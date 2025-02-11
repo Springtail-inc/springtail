@@ -122,9 +122,9 @@ jobs:
             _LOG_FLAG="failed"
           fi
           
-          _TIMESTAMP = $(date +%s)
+          _TIMESTAMP=$(date +%s)
           log_file="unit-test-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log" 
-          log_s3_key = "${TEST_LOG_S3_FULL_PREFIX}/${log_file}"
+          log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${log_file}"
           aws s3 cp tmplog $log_s3_key
           echo "*** Unit Test Log S3 Key: $log_s3_key"
           rm -rf tmplog
@@ -216,7 +216,7 @@ jobs:
           cd python/testing/proxy
           python3 test_runner.py -t -s postgres_all
           
-          _TIMESTAMP = $(date +%s)
+          _TIMESTAMP=$(date +%s)
           
           # Test log
           log_file="proxy-regress-${GITHUB_SHORT_SHA}-${_TIMESTAMP}.log" 
