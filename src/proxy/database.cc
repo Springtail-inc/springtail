@@ -1,7 +1,6 @@
 #include <mutex>
 #include <shared_mutex>
 #include <memory>
-#include <format>
 #include <unordered_map>
 
 #include <common/counter.hh>
@@ -494,6 +493,67 @@ namespace springtail::pg_proxy
 
     /*********** Database Mgr *************/
 
+    DatabaseMgr::DatabaseMgr() :
+        _data_sub_thread(1, false),
+        _primary_set(std::make_shared<DatabasePrimarySet>(POOL_SESSIONS_PER_INSTANCE)),
+        _replica_set(std::make_shared<DatabaseReplicaSet>(POOL_SESSIONS_PER_INSTANCE))
+    {
+        _cache_watcher_db_ids = std::make_shared<RedisCache::RedisChangeWatcher>(
+            [this](const std::string &path, const nlohmann::json &new_value) -> void {
+                SPDLOG_DEBUG_MODULE(LOG_PROXY,"Replicated databases: {}", new_value.dump(4));
+                CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
+                // get a vector of old database ids from _log_mgrs
+                std::shared_lock<std::shared_mutex> lock(_db_mutex);
+                auto keys = std::views::keys(_db_id_rep_dbs);
+                lock.unlock();
+                std::vector<uint64_t> old_db_ids{ keys.begin(), keys.end() };
+                // get a vector of new database ids from new_value
+                std::vector<uint64_t> new_db_ids = Properties::get_instance()->get_database_ids(new_value);
+                // diff the vectors
+                RedisCache::array_diff(old_db_ids, new_db_ids, true, true);
+                // everything in old_db_ids needs to be removed
+                for (auto db_id: old_db_ids) {
+                    _remove_replicated_database(db_id);
+                }
+                // everything in new_db_ids needs to be added
+                for (auto db_id: new_db_ids) {
+                    _add_replicated_database(db_id);
+                }
+            }
+        );
+        _cache_watcher_db_states = std::make_shared<RedisCache::RedisChangeWatcher>(
+            [this](const std::string &path, const nlohmann::json &new_value) -> void {
+                SPDLOG_DEBUG_MODULE(LOG_PROXY,"Replicated database state change; path: {}, state: {}",
+                    path, new_value.dump(4));
+                CHECK(path.starts_with(Properties::DATABASE_STATE_PATH));
+                // extract database id
+                std::vector<std::string> path_parts;
+                common::split_string("/", path, path_parts);
+                CHECK_EQ(path_parts.size(), 2);
+                uint64_t db_id = stoull(path_parts[1]);
+
+                // if we ever get in here, this means that this database will be deleted
+                if (new_value.type() == nlohmann::json::value_t::null) {
+                    return;
+                }
+
+                // extract state
+                CHECK(new_value.type() == nlohmann::json::value_t::string);
+                std::string state_str = new_value.get<std::string>();
+                redis::db_state_change::DBState state = redis::db_state_change::db_state_map[state_str];
+
+                // shared lock for lookup
+                std::shared_lock lock(_db_mutex);
+                auto iter = _db_id_rep_dbs.find(db_id);
+                if (iter == _db_id_rep_dbs.end()) {
+                    return;
+                }
+
+                iter->second->set_state(state);
+            }
+        );
+    }
+
     void
     DatabaseMgr::init()
     {
@@ -522,24 +582,10 @@ namespace springtail::pg_proxy
             }
         }
 
-        // add subscribers to pubsub threads
-        std::string db_change_channel = fmt::format(redis::PUBSUB_DB_CONFIG_CHANGES, _db_instance_id);
-        _config_sub_thread.add_subscriber(db_change_channel,
-            [this]() {
-                this->_init_replicated_dbs_subscriber();
-            },
-            [this](const std::string &msg) {
-                _handle_replicated_dbs_change(msg);
-            });
+        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
+        redis_cache->add_callback(Properties::DATABASE_IDS_PATH, _cache_watcher_db_ids);
 
-        std::string state_change_channel = fmt::format(redis::PUBSUB_DB_STATE_CHANGES, _db_instance_id);
-        _config_sub_thread.add_subscriber(state_change_channel,
-            [this]() {
-                this->_init_db_states_subscriber();
-            },
-            [this](const std::string &msg) {
-                _handle_db_state_change(msg);
-            });
+        _init_replicated_dbs();
 
         std::string db_table_change_channel = fmt::format(redis::PUBSUB_DB_TABLE_CHANGES, _db_instance_id);
         _data_sub_thread.add_subscriber(db_table_change_channel,
@@ -550,40 +596,8 @@ namespace springtail::pg_proxy
                 _handle_db_table_change(msg);
             });
 
-        // start redis subscriber threads
-        _config_sub_thread.start();
+        // start redis subscriber thread
         _data_sub_thread.start();
-    }
-
-    void
-    DatabaseMgr::_handle_db_state_change(const std::string &msg)
-    {
-        uint64_t db_id;
-
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Received state change: {}", msg);
-
-        redis::db_state_change::DBState state;
-        redis::db_state_change::parse_db_state_change(msg, db_id, state);
-
-        // shared lock for lookup
-        std::shared_lock lock(_db_mutex);
-        auto iter = _db_id_rep_dbs.find(db_id);
-        if (iter == _db_id_rep_dbs.end()) {
-            return;
-        }
-
-        iter->second->set_state(state);
-    }
-
-    void DatabaseMgr::_init_db_states_subscriber()
-    {
-        // refresh all database states; shared lock for lookup
-        std::shared_lock lock(_db_mutex);
-        for (const auto &[db_id, db_object]: _db_id_rep_dbs) {
-            // this is a blocking redis call, but we are in init, so should be ok
-            redis::db_state_change::DBState db_state = redis::db_state_change::get_db_state(db_id);
-            db_object->set_state(db_state);
-        }
     }
 
     void DatabaseMgr::_handle_db_table_change(const std::string &msg)
@@ -628,28 +642,10 @@ namespace springtail::pg_proxy
     }
 
     void
-    DatabaseMgr::_handle_replicated_dbs_change(const std::string &msg)
-    {
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Handling DB Change Action message: {}", msg);
-        uint64_t db_id;
-        redis::db_state_change::DBAction action;
-        redis::db_state_change::parse_db_action(msg, db_id, action);
-        switch (action) {
-            case redis::db_state_change::DB_ACTION_ADD:
-                _add_replicated_database(db_id);
-                break;
-            case redis::db_state_change::DB_ACTION_REMOVE:
-                _remove_replicated_database(db_id);
-                break;
-            default:
-                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Unsupported action: {}", redis::db_state_change::db_action_to_name[action]);
-        }
-    }
-
-    void
-    DatabaseMgr::_init_replicated_dbs_subscriber()
+    DatabaseMgr::_init_replicated_dbs()
     {
         std::map<uint64_t, std::string> db_list = Properties::get_databases();
+        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
 
         std::unique_lock db_lock(_db_mutex);
         for (const auto& [db_id, db_name]: db_list) {
@@ -658,6 +654,16 @@ namespace springtail::pg_proxy
             SPDLOG_DEBUG_MODULE(LOG_PROXY, "Added database (id, name): ({}, {})", db_id, db_name);
             _db_name_rep_dbs.insert(std::pair<std::string, DatabasePtr>(db_name, db_object));
             _db_id_rep_dbs.insert(std::pair<uint64_t, DatabasePtr>(db_id, db_object));
+
+            // subscribe to state change notifications per database
+            redis_cache->add_callback(
+                std::string(Properties::DATABASE_STATE_PATH) + "/" + std::to_string(db_id),
+                _cache_watcher_db_states);
+
+            // initialize state
+            redis::db_state_change::DBState db_state = redis::db_state_change::get_db_state(db_id);
+            db_object->set_state(db_state);
+
         }
     }
 
@@ -674,6 +680,12 @@ namespace springtail::pg_proxy
         // create new database object
         const std::string &db_name = iter->second;
         DatabasePtr db_object = std::make_shared<Database>(db_id, db_name);
+
+        // add state change notification callback
+        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
+        redis_cache->add_callback(
+            std::string(Properties::DATABASE_STATE_PATH) + "/" + std::to_string(db_id),
+            _cache_watcher_db_states);
 
         // set database state
         redis::db_state_change::DBState db_state = redis::db_state_change::get_db_state(db_id);
@@ -703,6 +715,12 @@ namespace springtail::pg_proxy
         if (iter == _db_id_rep_dbs.end()) {
             return;
         }
+
+        // remove state change notification callback
+        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
+        redis_cache->remove_callback(
+            std::string(Properties::DATABASE_STATE_PATH) + "/" + std::to_string(db_id),
+            _cache_watcher_db_states);
 
         // get the database name and remove from maps
         std::string db_name = iter->second->get_db_name();
@@ -790,7 +808,19 @@ namespace springtail::pg_proxy
     void
     DatabaseMgr::_internal_shutdown()
     {
-        _config_sub_thread.shutdown();
+        // deregister callback for add/remove replicated database
+        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
+        redis_cache->remove_callback(Properties::DATABASE_IDS_PATH, _cache_watcher_db_ids);
+
+        // deregister callbacks for replicated database state change
+        std::shared_lock<std::shared_mutex> lock(_db_mutex);
+        for (auto [db_id, rep_db]: _db_id_rep_dbs) {
+            redis_cache->remove_callback(
+                std::string(Properties::DATABASE_STATE_PATH) + "/" + std::to_string(db_id),
+                _cache_watcher_db_states);
+        }
+        lock.unlock();
+
         _data_sub_thread.shutdown();
     }
 

@@ -35,7 +35,7 @@ TEST_P(RedisPubSub_Test, SingleSubscriberTest) {
         PubSubThread pubsub_thread(1, config_db);
         std::string initial_msg = "this is initialization message";
         std::string received_msg;
-        std::string channel = fmt::format(redis::PUBSUB_DB_STATE_CHANGES, "5050");
+        std::string channel = fmt::format(redis::PUBSUB_DB_TABLE_CHANGES, "5050");
 
         pubsub_thread.add_subscriber(channel,
             [this, &received_msg, &channel, &initial_msg]() {
@@ -82,9 +82,6 @@ TEST_P(RedisPubSub_Test, SingleSubscriberTest) {
             fmt::format(redis::DB_CONFIG, "5050"),
             fmt::format(redis::HASH_FDW, "5050"),
             fmt::format(redis::DB_INSTANCE_STATE, "5050"),
-            fmt::format(redis::PUBSUB_FDW_CHANGES, "5050"),
-            fmt::format(redis::PUBSUB_DB_CONFIG_CHANGES, "5050"),
-            fmt::format(redis::PUBSUB_DB_STATE_CHANGES, "5050"),
             fmt::format(redis::QUEUE_GC_XID_READY, "5050"),
             fmt::format(redis::QUEUE_DDL_XID, "5050", "4242", "2222"),
             fmt::format(redis::HASH_DDL_PRECOMMIT, "5050"),
@@ -102,7 +99,7 @@ TEST_P(RedisPubSub_Test, SingleSubscriberTest) {
 
         for(std::string *channel = channels; *channel != ""; channel++) {
             pubsub_thread.add_subscriber(*channel,
-                [this, &received_msg, channel, &initial_msg]() {
+                [channel]() {
                     SPDLOG_DEBUG("Initialization for channel: {}", *channel);
                 },
                 [this, &received_msg, channel, &initial_msg](const std::string &msg) {
