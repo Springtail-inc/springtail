@@ -102,6 +102,10 @@ namespace springtail::pg_log_mgr {
 
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Starting up: DB state: {}", state);
 
+        // need to add back table sync worker items to redis sync queue and clear the queue
+        _redis_sync_queue.abort(REDIS_WORKER_ID);
+        _redis_sync_queue.clear();
+
         // fetch latest xid from xid mgr
         XidMgrClient *xid_mgr = XidMgrClient::get_instance();
         uint64_t next_xid = xid_mgr->get_committed_xid(_db_id, 0) + 1;
@@ -191,12 +195,6 @@ namespace springtail::pg_log_mgr {
             }
         }
 
-        // need to add back table sync worker items to redis sync queue
-        _redis_sync_queue.abort(REDIS_WORKER_ID);
-
-        // clear redis sync queue since it will be reissued by GC
-        _redis_sync_queue.clear();
-
         // set state to running
         Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_RUNNING);
 
@@ -216,10 +214,6 @@ namespace springtail::pg_log_mgr {
         // create directories if they don't exist
         std::filesystem::create_directories(_repl_log_path);
         std::filesystem::create_directories(_xact_log_path);
-
-        // clear out Redis
-        // Table sync queue
-        _redis_sync_queue.clear();
 
         // set state to copy tables
         Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_COPY_TABLES);
