@@ -245,7 +245,7 @@ namespace springtail::pg_log_mgr {
 
         // check initial state on thread startup
         // if in startup_sync state then switch to syncing
-        if (_internal_state.is(STATE_STARTUP_SYNC)) {    
+        if (_internal_state.is(STATE_STARTUP_SYNC)) {
             // Create the namespaces before starting the copy thread
             auto xid = _pg_log_reader.get_next_xid();
             PgCopyTable::create_namespaces(_db_id, xid);

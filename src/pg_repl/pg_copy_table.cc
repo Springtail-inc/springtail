@@ -48,6 +48,7 @@ namespace springtail
         "SELECT oid::integer, nspname::text "
         "FROM pg_catalog.pg_namespace "
         "WHERE nspname NOT LIKE 'pg_%' "
+        "{}" // Placeholder for namespace condition
         "AND nspname != 'information_schema';";
 
     /** Query oid from table and schema */
@@ -898,8 +899,31 @@ namespace springtail
     std::vector<std::pair<uint64_t, std::string>>
     PgCopyTable::_get_namespaces(uint64_t db_id, uint64_t xid)
     {
+        auto db_config = Properties::get_db_config(db_id);
+        auto include_json = db_config["include"];
+
+        std::vector<std::string> schema_names;
+
+        if (include_json.contains("schemas") && include_json["schemas"].is_array()) {
+            for (const auto &schema : include_json["schemas"]) {
+                std::string schema_name = schema.get<std::string>();
+                if (schema_name == "*") {
+                    // all schemas
+                    break;
+                }
+
+                // Get the list of schema names for the query
+                schema_names.push_back(fmt::format("'{}'", _connection.escape_string(schema)));
+            }
+        }
+
+        std::string schema_condition = "";
+        if (!schema_names.empty()) {
+            schema_condition = fmt::format("AND nspname IN ({})", common::join_string(",", schema_names.begin(), schema_names.end()));
+        }
+
         // get the namespaces
-        _connection.exec(NAMESPACE_QUERY);
+        _connection.exec(fmt::format(NAMESPACE_QUERY, schema_condition));
 
         if (_connection.ntuples() == 0) {
             // Technically this should never happen, but keep this here just in case
@@ -922,7 +946,7 @@ namespace springtail
 
     void
     PgCopyTable::create_namespaces(uint64_t db_id, uint64_t xid)
-    {
+    {   
         PgCopyTable copy_table;
 
         // connect to the database
