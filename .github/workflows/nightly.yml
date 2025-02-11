@@ -31,8 +31,6 @@ jobs:
       ZIC: true
       USER: root
       PYTHONUNBUFFERED: 1
-      GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
-      GITHUB_LATEST_SHA: ${{ github.event.pull_request.head.sha }}
       CWD: ${{ github.workspace }}
       DATA_SHARE_BUCKET_NAME: data-share.springtail.internal
       DEVSUPPORT_BUCKET_NAME: devsupport.springtail.internal
@@ -43,6 +41,7 @@ jobs:
       # The path to the Springtail logs, keep consistent with the `log_path` inside
       # system.json.test
       SPRINGTAIL_LOG_PATH: /opt/springtail/logs
+
 
     steps:
       - name: Checkout repository
@@ -64,7 +63,7 @@ jobs:
 
       - name: Prepare Tests
         run: |
-          git config --global --add safe.directory /__w/springtail/springtail
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
           cp system.json.settings system.json.test
           mkdir -p /opt/springtail/pids
           service redis-server start
@@ -75,6 +74,15 @@ jobs:
           ./clean.sh
           ./debug.sh -j ${NUM_PROCS}          
 
+      - name: Set common env vars
+        run: |
+          # This is the last path segment for on S3 for segmenting the logs
+          CURRENT_DATE=$(date +'%Y/%m/%d/%H')
+          echo "CURRENT_DATE=${CURRENT_DATE}" >> $GITHUB_ENV
+          echo "GITHUB_SHORT_SHA=$(echo $GITHUB_SHA | cut -c1-7)" >> $GITHUB_ENV
+          # This is the prefix for the logs on S3, including the S3 scheme, buket name all the way to the "folder"
+          echo "TEST_LOG_S3_FULL_PREFIX=s3://${DEVSUPPORT_BUCKET_NAME}/${TEST_LOGS_S3_PREFIX}/${CURRENT_DATE}" >> $GITHUB_ENV
+
       - name: Prepare DB for Unit Tests
         run: |
           service postgresql start
@@ -84,7 +92,7 @@ jobs:
           fi
           sudo -u postgres psql -c "CREATE DATABASE springtail WITH OWNER springtail"
           # Create triggers
-          sudo -u postgres psql -d springtail -f /__w/springtail/springtail/scripts/triggers.sql
+          sudo -u postgres psql -d springtail -f ${GITHUB_WORKSPACE}/scripts/triggers.sql
 
       - name: Run Unit Tests
         if: success()
@@ -113,17 +121,13 @@ jobs:
           then 
             _LOG_FLAG="failed"
           fi
-          # Grab the current PR ID
-          _LOG_PR_ID="${GITHUB_EVENT_PULL_REQUEST_NUMBER}"
-          # Grab the short SHA
-          _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
           
-          log_file="unit-test-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-$(date +%s).log" 
-          mv tmplog $log_file
-          unit_test_log_s3key="s3://${DEVSUPPORT_BUCKET_NAME}/${TEST_LOGS_S3_PREFIX}/$(date +"%Y/%m/%d/%H")/$log_file"
-          
-          aws s3 cp "$log_file" "$unit_test_log_s3key"
-          echo "*** Unit Test Log S3 Key: $unit_test_log_s3key"
+          _TIMESTAMP = $(date +%s)
+          log_file="unit-test-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log" 
+          log_s3_key = "${TEST_LOG_S3_FULL_PREFIX}/${log_file}"
+          aws s3 cp tmplog $log_s3_key
+          echo "*** Unit Test Log S3 Key: $log_s3_key"
+          rm -rf tmplog
 
       - name: Cleanup Unit Test
         if: success() || failure()      # run this step even if previous step failed
@@ -163,21 +167,13 @@ jobs:
           service postgresql start
           ./startup.sh -s data_init.sql
           
-          # Metadata: Grab the current PR ID
-          _LOG_PR_ID="${GITHUB_EVENT_PULL_REQUEST_NUMBER}"
-          # Metadata: Grab the short SHA
-          _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
-          # Timestamp, use the starting date for easier grouping
-          _LOG_DATE=$(date +"%Y/%m/%d/%H")
-          
           # Run integration tests
           for i in $(seq 1 ${INTEGRATION_TEST_ITERATIONS}) ; 
           do
             # Note: there might be discrepancies between the _LOG_TIMESTAMP and the _LOG_DATE due to the time it takes to run the integration tests
             # it may run across a day. This is fine as long as the logs are grouped by _LOG_DATE
-            _LOG_TIMESTAMP=$(date +%s)
             echo "*** Starting iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
-            python3 test_runner.py -c config.yaml -j /__w/springtail/springtail/integration-test-report.xml 2>&1 | tee tmplog
+            python3 test_runner.py -c config.yaml -j ${GITHUB_WORKSPACE}/integration-test-report.xml 2>&1 | tee tmplog
           
             echo "*** Finished iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
 
@@ -188,26 +184,24 @@ jobs:
               _LOG_FLAG="failed"
             fi
           
-            log_file="integration-test-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-${_LOG_TIMESTAMP}.log" 
-            mv tmplog $log_file
+            _TIMESTAMP=$(date +%s)
           
-            # Integration test log
-            integration_test_log_s3key="s3://${DEVSUPPORT_BUCKET_NAME}/${TEST_LOGS_S3_PREFIX}/${_LOG_DATE}/$log_file"
-            aws s3 cp "$log_file" "$integration_test_log_s3key"
-            echo "*** Integration Test Log S3 Key: $integration_test_log_s3key"
-            rm -f $log_file
+            # Test logs
+            log_file="integration-test-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log" 
+            log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${log_file}"
+            aws s3 cp tmplog $log_s3_key
+            echo "*** Integration Test Log S3 Key: $log_s3_key"
+            rm -f tmplog
           
-            # Springtail service log
-            springtail_log_file="springtail-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-${_LOG_TIMESTAMP}.tar.gz"
+            # Springtail service logs
+            springtail_log_file="springtail-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.tar.gz"
             output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../debug)
             fname=$(echo $output  | cut -f2 -d':' | xargs | head -1)
-            mv $fname $springtail_log_file
-            springtail_log_s3key="s3://${DEVSUPPORT_BUCKET_NAME}/${TEST_LOGS_S3_PREFIX}/${_LOG_DATE}/$springtail_log_file"
-            aws s3 cp "$springtail_log_file" "$springtail_log_s3key"
-            echo "*** Springtail Log S3 Key: $springtail_log_s3key"
-            rm -f $springtail_log_file
+            springtail_log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${springtail_log_file}"
+            aws s3 cp $fname $springtail_log_s3_key
+            echo "*** Springtail Log S3 Key: $springtail_log_s3_key"
+            rm -f $fname
           done
-          # Note: As we have many tests logs. We are *not* going to upload them to GitHub artifacts. Checkout the S3 bucket for the logs.
 
       - name: Run nightly build (if above tests pass)
         if: success()
@@ -222,33 +216,28 @@ jobs:
           cd python/testing/proxy
           python3 test_runner.py -t -s postgres_all
           
-          # Metadata: Grab the current PR ID
-          _LOG_PR_ID="${GITHUB_EVENT_PULL_REQUEST_NUMBER}"
-          # Metadata: Grab the short SHA
-          _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
-          # Timestamp, use the starting date for easier grouping
-          _LOG_DATE=$(date +"%Y/%m/%d/%H")
+          _TIMESTAMP = $(date +%s)
           
-          log_name="proxy-regress-log-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-${_LOG_TIMESTAMP}.log" 
-          proxy_test_log_s3key="s3://${DEVSUPPORT_BUCKET_NAME}/${TEST_LOGS_S3_PREFIX}/${_LOG_DATE}/${log_name}"
-          aws s3 cp proxy_regress.log "$proxy_test_log_s3key"
-          echo "*** Proxy Test Log S3 Key: $proxy_test_log_s3key"
+          # Test log
+          log_file="proxy-regress-${GITHUB_SHORT_SHA}-${_TIMESTAMP}.log" 
+          log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${log_file}"
+          aws s3 cp proxy_regress.log $log_s3_key
+          echo "*** Proxy Test Log S3 Key: $log_s3_key"
           
-          springtail_proxy_logs="proxy-springtail-logs-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-${_LOG_TIMESTAMP}.tar.gz"
+          # Springtail service logs (proxy)
+          springtail_proxy_log_file="proxy-springtail-svc-${GITHUB_SHORT_SHA}-${_TIMESTAMP}.tar.gz"
           # tar all logs starting with `proxy*` under the Springtail log path 
-          tar -czf $springtail_proxy_logs ${SPRINGTAIL_LOG_PATH}/proxy*
-          springtail_proxy_logs_s3key="s3://${DEVSUPPORT_BUCKET_NAME}/${TEST_LOGS_S3_PREFIX}/${_LOG_DATE}/${springtail_proxy_logs}"
-          aws s3 cp $springtail_proxy_logs $springtail_proxy_logs_s3key
-          echo "*** Springtail Proxy Logs S3 Key: $springtail_proxy_logs_s3key"
+          tar -czf $springtail_proxy_log_file ${SPRINGTAIL_LOG_PATH}/proxy*
+          springtail_log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${springtail_proxy_log_file}"
+          aws s3 cp $springtail_proxy_log_file $springtail_log_s3_key
+          echo "*** Springtail Proxy Logs S3 Key: $springtail_log_s3_key"
           
           # Find the file matching this name exactly: `regression.diff.proxy.out`
           # under the $TMPDIR directory (recursive) and upload it to S3
           regression_diff_file=$(find /tmp -name "regression.diff.proxy.out")
-          
-          regression_diff_name="proxy-regression-diff-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-${_LOG_TIMESTAMP}.out"
-          regression_diff_s3key="s3://${DEVSUPPORT_BUCKET_NAME}/${TEST_LOGS_S3_PREFIX}/${_LOG_DATE}/${regression_diff_name}"  
-          aws s3 cp "$regression_diff_file" "$regression_diff_s3key"
-          echo "*** Proxy Regression Diff S3 Key: $regression_diff_s3key"
+          regression_diff_s3_key="${TEST_LOG_S3_FULL_PREFIX}/regression.diff.proxy-${GITHUB_SHORT_SHA}-${_TIMESTAMP}.out"  
+          aws s3 cp $regression_diff_file $regression_diff_s3_key
+          echo "*** Proxy Regression Diff S3 Key: $regression_diff_s3_key"
 
       - name: Package and Upload Build artifacts to S3
         if: success()
