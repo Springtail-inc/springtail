@@ -187,6 +187,36 @@ namespace springtail::thrift {
             _thread_manager->stop();
         }
 
+        /**
+         * @brief A wrapper function for thrift API calls that catches exceptions
+         *      and prevents them from being handled by thrift.
+         *
+         * @tparam Func function
+         * @param func function to call
+         */
+        template<typename Func>
+        static inline void
+        call_wrapper(Func func)
+        {
+            bool failed = false;
+            try {
+                func();
+            } catch (Error &e) {
+                SPDLOG_ERROR("Error in thrift API call: {}", e.what());
+                e.log_backtrace();
+                failed = true;
+            } catch (std::exception &e) {
+                SPDLOG_ERROR("Standard exception in thrift API call: {}", e.what());
+                failed = true;
+            } catch (...) {
+                SPDLOG_ERROR("Unknown exception in thrift API call");
+                failed = true;
+            }
+            if (failed) {
+                raise(SIGABRT);
+            }
+        }
+
     protected:
          /** number of worker threads */
         int _worker_thread_count = 0;
