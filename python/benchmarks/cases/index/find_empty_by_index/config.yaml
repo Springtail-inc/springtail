@@ -1,0 +1,2 @@
+setup: ../setup_empty_with_index.sql
+test: find_empty_by_index_test.sql

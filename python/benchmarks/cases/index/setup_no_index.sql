@@ -8,7 +8,7 @@ DO $FN$
 DECLARE
     i INT;
 BEGIN
-    FOR i IN 1..100000 LOOP
+    FOR i IN 1..10000 LOOP
         INSERT INTO index_test_data (col1, col2) SELECT  i, rnd FROM (SELECT floor(random() * 10000) + 1 AS rnd);
     END LOOP;
 END;
