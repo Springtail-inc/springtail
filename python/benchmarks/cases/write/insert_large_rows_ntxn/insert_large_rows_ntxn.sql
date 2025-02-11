@@ -1,11 +1,6 @@
-DO $$
-DECLARE
-    i INT;
-    random_text BYTEA;
-BEGIN
-    FOR i IN 1..10000 LOOP
-        INSERT INTO benchmark_data (id, value)
-        VALUES (i, encrypt(repeat(E'c', 102400)::bytea, LPAD(i::text, 16, '0')::bytea, 'aes'));
-    END LOOP;
-END;
-$$;
+## repeat 2000 times
+BEGIN TRANSACTION;
+INSERT INTO benchmark_data (value)
+VALUES (encrypt(repeat(E'c', 102400)::bytea, gen_random_bytes(16), 'aes'));
+COMMIT;
+## endrepeat
