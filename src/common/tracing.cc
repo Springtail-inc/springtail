@@ -1,5 +1,7 @@
 #include <opentelemetry/exporters/otlp/otlp_grpc_exporter.h>
 #include <opentelemetry/exporters/otlp/otlp_grpc_metric_exporter.h>
+#include <opentelemetry/exporters/prometheus/exporter.h>
+#include <opentelemetry/exporters/prometheus/exporter_factory.h>
 #include <opentelemetry/metrics/provider.h>
 #include <opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader.h>
 #include <opentelemetry/sdk/metrics/meter_provider.h>
@@ -50,6 +52,16 @@ create_default_otel_resource(std::string_view component_name)
 static void
 init_metrics(const opentelemetry::sdk::resource::Resource& resource)
 {
+    auto context = opentelemetry::sdk::metrics::MeterContextFactory::Create();
+
+    if (false) {
+        opentelemetry::exporter::metrics::PrometheusExporterOptions prometheus_options;
+        prometheus_options.url = "0.0.0.0:8899";
+        auto prometheus_exporter =
+            opentelemetry::exporter::metrics::PrometheusExporterFactory::Create(prometheus_options);
+        context->AddMetricReader(std::move(prometheus_exporter));
+    }
+
     // check if we should send to an otlp server
     auto json = Properties::get(Properties::OTEL_CONFIG);
     auto host = Json::get<std::string>(json, "metrics_host");
@@ -74,7 +86,6 @@ init_metrics(const opentelemetry::sdk::resource::Resource& resource)
     auto reader = opentelemetry::sdk::metrics::PeriodicExportingMetricReaderFactory::Create(
         std::move(exporter), reader_options);
 
-    auto context = opentelemetry::sdk::metrics::MeterContextFactory::Create();
     context->AddMetricReader(std::move(reader));
 
     auto base_meter_provider =
