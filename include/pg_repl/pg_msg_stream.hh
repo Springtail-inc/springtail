@@ -10,6 +10,9 @@
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_repl_connection.hh>
 
+#include <opentelemetry/metrics/meter.h>
+#include <opentelemetry/metrics/provider.h>
+
 namespace springtail {
     /**
      * @brief Msg Stream header
@@ -231,6 +234,8 @@ namespace springtail {
 
         bool _read_hdr = false;         ///< true if header needs to be read (set when opening a new file)
         bool _streaming = false;        ///< true if streaming mode (between stream_start and stream_stop)
+
+        std::shared_ptr<opentelemetry::metrics::Counter<double>> _decode_msg_counter;
 
         /** Helper to check for eof errors in reading stream */
         void _check_fail() {

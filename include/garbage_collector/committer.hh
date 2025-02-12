@@ -153,6 +153,7 @@ namespace springtail::gc {
         std::unique_ptr<Indexer> _indexer;
 
         std::shared_ptr<metrics::Histogram<double>> _btree_write_latencies;
+        std::shared_ptr<metrics::Counter<double>> _sys_tbl_rpc_calls;
         opentelemetry::context::Context _context;
     };
 }

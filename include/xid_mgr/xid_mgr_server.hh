@@ -12,6 +12,9 @@
 #include <xid_mgr/xid_partition.hh>
 #include <xid_mgr/xid_mgr_service.hh>
 
+#include <opentelemetry/metrics/meter.h>
+#include <opentelemetry/metrics/provider.h>
+
 namespace springtail::xid_mgr {
 
     /**
@@ -77,6 +80,8 @@ namespace springtail::xid_mgr {
 
         /** map of db_id to partitions */
         std::map<uint64_t, PartitionPtr> _partition_map;
+
+        std::shared_ptr<opentelemetry::metrics::Counter<double>> _commit_xid_counter;
 
         /**
          * @brief Get a partition based on a db_id, optionally create it
