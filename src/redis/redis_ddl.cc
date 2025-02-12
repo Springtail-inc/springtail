@@ -16,7 +16,7 @@ namespace {
             RedisClient& redis,
             uint64_t db_id,
             uint64_t xid
-            ) 
+            )
     {
         std::string ddl_key = fmt::format(queue,
                 Properties::get_db_instance_id(), db_id, xid);
@@ -41,7 +41,7 @@ namespace {
             uint64_t db_id,
             uint64_t xid,
             nlohmann::json ddls
-            ) 
+            )
     {
         nlohmann::json op;
         op["db_id"] = db_id;
@@ -120,7 +120,7 @@ namespace springtail {
         _precommit<redis::QUEUE_DDL_XID, redis::HASH_DDL_PRECOMMIT>(*_redis, db_id, xid, ddls);
     }
 
-    void RedisDDL::precommit_index_ddl(uint64_t db_id, uint64_t xid, nlohmann::json ddls) 
+    void RedisDDL::precommit_index_ddl(uint64_t db_id, uint64_t xid, nlohmann::json ddls)
     {
         _precommit<redis::QUEUE_INDEX_DDL_XID, redis::HASH_DDL_INDEX_PRECOMMIT>(*_redis, db_id, xid, ddls);
     }
@@ -322,6 +322,7 @@ namespace springtail {
         std::string key = fmt::format(redis::QUEUE_DDL_FDW, Properties::get_db_instance_id(), fdw_id);
         RedisQueue<std::string> queue(key);
 
+        // TODO: this "active" needs to be replaced with something
         auto value = queue.pop("active", 2);
         if (value == nullptr) {
             return ddls;

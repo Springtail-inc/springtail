@@ -139,3 +139,10 @@ install(FILES
     springtail_fdw.control
     DESTINATION share
 )
+
+add_executable(test_thread_manager test/test_thread_manager.cc)
+target_include_directories(test_thread_manager PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_thread_manager PRIVATE springtail_common GTest::gtest_main)
+add_dsymutil_command(test_thread_manager)
+
+gtest_discover_tests(test_thread_manager)

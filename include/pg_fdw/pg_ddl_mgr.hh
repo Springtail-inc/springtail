@@ -17,6 +17,8 @@
 
 #include <pg_repl/libpq_connection.hh>
 
+#include <pg_fdw/multi-queue-thread-manager.hh>
+
 
 /* These are defined by Thrift imported from xid_mgr_client.h and
  * must be undefined before including postgres.h */
@@ -30,11 +32,13 @@ namespace springtail::pg_fdw {
      * @brief DDL Mgr, applies changes from Redis queue
      * to the FDW tables
      */
-    class PgDDLMgr final : public SingletonWithThread<PgDDLMgr> {
-        friend class SingletonWithThread<PgDDLMgr>;
+    class PgDDLMgr final : public Singleton<PgDDLMgr> {
+            friend class Singleton<PgDDLMgr>;
     public:
         /** Max number of connections to cache */
         static constexpr int MAX_CONNECTION_CACHE_SIZE = 10;
+
+        static constexpr int MAx_THREAD_POOL_SIZE = 8;
 
         /**
          * Start the main thread
@@ -48,9 +52,13 @@ namespace springtail::pg_fdw {
                   const std::string &password,
                   const std::optional<std::string> &hostname = std::nullopt);
 
+        void run();
+
+        void notify_shutdown() { _is_shutting_down = true; }
     private:
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections
         RedisCache::RedisChangeWatcherPtr _cache_watcher;           ///< redis cache callback object
+        std::shared_ptr<MultiQueueThreadManager> _thread_manager;
 
         std::string _fdw_id;                       ///< FDW ID
 
@@ -66,6 +74,7 @@ namespace springtail::pg_fdw {
         std::map<uint64_t, uint64_t> _db_xid_map;  ///< map of db id to max schema xid (applied)
 
         std::map<uint32_t, std::string> _type_map;  ///< map of PG type OIDs to type names
+        std::atomic<bool> _is_shutting_down{false};
 
         /** Private constructor */
         PgDDLMgr();
@@ -77,11 +86,6 @@ namespace springtail::pg_fdw {
 
         /** Initialize the FDW */
         void _init_fdw(const std::string &username, const std::string &password);
-
-        /**
-         * Main thread entry point; loops checking redis for DDL changes
-         */
-        void _internal_run() override;
 
         /**
          * Method to get the create schema query
