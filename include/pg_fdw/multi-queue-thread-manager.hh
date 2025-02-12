@@ -16,7 +16,7 @@ namespace springtail {
          * @param queue_id - id of the queue
          * @param run_cb - callback to be executed by the thread worker
          */
-        MultiQueueRequest(uint64_t queue_id, std::function<void ()> run_cb) :
+        explicit MultiQueueRequest(uint64_t queue_id, std::function<void ()> run_cb) :
             _queue_id(queue_id), _run_cb(run_cb) {}
 
             /**
