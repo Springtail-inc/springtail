@@ -34,29 +34,6 @@ namespace springtail::redis {
      */
     static constexpr char DB_INSTANCE_STATE[] = "{}:instance_state";
 
-    //// For publish/subscribe (DB 0)
-
-    /**
-     * Pubsub channel for notifying of FDW changes (up | down)
-     * args: <db_instance_id>
-     * message: <fdw_id>:up|down
-     */
-    static constexpr char PUBSUB_FDW_CHANGES[] = "{}:pubsub:fdw_changes";
-
-    /**
-     * Pubsub channel for all DB config changes
-     * args: <db_instance_id>
-     * message: TBD (Type 1: include schema/table changes)
-     */
-    static constexpr char PUBSUB_DB_CONFIG_CHANGES[] = "{}:pubsub:db_config_changes";
-
-    /**
-     * Pubsub channel for all DB state changes
-     * args: <db_instance_id>
-     * message: db_id:<new state>
-     */
-    static constexpr char PUBSUB_DB_STATE_CHANGES[] = "{}:pubsub:db_state_changes";
-
     //// Data DB (1) accessed via RedisClient::
 
     //// Postgres redis key prefixes.  Value defs in: pg_log_mgr/pg_redis_xact.hh

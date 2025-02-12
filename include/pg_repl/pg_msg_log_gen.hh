@@ -67,6 +67,27 @@ namespace springtail {
         void drop_table(uint32_t table_id);
 
         /**
+         * @brief Create a schema
+         * @param schema_id schema id
+         * @param schema_name schema name
+         */
+        void create_schema(uint32_t schema_id, const std::string_view schema_name);
+
+        /**
+         * @brief Alter a schema
+         * @param schema_id schema id
+         * @param schema_name schema name
+         */
+        void alter_schema(uint32_t schema_id, const std::string_view schema_name);
+
+        /**
+         * @brief Drop a schema
+         * @param schema_id schema id
+         * @param schema_name schema name
+         */
+        void drop_schema(uint32_t schema_id, const std::string_view schema_name);
+
+        /**
          * @brief Start a transaction, every begin must end with a commit
          * @return uint32_t transaction ID
          */
@@ -135,7 +156,7 @@ namespace springtail {
         int _header_offset = 0;           ///< header offset; where to write header of current message
         uint64_t _begin_lsn;              ///< begin lsn
 
-        uint32_t _next_table_id = 0;      ///< next table id
+        uint32_t _next_table_id = 1000;   ///< next table id
         uint32_t _xid = 0;                ///< transaction id
         uint64_t _lsn = 1;                ///< lsn
         uint64_t _commit_ts = 0;          ///< commit timestamp
@@ -218,6 +239,9 @@ namespace springtail {
         static constexpr char PG_OP_UPDATE[] = "update";
         static constexpr char PG_OP_TRUNCATE[] = "truncate";
         static constexpr char PG_OP_ALTER_TABLE[] = "alter table";
+        static constexpr char PG_OP_CREATE_SCHEMA[] = "create schema";
+        static constexpr char PG_OP_ALTER_SCHEMA[] = "alter schema";
+        static constexpr char PG_OP_DROP_SCHEMA[] = "drop schema";
         static constexpr char PG_OP_CREATE_TABLE[] = "create table";
         static constexpr char PG_OP_DROP_TABLE[] = "drop table";
         static constexpr char PG_OP_CREATE_INDEX[] = "create index";
@@ -278,6 +302,15 @@ namespace springtail {
 
         /** Parse drop table op -- calls into _log_gen */
         void _parse_drop_table(const nlohmann::json &json);
+
+        /** Parse create schema op -- calls into _log_gen */
+        void _parse_create_schema(const nlohmann::json &json);
+
+        /** Parse alter schema op -- calls into _log_gen */
+        void _parse_alter_schema(const nlohmann::json &json);
+
+        /** Parse drop schema op -- calls into _log_gen */
+        void _parse_drop_schema(const nlohmann::json &json);
 
         /** Parse begin op -- calls into _log_gen */
         void _parse_begin(const nlohmann::json &json);

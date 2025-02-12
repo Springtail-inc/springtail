@@ -29,7 +29,7 @@ struct TableColumn {
 
 struct TableInfo {
     1: i64 id,
-    2: string schema,
+    2: string namespace_name,
     3: string name,
     4: list<TableColumn> columns
 }
@@ -47,8 +47,16 @@ struct DropTableRequest {
     2: i64 xid,
     3: i64 lsn,
     4: i64 table_id,
-    5: string schema,
+    5: string namespace_name,
     6: string name
+}
+
+struct NamespaceRequest {
+    1: i64 db_id,
+    2: i64 namespace_id,
+    3: string name,
+    4: i64 xid,
+    5: i64 lsn
 }
 
 struct TableStats {
@@ -68,7 +76,7 @@ struct IndexColumn {
 
 struct IndexInfo {
     1: i64 id,
-    2: string schema,
+    2: string namespace_name,
     3: string name,
     4: bool is_unique,
     5: i64 table_id,
@@ -98,7 +106,7 @@ struct DropIndexRequest {
     2: i64 xid,
     3: i64 lsn,
     4: i64 index_id,
-    5: string schema,
+    5: string namespace_name,
     6: string name
 }
 
@@ -207,6 +215,15 @@ service Service {
     // drops an existing data table at the given xid/lsn
     DDLStatement drop_table(1: DropTableRequest request),
 
+    // create a namespace at a given xid/lsn
+    DDLStatement create_namespace(1: NamespaceRequest request),
+
+    // rename a namespace at a given xid/lsn
+    DDLStatement alter_namespace(1: NamespaceRequest request),
+
+    // drop a namespace at a given xid/lsn
+    DDLStatement drop_namespace(1: NamespaceRequest request),
+
     // update the index root pointers and stats for a given table at a given xid
     Status update_roots(1: UpdateRootsRequest request),
 
@@ -227,5 +244,8 @@ service Service {
 
     // performs a drop + create + update_roots as a single operation
     // to support swapping a newly synced table into place
-    DDLStatement swap_sync_table(1: TableRequest create, 2: list<IndexRequest> indexes, 3: UpdateRootsRequest roots);
+    DDLStatement swap_sync_table(1: NamespaceRequest namespace_req,
+				 2: TableRequest create_req,
+				 3: list<IndexRequest> index_reqs,
+				 4: UpdateRootsRequest roots_req);
 }

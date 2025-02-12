@@ -39,18 +39,44 @@ namespace springtail::pg_fdw {
     static constexpr char CREATE_FDW_USER[] =
         "CREATE USER {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '{}'";
 
-    /** Create schema with grants, params: schema, schema, user, schema, user, schema, user */
-    static constexpr char CREATE_SCHEMA_WITH_GRANTS[] =
-        "CREATE SCHEMA {} "
-        "  GRANT USAGE ON SCHEMA {} TO {} "
-        "  GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {} "
-        "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {} ";
-
     static constexpr char DROP_DATABASE[] =
         "DROP DATABASE IF EXISTS {} WITH (FORCE)";
 
     static constexpr char VERIFY_DB_EXISTS[] =
         "SELECT 1 FROM  pg_database WHERE datname = '{}'";
+
+    PgDDLMgr::PgDDLMgr() : _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE)
+    {
+        _cache_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
+            [this](const std::string &path, const nlohmann::json &new_value) -> void {
+                SPDLOG_DEBUG("Replicated databases: {}", new_value.dump(4));
+                CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
+                // get a vector of old database ids from _log_mgrs
+                std::shared_lock<std::shared_mutex> lock(_db_mutex);
+                auto keys = std::views::keys(_db_xid_map);
+                lock.unlock();
+                std::vector<uint64_t> old_db_ids{ keys.begin(), keys.end() };
+                // get a vector of new database ids from new_value
+                std::vector<uint64_t> new_db_ids = Properties::get_instance()->get_database_ids(new_value);
+                // diff the vectors
+                RedisCache::array_diff(old_db_ids, new_db_ids, true, true);
+                // everything in old_db_ids needs to be removed
+                for (auto db_id: old_db_ids) {
+                    _remove_replicated_database(db_id);
+                }
+                // everything in new_db_ids needs to be added
+                for (auto db_id: new_db_ids) {
+                    _add_replicated_database(db_id);
+                }
+            }
+        );
+    }
+
+    void
+    PgDDLMgr::_internal_shutdown() {
+        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
+        redis_cache->remove_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
+    }
 
     void
     PgDDLMgr::init(const std::string &fdw_id,
@@ -99,18 +125,11 @@ namespace springtail::pg_fdw {
 
         // add subscribers to pubsub threads
         _db_instance_id = Properties::get_db_instance_id();
-        std::string db_change_channel = fmt::format(redis::PUBSUB_DB_CONFIG_CHANGES, _db_instance_id);
-        _config_sub_thread.add_subscriber(db_change_channel,
-            [this, &username, &password]() {
-                // initialize the fdw, setup fdw server, import foreign schemas, etc
-                _init_fdw(username, password);
-            },
-            [this](const std::string &msg) {
-                _handle_replicated_dbs_change(msg);
-            });
 
-        // start redis subscriber threads
-        _config_sub_thread.start();
+        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
+        redis_cache->add_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
+
+        _init_fdw(username, password);
 
         // start the main thread
         start_thread();
@@ -152,15 +171,13 @@ namespace springtail::pg_fdw {
 
         // otherwise all schemas, need to query the primary
         // use libpq to connect to the database
-        LibPqConnectionPtr conn = _connect_primary(db_id, db_name);
-        conn->exec(SCHEMA_SELECT);
+        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, 0);
+        auto fields = table->extent_schema()->get_fields();
 
-        // iterate through the results and get the schema names
-        for (int i = 0; i < conn->ntuples(); i++) {
-            schemas.insert(conn->get_string(i, 0));
+        for (auto row : (*table)) {
+            std::string namespace_name(fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(row));
+            schemas.insert(namespace_name);
         }
-        conn->clear();
-        conn->disconnect();
 
         return schemas;
     }
@@ -195,6 +212,34 @@ namespace springtail::pg_fdw {
         for (const auto &[db_id, db_name] : dbs) {
             _create_schemas(conn, db_id, db_name);
         }
+    }
+
+    std::string
+    PgDDLMgr::_get_create_schema_with_grants_query(std::string_view schema)
+    {
+        /** Create schema with grants, params: schema, schema, user, schema, user, schema, user */
+        return fmt::format("CREATE SCHEMA {};"
+                "  GRANT USAGE ON SCHEMA {} TO {};"
+                "  GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {};"
+                "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {};",
+                schema,
+                schema, _fdw_username,
+                schema, _fdw_username,
+                schema, _fdw_username);
+    }
+
+    std::string
+    PgDDLMgr::_get_alter_schema_with_grants_query(std::string_view old_schema, std::string_view new_schema)
+    {
+        /** Alter schema with grants, params: old_schema, new_schema, new_schema, user, new_schema, user, new_schema, user */
+        return fmt::format("ALTER SCHEMA {} RENAME TO {};"
+            "  GRANT USAGE ON SCHEMA {} TO {};"
+            "  GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {};"
+            "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {};",
+                old_schema, new_schema,
+                new_schema, _fdw_username,
+                new_schema, _fdw_username,
+                new_schema, _fdw_username);
     }
 
     void
@@ -260,21 +305,6 @@ namespace springtail::pg_fdw {
     }
 
     LibPqConnectionPtr
-    PgDDLMgr::_connect_primary(uint64_t db_id, const std::string &db_name)
-    {
-        // get db config and parse it
-        std::string host, user, password;
-        int port;
-        Properties::get_primary_db_config(host, port, user, password);
-
-        // use libpq to connect to the database
-        LibPqConnectionPtr conn = std::make_shared<LibPqConnection>();
-        conn->connect(host, db_name, user, password, port);
-
-        return conn;
-    }
-
-    LibPqConnectionPtr
     PgDDLMgr::_connect_fdw(std::optional<uint64_t> db_id_opt, const std::string &db_name)
     {
         // check if we have a connection in the cache
@@ -335,17 +365,8 @@ namespace springtail::pg_fdw {
                                       SPRINGTAIL_FDW_SCHEMA_XID_OPTION,
                                       schema_xid));
 
-            // find the difference between the schemas in the db and the schemas in the DDL
-            // these will be added as new schemas
-            std::set<std::string> new_schemas;
-            std::shared_lock db_lock(_db_mutex);
-            std::set_difference(schemas.begin(), schemas.end(),
-                                _db_schemas[db_id].begin(), _db_schemas[db_id].end(),
-                                std::inserter(new_schemas, new_schemas.begin()));
-            db_lock.unlock();
-
             // execute the set of statements
-            _execute_ddl(conn, db_id, schema_xid, txn, new_schemas);
+            _execute_ddl(conn, db_id, schema_xid, txn);
 
             return true;
 
@@ -360,22 +381,10 @@ namespace springtail::pg_fdw {
     PgDDLMgr::_execute_ddl(LibPqConnectionPtr conn,
                            uint64_t db_id,
                            uint64_t schema_xid,
-                           const std::vector<std::string> &txn,
-                           const std::set<std::string> &schemas)
+                           const std::vector<std::string> &txn)
     {
         // start a transaction
         conn->start_transaction();
-
-        // go through each new schema and create it
-        for (const auto &schema : schemas) {
-            std::string escaped_schema = conn->escape_identifier(schema);
-
-            conn->exec(fmt::format(CREATE_SCHEMA_WITH_GRANTS, escaped_schema,
-                                   escaped_schema, _fdw_username,
-                                   escaped_schema, _fdw_username,
-                                   escaped_schema, _fdw_username));
-            conn->clear();
-        }
 
         // exectute each DDL statement
         for (const auto &sql : txn) {
@@ -385,11 +394,6 @@ namespace springtail::pg_fdw {
         }
 
         conn->end_transaction();
-
-        // add the new schemas to the set after commit
-        std::unique_lock db_lock(_db_mutex);
-        _db_schemas[db_id].insert(schemas.begin(), schemas.end());
-        db_lock.unlock();
     }
 
     std::string
@@ -434,10 +438,12 @@ namespace springtail::pg_fdw {
                                              conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
                                              conn->escape_identifier(ddl.at("old_table").get<std::string>()),
                                              conn->escape_identifier(ddl.at("table").get<std::string>()));
+
+            // XXX it's not clear to me that we need to support a schema change here?
             if (ddl.at("schema").get<std::string>() != ddl.at("old_schema").get<std::string>()) {
                 return rename + fmt::format("ALTER FOREIGN TABLE {}.{} SET SCHEMA {};",
                                             conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
-                                            conn->escape_identifier(ddl.at("old_table").get<std::string>()),
+                                            conn->escape_identifier(ddl.at("table").get<std::string>()),
                                             conn->escape_identifier(ddl.at("schema").get<std::string>()));
             } else {
                 return rename;
@@ -445,7 +451,7 @@ namespace springtail::pg_fdw {
         }
 
         else if (action == "drop") {
-            return fmt::format("DROP FOREIGN TABLE {}.{};",
+            return fmt::format("DROP FOREIGN TABLE IF EXISTS {}.{};",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()));
         }
@@ -507,6 +513,32 @@ namespace springtail::pg_fdw {
             // TODO: do something?
             SPDLOG_ERROR("DROP INDEX");
             return "";
+        }
+        else if (action == "ns_create") {
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Creating schema with JSON: {}", ddl.dump());
+            const auto escaped_schema = conn->escape_identifier(ddl.at("name").get<std::string>());
+            return _get_create_schema_with_grants_query(escaped_schema);
+        }
+        else if (action == "ns_alter") {
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Altering schema with JSON: {}", ddl.dump());
+            const auto old_schema = conn->escape_identifier(ddl.at("old_name").get<std::string>());
+            const auto new_schema = conn->escape_identifier(ddl.at("name").get<std::string>());
+
+            return _get_alter_schema_with_grants_query(old_schema, new_schema);
+        }
+        else if (action == "ns_drop") {
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Dropping schema with JSON: {}", ddl.dump());
+            const auto escaped_schema = conn->escape_identifier(ddl.at("name").get<std::string>());
+            return fmt::format("DROP SCHEMA IF EXISTS {} CASCADE", escaped_schema);
+        }
+        else if (action == "set_namespace") {
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Set namespace with JSON: {}", ddl.dump());
+            const auto schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
+            const auto table = conn->escape_identifier(ddl.at("table").get<std::string>());
+            const auto old_schema = conn->escape_identifier(ddl.at("old_schema").get<std::string>());
+
+            return fmt::format("ALTER FOREIGN TABLE {}.{} SET SCHEMA {};",
+                               old_schema, table, schema);
         }
 
         // can't currently support other kinds of DDL mutations
@@ -700,12 +732,8 @@ namespace springtail::pg_fdw {
                                 escaped_schema));
         conn->clear();
 
-        std::unique_lock db_lock(_db_mutex);
-        // add all schemas to _db_schema
-        for (const auto &schema: schemas) {
-            _db_schemas[db_id].insert(schema);
-        }
         // set the schema xid in the map
+        std::unique_lock db_lock(_db_mutex);
         _db_xid_map[db_id] = xid;
         db_lock.unlock();
 
@@ -769,26 +797,6 @@ namespace springtail::pg_fdw {
         // remove it from internal storage
         std::unique_lock unique_lock(_db_mutex);
         _db_xid_map.erase(db_id);
-        _db_schemas.erase(db_id);
-    }
-
-    void
-    PgDDLMgr::_handle_replicated_dbs_change(const std::string &msg)
-    {
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "Handling DB Change Action message: {}", msg);
-        uint64_t db_id;
-        redis::db_state_change::DBAction action;
-        redis::db_state_change::parse_db_action(msg, db_id, action);
-        switch (action) {
-            case redis::db_state_change::DB_ACTION_ADD:
-                _add_replicated_database(db_id);
-                break;
-            case redis::db_state_change::DB_ACTION_REMOVE:
-                _remove_replicated_database(db_id);
-                break;
-            default:
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Unsupported action: {}", redis::db_state_change::db_action_to_name[action]);
-        }
     }
 
 } // namespace springtail::pg_fdw

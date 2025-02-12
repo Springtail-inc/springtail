@@ -121,28 +121,29 @@ namespace springtail::gc {
                     //       table mutations up to this XID have already been applied, otherwise we
                     //       could potentially get a stray column added before the swap XID showing
                     //       up in the schema since it wouldn't get deleted by the DROP TABLE
-                    auto create = common::json_to_thrift<sys_tbl_mgr::TableRequest>(json[0]);
+                    auto namespace_req = common::json_to_thrift<sys_tbl_mgr::NamespaceRequest>(json[0]);
+                    namespace_req.xid = completed_xid;
+                    namespace_req.lsn = constant::MAX_LSN - 2;
+
+                    auto create = common::json_to_thrift<sys_tbl_mgr::TableRequest>(json[1]);
                     create.xid = completed_xid;
                     create.lsn = constant::MAX_LSN - 1;
 
-                    auto indexes = common::json_to_thrift_vector<sys_tbl_mgr::IndexRequest>(json[1]);
+                    auto indexes = common::json_to_thrift_vector<sys_tbl_mgr::IndexRequest>(json[2]);
                     for (auto &index : indexes) {
                         index.xid = completed_xid;
                         index.lsn = constant::MAX_LSN - 1;
                     }
 
-                    auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[2]);
+                    auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[3]);
                     roots.xid = completed_xid;
 
                     // note: this will also invalidate the table's client cache entry
-                    auto ddl_str = client->swap_sync_table(create, indexes, roots);
+                    auto ddl_str = client->swap_sync_table(namespace_req, create, indexes, roots);
 
                     // store the ddl mutations for the FDWs
-                    auto ddl_ops = nlohmann::json::parse(ddl_str);
-                    assert(ddl_ops.is_array());
-                    for (int i = 0; i < ddl_ops.size(); ++i) {
-                        ddls.push_back(ddl_ops[i]);
-                    }
+                    ddls = nlohmann::json::parse(ddl_str);
+                    assert(ddls.is_array());
 
                     // clear the hash entry for the table
                     redis->hdel(key, fmt::format("{}", table_id));
@@ -396,7 +397,7 @@ namespace springtail::gc {
                         PgMsgIndex msg;
                         msg.oid = index_id;
                         msg.xid = xid;
-                        msg.schema = ddl["schema"];
+                        msg.namespace_name = ddl["schema"];
                         msg.index = ddl["index"];
                         msg.is_unique = ddl["is_unique"];
                         msg.table_oid = tid;

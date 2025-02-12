@@ -110,6 +110,22 @@ namespace springtail {
             }
         }
 
+        /**
+         * @brief Split a string based on a delimiter
+         * @param delimiter delimiter string (e.g., ":")
+         * @param string_value string to split (e.g., "this:is:a:string")
+         * @param out_queue output queue of strings
+         */
+        static inline void
+        split_string(const std::string &delimiter,
+                     const std::string &string_value,
+                     std::deque<std::string> &out_queue)
+        {
+            std::vector<std::string> out_vector;
+            split_string(delimiter, string_value, out_vector);
+            std::move(out_vector.begin(), out_vector.end(), std::back_inserter(out_queue));
+        }
+
         template <typename T>
         nlohmann::json
         thrift_to_json(const T &obj)

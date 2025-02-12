@@ -27,26 +27,31 @@ namespace {
     protected:
         std::filesystem::path _base_dir;
 
+        static void SetUpTestSuite() {
+            springtail_init();
+            _services.init();
+
+            // create the public namespace
+            auto client = sys_tbl_mgr::Client::get_instance();
+            auto xid_client = XidMgrClient::get_instance();
+            uint64_t target_xid = xid_client->get_committed_xid(1, 0) + 1;
+
+            // create the public namespace in the sys_tbl_mgr
+            PgMsgNamespace ns_msg;
+            ns_msg.oid = 90000;
+            ns_msg.name = "public";
+            client->create_namespace(1, XidLsn(target_xid, 0), ns_msg);
+
+            xid_client->commit_xid(1, target_xid, false);
+        }
+
+        static void TearDownTestSuite() {
+            _services.shutdown();
+        }
+
+        static test::Services _services;
+
         void SetUp() override {
-            struct Initializer
-            {
-                test::Services _s;
-
-                Initializer() : _s{true, true, true}
-                {
-                    springtail_init();
-                    _s.init();
-                }
-                Initializer(const Initializer&) = delete;
-                Initializer& operator=(const Initializer&) = delete;
-                ~Initializer()
-                {
-                    _s.shutdown();
-                }
-
-            };
-            static Initializer init;
-
             nlohmann::json db_config = Properties::get_db_config(db_id);
             auto db_name = db_config["name"].get<std::string>();
 
@@ -64,6 +69,8 @@ namespace {
 
         uint64_t db_id = 1;
     };
+
+    test::Services PgCopyTable_Test::_services{true, true, true};
 
     TEST_F(PgCopyTable_Test, CopyTable)
     {
@@ -99,16 +106,20 @@ namespace {
             //       table mutations up to this XID have already been applied, otherwise we
             //       could potentially get a stray column added before the swap XID showing
             //       up in the schema since it wouldn't get deleted by the DROP TABLE
-            auto create = common::json_to_thrift<sys_tbl_mgr::TableRequest>(json[0]);
-            create.xid = xid;
-            create.lsn = constant::MAX_LSN - 1;
+            auto namespace_req = common::json_to_thrift<sys_tbl_mgr::NamespaceRequest>(json[0]);
+            namespace_req.xid = xid;
+            namespace_req.lsn = constant::MAX_LSN - 2;
 
-            auto indexes = common::json_to_thrift_vector<sys_tbl_mgr::IndexRequest>(json[1]);
+            auto create_req = common::json_to_thrift<sys_tbl_mgr::TableRequest>(json[1]);
+            create_req.xid = xid;
+            create_req.lsn = constant::MAX_LSN - 1;
 
-            auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[2]);
-            roots.xid = xid;
+            auto index_reqs = common::json_to_thrift_vector<sys_tbl_mgr::IndexRequest>(json[2]);
 
-            client->swap_sync_table(create, indexes, roots);
+            auto roots_req = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[3]);
+            roots_req.xid = xid;
+
+            client->swap_sync_table(namespace_req, create_req, index_reqs, roots_req);
 
             // clear the table entry from the hash
             redis->hdel(key, hkey);

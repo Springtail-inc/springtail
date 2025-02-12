@@ -31,6 +31,16 @@ namespace springtail {
             ++_count;
         }
 
+        /**
+         * @brief Increment the counter by given number
+         *
+         * @param incr - increment value
+         */
+        void increment_by(uint64_t incr) {
+            boost::unique_lock lock(_mutex);
+            _count += incr;
+        }
+
         /** Decrements the counter. */
         void decrement() {
             boost::unique_lock lock(_mutex);

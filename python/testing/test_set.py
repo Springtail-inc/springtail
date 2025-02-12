@@ -47,6 +47,7 @@ class TestSet:
             # skip the test set configuration file
             if test_file == _GLOBAL_CONFIG_FILE:
                 continue
+            logging.info(f'Processing test file {test_file}')
 
             # test files must be of the form "<name>.sql"
             if not test_file.endswith('.sql'):
@@ -60,11 +61,13 @@ class TestSet:
 
                 # if only a subset of test cases was requsted, limit them here
                 if test_files and test_file not in test_files:
+                    logging.warning(f'skipping test file {test_file} -- not in the requested tests')
                     self._tests[test_file].skip()
                 else:
                     self._test_files.append(test_file)
 
-            except:
+            except Exception as e:
+                logging.error(f'Error parsing test -- {e}')
                 pass # this test was recorded as an error and we continue
 
 

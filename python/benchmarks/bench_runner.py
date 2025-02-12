@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import yaml
+import time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../testing")))
 
@@ -100,26 +101,23 @@ def run_benchmark(
             bench_path = os.path.join(bench_dir, bench_name)
             if not os.path.exists(bench_path):
                 raise ValueError(f"Benchmark not found: {bench_path}")
-            benchmarks = [BenchCase(bench_path, config_file, build_dir)]
+            benchmarks = {os.path.basename(os.path.dirname(bench_path)): bench_path}
         else:
             # Run all benchmarks
-            benchmarks = []
-            for root, _, files in os.walk(bench_dir):
-                for f in sorted(files):
-                    if f.endswith(".sql"):
-                        bench_path = os.path.join(root, f)
-                        benchmarks.append(BenchCase(bench_path, config_file, build_dir))
-        print("\nRunning benchmarks:")
-        for bench in benchmarks:
-            print(f"  {bench.name}")
+            test_files = [os.path.join(root, f) for root, _, files in os.walk(bench_dir)
+                          for f in files if f.endswith(".yaml")]
+            benchmarks = dict(sorted({os.path.basename(os.path.dirname(key)): key for key in test_files}.items()))
 
-        results = []
-        for bench in benchmarks:
+        print("\nRunning benchmarks:")
+        for n, f in benchmarks.items():
+            print(f" {n}:   {f}")
+
+        for n, f in benchmarks.items():
+            print(f"\nBenchmark: {n}")
+            bench = BenchCase(n, f, config_file, build_dir)
             result = bench.run()
-            results.append(result)
-            print(f"\nBenchmark: {bench.name}")
-            print(f"Primary write time: {result['postgres_time']:.6f}s")
-            print(f"Total sync time: {result['springtail_time']:.6f}s")
+            for d, t in result.items():
+                print(f"   {d}: {t}")
 
     finally:
         if not nostartstop:
