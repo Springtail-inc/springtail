@@ -16,7 +16,7 @@ namespace springtail {
          * @param queue_id - id of the queue
          * @param run_cb - callback to be executed by the thread worker
          */
-        explicit MultiQueueRequest(uint64_t queue_id, std::function<void ()> run_cb) :
+        MultiQueueRequest(uint64_t queue_id, std::function<void ()> run_cb) :
             _queue_id(queue_id), _run_cb(run_cb) {}
 
             /**
@@ -102,7 +102,7 @@ namespace springtail {
          *
          * @param max_threads - number of threads to use for thread pool
          */
-        MultiQueueThreadManager(int max_threads) : _thread_pool(max_threads) {}
+        explicit MultiQueueThreadManager(int max_threads) : _thread_pool(max_threads) {}
 
         /**
          * @brief Multi Queue Thread Manager object destructor.
