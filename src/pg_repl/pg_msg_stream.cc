@@ -17,9 +17,6 @@
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/exception.hh>
 
-#include <opentelemetry/metrics/meter.h>
-#include <opentelemetry/metrics/provider.h>
-
 namespace springtail {
 
     PgMsgStreamReader::PgMsgStreamReader(const std::filesystem::path &start_file,
@@ -122,15 +119,6 @@ namespace springtail {
     PgMsgPtr
     PgMsgStreamReader::read_message(const std::vector<char> &filter)
     {
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "LOG_REMOVE PgMsgStreamReader: constructor called");
-        auto meter = opentelemetry::metrics::Provider::GetMeterProvider()->GetMeter("pg_repl");
-        _decode_msg_counter = std::shared_ptr<opentelemetry::metrics::Counter<double>>(
-            meter
-                ->CreateDoubleCounter(
-                    "pg_msg_stream_decode_msg_calls",
-                    "Number of times decode_msg is called", "calls")
-                .release());
-        _decode_msg_counter->Add(1);
         SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Reading message, current_offset: {}, end_offset: {}\n", _current_offset, _end_offset);
         // check if we've already encountered the end of the file
         if (end_of_stream()) {

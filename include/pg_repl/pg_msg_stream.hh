@@ -235,8 +235,6 @@ namespace springtail {
         bool _read_hdr = false;         ///< true if header needs to be read (set when opening a new file)
         bool _streaming = false;        ///< true if streaming mode (between stream_start and stream_stop)
 
-        std::shared_ptr<opentelemetry::metrics::Counter<double>> _decode_msg_counter;
-
         /** Helper to check for eof errors in reading stream */
         void _check_fail() {
             if (_stream.fail()) {
