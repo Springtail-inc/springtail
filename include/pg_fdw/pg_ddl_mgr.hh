@@ -105,14 +105,12 @@ namespace springtail::pg_fdw {
 
         /**
          * @brief Helper to apply outstanding DDL changes to the FDW tables.
-         * @param redis RedisDDL instance
          * @param db_id The database ID to apply the changes to.
          * @param schema_xid The XID at which the DDL changes were applied.
          * @param ddls A JSON array of DDL statements to apply.
          * @return Status of the operation. True if successful, false otherwise.
          */
-        bool _update_schemas(RedisDDL &redis,
-                             uint64_t db_id,
+        bool _update_schemas(uint64_t db_id,
                              uint64_t schema_xid,
                              const nlohmann::json &ddls);
 

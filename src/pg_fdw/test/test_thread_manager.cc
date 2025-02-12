@@ -4,6 +4,7 @@
 #include <pg_fdw/multi-queue-thread-manager.hh>
 
 using namespace springtail;
+using namespace springtail::pg_fdw;
 
 namespace {
     class MultiQueueThreadManager_Test : public testing::Test {

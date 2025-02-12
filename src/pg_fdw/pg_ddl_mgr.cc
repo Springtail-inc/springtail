@@ -279,7 +279,7 @@ namespace springtail::pg_fdw {
                 _thread_manager->queue_request(std::make_shared<MultiQueueRequest>(
                     db_id, [this, &redis_ddl, db_id, schema_xid, ddls]() {
                         // apply the DDL statements
-                        bool status = _update_schemas(redis_ddl, db_id, schema_xid, ddls);
+                        bool status = _update_schemas(db_id, schema_xid, ddls);
                         if (!status) {
                             // error occured, abort the DDL
                             SPDLOG_ERROR("Failed to apply DDL statements");
@@ -346,8 +346,7 @@ namespace springtail::pg_fdw {
     }
 
     bool
-    PgDDLMgr::_update_schemas(RedisDDL &redis,
-                              uint64_t db_id,
+    PgDDLMgr::_update_schemas(uint64_t db_id,
                               uint64_t schema_xid,
                               const nlohmann::json &ddls)
     {
