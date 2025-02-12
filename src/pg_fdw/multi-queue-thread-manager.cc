@@ -45,6 +45,9 @@ namespace springtail::pg_fdw {
             _completed_queue.pop();
             lock.unlock();
 
+            // when request is scheduled to run by the thread pool, it remains
+            // at the top of the its queue till _completed_queue indicates
+            // that this request is now done
             // remove request from the appropriate queue
             _request_queues[queue_id].pop();
 
