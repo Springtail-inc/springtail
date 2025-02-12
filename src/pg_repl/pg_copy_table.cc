@@ -130,7 +130,7 @@ namespace springtail
         "    col.collname AS collation, "
         "    bool_or(a.attgenerated = 's') OVER w AS has_generated_column, "
         "    bool_or(t.typnamespace != 'pg_catalog'::regnamespace) OVER w AS has_user_defined_type, "
-        "    bool_or(col.collname IS NOT NULL AND col.collname NOT IN ('C', 'en_US.UTF-8', 'default')) OVER w AS has_non_standard_collation, "
+        "    bool_or(col.collname IS NOT NULL AND col.collname NOT IN ('C', 'en_US.UTF-8', 'default')) OVER w AS has_non_standard_collation "
         "FROM pg_attribute a "
         "JOIN pg_class c ON a.attrelid = c.oid "
         "JOIN pg_namespace n ON c.relnamespace = n.oid "
