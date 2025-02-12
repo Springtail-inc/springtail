@@ -136,6 +136,11 @@ namespace springtail
                   table_oid(t_pgoid)
             { }
             TableMetadata() = default;
+
+            // Operator to sort the table metadata by table oid
+            bool operator<(const TableMetadata &table_metadata) const{
+                return table_oid < table_metadata.table_oid;
+            }
         };
 
         LibPqConnection _connection;
@@ -216,7 +221,7 @@ namespace springtail
          * @param db_id database id
          */
         void _get_table_oids(const std::string &query,
-                             std::vector<TableMetadata> &table_oids,
+                             std::set<TableMetadata> &table_oids,
                              uint64_t db_id);
 
         /**
@@ -226,7 +231,7 @@ namespace springtail
          * @param db_id database id
          */
         void _get_table_oids(const nlohmann::json &include_json,
-                             std::vector<TableMetadata> &table_oids,
+                             std::set<TableMetadata> &table_oids,
                              uint64_t db_id);
 
         /**
@@ -266,6 +271,13 @@ namespace springtail
                      uint64_t target_xid,
                      CopyQueuePtr copy_queue,
                      PgCopyResultPtr result);
+
+        /**
+         * @brief Get namespaces, returns a pair of namespace name and oid
+         * @param db_id database id
+         * @param xid xid
+         */
+        std::vector<std::pair<uint64_t, std::string>> _get_namespaces(uint64_t db_id, uint64_t xid);
 
         /**
          * @brief Internall helper called from copy_db, copy_schema, copy_table
@@ -332,6 +344,13 @@ namespace springtail
          */
         static std::vector<PgCopyResultPtr>
             copy_db(uint64_t db_id, uint64_t xid);
+
+        /**
+         * @brief Create namespaces
+         * @param db_id database id
+         * @param xid xid
+         */
+        static void create_namespaces(uint64_t db_id, uint64_t xid);
 
         /**
          * @brief Copy all tables in single schema from remote system

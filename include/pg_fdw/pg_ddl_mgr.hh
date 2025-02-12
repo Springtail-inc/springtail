@@ -1,8 +1,5 @@
 #pragma once
 
-#include <thread>
-#include <mutex>
-#include <atomic>
 #include <vector>
 #include <set>
 #include <optional>
@@ -14,7 +11,6 @@
 #include <common/singleton.hh>
 
 #include <redis/redis_ddl.hh>
-#include <redis/pubsub_thread.hh>
 
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
@@ -54,7 +50,7 @@ namespace springtail::pg_fdw {
 
     private:
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections
-        PubSubThread _config_sub_thread;           ///< pubsub thread for redis config database
+        RedisCache::RedisChangeWatcherPtr _cache_watcher;           ///< redis cache callback object
 
         std::string _fdw_id;                       ///< FDW ID
 
@@ -72,10 +68,12 @@ namespace springtail::pg_fdw {
         std::map<uint32_t, std::string> _type_map;  ///< map of PG type OIDs to type names
 
         /** Private constructor */
-        PgDDLMgr() : _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE), _config_sub_thread(1, true) {};
-        ~PgDDLMgr() {
-            _config_sub_thread.shutdown();
-        }
+        PgDDLMgr();
+        /** Private destructor */
+        ~PgDDLMgr() override = default;
+
+        /** Function for shutdown */
+        void _internal_shutdown() override;
 
         /** Initialize the FDW */
         void _init_fdw(const std::string &username, const std::string &password);
@@ -217,14 +215,6 @@ namespace springtail::pg_fdw {
          */
         void
         _remove_replicated_database(uint64_t db_id);
-
-        /**
-         * @brief Function for handling database change notifications from redis
-         *
-         * @param msg - message
-         */
-        void
-        _handle_replicated_dbs_change(const std::string &msg);
 
     };
 }
