@@ -123,7 +123,6 @@ namespace springtail
         "    bool_or(a.attgenerated = 's') OVER w AS has_generated_column, "
         "    bool_or(t.typnamespace != 'pg_catalog'::regnamespace) OVER w AS has_user_defined_type, "
         "    bool_or(col.collname IS NOT NULL AND col.collname NOT IN ('C', 'en_US.UTF-8', 'default')) OVER w AS has_non_standard_collation, "
-        "    bool_or(t.typname = 'oid') OVER w AS has_non_standard_encoding "
         "FROM pg_attribute a "
         "JOIN pg_class c ON a.attrelid = c.oid "
         "JOIN pg_namespace n ON c.relnamespace = n.oid "
@@ -135,7 +134,6 @@ namespace springtail
         "AND n.nspname NOT LIKE 'pg_%' "
         "AND n.nspname != 'information_schema' "
         "AND (a.attgenerated = 's' "
-        "    OR t.typname = 'oid' " // exclude oid type which is used for BLOB types
         "    OR (col.collname IS NOT NULL AND col.collname NOT IN ('C', 'en_US.UTF-8', 'default')) "
         "    OR (t.typnamespace != 'pg_catalog'::regnamespace)) " // exclude pg_catalog types and only consider user-defined types
         "WINDOW w AS (PARTITION BY n.nspname, c.relname) "
@@ -763,10 +761,9 @@ namespace springtail
             bool has_generated_column = _connection.get_boolean(i, 7);
             bool has_user_defined_type = _connection.get_boolean(i, 8);
             bool has_non_standard_collation = _connection.get_boolean(i, 9);
-            bool has_non_standard_encoding = _connection.get_boolean(i, 10);
 
             // Skip columns that are not UTF-8 encoded or generated columns
-            if ( !has_generated_column && !has_user_defined_type && !has_non_standard_collation && !has_non_standard_encoding ) {
+            if ( !has_generated_column && !has_user_defined_type && !has_non_standard_collation ) {
                 continue;
             }
 
