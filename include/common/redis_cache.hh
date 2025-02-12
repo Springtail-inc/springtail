@@ -68,6 +68,57 @@ namespace springtail {
         using RedisCacheChangeCallbackPtr = std::shared_ptr<RedisCacheChangeCallback>;
 
         /**
+         * @brief This is another callback helper class. When there is no class that can meaningfully inherit from
+         *      RedisCacheChangeCallback, this class, RedisChangeWatcher, can be used to pass a callback function
+         *      for redis database notifications. This callback function can also be changed any time without
+         *      removing callback object from redis cache and adding a new one back.
+         *
+         */
+        class RedisChangeWatcher : public RedisCacheChangeCallback {
+        public:
+            /**
+             * @brief Construct a new Redis Change Watcher object
+             *
+             * @param func - callback function
+             */
+            explicit RedisChangeWatcher(std::function<void(const std::string &path, const nlohmann::json &new_value)> func) : _cb(func) {}
+            /**
+             * @brief Destroy the Redis Change Watcher object
+             *
+             */
+            ~RedisChangeWatcher() override = default;
+
+            /**
+             * @brief Callback that overrides the callback function from the base class
+             *
+             * @param path - notification path
+             * @param new_value - new json value
+             */
+            void change_callback(const std::string &path, const nlohmann::json &new_value) override {
+                SPDLOG_DEBUG("!!! Received notification; path: \"{}\"; new value: {}", path, new_value.dump(4));
+                _cb(path, new_value);
+            }
+
+            /**
+             * @brief Set a different callback function
+             *
+             * @param func - callback function
+             */
+            void set_cb(std::function<void(const std::string &path, const nlohmann::json &new_value)> func) {
+                _cb = func;
+            }
+        private:
+            /**
+             * @brief Callback function storage
+             *
+             */
+            std::function<void(const std::string &, const nlohmann::json &)> _cb;
+        };
+
+        using RedisChangeWatcherPtr = std::shared_ptr<RedisChangeWatcher>;
+
+
+        /**
          * @brief Get the value of json object at the specified path.
          *      The path will be turned into a json_pointer, format should be:
          *          "<top level key without instance id and semicolon>/<rest of the path>"
@@ -131,7 +182,59 @@ namespace springtail {
          */
         void dump();
 
+        /**
+         * @brief This function uses redis client object to send publish notifications to redis. This
+         *      function is needed only temporarily till we transition to using redis notifications
+         *      used by the cache.
+         *
+         * @param channel_template - channel pattern
+         * @param message - message to send
+         * @return long long - return value from redis client API call
+         */
         long long publish(const std::string &channel_template, const std::string_view &message);
+
+        /**
+         * @brief This function modifies input vectors by doing subtracting intersection from the union of these
+         *      vector elements. Each vector is left with the elements not found in both. The vectors are first
+         *      sorted, then if they are market as unique, all non-unique elements are removed. After that
+         *      the common elements are removed.
+         *
+         * @tparam T - object type for vector container
+         * @param u - first vector
+         * @param v - second vector
+         * @param u_unique - is first vector unique
+         * @param v_unique - is second vector unique
+         */
+        template<typename T>
+        static void
+        array_diff(std::vector<T> &u, std::vector<T> &v, bool u_unique, bool v_unique) {
+            std::sort(u.begin(), u.end());
+            std::sort(v.begin(), v.end());
+
+            // remove unique elements if required
+            if (u_unique) {
+                auto last = std::unique(u.begin(), u.end());
+                u.erase(last, u.end());
+            }
+            if (v_unique) {
+                auto last = std::unique(v.begin(), v.end());
+                v.erase(last, v.end());
+            }
+
+            uint32_t i = 0;
+            uint32_t j = 0;
+
+            while ((u.begin() + i) != u.end() && (v.begin() + j) != v.end()) {
+                if (u[i] == v[j]) {
+                    u.erase(u.begin() + i);
+                    v.erase(v.begin() + j);
+                } else if (u[i] < v[j]) {
+                    i++;
+                } else {
+                    j++;
+                }
+            }
+        }
 
     private:
         std::atomic<bool> _shutdown = false;        ///> flag to signal to subscriber thread to shutdown
