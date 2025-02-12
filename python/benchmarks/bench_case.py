@@ -4,7 +4,6 @@ import time
 import common
 import yaml
 
-
 class BenchCase:
     """Class to run a single benchmark case"""
 
@@ -24,7 +23,7 @@ class BenchCase:
         else:
             self.replica_name = self.primary_name
 
-    def _run_benchmark(self, primary_conn, replica_conn) -> dict:
+    def _run_benchmark(self, primary_conn, replica_conn, setup_timeout) -> dict:
         """Run the benchmark with given connections"""
 
         # test root
@@ -124,18 +123,24 @@ class BenchCase:
                 replica_conn,
                 f"SELECT state FROM benchmark_state WHERE key = 'benchcase_{self.name}'",
                 (self.name,),
-                timeout=60,
+                setup_timeout,
             )
 
             result["Primary setup time"] = postgres_time
             result["Setup sync time"] = time.time() - start
 
         if test_sql:
+            with primary_conn.cursor() as cursor:
+                cursor.execute("DISCARD ALL")
+
             start = time.time()
             with primary_conn.cursor() as cursor:
                 cursor.execute(test_sql)
             primary_conn.commit()
             postgres_time = time.time() - start
+
+            with replica_conn.cursor() as cursor:
+                cursor.execute("DISCARD ALL")
 
             start = time.time()
             with replica_conn.cursor() as cursor:
@@ -162,7 +167,7 @@ class BenchCase:
 
         return result
 
-    def run(self) -> dict:
+    def run(self, setup_timeout) -> dict:
         """Run the benchmark and return timing results"""
         # Connect to databases
         primary_conn = springtail.connect_db_instance(self.props, self.primary_name)
@@ -170,7 +175,7 @@ class BenchCase:
         replica_conn = springtail.connect_fdw_instance(self.props, self.replica_name)
 
         try:
-            return self._run_benchmark(primary_conn, replica_conn)
+            return self._run_benchmark(primary_conn, replica_conn, setup_timeout)
         except Exception as e:
             raise RuntimeError(f"Error running benchmark {self.name}") from e
         finally:
