@@ -1,0 +1,2 @@
+setup: ../setup_empty_no_index.sql
+test: sort_empty_test.sql

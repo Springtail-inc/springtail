@@ -43,7 +43,7 @@ namespace springtail {
     ThriftXidMgrService::get_committed_xid(const int64_t db_id,
                                            const thrift::xid_mgr::xid_t schema_xid)
     {
-        uint64_t xid;
+        uint64_t xid = 0;
         xid_mgr::XidMgrServer::call_wrapper([db_id, schema_xid, &xid]() {
             xid_mgr::XidMgrServer *server = xid_mgr::XidMgrServer::get_instance();
             xid = server->get_committed_xid(db_id, schema_xid);
