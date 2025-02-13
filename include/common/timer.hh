@@ -55,7 +55,7 @@ namespace springtail {
          * @return Elapsed time in milliseconds.
          */
         std::chrono::milliseconds
-        elapsed_ms()
+        elapsed_ms() const
         {
             return std::chrono::duration_cast<std::chrono::milliseconds>(_total_elapsed);
         }

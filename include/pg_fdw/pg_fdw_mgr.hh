@@ -7,6 +7,7 @@
 
 #include <common/constants.hh>
 #include <common/concurrent_queue.hh>
+#include <common/time_trace.hh>
 
 #include <redis/redis_ddl.hh>
 
@@ -209,6 +210,10 @@ namespace springtail::pg_fdw {
         std::atomic<uint64_t> _schema_xid; ///< The most recently seen schema XID
 
         // static methods
+        //
+        //
+        TIME_TRACE_CREATE(create_state_trace);
+
 
         /** Helper to convert field to PG Datum */
         static Datum _get_datum_from_field(FieldPtr field,
