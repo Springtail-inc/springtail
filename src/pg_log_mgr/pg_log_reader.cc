@@ -439,6 +439,28 @@ namespace springtail::pg_log_mgr {
     }
 
     void
+    PgLogReader::enqueue_msg(PgMsgPtr msg)
+    {
+        _msg_queue.push(msg);
+    }
+
+    void
+    PgLogReader::_msg_worker()
+    {
+        while (!_msg_queue.is_shutdown()) {
+            // Try to get next message from queue, wait up to 1 second
+            auto msg = _msg_queue.pop(1);
+            if (msg == nullptr) {
+                continue;
+            }
+
+            // Process the message
+            _process_msg(msg);
+        }
+    }
+
+#if 0
+    void
     PgLogReader::process_log(const std::filesystem::path &path,
                              uint64_t start_offset,
                              int num_messages)
@@ -475,7 +497,7 @@ namespace springtail::pg_log_mgr {
                 }
 
                 // process the message
-                _process_msg(msg);
+                this->enqueue_msg(msg);
             }
 
             if (num_messages > 0) {
@@ -483,6 +505,7 @@ namespace springtail::pg_log_mgr {
             }
         }
     }
+#endif
 
     void
     PgLogReader::_process_msg(PgMsgPtr msg)
@@ -615,8 +638,6 @@ namespace springtail::pg_log_mgr {
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Begin: xid={}, xact_lsn={}\n", begin_msg.xid, begin_msg.xact_lsn);
 
         PgTransactionPtr xact = std::make_shared<PgTransaction>(PgTransaction::TYPE_COMMIT);
-        xact->begin_path = _current_path;
-        xact->begin_offset = _reader.header_offset();
         xact->xact_lsn = begin_msg.xact_lsn;
         xact->xid = begin_msg.xid;
         _current_xact = xact;
@@ -638,15 +659,22 @@ namespace springtail::pg_log_mgr {
             return;
         }
 
-        assert (xact->type == PgTransaction::TYPE_COMMIT);
+        CHECK_EQ(xact->type, PgTransaction::TYPE_COMMIT);
 
-        // set transaction path and end offset
-        xact->commit_path = _current_path;
-        xact->commit_offset = _reader.offset();
-
-        // update the write cache and system tables as needed
+        // assign a Springtail XID to this transaction
         uint64_t xid = this->get_next_xid();
-        _current_batch->commit(xid);
+
+        // If the assigned XID is <= the most recently committed XID, then we need to skip this
+        // transaction.  This can occur in the unlikely case that we are performing a log recovery
+        // and the Committer got ahead of the XactLog flushing so that the committed XID is ahead of
+        // the most recently written PGXID -> Springtail XID mapping.
+        if (xid <= _committed_xid) {
+            _current_batch->abort(); // we abort this batch since it was already processed
+        } else {
+            _current_batch->commit(xid); // update the write cache and system tables as needed
+        }
+
+        // clear the current batch
         _batch_map.erase(xact->xid);
         _current_batch = nullptr;
 
@@ -658,13 +686,16 @@ namespace springtail::pg_log_mgr {
         // check if we need to perform a table swap / commit before proceeding
         _check_sync_commit(_db_id, xact->xid, xid);
 
-        // message the Committer
-        SPDLOG_DEBUG_MODULE(LOG_GC, "Issue XID to committer on {} @ {}", _db_id, xid);
-        committer_queue.push(gc::XidReady(_db_id, gc::XidReady::XactMsg(xid)));
+        // write the pg_xid -> xid mapping
+        _xact_log_writer.log(xact->xid, xid);
 
-        // pass the xact to the xact logging thread
-        xact->springtail_xid = xid;
-        _queue->push(xact);
+        if (xid > _committed_xid) {
+            // message the Committer
+            SPDLOG_DEBUG_MODULE(LOG_GC, "Issue XID to committer on {} @ {}", _db_id, xid);
+            committer_queue.push(gc::XidReady(_db_id, gc::XidReady::XactMsg(xid)));
+        }
+
+        // clear the current xact
         _current_xact = nullptr;
     }
 
@@ -683,17 +714,8 @@ namespace springtail::pg_log_mgr {
 
         // new transaction
         PgTransactionPtr xact = std::make_shared<PgTransaction>(PgTransaction::TYPE_COMMIT);
-        xact->begin_path = _current_path;
-        xact->begin_offset = _reader.header_offset();
         xact->xid = start_msg.xid;
         _xact_map.insert({xact->xid, xact});
-
-        PgTransactionPtr stream_xact = std::make_shared<PgTransaction>(PgTransaction::TYPE_STREAM_START);
-        stream_xact->begin_path = _current_path;
-        stream_xact->begin_offset = _reader.header_offset();
-        stream_xact->xid = start_msg.xid;
-
-        _queue->push(stream_xact);
 
         // prepare a batch for processing
         _current_batch = std::make_shared<Batch>(_db_id, start_msg.xid);
@@ -716,26 +738,41 @@ namespace springtail::pg_log_mgr {
         }
 
         PgTransactionPtr xact = itr->second;
-        xact->commit_path = _current_path;
-        xact->commit_offset = _reader.offset();
         xact->xact_lsn = commit_msg.xact_lsn;
 
-        assert (xact->type == PgTransaction::TYPE_COMMIT);
+        CHECK_EQ(xact->type, PgTransaction::TYPE_COMMIT);
 
-        // commit the current batch
+        // assign the transaction a Springtail XID
         uint64_t xid = this->get_next_xid();
-        _current_batch->commit(xid);
+
+        // If the assigned XID is <= the most recently committed XID, then we need to skip this
+        // transaction.  This can occur in the unlikely case that we are performing a log recovery
+        // and the Committer got ahead of the XactLog flushing so that the committed XID is ahead of
+        // the most recently written PGXID -> Springtail XID mapping.
+        if (xid <= _committed_xid) {
+            _current_batch->abort(); // we abort this batch since it was already processed
+        } else {
+            _current_batch->commit(xid); // update the write cache and system tables as needed
+        }
+
+        // free the batch
         _batch_map.erase(commit_msg.xid);
 
-        // message the Committer
-        RedisQueue<gc::XidReady> committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
-                                                             Properties::get_db_instance_id()));
-        committer_queue.push(gc::XidReady(_db_id, gc::XidReady::XactMsg(xid)));
+        // write the pg_xid -> xid mapping
+        // note: we do this even if the xact isn't being committed since it is needed for recovery
+        //       in the case of a crash
+        _xact_log_writer.log(commit_msg.xid, xid);
 
-        // pass the xact to the xact logging thread
-        xact->springtail_xid = xid;
+        if (xid > _committed_xid) {
+            // message the Committer
+            RedisQueue<gc::XidReady> committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
+                                                                 Properties::get_db_instance_id()));
+            committer_queue.push(gc::XidReady(_db_id, gc::XidReady::XactMsg(xid)));
+        }
+
+        // remove the xact from the active map
         _xact_map.erase(itr);
-        _queue->push(xact);
+        _current_batch = nullptr;
     }
 
     void
@@ -753,10 +790,6 @@ namespace springtail::pg_log_mgr {
 
         if (abort_msg.sub_xid == abort_msg.xid) {
             // if sub_xid == xid, then it's a top level xact that aborted
-            // add it to the xact queue for logging
-            PgTransactionPtr xact = itr->second;
-            xact->type = PgTransaction::TYPE_STREAM_ABORT;
-            _queue->push(xact);
             // remove it from the map
             _xact_map.erase(itr);
 
@@ -764,9 +797,6 @@ namespace springtail::pg_log_mgr {
             _current_batch->abort();
             _batch_map.erase(abort_msg.xid);
         } else {
-            // subtransaction aborted, add to parent xact aborted list
-            itr->second->aborted_xids.insert(abort_msg.sub_xid);
-
             // abort the subtxn
             _current_batch->abort_subtxn(abort_msg.sub_xid);
             _batch_map.erase(abort_msg.sub_xid);
@@ -796,7 +826,6 @@ namespace springtail::pg_log_mgr {
             xact = itr->second;
             pg_xid_txn = xact->xid;
         }
-        xact->oids.insert(oid);
 
         // check if we should ignore this message
         if (SyncTracker::get_instance()->should_skip(_db_id, oid, pg_xid_txn)) {

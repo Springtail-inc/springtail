@@ -280,16 +280,9 @@ namespace springtail
             TYPE_PIPELINE_STALL = 3 ///< stalls the pipeline for table sync
         };
 
-        uint64_t begin_offset;   ///< offset to start of block header
-        uint64_t commit_offset;  ///< offset to end of commit msg
-        uint64_t springtail_xid; ///< springtail xid
         LSN_t xact_lsn;          ///< xact lsn (final lsn of xact; begin_msg.xact_lsn)
         uint8_t type;            ///< transaction record type (see enum above)
         uint32_t xid;                      ///< postgres xid
-        std::set<uint64_t> oids;           ///< table oids changed in transaction
-        std::set<uint32_t> aborted_xids;   ///< stream subxacts that aborted
-        std::filesystem::path begin_path;  ///< log path containing begin message
-        std::filesystem::path commit_path; ///< log path containing commit message
 
         PgTransaction(uint8_t type) : type(type) {}
 

@@ -175,9 +175,12 @@ namespace springtail {
             { }
 
         public:
-            Iterator()
-                : _row(nullptr, 0)
-            { }
+            Iterator() : _row(nullptr, 0) {}
+            Iterator(const Iterator &i) : _row(i._row) {}
+            Iterator &operator=(const Iterator &i) { _row = i._row; return *this; }
+
+            Iterator(Iterator &&i) : _row(i._row) {}
+            Iterator &operator=(Iterator &&i) { _row = i._row; return *this; }
 
             using iterator_category = std::random_access_iterator_tag;
             using difference_type   = std::ptrdiff_t;

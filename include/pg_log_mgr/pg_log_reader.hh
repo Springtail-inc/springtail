@@ -22,6 +22,10 @@
 #include <storage/field.hh>
 #include <storage/xid.hh>
 
+#include <pg_log_mgr/pg_xact_log_writer.hh>
+
+#include <xid_mgr/xid_mgr_client.hh>
+
 namespace springtail::pg_log_mgr {
     /**
      * @brief Log reader class.  Reads logs written by PgLogWriter.  Collects the various table
@@ -30,36 +34,49 @@ namespace springtail::pg_log_mgr {
      */
     class PgLogReader {
     public:
-        /** convenience type for the shared transaction queue */
-        using PgTransactionQueuePtr = std::shared_ptr<ConcurrentQueue<PgTransaction>>;
+        /** convenience type for the shared msg queue */
+        using PgMsgQueuePtr = std::shared_ptr<ConcurrentQueue<PgMsg>>;
 
         /**
          * @brief Construct a new Pg Log Reader object
          * @param queue queue to enqueue parsed xactions for xid logger and GC
          */
-        PgLogReader(uint64_t db_id,
-                    const PgTransactionQueuePtr queue)
+        PgLogReader(uint64_t db_id, uint32_t queue_size,
+                    const std::filesystem::path &log_path)
             : _db_id(db_id),
-              _queue(queue)
-        { }
+              _msg_queue(queue_size),
+              _xact_log_writer(log_path)
+        {
+            // retrieve the most recently committed XID at startup
+            _committed_xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
 
+            // start the message processing thread
+            _msg_thread = std::thread(&PgLogReader::_msg_worker, this);
+        }
+
+        /**
+         * @brief Queues a message to be processed by the log reader.
+         * @param msg The PgMsg object to process.
+         */
+        void enqueue_msg(PgMsgPtr msg);
+        
         /**
          * @brief Process next set of messages from log file
          * @param path file path
          * @param start_offset starting file offset
          * @param num_messages number of messages to process (-1 read until end of file)
          */
-        void process_log(const std::filesystem::path &path,
-                         uint64_t start_offset,
-                         int num_messages);
+        // void process_log(const std::filesystem::path &path,
+        //                  uint64_t start_offset,
+        //                  int num_messages);
 
         /**
          * @brief Set the xact map object; moves contents of xact_map to _xact_map
          * @param xact_map xact map -- will be empty after call
          */
-        void set_xact_map(std::map<uint32_t, PgTransactionPtr> &xact_map) {
-            _xact_map.swap(xact_map);
-        }
+        // void set_xact_map(std::map<uint32_t, PgTransactionPtr> &xact_map) {
+        //     _xact_map.swap(xact_map);
+        // }
 
         /**
          * Set the starting point for XID assignment.
@@ -210,17 +227,27 @@ namespace springtail::pg_log_mgr {
         using BatchPtr = std::shared_ptr<Batch>;
 
         uint64_t _db_id; ///< The database ID
+        uint64_t _committed_xid; ///< The most recently committed XID at startup
         std::filesystem::path _current_path; ///< current log file path
         PgMsgStreamReader _reader;           ///< msg stream reader for log file
-        PgTransactionQueuePtr _queue;        ///< shared queue for xactions
+
         PgTransactionPtr _current_xact;      ///< current transaction
-        std::map<uint32_t, PgTransactionPtr> _xact_map; ///< in progress xact map
+        std::map<uint32_t, PgTransactionPtr> _xact_map; ///< in progress xact map for streams
+
         std::atomic<uint64_t> _next_xid{0};        ///< next xid in xid range
+
+        ConcurrentQueue<PgMsg> _msg_queue; ///< Queue of PgMsg records to process
+        std::thread _msg_thread; ///< Thread for processing messages using the _msg_worker()
+
+        PgXactLogWriter _xact_log_writer; ///< For logging the xact mapping of pgxid to springtail XID
 
         /** Tracks mutation batches using a map of pgxid -> Extent.  The pgxid is always the
             top-most pgxid and never a subtxn, which are handled within the batch. */
         std::map<int32_t, BatchPtr> _batch_map;
         BatchPtr _current_batch; ///< The batch matching the current pg xid
+
+        /** Worker function that processes the messages from the internal queue. */
+        void _msg_worker();
 
         /** Process a PG message */
         void _process_msg(PgMsgPtr msg);

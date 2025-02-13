@@ -54,7 +54,8 @@ namespace springtail::pg_log_mgr {
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Last committed XID: {}", next_xid-1);
 
         uint64_t lsn = INVALID_LSN;
-        if (state == redis::db_state_change::REDIS_STATE_INITIALIZE) {
+        bool do_recovery = (state != redis::db_state_change::REDIS_STATE_INITIALIZE);
+        if (!do_recovery) {
             _startup_init();
         } else {
             lsn = _startup_running();
@@ -65,6 +66,11 @@ namespace springtail::pg_log_mgr {
 
         // initiate table copy thread; do this before we start streaming
         _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
+
+        // perform the actual log recovery here
+        if (do_recovery) {
+            _perform_log_recovery();
+        }
 
         // start streaming
         _start_streaming(lsn);
@@ -78,6 +84,8 @@ namespace springtail::pg_log_mgr {
         uint64_t lsn = INVALID_LSN;
 
         // create directories if they don't exist
+        // XXX shouldn't these always exist if we're starting up from running?  Maybe we should skip
+        //     recovery if the directories didn't exist?
         std::filesystem::create_directories(_repl_log_path);
         std::filesystem::create_directories(_xact_log_path);
 
@@ -89,70 +97,150 @@ namespace springtail::pg_log_mgr {
             lsn = PgMsgStreamReader::scan_log(latest_log, true);
         }
 
-        //// Replay xact logs
-
-        // XXX need to change this to pull individual message batches like the log writer sends to
-        //     the log reader and then exclude ones that shouldn't be committed
-
-        // scan xact logs and transfer in progress xacts to log reader
-        // fetch xaction list from xact reader, and add them to Redis
-        // these are transactions with springtail XIDs that are > than last committed XID
-        PgTransactionPtr last_xact = nullptr;
-        uint64_t current_xid = _pg_log_reader.get_current_xid();
-        PgXactLogReader xact_reader(_xact_log_path, LOG_PREFIX_XACT, LOG_SUFFIX, current_xid);
-        xact_reader.begin();
-        while (true) {
-            // go through log and fetch batches of transactions to send to redis
-            std::vector<PgTransactionPtr> committed_xacts;
-            int num_xacts = xact_reader.next(MAX_REDIS_BATCH_SIZE, committed_xacts);
-            if (num_xacts == 0) {
-                break;
-            }
-
-            for (auto &xact: committed_xacts) {
-                CHECK(xact->springtail_xid >= current_xid);
-                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replaying xact to redis: xid={}, type={}", xact->springtail_xid, xact->type);
-
-                _logger_queue.push(xact->begin_offset, xact->commit_offset, );
-            }
-
-            last_xact = committed_xacts.back();
-            committed_xacts.clear();
-        }
-
-        // update next xid if we find an xid higher than committed xid in the log
-        uint64_t last_allocated_xid = xact_reader.get_max_sp_xid();
-        if (last_allocated_xid > current_xid) {
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Updating next xid: {} -> {}", current_xid, last_allocated_xid + 1);
-            _pg_log_reader.set_next_xid(last_allocated_xid + 1);
-        }
-
-        // move contents of stream map into pg log reader, invalidates stream map
-        std::map<uint32_t, springtail::PgTransactionPtr> stream_map = xact_reader.get_stream_map();
-        _pg_log_reader.set_xact_map(stream_map);
-
-        // if xact log is behind pg log then we need to catchup before starting to stream
-        // find last xact from xact_list, and start from there (file + offset)
-        // inserts into xact queue
-        if (last_xact != nullptr) {
-            _pg_log_reader.process_log(last_xact->commit_path, last_xact->commit_offset, -1);
-            std::filesystem::path next_log = fs::get_next_file(last_xact->commit_path, LOG_PREFIX_REPL, LOG_SUFFIX);
-
-            // iterate and process xacts from next log file
-            while (!next_log.empty() && std::filesystem::exists(next_log)) {
-                _pg_log_reader.process_log(next_log, 0, -1);
-                next_log = fs::get_next_file(next_log, LOG_PREFIX_REPL, LOG_SUFFIX);
-            }
-        }
-
-        // need to add back table sync worker items to redis sync queue
+        // clear out any incomplete table syncs
         _redis_sync_queue.abort(REDIS_WORKER_ID);
+        _redis_sync_queue.clear();
 
         // set state to running
         Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_RUNNING);
 
         // set internal state to running
         _internal_state.set(STATE_RUNNING);
+
+        // perform recovery from the logs, replaying any transactions that didn't get committed
+        _perform_log_recovery();
+
+        //// Replay xact logs
+        // 1) open the repl log and the xact log for reading
+        std::filesystem::path repl_log = fs::find_earliest_modified_file(_repl_log_path, LOG_PREFIX_REPL, LOG_SUFFIX);
+        PgMsgStreamReader repl_reader(repl_log);
+        PgXactLogReader xact_reader(_xact_log_path, LOG_PREFIX_XACT, LOG_SUFFIX);
+
+        // 2) scan the repl log for any begin/commit/abort messages
+        bool done = false;
+        std::vector<char> filter = {pg_msg::MSG_BEGIN, pg_msg::MSG_COMMIT, pg_msg::MSG_STREAM_START,
+                                    pg_msg::MSG_STREAM_COMMIT, pg_msg::MSG_STREAM_ABORT};
+
+        struct Position {
+            uint32_t log_number;
+            uint64_t offset;
+            std::filesystem::path file;
+
+            Position(uint32_t ln, uint64_t o, const std::filesystem::path &f)
+                : log_number(ln), offset(o), file(f)
+            { }
+
+            std::strong_ordering operator<=>(const Position &rhs) {
+                return std::tie(log_number, offset) <=> std::tie(rhs.log_number, rhs.offset);
+            }
+        };
+
+        std::unordered_map<uint32_t, Position> active_pgxid;
+        uint32_t log_number = 0;
+        uint32_t first_uncommitted_pgxid = 0;
+        while (!done) {
+            bool eob, eos;
+            auto msg = repl_reader.read_message(filter, eob, eos);
+
+            switch (msg->msg_type) {
+                    // a) when a begin is seen, record it's position into the active set as a
+                    // possible
+                    //    starting point for the scan along with pgxid
+                case pg_msg::MSG_BEGIN: {
+                    auto &begin_msg = std::get<PgMsgBegin>(msg->msg);
+                    Position p(log_number, repl_reader.header_offset(), repl_log);
+                    active_pgxid.try_emplace({ begin_msg.xid, p });
+                    break;
+                }
+                case pg_msg::MSG_STREAM_START: {
+                    auto &start_msg = std::get<PgMsgStreamStart>(msg->msg);
+                    if (start_msg.first) {
+                        Position p(log_number, repl_reader.header_offset(), repl_log);
+                        active_pgxid.try_emplace({ start_msg.xid, p });
+                    }
+                    break;
+                }
+
+                    // b) when an abort is seen, remove the pgxid from the active set
+                case pg_msg::MSG_STREAM_ABORT: {
+                    auto &abort_msg = std::get<PgMsgStreamAbort>(msg->msg);
+                    if (abort_msg.xid == abort_msg.sub_xid) {
+                        active_pgxid.erase(abort_msg.xid);
+                    }
+                    break;
+                }
+
+                    // c) when a commit is seen, check for it in the xact log
+                    //    i)   if the xact log is empty, start the replay step
+                    //    ii)  if the pgxid doesn't match the next entry, there's some kind of error
+                    //         -- should never happen, but we could roll back the committed XID to
+                    //         the XID prior to this one and replay?
+                    //    iii) if the XID is <= the committed XID, remove from the active set
+                    //    iv)  if the XID is > the committed XID, start the replay step
+                case pg_msg::MSG_COMMIT:
+                case pg_msg::MSG_STREAM_COMMIT: {
+                    uint32_t pgxid;
+                    if (msg->msg_type == pg_msg::MSG_COMMIT) {
+                        auto &commit_msg = std::get<PgMsgCommit>(msg->msg);
+                        pgxid = commit_msg.xid;
+                    } else {
+                        auto &commit_msg = std::get<PgMsgStreamCommit>(msg->msg);
+                        pgxid = commit_msg.xid;
+                    }                        
+                    CHECK_EQ(pgxid, xact_log.get_pg_xid());
+
+                    if (xact_log.get_xid() <= _committed_xid) {
+                        active_pgxid.erase(pgxid);
+                        done = !xact_log.next();
+                    } else {
+                        first_uncommitted_pgxid = pgxid;
+                        done = true;
+                    }
+                    break;
+                }
+            }
+
+            // check if we need to move to the next replication log file
+            if (!done && eos) {
+                repl_log = fs::get_next_file(last_xact->commit_path, LOG_PREFIX_REPL, LOG_SUFFIX);
+                ++log_number;
+                repl_reader.set_file(repl_log);
+            }
+        }
+
+        // 3) in the replay step, we replay all records from pgxids in the active set, as well as
+        //    any pgxids that are beyond the committed XID or recorded XID from the xact log.
+        //    During this phase the PgLogReader needs to skip any assigned XIDs prior to the
+        //    committed XID.
+
+        // If the active_pgxid is empty, then we can jump directly to replaying everything remaining
+        // in the repl_log.  Otherwise, we need to re-process all of the in-flight active xacts.
+        if (!active_pgxid.empty()) {
+            auto min_i = std::min_element(active_pgxid.begin(), active_pgxid.end(),
+                                          [](const std::pair<uint32_t, Position>& lhs,
+                                             const std::pair<uint32_t, Position>& rhs) {
+                                              return lhs.second < rhs.second;
+                                          });
+            CHECK(min_i != active_pgxid.end());
+
+            uint64_t start_offset = min_i->second.offset;
+            repl_log = min_i->second.file;
+            repl_reader.set_file(repl_log, start_offset);
+
+            // replay repl log entries for the active_pgxid set... skip everything else until the
+            // first_uncommitted_pgxid is committed
+            while (!done) {
+                auto msg = repl_reader.read_message(filter, eos, eob);
+                // XXXXXX handle the message, skipping any messages for xacts that aren't active
+            }
+        }
+
+        // now process all remaining messages out of the repl_log
+        while (!done) {
+            auto msg = repl_reader.read_message(filter, eos, eob);
+
+            // XXXXXX push the message into the pg_log_reader queue
+        }
 
         return lsn;
     }
@@ -173,6 +261,9 @@ namespace springtail::pg_log_mgr {
         _redis_sync_queue.clear();
 
         _internal_state.set(STATE_STARTUP_SYNC);
+
+        // perform the table copies during initialization
+        _do_table_copies();
     }
 
     void
@@ -401,7 +492,6 @@ namespace springtail::pg_log_mgr {
         // create the worker threads
         _writer_thread = std::thread(&PgLogMgr::_log_writer_thread, this);
         _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
-        _xact_thread = std::thread(&PgLogMgr::_xact_handler_thread, this);
     }
 
     void

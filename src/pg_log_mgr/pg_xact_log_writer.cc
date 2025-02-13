@@ -1,187 +1,133 @@
+#include <absl/log/check.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <iostream>
 #include <chrono>
+#include <iostream>
 #include <vector>
-#include <absl/log/check.h>
 
 #include <common/common.hh>
-#include <common/logging.hh>
 #include <common/exception.hh>
+#include <common/filesystem.hh>
+#include <common/logging.hh>
 
+#include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_xact_log_writer.hh>
 
 namespace springtail::pg_log_mgr {
 
-    PgXactLogWriter::PgXactLogWriter(const std::filesystem::path &file) : _file(file)
-    {
-        int fmode = O_WRONLY | O_APPEND | O_CREAT;
-        mode_t owner = S_IRUSR | S_IWUSR | S_IRGRP;
+// note: these are hard-coded from the postgres type OIDs to avoid having to include all of the
+//       postgres headers here -- also duplicated in system_tables.cc
+constexpr int32_t INT8OID = 20;
+constexpr int32_t INT4OID = 23;
 
-        // create the base directory for the file if it doesn't exist
-        std::filesystem::create_directories(file.parent_path());
+PgXactLogWriter::PgXactLogWriter(const std::filesystem::path &base_dir)
+{
+    // create the base directory for the file if it doesn't exist
+    std::filesystem::create_directories(base_dir);
 
-        _fd = ::open(file.c_str(), fmode, owner);
-        if (_fd == -1) {
-            SPDLOG_ERROR("Error opening file: path={}, errno={}", file.c_str(), errno);
-            throw Error("Error opening file for PgLogFile");
-        }
-
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Opened xact log file: {}\n", file.c_str());
-
-        _fsync_thread = std::thread(&PgXactLogWriter::_fsync_worker, this);
+    // construct the log file name
+    _file = fs::find_latest_modified_file(base_dir, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX);
+    if (_file.empty()) {
+        _file = base_dir / fmt::format("{}{:04d}{}", PgLogMgr::LOG_PREFIX_XACT, 0, PgLogMgr::LOG_SUFFIX);
+    } else {
+        _file = fs::get_next_file(_file, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX);
     }
 
-    void
-    PgXactLogWriter::close()
-    {
-        if (_fd == -1) {
-            return;
-        }
+    // construct the schema of the log file
+    std::vector<SchemaColumn> columns = {
+        { "pgxid", 1, SchemaType::UINT32, INT4OID, false },
+        { "xid", 2, SchemaType::UINT64, INT8OID, false }
+    };
+    _schema = std::make_shared<ExtentSchema>(columns);
+    _pg_xid_f = _schema->get_mutable_field("pgxid");
+    _xid_f = _schema->get_mutable_field("xid");
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Xact log writer closing file: {}, fd={}", _file.c_str(), _fd);
+    // prepare an empty extent for buffering
+    _extent = std::make_shared<Extent>(ExtentType(), 0, _schema->row_size());
+
+    // start the background syncing thread
+    _fsync_thread = std::thread(&PgXactLogWriter::_fsync_worker, this);
+}
+
+void
+PgXactLogWriter::close()
+{
+    // atomic set of shutdown flag
+    if (_shutdown.exchange(true)) {
+        return;
+    }
+
+    // wait for the fsync worker to finish
+    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Xact log writer closing file: {}", _file.c_str());
+    _fsync_thread.join();
+
+    // once the sync worker finishes, check if we need to do a final flush
+    if (!_extent->empty()) {
+        _flush_extent(_extent);
+    }
+    _extent = nullptr;
+}
+
+void
+PgXactLogWriter::_flush_extent(ExtentPtr extent)
+{
+    auto handle = IOMgr::get_instance()->open(_file, IOMgr::IO_MODE::APPEND, true);
+    auto response = extent->async_flush(handle);
+
+    // wait for the async flush to complete
+    uint64_t filesize = response.get()->next_offset;
+
+    // rotate if the filesize has crossed a given threshold
+    if (filesize > PG_XLOG_MAX_FILE_SIZE) {
+        _file = fs::get_next_file(_file, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX);
+    }
+}
+
+void
+PgXactLogWriter::_fsync_worker()
+{
+    while (!_shutdown) {
+        // sleep for at least PG_LOG_MIN_FSYNC_MS
+        std::this_thread::sleep_for(std::chrono::milliseconds(PG_XLOG_MIN_FSYNC_MS));
+
+        // check for shutdown request
         if (_shutdown) {
-            return;
+            break;
         }
-        _shutdown = true;
-        _fsync_thread.join();
-        ::fsync(_fd);
-        ::close(_fd);
-        _fd = -1;
+
+        // check if the extent needs to be flushed
+        std::unique_lock lock(_mutex);
+        if (_extent->empty()) {
+            continue;
+        }
+
+        // swap the extent object
+        // note: we aren't going through the StorageCache here
+        auto sync_extent = _extent;
+        _extent = std::make_shared<Extent>(ExtentType(), 0, _schema->row_size());
+        lock.unlock();
+
+        // flush the data to disk
+        _flush_extent(sync_extent);
     }
+}
 
-    void
-    PgXactLogWriter::_fsync_worker()
-    {
-        while (!_shutdown) {
-            // sleep for at least PG_LOG_MIN_FSYNC_MS
-            std::this_thread::sleep_for(std::chrono::milliseconds(PG_XLOG_MIN_FSYNC_MS));
-            if (_shutdown) {
-                break;
-            }
+void
+PgXactLogWriter::log(uint32_t pg_xid,
+                     uint64_t xid)
+{
+    std::unique_lock lock(_mutex);
 
-            if (!_need_fsync.load()) {
-                continue;
-            }
+    // get a new row in the current extent buffer
+    auto row = _extent->append();
 
-            // set flag before fsync in case data comes while fsync is in progress
-            // can't be exactly sure of what was fsynced
-            _need_fsync = false;
-            ::fsync(_fd);
-        }
-    }
+    // write the data to the row
+    _pg_xid_f->set_uint32(row, pg_xid);
+    _xid_f->set_uint64(row, xid);
+}
 
-    void
-    PgXactLogWriter::log_stream_msg(PgTransactionPtr xact)
-    {
-        // TYPE_STREAM_START or TYPE_STREAM_ABORT
-        // 4B message length + 3B magic + 1B Type
-        // 4B postgres XID + 8B LSN + 8B begin offset + 4B path len + path string
-        assert(xact->type == PgTransaction::TYPE_STREAM_START || xact->type == PgTransaction::TYPE_STREAM_ABORT);
-
-        uint32_t buffer_len = (4 + 3 + 1 + 4 + 8 + 8 + 4); // fixed msg length
-        uint32_t begin_path_len = ::strlen(xact->begin_path.c_str());
-
-        // calculate total length of log entry
-        uint32_t total_length = buffer_len + begin_path_len;
-        std::vector<char> data(total_length); // allocate log entry on heap in vector
-        char *buffer = data.data();           // get pointer to actual data
-
-        // first write out fixed header
-        std::copy_n(reinterpret_cast<char *>(&total_length), 4, &buffer[0]);
-        std::copy_n(reinterpret_cast<const char *>(&PG_XLOG_MAGIC[0]), 3, &buffer[4]);
-        std::copy_n(reinterpret_cast<const char *>(&xact->type), 1, &buffer[7]);
-        std::copy_n(reinterpret_cast<char *>(&xact->xid), 4, &buffer[8]);
-        std::copy_n(reinterpret_cast<char *>(&xact->xact_lsn), 8, &buffer[12]);
-        std::copy_n(reinterpret_cast<char *>(&xact->begin_offset), 8, &buffer[20]);
-        std::copy_n(reinterpret_cast<char *>(&begin_path_len), 4, &buffer[28]);
-
-        // next write out variable length data
-        int offset = 32;
-        std::copy_n(xact->begin_path.c_str(), begin_path_len, &buffer[offset]);
-
-        assert(offset + begin_path_len == total_length);
-
-        // do the actual disk write
-        int res = ::write(_fd, buffer, total_length);
-        if (res != total_length) {
-            SPDLOG_ERROR("Error writing to xact log file={}, result={}, errno={}\n", _file.c_str(), res, errno);
-            throw Error("Error writing to xact log file");
-        }
-
-        _offset += total_length;
-        _need_fsync = true;
-    }
-
-    void
-    PgXactLogWriter::log_commit(PgTransactionPtr xact)
-    {
-        // TYPE_COMMIT
-        // 4B message length + 3B magic + 1B Type
-        // 4B postgres XID + 8B springtail XID +
-        // 8B lsn + 8B begin offset + 8B commit offset +
-        // 4B path len + path string (starting offset path) +
-        // 4B path len + path string (ending offset path)
-        // 4B oid count + oid list (8B each oid)
-        // 4B xid count + xid list (4B each xid)
-
-        uint32_t buffer_len = (4 + 3 + 1 + 4 + 8 + 8 + 8 + 8 + 4 + 4 + 4 + 4); // fixed msg length
-        uint32_t begin_path_len = ::strlen(xact->begin_path.c_str());
-        uint32_t commit_path_len = ::strlen(xact->commit_path.c_str());
-        uint32_t oid_cnt = xact->oids.size();
-        uint32_t aborted_cnt = xact->aborted_xids.size();
-
-        // calculate total length of log entry
-        uint32_t total_length = buffer_len + begin_path_len + commit_path_len + oid_cnt * 8 + aborted_cnt * 4;
-        std::vector<char> data(total_length); // allocate log entry on heap in vector
-        char *buffer = data.data();           // get pointer to actual data
-
-        // first write out fixed header
-        std::copy_n(reinterpret_cast<char *>(&total_length), 4, &buffer[0]);
-        std::copy_n(reinterpret_cast<const char *>(&PG_XLOG_MAGIC[0]), 3, &buffer[4]);
-        std::copy_n(reinterpret_cast<const char *>(&xact->type), 1, &buffer[7]);
-        std::copy_n(reinterpret_cast<char *>(&xact->xid), 4, &buffer[8]);
-        std::copy_n(reinterpret_cast<char *>(&xact->springtail_xid), 8, &buffer[12]);
-        std::copy_n(reinterpret_cast<char *>(&xact->xact_lsn), 8, &buffer[20]);
-        std::copy_n(reinterpret_cast<char *>(&xact->begin_offset), 8, &buffer[28]);
-        std::copy_n(reinterpret_cast<char *>(&xact->commit_offset), 8, &buffer[36]);
-        std::copy_n(reinterpret_cast<char *>(&begin_path_len), 4, &buffer[44]);
-        std::copy_n(reinterpret_cast<char *>(&commit_path_len), 4, &buffer[48]);
-        std::copy_n(reinterpret_cast<char *>(&oid_cnt), 4, &buffer[52]);
-        std::copy_n(reinterpret_cast<char *>(&aborted_cnt), 4, &buffer[56]);
-
-        // next write out variable length data
-        int offset = 60;
-        std::copy_n(xact->begin_path.c_str(), begin_path_len, &buffer[offset]);
-        offset += begin_path_len;
-
-        std::copy_n(xact->commit_path.c_str(), commit_path_len, &buffer[offset]);
-        offset += commit_path_len;
-
-        for (uint64_t oid: xact->oids) {
-            std::copy_n(reinterpret_cast<char *>(&oid), 8, &buffer[offset]);
-            offset += 8;
-        }
-
-        for (uint32_t xid: xact->aborted_xids) {
-            std::copy_n(reinterpret_cast<char *>(&xid), 4, &buffer[offset]);
-            offset += 4;
-        }
-
-        CHECK_EQ(offset, total_length);
-
-        // do the actual disk write
-        int res = ::write(_fd, buffer, total_length);
-        if (res != total_length) {
-            SPDLOG_ERROR("Error writing to xact log file={}, result={}, errno={}\n", _file.c_str(), res, errno);
-            throw Error("Error writing to xact log file");
-        }
-
-        _offset += total_length;
-        _need_fsync = true;
-    }
-} // namespace springtail::pg_log_mgr
+}  // namespace springtail::pg_log_mgr

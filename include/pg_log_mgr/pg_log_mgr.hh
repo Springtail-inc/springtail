@@ -88,7 +88,8 @@ namespace springtail::pg_log_mgr {
           _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
           _repl_log_path(repl_log_path),
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
-          _pg_log_reader(db_id, _xact_queue), _xact_log_path(xact_log_path),
+          // XXX 8192
+          _pg_log_reader(db_id, 8192, xact_log_path), _xact_log_path(xact_log_path),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
         {}
 
@@ -103,7 +104,8 @@ namespace springtail::pg_log_mgr {
           _internal_state(STATE_RUNNING),
           _repl_log_path(repl_log_path),
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
-          _pg_log_reader(_db_id, _xact_queue), _xact_log_path(xact_log_path),
+          // XXX 8192
+          _pg_log_reader(_db_id, 8192, xact_log_path), _xact_log_path(xact_log_path),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
         {}
 
