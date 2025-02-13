@@ -103,23 +103,11 @@ protected:
     std::vector<std::pair<std::string, std::string>>
     get_context_attributes(const spdlog::details::log_msg &msg)
     {
-        std::string ctx_xid_str = "-1";
-        std::string ctx_db_id_str = "-1";
-
-        auto ctx = opentelemetry::context::RuntimeContext::GetCurrent();
-        auto baggage_entries = opentelemetry::baggage::GetBaggage(ctx);
-
-        baggage_entries->GetValue("xid", ctx_xid_str);
-        baggage_entries->GetValue("db_id", ctx_db_id_str);
-
         // Create attributes
         std::vector<std::pair<std::string, std::string>> attributes = {
             {"source_file", msg.source.filename ? msg.source.filename : ""},
             {"source_line", std::to_string(msg.source.line)},
-            {"source_func", msg.source.funcname ? msg.source.funcname : ""},
-            {"meta", "extra_meta"},
-            {"xid", ctx_xid_str},
-            {"db_id", ctx_db_id_str}
+            {"source_func", msg.source.funcname ? msg.source.funcname : ""}
         };
 
         return attributes;
