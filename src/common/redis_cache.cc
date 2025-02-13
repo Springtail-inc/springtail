@@ -28,7 +28,7 @@ RedisCache::RedisCache(bool config_db)
     _subscribe_pattern = "__keyspace@" + std::to_string(_db_id) + "__:" + std::to_string(_instance_id) + ":*";
     _subscriber->psubscribe(_subscribe_pattern);
     _subscriber->on_pmessage([this](const std::string &pattern, const std::string &channel, const std::string &msg) {
-        this->_process_notification(pattern, channel, msg);
+        _process_notification(pattern, channel, msg);
     });
 
     _init_storage();
