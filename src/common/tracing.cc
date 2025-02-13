@@ -167,4 +167,18 @@ tracer(const std::string_view& name)
     return provider->GetTracer(name.data());
 }
 
+void
+increment_counter(const std::string name, const std::string description, const std::string unit)
+{
+    increment_counter(name, description, unit, 1);
+}
+
+void
+increment_counter(const std::string name, const std::string description, const std::string unit, uint32_t value)
+{
+    auto meter = opentelemetry::metrics::Provider::GetMeterProvider()->GetMeter(name);
+    auto counter = meter->CreateUInt64Counter(name.data(), description.data(), unit.data());
+    counter->Add(value);
+}
+
 }  // namespace springtail::tracing

@@ -94,6 +94,16 @@ void init_tracing_and_metrics(std::string_view component_name);
 void shutdown_tracing_and_metrics();
 
 /**
+ * @brief Increment a counter
+ */
+void increment_counter(const std::string name, const std::string description, const std::string unit);
+
+/**
+ * @brief Increment a counter
+ */
+void increment_counter(const std::string name, const std::string description, const std::string unit, uint32_t value);
+
+/**
  * @brief Retrieve the otel Tracer by name.
  */
 opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer(const std::string_view& name);

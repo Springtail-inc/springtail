@@ -11,25 +11,16 @@
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/json.hh>
+#include <common/tracing.hh>
 
 #include <xid_mgr/xid_mgr_server.hh>
 #include <xid_mgr/xid_mgr_service.hh>
 
-#include <opentelemetry/metrics/meter.h>
-#include <opentelemetry/metrics/provider.h>
 
 namespace springtail::xid_mgr {
 
     XidMgrServer::XidMgrServer()
     {
-        auto meter = opentelemetry::metrics::Provider::GetMeterProvider()->GetMeter("xid_mgr");
-        _commit_xid_counter = std::shared_ptr<opentelemetry::metrics::Counter<double>>(
-            meter
-                ->CreateDoubleCounter(
-                    "xid_mgr_commit_xid_calls",
-                    "Number of times commit_xid is called", "calls")
-                .release());
-
         nlohmann::json json = Properties::get(Properties::XID_MGR_CONFIG);
         nlohmann::json rpc_json;
 
@@ -150,6 +141,8 @@ namespace springtail::xid_mgr {
         _partition_map[db_id] = partition;
         _partitions.push_back(partition);
 
+        tracing::increment_counter("xid_mgr", "get_partition_calls", "calls", 1);
+
         return partition;
     }
 
@@ -166,6 +159,8 @@ namespace springtail::xid_mgr {
         if (partition == nullptr) {
             return 0;
         }
+
+        tracing::increment_counter("xid_mgr", "get_committed_xid_calls", "calls", 1);
 
         return partition->get_committed_xid(db_id, schema_xid);
     }
@@ -195,11 +190,8 @@ namespace springtail::xid_mgr {
         // exclusive lock held for insert/create
         partition->commit_xid(db_id, xid, has_schema_changes);
 
-        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "[LOG_REMOVE]: commit_xid called for db_id: {}, xid: {}", db_id, xid);
         // increment the counter for commit_xid calls
-        _commit_xid_counter->Add(1);
-
-        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "[LOG_REMOVE]: commit_xid done for db_id: {}, xid: {}", db_id, xid);
+        tracing::increment_counter("xid_mgr", "commit_xid_calls", "calls", 1);
 
         return;
     }
@@ -231,6 +223,8 @@ namespace springtail::xid_mgr {
 
         // exclusive lock held for insert/create
         partition->record_ddl_change(db_id, xid);
+
+        tracing::increment_counter("xid_mgr", "record_ddl_change_calls", "calls", 1);
     }
 
 }

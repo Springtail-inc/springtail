@@ -14,6 +14,10 @@
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/object_pool.hh>
+#include <common/tracing.hh>
+
+#include <opentelemetry/metrics/meter.h>
+#include <opentelemetry/metrics/provider.h>
 
 constexpr useconds_t RECONNECT_SLEEP_INTERVAL_USEC = 1000000;
 
@@ -229,6 +233,9 @@ namespace springtail::thrift {
             );
         }
 
+        /** OpenTelemetry span */
+        tracing::SpanPtr _span;
+
         // the following is for handling cached thrift clients from the object pool
         // we wrap the client in a struct whose deallocator will release it back to the pool
 
@@ -296,11 +303,18 @@ namespace springtail::thrift {
         void _invoke_with_retries(std::function<void (ThriftClient &)> api_call) {
             ThriftClient c = _get_client();
 
+            auto provider = opentelemetry::trace::Provider::GetTracerProvider();
+            auto tracer = provider->GetTracer("Thrift");
+            _span = tracer->StartSpan("Thrift_Rpc");
+            _span->SetAttribute("type_name", _type_name);
+            tracing::increment_counter("thrift", "rpc_calls", "calls", 1);
+
             bool call_successful = false;
             while (!call_successful) {
                 try {
                     api_call(c);
                     call_successful = true;
+                     _span->End();
                 } catch (const apache::thrift::transport::TTransportException &e) {
                     SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "{}: Failed API call : {}", _type_name, e.what());
                     if (_shutting_down) {
