@@ -1,8 +1,6 @@
 #include <thread>
 #include <sys/time.h>
 
-#include <chrono>
-
 #include <fmt/core.h>
 
 #include <common/common.hh>
@@ -24,6 +22,51 @@
 
 namespace springtail::pg_log_mgr {
 
+    PgLogMgr::PgLogMgr(uint64_t db_id,
+        const std::filesystem::path &repl_log_path,
+        const std::filesystem::path &xact_log_path,
+        const std::string &host, const std::string &db_name,
+        const std::string &user_name, const std::string &password,
+        const std::string &pub_name, const std::string &slot_name,
+        int port)
+            : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
+            _host(host), _db_name(db_name), _user_name(user_name),
+            _password(password), _pub_name(pub_name), _slot_name(slot_name), _port(port),
+            _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
+            _repl_log_path(repl_log_path),
+            _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
+            _pg_log_reader(db_id, _xact_queue), _xact_log_path(xact_log_path),
+            _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
+    {
+        _cache_watcher_db_states = std::make_shared<RedisCache::RedisChangeWatcher>(
+            [this](const std::string &path, const nlohmann::json &new_value) -> void {
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR,"Replicated database state change; path: {}, state: {}",
+                    path, new_value.dump(4));
+                CHECK(path.starts_with(Properties::DATABASE_STATE_PATH));
+                // extract database id
+                std::vector<std::string> path_parts;
+                common::split_string("/", path, path_parts);
+                CHECK_EQ(path_parts.size(), 2);
+                uint64_t db_id = stoull(path_parts[1]);
+                CHECK_EQ(db_id, _db_id);
+
+                // if we ever get in here, this means that this database will be deleted
+                if (new_value.type() == nlohmann::json::value_t::null) {
+                    return;
+                }
+
+                // extract state
+                CHECK(new_value.type() == nlohmann::json::value_t::string);
+                std::string state_str = new_value.get<std::string>();
+                redis::db_state_change::DBState state = redis::db_state_change::db_state_map[state_str];
+
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received state change: {}", redis::db_state_change::db_state_to_name[state]);
+                _handle_external_state_change(state);
+            }
+        );
+    }
+
+
     // XXX make sure GC is shutdown -- assume it for now
     void
     PgLogMgr::startup()
@@ -44,6 +87,12 @@ namespace springtail::pg_log_mgr {
             assert(false);
         }
 
+        // add redis cache callback for watching database state changes
+        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
+        redis_cache->add_callback(
+            std::string(Properties::DATABASE_STATE_PATH) + "/" + std::to_string(_db_id),
+            _cache_watcher_db_states);
+
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Starting up: DB state: {}", state);
 
         // fetch latest xid from xid mgr
@@ -60,9 +109,6 @@ namespace springtail::pg_log_mgr {
         } else {
             lsn = _startup_running();
         }
-
-        // initiate the pubsub thread; do this before copy thread
-        _pubsub_thread = std::thread(&PgLogMgr::_redis_pubsub_thread, this);
 
         // initiate table copy thread; do this before we start streaming
         _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
@@ -293,56 +339,16 @@ namespace springtail::pg_log_mgr {
     }
 
     void
-    PgLogMgr::_redis_pubsub_thread()
-    {
-        // create subscriber for redis pubsub, set timeout to 5 secs.
-        RedisMgr::SubscriberPtr subscriber = RedisMgr::get_instance()->get_subscriber(5);
-
-        // subscribe to the state change channel
-        std::string state_change_channel = fmt::format(redis::PUBSUB_DB_STATE_CHANGES, _db_instance_id);
-        subscriber->subscribe(state_change_channel);
-
-        subscriber->on_message([this, state_change_channel](const std::string &channel, const std::string &msg)
-        {
-            if (channel != state_change_channel) {
-                return;
-            }
-
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received message: {}", msg);
-            uint64_t db_id;
-            redis::db_state_change::DBState state;
-            // decode message
-            redis::db_state_change::parse_db_state_change(msg, db_id, state);
-
-            // check db_id matches
-            if (db_id != _db_id) {
-                return;
-            }
-
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received state change: {}", redis::db_state_change::db_state_to_name[state]);
-            _handle_external_state_change(state);
-        });
-
-        while (!_shutdown) {
-            try {
-                // consume from subscriber, timeout is set above
-                subscriber->consume();
-            } catch (const sw::redis::TimeoutError &e) {
-                // timeout, check for shutdown
-                continue;
-            } catch (const sw::redis::Error &e) {
-                SPDLOG_ERROR("Error consuming from redis: {}\n", e.what());
-                break;
-            }
-        }
-    }
-
-    void
     PgLogMgr::_copy_thread()
     {
+
         // check initial state on thread startup
         // if in startup_sync state then switch to syncing
         if (_internal_state.is(STATE_STARTUP_SYNC)) {
+            // Create the namespaces before starting the copy thread
+            auto xid = _pg_log_reader.get_next_xid();
+            PgCopyTable::create_namespaces(_db_id, xid);
+
             _do_table_copies();
         }
 

@@ -88,7 +88,8 @@ namespace springtail
         std::string schema_name;
         std::string table_name;
         std::string xids;                // pg_current_snapshot(); xmin:xmax:xids
-        int32_t table_oid;
+        uint64_t table_oid;
+        uint64_t schema_oid;
         std::vector<SchemaColumn> columns;
         std::vector<std::string> pkeys;  // primary keys as columns
         std::vector<Index> secondary_keys;  // secondary keys as columns
@@ -112,10 +113,35 @@ namespace springtail
             std::string table_name;
             std::string schema_name;
             int32_t table_oid;
+            int32_t schema_oid;
         };
         using CopyRequestPtr = std::shared_ptr<CopyRequest>;
         using CopyQueue = ConcurrentQueue<CopyRequest>;
         using CopyQueuePtr = std::shared_ptr<CopyQueue>;
+
+        /** Struct for holding table metadata */
+        struct TableMetadata {
+            std::string namespace_name;
+            std::string table_name;
+            uint32_t namespace_oid;
+            uint32_t table_oid;
+
+            TableMetadata(std::string_view n_name,
+                          std::string_view t_name,
+                          uint32_t n_pgoid,
+                          uint32_t t_pgoid)
+                : namespace_name(n_name),
+                  table_name(t_name),
+                  namespace_oid(n_pgoid),
+                  table_oid(t_pgoid)
+            { }
+            TableMetadata() = default;
+
+            // Operator to sort the table metadata by table oid
+            bool operator<(const TableMetadata &table_metadata) const{
+                return table_oid < table_metadata.table_oid;
+            }
+        };
 
         LibPqConnection _connection;
         std::string _db_name;
@@ -135,7 +161,8 @@ namespace springtail
          */
         void _set_schema(const std::string &table_name,
                          const std::string &schema_name,
-                         uint64_t table_oid);
+                         uint64_t table_oid,
+                         uint64_t schema_oid);
 
         /**
          * @brief Get transaction ids for current transaction snapshot
@@ -192,7 +219,7 @@ namespace springtail
          * @param table_oids output: table name, schema name, oid
          */
         void _get_table_oids(const std::string &query,
-                             std::vector<std::tuple<std::string, std::string, int32_t>> &table_oids);
+                             std::set<TableMetadata> &table_oids);
 
         /**
          * @brief Get table oids based on json specifying schema and table includes
@@ -200,7 +227,7 @@ namespace springtail
          * @param table_oids output: table name, schema name, oid
          */
         void _get_table_oids(const nlohmann::json &include_json,
-                             std::vector<std::tuple<std::string, std::string, int32_t>> &table_oids);
+                             std::set<TableMetadata> &table_oids);
 
         /**
          * @brief Copy table from remote system
@@ -209,7 +236,8 @@ namespace springtail
                          springtail::XidLsn &xid,
                          const std::string &table_name,
                          const std::string &schema_name,
-                         uint64_t table_oid);
+                         uint64_t table_oid,
+                         uint64_t schema_oid);
 
         /**
          * @brief End the copy, commit the transaction
@@ -233,6 +261,13 @@ namespace springtail
                      uint64_t target_xid,
                      CopyQueuePtr copy_queue,
                      PgCopyResultPtr result);
+
+        /**
+         * @brief Get namespaces, returns a pair of namespace name and oid
+         * @param db_id database id
+         * @param xid xid
+         */
+        std::vector<std::pair<uint64_t, std::string>> _get_namespaces(uint64_t db_id, uint64_t xid);
 
         /**
          * @brief Internall helper called from copy_db, copy_schema, copy_table
@@ -299,6 +334,13 @@ namespace springtail
          */
         static std::vector<PgCopyResultPtr>
             copy_db(uint64_t db_id, uint64_t xid);
+
+        /**
+         * @brief Create namespaces
+         * @param db_id database id
+         * @param xid xid
+         */
+        static void create_namespaces(uint64_t db_id, uint64_t xid);
 
         /**
          * @brief Copy all tables in single schema from remote system

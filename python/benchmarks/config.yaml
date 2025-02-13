@@ -1,3 +1,4 @@
-test_folder: 'test_cases'
 system_json_path: '../../system.json.test'
-build_dir: '../../debug'
+build_dir: '../../release'
+benchmark_folder: 'cases/index'
+setup_timeout: 120

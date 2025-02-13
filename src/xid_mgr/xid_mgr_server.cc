@@ -1,7 +1,6 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
-#include <iostream>
 #include <mutex>
 #include <shared_mutex>
 #include <memory>

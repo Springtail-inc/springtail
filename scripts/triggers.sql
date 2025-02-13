@@ -12,13 +12,15 @@ BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_dropped_objects()
     LOOP
         -- Check for table or index drops
-        IF NOT obj.is_temporary AND (obj.object_type = 'table' OR obj.object_type = 'index') AND obj.schema_name NOT LIKE 'pg_%' THEN
+        IF NOT obj.is_temporary AND (obj.object_type = 'table' OR obj.object_type = 'index' OR obj.object_type = 'schema') AND (obj.schema_name IS NULL OR obj.schema_name NOT LIKE 'pg_%') THEN
 
             -- sometimes tg_tag is DROP TABLE even if type is index
             IF obj.object_type = 'table' THEN
                 tag_name := 'DROP TABLE';
-            ELSE
+            ELSIF obj.object_type = 'index' THEN
                 tag_name := 'DROP INDEX';
+            ELSIF obj.object_type = 'schema' THEN
+                tag_name := 'DROP SCHEMA';
             END IF;
 
             -- generate message same for DROP TABLE/INDEX
@@ -31,7 +33,7 @@ BEGIN
 
             --- RAISE NOTICE 'springtail: % op, %.%', tag_name, obj.schema_name, obj.object_name;
 
-            -- tag_name is DROP TABLE or DROP INDEX
+            -- tag_name is DROP TABLE or DROP INDEX or DROP SCHEMA
             PERFORM pg_logical_emit_message(true, 'springtail:' || tag_name, msg::text);
         END IF;
     END LOOP;
@@ -144,7 +146,7 @@ BEGIN
                 JOIN pg_class ci ON ci.oid = i.indrelid
                 JOIN pg_namespace n ON n.oid = c.relnamespace
                 WHERE i.indisprimary IS FALSE
-                AND c.oid IN (SELECT indexrelid FROM pg_index WHERE indrelid = obj.objid) 
+                AND c.oid IN (SELECT indexrelid FROM pg_index WHERE indrelid = obj.objid)
             LOOP
                 -- get index columns
                 SELECT json_agg(json_col)
@@ -244,17 +246,54 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION springtail_event_trigger_for_schema_ddl()
+        RETURNS event_trigger LANGUAGE plpgsql AS $$
+DECLARE
+    obj record;
+    schema_obj record;
+    msg text;
+BEGIN
+    FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() as cmd
+    LOOP
+        --- RAISE NOTICE 'springtail: obj.command_tag % ', obj.command_tag;
+
+	SELECT nsp.oid AS schema_oid,
+	       nsp.nspname AS schema_name
+	  INTO schema_obj
+	  FROM pg_catalog.pg_namespace nsp
+	 WHERE nsp.oid = obj.objid;
+
+        msg := json_build_object('xid', txid_current(),
+            'cmd', obj.command_tag,
+            'oid', schema_obj.schema_oid::bigint,
+            'obj', obj.object_type,
+            'name', schema_obj.schema_name);
+
+        -- command_tag is CREATE SCHEMA or ALTER SCHEMA
+        --- RAISE NOTICE 'springtail: %', msg::text;
+
+        PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
+    END LOOP;
+END;
+$$;
+
 DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_drops;
 CREATE EVENT TRIGGER springtail_event_trigger_for_drops
    ON sql_drop
-   WHEN TAG IN ( 'DROP TABLE', 'DROP INDEX')
+   WHEN TAG IN ( 'DROP TABLE', 'DROP INDEX', 'DROP SCHEMA' )
    EXECUTE FUNCTION springtail_event_trigger_for_drops();
 
 DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_table_ddl;
 CREATE EVENT TRIGGER springtail_event_trigger_for_table_ddl
    ON ddl_command_end
-   WHEN TAG IN ( 'CREATE TABLE', 'ALTER TABLE', 'CREATE SCHEMA' )
+   WHEN TAG IN ( 'CREATE TABLE', 'ALTER TABLE' )
    EXECUTE FUNCTION springtail_event_trigger_for_table_ddl();
+
+DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_schema_ddl;
+CREATE EVENT TRIGGER springtail_event_trigger_for_schema_ddl
+   ON ddl_command_end
+   WHEN TAG IN ( 'CREATE SCHEMA', 'ALTER SCHEMA' )
+   EXECUTE FUNCTION springtail_event_trigger_for_schema_ddl();
 
 DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_index_ddl;
 CREATE EVENT TRIGGER springtail_event_trigger_for_index_ddl

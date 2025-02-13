@@ -6,9 +6,13 @@
 #include <map>
 #include <vector>
 
+#include <opentelemetry/metrics/meter.h>
+#include <opentelemetry/metrics/provider.h>
+
 #include <common/concurrent_queue.hh>
 #include <common/redis_types.hh>
 #include <common/tracing.hh>
+#include <common/timestamp.hh>
 
 #include <garbage_collector/xid_ready.hh>
 
@@ -23,7 +27,6 @@
 #include <storage/xid.hh>
 
 #include <pg_log_mgr/pg_xact_log_writer.hh>
-
 #include <xid_mgr/xid_mgr_client.hh>
 
 namespace springtail::pg_log_mgr {
@@ -42,17 +45,7 @@ namespace springtail::pg_log_mgr {
          * @param queue queue to enqueue parsed xactions for xid logger and GC
          */
         PgLogReader(uint64_t db_id, uint32_t queue_size,
-                    const std::filesystem::path &log_path)
-            : _db_id(db_id),
-              _msg_queue(queue_size),
-              _xact_log_writer(log_path)
-        {
-            // retrieve the most recently committed XID at startup
-            _committed_xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
-
-            // start the message processing thread
-            _msg_thread = std::thread(&PgLogReader::_msg_worker, this);
-        }
+                    const std::filesystem::path &log_path);
 
         /**
          * @brief Queues a message to be processed by the log reader.
@@ -115,8 +108,10 @@ namespace springtail::pg_log_mgr {
             /**
              * Send all extents to the WriteCache, apply all schema changes to the SysTblMgr at the
              * provided xid.
+             * @param xid springtail xid
+             * @param commit_ts Postgres commit ts
              */
-            void commit(uint64_t xid);
+            void commit(uint64_t xid, PostgresTimestamp commit_ts);
 
             /**
              * Abort the entire transaction.  Drop all related batches from the WriteCache.
@@ -273,5 +268,7 @@ namespace springtail::pg_log_mgr {
         /** Check if we need to perform a table swap / commit and notify the Committer if so. */
         void _check_sync_commit(uint64_t db_id, int32_t pg_xid, uint64_t xid);
 
+        std::shared_ptr<opentelemetry::metrics::Histogram<double>> _postgres_log_reader_latencies;
+        opentelemetry::context::Context _context;
     };
 } // namespace springtail::pg_log_mgr

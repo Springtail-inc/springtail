@@ -701,10 +701,6 @@ if __name__ == "__main__":
             stop(args.config_file, do_cleanup=not args.no_cleanup)
             sys.exit(0)
 
-        if args.start:
-            start(args.config_file, args.build_dir, args.sql_file, 
-                  do_cleanup=not args.no_cleanup, start_xid=args.start_xid)
-
         if args.check:
             check_logs(args.config_file)
             sys.exit(0)
@@ -721,6 +717,10 @@ if __name__ == "__main__":
             props = Properties(args.config_file, True)
             print("Redis loaded from the system settings file.")
             sys.exit(0)
+
+        if args.start:
+            start(args.config_file, args.build_dir, args.sql_file, 
+                  do_cleanup=not args.no_cleanup, start_xid=args.start_xid)
 
     except Exception as e:
         print(f"Caught error: {e}")

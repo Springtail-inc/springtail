@@ -1,5 +1,4 @@
 #include <mutex>
-#include <iostream>
 
 #include <sw/redis++/redis++.h>
 
@@ -10,40 +9,23 @@
 #include <common/common.hh>
 
 namespace springtail {
-    /* static initialization must happen outside of class */
-    RedisMgr* RedisMgr::_instance {nullptr};
-    std::mutex RedisMgr::_instance_mutex;
 
-    RedisMgr *
-    RedisMgr::get_instance()
-    {
-        std::unique_lock<std::mutex> lock(_instance_mutex);
-
-        if (_instance == nullptr) {
-            _instance = new RedisMgr();
+    sw::redis::ConnectionOptions RedisMgr::_get_connect_options(bool config_db) {
+        std::unique_lock lock(_connect_options_mutex);
+        int db_id = (config_db)? _config_db_id : _data_db_id;
+        if (_connect_options.db != db_id) {
+            sw::redis::ConnectionOptions connect_options_clone = _connect_options;
+            connect_options_clone.db = db_id;
+            return connect_options_clone;
         }
-
-        return _instance;
+        return _connect_options;
     }
 
-    RedisMgr::RedisMgr()
-    {
+    std::tuple<int, RedisClientPtr> RedisMgr::create_client(bool config_db) {
+        sw::redis::ConnectionOptions     connect_options = _get_connect_options(config_db);
+        sw::redis::ConnectionPoolOptions pool_options;
+
         nlohmann::json json = Properties::get(Properties::REDIS_CONFIG);
-
-        _connect_options.host = Json::get_or<std::string>(json, "host", "localhost");
-        _connect_options.user = Json::get_or<std::string>(json, "user", "user");
-        _connect_options.password = Json::get_or<std::string>(json, "password", "");
-        _connect_options.port = Json::get_or<int>(json, "port", 6379);
-        _connect_options.db = Json::get_or<int>(json, "db", REDIS_DATA_DB);
-        int keep_alive_secs = Json::get_or<int>(json, "keep_alive_sec", 30);
-        bool ssl_enabled = Json::get_or<bool>(json, "ssl", false);
-
-        _connect_options.keep_alive_s = std::chrono::seconds(keep_alive_secs);
-        _connect_options.keep_alive = true;
-        _connect_options.resp = 3;
-        _connect_options.socket_timeout = std::chrono::milliseconds(0);
-        _connect_options.tls.enabled = ssl_enabled;
-
         nlohmann::json pool_json;
         if (!Json::get_to(json, "pool", pool_json)) {
             throw Error("Redis connection pool settings not found");
@@ -53,48 +35,47 @@ namespace springtail {
         int max_idle_secs = Json::get_or<int>(pool_json, "max_idle_secs", 0);
         int max_connection_lifetime_secs = Json::get_or<int>(pool_json, "max_connection_lifetime_secs", 0);
 
-        _pool_options.size = pool_size;
-        _pool_options.connection_idle_time = std::chrono::seconds(max_idle_secs);
-        _pool_options.connection_lifetime = std::chrono::seconds(max_connection_lifetime_secs);
+        pool_options.size = pool_size;
+        pool_options.connection_idle_time = std::chrono::seconds(max_idle_secs);
+        pool_options.connection_lifetime = std::chrono::seconds(max_connection_lifetime_secs);
 
-        _redis = std::make_shared<RedisClient>(_connect_options, _pool_options);
-
-        SPDLOG_INFO("Connected to redis server: {}", _connect_options.host);
+        RedisClientPtr client = std::make_shared<RedisClient>(connect_options, pool_options);
+        SPDLOG_INFO("Connected to redis server: {}", connect_options.host);
+        return std::make_tuple(connect_options.db, client);
     }
 
-    void
-    RedisMgr::shutdown()
+    RedisMgr::RedisMgr()
     {
-        if (_instance != nullptr) {
-            delete _instance;
-            _instance = nullptr;
-        }
+        std::unique_lock lock(_connect_options_mutex);
+
+        nlohmann::json json = Properties::get(Properties::REDIS_CONFIG);
+
+        _connect_options.host = Json::get_or<std::string>(json, "host", "localhost");
+        _connect_options.user = Json::get_or<std::string>(json, "user", "user");
+        _connect_options.password = Json::get_or<std::string>(json, "password", "");
+        _connect_options.port = Json::get_or<int>(json, "port", 6379);
+        _config_db_id = Json::get_or<int>(json, "config_db", RedisMgr::REDIS_DATA_DB);
+        _data_db_id = Json::get_or<int>(json, "db", RedisMgr::REDIS_DATA_DB);
+        // For now set it to something
+        _connect_options.db = _data_db_id;
+        int keep_alive_secs = Json::get_or<int>(json, "keep_alive_sec", 30);
+        bool ssl_enabled = Json::get_or<bool>(json, "ssl", false);
+
+        _connect_options.keep_alive_s = std::chrono::seconds(keep_alive_secs);
+        _connect_options.keep_alive = true;
+        _connect_options.resp = 3;
+        _connect_options.socket_timeout = std::chrono::milliseconds(0);
+        _connect_options.tls.enabled = ssl_enabled;
+        lock.unlock();
+
+        int db_id;
+        tie(db_id, _redis) = create_client(false);
     }
 
     RedisMgr::SubscriberPtr
     RedisMgr::get_subscriber(int timeoutsecs, bool config_db)
     {
-        sw::redis::ConnectionOptions connect_options;
-
-        // get config db from redis
-        if (config_db) {
-            nlohmann::json json = Properties::get(Properties::REDIS_CONFIG);
-            int config_db;
-            Json::get_to<int>(json, "config_db", config_db);
-            connect_options.db = config_db;
-        } else {
-            connect_options.db = _connect_options.db;
-        }
-
-        // create new redis connection for use with subscriber
-        // copy the connection options, change the db to the config db
-        connect_options.host = _connect_options.host;
-        connect_options.port = _connect_options.port;
-        connect_options.user = _connect_options.user;
-        connect_options.password = _connect_options.password;
-        connect_options.keep_alive = _connect_options.keep_alive;
-        connect_options.keep_alive_s = _connect_options.keep_alive_s;
-        connect_options.resp = _connect_options.resp;
+        sw::redis::ConnectionOptions connect_options = _get_connect_options(config_db);
 
         // this is the real timeout for the subscriber consume() call
         connect_options.socket_timeout = std::chrono::seconds(timeoutsecs);

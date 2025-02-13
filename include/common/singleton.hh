@@ -1,8 +1,11 @@
 #pragma once
 
 #include <atomic>
+#include <cassert>
 #include <mutex>
 #include <thread>
+
+#include <absl/log/check.h>
 
 namespace springtail {
     template <typename T> class Singleton {
@@ -52,6 +55,14 @@ namespace springtail {
          *
          */
         virtual ~Singleton() = default;
+
+        /**
+         * @brief Assert if the singleton object has not been created yet
+         *
+         */
+        static void _assert_instance() {
+            CHECK_NE(_instance, nullptr);
+        }
 
     private:
         static inline T* _instance = nullptr;             ///< derived class instance
@@ -121,7 +132,7 @@ namespace springtail {
          * @brief Stop the thread
          *
          */
-        void stop_thread() {
+        virtual void stop_thread() {
             _shutting_down = true;
         }
 

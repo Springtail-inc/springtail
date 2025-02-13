@@ -2,13 +2,9 @@
 
 #include <map>
 #include <mutex>
-#include <memory>
-#include <atomic>
 
 #include <common/counter.hh>
 #include <common/singleton.hh>
-
-#include <redis/pubsub_thread.hh>
 
 #include <pg_log_mgr/pg_log_mgr.hh>
 
@@ -30,13 +26,13 @@ namespace springtail::pg_log_mgr {
 
     private:
         friend class Singleton<PgLogCoordinator>;
-        PgLogCoordinator() : _shutdown_counter(1), _config_sub_thread(1, true) {}
+        PgLogCoordinator();
         ~PgLogCoordinator() = default;
 
         Counter _shutdown_counter;
         std::mutex _mutex;                         ///< mutex for _log_mgrs map
         std::map<uint64_t, PgLogMgrPtr> _log_mgrs; ///< map of db_id to log mgr
-        PubSubThread _config_sub_thread;           ///< pubsub thread for redis config database
+        RedisCache::RedisChangeWatcherPtr _cache_watcher; ///> redis cache callback object
         std::string _repl_log;                     ///< common part of replication log path
         std::string _trans_log;                    ///< common part of transcation log path
         uint64_t _db_instance_id;                  ///< database instance id
@@ -50,21 +46,7 @@ namespace springtail::pg_log_mgr {
          * @brief Function for performing shutdown that is called by Singleton
          *
          */
-        void _internal_shutdown();
-
-        /**
-         * @brief Function for initialization of existing databases and starting a log manager instance
-         *      per database
-         *
-         */
-        void _init_db_change_subscriber();
-
-        /**
-         * @brief Function to processes database add and remove actions
-         *
-         * @param msg - message from redis
-         */
-        void _handle_db_changes(const std::string &msg);
+        void _internal_shutdown() override;
 
         /**
          * @brief Add database and start its own log manager

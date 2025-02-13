@@ -26,15 +26,28 @@ int main(int argc, char* argv[])
     po::options_description desc("Allowed options");
     desc.add_options()("help,h", "Help message.");
     desc.add_options()("daemonize", "Start the server as a daemon");
+    desc.add_options()("primary", "Force mode to primary, overriding redis");
+    desc.add_options()("shadow", "Force mode to shadow, overriding redis");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
     po::notify(vm);
 
+    bool force_primary = false;
+    bool force_shadow = false;
+
     // check if we need to print the help message
     if (vm.count("help")) {
         std::cout << desc << std::endl;
         return 0;
+    }
+
+    if (vm.count("primary")) {
+        force_primary = true;
+    }
+
+    if (vm.count("shadow")) {
+        force_shadow = true;
     }
 
     std::optional<std::string> pidfile;
@@ -86,6 +99,14 @@ int main(int argc, char* argv[])
 
     ProxyServer::MODE server_mode = ProxyServer::MODE::NORMAL;
     std::string mode = Json::get_or<std::string>(json, "mode", "normal");
+
+    // overrides from command line (for debugging)
+    if (force_primary) {
+        mode = "primary";
+    } else if (force_shadow) {
+        mode = "shadow";
+    }
+
     if (mode == "shadow") {
         server_mode = ProxyServer::MODE::SHADOW;
         CHECK_NE(logger, nullptr);

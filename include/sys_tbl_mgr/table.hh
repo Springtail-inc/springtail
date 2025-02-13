@@ -329,6 +329,8 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
             return _id;
         }
 
+        bool empty() const;
+
         /** This will convert column positions to column names based on the table schema
          */
         std::vector<std::string> get_column_names(const std::vector<uint32_t>& col_position);
@@ -345,7 +347,7 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
          * Returns an iterator to the first row that is less than or equal to the provided search
          * key.  Search key must match the primary index order.
          */
-        Iterator inverse_lower_bound(TuplePtr search_key);
+        Iterator inverse_lower_bound(TuplePtr search_key, uint32_t index_id = constant::INDEX_PRIMARY);
 
         /**
          * An iterator to the start of the table.

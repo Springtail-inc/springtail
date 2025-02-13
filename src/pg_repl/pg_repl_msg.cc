@@ -1,7 +1,5 @@
 #include <cstdlib>
 #include <sstream>
-#include <variant>
-#include <algorithm>
 
 #include <fmt/core.h>
 #include <nlohmann/json.hpp>
@@ -290,7 +288,7 @@ namespace pg_msg {
                 }
                 ss << "  oid=" << table.oid << std::endl;
                 ss << "  LSN=" << table.lsn << std::endl;
-                ss << "  schema=" << table.schema << std::endl;
+                ss << "  namespace=" << table.namespace_name << std::endl;
                 ss << "  table=" << table.table << std::endl;
                 ss << "  columns=" << table.columns.size() << std::endl;
 
@@ -315,7 +313,7 @@ namespace pg_msg {
                 }
                 ss << "  oid=" << table.oid << std::endl;
                 ss << "  LSN=" << table.lsn << std::endl;
-                ss << "  schema=" << table.schema << std::endl;
+                ss << "  namespace=" << table.namespace_name << std::endl;
                 ss << "  table=" << table.table << std::endl;
                 ss << "  columns=" << table.columns.size() << std::endl;
 
@@ -338,8 +336,43 @@ namespace pg_msg {
                 }
                 ss << "  oid=" << drop_table.oid << std::endl;
                 ss << "  LSN=" << drop_table.lsn << std::endl;
-                ss << "  schema=" << drop_table.schema << std::endl;
+                ss << "  namespace=" << drop_table.namespace_name << std::endl;
                 ss << "  table=" << drop_table.table << std::endl;
+                break;
+            }
+
+            case CREATE_NAMESPACE: {
+                PgMsgNamespace create_namespace = std::get<PgMsgNamespace>(msg.msg);
+                ss << "\nCREATE SCHEMA" << std::endl;
+                if (msg.is_streaming) {
+                    ss << "  xid=" << create_namespace.xid << std::endl;
+                }
+                ss << "  oid=" << create_namespace.oid << std::endl;
+                ss << "  LSN=" << create_namespace.lsn << std::endl;
+                ss << "  namespace=" << create_namespace.name << std::endl;
+                break;
+            }
+
+            case ALTER_NAMESPACE: {
+                PgMsgNamespace alter_namespace = std::get<PgMsgNamespace>(msg.msg);
+                ss << "\nALTER SCHEMA" << std::endl;
+                if (msg.is_streaming) {
+                    ss << "  xid=" << alter_namespace.xid << std::endl;
+                }
+                ss << "  oid=" << alter_namespace.oid << std::endl;
+                ss << "  LSN=" << alter_namespace.lsn << std::endl;
+                ss << "  namespace=" << alter_namespace.name << std::endl;
+                break;
+            }
+
+            case DROP_NAMESPACE: {
+                PgMsgNamespace create_namespace = std::get<PgMsgNamespace>(msg.msg);
+                ss << "\nDROP SCHEMA" << std::endl;
+                if (msg.is_streaming) {
+                    ss << "  xid=" << create_namespace.xid << std::endl;
+                }
+                ss << "  oid=" << create_namespace.oid << std::endl;
+                ss << "  LSN=" << create_namespace.lsn << std::endl;
                 break;
             }
 
