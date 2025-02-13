@@ -123,10 +123,6 @@ namespace springtail
         "        pg_get_expr(pg_attrdef.adbin, pg_attrdef.adrelid) "
         "        ELSE NULL "
         "    END AS generation_expression, "
-        "    CASE WHEN t.typname = 'oid' "
-        "        THEN 'Non-UTF8 Encoding' "
-        "        ELSE 'UTF-8 Encoding' "
-        "    END AS encoding, "
         "    col.collname AS collation, "
         "    bool_or(a.attgenerated = 's') OVER w AS has_generated_column, "
         "    bool_or(t.typnamespace != 'pg_catalog'::regnamespace) OVER w AS has_user_defined_type, "
@@ -764,11 +760,10 @@ namespace springtail
             std::string column_name = _connection.get_string(i, 2);
             std::string type_name = _connection.get_string(i, 3);
             std::string generation_expression = _connection.get_string_optional(i, 4).value_or("");
-            std::string encoding = _connection.get_string(i, 5);
-            std::string collation = _connection.get_string(i, 6);
-            bool has_generated_column = _connection.get_boolean(i, 7);
-            bool has_user_defined_type = _connection.get_boolean(i, 8);
-            bool has_non_standard_collation = _connection.get_boolean(i, 9);
+            std::string collation = _connection.get_string(i, 5);
+            bool has_generated_column = _connection.get_boolean(i, 6);
+            bool has_user_defined_type = _connection.get_boolean(i, 7);
+            bool has_non_standard_collation = _connection.get_boolean(i, 8);
 
             // Skip columns that are not UTF-8 encoded or generated columns
             if ( !has_generated_column && !has_user_defined_type && !has_non_standard_collation ) {
@@ -792,7 +787,6 @@ namespace springtail
                 {"name", column_name},
                 {"type", type_name},
                 {"generation_expression", generation_expression},
-                {"encoding", encoding},
                 {"collation", collation}
             });
         }
