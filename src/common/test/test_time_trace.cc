@@ -31,9 +31,11 @@ TEST(TimeTraceTest, Basic)
     auto s = trace.format();
 
     EXPECT_EQ(trace._trace[0].second._start_count, 1);
-    EXPECT_TRUE(trace._trace[0].second._timer.elapsed_ms() > 400ms);
+    EXPECT_GE(trace._trace[0].second._timer.elapsed_ms(), 400ms);
+    EXPECT_LE(trace._trace[0].second._timer.elapsed_ms(), 420ms);
     EXPECT_EQ(trace._trace[1].second._start_count, 2);
-    EXPECT_TRUE(trace._trace[1].second._timer.elapsed_ms() > 200ms);
+    EXPECT_GE(trace._trace[1].second._timer.elapsed_ms(), 200ms);
     EXPECT_EQ(trace._trace[2].second._start_count, 1);
-    EXPECT_TRUE(trace._trace[2].second._timer.elapsed_ms() > 100ms);
+    EXPECT_GE(trace._trace[2].second._timer.elapsed_ms(), 100ms);
+    EXPECT_LE(trace._trace[2].second._timer.elapsed_ms(), 120ms);
 }

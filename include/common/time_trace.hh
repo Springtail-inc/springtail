@@ -23,7 +23,7 @@ namespace time_trace {
         using Item = std::pair<Name, Trace>;
         std::vector<Item> _trace;
 
-        FlatTrace() {}
+        FlatTrace() = default;
 
         FlatTrace(const FlatTrace&) = delete;
         FlatTrace& operator=(const FlatTrace&) = delete;
