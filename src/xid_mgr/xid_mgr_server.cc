@@ -41,6 +41,7 @@ namespace springtail::xid_mgr {
 
         // iterate over all files in the base path creating partitions
         _load_partitions();
+        _register_metrics();
         init(rpc_json);
     }
 
@@ -141,7 +142,7 @@ namespace springtail::xid_mgr {
         _partition_map[db_id] = partition;
         _partitions.push_back(partition);
 
-        tracing::increment_counter("xid_mgr", "get_partition_calls", "calls", 1);
+        tracing::increment_counter("xid_mgr_get_partition_calls");
 
         return partition;
     }
@@ -160,7 +161,7 @@ namespace springtail::xid_mgr {
             return 0;
         }
 
-        tracing::increment_counter("xid_mgr", "get_committed_xid_calls", "calls", 1);
+        tracing::increment_counter("xid_mgr_get_committed_xid_calls");
 
         return partition->get_committed_xid(db_id, schema_xid);
     }
@@ -190,8 +191,7 @@ namespace springtail::xid_mgr {
         // exclusive lock held for insert/create
         partition->commit_xid(db_id, xid, has_schema_changes);
 
-        // increment the counter for commit_xid calls
-        tracing::increment_counter("xid_mgr", "commit_xid_calls", "calls", 1);
+        tracing::increment_counter("xid_mgr_commit_xid_calls");
 
         return;
     }
@@ -224,7 +224,18 @@ namespace springtail::xid_mgr {
         // exclusive lock held for insert/create
         partition->record_ddl_change(db_id, xid);
 
-        tracing::increment_counter("xid_mgr", "record_ddl_change_calls", "calls", 1);
+        tracing::increment_counter("xid_mgr_record_ddl_change_calls");
     }
 
+    void
+    XidMgrServer::_register_metrics() {
+        for (const auto& metric : _xid_mgr_metrics) {
+            // Registers the counter for the metric
+            tracing::register_counter(
+                metric.first,
+                metric.second,
+                "calls"
+            );
+        }
+    }
 }

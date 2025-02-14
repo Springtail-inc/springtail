@@ -5,6 +5,7 @@
 
 #include <common/json.hh>
 #include <common/properties.hh>
+#include <common/tracing.hh>
 
 #include <sys_tbl_mgr/system_tables.hh>
 
@@ -46,6 +47,14 @@ namespace springtail {
 
         _data_cache = std::make_shared<DataCache>(data_size);
         _page_cache = std::make_shared<PageCache>(page_size);
+
+        _register_metrics();
+    }
+
+    void StorageCache::_register_metrics() {
+        for (const auto &metric : _storage_cache_metrics) {
+            tracing::register_counter(metric.first, metric.second, "calls");
+        }
     }
 
     StorageCache::SafePagePtr
@@ -64,6 +73,8 @@ namespace springtail {
         if (target_xid == constant::LATEST_XID) {
             target_xid = access_xid;
         }
+
+        tracing::increment_counter("storage_cache_get_calls");
 
         // if the extent ID is UNKNOWN, then we will get an empty page for the file
         if (extent_id == constant::UNKNOWN_EXTENT) {
@@ -118,12 +129,14 @@ namespace springtail {
     StorageCache::flush(const std::filesystem::path &file)
     {
         _page_cache->flush_file(file);
+        tracing::increment_counter("storage_cache_flush_calls");
     }
 
     void
     StorageCache::drop_for_truncate(const std::filesystem::path &file)
     {
         _page_cache->drop_file(file);
+        tracing::increment_counter("storage_cache_drop_calls");
     }
 
 
@@ -142,6 +155,7 @@ namespace springtail {
         // check if the page already exists in the cache for the given target XID
         PagePtr page = _try_get(file, extent_id, target_xid);
         if (page != nullptr) {
+            tracing::increment_counter("storage_cache_get_calls");
             SPDLOG_DEBUG_MODULE(LOG_CACHE, "Found in cache");
             return page;
         }
@@ -191,6 +205,7 @@ namespace springtail {
             return;
         }
 
+        tracing::increment_counter("storage_cache_put_calls");
         // release the page back to the cache
        _put(page);
     }
@@ -267,6 +282,7 @@ namespace springtail {
             }
         }
 
+        tracing::increment_counter("storage_cache_flush_calls");
         // flush list for the file must be empty, so remove it
         _flush_list.erase(file);
     }
@@ -316,6 +332,7 @@ namespace springtail {
             }
         }
 
+        tracing::increment_counter("storage_cache_drop_calls");
         // flush list for the file must be empty, so remove it
         _flush_list.erase(file);
     }

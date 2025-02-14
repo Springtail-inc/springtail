@@ -307,7 +307,6 @@ namespace springtail::thrift {
             auto tracer = provider->GetTracer("Thrift");
             _span = tracer->StartSpan("Thrift_Rpc");
             _span->SetAttribute("type_name", _type_name);
-            tracing::increment_counter("thrift", "rpc_calls", "calls", 1);
 
             bool call_successful = false;
             while (!call_successful) {

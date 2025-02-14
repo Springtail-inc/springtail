@@ -138,7 +138,6 @@ namespace springtail::gc {
                     auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[3]);
                     roots.xid = completed_xid;
 
-                    tracing::increment_counter("gc", "sys_tbl_rpc_calls", "calls", 1);
                     // note: this will also invalidate the table's client cache entry
                     auto ddl_str = client->swap_sync_table(namespace_req, create, indexes, roots);
 
@@ -157,7 +156,6 @@ namespace springtail::gc {
 
                 if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
                     // finalize the system metadata
-                    tracing::increment_counter("gc", "sys_tbl_rpc_calls", "calls", 1);
                     client->finalize(db_id, completed_xid);
 
                     // perform a commit to the XidMgr
@@ -241,13 +239,11 @@ namespace springtail::gc {
                 _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
                 _indexer->process_ddls(db_id, xid, index_ddls);
                 _indexer->wait_for_completion(db_id);
-                tracing::increment_counter("gc", "sys_tbl_rpc_calls", "calls", 1);
                 sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
                 _redis_ddl.commit_index_ddl(db_id, xid);
             } else {
                 if (!completed_ddls.is_null()) {
                     // finalize the system metadata
-                    tracing::increment_counter("gc", "sys_tbl_rpc_calls", "calls", 1);
                     sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
                 }
             }
@@ -354,7 +350,6 @@ namespace springtail::gc {
 
             uint64_t tid = ddl["tid"].get<uint64_t>();
             XidLsn ddl_xid(ddl["xid"].get<uint64_t>(), ddl["lsn"].get<uint64_t>());
-            tracing::increment_counter("gc", "sys_tbl_rpc_calls", "calls", 1);
             client->invalidate_table(db, tid, ddl_xid);
         }
     }
@@ -434,7 +429,6 @@ namespace springtail::gc {
         //finalize and commit
         auto client = sys_tbl_mgr::Client::get_instance();
         for (auto const& [db_id, xid, ddls] : precommit) {
-            tracing::increment_counter("gc", "sys_tbl_rpc_calls", "calls", 1);
             client->finalize(db_id, xid);
             _redis_ddl.commit_ddl(db_id, xid);
         }

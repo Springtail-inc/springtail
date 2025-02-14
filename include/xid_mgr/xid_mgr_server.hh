@@ -12,11 +12,7 @@
 #include <xid_mgr/xid_partition.hh>
 #include <xid_mgr/xid_mgr_service.hh>
 
-#include <opentelemetry/metrics/meter.h>
-#include <opentelemetry/metrics/provider.h>
-
 namespace springtail::xid_mgr {
-
     /**
      * @class XidMgrServer
      * @brief This class represents a server for managing transaction IDs (XIDs).
@@ -70,6 +66,25 @@ namespace springtail::xid_mgr {
          */
          ~XidMgrServer() override = default;
 
+        // Vector containing the xid mgr methods
+        std::vector<std::pair<std::string, std::string>> _xid_mgr_metrics = {
+            {"xid_mgr_commit_xid_calls", "Total number of XID commits"},
+            {"xid_mgr_record_ddl_change_calls", "Total number of XID record DDL change calls"},
+            {"xid_mgr_get_partition_calls", "Total number of XID get partition calls"},
+            {"xid_mgr_get_committed_xid_calls", "Total number of XID get committed xid calls"}
+        };
+
+        /**
+         * @brief Register metrics for monitoring XID manager operations
+         * 
+         * Registers counters for tracking various XID manager operations like:
+         * - Number of XID commits
+         * - Number of DDL change records
+         * - Number of partition lookups
+         * - Number of committed XID lookups
+         */
+        void _register_metrics();
+
         /** base path */
         std::filesystem::path _base_path;
 
@@ -80,8 +95,6 @@ namespace springtail::xid_mgr {
 
         /** map of db_id to partitions */
         std::map<uint64_t, PartitionPtr> _partition_map;
-
-        std::shared_ptr<opentelemetry::metrics::Counter<double>> _commit_xid_counter;
 
         /**
          * @brief Get a partition based on a db_id, optionally create it

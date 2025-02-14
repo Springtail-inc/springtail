@@ -22,6 +22,8 @@
 
 namespace springtail::tracing {
 
+static std::map<std::string, opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Counter<uint64_t>>> counters;
+
 static std::shared_ptr<opentelemetry::sdk::metrics::MeterProvider> meter_provider;
 
 static opentelemetry::sdk::resource::Resource
@@ -168,17 +170,27 @@ tracer(const std::string_view& name)
 }
 
 void
-increment_counter(const std::string name, const std::string description, const std::string unit)
+increment_counter(std::string name)
 {
-    increment_counter(name, description, unit, 1);
+    auto counter = counters[name];
+    if(counter){
+        // Increment the counter
+        counter->Add(1);
+    } else {
+        SPDLOG_ERROR("Counter '{}' not found", name);
+    }
 }
 
-void
-increment_counter(const std::string name, const std::string description, const std::string unit, uint32_t value)
+opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Counter<uint64_t>>
+create_uint64_counter(const std::string name, const std::string description, const std::string unit)
 {
     auto meter = opentelemetry::metrics::Provider::GetMeterProvider()->GetMeter(name);
-    auto counter = meter->CreateUInt64Counter(name.data(), description.data(), unit.data());
-    counter->Add(value);
+    return meter->CreateUInt64Counter(name.data(), description.data(), unit.data());
+}
+
+void register_counter(const std::string name, const std::string description, const std::string unit)
+{
+    counters[name] = create_uint64_counter(name, description, unit);
 }
 
 }  // namespace springtail::tracing
