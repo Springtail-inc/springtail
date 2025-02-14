@@ -338,8 +338,6 @@ namespace springtail {
                 pos = start;
             }
         }
-
-        _cache = std::make_shared<RedisCache>(true);
     }
 
     std::map<uint64_t, std::string>
