@@ -9,39 +9,33 @@ namespace time_trace
 void 
 FlatTrace::start(Name name) 
 {
-    auto it = std::ranges::find_if(_trace,
+    auto it = std::ranges::find_if(trace,
             [&name](auto const& v) { return v.first == name; });
-    if (it != _trace.end()) {
-        CHECK(!it->second._started);
-        it->second._timer.start();
-        ++(it->second._start_count);
-        it->second._started = true;
+    if (it != trace.end()) {
+        it->second.timer.start();
+        ++(it->second.start_count);
     } else {
         Trace t;
-        t._timer.start();
-        ++t._start_count;
-        t._started = true;
-        _trace.emplace_back(std::move(name), t);
+        t.timer.start();
+        ++t.start_count;
+        trace.emplace_back(std::move(name), t);
     }
 }
 
 void 
 FlatTrace::stop(const Name& name)
 {
-    auto it = std::ranges::find_if(_trace,
+    auto it = std::ranges::find_if(trace,
             [&name](auto const& v) { return v.first == name; });
-    CHECK(it != _trace.end());
-    CHECK(it->second._started);
-    it->second._started = false;
-    it->second._timer.stop();
+    CHECK(it != trace.end());
+    it->second.timer.stop();
 }
 
 void FlatTrace::reset()
 {
-    for( auto & [_, item]: _trace) {
-        item._timer.reset();
-        item._started = false;
-        item._start_count = 0;
+    for( auto & [_, item]: trace) {
+        item.timer.reset();
+        item.start_count = 0;
     }
 }
 
@@ -52,11 +46,11 @@ FlatTrace::format()
 
     s << "Time trace:";
 
-    for (auto const& [name, item]: _trace) {
+    for (auto const& [name, item]: trace) {
         s << std::endl << "  " << name 
-            << "[total=" << item._timer.elapsed_ms() 
-            << ", counter=" << item._start_count
-            << ", average=" << (item._timer.elapsed_ms()/item._start_count) << "]";
+            << "[total=" << item.timer.elapsed_ms() 
+            << ", counter=" << item.start_count
+            << ", average=" << (item.timer.elapsed_ms()/item.start_count) << "]";
     }
 
     return s.str();

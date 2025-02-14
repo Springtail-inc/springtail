@@ -74,8 +74,8 @@ else()
   add_definitions( -D SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO )
 endif()
 
-if(DEFINED ENV{SPRINGTAILE_INCLUDE_TIME_TRACES})
-  add_definitions( -D SPRINGTAILE_INCLUDE_TIME_TRACES )
+if(DEFINED ENV{SPRINGTAIL_INCLUDE_TIME_TRACES})
+  add_definitions( -D SPRINGTAIL_INCLUDE_TIME_TRACES )
   message(STATUS "Include time traces.")
 endif()
 

@@ -11,17 +11,22 @@ namespace time_trace {
 
     using Name = std::string;
 
+    /**
+     * @brief Single trace stats.
+     */
     struct Trace
     {
-        bool _started = false;
-        size_t _start_count = 0;
-        Timer _timer;
+        size_t start_count = 0;
+        Timer timer;
     };
 
+    /**
+     * @brief An array of traces.
+     */
     struct FlatTrace
     {
         using Item = std::pair<Name, Trace>;
-        std::vector<Item> _trace;
+        std::vector<Item> trace;
 
         FlatTrace() = default;
 
@@ -37,7 +42,7 @@ namespace time_trace {
 }
 }
 
-#if defined(SPRINGTAILE_INCLUDE_TIME_TRACES)
+#if defined(SPRINGTAIL_INCLUDE_TIME_TRACES)
     #define TIME_TRACE_CREATE(trace) time_trace::FlatTrace trace
     #define TIME_TRACE_START(trace, name) trace.start(std::move(name))
     #define TIME_TRACE_STOP(trace, name) trace.stop(std::move(name))

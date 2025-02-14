@@ -384,7 +384,7 @@ namespace springtail::pg_fdw {
         //TODO: I couldn't figure out how to get a notification from
         // PG when the FDW extension is dropped/killed, so I print the 
         // traces at the end of every scan that could be noisy when
-        // SPRINGTAILE_INCLUDE_TIME_TRACES is set.
+        // SPRINGTAIL_INCLUDE_TIME_TRACES is set.
         // If you do need the traces uncomment this line.
         //
         //TIME_TRACE_LOG(create_state_trace);

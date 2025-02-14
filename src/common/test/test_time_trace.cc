@@ -30,12 +30,12 @@ TEST(TimeTraceTest, Basic)
 
     auto s = trace.format();
 
-    EXPECT_EQ(trace._trace[0].second._start_count, 1);
-    EXPECT_GE(trace._trace[0].second._timer.elapsed_ms(), 400ms);
-    EXPECT_LE(trace._trace[0].second._timer.elapsed_ms(), 420ms);
-    EXPECT_EQ(trace._trace[1].second._start_count, 2);
-    EXPECT_GE(trace._trace[1].second._timer.elapsed_ms(), 200ms);
-    EXPECT_EQ(trace._trace[2].second._start_count, 1);
-    EXPECT_GE(trace._trace[2].second._timer.elapsed_ms(), 100ms);
-    EXPECT_LE(trace._trace[2].second._timer.elapsed_ms(), 120ms);
+    EXPECT_EQ(trace.trace[0].second.start_count, 1);
+    EXPECT_GE(trace.trace[0].second.timer.elapsed_ms(), 400ms);
+    EXPECT_LE(trace.trace[0].second.timer.elapsed_ms(), 420ms);
+    EXPECT_EQ(trace.trace[1].second.start_count, 2);
+    EXPECT_GE(trace.trace[1].second.timer.elapsed_ms(), 200ms);
+    EXPECT_EQ(trace.trace[2].second.start_count, 1);
+    EXPECT_GE(trace.trace[2].second.timer.elapsed_ms(), 100ms);
+    EXPECT_LE(trace.trace[2].second.timer.elapsed_ms(), 120ms);
 }
