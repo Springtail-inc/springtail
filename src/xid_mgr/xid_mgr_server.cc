@@ -169,6 +169,8 @@ namespace springtail::xid_mgr {
     void
     XidMgrServer::commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_changes)
     {
+        auto start_time = std::chrono::system_clock::now();
+
         PartitionPtr partition;
         // first try to get partition without write lock
         std::shared_lock rd_lock(_mutex);
@@ -191,6 +193,11 @@ namespace springtail::xid_mgr {
         // exclusive lock held for insert/create
         partition->commit_xid(db_id, xid, has_schema_changes);
 
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now() -
+            start_time);
+        tracing::record_histogram("xid_mgr_commit_xid_latencies", duration.count());
+
         tracing::increment_counter("xid_mgr_commit_xid_calls");
 
         return;
@@ -201,6 +208,7 @@ namespace springtail::xid_mgr {
                                     uint64_t xid)
     {
         // note: code is nearly identical to commit_xid()... make sure they stay in sync
+        auto start_time = std::chrono::system_clock::now();
 
         PartitionPtr partition;
 
@@ -224,17 +232,31 @@ namespace springtail::xid_mgr {
         // exclusive lock held for insert/create
         partition->record_ddl_change(db_id, xid);
 
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now() -
+            start_time);
+        tracing::record_histogram("xid_mgr_record_ddl_change_latencies", duration.count());
+
         tracing::increment_counter("xid_mgr_record_ddl_change_calls");
     }
 
     void
     XidMgrServer::_register_metrics() {
-        for (const auto& metric : _xid_mgr_metrics) {
-            // Registers the counter for the metric
+        for (const auto& counter : _xid_mgr_counter_metrics) {
+            // Registers the counters
             tracing::register_counter(
-                metric.first,
-                metric.second,
+                counter.first,
+                counter.second,
                 "calls"
+            );
+        }
+
+        for (const auto& histogram : _xid_mgr_histogram_metrics) {
+            // Registers the histograms
+            tracing::register_histogram(
+                histogram.first,
+                histogram.second,
+                "ms"
             );
         }
     }

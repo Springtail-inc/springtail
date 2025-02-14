@@ -24,6 +24,8 @@ namespace springtail::tracing {
 
 static std::map<std::string, opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Counter<uint64_t>>> counters;
 
+static std::map<std::string, opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Histogram<double>>> histograms;
+
 static std::shared_ptr<opentelemetry::sdk::metrics::MeterProvider> meter_provider;
 
 static opentelemetry::sdk::resource::Resource
@@ -181,6 +183,16 @@ increment_counter(std::string name)
     }
 }
 
+void record_histogram(std::string name, double value)
+{
+    auto histogram = histograms[name];
+    if(histogram){
+        histogram->Record(value);
+    } else {
+        SPDLOG_ERROR("Histogram '{}' not found", name);
+    }
+}
+
 opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Counter<uint64_t>>
 create_uint64_counter(const std::string name, const std::string description, const std::string unit)
 {
@@ -188,9 +200,21 @@ create_uint64_counter(const std::string name, const std::string description, con
     return meter->CreateUInt64Counter(name.data(), description.data(), unit.data());
 }
 
+opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Histogram<double>>
+create_double_histogram(const std::string name, const std::string description, const std::string unit)
+{
+    auto meter = opentelemetry::metrics::Provider::GetMeterProvider()->GetMeter(name);
+    return meter->CreateDoubleHistogram(name.data(), description.data(), unit.data());
+}
+
 void register_counter(const std::string name, const std::string description, const std::string unit)
 {
     counters[name] = create_uint64_counter(name, description, unit);
+}
+
+void register_histogram(const std::string name, const std::string description, const std::string unit)
+{
+    histograms[name] = create_double_histogram(name, description, unit);
 }
 
 }  // namespace springtail::tracing

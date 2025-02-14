@@ -93,12 +93,6 @@ void init_tracing_and_metrics(std::string_view component_name);
  */
 void shutdown_tracing_and_metrics();
 
-
-/**
- * @brief Increment a counter
- */
-void increment_counter(const std::string name);
-
 /**
  * @brief Retrieve the otel Tracer by name.
  */
@@ -108,4 +102,19 @@ opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer(const std:
  * @brief Register a counter
  */
 void register_counter(const std::string name, const std::string description, const std::string unit);
+
+/**
+ * @brief Register a histogram
+ */
+void register_histogram(const std::string name, const std::string description, const std::string unit);
+
+/**
+ * @brief Increment a counter
+ */
+void increment_counter(const std::string name);
+
+/**
+ * @brief Record a histogram
+ */
+void record_histogram(const std::string name, double value);
 }  // namespace springtail::tracing
