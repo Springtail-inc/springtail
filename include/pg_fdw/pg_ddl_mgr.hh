@@ -37,8 +37,8 @@ namespace springtail::pg_fdw {
     public:
         /** Max number of connections to cache */
         static constexpr int MAX_CONNECTION_CACHE_SIZE = 10;
-
-        static constexpr int MAX_THREAD_POOL_SIZE = 1;
+        /** Max number of threads in the thread manager pool */
+        static constexpr int MAX_THREAD_POOL_SIZE = 4;
 
         /**
          * Start the main thread
@@ -52,13 +52,21 @@ namespace springtail::pg_fdw {
                   const std::string &password,
                   const std::optional<std::string> &hostname = std::nullopt);
 
+        /**
+         * @brief This function runs the main loop of DDL manager
+         *
+         */
         void run();
 
+        /**
+         * @brief This function notifies DDL manager to exit the main loop
+         *
+         */
         void notify_shutdown() { _is_shutting_down = true; }
     private:
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections
         RedisCache::RedisChangeWatcherPtr _cache_watcher;           ///< redis cache callback object
-        std::shared_ptr<MultiQueueThreadManager> _thread_manager;
+        std::shared_ptr<MultiQueueThreadManager> _thread_manager;   ///< thread manager that processes DDL requests
 
         std::string _fdw_id;                       ///< FDW ID
 
@@ -74,7 +82,7 @@ namespace springtail::pg_fdw {
         std::map<uint64_t, uint64_t> _db_xid_map;  ///< map of db id to max schema xid (applied)
 
         std::map<uint32_t, std::string> _type_map;  ///< map of PG type OIDs to type names
-        std::atomic<bool> _is_shutting_down{false};
+        std::atomic<bool> _is_shutting_down{false}; ///< shutting down flag
 
         /** Private constructor */
         PgDDLMgr();
