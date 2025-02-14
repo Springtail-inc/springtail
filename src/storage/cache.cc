@@ -52,8 +52,12 @@ namespace springtail {
     }
 
     void StorageCache::_register_metrics() {
-        for (const auto &metric : _storage_cache_metrics) {
-            tracing::register_counter(metric.first, metric.second, "calls");
+        for (const auto &counter : _storage_cache_counters) {
+            tracing::register_counter(counter.first, counter.second, "calls");
+        }
+
+        for (const auto &histogram : _storage_cache_histograms) {
+            tracing::register_histogram(histogram.first, histogram.second, "ms");
         }
     }
 
@@ -164,6 +168,7 @@ namespace springtail {
         //     from; for now we assume that the single extent_id *is* the full list of extents for
         //     the access XID and that the query nodes won't perform any roll-forward on their own.
 
+        tracing::increment_counter("storage_cache_get_cache_misses");
         // note: not in the cache, need to create a new Page
         return _create(file, extent_id, target_xid, { extent_id });
     }
@@ -188,6 +193,8 @@ namespace springtail {
 
         boost::unique_lock lock(_mutex);
 
+        tracing::increment_counter("storage_cache_put_calls");
+
         // set the flush callback for the page if it doesn't have one yet
         if (flush_callback && !page->_flush_callback) {
             page->_register_flush(flush_callback);
@@ -205,7 +212,6 @@ namespace springtail {
             return;
         }
 
-        tracing::increment_counter("storage_cache_put_calls");
         // release the page back to the cache
        _put(page);
     }
@@ -214,6 +220,9 @@ namespace springtail {
     StorageCache::PageCache::flush_file(const std::filesystem::path &file)
     {
         boost::unique_lock lock(_mutex);
+
+        tracing::increment_counter("storage_cache_flush_calls");
+        const auto start_time = std::chrono::system_clock::now();
 
         // go through the dirty page list for the file
         auto file_i = _flush_list.find(file);
@@ -282,7 +291,10 @@ namespace springtail {
             }
         }
 
-        tracing::increment_counter("storage_cache_flush_calls");
+        auto duration = std::chrono::system_clock::now() - start_time;
+        tracing::record_histogram("storage_cache_flush_latencies",
+            std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
+
         // flush list for the file must be empty, so remove it
         _flush_list.erase(file);
     }
@@ -291,6 +303,9 @@ namespace springtail {
     StorageCache::PageCache::drop_file(const std::filesystem::path &file)
     {
         boost::unique_lock lock(_mutex);
+
+        tracing::increment_counter("storage_cache_drop_calls");
+        const auto start_time = std::chrono::system_clock::now();
 
         // go through the dirty page list for the file
         auto file_i = _flush_list.find(file);
@@ -332,7 +347,10 @@ namespace springtail {
             }
         }
 
-        tracing::increment_counter("storage_cache_drop_calls");
+        const auto duration = std::chrono::system_clock::now() - start_time;
+        tracing::record_histogram("storage_cache_drop_latencies",
+            std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
+
         // flush list for the file must be empty, so remove it
         _flush_list.erase(file);
     }

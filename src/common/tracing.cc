@@ -22,6 +22,8 @@
 
 namespace springtail::tracing {
 
+static opentelemetry::context::Context _context;
+
 static std::map<std::string, opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Counter<uint64_t>>> counters;
 
 static std::map<std::string, opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Histogram<double>>> histograms;
@@ -187,7 +189,7 @@ void record_histogram(std::string name, double value)
 {
     auto histogram = histograms[name];
     if(histogram){
-        histogram->Record(value);
+        histogram->Record(value, _context);
     } else {
         SPDLOG_ERROR("Histogram '{}' not found", name);
     }
