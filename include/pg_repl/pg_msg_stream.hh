@@ -10,9 +10,6 @@
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_repl_connection.hh>
 
-#include <opentelemetry/metrics/meter.h>
-#include <opentelemetry/metrics/provider.h>
-
 namespace springtail {
     /**
      * @brief Msg Stream header

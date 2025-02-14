@@ -24,8 +24,14 @@ namespace springtail::tracing {
 
 static opentelemetry::context::Context _context;
 
+/**
+ * @brief Map of counter names to their corresponding counters
+ */
 static std::map<std::string, opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Counter<uint64_t>>> counters;
 
+/**
+ * @brief Map of histogram names to their corresponding histograms
+ */
 static std::map<std::string, opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Histogram<double>>> histograms;
 
 static std::shared_ptr<opentelemetry::sdk::metrics::MeterProvider> meter_provider;
@@ -173,6 +179,10 @@ tracer(const std::string_view& name)
     return provider->GetTracer(name.data());
 }
 
+/**
+ * @brief Increment a counter
+ * @param name The name of the counter
+ */
 void
 increment_counter(std::string name)
 {
@@ -185,6 +195,11 @@ increment_counter(std::string name)
     }
 }
 
+/**
+ * @brief Record a value in the histogram
+ * @param name The name of the histogram
+ * @param value The value to record
+ */
 void record_histogram(std::string name, double value)
 {
     auto histogram = histograms[name];
@@ -195,6 +210,12 @@ void record_histogram(std::string name, double value)
     }
 }
 
+/**
+ * @brief Create a uint64 counter with the given name, description, and unit
+ * @param name The name of the counter
+ * @param description The description of the counter
+ * @param unit The unit of the counter
+ */
 opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Counter<uint64_t>>
 create_uint64_counter(const std::string name, const std::string description, const std::string unit)
 {
@@ -202,6 +223,12 @@ create_uint64_counter(const std::string name, const std::string description, con
     return meter->CreateUInt64Counter(name.data(), description.data(), unit.data());
 }
 
+/**
+ * @brief Create a double histogram with the given name, description, and unit
+ * @param name The name of the histogram
+ * @param description The description of the histogram
+ * @param unit The unit of the histogram
+ */
 opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Histogram<double>>
 create_double_histogram(const std::string name, const std::string description, const std::string unit)
 {
@@ -209,11 +236,23 @@ create_double_histogram(const std::string name, const std::string description, c
     return meter->CreateDoubleHistogram(name.data(), description.data(), unit.data());
 }
 
+/**
+ * @brief Register a counter with the given name, description, and unit
+ * @param name The name of the counter
+ * @param description The description of the counter
+ * @param unit The unit of the counter
+ */
 void register_counter(const std::string name, const std::string description, const std::string unit)
 {
     counters[name] = create_uint64_counter(name, description, unit);
 }
 
+/**
+ * @brief Register a histogram with the given name, description, and unit
+ * @param name The name of the histogram
+ * @param description The description of the histogram
+ * @param unit The unit of the histogram
+ */
 void register_histogram(const std::string name, const std::string description, const std::string unit)
 {
     histograms[name] = create_double_histogram(name, description, unit);
