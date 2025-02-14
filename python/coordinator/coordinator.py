@@ -5,7 +5,6 @@ import logging
 import argparse
 import string
 import signal
-import boto3
 import time
 from typing import Optional
 from random import SystemRandom
@@ -157,18 +156,22 @@ if __name__ == "__main__":
     logger = logging.getLogger("Coordinator")
 
     # Get the service type
-    service_type = args.service
-    if not service_type:
-        service_type = os.environ.get('SERVICE_NAME')
-        if not service_type:
+    service_name = args.service
+    if not service_name:
+        service_name = os.environ.get('SERVICE_NAME')
+        if not service_name:
             raise ValueError("Service type not provided")
+
+    send_sns('startup')
 
     # get install path
     install_path = yaml_config.get('install_dir')
 
     # Check the properties for production
+    production = False
     if yaml_config.get('production'):
         logger.debug("Checking properties for production")
+        production = True
 
         # Install binaries
         try:
@@ -179,7 +182,7 @@ if __name__ == "__main__":
 
     # Create scheduler
     logger.debug("Starting scheduler")
-    scheduler = Scheduler(props)
+    scheduler = Scheduler(props, service_name, production)
 
     # Set up signal handlers
     def signal_handler(signum, frame):
@@ -199,15 +202,15 @@ if __name__ == "__main__":
     factory = ComponentFactory(bin_dir, props.get_pid_path())
 
     # Register components
-    logger.debug(f"Starting {service_type} service")
+    logger.debug(f"Starting {service_name} service")
 
-    if service_type == "ingestion":
+    if service_name == "ingestion":
         scheduler.register_component(factory.create_xid_mgr_daemon(), 1)
         scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 2)
         scheduler.register_component(factory.create_gc_daemon(), 3)
         scheduler.register_component(factory.create_log_mgr_daemon(), 4)
 
-    elif service_type == "fdw":
+    elif service_name == "fdw":
         try:
             install_pgfdw(install_path)
         except Exception as e:
@@ -232,15 +235,16 @@ if __name__ == "__main__":
         scheduler.register_component(postgres, 3)
         scheduler.register_component(factory.create_ddl_daemon('ddl_user', ddl_password), 4)
 
-    elif service_type == "proxy":
+    elif service_name == "proxy":
         scheduler.register_component(factory.create_proxy(), 1)
 
     else:
-        raise ValueError(f"Invalid service type: {service_type}; must be one of: ingestion, fdw, proxy")
+        raise ValueError(f"Invalid service type: {service_name}; must be one of: ingestion, fdw, proxy")
 
     # Start all components
     if not scheduler.start_all():
         logger.error("Failed to start all components")
+        send_sns('shutdown')
         raise ValueError("Failed to start all components")
 
     logger.info("All components started successfully")
@@ -254,3 +258,4 @@ if __name__ == "__main__":
     logger.debug("Shutting down all components")
     scheduler.shutdown_all()
 
+    send_sns('shutdown')

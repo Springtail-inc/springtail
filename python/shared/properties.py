@@ -49,6 +49,10 @@ class Properties:
                 self.replication_user_password = system_json['org']['replication_user_password']
                 self.fdw_user_password = system_json['org']['fdw_user_password']
 
+                # not in config file, but will be set in production env
+                self.instance_key = None
+                self.service_name = None
+
                 # set the environment variables
                 env_vars = {
                     'ORGANIZATION_ID': system_json['org']['organization_id'],
@@ -89,6 +93,10 @@ class Properties:
             self.replication_user_password = os.environ.get('REPLICATION_USER_PASSWORD', None)
             self.fdw_user_password = os.environ.get('FDW_USER_PASSWORD', None)
             self.fdw_id = os.environ.get('FDW_ID', None)
+
+            # not in config file, but will be set in production env
+            self.instance_key = os.environ.get('INSTANCE_KEY', None)
+            self.service_name = os.environ.get('SERVICE_NAME', None)
 
         self.redis = redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db, ssl=self.redis_ssl,
                                        username=self.redis_user, password=self.redis_password, encoding="utf-8", decode_responses=True)
@@ -368,4 +376,19 @@ class Properties:
         # set the state to initialize
         self.redis.hset(self.db_instance_id + ':instance_state', new_id, 'initialize')
 
+def get_coordinator_state(self) -> str:
+    """Return the coordinator state."""
+    key = self.db_instance_id + ':coordinator_state'
+    if not self.service_name or not self.instance_key:
+        return 'running' # for test env.
+    field_key = self.service_name + ':' + self.instance_key
+    return self.redis.hget(key, field_key)
+
+def set_coordinator_state(self, state: str) -> None:
+    """Set the coordinator state."""
+    if not self.service_name or not self.instance_key:
+        return # for test env.
+    key = self.db_instance_id + ':coordinator_state'
+    field_key = self.service_name + ':' + self.instance_key
+    self.redis.hset(key, field_key, state)
 
