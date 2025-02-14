@@ -1,0 +1,130 @@
+name: Build Springtail Packages
+
+on:
+  workflow_call:
+    inputs:
+      num_procs:
+        description: 'The number of processes to use for the build.'
+        type: string
+        required: true
+      data_share_bucket_name:
+        description: 'The name of the S3 bucket to store the build artifacts.'
+        type: string
+        required: true
+      image_version_tag:
+        description: 'The image version tag for the base builder to pull.'
+        type: string
+        required: true
+      slack_webhook_url:
+        description: "The Slack webhook URL."
+        required: true
+    secrets:
+      aws_role_arn:
+        description: "The ARN of the role to assume."
+        required: true
+      aws_ecr_docker_password:
+        description: "The password for the ECR docker registry."
+        required: true
+
+
+jobs:
+  build:
+    name: Build Springtail Packages
+    runs-on: warp-ubuntu-latest-arm64-4x-spot
+    timeout-minutes: 30
+    container:
+      image: ${{ inputs.image_version_tag }}
+      credentials:
+        username: AWS
+        password: ${{ secrets.aws_ecr_docker_password }}
+    env:
+      VCPKG_FORCE_SYSTEM_BINARIES: 1
+      ZIC: true
+      DATA_SHARE_BUCKET_NAME: ${{ inputs.data_share_bucket_name }}
+      PACKAGES_S3_PREFIX: packages
+      NUM_PROCS: ${{ inputs.num_procs }}
+      SLACK_WEBHOOK_URL: ${{ inputs.slack_webhook_url }}
+      SLACK_CHANNEL: '#release'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          clean: true
+
+      - name: install-aws-cli-action
+        uses: unfor19/install-aws-cli-action@v1
+        with:
+          version: 2                         # default
+          verbose: false                     # default
+          arch: arm64
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.aws_role_arn }}
+          role-session-name: tempSession
+          aws-region: us-east-1
+
+      - name: Build Springtail Service
+        run: |
+          git config --global --add safe.directory /__w/springtail/springtail
+          # Todo: change this to release in the future
+          ./debug.sh -j 3
+
+      - name: Install the packages
+        if: success()
+        run: |
+          # Todo: later change to release/ location
+          cd debug
+          make install
+
+      - name: Package and Upload Build artifacts to S3
+        if: success()
+        run: |
+          sudo ./package.sh
+          cd releases
+          PKG_NAME="$(ls -t *.tgz | head -n1)"
+          aws s3 cp $PKG_NAME s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/
+          echo "PACKAGE_PATH=s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/${PKG_NAME}" >> $GITHUB_ENV
+          echo "RELEASE_INFO=$(cat install/INFO.txt)" >> $GITHUB_ENV
+
+      - name: Notify Slack Success
+        if: success()
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "channel": "${{ env.SLACK_CHANNEL }}",
+              "text": ":tada: Springtail Release Package Built",
+              "attachments": [
+                {
+                  "color": "#36a64f",
+                  "fields": [
+                    {
+                      "title": "Git SHA",
+                      "value": "${{ github.sha }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Build Artifacts",
+                      "value": "${{ env.PACKAGE_PATH }}",
+                      "short": false
+                    },
+                    {
+                        "title": "Release Info",
+                        "value": "${{ env.RELEASE_INFO }}",
+                        "short": false
+                        }
+                  ]
+                }
+              ]
+            }
+
+      - name: Upload Release info file
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-info
+          path: install/INFO.txt
+
