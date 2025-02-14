@@ -38,7 +38,7 @@ namespace springtail::pg_fdw {
         /** Max number of connections to cache */
         static constexpr int MAX_CONNECTION_CACHE_SIZE = 10;
 
-        static constexpr int MAx_THREAD_POOL_SIZE = 8;
+        static constexpr int MAX_THREAD_POOL_SIZE = 1;
 
         /**
          * Start the main thread

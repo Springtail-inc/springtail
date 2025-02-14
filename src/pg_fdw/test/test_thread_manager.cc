@@ -10,11 +10,9 @@ namespace {
     class MultiQueueThreadManager_Test : public testing::Test {
     public:
         static void SetUpTestSuite() {
-            // Properties::get_instance()->init(true);
             init_exception();
         }
         static void TearDownTestSuite() {
-            // Properties::shutdown();
         }
     protected:
         void SetUp() override {

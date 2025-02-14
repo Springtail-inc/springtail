@@ -145,4 +145,20 @@ target_include_directories(test_thread_manager PRIVATE ${CMAKE_SOURCE_DIR}/inclu
 target_link_libraries(test_thread_manager PRIVATE springtail_common GTest::gtest_main)
 add_dsymutil_command(test_thread_manager)
 
+add_executable(test_pg_ddl_mgr
+    test/test_pg_ddl_mgr.cc
+    pg_ddl_mgr.cc
+    multi-queue-thread-manager.cc)
+target_include_directories(test_pg_ddl_mgr
+    PRIVATE ${PROJECT_SOURCE_DIR}/include
+    PRIVATE ${PostgreSQL_INCLUDE_DIRS})
+target_link_libraries(test_pg_ddl_mgr
+    PRIVATE springtail_common
+    PRIVATE springtail_pg
+    PRIVATE springtail_redis
+    PRIVATE springtail_test
+    PRIVATE GTest::gtest_main)
+add_dsymutil_command(test_pg_ddl_mgr)
+
 gtest_discover_tests(test_thread_manager)
+gtest_discover_tests(test_pg_ddl_mgr)

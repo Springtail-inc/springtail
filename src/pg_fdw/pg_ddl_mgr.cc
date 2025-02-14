@@ -131,7 +131,7 @@ namespace springtail::pg_fdw {
 
         _init_fdw(username, password);
 
-        _thread_manager = std::make_shared<MultiQueueThreadManager>(MAx_THREAD_POOL_SIZE);
+        _thread_manager = std::make_shared<MultiQueueThreadManager>(MAX_THREAD_POOL_SIZE);
         _thread_manager->start();
     }
 
