@@ -319,7 +319,7 @@ namespace springtail::pg_proxy {
         // it is set back to blocking after the handshake (after ssl_accept/connect)
         _set_non_blocking();
 
-    #if SPDLOG_ACTIVE_LEVEL==SPDLOG_ACTIVE_DEBUG
+    #if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG
         // set the connection object in the SSL ex data for debugging
         SSL_set_ex_data(ssl, 0, this);
     #endif

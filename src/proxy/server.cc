@@ -168,7 +168,7 @@ namespace springtail::pg_proxy {
             exit(1);
         }
 
-#if SPDLOG_ACTIVE_LEVEL==SPDLOG_ACTIVE_DEBUG
+#if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG
         // set the info callback
         SSL_CTX_set_info_callback(ssl_ctx, ssl_info_callback);
 #endif
