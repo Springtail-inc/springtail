@@ -1,6 +1,7 @@
 #pragma once
 
 #include <common/common.hh>
+#include <fmt/ranges.h>
 
 namespace springtail::gc {
 

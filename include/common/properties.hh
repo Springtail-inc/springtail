@@ -67,6 +67,12 @@ namespace springtail {
          */
         void init(bool load_redis);
 
+        /**
+         * @brief Function for separate redis cache initialization
+         *
+         */
+        void init_cache() { _cache = std::make_shared<RedisCache>(true); }
+
         /** Helper to get db instance id */
         static inline uint64_t get_db_instance_id() {
             _assert_instance();
