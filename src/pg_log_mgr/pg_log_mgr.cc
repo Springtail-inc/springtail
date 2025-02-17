@@ -243,14 +243,13 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_copy_thread()
     {
-        // XXX Fix this
-        _token = logging::set_otel_context(_db_id, 100001);
-
         // check initial state on thread startup
         // if in startup_sync state then switch to syncing
         if (_internal_state.is(STATE_STARTUP_SYNC)) {
             // Create the namespaces before starting the copy thread
             auto xid = _pg_log_reader.get_next_xid();
+            _pg_log_mgr_token = logging::set_otel_context(_db_id, xid);
+
             PgCopyTable::create_namespaces(_db_id, xid);
 
             _do_table_copies();

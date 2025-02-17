@@ -65,6 +65,8 @@ namespace springtail::gc {
             }
             uint64_t db_id = result->db();
 
+            _gc_token = logging::set_otel_context(db_id, -1);
+
             // handle a TABLE_SYNC_START
             if (result->type() == XidReady::Type::TABLE_SYNC_START) {
                 SPDLOG_DEBUG_MODULE(LOG_GC, "Stop committing due to table sync: {}", db_id);
@@ -86,6 +88,8 @@ namespace springtail::gc {
             } else {
                 completed_xid = itr->second;
             }
+
+            _gc_token = logging::set_otel_context(db_id, completed_xid);
             SPDLOG_INFO("Last completed XID: {}@{}", db_id, completed_xid);
 
             // handle a TABLE_SYNC_COMMIT
