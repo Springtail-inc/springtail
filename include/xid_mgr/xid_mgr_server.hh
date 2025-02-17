@@ -13,6 +13,7 @@
 #include <xid_mgr/xid_mgr_service.hh>
 
 namespace springtail::xid_mgr {
+
     /**
      * @class XidMgrServer
      * @brief This class represents a server for managing transaction IDs (XIDs).
@@ -65,17 +66,6 @@ namespace springtail::xid_mgr {
          * @brief Destroy the XidMgr object; shouldn't be called directly use shutdown()
          */
          ~XidMgrServer() override = default;
-
-        /**
-         * @brief Register metrics for monitoring XID manager operations
-         * 
-         * Registers counters for tracking various XID manager operations like:
-         * - Number of XID commits
-         * - Number of DDL change records
-         * - Number of partition lookups
-         * - Number of committed XID lookups
-         */
-        void _register_metrics();
 
         /** base path */
         std::filesystem::path _base_path;

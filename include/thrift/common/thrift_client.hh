@@ -14,10 +14,6 @@
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/object_pool.hh>
-#include <common/tracing.hh>
-
-#include <opentelemetry/metrics/meter.h>
-#include <opentelemetry/metrics/provider.h>
 
 constexpr useconds_t RECONNECT_SLEEP_INTERVAL_USEC = 1000000;
 
@@ -232,9 +228,6 @@ namespace springtail::thrift {
                 ObjectPool<T>::LIFO
             );
         }
-
-        /** OpenTelemetry span */
-        tracing::SpanPtr _span;
 
         // the following is for handling cached thrift clients from the object pool
         // we wrap the client in a struct whose deallocator will release it back to the pool

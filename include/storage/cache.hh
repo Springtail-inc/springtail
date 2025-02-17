@@ -34,17 +34,6 @@ namespace springtail {
         static StorageCache *_instance; ///< static instance (singleton)
         static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
 
-        /**
-         * @brief Register metrics for monitoring storage cache operations
-         * 
-         * Registers counters for tracking key storage cache operations including:
-         * - Number of get calls
-         * - Number of put calls 
-         * - Number of flush calls
-         * - Number of drop calls
-         */
-        void _register_metrics();
-
         /** Constructor.  Uses global properties to configure itself. */
         StorageCache();
 
