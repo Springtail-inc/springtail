@@ -104,5 +104,7 @@ gtest_discover_tests(test_dns)
 gtest_discover_tests(test_synchronizer)
 gtest_discover_tests(test_exception)
 gtest_discover_tests(test_coordinator)
-gtest_discover_tests(test_redis_cache)
+gtest_discover_tests(test_redis_cache
+  PROPERTIES TIMEOUT 30
+)
 gtest_discover_tests(test_timestamp)
