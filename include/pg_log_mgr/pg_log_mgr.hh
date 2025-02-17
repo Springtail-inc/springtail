@@ -134,6 +134,8 @@ namespace springtail::pg_log_mgr {
         void _process_xact(const PgTransactionPtr xact);
 
     private:
+        std::unique_ptr<opentelemetry::context::Token> _token;
+
         /** minimum size for log rollover */
         static constexpr int LOG_ROLLOVER_SIZE_BYTES = 128 * 1024 * 1024;
 

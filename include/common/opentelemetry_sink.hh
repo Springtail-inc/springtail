@@ -1,3 +1,4 @@
+#include <common/properties.hh>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/base_sink.h>
 #include <opentelemetry/logs/provider.h>
@@ -17,7 +18,6 @@
 #include <opentelemetry/sdk/logs/logger_provider.h>
 #include <opentelemetry/sdk/logs/processor.h>
 #include <opentelemetry/sdk/logs/simple_log_record_processor.h>
-#include <iostream>
 #include <mutex>
 #include <string>
 
@@ -103,12 +103,30 @@ protected:
     std::vector<std::pair<std::string, std::string>>
     get_context_attributes(const spdlog::details::log_msg &msg)
     {
-        // Create attributes
-        std::vector<std::pair<std::string, std::string>> attributes = {
-            {"source_file", msg.source.filename ? msg.source.filename : ""},
-            {"source_line", std::to_string(msg.source.line)},
-            {"source_func", msg.source.funcname ? msg.source.funcname : ""}
-        };
+        auto ctx = opentelemetry::context::RuntimeContext::GetCurrent();
+        auto db_id = opentelemetry::nostd::get<int64_t>(ctx.GetValue("db_id"));
+        auto xid = opentelemetry::nostd::get<int64_t>(ctx.GetValue("xid"));
+
+        // Instance properties
+        auto db_instance_id = springtail::Properties::get_db_instance_id();
+        std::string organization_id = springtail::Properties::get_organization_id();
+        std::string account_id = springtail::Properties::get_account_id();
+
+        std::vector<std::pair<std::string, std::string>> attributes;
+        
+        // Source properties
+        attributes.emplace_back("source_file", msg.source.filename ? msg.source.filename : "");
+        attributes.emplace_back("source_line", std::to_string(msg.source.line));
+        attributes.emplace_back("source_func", msg.source.funcname ? msg.source.funcname : "");
+
+        // Instance properties
+        attributes.emplace_back("db_instance_id", std::to_string(db_instance_id));
+        attributes.emplace_back("organization_id", organization_id);
+        attributes.emplace_back("account_id", account_id);
+
+        // Transaction properties
+        attributes.emplace_back("xid", std::to_string(xid));
+        attributes.emplace_back("db_id", std::to_string(db_id));
 
         return attributes;
     }

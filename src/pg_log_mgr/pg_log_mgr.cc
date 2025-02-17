@@ -243,6 +243,8 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_copy_thread()
     {
+        // XXX Fix this
+        _token = logging::set_otel_context(_db_id, 100001);
 
         // check initial state on thread startup
         // if in startup_sync state then switch to syncing
