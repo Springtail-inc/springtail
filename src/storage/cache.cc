@@ -66,7 +66,7 @@ namespace springtail {
             target_xid = access_xid;
         }
 
-        tracing::increment_counter(STORAGE_CACHE_GET_CALLS);
+        tracing::increment_counter(STORAGE_CACHE_GET_CALLS, tracing::get_db_id_xid_map(0, target_xid));
 
         // if the extent ID is UNKNOWN, then we will get an empty page for the file
         if (extent_id == constant::UNKNOWN_EXTENT) {
@@ -147,7 +147,7 @@ namespace springtail {
         // check if the page already exists in the cache for the given target XID
         PagePtr page = _try_get(file, extent_id, target_xid);
         if (page != nullptr) {
-            tracing::increment_counter(STORAGE_CACHE_GET_CALLS);
+            tracing::increment_counter(STORAGE_CACHE_GET_CALLS, tracing::get_db_id_xid_map(0, target_xid));
             SPDLOG_DEBUG_MODULE(LOG_CACHE, "Found in cache");
             return page;
         }
@@ -156,7 +156,7 @@ namespace springtail {
         //     from; for now we assume that the single extent_id *is* the full list of extents for
         //     the access XID and that the query nodes won't perform any roll-forward on their own.
 
-        tracing::increment_counter(STORAGE_CACHE_GET_CACHE_MISSES);
+        tracing::increment_counter(STORAGE_CACHE_GET_CACHE_MISSES, tracing::get_db_id_xid_map(0, target_xid));
         // note: not in the cache, need to create a new Page
         return _create(file, extent_id, target_xid, { extent_id });
     }
@@ -181,7 +181,7 @@ namespace springtail {
 
         boost::unique_lock lock(_mutex);
 
-        tracing::increment_counter(STORAGE_CACHE_PUT_CALLS);
+        tracing::increment_counter(STORAGE_CACHE_PUT_CALLS, tracing::get_db_id_xid_map(0, page->_end_xid));
 
         // set the flush callback for the page if it doesn't have one yet
         if (flush_callback && !page->_flush_callback) {

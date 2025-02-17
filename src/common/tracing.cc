@@ -232,6 +232,15 @@ _set_default_attributes(const std::unordered_map<std::string, std::string>& inpu
     return attributes;
 }
 
+std::unordered_map<std::string, std::string>
+get_db_id_xid_map(uint64_t db_id, uint64_t xid)
+{
+    return std::unordered_map<std::string, std::string>{
+        {"db_id", std::to_string(db_id)},
+        {"xid", std::to_string(xid)}
+    };
+}
+
 /**
  * @brief Increment a counter
  * @param name The name of the counter
@@ -272,7 +281,7 @@ record_histogram(std::string_view name, double value, const std::unordered_map<s
  * @param unit The unit of the counter
  */
 opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Counter<uint64_t>>
-create_uint64_counter(const std::string name, const std::string description, const std::string unit)
+_create_uint64_counter(const std::string name, const std::string description, const std::string unit)
 {
     auto meter = opentelemetry::metrics::Provider::GetMeterProvider()->GetMeter(name);
     return meter->CreateUInt64Counter(name, description, unit);
@@ -285,7 +294,7 @@ create_uint64_counter(const std::string name, const std::string description, con
  * @param unit The unit of the histogram
  */
 opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Histogram<double>>
-create_double_histogram(const std::string name, const std::string description, const std::string unit)
+_create_double_histogram(const std::string name, const std::string description, const std::string unit)
 {
     auto meter = opentelemetry::metrics::Provider::GetMeterProvider()->GetMeter(name);
     return meter->CreateDoubleHistogram(name, description, unit);
@@ -299,7 +308,7 @@ create_double_histogram(const std::string name, const std::string description, c
  */
 void _register_counter(std::string_view name, std::string_view description, std::string_view unit)
 {
-    counters[name] = create_uint64_counter(std::string(name), std::string(description), std::string(unit));
+    counters[name] = _create_uint64_counter(std::string(name), std::string(description), std::string(unit));
 }
 
 /**
@@ -310,7 +319,7 @@ void _register_counter(std::string_view name, std::string_view description, std:
  */
 void _register_histogram(std::string_view name, std::string_view description, std::string_view unit)
 {
-    histograms[name] = create_double_histogram(std::string(name), std::string(description), std::string(unit));
+    histograms[name] = _create_double_histogram(std::string(name), std::string(description), std::string(unit));
 }
 
 }  // namespace springtail::tracing

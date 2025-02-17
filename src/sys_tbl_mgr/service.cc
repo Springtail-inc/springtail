@@ -28,10 +28,7 @@ namespace springtail::sys_tbl_mgr {
                           const IndexRequest &request)
     {
         sys_tbl_mgr::Server::call_wrapper([this, &_return, &request]() {
-            tracing::increment_counter(SYS_TBL_MGR_CREATE_INDEX_CALLS, {
-                {"db_id", std::to_string(request.db_id)},
-                {"xid", std::to_string(request.xid)}
-            });
+            tracing::increment_counter(SYS_TBL_MGR_CREATE_INDEX_CALLS, tracing::get_db_id_xid_map(request.db_id, request.xid));
             SPDLOG_INFO("got create_index(): db {}, table {}, index {}, xid {}:{}",
                 request.db_id, request.index.table_id, request.index.id, request.xid, request.lsn);
 
@@ -146,10 +143,7 @@ namespace springtail::sys_tbl_mgr {
             const SetIndexStateRequest &request)
     {
         sys_tbl_mgr::Server::call_wrapper([this, &_return, &request]() {
-            tracing::increment_counter(SYS_TBL_MGR_SET_INDEX_STATE_CALLS, {
-                {"db_id", std::to_string(request.db_id)},
-                {"xid", std::to_string(request.xid)}
-            });
+            tracing::increment_counter(SYS_TBL_MGR_SET_INDEX_STATE_CALLS, tracing::get_db_id_xid_map(request.db_id, request.xid));
             SPDLOG_INFO("got set_index_state()");
 
             // acquire a shared lock to ensure no one is doing a finalize
@@ -167,10 +161,7 @@ namespace springtail::sys_tbl_mgr {
     Service::get_index_info(IndexInfo& _return, const GetIndexInfoRequest &request)
     {
         sys_tbl_mgr::Server::call_wrapper([this, &_return, &request]() {
-            tracing::increment_counter(SYS_TBL_MGR_GET_INDEX_INFO_CALLS, {
-                {"db_id", std::to_string(request.db_id)},
-                {"xid", std::to_string(request.xid)}
-            });
+            tracing::increment_counter(SYS_TBL_MGR_GET_INDEX_INFO_CALLS, tracing::get_db_id_xid_map(request.db_id, request.xid));
             SPDLOG_INFO("got get_index_info()");
 
             // acquire a shared lock to ensure no one is doing a finalize
@@ -246,10 +237,7 @@ namespace springtail::sys_tbl_mgr {
                           const DropIndexRequest &request)
     {
         sys_tbl_mgr::Server::call_wrapper([this, &_return, &request]() {
-            tracing::increment_counter(SYS_TBL_MGR_DROP_INDEX_CALLS, {
-                {"db_id", std::to_string(request.db_id)},
-                {"xid", std::to_string(request.xid)}
-            });
+            tracing::increment_counter(SYS_TBL_MGR_DROP_INDEX_CALLS, tracing::get_db_id_xid_map(request.db_id, request.xid));
             SPDLOG_INFO("got drop_index(): db {}, index {}, xid {}:{}",
                 request.db_id, request.index_id, request.xid, request.lsn);
 
@@ -409,10 +397,7 @@ namespace springtail::sys_tbl_mgr {
                           const TableRequest &request)
     {
         sys_tbl_mgr::Server::call_wrapper([this, &_return, &request]() {
-            tracing::increment_counter(SYS_TBL_MGR_CREATE_TABLE_CALLS, {
-                {"db_id", std::to_string(request.db_id)},
-                {"xid", std::to_string(request.xid)}
-            });
+            tracing::increment_counter(SYS_TBL_MGR_CREATE_TABLE_CALLS, tracing::get_db_id_xid_map(request.db_id, request.xid));
             SPDLOG_INFO("got create_table() -- db {} table {} xid {} lsn {}",
                 request.db_id, request.table.id, request.xid, request.lsn);
 
@@ -499,10 +484,7 @@ namespace springtail::sys_tbl_mgr {
                          const TableRequest &request)
     {
         sys_tbl_mgr::Server::call_wrapper([this, &_return, &request]() {
-            tracing::increment_counter(SYS_TBL_MGR_ALTER_TABLE_CALLS, {
-                {"db_id", std::to_string(request.db_id)},
-                {"xid", std::to_string(request.xid)}
-            });
+            tracing::increment_counter(SYS_TBL_MGR_ALTER_TABLE_CALLS, tracing::get_db_id_xid_map(request.db_id, request.xid));
             // retrieve the id of the namespace
             auto ns_info = _get_namespace_info(request.db_id, request.table.namespace_name,
                 XidLsn(request.xid, request.lsn));
@@ -598,10 +580,7 @@ namespace springtail::sys_tbl_mgr {
                         const DropTableRequest &request)
     {
         sys_tbl_mgr::Server::call_wrapper([this, &_return, &request]() {
-            tracing::increment_counter(SYS_TBL_MGR_DROP_TABLE_CALLS, {
-                {"db_id", std::to_string(request.db_id)},
-                {"xid", std::to_string(request.xid)}
-            });
+            tracing::increment_counter(SYS_TBL_MGR_DROP_TABLE_CALLS, tracing::get_db_id_xid_map(request.db_id, request.xid));
             SPDLOG_INFO("got drop_table() {}@{}:{}", request.table_id, request.xid, request.lsn);
 
             // hold a shared lock to prevent a concurrent finalize()
@@ -682,10 +661,7 @@ namespace springtail::sys_tbl_mgr {
     Service::create_namespace(DDLStatement &_return, const NamespaceRequest &request)
     {
         sys_tbl_mgr::Server::call_wrapper([this, &_return, &request]() {
-            tracing::increment_counter(SYS_TBL_MGR_CREATE_NAMESPACE_CALLS, {
-                {"db_id", std::to_string(request.db_id)},
-                {"xid", std::to_string(request.xid)}
-            });
+            tracing::increment_counter(SYS_TBL_MGR_CREATE_NAMESPACE_CALLS, tracing::get_db_id_xid_map(request.db_id, request.xid));
             SPDLOG_INFO("got create_namespace() -- db {} namespace_id {} name {} xid {} lsn {}",
                     request.db_id, request.namespace_id, request.name, request.xid, request.lsn);
 
@@ -706,10 +682,7 @@ namespace springtail::sys_tbl_mgr {
     Service::alter_namespace(DDLStatement &_return, const NamespaceRequest &request)
     {
         sys_tbl_mgr::Server::call_wrapper([this, &_return, &request]() {
-            tracing::increment_counter(SYS_TBL_MGR_ALTER_NAMESPACE_CALLS, {
-                {"db_id", std::to_string(request.db_id)},
-                {"xid", std::to_string(request.xid)}
-            });
+            tracing::increment_counter(SYS_TBL_MGR_ALTER_NAMESPACE_CALLS, tracing::get_db_id_xid_map(request.db_id, request.xid));
             SPDLOG_INFO("got alter_namespace() -- db {} namespace_id {} name {} xid {} lsn {}",
                     request.db_id, request.namespace_id, request.name, request.xid, request.lsn);
 
@@ -735,10 +708,7 @@ namespace springtail::sys_tbl_mgr {
     Service::drop_namespace(DDLStatement &_return, const NamespaceRequest &request)
     {
         sys_tbl_mgr::Server::call_wrapper([this, &_return, &request]() {
-            tracing::increment_counter(SYS_TBL_MGR_DROP_NAMESPACE_CALLS, {
-                {"db_id", std::to_string(request.db_id)},
-                {"xid", std::to_string(request.xid)}
-            });
+            tracing::increment_counter(SYS_TBL_MGR_DROP_NAMESPACE_CALLS, tracing::get_db_id_xid_map(request.db_id, request.xid));
             SPDLOG_INFO("got drop_namespace() -- db {} namespace_id {} xid {} lsn {}",
                     request.db_id, request.namespace_id, request.xid, request.lsn);
 
@@ -799,10 +769,7 @@ namespace springtail::sys_tbl_mgr {
                           const UpdateRootsRequest &request)
     {
         sys_tbl_mgr::Server::call_wrapper([this, &_return, &request]() {
-            tracing::increment_counter(SYS_TBL_MGR_UPDATE_ROOTS_CALLS, {
-                {"db_id", std::to_string(request.db_id)},
-                {"xid", std::to_string(request.xid)}
-            });
+            tracing::increment_counter(SYS_TBL_MGR_UPDATE_ROOTS_CALLS, tracing::get_db_id_xid_map(request.db_id, request.xid));
             SPDLOG_INFO("got update_roots()");
 
             // hold a shared lock to prevent a concurrent finalize()
@@ -878,10 +845,7 @@ namespace springtail::sys_tbl_mgr {
                       const FinalizeRequest &request)
     {
         sys_tbl_mgr::Server::call_wrapper([this, &_return, &request]() {
-            tracing::increment_counter(SYS_TBL_MGR_FINALIZE_CALLS, {
-                {"db_id", std::to_string(request.db_id)},
-                {"xid", std::to_string(request.xid)}
-            });
+            tracing::increment_counter(SYS_TBL_MGR_FINALIZE_CALLS, tracing::get_db_id_xid_map(request.db_id, request.xid));
             SPDLOG_INFO("got finalize()");
 
             // block all mutations
@@ -930,10 +894,7 @@ namespace springtail::sys_tbl_mgr {
                        const GetRootsRequest &request)
     {
         sys_tbl_mgr::Server::call_wrapper([this, &_return, &request]() {
-            tracing::increment_counter(SYS_TBL_MGR_GET_ROOTS_CALLS, {
-                {"db_id", std::to_string(request.db_id)},
-                {"xid", std::to_string(request.xid)}
-            });
+            tracing::increment_counter(SYS_TBL_MGR_GET_ROOTS_CALLS, tracing::get_db_id_xid_map(request.db_id, request.xid));
             SPDLOG_INFO("got get_roots()");
 
             boost::shared_lock lock(_read_mutex);
@@ -960,10 +921,7 @@ namespace springtail::sys_tbl_mgr {
                         const GetSchemaRequest &request)
     {
         sys_tbl_mgr::Server::call_wrapper([this, &_return, &request]() {
-            tracing::increment_counter(SYS_TBL_MGR_GET_SCHEMA_CALLS, {
-                {"db_id", std::to_string(request.db_id)},
-                {"xid", std::to_string(request.xid)}
-            });
+            tracing::increment_counter(SYS_TBL_MGR_GET_SCHEMA_CALLS, tracing::get_db_id_xid_map(request.db_id, request.xid));
             SPDLOG_INFO("got get_schema()");
 
             boost::shared_lock lock(_read_mutex);
@@ -984,10 +942,7 @@ namespace springtail::sys_tbl_mgr {
                                const GetTargetSchemaRequest &request)
     {
         sys_tbl_mgr::Server::call_wrapper([this, &_return, &request]() {
-            tracing::increment_counter(SYS_TBL_MGR_GET_TARGET_SCHEMA_CALLS, {
-                {"db_id", std::to_string(request.db_id)},
-                {"xid", std::to_string(request.target_xid)}
-            });
+            tracing::increment_counter(SYS_TBL_MGR_GET_TARGET_SCHEMA_CALLS, tracing::get_db_id_xid_map(request.db_id, request.target_xid));
             SPDLOG_INFO("got get_target_schema() -- {}, {}", request.access_xid, request.target_xid);
 
             boost::shared_lock lock(_read_mutex);
@@ -1006,10 +961,7 @@ namespace springtail::sys_tbl_mgr {
     {
         bool ret = false;
         sys_tbl_mgr::Server::call_wrapper([this, &request, &ret]() {
-            tracing::increment_counter(SYS_TBL_MGR_EXISTS_CALLS, {
-                {"db_id", std::to_string(request.db_id)},
-                {"xid", std::to_string(request.xid)}
-            });
+            tracing::increment_counter(SYS_TBL_MGR_EXISTS_CALLS, tracing::get_db_id_xid_map(request.db_id, request.xid));
             SPDLOG_INFO("got exists()");
 
             boost::shared_lock lock(_read_mutex);
@@ -1029,10 +981,7 @@ namespace springtail::sys_tbl_mgr {
                              const UpdateRootsRequest &roots_req)
     {
         sys_tbl_mgr::Server::call_wrapper([this, &_return, &namespace_req, &create_req, &index_reqs, &roots_req]() {
-            tracing::increment_counter(SYS_TBL_MGR_SWAP_SYNC_TABLE_CALLS, {
-                {"db_id", std::to_string(namespace_req.db_id)},
-                {"xid", std::to_string(create_req.xid)}
-            });
+            tracing::increment_counter(SYS_TBL_MGR_SWAP_SYNC_TABLE_CALLS, tracing::get_db_id_xid_map(namespace_req.db_id, namespace_req.xid));
             SPDLOG_INFO("got swap_sync_table()");
 
             nlohmann::json ddls;

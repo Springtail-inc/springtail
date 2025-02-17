@@ -137,4 +137,9 @@ void increment_counter(std::string_view name,
  */
 void record_histogram(std::string_view name, double value,
     const std::unordered_map<std::string, std::string>& attributes = {});
+
+/**
+ * @brief Get the db id xid map
+ */
+std::unordered_map<std::string, std::string> get_db_id_xid_map(uint64_t db_id, uint64_t xid);
 }  // namespace springtail::tracing
