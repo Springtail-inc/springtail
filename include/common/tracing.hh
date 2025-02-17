@@ -17,40 +17,39 @@
 
 #include <common/logging.hh>
 
-namespace springtail::tracing {
+namespace springtail {
 
-enum : std::string {
-    // xid_mgr counter metrics
-    XID_MGR_RECORD_DDL_CHANGE_CALLS = "xid_mgr_record_ddl_change_calls",
-    XID_MGR_GET_PARTITION_CALLS = "xid_mgr_get_partition_calls",
-    XID_MGR_GET_COMMITTED_XID_CALLS = "xid_mgr_get_committed_xid_calls",
-    XID_MGR_COMMIT_XID_CALLS = "xid_mgr_commit_xid_calls",
+// xid_mgr counter metrics
+constexpr std::string_view XID_MGR_RECORD_DDL_CHANGE_CALLS = "xid_mgr_record_ddl_change_calls";
+constexpr std::string_view XID_MGR_GET_PARTITION_CALLS = "xid_mgr_get_partition_calls";
+constexpr std::string_view XID_MGR_GET_COMMITTED_XID_CALLS = "xid_mgr_get_committed_xid_calls";
+constexpr std::string_view XID_MGR_COMMIT_XID_CALLS = "xid_mgr_commit_xid_calls";
 
-    // xid_mgr histogram metrics
-    XID_MGR_COMMIT_XID_LATENCIES = "xid_mgr_commit_xid_latencies",
-    XID_MGR_RECORD_DDL_CHANGE_LATENCIES = "xid_mgr_record_ddl_change_latencies",
+// xid_mgr histogram metrics
+constexpr std::string_view XID_MGR_COMMIT_XID_LATENCIES = "xid_mgr_commit_xid_latencies";
+constexpr std::string_view XID_MGR_RECORD_DDL_CHANGE_LATENCIES = "xid_mgr_record_ddl_change_latencies";
 
-    // storage cache counter metrics
-    STORAGE_CACHE_GET_CALLS = "storage_cache_get_calls",
-    STORAGE_CACHE_GET_CACHE_MISSES = "storage_cache_get_cache_misses",
-    STORAGE_CACHE_PUT_CALLS = "storage_cache_put_calls",
-    STORAGE_CACHE_FLUSH_CALLS = "storage_cache_flush_calls",
-    STORAGE_CACHE_DROP_CALLS = "storage_cache_drop_calls",
+// storage cache counter metrics
+constexpr std::string_view STORAGE_CACHE_GET_CALLS = "storage_cache_get_calls";
+constexpr std::string_view STORAGE_CACHE_GET_CACHE_MISSES = "storage_cache_get_cache_misses";
+constexpr std::string_view STORAGE_CACHE_PUT_CALLS = "storage_cache_put_calls";
+constexpr std::string_view STORAGE_CACHE_FLUSH_CALLS = "storage_cache_flush_calls";
+constexpr std::string_view STORAGE_CACHE_DROP_CALLS = "storage_cache_drop_calls";
 
-    // storage cache histogram metrics
-    STORAGE_CACHE_GET_LATENCIES = "storage_cache_get_latencies",
-    STORAGE_CACHE_WRITE_LATENCIES = "storage_cache_write_latencies",
-    STORAGE_CACHE_FLUSH_LATENCIES = "storage_cache_flush_latencies",
-    STORAGE_CACHE_REMOVE_LATENCIES = "storage_cache_remove_latencies",
-};
+// storage cache histogram metrics
+constexpr std::string_view STORAGE_CACHE_GET_LATENCIES = "storage_cache_get_latencies";
+constexpr std::string_view STORAGE_CACHE_WRITE_LATENCIES = "storage_cache_write_latencies";
+constexpr std::string_view STORAGE_CACHE_FLUSH_LATENCIES = "storage_cache_flush_latencies";
+constexpr std::string_view STORAGE_CACHE_DROP_LATENCIES = "storage_cache_drop_latencies";
 
+namespace tracing {
 // counter metrics
-std::vector<std::pair<std::string, std::string>> _counter_metrics = {
+inline const std::vector<std::pair<std::string_view, std::string_view>> _counter_metrics = {
     // xid_mgr counter metrics
     {XID_MGR_RECORD_DDL_CHANGE_CALLS, "Total number of XID record DDL change calls"},
     {XID_MGR_GET_PARTITION_CALLS, "Total number of XID get partition calls"},
     {XID_MGR_GET_COMMITTED_XID_CALLS, "Total number of XID get committed xid calls"},
-    {XID_MGR_COMMIT_XID_CALLS, "Total number of XID commit xid calls"}
+    {XID_MGR_COMMIT_XID_CALLS, "Total number of XID commit xid calls"},
     
     // storage cache counter metrics
     {STORAGE_CACHE_GET_CALLS, "Total number of storage cache get calls"},
@@ -61,16 +60,16 @@ std::vector<std::pair<std::string, std::string>> _counter_metrics = {
 };
 
 // histogram metrics
-std::vector<std::pair<std::string, std::string>> _histogram_metrics = {
+inline const std::vector<std::pair<std::string_view, std::string_view>> _histogram_metrics = {
     // xid_mgr histogram metrics
     {XID_MGR_COMMIT_XID_LATENCIES, "Latency of XID commits"},
     {XID_MGR_RECORD_DDL_CHANGE_LATENCIES, "Latency of XID record DDL change calls"},
 
     // storage cache histogram metrics
-    {STORAGE_CACHE_READ_LATENCIES, "Latency of storage cache read calls"},
+    {STORAGE_CACHE_GET_LATENCIES, "Latency of storage cache get calls"},
     {STORAGE_CACHE_WRITE_LATENCIES, "Latency of storage cache write calls"},
     {STORAGE_CACHE_FLUSH_LATENCIES, "Latency of storage cache flush calls"},
-    {STORAGE_CACHE_REMOVE_LATENCIES, "Latency of storage cache remove calls"}
+    {STORAGE_CACHE_DROP_LATENCIES, "Latency of storage cache drop calls"}
 };
 
 /** Convenience name */
@@ -153,23 +152,40 @@ void shutdown_tracing_and_metrics();
  */
 opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer(const std::string_view& name);
 
+
+/**
+ * @brief Register the metrics
+ */
+void _register_metrics();
+
+/**
+ * @brief Register the default counters
+ */
+void _register_counters();
+
+/**
+ * @brief Register the default histograms
+ */
+void _register_histograms();
+
 /**
  * @brief Register a counter
  */
-void register_counter(const std::string name, const std::string description, const std::string unit);
+void _register_counter(std::string_view name, std::string_view description, std::string_view unit);
 
 /**
  * @brief Register a histogram
  */
-void register_histogram(const std::string name, const std::string description, const std::string unit);
+void _register_histogram(std::string_view name, std::string_view description, std::string_view unit);
 
 /**
  * @brief Increment a counter
  */
-void increment_counter(const std::string name);
+void increment_counter(std::string_view name);
 
 /**
  * @brief Record a histogram
  */
-void record_histogram(const std::string name, double value);
+void record_histogram(std::string_view name, double value);
 }  // namespace springtail::tracing
+}  // namespace springtail

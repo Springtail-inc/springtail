@@ -27,12 +27,12 @@ static opentelemetry::context::Context _context;
 /**
  * @brief Map of counter names to their corresponding counters
  */
-static std::map<std::string, opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Counter<uint64_t>>> counters;
+static std::map<std::string_view, opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Counter<uint64_t>>> counters;
 
 /**
  * @brief Map of histogram names to their corresponding histograms
  */
-static std::map<std::string, opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Histogram<double>>> histograms;
+static std::map<std::string_view, opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Histogram<double>>> histograms;
 
 static std::shared_ptr<opentelemetry::sdk::metrics::MeterProvider> meter_provider;
 
@@ -75,7 +75,7 @@ void _register_metrics(){
  */
 void _register_counters(){
     for (const auto &counter : _counter_metrics) {  
-        register_counter(counter.first, counter.second, "calls");
+        _register_counter(counter.first, counter.second, "calls");
     }
 }
 
@@ -84,7 +84,7 @@ void _register_counters(){
  */
 void _register_histograms(){
     for (const auto &histogram : _histogram_metrics) {
-        register_histogram(histogram.first, histogram.second, "ms");
+        _register_histogram(histogram.first, histogram.second, "ms");
     }
 }
 
@@ -217,7 +217,7 @@ tracer(const std::string_view& name)
  * @param name The name of the counter
  */
 void
-increment_counter(std::string name)
+increment_counter(std::string_view name)
 {
     auto counter = counters[name];
     if(counter){
@@ -233,7 +233,7 @@ increment_counter(std::string name)
  * @param name The name of the histogram
  * @param value The value to record
  */
-void record_histogram(std::string name, double value)
+void record_histogram(std::string_view name, double value)
 {
     auto histogram = histograms[name];
     if(histogram){
@@ -253,7 +253,7 @@ opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Counter<uint64_t>>
 create_uint64_counter(const std::string name, const std::string description, const std::string unit)
 {
     auto meter = opentelemetry::metrics::Provider::GetMeterProvider()->GetMeter(name);
-    return meter->CreateUInt64Counter(name.data(), description.data(), unit.data());
+    return meter->CreateUInt64Counter(name, description, unit);
 }
 
 /**
@@ -266,7 +266,7 @@ opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Histogram<double>>
 create_double_histogram(const std::string name, const std::string description, const std::string unit)
 {
     auto meter = opentelemetry::metrics::Provider::GetMeterProvider()->GetMeter(name);
-    return meter->CreateDoubleHistogram(name.data(), description.data(), unit.data());
+    return meter->CreateDoubleHistogram(name, description, unit);
 }
 
 /**
@@ -275,9 +275,9 @@ create_double_histogram(const std::string name, const std::string description, c
  * @param description The description of the counter
  * @param unit The unit of the counter
  */
-void register_counter(const std::string name, const std::string description, const std::string unit)
+void _register_counter(std::string_view name, std::string_view description, std::string_view unit)
 {
-    counters[name] = create_uint64_counter(name, description, unit);
+    counters[name] = create_uint64_counter(std::string(name), std::string(description), std::string(unit));
 }
 
 /**
@@ -286,9 +286,9 @@ void register_counter(const std::string name, const std::string description, con
  * @param description The description of the histogram
  * @param unit The unit of the histogram
  */
-void register_histogram(const std::string name, const std::string description, const std::string unit)
+void _register_histogram(std::string_view name, std::string_view description, std::string_view unit)
 {
-    histograms[name] = create_double_histogram(name, description, unit);
+    histograms[name] = create_double_histogram(std::string(name), std::string(description), std::string(unit));
 }
 
 }  // namespace springtail::tracing
