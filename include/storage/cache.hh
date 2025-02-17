@@ -34,22 +34,6 @@ namespace springtail {
         static StorageCache *_instance; ///< static instance (singleton)
         static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
 
-        // Vector containing the storage cache methods
-        std::vector<std::pair<std::string, std::string>> _storage_cache_counters = {
-            {"storage_cache_get_calls", "Total number of storage cache get calls"},
-            {"storage_cache_get_cache_misses", "Total number of storage cache get calls that missed the cache"},
-            {"storage_cache_put_calls", "Total number of storage cache put calls"},
-            {"storage_cache_flush_calls", "Total number of storage cache flush calls"},
-            {"storage_cache_drop_calls", "Total number of storage cache drop calls"}
-        };
-
-        std::vector<std::pair<std::string, std::string>> _storage_cache_histograms = {
-            {"storage_cache_get_latencies", "Latency of storage cache get calls"},
-            {"storage_cache_put_latencies", "Latency of storage cache put calls"},
-            {"storage_cache_flush_latencies", "Latency of storage cache flush calls"},
-            {"storage_cache_drop_latencies", "Latency of storage cache drop calls"}
-        };
-
         /**
          * @brief Register metrics for monitoring storage cache operations
          * 

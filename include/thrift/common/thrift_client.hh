@@ -231,8 +231,6 @@ namespace springtail::thrift {
                 max_connections,
                 ObjectPool<T>::LIFO
             );
-
-            _register_metrics();
         }
 
         /** OpenTelemetry span */
@@ -304,23 +302,12 @@ namespace springtail::thrift {
          */
         void _invoke_with_retries(std::function<void (ThriftClient &)> api_call) {
             ThriftClient c = _get_client();
-            auto start_time = std::chrono::system_clock::now();
-
-            auto provider = opentelemetry::trace::Provider::GetTracerProvider();
-            auto tracer = provider->GetTracer("Thrift");
-            _span = tracer->StartSpan("Thrift_Rpc");
-            _span->SetAttribute("type_name", _type_name);
 
             bool call_successful = false;
             while (!call_successful) {
                 try {
-                    tracing::increment_counter("thrift_client_calls");
-
                     api_call(c);
                     call_successful = true;
-
-                    tracing::record_histogram("thrift_client_latencies", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start_time).count());
-                    _span->End();
                 } catch (const apache::thrift::transport::TTransportException &e) {
                     SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "{}: Failed API call : {}", _type_name, e.what());
                     if (_shutting_down) {
@@ -329,11 +316,6 @@ namespace springtail::thrift {
                     _reconnect_client(c);
                 }
             }
-        }
-
-        void _register_metrics() {
-            tracing::register_counter("thrift_client_calls", "Number of thrift client calls", "calls");
-            tracing::register_histogram("thrift_client_latencies", "Latency of thrift client calls", "ms");
         }
     };
 };

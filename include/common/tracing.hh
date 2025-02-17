@@ -18,6 +18,61 @@
 #include <common/logging.hh>
 
 namespace springtail::tracing {
+
+enum : std::string {
+    // xid_mgr counter metrics
+    XID_MGR_RECORD_DDL_CHANGE_CALLS = "xid_mgr_record_ddl_change_calls",
+    XID_MGR_GET_PARTITION_CALLS = "xid_mgr_get_partition_calls",
+    XID_MGR_GET_COMMITTED_XID_CALLS = "xid_mgr_get_committed_xid_calls",
+    XID_MGR_COMMIT_XID_CALLS = "xid_mgr_commit_xid_calls",
+
+    // xid_mgr histogram metrics
+    XID_MGR_COMMIT_XID_LATENCIES = "xid_mgr_commit_xid_latencies",
+    XID_MGR_RECORD_DDL_CHANGE_LATENCIES = "xid_mgr_record_ddl_change_latencies",
+
+    // storage cache counter metrics
+    STORAGE_CACHE_GET_CALLS = "storage_cache_get_calls",
+    STORAGE_CACHE_GET_CACHE_MISSES = "storage_cache_get_cache_misses",
+    STORAGE_CACHE_PUT_CALLS = "storage_cache_put_calls",
+    STORAGE_CACHE_FLUSH_CALLS = "storage_cache_flush_calls",
+    STORAGE_CACHE_DROP_CALLS = "storage_cache_drop_calls",
+
+    // storage cache histogram metrics
+    STORAGE_CACHE_GET_LATENCIES = "storage_cache_get_latencies",
+    STORAGE_CACHE_WRITE_LATENCIES = "storage_cache_write_latencies",
+    STORAGE_CACHE_FLUSH_LATENCIES = "storage_cache_flush_latencies",
+    STORAGE_CACHE_REMOVE_LATENCIES = "storage_cache_remove_latencies",
+};
+
+// counter metrics
+std::vector<std::pair<std::string, std::string>> _counter_metrics = {
+    // xid_mgr counter metrics
+    {XID_MGR_RECORD_DDL_CHANGE_CALLS, "Total number of XID record DDL change calls"},
+    {XID_MGR_GET_PARTITION_CALLS, "Total number of XID get partition calls"},
+    {XID_MGR_GET_COMMITTED_XID_CALLS, "Total number of XID get committed xid calls"},
+    {XID_MGR_COMMIT_XID_CALLS, "Total number of XID commit xid calls"}
+    
+    // storage cache counter metrics
+    {STORAGE_CACHE_GET_CALLS, "Total number of storage cache get calls"},
+    {STORAGE_CACHE_GET_CACHE_MISSES, "Total number of storage cache get cache misses"},
+    {STORAGE_CACHE_PUT_CALLS, "Total number of storage cache put calls"},
+    {STORAGE_CACHE_FLUSH_CALLS, "Total number of storage cache flush calls"},
+    {STORAGE_CACHE_DROP_CALLS, "Total number of storage cache drop calls"}
+};
+
+// histogram metrics
+std::vector<std::pair<std::string, std::string>> _histogram_metrics = {
+    // xid_mgr histogram metrics
+    {XID_MGR_COMMIT_XID_LATENCIES, "Latency of XID commits"},
+    {XID_MGR_RECORD_DDL_CHANGE_LATENCIES, "Latency of XID record DDL change calls"},
+
+    // storage cache histogram metrics
+    {STORAGE_CACHE_READ_LATENCIES, "Latency of storage cache read calls"},
+    {STORAGE_CACHE_WRITE_LATENCIES, "Latency of storage cache write calls"},
+    {STORAGE_CACHE_FLUSH_LATENCIES, "Latency of storage cache flush calls"},
+    {STORAGE_CACHE_REMOVE_LATENCIES, "Latency of storage cache remove calls"}
+};
+
 /** Convenience name */
 using SpanPtr = opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>;
 

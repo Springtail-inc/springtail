@@ -66,19 +66,6 @@ namespace springtail::xid_mgr {
          */
          ~XidMgrServer() override = default;
 
-        // Vector containing the xid mgr methods
-        std::vector<std::pair<std::string, std::string>> _xid_mgr_counter_metrics = {
-            {"xid_mgr_commit_xid_calls", "Total number of XID commits"},
-            {"xid_mgr_record_ddl_change_calls", "Total number of XID record DDL change calls"},
-            {"xid_mgr_get_partition_calls", "Total number of XID get partition calls"},
-            {"xid_mgr_get_committed_xid_calls", "Total number of XID get committed xid calls"}
-        };
-
-        std::vector<std::pair<std::string, std::string>> _xid_mgr_histogram_metrics = {
-            {"xid_mgr_commit_xid_latencies", "Latency of XID commits"},
-            {"xid_mgr_record_ddl_change_latencies", "Latency of XID record DDL change calls"}
-        };
-
         /**
          * @brief Register metrics for monitoring XID manager operations
          * 

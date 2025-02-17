@@ -59,6 +59,35 @@ create_default_otel_resource(std::string_view component_name)
     return opentelemetry::sdk::resource::Resource::Create(resource_attributes);
 }
 
+/**
+ * @brief Register the metrics
+ */
+void _register_metrics(){
+    // register the counters
+    _register_counters();
+
+    // register the histograms
+    _register_histograms(); 
+}
+
+/**
+ * @brief Register the counters
+ */
+void _register_counters(){
+    for (const auto &counter : _counter_metrics) {  
+        register_counter(counter.first, counter.second, "calls");
+    }
+}
+
+/**
+ * @brief Register the histograms
+ */
+void _register_histograms(){
+    for (const auto &histogram : _histogram_metrics) {
+        register_histogram(histogram.first, histogram.second, "ms");
+    }
+}
+
 static void
 init_metrics(const opentelemetry::sdk::resource::Resource& resource)
 {
@@ -97,6 +126,10 @@ init_metrics(const opentelemetry::sdk::resource::Resource& resource)
     // Set as the global meter provider
     opentelemetry::metrics::Provider::SetMeterProvider(
         std::dynamic_pointer_cast<opentelemetry::metrics::MeterProvider>(meter_provider));
+
+    // register the metrics
+    _register_metrics();
+
 }
 
 static void
