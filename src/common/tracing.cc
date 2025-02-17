@@ -212,6 +212,19 @@ tracer(const std::string_view& name)
     return provider->GetTracer(name.data());
 }
 
+opentelemetry::common::KeyValueIterableView<std::unordered_map<std::string, std::string>>
+get_metric_attributes(){
+    auto db_instance_id = Properties::get_db_instance_id();
+    auto organization_id = Properties::get_organization_id();
+    auto account_id = Properties::get_account_id();
+    return opentelemetry::common::KeyValueIterableView<std::unordered_map<std::string, std::string>>(   
+    {
+        {"db_instance_id", std::to_string(db_instance_id)}, 
+        {"organization_id", organization_id}, 
+        {"account_id", account_id}
+    });
+}
+
 /**
  * @brief Increment a counter
  * @param name The name of the counter
@@ -222,7 +235,7 @@ increment_counter(std::string_view name)
     auto counter = counters[name];
     if(counter){
         // Increment the counter
-        counter->Add(1);
+        counter->Add(1, get_metric_attributes());
     } else {
         SPDLOG_ERROR("Counter '{}' not found", name);
     }
@@ -237,7 +250,7 @@ void record_histogram(std::string_view name, double value)
 {
     auto histogram = histograms[name];
     if(histogram){
-        histogram->Record(value, _context);
+        histogram->Record(value, get_metric_attributes(), _context);
     } else {
         SPDLOG_ERROR("Histogram '{}' not found", name);
     }

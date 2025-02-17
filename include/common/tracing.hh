@@ -37,8 +37,6 @@ constexpr std::string_view STORAGE_CACHE_FLUSH_CALLS = "storage_cache_flush_call
 constexpr std::string_view STORAGE_CACHE_DROP_CALLS = "storage_cache_drop_calls";
 
 // storage cache histogram metrics
-constexpr std::string_view STORAGE_CACHE_GET_LATENCIES = "storage_cache_get_latencies";
-constexpr std::string_view STORAGE_CACHE_WRITE_LATENCIES = "storage_cache_write_latencies";
 constexpr std::string_view STORAGE_CACHE_FLUSH_LATENCIES = "storage_cache_flush_latencies";
 constexpr std::string_view STORAGE_CACHE_DROP_LATENCIES = "storage_cache_drop_latencies";
 
@@ -66,8 +64,6 @@ inline const std::vector<std::pair<std::string_view, std::string_view>> _histogr
     {XID_MGR_RECORD_DDL_CHANGE_LATENCIES, "Latency of XID record DDL change calls"},
 
     // storage cache histogram metrics
-    {STORAGE_CACHE_GET_LATENCIES, "Latency of storage cache get calls"},
-    {STORAGE_CACHE_WRITE_LATENCIES, "Latency of storage cache write calls"},
     {STORAGE_CACHE_FLUSH_LATENCIES, "Latency of storage cache flush calls"},
     {STORAGE_CACHE_DROP_LATENCIES, "Latency of storage cache drop calls"}
 };
