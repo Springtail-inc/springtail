@@ -1,3 +1,4 @@
+#include <opentelemetry/common/key_value_iterable_view.h>
 #include <opentelemetry/exporters/otlp/otlp_grpc_exporter.h>
 #include <opentelemetry/exporters/otlp/otlp_grpc_metric_exporter.h>
 #include <opentelemetry/metrics/provider.h>
@@ -11,7 +12,6 @@
 #include <common/json.hh>
 #include <common/properties.hh>
 #include <common/tracing.hh>
-
 #include "opentelemetry/exporters/otlp/otlp_grpc_metric_exporter_factory.h"
 #include "opentelemetry/exporters/otlp/otlp_grpc_metric_exporter_options.h"
 #include "opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_factory.h"
@@ -74,7 +74,7 @@ void _register_metrics(){
  * @brief Register the counters
  */
 void _register_counters(){
-    for (const auto &counter : _counter_metrics) {  
+    for (const auto &counter : metrics::_counter_metrics) {  
         _register_counter(counter.first, counter.second, "calls");
     }
 }
@@ -83,7 +83,7 @@ void _register_counters(){
  * @brief Register the histograms
  */
 void _register_histograms(){
-    for (const auto &histogram : _histogram_metrics) {
+    for (const auto &histogram : metrics::_histogram_metrics) {
         _register_histogram(histogram.first, histogram.second, "ms");
     }
 }
@@ -212,30 +212,37 @@ tracer(const std::string_view& name)
     return provider->GetTracer(name.data());
 }
 
-opentelemetry::common::KeyValueIterableView<std::unordered_map<std::string, std::string>>
-get_metric_attributes(){
+std::unordered_map<std::string, std::string>
+_set_default_attributes(const std::unordered_map<std::string, std::string>& input_attributes)
+{
+    auto attributes = input_attributes;
+
+    if (attributes.empty()) {
+        attributes = std::unordered_map<std::string, std::string>();
+    }
+
     auto db_instance_id = Properties::get_db_instance_id();
     auto organization_id = Properties::get_organization_id();
     auto account_id = Properties::get_account_id();
-    return opentelemetry::common::KeyValueIterableView<std::unordered_map<std::string, std::string>>(   
-    {
-        {"db_instance_id", std::to_string(db_instance_id)}, 
-        {"organization_id", organization_id}, 
-        {"account_id", account_id}
-    });
+    
+    attributes["organization_id"] = organization_id;
+    attributes["account_id"] = account_id;
+    attributes["db_instance_id"] = std::to_string(db_instance_id);
+
+    return attributes;
 }
 
 /**
  * @brief Increment a counter
  * @param name The name of the counter
+ * @param attributes The attributes to record
  */
 void
-increment_counter(std::string_view name)
+increment_counter(std::string_view name, const std::unordered_map<std::string, std::string>& attributes)
 {
     auto counter = counters[name];
     if(counter){
-        // Increment the counter
-        counter->Add(1, get_metric_attributes());
+        counter->Add(1, _set_default_attributes(attributes), _context);
     } else {
         SPDLOG_ERROR("Counter '{}' not found", name);
     }
@@ -245,12 +252,14 @@ increment_counter(std::string_view name)
  * @brief Record a value in the histogram
  * @param name The name of the histogram
  * @param value The value to record
+ * @param attributes The attributes to record
  */
-void record_histogram(std::string_view name, double value)
+void
+record_histogram(std::string_view name, double value, const std::unordered_map<std::string, std::string>& attributes)
 {
     auto histogram = histograms[name];
     if(histogram){
-        histogram->Record(value, get_metric_attributes(), _context);
+        histogram->Record(value, _set_default_attributes(attributes), _context);
     } else {
         SPDLOG_ERROR("Histogram '{}' not found", name);
     }
