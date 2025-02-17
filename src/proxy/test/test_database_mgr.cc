@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <gmock/gmock.h>
 
 #include <common/common.hh>
 #include <common/json.hh>
@@ -7,6 +8,7 @@
 
 using namespace springtail;
 using namespace springtail::pg_proxy;
+using namespace testing;
 
 namespace {
     class DatabaseMgr_Test : public testing::Test {
@@ -33,7 +35,7 @@ namespace {
 
         void _add_database(uint64_t db_id, const std::string &name)
         {
-            EXPECT_FALSE(DatabaseMgr::get_instance()->get_database_id(name).has_value());
+            ASSERT_THAT(DatabaseMgr::get_instance()->get_database_id(name), Eq(std::nullopt));
             EXPECT_FALSE(DatabaseMgr::get_instance()->is_database_replicated(name));
             EXPECT_FALSE(DatabaseMgr::get_instance()->is_database_ready(db_id));
 
@@ -69,16 +71,14 @@ namespace {
 
             sleep(1);
 
-            EXPECT_TRUE(DatabaseMgr::get_instance()->get_database_id(name).has_value());
-            EXPECT_EQ(DatabaseMgr::get_instance()->get_database_id(name).value(), db_id);
+            ASSERT_THAT(DatabaseMgr::get_instance()->get_database_id(name), Optional(db_id));
             EXPECT_TRUE(DatabaseMgr::get_instance()->is_database_replicated(name));
             EXPECT_TRUE(DatabaseMgr::get_instance()->is_database_ready(db_id));
         }
 
         void _remove_database(uint64_t db_id, const std::string &name)
         {
-            EXPECT_TRUE(DatabaseMgr::get_instance()->get_database_id(name).has_value());
-            EXPECT_EQ(DatabaseMgr::get_instance()->get_database_id(name).value(), db_id);
+            ASSERT_THAT(DatabaseMgr::get_instance()->get_database_id(name), Optional(db_id));
             EXPECT_TRUE(DatabaseMgr::get_instance()->is_database_replicated(name));
             EXPECT_TRUE(DatabaseMgr::get_instance()->is_database_ready(db_id));
 
@@ -109,7 +109,7 @@ namespace {
 
             sleep(1);
 
-            EXPECT_FALSE(DatabaseMgr::get_instance()->get_database_id(name).has_value());
+            ASSERT_THAT(DatabaseMgr::get_instance()->get_database_id(name), Eq(std::nullopt));
             EXPECT_FALSE(DatabaseMgr::get_instance()->is_database_replicated(name));
             EXPECT_FALSE(DatabaseMgr::get_instance()->is_database_ready(db_id));
         }
