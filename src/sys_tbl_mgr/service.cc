@@ -1,4 +1,5 @@
 #include "common/constants.hh"
+#include <common/tracing.hh>
 #include "thrift/sys_tbl_mgr/sys_tbl_mgr_types.h"
 #include <limits>
 #include <thrift/sys_tbl_mgr/Service.h> // generated file
