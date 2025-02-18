@@ -46,6 +46,11 @@ public:
      */
     friend std::ostream& operator<<(std::ostream& os, const PostgresTimestamp& ts);
 
+    /**
+     * @brief Convert to Unix nanoseconds (nanoseconds since 1970-01-01)
+     */
+    int64_t to_unix_ns() const;
+
 private:
     int64_t _micros;  ///< Microseconds since 2000-01-01
 };
