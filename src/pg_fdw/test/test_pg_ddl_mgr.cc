@@ -78,6 +78,7 @@ namespace {
             _subscriber = RedisMgr::get_instance()->get_subscriber(1, false);
         }
         void TearDown() override {
+            // placeholder, left empty for now
         }
 
         static inline std::thread _pg_ddl_mgr_thread;
@@ -136,7 +137,7 @@ namespace {
 
         class RedisNotification {
         public:
-            RedisNotification(RedisMgr::SubscriberPtr subscriber) : _subscriber(subscriber) {
+            explicit RedisNotification(RedisMgr::SubscriberPtr subscriber) : _subscriber(subscriber) {
                 _subscriber->psubscribe(_pattern);
                 _subscriber->on_pmessage(
                     [this](const std::string &pattern, const std::string &channel, const std::string &msg) {

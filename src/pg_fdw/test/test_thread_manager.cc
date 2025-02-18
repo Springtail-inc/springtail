@@ -13,6 +13,7 @@ namespace {
             init_exception();
         }
         static void TearDownTestSuite() {
+            // placeholder, left empty for now
         }
     protected:
         void SetUp() override {
