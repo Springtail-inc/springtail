@@ -56,9 +56,14 @@ namespace springtail {
             _cv.wait(lock, [this]{ return this->_count == 0; });
         }
 
+        uint64_t get_count() const {
+            boost::unique_lock lock(_mutex);
+            return _count;
+        }
+
     private:
         boost::condition_variable _cv; ///< Condition variable for waiting.
-        boost::mutex _mutex; ///< Access mutex to provide thread-safety.
+        mutable boost::mutex _mutex; ///< Access mutex to provide thread-safety.
         uint64_t _count; ///< The underlying counter.
     };
     typedef std::shared_ptr<Counter> CounterPtr;

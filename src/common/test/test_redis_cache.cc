@@ -17,9 +17,12 @@ namespace {
             //      this unit test and to ensure that no memory is leaked, corrupted, or not cleaned up
             //      properly. Unfortunately, springtail_init() brings a lot of noise that I did not want
             //      to deal with at the moment.
-            Properties::get_instance()->init(true);
-            Properties::get_instance()->init_cache();
-            init_exception();
+
+            springtail_init();
+
+            //Properties::get_instance()->init(true);
+            //Properties::get_instance()->init_cache();
+            //init_exception();
         }
 
         static void TearDownTestSuite()
@@ -750,6 +753,8 @@ namespace {
         Counter c(0);
         auto redis_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [&c] (const std::string &path, const nlohmann::json &new_value) {
+                std::cout << "path: " << path << " new_value: " << new_value << std::endl;
+                std::cout << "c count: " << c.get_count() << std::endl;
                 c.decrement();
         });
 
@@ -764,6 +769,7 @@ namespace {
             "3"
         };
 
+        std::cout << "c increment 1" << std::endl;
         c.increment();
         _test_client->sadd(array_key, array_values[0].get<std::string>());
         c.wait();
@@ -774,25 +780,32 @@ namespace {
         nlohmann::json array_element = _cache->get_value(fdw_ids_clone + "/0");
         EXPECT_EQ(array_element.type(), nlohmann::json::value_t::string);
 
+        std::cout << "c increment 2" << std::endl;
         c.increment();
         _cache->set_value(fdw_ids_clone + "/1", array_values[1]);
         c.wait();
 
+        std::cout << "c increment 3" << std::endl;
         c.increment();
         _cache->set_value(fdw_ids_clone + "/2", array_values[2]);
         c.wait();
 
         array_values.erase(0);
+
+        std::cout << "c increment 4" << std::endl;
         c.increment();
         _cache->set_value(fdw_ids_clone, array_values);
         c.wait();
 
         array_values.erase(0);
+
+        std::cout << "c increment 5" << std::endl;
         c.increment();
         _cache->set_value(fdw_ids_clone, array_values);
         c.wait();
 
         array_values.erase(0);
+        std::cout << "c increment 6" << std::endl;
         c.increment();
         _cache->set_value(fdw_ids_clone, array_values);
         c.wait();
@@ -802,10 +815,13 @@ namespace {
             "2",
             "3"
         };
+
+        std::cout << "c increment 7" << std::endl;
         c.increment();
         _test_client->sadd(array_key, array_values[0].get<std::string>());
         c.wait();
 
+        std::cout << "c increment 8" << std::endl;
         c.increment();
         _cache->set_value(fdw_ids_clone, array_values);
         c.wait();
