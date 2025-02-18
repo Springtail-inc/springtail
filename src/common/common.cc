@@ -89,6 +89,9 @@ namespace springtail {
 
         // initialize the tracing infrastructure
         tracing::init_tracing_and_metrics(log_filename.value_or(""));
+
+        // initialize redis cache
+        Properties::get_instance()->init_cache();
     }
 
     void

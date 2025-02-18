@@ -28,7 +28,7 @@ RedisCache::RedisCache(bool config_db)
     _subscribe_pattern = "__keyspace@" + std::to_string(_db_id) + "__:" + std::to_string(_instance_id) + ":*";
     _subscriber->psubscribe(_subscribe_pattern);
     _subscriber->on_pmessage([this](const std::string &pattern, const std::string &channel, const std::string &msg) {
-        this->_process_notification(pattern, channel, msg);
+        _process_notification(pattern, channel, msg);
     });
 
     _init_storage();
@@ -482,32 +482,7 @@ RedisCache::_array_diff(const nlohmann::json &arr1, const nlohmann::json &arr2, 
     for (uint32_t i = 0; i < arr2.size(); i++) {
         v.push_back(_json_to_string(arr2[i]));
     }
-    std::sort(u.begin(), u.end());
-    std::sort(v.begin(), v.end());
-
-    // remove unique elements if required
-    if (arr1_unique) {
-        auto last = std::unique(u.begin(), u.end());
-        u.erase(last, u.end());
-    }
-    if (arr2_unique) {
-        auto last = std::unique(v.begin(), v.end());
-        v.erase(last, v.end());
-    }
-
-    uint32_t i = 0;
-    uint32_t j = 0;
-
-    while ((u.begin() + i) != u.end() && (v.begin() + j) != v.end()) {
-        if (u[i] == v[j]) {
-            u.erase(u.begin() + i);
-            v.erase(v.begin() + j);
-        } else if (u[i] < v[j]) {
-            i++;
-        } else {
-            j++;
-        }
-    }
+    array_diff<std::string>(u, v, arr1_unique, arr2_unique);
     return std::make_pair(u, v);
 }
 

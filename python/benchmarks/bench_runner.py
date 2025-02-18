@@ -62,6 +62,7 @@ def run_benchmark(
     bench_dir: str,
     config_file: str,
     build_dir: str,
+    setup_timeout: int,
     bench_name: str = None,
     start_only: bool = False,
     stop_only: bool = False,
@@ -115,7 +116,7 @@ def run_benchmark(
         for n, f in benchmarks.items():
             print(f"\nBenchmark: {n}")
             bench = BenchCase(n, f, config_file, build_dir)
-            result = bench.run()
+            result = bench.run(setup_timeout)
             for d, t in result.items():
                 print(f"   {d}: {t}")
 
@@ -158,6 +159,9 @@ if __name__ == "__main__":
     bench_dir = config.get("benchmark_folder", "cases")
     build_dir = config.get("build_dir")
     system_config = config.get("system_json_path")
+    setup_timeout = config.get("setup_timeout")
+    if not setup_timeout:
+        setup_timeout = 30
 
     if not build_dir or not system_config:
         raise ValueError("Missing required config: build_dir or system_json_path")
@@ -170,6 +174,7 @@ if __name__ == "__main__":
         bench_dir,
         system_config,
         build_dir,
+        setup_timeout,
         args.benchmark,
         args.start_only,
         args.stop_only,

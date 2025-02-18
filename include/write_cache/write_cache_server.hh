@@ -2,9 +2,6 @@
 
 #include <mutex>
 #include <memory>
-#include <vector>
-#include <string>
-#include <string_view>
 
 #include <common/singleton.hh>
 
@@ -49,7 +46,7 @@ namespace springtail {
          ~WriteCacheServer() override = default;
 
         /** shutdown from shutdown(), called once */
-        void _internal_shutdown();
+        void _internal_shutdown() override;
 
         /** indexes mutex */
         std::mutex _mutex;

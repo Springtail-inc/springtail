@@ -263,7 +263,7 @@ class TestCase:
             self._raise_failure(f'Query timed out: {e}')
         except Exception as e:
             self._raise_failure(f'Unknown error: {e}')
-        
+
 
     def _execute_command(self, command: dict, do_fetch: bool = False) -> list:
         """Execute a sql command or test directive.  When executing a
@@ -296,12 +296,15 @@ class TestCase:
                 self._execute_sql(cursor, f"BEGIN; INSERT INTO sync_control (sync, test) VALUES ({self._sync_step}, '{self._name}'); COMMIT;", False)
 
                 # Wait for sync row to appear in replica
-                sync_time = common.wait_for_replica_condition(
-                    self._fdw,
-                    f"SELECT MAX(sync) FROM sync_control WHERE test = '{self._name}'",
-                    (self._sync_step,),
-                    timeout=self._metadata['sync_timeout']
-                )
+                try:
+                    sync_time = common.wait_for_replica_condition(
+                        self._fdw,
+                        f"SELECT MAX(sync) FROM sync_control WHERE test = '{self._name}'",
+                        (self._sync_step,),
+                        timeout=self._metadata['sync_timeout']
+                    )
+                except Exception as e:
+                    self._raise_failure(f'Sync control error: {e}')
 
                 return []
 
@@ -564,7 +567,7 @@ class TestCase:
         for connection in self._connections:
             self._connections[connection].close()
             self._connections[connection] = springtail.connect_db_instance(self._props, self._primary_name)
-            
+
         # run the cleanup commands
         if len(self._sections['cleanup']) > 0:
             self._execute_commands(self._sections['cleanup'][0]['sequential'])
@@ -581,7 +584,7 @@ class TestCase:
             return # if no errors, return
 
         logging.error(f'Found errors in logs: {error_logs}')
-        
+
         for log in error_logs:
             backtrace = sysutils.extract_backtrace(log)
             if backtrace:
@@ -612,7 +615,7 @@ class TestCase:
             error = etree.Element('error')
             error.text = self._error
             root.append(error)
-            
+
         elif self._result == 'FAILED':
             failure = etree.Element('failure')
             failure.text = self._error
@@ -641,5 +644,5 @@ class TestCase:
             root.append(system_err)
 
         return root
-            
-        
+
+

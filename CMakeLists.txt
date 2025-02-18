@@ -35,7 +35,7 @@ include(GitInstall)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror -Wno-sign-compare -Wuninitialized -fPIC")
-set(CMAKE_CXX_FLAGS_DEBUG "-g")
+set(CMAKE_CXX_FLAGS_DEBUG "-g3 -gz")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 set(CMAKE_SKIP_TEST_ALL_DEPENDENCY FALSE)
 
@@ -68,7 +68,7 @@ add_definitions( -D CXX_BYTE_ORDER=${CMAKE_CXX_BYTE_ORDER} )
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   # set debug level to debug for debug builds
-  add_definitions( -D SPDLOG_ACTIVE_LEVEL=SPDLOG_ACTIVE_DEBUG )
+  add_definitions( -D SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG )
   set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
 else()
   add_definitions( -D SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO )

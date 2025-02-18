@@ -1,11 +1,5 @@
 #pragma once
 
-#include <mutex>
-#include <memory>
-#include <vector>
-#include <string>
-#include <string_view>
-
 #include <thrift/sys_tbl_mgr/Service.h>
 #include <thrift/common/thrift_server.hh>
 
@@ -36,7 +30,7 @@ namespace springtail::sys_tbl_mgr {
          ~Server() override = default;
 
         /** shutdown from shutdown(), called once */
-        void _internal_shutdown();
+        void _internal_shutdown() override;
 
     };
 

@@ -4,7 +4,6 @@
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
-#include <atomic>
 #include <set>
 #include <map>
 #include <utility>
@@ -635,7 +634,9 @@ namespace springtail::pg_proxy {
     private:
         uint64_t _db_instance_id;           ///< primary database instance id
 
-        PubSubThread _config_sub_thread;    ///< pubsub thread for redis config database
+        RedisCache::RedisChangeWatcherPtr _cache_watcher_db_ids; ///< callback for redis cache db ids
+        RedisCache::RedisChangeWatcherPtr _cache_watcher_db_states; ///< callback for redis cache database replica state
+
         PubSubThread _data_sub_thread;      ///< pubsub thread for redis data database
 
         DatabasePrimarySetPtr _primary_set; ///< set of primary database and standby database
@@ -650,23 +651,12 @@ namespace springtail::pg_proxy {
         /**
          * @brief Construct a new Database Mgr object
          */
-        DatabaseMgr() :
-            _config_sub_thread(1, true),
-            _data_sub_thread(1, false),
-            _primary_set(std::make_shared<DatabasePrimarySet>(POOL_SESSIONS_PER_INSTANCE)),
-            _replica_set(std::make_shared<DatabaseReplicaSet>(POOL_SESSIONS_PER_INSTANCE))
-        {}
+        DatabaseMgr();
 
         /**
          * @brief Destroy the Database Mgr object
          */
         ~DatabaseMgr() override = default;
-
-        /**
-         * @brief Database state change handling
-         * @param msg - message
-         */
-        void _handle_db_state_change(const std::string &msg);
 
         /**
          * @brief Database schema and table change handling
@@ -675,25 +665,14 @@ namespace springtail::pg_proxy {
         void _handle_db_table_change(const std::string &msg);
 
         /**
-         * @brief Replicated database change handling
-         * @param msg - message
-         */
-        void _handle_replicated_dbs_change(const std::string &msg);
-
-        /**
-         * @brief Initialize pubsub thread for database state change
-         */
-        void _init_db_states_subscriber();
-
-        /**
          * @brief Initialize pubsub thread for database tables subscriber
          */
         void _init_db_tables_subscriber();
 
         /**
-         * @brief Initialize pubsub thread for adding and removing databases
+         * @brief Initialize replicated databases
          */
-        void _init_replicated_dbs_subscriber();
+        void _init_replicated_dbs();
 
         /**
          * @brief add replicated database

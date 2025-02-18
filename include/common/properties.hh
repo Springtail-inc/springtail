@@ -50,6 +50,11 @@ namespace springtail {
         /** Open telemetry configuration section */
         static inline constexpr char OTEL_CONFIG[] = "otel";
 
+        /** Redis notification path for database ids */
+        static inline constexpr char DATABASE_IDS_PATH[] = "instance_config/database_ids";
+        /** Redis notification path for database states */
+        static inline constexpr char DATABASE_STATE_PATH[] = "instance_state";
+
         /**
          * @brief Get JSON object from a key
          * @param key key to lookup
@@ -61,6 +66,12 @@ namespace springtail {
          * @brief Init _instance and read from redis
          */
         void init(bool load_redis);
+
+        /**
+         * @brief Function for separate redis cache initialization
+         *
+         */
+        void init_cache() { _cache = std::make_shared<RedisCache>(true); }
 
         /** Helper to get db instance id */
         static inline uint64_t get_db_instance_id() {
@@ -147,8 +158,6 @@ namespace springtail {
         /** Helper to set env vars from config file */
         static void set_env_from_file(const char *config_file);
 
-        /** Get access to redis cache in case the user need to make the changes to config database */
-
         /**
          * @brief Get access to redis cache in case the user need to make
          *          the changes to config database
@@ -156,6 +165,14 @@ namespace springtail {
          * @return std::shared_ptr<RedisCache> - RedisCache shared pointer
          */
         std::shared_ptr<RedisCache> get_cache() { return _cache; }
+
+        /**
+         * @brief Utility function to get database ids vector from passed json object
+         *
+         * @param json_db_ids - json object with an array of database ids
+         * @return std::vector<uint64_t> - vector with database ids
+         */
+        static std::vector<uint64_t> get_database_ids(const nlohmann::json &json_db_ids);
 
     private:
         /** json containing parsed settings file */
