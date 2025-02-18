@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <common/common.hh>
-#include <common/counter.hh>
 #include <common/redis_cache.hh>
 
 using namespace springtail;
@@ -52,10 +51,20 @@ namespace {
         std::shared_ptr<RedisCache> _cache = nullptr;
         RedisClientPtr _test_client;
         int _db_id;
+        std::atomic<uint32_t> _notification_counter = 0;
 
-        std::string make_key_string(std::string key) {
+        std::string make_key_string(std::string key)
+        {
             uint64_t instance_id = Properties::get_db_instance_id();
             return std::to_string(instance_id) + ":" + key;
+        }
+
+        void wait_for_increment(uint32_t old_value, uint32_t increment)
+        {
+            while (_notification_counter.load() != (old_value + increment)) {
+                _notification_counter.wait(old_value);
+                EXPECT_LE(_notification_counter, old_value + increment);
+            }
         }
     };
 
@@ -94,12 +103,12 @@ namespace {
         nlohmann::json::json_pointer pointer("/xid_mgr/rpc_config/client_connections");
         std::string system_settings_key = "instance_config/system_settings";
         // create callback class
-        Counter c(0);
         auto redis_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
-            [&c, &connections, &pointer, &system_settings_key](const std::string &path, const nlohmann::json &new_value) {
+            [this, &connections, &pointer, &system_settings_key](const std::string &path, const nlohmann::json &new_value) {
                 EXPECT_EQ(path, system_settings_key);
                 EXPECT_EQ(connections, new_value.at(pointer));
-                c.decrement();
+                _notification_counter++;
+                _notification_counter.notify_one();
             });
 
         // add callback
@@ -114,21 +123,21 @@ namespace {
         // update value in database using test client
         std::string key_value = make_key_string("instance_config");
         std::string value_string = nlohmann::to_string(system_settings_value);
-        c.increment();
+        uint32_t counter_value = _notification_counter;
         _test_client->hset(key_value, "system_settings", value_string);
 
         // Wait for notification
-        c.wait();
+        wait_for_increment(counter_value, 1);
 
         // update value in the database again
         connections--;
         system_settings_value.at(pointer) = connections;
         value_string = nlohmann::to_string(system_settings_value);
-        c.increment();
+        counter_value = _notification_counter;
         _test_client->hset(key_value, "system_settings", value_string);
 
         // wait for notification
-        c.wait();
+        wait_for_increment(counter_value, 1);
 
         _cache->remove_callback(system_settings_key, redis_watcher);
     }
@@ -228,8 +237,7 @@ namespace {
 
         int connections = 0;
         // create callback class
-        Counter c(0);
-        redis_watcher->set_cb([&c, &connections](const std::string &path, const nlohmann::json &new_value) {
+        redis_watcher->set_cb([this, &connections](const std::string &path, const nlohmann::json &new_value) {
             if (!new_value.is_null()) {
                 if (path == "instance_config") {
                     // less specific path match
@@ -247,7 +255,8 @@ namespace {
                     throw Error();
                 }
             }
-            c.decrement();
+            _notification_counter++;
+            _notification_counter.notify_one();
         });
 
         // get value from cache
@@ -261,28 +270,28 @@ namespace {
         // update value in database using test client
         std::string key_value = make_key_string("instance_config");
         std::string value_string = nlohmann::to_string(system_settings_value);
-        c.increment_by(4);
+        uint32_t counter_value = _notification_counter;
         _test_client->hset(key_value, "system_settings", value_string);
 
         // Wait for notification
-        c.wait();
+        wait_for_increment(counter_value, 4);
 
         // update value in the database again
         connections--;
         system_settings_value.at(pointer) = connections;
         value_string = nlohmann::to_string(system_settings_value);
-        c.increment_by(4);
+        counter_value = _notification_counter;
         _test_client->hset(key_value, "system_settings", value_string);
 
         // wait for notification
-        c.wait();
+        wait_for_increment(counter_value, 4);
     }
 
     TEST_F(RedisCache_Test, TestTopLevelString) {
-        Counter c(0);
         auto redis_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
-            [&c] (const std::string &path, const nlohmann::json &new_value) {
-                c.decrement();
+            [this] (const std::string &path, const nlohmann::json &new_value) {
+                _notification_counter++;
+                _notification_counter.notify_one();
         });
 
         std::string string_key = make_key_string("top_level_string");
@@ -303,42 +312,42 @@ namespace {
         _cache->add_callback("top_level_string/key1", redis_watcher);
         _cache->add_callback("top_level_string/key2", redis_watcher);
 
-        c.increment();
+        uint32_t counter_value = _notification_counter;
         // create string
         _test_client->set(string_key, initial_value);
-        c.wait();
+        wait_for_increment(counter_value, 1);
 
         // update string to another string
-        c.increment();
+        counter_value = _notification_counter;
         _test_client->set(string_key, new_string_value);
-        c.wait();
+        wait_for_increment(counter_value, 1);
 
         // update string with json value
-        c.increment_by(3);
+        counter_value = _notification_counter;
         _test_client->set(string_key, json_value_string);
-        c.wait();
+        wait_for_increment(counter_value, 3);
 
         // update string with new json value
-        c.increment_by(2);
+        counter_value = _notification_counter;
         _test_client->set(string_key, new_json_value_string);
-        c.wait();
+        wait_for_increment(counter_value, 2);
 
         // set it back to string
-        c.increment_by(3);
+        counter_value = _notification_counter;
         _test_client->set(string_key, initial_value);
-        c.wait();
+        wait_for_increment(counter_value, 3);
 
         // delete key
-        c.increment();
+        counter_value = _notification_counter;
         _test_client->del(string_key);
-        c.wait();
+        wait_for_increment(counter_value, 1);
     }
 
     TEST_F(RedisCache_Test, TestTopLevelHash) {
-        Counter c(0);
         auto redis_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
-            [&c] (const std::string &path, const nlohmann::json &new_value) {
-                c.decrement();
+            [this] (const std::string &path, const nlohmann::json &new_value) {
+                _notification_counter++;
+                _notification_counter.notify_one();
         });
 
         nlohmann::json hash_values = R"({
@@ -371,100 +380,100 @@ namespace {
         _cache->add_callback("top_level_hash/top_key5", redis_watcher);
 
         // add string
-        c.increment_by(2);
+        uint32_t counter_value = _notification_counter;
         _test_client->hset(hash_key, "top_key1", hash_values["top_key1"].get<std::string>());
-        c.wait();
+        wait_for_increment(counter_value, 2);
 
         // add string
-        c.increment_by(2);
+        counter_value = _notification_counter;
         _test_client->hset(hash_key, "top_key2", hash_values["top_key2"].get<std::string>());
-        c.wait();
+        wait_for_increment(counter_value, 2);
 
         // add hash
-        c.increment_by(4);
+        counter_value = _notification_counter;
         _test_client->hset(hash_key, "top_key3", nlohmann::to_string(hash_values["top_key3"]));
-        c.wait();
+        wait_for_increment(counter_value, 4);
 
         // add array
-        c.increment_by(2);
+        counter_value = _notification_counter;
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
-        c.wait();
+        wait_for_increment(counter_value, 2);
 
         // replace first key by a different string
-        c.increment_by(2);
+        counter_value = _notification_counter;
         _test_client->hset(hash_key, "top_key1", "new_value1");
-        c.wait();
+        wait_for_increment(counter_value, 2);
 
         // replace second key by a different string
-        c.increment_by(2);
+        counter_value = _notification_counter;
         _test_client->hset(hash_key, "top_key2", "new_value2");
-        c.wait();
+        wait_for_increment(counter_value, 2);
 
         // change hash value
-        c.increment_by(3);
+        counter_value = _notification_counter;
         hash_values.at("/top_key3/bottom_key1"_json_pointer) = "new_value1";
         _test_client->hset(hash_key, "top_key3", nlohmann::to_string(hash_values["top_key3"]));
-        c.wait();
+        wait_for_increment(counter_value, 3);
 
         // change hash value
-        c.increment_by(3);
+        counter_value = _notification_counter;
         hash_values.at("/top_key3/bottom_key2"_json_pointer) = "new_value2";
         _test_client->hset(hash_key, "top_key3", nlohmann::to_string(hash_values["top_key3"]));
-        c.wait();
+        wait_for_increment(counter_value, 3);
 
         // delete hash
         nlohmann::json top_key3_value = hash_values["top_key3"];
-        c.increment_by(4);
+        counter_value = _notification_counter;
         _test_client->hdel(hash_key, "top_key3");
-        c.wait();
+        wait_for_increment(counter_value, 4);
 
         // add hash back
-        c.increment_by(4);
+        counter_value = _notification_counter;
         _test_client->hset(hash_key, "top_key3", nlohmann::to_string(top_key3_value));
-        c.wait();
+        wait_for_increment(counter_value, 4);
 
         // Replace hash by string
-        c.increment_by(4);
+        counter_value = _notification_counter;
         _test_client->hset(hash_key, "top_key3", "some string for top_key3");
-        c.wait();
+        wait_for_increment(counter_value, 4);
 
         // assign different string to a former hash
-        c.increment_by(2);
+        counter_value = _notification_counter;
         _test_client->hset(hash_key, "top_key3", "some other string for top_key3");
-        c.wait();
+        wait_for_increment(counter_value, 2);
 
         // Replace string by hash
-        c.increment_by(4);
+        counter_value = _notification_counter;
         _test_client->hset(hash_key, "top_key3", nlohmann::to_string(top_key3_value));
-        c.wait();
+        wait_for_increment(counter_value, 4);
 
         // change array value
         nlohmann::json top_key4_value = hash_values["top_key4"];
-        c.increment_by(2);
+        counter_value = _notification_counter;
         hash_values.at("/top_key4/0"_json_pointer) = 5;
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
-        c.wait();
+        wait_for_increment(counter_value, 2);
 
         // change array value
-        c.increment_by(2);
+        counter_value = _notification_counter;
         hash_values.at("/top_key4/1"_json_pointer) = 6;
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
-        c.wait();
+        wait_for_increment(counter_value, 2);
 
         // remove array value
-        c.increment_by(2);
+        counter_value = _notification_counter;
         hash_values.at("top_key4").erase(0);
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
-        c.wait();
+        wait_for_increment(counter_value, 2);
 
         // add array value at the beginning of the array
-        c.increment_by(2);
+        counter_value = _notification_counter;
         hash_values.at("top_key4").insert(hash_values.at("top_key4").begin(), 1);
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
-        c.wait();
+        wait_for_increment(counter_value, 2);
 
         // add hash to an array
-        c.increment_by(2);
+        counter_value = _notification_counter;
         hash_values["top_key4"][4] = R"({
             "item_key1": "item_value1",
             "item_key2": "item_value2",
@@ -472,85 +481,85 @@ namespace {
             "item_key4": "item_value4"
         })"_json;
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
-        c.wait();
+        wait_for_increment(counter_value, 2);
 
         // remove first element from the array
-        c.increment_by(2);
+        counter_value = _notification_counter;
         hash_values.at("top_key4").erase(0);
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
-        c.wait();
+        wait_for_increment(counter_value, 2);
 
         // restore original array values
-        c.increment_by(2);
+        counter_value = _notification_counter;
         hash_values["top_key4"] = top_key4_value;
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
-        c.wait();
+        wait_for_increment(counter_value, 2);
 
         // Replace array by hash
-        c.increment_by(3);
+        counter_value = _notification_counter;
         hash_values["top_key4"] = R"({
             "key1": "item1",
             "key2": "item2",
             "key3": "item2"
         })"_json;
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
-        c.wait();
+        wait_for_increment(counter_value, 3);
 
         // restore original array values
-        c.increment_by(3);
+        counter_value = _notification_counter;
         hash_values["top_key4"] = top_key4_value;
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
-        c.wait();
+        wait_for_increment(counter_value, 3);
 
         // Replace array by a string
-        c.increment_by(2);
+        counter_value = _notification_counter;
         hash_values["top_key4"] = R"("string for top_key4")"_json;
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
-        c.wait();
+        wait_for_increment(counter_value, 2);
 
         // restore original array values
-        c.increment_by(2);
+        counter_value = _notification_counter;
         hash_values["top_key4"] = top_key4_value;
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
-        c.wait();
+        wait_for_increment(counter_value, 2);
 
         // Replace array by hash with keys identical to array indices
-        c.increment_by(4);
+        counter_value = _notification_counter;
         hash_values["top_key4"] = R"({
             "0": "item1",
             "1": "item2",
             "2": "item2"
         })"_json;
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
-        c.wait();
+        wait_for_increment(counter_value, 4);
 
         // restore original array values
-        c.increment_by(4);
+        counter_value = _notification_counter;
         hash_values["top_key4"] = top_key4_value;
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
-        c.wait();
+        wait_for_increment(counter_value, 4);
 
         // add string to the top level hash
-        c.increment_by(2);
+        counter_value = _notification_counter;
         _test_client->hset(hash_key, "top_key5", "value5");
-        c.wait();
+        wait_for_increment(counter_value, 2);
 
         // remove string from the top level hash
-        c.increment_by(2);
+        counter_value = _notification_counter;
         _test_client->hdel(hash_key, "top_key5");
-        c.wait();
+        wait_for_increment(counter_value, 2);
 
         // remove the key of the hash
-        c.increment_by(7);
+        counter_value = _notification_counter;
         _test_client->del(hash_key);
-        c.wait();
+        wait_for_increment(counter_value, 7);
     }
 
     TEST_F(RedisCache_Test, TestTopLevelArray) {
-        Counter c(0);
         auto redis_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
-            [&c] (const std::string &path, const nlohmann::json &new_value) {
-                c.decrement();
+            [this] (const std::string &path, const nlohmann::json &new_value) {
+                _notification_counter++;
+                _notification_counter.notify_one();
         });
 
         nlohmann::json array_values = R"([
@@ -569,41 +578,41 @@ namespace {
         _cache->add_callback("top_level_array/4", redis_watcher);
         _cache->add_callback("top_level_array/5", redis_watcher);
 
-        c.increment_by(1);
+        uint32_t counter_value = _notification_counter;
         _test_client->sadd(array_key, array_values[0].get<std::string>());
-        c.wait();
+        wait_for_increment(counter_value, 1);
 
-        c.increment_by(1);
+        counter_value = _notification_counter;
         _test_client->sadd(array_key, array_values[1].get<std::string>());
-        c.wait();
+        wait_for_increment(counter_value, 1);
 
-        c.increment_by(1);
+        counter_value = _notification_counter;
         _test_client->sadd(array_key, array_values[2].get<std::string>());
-        c.wait();
+        wait_for_increment(counter_value, 1);
 
-        c.increment_by(1);
+        counter_value = _notification_counter;
         _test_client->sadd(array_key, array_values[3].get<std::string>());
-        c.wait();
+        wait_for_increment(counter_value, 1);
 
-        c.increment_by(1);
+        counter_value = _notification_counter;
         _test_client->srem(array_key, array_values[0].get<std::string>());
-        c.wait();
+        wait_for_increment(counter_value, 1);
 
         // replace array with string
-        c.increment_by(1);
+        counter_value = _notification_counter;
         _test_client->set(array_key, "some string");
-        c.wait();
+        wait_for_increment(counter_value, 1);
 
-        c.increment_by(1);
+        counter_value = _notification_counter;
         _test_client->del(array_key);
-        c.wait();
+        wait_for_increment(counter_value, 1);
     }
 
     TEST_F(RedisCache_Test, TestRedisChange) {
-        Counter c(0);
         auto redis_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
-            [&c] (const std::string &path, const nlohmann::json &new_value) {
-                c.decrement();
+            [this] (const std::string &path, const nlohmann::json &new_value) {
+                _notification_counter++;
+                _notification_counter.notify_one();
         });
 
         // NOTE: The array values are here in sorted order. Redis may reorder array values when it stores
@@ -641,90 +650,90 @@ namespace {
         _cache->add_callback("top_level_string", redis_watcher);
         _cache->add_callback("top_level_hash", redis_watcher);
 
-        c.increment();
+        uint32_t counter_value = _notification_counter;
         _test_client->set(string_key, nlohmann::to_string(string_value));
-        c.wait();
+        wait_for_increment(counter_value, 1);
 
-        c.increment();
+        counter_value = _notification_counter;
         _test_client->hset(hash_key, "top_key1", hash_values["top_key1"].get<std::string>());
-        c.wait();
-        c.increment();
+        wait_for_increment(counter_value, 1);
+        counter_value = _notification_counter;
         _test_client->hset(hash_key, "top_key2", hash_values["top_key2"].get<std::string>());
-        c.wait();
-        c.increment();
+        wait_for_increment(counter_value, 1);
+        counter_value = _notification_counter;
         _test_client->hset(hash_key, "top_key3", nlohmann::to_string(hash_values["top_key3"]));
-        c.wait();
-        c.increment();
+        wait_for_increment(counter_value, 1);
+        counter_value = _notification_counter;
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
-        c.wait();
-        c.increment();
+        wait_for_increment(counter_value, 1);
+        counter_value = _notification_counter;
         _test_client->hset(hash_key, "top_key5", hash_values["top_key5"].get<std::string>());
-        c.wait();
+        wait_for_increment(counter_value, 1);
 
-        c.increment();
+        counter_value = _notification_counter;
         _test_client->sadd(array_key, array_values[0].get<std::string>());
-        c.wait();
-        c.increment();
+        wait_for_increment(counter_value, 1);
+        counter_value = _notification_counter;
         _test_client->sadd(array_key, array_values[1].get<std::string>());
-        c.wait();
-        c.increment();
+        wait_for_increment(counter_value, 1);
+        counter_value = _notification_counter;
         _test_client->sadd(array_key, array_values[2].get<std::string>());
-        c.wait();
-        c.increment();
+        wait_for_increment(counter_value, 1);
+        counter_value = _notification_counter;
         _test_client->sadd(array_key, array_values[3].get<std::string>());
-        c.wait();
+        wait_for_increment(counter_value, 1);
 
-        c.increment();
+        counter_value = _notification_counter;
         string_value["key3"] = "value3";
         EXPECT_TRUE(_cache->set_value("top_level_string", string_value));
-        c.wait();
+        wait_for_increment(counter_value, 1);
 
         nlohmann::json stored_string_value = _cache->get_value("top_level_string");
         EXPECT_EQ(string_value, stored_string_value);
 
-        c.increment();
+        counter_value = _notification_counter;
         hash_values["top_key1"] = "new value1";
         EXPECT_TRUE(_cache->set_value("top_level_hash/top_key1", hash_values["top_key1"]));
-        c.wait();
+        wait_for_increment(counter_value, 1);
         nlohmann::json stored_hash_values = _cache->get_value("top_level_hash");
         EXPECT_EQ(hash_values, stored_hash_values);
 
-        c.increment();
+        counter_value = _notification_counter;
         hash_values["top_key2"] = "new value2";
         EXPECT_TRUE(_cache->set_value("top_level_hash/top_key2", hash_values["top_key2"]));
-        c.wait();
+        wait_for_increment(counter_value, 1);
         stored_hash_values = _cache->get_value("top_level_hash");
         EXPECT_EQ(hash_values, stored_hash_values);
 
-        c.increment();
+        counter_value = _notification_counter;
         hash_values["top_key3"]["bottom_key3"] = "new value3";
         EXPECT_TRUE(_cache->set_value("top_level_hash/top_key3/bottom_key3", hash_values["top_key3"]["bottom_key3"]));
-        c.wait();
+        wait_for_increment(counter_value, 1);
         stored_hash_values = _cache->get_value("top_level_hash");
         EXPECT_EQ(hash_values, stored_hash_values);
 
-        c.increment();
+        counter_value = _notification_counter;
         hash_values["top_key4"][4] = 5;
         EXPECT_TRUE(_cache->set_value("top_level_hash/top_key4/4", hash_values["top_key4"][4]));
-        c.wait();
+        wait_for_increment(counter_value, 1);
         stored_hash_values = _cache->get_value("top_level_hash");
         EXPECT_EQ(hash_values, stored_hash_values);
 
         // test add
-        c.increment();
+        counter_value = _notification_counter;
         array_values = _cache->get_value("top_level_array");
         array_values[4] = "value5";
         ASSERT_TRUE(_cache->set_value("top_level_array/4", array_values[4]));
-        c.wait();
+        wait_for_increment(counter_value, 1);
         nlohmann::json stored_array_values = _cache->get_value("top_level_array");
         EXPECT_EQ(array_values, stored_array_values);
 
         // test remove
-        c.increment();
+        counter_value = _notification_counter;
         array_values = _cache->get_value("top_level_array");
         array_values.erase(0);
         ASSERT_TRUE(_cache->set_value("top_level_array", array_values));
-        c.wait();
+        wait_for_increment(counter_value, 1);
         stored_array_values = _cache->get_value("top_level_array");
         EXPECT_EQ(array_values, stored_array_values);
 
@@ -736,26 +745,24 @@ namespace {
         EXPECT_NE(array_values, stored_array_values);
 
         SPDLOG_INFO("started cleanup");
-        c.increment();
+        counter_value = _notification_counter;
         _test_client->del(string_key);
-        c.wait();
+        wait_for_increment(counter_value, 1);
 
-        c.increment();
+        counter_value = _notification_counter;
         _test_client->del(hash_key);
-        c.wait();
+        wait_for_increment(counter_value, 1);
 
-        c.increment();
+        counter_value = _notification_counter;
         _test_client->del(array_key);
-        c.wait();
+        wait_for_increment(counter_value, 1);
     }
 
     TEST_F(RedisCache_Test, TestArrayRemoval) {
-        Counter c(0);
         auto redis_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
-            [&c] (const std::string &path, const nlohmann::json &new_value) {
-                std::cout << "path: " << path << " new_value: " << new_value << std::endl;
-                std::cout << "c count: " << c.get_count() << std::endl;
-                c.decrement();
+            [this] (const std::string &path, const nlohmann::json &new_value) {
+                _notification_counter++;
+                _notification_counter.notify_one();
         });
 
         std::string fdw_ids_clone = "fdw_ids_clone";
@@ -769,10 +776,9 @@ namespace {
             "3"
         };
 
-        std::cout << "c increment 1" << std::endl;
-        c.increment();
+        uint32_t old_notifications_received = _notification_counter;
         _test_client->sadd(array_key, array_values[0].get<std::string>());
-        c.wait();
+        wait_for_increment(old_notifications_received, 1);
 
         EXPECT_EQ(array_values.type(), nlohmann::json::value_t::array);
         EXPECT_EQ(array_values[0].type(), nlohmann::json::value_t::string);
@@ -780,35 +786,29 @@ namespace {
         nlohmann::json array_element = _cache->get_value(fdw_ids_clone + "/0");
         EXPECT_EQ(array_element.type(), nlohmann::json::value_t::string);
 
-        std::cout << "c increment 2" << std::endl;
-        c.increment();
+        old_notifications_received = _notification_counter;
         _cache->set_value(fdw_ids_clone + "/1", array_values[1]);
-        c.wait();
+        wait_for_increment(old_notifications_received, 1);
 
-        std::cout << "c increment 3" << std::endl;
-        c.increment();
+        old_notifications_received = _notification_counter;
         _cache->set_value(fdw_ids_clone + "/2", array_values[2]);
-        c.wait();
+        wait_for_increment(old_notifications_received, 1);
 
         array_values.erase(0);
 
-        std::cout << "c increment 4" << std::endl;
-        c.increment();
+        old_notifications_received = _notification_counter;
         _cache->set_value(fdw_ids_clone, array_values);
-        c.wait();
 
         array_values.erase(0);
 
-        std::cout << "c increment 5" << std::endl;
-        c.increment();
+        old_notifications_received = _notification_counter;
         _cache->set_value(fdw_ids_clone, array_values);
-        c.wait();
+        wait_for_increment(old_notifications_received, 1);
 
         array_values.erase(0);
-        std::cout << "c increment 6" << std::endl;
-        c.increment();
+        old_notifications_received = _notification_counter;
         _cache->set_value(fdw_ids_clone, array_values);
-        c.wait();
+        wait_for_increment(old_notifications_received, 1);
 
         array_values = {
             "1",
@@ -816,22 +816,20 @@ namespace {
             "3"
         };
 
-        std::cout << "c increment 7" << std::endl;
-        c.increment();
+        old_notifications_received = _notification_counter;
         _test_client->sadd(array_key, array_values[0].get<std::string>());
-        c.wait();
+        wait_for_increment(old_notifications_received, 1);
 
-        std::cout << "c increment 8" << std::endl;
-        c.increment();
+        old_notifications_received = _notification_counter;
         _cache->set_value(fdw_ids_clone, array_values);
-        c.wait();
+        wait_for_increment(old_notifications_received, 1);
     }
 
     TEST_F(RedisCache_Test, TestHashRemoval) {
-        Counter c(0);
         auto redis_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
-            [&c] (const std::string &path, const nlohmann::json &new_value) {
-                c.decrement();
+            [this] (const std::string &path, const nlohmann::json &new_value) {
+                _notification_counter++;
+                _notification_counter.notify_one();
         });
 
         std::string fdw_clone = "fdw_clone";
@@ -870,41 +868,41 @@ namespace {
             } }
         });
 
-        c.increment();
+        uint32_t old_notifications_received = _notification_counter;
         _test_client->hset(hash_key, "1", nlohmann::to_string(first_element));
-        c.wait();
+        wait_for_increment(old_notifications_received, 1);
 
-        c.increment();
+        old_notifications_received = _notification_counter;
         _cache->set_value(fdw_clone + "/1", hash_values["1"]);
-        c.wait();
+        wait_for_increment(old_notifications_received, 1);
 
-        c.increment();
+        old_notifications_received = _notification_counter;
         _cache->set_value(fdw_clone + "/2", hash_values["2"]);
-        c.wait();
+        wait_for_increment(old_notifications_received, 1);
 
-        c.increment();
+        old_notifications_received = _notification_counter;
         _cache->set_value(fdw_clone + "/3", hash_values["3"]);
-        c.wait();
+        wait_for_increment(old_notifications_received, 1);
 
+        old_notifications_received = _notification_counter;
         nlohmann::json empty;
-        c.increment();
         _cache->set_value(fdw_clone + "/1", empty);
-        c.wait();
+        wait_for_increment(old_notifications_received, 1);
 
-        c.increment();
+        old_notifications_received = _notification_counter;
         _cache->set_value(fdw_clone + "/2", empty);
-        c.wait();
+        wait_for_increment(old_notifications_received, 1);
 
-        c.increment();
+        old_notifications_received = _notification_counter;
         _cache->set_value(fdw_clone + "/3", empty);
-        c.wait();
+        wait_for_increment(old_notifications_received, 1);
     }
 
     TEST_F(RedisCache_Test, TestStringRemoval) {
-        Counter c(0);
         auto redis_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
-            [&c] (const std::string &path, const nlohmann::json &new_value) {
-                c.decrement();
+            [this] (const std::string &path, const nlohmann::json &new_value) {
+                _notification_counter++;
+                _notification_counter.notify_one();
         });
 
         std::string string_key = "string_key";
@@ -915,18 +913,18 @@ namespace {
         nlohmann::json json_string = "test string";
         nlohmann::json json_new_string = "some different test string";
 
-        c.increment();
+        uint32_t old_notifications_received = _notification_counter;
         _test_client->set(redis_string_key, json_string.get<std::string>());
-        c.wait();
+        wait_for_increment(old_notifications_received, 1);
 
-        c.increment();
+        old_notifications_received = _notification_counter;
         _cache->set_value(string_key, json_new_string);
-        c.wait();
+        wait_for_increment(old_notifications_received, 1);
 
+        old_notifications_received = _notification_counter;
         nlohmann::json empty;
-        c.increment();
         _cache->set_value(string_key, empty);
-        c.wait();
+        wait_for_increment(old_notifications_received, 1);
 
     }
 };
