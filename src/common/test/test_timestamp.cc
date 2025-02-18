@@ -67,3 +67,14 @@ TEST(TimestampTest, FormattingComplex)
 
     EXPECT_EQ(ss.str(), "1970-01-02 02:34:56.789012 UTC");
 }
+
+TEST(TimestampTest, UnixNanoseconds)
+{
+    // Test zero timestamp (2000-01-01 00:00:00 UTC)
+    PostgresTimestamp zero(0);
+    EXPECT_EQ(zero.to_unix_ns(), PostgresTimestamp::POSTGRES_TO_UNIX_EPOCH_MICROS * 1000LL);
+
+    // Test one second after PostgreSQL epoch
+    PostgresTimestamp one_sec(1000000);  // 1 second after PG epoch
+    EXPECT_EQ(one_sec.to_unix_ns(), (PostgresTimestamp::POSTGRES_TO_UNIX_EPOCH_MICROS + 1000000LL) * 1000LL);
+}
