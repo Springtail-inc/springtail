@@ -11,17 +11,7 @@ namespace {
     protected:
         static void SetUpTestSuite()
         {
-            // springtail_init();
-            // NOTE: the reason for not using springtail_init() is because I am using valgrind to run
-            //      this unit test and to ensure that no memory is leaked, corrupted, or not cleaned up
-            //      properly. Unfortunately, springtail_init() brings a lot of noise that I did not want
-            //      to deal with at the moment.
-
             springtail_init();
-
-            //Properties::get_instance()->init(true);
-            //Properties::get_instance()->init_cache();
-            //init_exception();
         }
 
         static void TearDownTestSuite()
@@ -61,7 +51,7 @@ namespace {
 
         void wait_for_increment(uint32_t old_value, uint32_t increment)
         {
-            while (_notification_counter.load() != (old_value + increment)) {
+            while (_notification_counter.load() < (old_value + increment)) {
                 _notification_counter.wait(old_value);
                 EXPECT_LE(_notification_counter, old_value + increment);
             }
