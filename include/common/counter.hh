@@ -1,5 +1,5 @@
 #pragma once
-
+#include <cassert>
 #include <cstdint>
 #include <boost/thread.hpp>
 
@@ -45,6 +45,7 @@ namespace springtail {
         void decrement() {
             boost::unique_lock lock(_mutex);
             --_count;
+            assert(_count >= 0);
             if (_count == 0) {
                 _cv.notify_all();
             }
@@ -64,7 +65,7 @@ namespace springtail {
     private:
         boost::condition_variable _cv; ///< Condition variable for waiting.
         mutable boost::mutex _mutex; ///< Access mutex to provide thread-safety.
-        uint64_t _count; ///< The underlying counter.
+        int64_t _count; ///< The underlying counter.
     };
     typedef std::shared_ptr<Counter> CounterPtr;
 

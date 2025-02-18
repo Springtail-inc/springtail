@@ -130,6 +130,12 @@ public:
                 log_path = log_path.parent_path() / log_name_path;
             }
             log_path_str = log_path.string();
+        } else {
+            std::filesystem::path log_path{log_path_str};
+            if (!log_path.has_extension()) {
+                log_path = log_path.parent_path() / "springtail.log";
+                log_path_str = log_path.string();
+            }
         }
 
         // log bitmask
