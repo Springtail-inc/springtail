@@ -47,16 +47,16 @@ VALUES
 ## verify
 ### schema_check public numeric_and_nulls
 -- col3 IS NULL and col4 > 100
-SELECT col3, col4, col5 FROM numeric_and_nulls WHERE col3 IS NULL AND col4 > 100.00;
+SELECT col3, col4, col5 FROM numeric_and_nulls WHERE col3 IS NULL AND col4 > 100.00 ORDER BY col3 ASC;
 
 -- col3 IS NOT NULL and col4 < 200
-SELECT col3, col4, col5 FROM numeric_and_nulls WHERE col3 IS NOT NULL AND col4 < 200.00;
+SELECT col3, col4, col5 FROM numeric_and_nulls WHERE col3 IS NOT NULL AND col4 < 200.00 ORDER BY col4, col5 ASC;
 
 -- col4 IS NULL and col5 = TRUE
-SELECT col3, col4, col5 FROM numeric_and_nulls WHERE col4 IS NULL AND col5 = TRUE;
+SELECT col3, col4, col5 FROM numeric_and_nulls WHERE col4 IS NULL AND col5 = TRUE ORDER BY col3 ASC;
 
 -- col4 IS NOT NULL and col5 = FALSE
-SELECT col3, col4, col5 FROM numeric_and_nulls WHERE col4 IS NOT NULL AND col5 = FALSE;
+SELECT col3, col4, col5 FROM numeric_and_nulls WHERE col4 IS NOT NULL AND col5 = FALSE ORDER BY col4, col5 ASC;
 
 ## cleanup
 DROP TABLE IF EXISTS numeric_and_nulls;
