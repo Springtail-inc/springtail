@@ -36,10 +36,7 @@ namespace springtail::pg_log_mgr {
     PgLogReader::Batch::commit(uint64_t xid, PostgresTimestamp commit_ts)
     {
         auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
-        auto attributes = opentelemetry::common::KeyValueIterableView<
-            std::initializer_list<std::pair<std::string, int64_t>>>(
-            {{"pg_commit_time", commit_ts.to_unix_ns()}});
-        _span->AddEvent("commit", attributes);
+        _span->AddEvent("commit", {{"pg_commit_time", commit_ts.to_unix_ns()}});
 
         // go through each subtxn and push it's outstanding batches to the WriteCache
         std::vector<uint64_t> pg_xids;
@@ -85,10 +82,7 @@ namespace springtail::pg_log_mgr {
     PgLogReader::Batch::abort(PostgresTimestamp abort_ts)
     {
         auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
-        auto attributes = opentelemetry::common::KeyValueIterableView<
-            std::initializer_list<std::pair<std::string, int64_t>>>(
-            {{"pg_abort_time", abort_ts.to_unix_ns()}});
-        _span->AddEvent("aborted", attributes);
+        _span->AddEvent("aborted", {{"pg_abort_time", abort_ts.to_unix_ns()}});
 
         // drop any batches for all active txns
         for (auto &&entry : _txns) {
@@ -106,10 +100,10 @@ namespace springtail::pg_log_mgr {
         auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
 
         // Add subtransaction abort event with the provided timestamp
-        auto attributes = opentelemetry::common::KeyValueIterableView<
-            std::initializer_list<std::pair<std::string, int64_t>>>(
-            {{"sub_xid", pg_xid}, {"pg_abort_time", abort_ts.to_unix_ns()}});
-        _span->AddEvent("subtransaction_abort", attributes);
+        _span->AddEvent("subtransaction_abort", {
+            {"sub_xid", pg_xid},
+            {"pg_abort_time", abort_ts.to_unix_ns()}
+        });
 
         // find the txn to abort it
         auto itr = _txns.find(pg_xid);
