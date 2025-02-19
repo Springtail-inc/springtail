@@ -139,6 +139,10 @@
         }
     },
     "otel": {
-	"enabled": true
+        "enabled": true,
+        "host": "otel-collector",
+        "port": 4318,
+        "metrics_host": "otel-collector",
+        "metrics_port": 9464
     }
 }

@@ -17,6 +17,64 @@ services:
       - redis-config:/usr/local/etc/redis/redis.conf
     ports:
       - 6379:6379
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.118.0
+    container_name: otel_collector
+    restart: always
+    volumes:
+      - ./otel_config.yaml:/etc/otelcol-contrib/config.yaml
+    ports:
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+      - "9464:9464"    # Prometheus metrics
+    command: [ "--config", "/etc/otelcol-contrib/config.yaml" ]
+    networks:
+      - springtail-fdw-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: always
+    volumes:
+      - ./prom_config.yaml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - springtail-fdw-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: always
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - springtail-fdw-network
+
+  zipkin:
+    image: openzipkin/zipkin:latest
+    container_name: zipkin
+    restart: always
+    ports:
+      - "9411:9411"
+    networks:
+      - springtail-fdw-network
+
+networks:
+  springtail-fdw-network:
+
 volumes:
+  grafana-data:
   redis:
   redis-config:
