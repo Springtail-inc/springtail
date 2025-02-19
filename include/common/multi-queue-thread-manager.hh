@@ -191,30 +191,27 @@ namespace springtail::pg_fdw {
          *      among the appropriate internal queues based on the queue id specified in the request.
          *
          */
-        void
-        _drain_incoming_queue();
+        void _drain_incoming_queue();
 
         /**
          * @brief This function processes completed queue.
          *
          */
-        void
-        _process_completed_queue();
+        void _process_completed_queue();
 
         /**
          * @brief Schedule requests that have not been scheduled yet and
-         *        set queue_empty to true if all queues are empty.
+         *        return true if at least one request was still present in any of the queues
+         *        and false if it found all the queues empty.
          *
-         * @param queues_empty - queues empty flag
+         * @return bool - true if scheduled requests, false if all the queues were empty
          */
-        void
-        _schedule_requests(bool &queues_empty);
+        bool _schedule_requests();
 
         /**
          * @brief Main run function that is executed by the manager thread.
          *
          */
-        void
-        _run();
+        void _run();
     };
 };

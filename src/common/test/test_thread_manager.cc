@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <common/common.hh>
 
-#include <pg_fdw/multi-queue-thread-manager.hh>
+#include <common/multi-queue-thread-manager.hh>
 
 using namespace springtail;
 using namespace springtail::pg_fdw;

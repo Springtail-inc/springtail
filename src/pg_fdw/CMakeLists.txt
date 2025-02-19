@@ -47,7 +47,7 @@ target_link_libraries(springtail_pg_fdw
     PRIVATE springtail_sys_tbl_mgr
 )
 
-add_executable(pg_ddl_daemon pg_ddl_daemon.cc pg_ddl_mgr.cc multi-queue-thread-manager.cc)
+add_executable(pg_ddl_daemon pg_ddl_daemon.cc pg_ddl_mgr.cc)
 target_include_directories(pg_ddl_daemon
     PUBLIC ${PROJECT_SOURCE_DIR}/include
     PRIVATE ${PostgreSQL_INCLUDE_DIRS}
@@ -140,15 +140,9 @@ install(FILES
     DESTINATION share
 )
 
-add_executable(test_thread_manager test/test_thread_manager.cc multi-queue-thread-manager.cc)
-target_include_directories(test_thread_manager PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_thread_manager PRIVATE springtail_common GTest::gtest_main)
-add_dsymutil_command(test_thread_manager)
-
 add_executable(test_pg_ddl_mgr
     test/test_pg_ddl_mgr.cc
-    pg_ddl_mgr.cc
-    multi-queue-thread-manager.cc)
+    pg_ddl_mgr.cc)
 target_include_directories(test_pg_ddl_mgr
     PRIVATE ${PROJECT_SOURCE_DIR}/include
     PRIVATE ${PostgreSQL_INCLUDE_DIRS})
@@ -160,5 +154,4 @@ target_link_libraries(test_pg_ddl_mgr
     PRIVATE GTest::gtest_main)
 add_dsymutil_command(test_pg_ddl_mgr)
 
-gtest_discover_tests(test_thread_manager)
 gtest_discover_tests(test_pg_ddl_mgr)
