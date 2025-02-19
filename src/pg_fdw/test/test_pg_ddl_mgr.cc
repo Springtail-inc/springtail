@@ -67,7 +67,9 @@ namespace {
         }
 
         static void TearDownTestSuite() {
-            _conn->disconnect();
+            if (_conn != nullptr) {
+                _conn->disconnect();
+            }
             PgDDLMgr::get_instance()->notify_shutdown();
             _pg_ddl_mgr_thread.join();
             PgDDLMgr::shutdown();
