@@ -42,6 +42,7 @@ namespace {
     public:
         static void SetUpTestSuite() {
             if (!_check_pg_config()) {
+                _skip_test = true;
                 GTEST_SKIP() << "Postgres replica config problem, skipping test";
             }
 
@@ -71,11 +72,16 @@ namespace {
         }
 
         static void TearDownTestSuite() {
+            if (_skip_test) {
+                return;
+            }
             if (_conn != nullptr) {
                 _conn->disconnect();
             }
             PgDDLMgr::get_instance()->notify_shutdown();
-            _pg_ddl_mgr_thread.join();
+            if (_pg_ddl_mgr_thread.has_value()) {
+                _pg_ddl_mgr_thread.value().join();
+            }
             PgDDLMgr::shutdown();
             _services.shutdown();
             RedisMgr::shutdown();
@@ -109,11 +115,12 @@ namespace {
             // placeholder, left empty for now
         }
 
-        static inline std::thread _pg_ddl_mgr_thread;
+        static inline std::optional<std::thread> _pg_ddl_mgr_thread;
         static inline test::Services _services{true, false, false};
         static inline std::string _db_id_str{"1"};
         static inline std::string _fdw_id_str{"1"};
         static inline LibPqConnectionPtr _conn;
+        static inline bool _skip_test{false};
 
         RedisClientPtr _redis_client_data;
         RedisMgr::SubscriberPtr _subscriber;
