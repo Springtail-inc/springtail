@@ -23,8 +23,8 @@ on:
 jobs:
   test:
     name: test
-    runs-on: warp-ubuntu-latest-arm64-4x-spot
-    timeout-minutes: 30
+    runs-on: image-builder
+    timeout-minutes: 90
     container:
       image: ${{ inputs.builder_image_version_tag }}
       credentials:
@@ -134,6 +134,8 @@ jobs:
           # Drop the springtail database 
           sudo -u postgres psql -c "DROP DATABASE springtail"
           service postgresql stop
+          # TODO: Remove later
+          sleep infinity
 
       - name: Unit Test Report
         uses: dorny/test-reporter@v1
