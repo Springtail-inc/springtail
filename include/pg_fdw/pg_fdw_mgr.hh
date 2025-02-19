@@ -7,7 +7,6 @@
 
 #include <common/constants.hh>
 #include <common/concurrent_queue.hh>
-#include <common/time_trace.hh>
 
 #include <redis/redis_ddl.hh>
 
