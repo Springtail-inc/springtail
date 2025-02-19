@@ -38,4 +38,10 @@ PostgresTimestamp::from_system_time(std::chrono::system_clock::time_point tp)
     return PostgresTimestamp(unix_micros - POSTGRES_TO_UNIX_EPOCH_MICROS);
 }
 
+int64_t
+PostgresTimestamp::to_unix_ns() const
+{
+    return (_micros + POSTGRES_TO_UNIX_EPOCH_MICROS) * 1000;
+}
+
 }  // namespace springtail

@@ -1,4 +1,4 @@
-#include <pg_fdw/multi-queue-thread-manager.hh>
+#include <common/multi-queue-thread-manager.hh>
 
 namespace springtail::pg_fdw {
 
@@ -18,7 +18,7 @@ namespace springtail::pg_fdw {
                 std::unique_lock<std::mutex> lock(_completed_queue_mutex);
                 _completed_queue.push(queue_id);
                 lock.unlock();
-                this->notify_ready();
+                notify_ready();
             });
 
             // get queue id of the request
@@ -55,15 +55,15 @@ namespace springtail::pg_fdw {
         }
     }
 
-    void
-    MultiQueueThreadManager::_schedule_requests(bool &queues_empty)
+    bool
+    MultiQueueThreadManager::_schedule_requests()
     {
-        queues_empty = true;
+        bool found_request = false;
         for (auto [queue_id, request_queue]: _request_queues) {
             if (request_queue.empty()) {
                 continue;
             }
-            queues_empty = false;
+            found_request = true;
             MultiQueueRequestPtr next_request = request_queue.front();
 
             // if this request is already queued, skip it, otherwise schedule it
@@ -72,36 +72,23 @@ namespace springtail::pg_fdw {
                 _thread_pool.queue(next_request);
             }
         }
+        return found_request;
     }
 
     void
     MultiQueueThreadManager::_run()
     {
-        while (!_shutdown) {
+        // while (!_shutdown) {
+        while (true) {
+            // wait to be notified of the change
             _work_ready = false;
             // 1. check incoming queue
             _drain_incoming_queue();
             // 2. check completed queues
             _process_completed_queue();
             // 3. find non-queued requests at the top of all queues and queue them
-            bool queues_empty = true;
-            _schedule_requests(queues_empty);
-
-            // wait to be notified of the change
-            _work_ready.wait(false);
-        }
-
-        // after shutdown is requested, drain the incoming queue once
-        _drain_incoming_queue();
-
-        while (true) {
-            _work_ready = false;
-            // continue to process completed requests and schedule the new ones
-            // until all the queues are empty
-            _process_completed_queue();
-            bool queues_empty = true;
-            _schedule_requests(queues_empty);
-            if (queues_empty) {
+            _schedule_requests();
+            if (_shutdown && !_schedule_requests()) {
                 break;
             }
 
@@ -109,6 +96,4 @@ namespace springtail::pg_fdw {
             _work_ready.wait(false);
         }
     }
-
-
 }

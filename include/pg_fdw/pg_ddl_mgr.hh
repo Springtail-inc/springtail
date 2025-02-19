@@ -17,7 +17,7 @@
 
 #include <pg_repl/libpq_connection.hh>
 
-#include <pg_fdw/multi-queue-thread-manager.hh>
+#include <common/multi-queue-thread-manager.hh>
 
 
 /* These are defined by Thrift imported from xid_mgr_client.h and
