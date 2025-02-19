@@ -103,10 +103,6 @@ protected:
     std::vector<std::pair<std::string, std::string>>
     get_context_attributes(const spdlog::details::log_msg &msg)
     {
-        auto ctx = opentelemetry::context::RuntimeContext::GetCurrent();
-        auto db_id = opentelemetry::nostd::get<int64_t>(ctx.GetValue("db_id"));
-        auto xid = opentelemetry::nostd::get<int64_t>(ctx.GetValue("xid"));
-
         // Instance properties
         auto db_instance_id = springtail::Properties::get_db_instance_id();
         std::string organization_id = springtail::Properties::get_organization_id();
@@ -125,8 +121,9 @@ protected:
         attributes.emplace_back("account_id", account_id);
 
         // Transaction properties
-        attributes.emplace_back("xid", std::to_string(xid));
-        attributes.emplace_back("db_id", std::to_string(db_id));
+        for (const auto& key : springtail::logging::get_context_variables()) {
+            attributes.emplace_back(key.first, std::to_string(key.second));
+        }
 
         return attributes;
     }

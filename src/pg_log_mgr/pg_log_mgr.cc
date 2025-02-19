@@ -248,7 +248,8 @@ namespace springtail::pg_log_mgr {
         if (_internal_state.is(STATE_STARTUP_SYNC)) {
             // Create the namespaces before starting the copy thread
             auto xid = _pg_log_reader.get_next_xid();
-            _pg_log_mgr_token = logging::set_otel_context(_db_id, xid);
+
+            logging::set_context_variables({{"db_id", _db_id}, {"xid", xid}});
 
             PgCopyTable::create_namespaces(_db_id, xid);
 

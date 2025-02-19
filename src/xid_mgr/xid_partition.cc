@@ -30,6 +30,7 @@ namespace springtail::xid_mgr {
     void
     Partition::_sync_thread_func()
     {
+        logging::set_context_variables({{"partition_id", _id}});
         while (!_shutdown) {
             std::unique_lock<std::mutex> _shutdown_lock(_shutdown_mutex);
             _shutdown_cv.wait_for(_shutdown_lock, std::chrono::seconds(SYNC_SLEEP_TIME_SECS));

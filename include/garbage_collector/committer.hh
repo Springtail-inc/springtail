@@ -154,6 +154,5 @@ namespace springtail::gc {
 
         std::shared_ptr<metrics::Histogram<double>> _btree_write_latencies;
         opentelemetry::context::Context _context;
-        std::unique_ptr<opentelemetry::context::Token> _gc_token;
     };
 }

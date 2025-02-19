@@ -65,7 +65,7 @@ namespace springtail::gc {
             }
             uint64_t db_id = result->db();
 
-            _gc_token = logging::set_otel_context(db_id, -1);
+            logging::set_context_variables({{"db_id", db_id}});
 
             // handle a TABLE_SYNC_START
             if (result->type() == XidReady::Type::TABLE_SYNC_START) {
@@ -89,7 +89,7 @@ namespace springtail::gc {
                 completed_xid = itr->second;
             }
 
-            _gc_token = logging::set_otel_context(db_id, completed_xid);
+            logging::set_context_variables({{"xid", completed_xid}});
             SPDLOG_INFO("Last completed XID: {}@{}", db_id, completed_xid);
 
             // handle a TABLE_SYNC_COMMIT
@@ -110,6 +110,8 @@ namespace springtail::gc {
                 if (completed_xid == _committed_xids[db_id]) {
                     completed_xid = result->swap().xid();
                 }
+
+                logging::set_context_variables({{"xid", completed_xid}});
 
                 // for operations at the SysTblMgr
                 auto client = sys_tbl_mgr::Client::get_instance();

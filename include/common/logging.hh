@@ -79,6 +79,10 @@ namespace springtail {
         /** Internal call to get a logger based on log id */
         std::shared_ptr<spdlog::logger> get_logger(uint32_t log_id);
 
+        void set_context_variables(const std::unordered_map<std::string, int64_t>& attributes);
+
+        std::unordered_map<std::string, int64_t> get_context_variables();
+
         /** Internal call to handle debug logging filtered by module */
         template <typename... Args> void
         debug(int log_id, fmt::format_string<Args...> fmt, const char *func, const char *file, int line, Args&&... args)
@@ -88,15 +92,6 @@ namespace springtail {
                 return;
             }
             logger->log(spdlog::source_loc{file, line, func}, spdlog::level::debug, fmt, std::forward<Args>(args)...);
-        }
-
-        inline std::unique_ptr<opentelemetry::context::Token>
-        set_otel_context(uint64_t db_id, uint64_t xid)
-        {
-            auto ctx = opentelemetry::context::RuntimeContext::GetCurrent();
-            ctx = ctx.SetValue("db_id", static_cast<int64_t>(db_id));
-            ctx = ctx.SetValue("xid", static_cast<int64_t>(xid));
-            return opentelemetry::context::RuntimeContext::Attach(ctx);
         }
     }
 }
