@@ -125,7 +125,6 @@ namespace springtail::gc {
                 _queue.pop();
                 params = _work_set[key];
             }
-
             if (!params._ddl.is_null()) {
                 auto root = _build(st, key, params);
                 _commit_build(root, key, params);
@@ -214,6 +213,9 @@ namespace springtail::gc {
 
         CHECK_EQ(idx._ddl["action"], "create_index");
 
+        auto client = sys_tbl_mgr::Client::get_instance();
+        client->invalidate_table(db_id, tid, XidLsn{idx._xid});
+
         // index column positions
         std::vector<uint32_t> idx_cols;
         for (auto const& col: idx._ddl["columns"]) {
@@ -224,9 +226,10 @@ namespace springtail::gc {
         std::shared_ptr<std::vector<FieldPtr>> key_fields;
         {
             auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, idx._xid, idx._xid);
+            root = table->index(index_id);
+            CHECK(root);
             // create an index root
-            root = table->create_index_root(index_id, idx_cols);
-            root->init_empty();
+            root->truncate();
             key_fields = table->schema()->get_fields(table->get_column_names(idx_cols));
         }
 
