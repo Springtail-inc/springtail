@@ -49,7 +49,7 @@ exporters:
   debug:
     verbosity: detailed
   prometheus:
-    endpoint: "http://prometheus:9464"
+    endpoint: "0.0.0.0:9464"
   elasticsearch:
     endpoint: "http://elasticsearch:9200"
     logs_index: logs-springtail
