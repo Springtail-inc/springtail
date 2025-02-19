@@ -78,8 +78,6 @@ jobs:
           ln -s /home/dev/external external
           ./clean.sh
           ./debug.sh -j ${NUM_PROCS}
-          cd debug
-          make install
 
       - name: Prepare DB for Unit Tests
         run: |

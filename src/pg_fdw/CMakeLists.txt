@@ -3,6 +3,8 @@ enable_language(C)
 find_package(PostgreSQL REQUIRED)
 find_package(Boost COMPONENTS program_options REQUIRED)
 
+include(FdwTestSetup)
+
 set(PG_FDW_SOURCES
     pg_fdw.c
     multicorn_util.c
@@ -162,3 +164,5 @@ add_dsymutil_command(test_pg_ddl_mgr)
 
 gtest_discover_tests(test_thread_manager)
 gtest_discover_tests(test_pg_ddl_mgr)
+
+add_dependencies(test_pg_ddl_mgr copy_fdw_files)
