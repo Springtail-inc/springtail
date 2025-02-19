@@ -33,3 +33,12 @@ Use the following command to connect our local dev server to the observability s
 ```
 docker network connect springtail-fdw-network dev
 ```
+
+### Grafana Dashboards
+
+Add the otel collector as a data source in grafana
+
+- Go to http://localhost:3000/connections/datasources
+- Click on "Add data source"
+- For the prometheus server URL, use the following url: http://prometheus:9090
+- Click on "Save & Test"
