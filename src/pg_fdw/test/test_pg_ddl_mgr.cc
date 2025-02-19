@@ -27,9 +27,13 @@ namespace {
                 pg_config_dir += "/extension/";
                 std::string springtail_sql_file = pg_config_dir + "springtail_fdw--1.0.sql";
                 std::string springtail_control_file = pg_config_dir + "springtail_fdw.control";
-                if (std::filesystem::exists(springtail_sql_file) && std::filesystem::exists(springtail_control_file)) {
+                bool sql_file_found = std::filesystem::exists(springtail_sql_file);
+                bool control_file_found = std::filesystem::exists(springtail_control_file);
+                if (sql_file_found && control_file_found) {
                     return true;
                 }
+                SPDLOG_ERROR("Springtail SQL file: {}, found: {}", springtail_sql_file, sql_file_found);
+                SPDLOG_ERROR("Springtail Control file: {}, found: {}", springtail_control_file, control_file_found);
             } catch (...) {
                 SPDLOG_ERROR("Failed to find postgres config files for springtail");
             }
