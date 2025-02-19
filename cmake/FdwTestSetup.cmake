@@ -8,6 +8,7 @@ find_program(
     REQUIRED
 )
 
+# the sudo command
 find_program(
     SUDO_COMMAND
     sudo
@@ -22,31 +23,44 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
-# Construct the destination directory
-set(DEST_DIR "${PG_SHARE_DIR}/extension")
+# Get the PostgreSQL package library directory
+execute_process(
+    COMMAND pg_config --pkglibdir
+    OUTPUT_VARIABLE PG_PKG_LIB_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
 
 # Define the source files
 set(SRC_DIR "${CMAKE_SOURCE_DIR}/src/pg_fdw")
 set(SRC_FILES
     "${SRC_DIR}/springtail_fdw--1.0.sql"
     "${SRC_DIR}/springtail_fdw.control"
+    "${CMAKE_BINARY_DIR}/src/pg_fdw/libspringtail_pg_fdw.so"
 )
 
 # Create custom commands for each file
 foreach(src_file ${SRC_FILES})
     get_filename_component(filename ${src_file} NAME)
+
+    if (filename STREQUAL "libspringtail_pg_fdw.so")
+        set(dst_file "${PG_PKG_LIB_DIR}/springtail_fdw.so")
+    else()
+        set(dst_file "${PG_SHARE_DIR}/extension/${filename}")
+    endif()
+
     add_custom_command(
-        OUTPUT "${DEST_DIR}/${filename}"
+        OUTPUT "${dst_file}"
         COMMAND ${SUDO_COMMAND} ${CP_COMMAND} --update=none
             "${src_file}"
-            "${DEST_DIR}/${filename}"
+            "${dst_file}"
         DEPENDS "${src_file}"
-        COMMENT "Copying ${filename} to ${DEST_DIR}"
+        COMMENT "Copying ${filename} to ${dst_file}"
     )
-    list(APPEND COPY_TARGETS "${DEST_DIR}/${filename}")
+    list(APPEND COPY_TARGETS "${dst_file}")
 endforeach()
 
 # Create a target that depends on all copied files
 add_custom_target(copy_fdw_files ALL
     DEPENDS ${COPY_TARGETS}
+    COMMENT "Copied FDW files to their respective destinations"
 )
