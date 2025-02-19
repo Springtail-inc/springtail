@@ -282,6 +282,7 @@ namespace springtail::pg_log_mgr {
                 continue;
             }
 
+            logging::set_context_variables({{"db_id", _db_id}});
             // copy tables
             _do_table_copies(table_ids);
 
@@ -311,6 +312,8 @@ namespace springtail::pg_log_mgr {
         // copy tables
         std::vector<PgCopyResultPtr> res;
         auto xid = _pg_log_reader.get_next_xid();
+
+        logging::set_context_variables({{"xid", xid}});
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Copying tables; target xid={}", xid);
         if (table_ids.has_value()) {
             res = PgCopyTable::copy_tables(_db_id, xid, table_ids.value());
