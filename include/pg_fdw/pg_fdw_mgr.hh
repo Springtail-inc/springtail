@@ -209,12 +209,6 @@ namespace springtail::pg_fdw {
 
         std::atomic<uint64_t> _schema_xid; ///< The most recently seen schema XID
 
-        // static methods
-        //
-        //
-        TIME_TRACE_CREATE(create_state_trace);
-
-
         /** Helper to convert field to PG Datum */
         static Datum _get_datum_from_field(FieldPtr field,
                                            const Extent::Row &row,

@@ -132,11 +132,7 @@ namespace springtail::pg_fdw {
                                uint64_t pg_xid,
                                uint64_t schema_xid)
     {
-        TIME_TRACE_START(create_state_trace, "fdw_create_state");
-
         uint64_t xid; // springtail xid
-
-        TIME_TRACE_START(create_state_trace, "fdw_create_state/resolve xid");
 
         // check if the schema_xid has progressed, if so, invalidate the schema cache
         const uint64_t prev_schema_xid = _schema_xid.exchange(schema_xid);
@@ -160,19 +156,13 @@ namespace springtail::pg_fdw {
             xid = it->second;
             rd_lock.unlock();
         }
-        TIME_TRACE_STOP(create_state_trace, "fdw_create_state/resolve xid");
 
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state: db_id: {}, tid: {}, xid: {}, pg_xid: {}",
                             db_id, tid, xid, pg_xid);
 
-        TIME_TRACE_START(create_state_trace, "fdw_create_state/create table");
-
         TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid);
         PgFdwState *state = new PgFdwState{table, tid, xid};
 
-        TIME_TRACE_STOP(create_state_trace, "fdw_create_state/create table");
-
-        TIME_TRACE_STOP(create_state_trace, "fdw_create_state");
         return state;
     }
 
@@ -380,14 +370,6 @@ namespace springtail::pg_fdw {
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_end: tid: {}, rows fetched: {}, rows skipped: {}",
                             state->tid, state->rows_fetched, state->rows_skipped);
         delete state;
-
-        //TODO: I couldn't figure out how to get a notification from
-        // PG when the FDW extension is dropped/killed, so I print the 
-        // traces at the end of every scan that could be noisy when
-        // SPRINGTAIL_INCLUDE_TIME_TRACES is set.
-        // If you do need the traces uncomment this line.
-        //
-        //TIME_TRACE_LOG(create_state_trace);
     }
 
     void
