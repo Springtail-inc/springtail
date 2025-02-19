@@ -79,9 +79,9 @@ namespace springtail {
         /** Internal call to get a logger based on log id */
         std::shared_ptr<spdlog::logger> get_logger(uint32_t log_id);
 
-        void set_context_variables(const std::unordered_map<std::string, int64_t>& attributes);
+        std::unique_ptr<opentelemetry::context::Token> set_context_variables(const std::unordered_map<std::string, std::string>& attributes);
 
-        std::unordered_map<std::string, int64_t> get_context_variables();
+        std::unordered_map<std::string, std::string> get_context_variables();
 
         /** Internal call to handle debug logging filtered by module */
         template <typename... Args> void

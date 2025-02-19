@@ -145,7 +145,7 @@ namespace springtail::xid_mgr {
     uint64_t
     XidMgrServer::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
     {
-        logging::set_context_variables({{"db_id", db_id}, {"xid", schema_xid}});
+        auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
         PartitionPtr partition;
         // first try to get partition without write lock
         std::shared_lock lock(_mutex);
@@ -163,7 +163,7 @@ namespace springtail::xid_mgr {
     void
     XidMgrServer::commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_changes)
     {
-        logging::set_context_variables({{"db_id", db_id}, {"xid", xid}});
+        auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(xid)}});
         PartitionPtr partition;
         // first try to get partition without write lock
         std::shared_lock rd_lock(_mutex);
@@ -194,7 +194,7 @@ namespace springtail::xid_mgr {
                                     uint64_t xid)
     {
         // note: code is nearly identical to commit_xid()... make sure they stay in sync
-        logging::set_context_variables({{"db_id", db_id}, {"xid", xid}});
+        auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(xid)}});
         PartitionPtr partition;
 
         // first try to get partition without write lock

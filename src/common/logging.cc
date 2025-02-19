@@ -34,15 +34,34 @@ namespace logging {
         return spdlog::default_logger();
     }
 
-    void set_context_variables(const std::unordered_map<std::string, int64_t>& attributes) {
+    std::unique_ptr<opentelemetry::context::Token>
+    set_context_variables(const std::unordered_map<std::string, std::string>& attributes) {
+        auto ctx = opentelemetry::context::RuntimeContext::GetCurrent();
+
+        auto baggage = opentelemetry::baggage::GetBaggage(ctx);
+
+        // Iterate over attributes and set baggage values
         for (const auto& attribute : attributes) {
-            otel_context[attribute.first] = static_cast<int64_t>(attribute.second); // Directly use the value without conversion
+            baggage = baggage->Set(attribute.first, attribute.second);
         }
+
+        auto updated_context = opentelemetry::baggage::SetBaggage(ctx, baggage);
+        return opentelemetry::context::RuntimeContext::Attach(updated_context);
     }
 
-    std::unordered_map<std::string, int64_t>
+    std::unordered_map<std::string, std::string>
     get_context_variables() {
-        return otel_context;
+        auto ctx = opentelemetry::context::RuntimeContext::GetCurrent();
+        auto baggage = opentelemetry::baggage::GetBaggage(ctx);
+        std::unordered_map<std::string, std::string> attributes;
+
+        // Iterate over all the baggage entries and populate the attributes object
+        baggage->GetAllEntries([&attributes](opentelemetry::nostd::string_view key, opentelemetry::nostd::string_view value) {
+            attributes[std::string(key)] = std::string(value);
+            return true;
+        });
+
+        return attributes;
     }
 } // namespace logging
 

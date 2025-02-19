@@ -122,7 +122,7 @@ protected:
 
         // Transaction properties
         for (const auto& key : springtail::logging::get_context_variables()) {
-            attributes.emplace_back(key.first, std::to_string(key.second));
+            attributes.emplace_back(key.first, key.second);
         }
 
         return attributes;

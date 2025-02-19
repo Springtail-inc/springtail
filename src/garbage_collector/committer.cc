@@ -25,6 +25,7 @@ namespace springtail::gc {
     void
     Committer::run()
     {
+        std::unique_ptr<opentelemetry::context::Token> token;
         // perform cleanup for any Committer threads in a previous run
         cleanup();
         _create_indexer();
@@ -65,7 +66,7 @@ namespace springtail::gc {
             }
             uint64_t db_id = result->db();
 
-            logging::set_context_variables({{"db_id", db_id}});
+            token = logging::set_context_variables({{"db_id", std::to_string(db_id)}});
 
             // handle a TABLE_SYNC_START
             if (result->type() == XidReady::Type::TABLE_SYNC_START) {
@@ -89,7 +90,7 @@ namespace springtail::gc {
                 completed_xid = itr->second;
             }
 
-            logging::set_context_variables({{"xid", completed_xid}});
+            token = logging::set_context_variables({{"xid", std::to_string(completed_xid)}});
             SPDLOG_INFO("Last completed XID: {}@{}", db_id, completed_xid);
 
             // handle a TABLE_SYNC_COMMIT
@@ -111,7 +112,7 @@ namespace springtail::gc {
                     completed_xid = result->swap().xid();
                 }
 
-                logging::set_context_variables({{"xid", completed_xid}});
+                token = logging::set_context_variables({{"xid", std::to_string(completed_xid)}});
 
                 // for operations at the SysTblMgr
                 auto client = sys_tbl_mgr::Client::get_instance();
@@ -191,6 +192,7 @@ namespace springtail::gc {
             // note: from here we know we have an XACT_MSG
             assert(result->type() == XidReady::Type::XACT_MSG);
             uint64_t xid = result->xact().xid();
+            token = logging::set_context_variables({{"xid", std::to_string(xid)}});
             SPDLOG_INFO("Process XID: {}@{}", db_id, xid);
             assert(xid > completed_xid);
 
