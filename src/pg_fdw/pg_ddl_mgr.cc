@@ -278,31 +278,41 @@ namespace springtail::pg_fdw {
 
                 _thread_manager->queue_request(std::make_shared<MultiQueueRequest>(
                     db_id, [this, &redis_ddl, db_id, schema_xid, ddls]() {
-                        // apply the DDL statements
-                        bool status = _update_schemas(db_id, schema_xid, ddls);
-                        if (!status) {
-                            // error occured, abort the DDL
-                            SPDLOG_ERROR("Failed to apply DDL statements");
-                            redis_ddl.abort_fdw(_fdw_id);
-                            assert(0);
-                            return;
-                        }
+                        try {
+                            // apply the DDL statements
+                            bool status = _update_schemas(db_id, schema_xid, ddls);
+                            if (!status) {
+                                // error occured, abort the DDL
+                                SPDLOG_ERROR("Failed to apply DDL statements");
+                                redis_ddl.abort_fdw(_fdw_id);
+                                DCHECK(false);
+                                return;
+                            }
 
-                        // success, update schema XID if applied, otherwise they may be queued
-                        SPDLOG_DEBUG_MODULE(LOG_FDW, "Updating redis ddl @ schema XID: {}, db_id: {}", schema_xid, db_id);
-                        redis_ddl.update_schema_xid(_fdw_id, db_id, schema_xid);
-                        std::unique_lock db_lock_unique(_db_mutex);
-                        _db_xid_map[db_id] = schema_xid;
+                            // success, update schema XID if applied, otherwise they may be queued
+                            SPDLOG_DEBUG_MODULE(LOG_FDW, "Updating redis ddl @ schema XID: {}, db_id: {}", schema_xid, db_id);
+                            redis_ddl.update_schema_xid(_fdw_id, db_id, schema_xid);
+                            std::unique_lock db_lock_unique(_db_mutex);
+                            _db_xid_map[db_id] = schema_xid;
+                        } catch (Error &e) {
+                            SPDLOG_ERROR("Springtail exception in thread manager task");
+                            DCHECK(false); // assert in debug
+                            e.log_backtrace();
+                        } catch (...) {
+                            // handle exception
+                            SPDLOG_ERROR("Exception in thread manager task");
+                            DCHECK(false); // assert in debug
+                        }
                     }
                 ));
             } catch (Error &e) {
                 SPDLOG_ERROR("Springtail exception in DDL thread");
-                assert(0); // assert in debug
+                DCHECK(false); // assert in debug
                 e.log_backtrace();
             } catch (...) {
                 // handle exception
                 SPDLOG_ERROR("Exception in DDL thread");
-                assert(0); // assert in debug
+                DCHECK(false); // assert in debug
             }
         }
         _thread_manager->notify_shutdown();

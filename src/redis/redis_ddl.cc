@@ -322,7 +322,6 @@ namespace springtail {
         std::string key = fmt::format(redis::QUEUE_DDL_FDW, Properties::get_db_instance_id(), fdw_id);
         RedisQueue<std::string> queue(key);
 
-        // TODO: this "active" needs to be replaced with something
         auto value = queue.pop("active", 2);
         if (value == nullptr) {
             return ddls;
