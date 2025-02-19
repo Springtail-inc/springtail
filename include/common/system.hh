@@ -55,7 +55,7 @@ namespace springtail {
          *
          * @param command - command for popen
          */
-        execbuf(const char* command)
+        explicit execbuf(const char* command)
         {
             // create array of specified length
             std::array<char, 128> buffer;
@@ -94,7 +94,7 @@ namespace springtail {
              *
              * @param command - command to be executed
              */
-            exec(const char* command) : std::istream(nullptr), _buffer(command)
+            explicit exec(const char* command) : std::istream(nullptr), _buffer(command)
             {
                 // set read streambuffer to command output stream buffer
                 rdbuf(&_buffer);
