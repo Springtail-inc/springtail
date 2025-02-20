@@ -1,60 +1,55 @@
 #include <sstream>
+
 #include <common/time_trace.hh>
 
-namespace springtail 
-{ 
-namespace time_trace
-{
+namespace springtail::time_trace {
 
-void 
-FlatTrace::start(Name name) 
+void
+FlatTraceSet::init(std::string_view name)
 {
-    auto it = std::ranges::find_if(trace,
-            [&name](auto const& v) { return v.first == name; });
-    if (it != trace.end()) {
-        it->second.timer.start();
-        ++(it->second.start_count);
+    auto it = std::ranges::find_if(traces, [&name](auto const& v) { return v.first == name; });
+    if (it == traces.end()) {
+        traces.emplace_back(Item(name, Trace()));
     } else {
-        Trace t;
-        t.timer.start();
-        ++t.start_count;
-        trace.emplace_back(std::move(name), t);
+        it->second.reset();
     }
 }
 
-void 
-FlatTrace::stop(const Name& name)
+void
+FlatTraceSet::update(std::string_view name, const Trace& trace)
 {
-    auto it = std::ranges::find_if(trace,
-            [&name](auto const& v) { return v.first == name; });
-    CHECK(it != trace.end());
-    it->second.timer.stop();
+    auto it = std::ranges::find_if(traces, [&name](auto const& v) { return v.first == name; });
+    if (it == traces.end()) {
+        traces.emplace_back(Item(name, trace));
+    } else {
+        it->second += trace;
+    }
 }
 
-void FlatTrace::reset()
+void
+FlatTraceSet::reset()
 {
-    for( auto & [_, item]: trace) {
+    for (auto& [_, item] : traces) {
         item.timer.reset();
         item.start_count = 0;
     }
 }
 
-std::string 
-FlatTrace::format() 
+std::string
+FlatTraceSet::format()
 {
     std::ostringstream s;
 
     s << "Time trace:";
 
-    for (auto const& [name, item]: trace) {
-        s << std::endl << "  " << name 
-            << "[total=" << item.timer.elapsed_ms() 
-            << ", counter=" << item.start_count
-            << ", average=" << (item.timer.elapsed_ms()/item.start_count) << "]";
+    for (auto const& [name, item] : traces) {
+        s << std::endl
+          << "  " << name << "[total=" << item.timer.elapsed_ms()
+          << ", counter=" << item.start_count
+          << ", average=" << (item.timer.elapsed_ms() / item.start_count) << "]";
     }
 
     return s.str();
 }
 
-}
-}
+}  // namespace springtail::time_trace

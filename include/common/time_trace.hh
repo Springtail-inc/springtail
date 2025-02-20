@@ -1,58 +1,85 @@
 #pragma once
 
-#include <common/timer.hh>
-#include <common/logging.hh>
-#include <common/tracing.hh>
 #include <absl/log/check.h>
 
-namespace springtail {
+#include <common/logging.hh>
+#include <common/timer.hh>
+#include <common/tracing.hh>
 
-namespace time_trace {
+namespace springtail::time_trace {
 
-    using Name = std::string;
+/**
+ * @brief Single trace stats.
+ */
+struct Trace {
+    size_t start_count = 0;
+    Timer timer;
 
-    /**
-     * @brief Single trace stats.
-     */
-    struct Trace
+    void start()
     {
-        size_t start_count = 0;
-        Timer timer;
-    };
+        ++start_count;
+        timer.start();
+    }
 
-    /**
-     * @brief An array of traces.
-     */
-    struct FlatTrace
+    void stop() { timer.stop(); }
+
+    void reset()
     {
-        using Item = std::pair<Name, Trace>;
-        std::vector<Item> trace;
+        start_count = 0;
+        timer.reset();
+    }
 
-        FlatTrace() = default;
+    Trace &operator+=(const Trace &rhs)
+    {
+        start_count += rhs.start_count;
+        timer += rhs.timer;
+        return *this;
+    }
+};
 
-        FlatTrace(const FlatTrace&) = delete;
-        FlatTrace& operator=(const FlatTrace&) = delete;
+/**
+ * @brief An array of traces.  Reports results based on registration order.
+ */
+struct FlatTraceSet {
+    using Item = std::pair<std::string, Trace>;
+    std::vector<Item> traces;
 
-        void start(Name name);
-        void stop(const Name& name);
-        void reset();
-        std::string format();
-    };
+    FlatTraceSet() = default;
 
-}
-}
+    FlatTraceSet(const FlatTraceSet &) = delete;
+    FlatTraceSet &operator=(const FlatTraceSet &) = delete;
+
+    void init(std::string_view name);
+    void update(std::string_view name, const Trace &trace);
+
+    void reset();
+    std::string format();
+};
+
+}  // namespace springtail::time_trace
 
 #if defined(SPRINGTAIL_INCLUDE_TIME_TRACES)
-    #define TIME_TRACE_CREATE(trace) time_trace::FlatTrace trace
-    #define TIME_TRACE_START(trace, name) trace.start(std::move(name))
-    #define TIME_TRACE_STOP(trace, name) trace.stop(std::move(name))
-    #define TIME_TRACE_RESET(trace) trace.reset();
-    #define TIME_TRACE_LOG(trace) SPDLOG_INFO(trace.format());
-#else
-    #define TIME_TRACE_CREATE(trace)
-    #define TIME_TRACE_START(trace, name)
-    #define TIME_TRACE_STOP(trace, name)
-    #define TIME_TRACE_RESET(trace)
-    #define TIME_TRACE_LOG(trace)
-#endif
 
+#define TIME_TRACESET(trace_set) time_trace::FlatTraceSet trace_set
+#define TIME_TRACESET_INIT(trace_set, name) trace_set.init(name)
+#define TIME_TRACESET_UPDATE(trace_set, name, trace) trace_set.update(name, trace)
+#define TIME_TRACESET_RESET(trace_set) trace_set.reset();
+#define TIME_TRACESET_LOG(trace_set) SPDLOG_INFO(trace_set.format());
+
+#define TIME_TRACE(trace) time_trace::Trace trace
+#define TIME_TRACE_START(trace) trace.start()
+#define TIME_TRACE_STOP(trace) trace.stop()
+
+#else
+
+#define TIME_TRACESET(trace_set)
+#define TIME_TRACESET_INIT(trace_set, name)
+#define TIME_TRACESET_UPDATE(trace_set, name, trace)
+#define TIME_TRACESET_RESET(trace_set)
+#define TIME_TRACESET_LOG(trace_set)
+
+#define TIME_TRACE(trace)
+#define TIME_TRACE_START(trace)
+#define TIME_TRACE_STOP(trace)
+
+#endif
