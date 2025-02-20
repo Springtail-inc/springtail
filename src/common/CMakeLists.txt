@@ -5,6 +5,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(c-ares CONFIG REQUIRED)
 find_package(opentelemetry-cpp CONFIG REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
+find_package(PostgreSQL REQUIRED)
 
 set(COMMON_LIB_SOURCES
   coordinator.cc
@@ -18,10 +19,12 @@ set(COMMON_LIB_SOURCES
   timestamp.cc
   tracing.cc
   tracking_allocator.cc
+  pg_common.cc
 )
 
 add_library(springtail_common ${COMMON_LIB_SOURCES})
-target_include_directories(springtail_common PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(springtail_common PRIVATE ${CMAKE_SOURCE_DIR}/include
+    PRIVATE ${PostgreSQL_INCLUDE_DIRS} )
 target_link_libraries(springtail_common
   PUBLIC absl::check
          cpptrace::cpptrace
