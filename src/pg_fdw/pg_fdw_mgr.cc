@@ -554,21 +554,18 @@ namespace springtail::pg_fdw {
 
         auto check_index = [&pg_state](const Index& idx, const List* sortgroup) -> List* {
             int i = 0;
-            ListCell   *lc;
+            ListCell *lc;
             std::vector<DeparsedSortGroup*> keys;
             foreach(lc, sortgroup) {
                 DeparsedSortGroup *pathkey = static_cast<DeparsedSortGroup *>(lfirst(lc));
-                int attnum = pathkey->attnum;
 
-               CHECK(idx.columns[i].position > 0);
-               auto typeoid = pg_state->columns[idx.columns[i].position].pg_type;
-
-                if (!_is_type_sortable(typeoid, LESS_THAN)) {
+                CHECK(idx.columns[i].position > 0);
+                if (!_is_type_sortable(pg_state->columns[idx.columns[i].position].pg_type, LESS_THAN)) {
                     return {};
                 }
 
                 // must match sortgroup completely
-                if (i == idx.columns.size() || attnum != idx.columns[i].position) {
+                if (i == idx.columns.size() || pathkey->attnum != idx.columns[i].position) {
                     return {};
                 }
 
