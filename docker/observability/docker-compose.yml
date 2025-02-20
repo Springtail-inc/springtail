@@ -4,7 +4,7 @@ services:
     container_name: otel_collector
     restart: always
     volumes:
-      - ./otel_config.yaml:/etc/otelcol-contrib/config.yaml
+      - ./otel-config.yaml:/etc/otelcol-contrib/config.yaml
     ports:
       - "4317:4317"    # OTLP gRPC
       - "4318:4318"    # OTLP HTTP
@@ -20,7 +20,7 @@ services:
     depends_on:
       - otel-collector
     volumes:
-      - ./prom_config.yaml:/etc/prometheus/prometheus.yml
+      - ./prom-config.yaml:/etc/prometheus/prometheus.yml
     ports:
       - "9090:9090"
     networks:

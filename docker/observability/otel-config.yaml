@@ -16,9 +16,6 @@ receivers:
       http:
         endpoint: 0.0.0.0:4318
 
-  opencensus:
-    endpoint: 0.0.0.0:55678
-
   # Collect own metrics
   prometheus:
     config:
@@ -27,20 +24,6 @@ receivers:
         scrape_interval: 10s
         static_configs:
         - targets: ['0.0.0.0:8888']
-
-  jaeger:
-    protocols:
-      grpc:
-        endpoint: 0.0.0.0:14250
-      thrift_binary:
-        endpoint: 0.0.0.0:6832
-      thrift_compact:
-        endpoint: 0.0.0.0:6831
-      thrift_http:
-        endpoint: 0.0.0.0:14268
-
-  zipkin:
-    endpoint: 0.0.0.0:9411
 
 processors:
   batch:
@@ -61,11 +44,11 @@ exporters:
 service:
   pipelines:
     traces:
-      receivers: [otlp, opencensus, jaeger, zipkin]
+      receivers: [otlp]
       processors: [batch]
       exporters: [debug]
     metrics:
-      receivers: [otlp, opencensus, prometheus]
+      receivers: [otlp, prometheus]
       processors: [batch]
       exporters: [debug, prometheus]
     logs:
