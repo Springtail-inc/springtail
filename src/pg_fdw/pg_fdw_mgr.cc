@@ -559,13 +559,13 @@ namespace springtail::pg_fdw {
             foreach(lc, sortgroup) {
                 DeparsedSortGroup *pathkey = static_cast<DeparsedSortGroup *>(lfirst(lc));
 
-                CHECK(idx.columns[i].position > 0);
-                if (!_is_type_sortable(pg_state->columns[idx.columns[i].position].pg_type, LESS_THAN)) {
+                // must match sortgroup completely
+                if (i == idx.columns.size() || pathkey->attnum != idx.columns[i].position) {
                     return {};
                 }
 
-                // must match sortgroup completely
-                if (i == idx.columns.size() || pathkey->attnum != idx.columns[i].position) {
+                CHECK(idx.columns[i].position > 0);
+                if (!_is_type_sortable(pg_state->columns[idx.columns[i].position].pg_type, LESS_THAN)) {
                     return {};
                 }
 
