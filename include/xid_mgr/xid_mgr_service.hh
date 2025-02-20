@@ -1,8 +1,5 @@
 #pragma once
 
-#include <iostream>
-#include <mutex>
-
 #include <thrift/transport/TSocket.h>
 
 #include <common/singleton.hh>
