@@ -46,7 +46,7 @@ VALUES
 
 ## verify
 ### schema_check public asc_desc_ordering
-SELECT col1, col2, col3 FROM asc_desc_ordering ORDER BY col3 DESC;
+SELECT col3 FROM asc_desc_ordering ORDER BY col3 DESC;
 SELECT col1, col2, col3 FROM asc_desc_ordering ORDER BY col4 ASC, col5 DESC;
 SELECT col1, col2, col3 FROM asc_desc_ordering ORDER BY col6 ASC;
 
