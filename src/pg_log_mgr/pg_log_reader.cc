@@ -517,7 +517,8 @@ namespace springtail::pg_log_mgr {
             pg_msg::MSG_UPDATE,
             pg_msg::MSG_DELETE,
             pg_msg::MSG_TRUNCATE,
-            pg_msg::MSG_MESSAGE // this will capture create_table, drop_table, alter_table, create_index, drop_index
+            pg_msg::MSG_MESSAGE // this will capture create_table, drop_table, alter_table,
+                                // create_index, drop_index
         };
 
         _current_path = path;

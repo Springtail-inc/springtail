@@ -89,7 +89,6 @@ namespace springtail::pg_log_mgr {
         : _db_id(1), _db_instance_id(Properties::get_db_instance_id()),
           _internal_state(STATE_RUNNING),
           _repl_log_path(repl_log_path),
-          _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
           // XXX 8192
           _pg_log_reader(_db_id, 8192, xact_log_path), _xact_log_path(xact_log_path),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
@@ -109,8 +108,6 @@ namespace springtail::pg_log_mgr {
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "writer thread joined");
             _reader_thread.join();
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "reader thread joined");
-            _xact_thread.join();
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "xact thread joined");
             _table_copy_thread.join();
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "copy thread joined");
         }
@@ -193,7 +190,6 @@ namespace springtail::pg_log_mgr {
 
         ///// Stage 2 of pipeline, reading replication log and parsing xacts
         std::thread _reader_thread;         ///< log reader thread
-        PgTransactionQueuePtr _xact_queue;  ///< queue between reader and xact thread
         PgLogReader _pg_log_reader;         ///< log reader
 
         /** Consume data from queue, scan log entries and notify GC */
@@ -202,7 +198,6 @@ namespace springtail::pg_log_mgr {
         ///// Stage 3 of pipeline, mapping pg xids to xids; notify GC
         std::filesystem::path _xact_log_path;      ///< xact log base path
         std::filesystem::path _xact_sync_log_file; ///< xact table copy log base path
-        std::thread _xact_thread;                  ///< xact worker thread
         PgXactLogWriterPtr _xact_logger = nullptr; ///< xact log writer
 
         LSN_t _last_pushed_lsn = INVALID_LSN;      ///< last pushed lsn to redis queue for GC

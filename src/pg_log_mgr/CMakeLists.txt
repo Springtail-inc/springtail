@@ -8,6 +8,7 @@ set(PG_LOG_SOURCES
     pg_log_mgr.cc
     pg_log_writer.cc
     pg_log_reader.cc
+    pg_log_recovery.cc
     pg_xact_log_writer.cc
     pg_xact_log_reader.cc
     sync_tracker.cc
