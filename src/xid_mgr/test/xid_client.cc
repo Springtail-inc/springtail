@@ -27,7 +27,8 @@ main(int argc, char **argv)
     desc.add_options()("set,s", "Set latest committed xid");
     desc.add_options()("dbid,d", po::value<uint64_t>(&db_id)->default_value(1), "DB ID.");
     desc.add_options()("xid,x", po::value<uint64_t>(&xid)->default_value(0), "Xid to set");
-    desc.add_options()("change,c", po::value<bool>(&schema_change)->default_value(false), "Has schema change");
+    desc.add_options()("change,c", po::value<bool>(&schema_change)->default_value(false),
+        "Has schema change (for testing set command so that the new xid is recorded in history)");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
