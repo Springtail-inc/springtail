@@ -7,12 +7,13 @@
 #include <shared_mutex>
 #include <memory>
 #include <vector>
-#include <string>
 #include <map>
 #include <filesystem>
 #include <thread>
 #include <atomic>
 #include <condition_variable>
+
+#include <redis/redis_ddl.hh>
 
 namespace springtail::xid_mgr {
     class Partition {
@@ -136,6 +137,13 @@ namespace springtail::xid_mgr {
          * @param xid xid to write
          */
         void _add_history(uint64_t db_id, uint64_t xid);
+
+        /**
+         * @brief Cleanup xids from history that are no longer needed
+         *
+         * @param redis_ddl helper object for getting data from redis
+         */
+        void _cleanup_history(RedisDDL &redis_ddl);
     };
     using PartitionPtr = std::shared_ptr<Partition>;
 }

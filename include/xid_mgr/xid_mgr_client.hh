@@ -1,11 +1,5 @@
 #pragma once
 
-#include <mutex>
-#include <memory>
-#include <vector>
-#include <string>
-#include <string_view>
-
 #include <common/singleton.hh>
 
 #include <thrift/xid_mgr/ThriftXidMgr.h> // generated file
