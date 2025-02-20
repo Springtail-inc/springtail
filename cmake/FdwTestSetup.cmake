@@ -53,6 +53,7 @@ foreach(src_file ${SRC_FILES})
         COMMAND ${SUDO_COMMAND} ${CP_COMMAND} --update=none
             "${src_file}"
             "${dst_file}"
+        BYPRODUCTS "${dst_file}"
         DEPENDS "${src_file}"
         COMMENT "Copying ${filename} to ${dst_file}"
     )
@@ -62,5 +63,4 @@ endforeach()
 # Create a target that depends on all copied files
 add_custom_target(copy_fdw_files ALL
     DEPENDS ${COPY_TARGETS}
-    COMMENT "Copied FDW files to their respective destinations"
 )
