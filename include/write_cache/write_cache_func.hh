@@ -2,6 +2,7 @@
 
 #include <common/timestamp.hh>
 #include <write_cache/write_cache_index.hh>
+#include <write_cache/write_cache_client.hh>
 #include <write_cache/write_cache_server.hh>
 #include <storage/extent.hh>
 
@@ -115,21 +116,17 @@ namespace springtail {
             return table_ids;
         }
 
-        static std::vector<springtail::thrift::write_cache::Extent>
+        static std::vector<springtail::WriteCacheClient::WriteCacheExtent>
         get_extents(uint64_t db_id, uint64_t tid, uint64_t xid, uint32_t count, uint64_t &cursor, PostgresTimestamp &commit_ts)
         {
             WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
-            std::vector<springtail::thrift::write_cache::Extent> extents;
+            std::vector<springtail::WriteCacheClient::WriteCacheExtent> extents;
             std::vector<WriteCacheIndexExtentPtr> idx_extents =
                 index->get_extents(tid, xid, count, cursor, commit_ts);
 
             for (const auto &e: idx_extents) {
-                thrift::write_cache::Extent extent;
+                springtail::WriteCacheClient::WriteCacheExtent extent;
                 extent.xid = e->xid;
-                extent.xid_seq = e->xid_seq;
-
-                // serialze the extent data
-                extent.__set_data(e->data->serialize());
 
                 extents.push_back(extent);
             }

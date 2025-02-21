@@ -89,7 +89,6 @@ set(MODULES
   common
   redis
   storage
-  garbage_collector
   pg_repl
   write_cache
   sys_tbl_mgr

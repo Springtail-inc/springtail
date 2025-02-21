@@ -9,6 +9,7 @@
 #include <redis/db_state_change.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
+#include <write_cache/write_cache_func.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -59,7 +60,7 @@ namespace springtail::pg_log_mgr {
 
             // figure out if there's an XID to process
             // note: this is a blocking call that will timeout after keep_alive secs
-            auto result = _committer_queue.pop(_worker_id, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+            auto result = _committer_queue.pop();
             if (result == nullptr) {
                 continue; // got a timeout, try again
             }
@@ -71,8 +72,6 @@ namespace springtail::pg_log_mgr {
                 // stop performing commits on this db until the table syncs are complete and aligned
                 _block_commit.insert(db_id);
 
-                // commit this work item and continue
-                _committer_queue.commit(_worker_id);
                 continue;
             }
 
@@ -177,8 +176,6 @@ namespace springtail::pg_log_mgr {
                     _block_commit.erase(db_id);
                 }
 
-                // commit this work item and continue
-                _committer_queue.commit(_worker_id);
                 continue;
             }
 
@@ -270,9 +267,6 @@ namespace springtail::pg_log_mgr {
             }
 
             SPDLOG_DEBUG_MODULE(LOG_GC, "XID completed: {}@{}", db_id, xid);
-
-            // mark the XID message as complete in the redis queue
-            _committer_queue.commit(_worker_id);
         }
 
         // join all of the worker threads

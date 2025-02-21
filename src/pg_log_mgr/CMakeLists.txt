@@ -4,6 +4,8 @@ find_package(nlohmann_json REQUIRED)
 
 # source files
 set(PG_LOG_SOURCES
+    committer.cc
+    indexer.cc
     pg_log_mgr_common.cc
     pg_log_coordinator.cc
     pg_log_mgr.cc
