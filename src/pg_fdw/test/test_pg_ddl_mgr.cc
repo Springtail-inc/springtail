@@ -1,4 +1,7 @@
 #include <filesystem>
+#include <iostream>
+#include <cstdio>
+#include <memory>
 
 #include <gtest/gtest.h>
 
@@ -6,7 +9,6 @@
 #include <common/json.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
-#include <common/system.hh>
 #include <pg_fdw/pg_ddl_mgr.hh>
 #include <test/services.hh>
 
@@ -19,26 +21,55 @@ namespace {
         "FROM information_schema.foreign_tables "
         "WHERE foreign_table_schema = '{}' and foreign_table_name = '{}'";
 
+
+    static std::string exec_popen(const std::string& command)
+    {
+        std::string result;
+        char buffer[128];
+
+        using Deleter = int(*)(FILE*);
+        std::unique_ptr<FILE, Deleter> pipe(popen(command.c_str(), "r"), pclose);
+
+        if (!pipe) {
+            throw std::runtime_error("popen() failed!");
+        }
+
+        // generate result
+        while (fgets(buffer, sizeof(buffer), pipe.get()) != nullptr) {
+            result += buffer;
+        }
+        SPDLOG_INFO("exec_popen: {}", result);
+
+        // remove new line
+        std::erase_if(result, [](char c) { return c == '\n'; });
+
+        return result;
+    }
+
     class PgDDLMgr_Test : public testing::Test {
     private:
-        static bool _check_pg_config() {
+        /** Check for the existence of springtail files for fdw */
+        static bool _check_pg_config()
+        {
             try {
-                std::string pg_config_dir = get_command_output("pg_config --sharedir");
+                std::string pg_config_dir = exec_popen("pg_config --sharedir");
                 pg_config_dir += "/extension/";
+
                 std::string springtail_sql_file = pg_config_dir + "springtail_fdw--1.0.sql";
                 std::string springtail_control_file = pg_config_dir + "springtail_fdw.control";
+
                 bool sql_file_found = std::filesystem::exists(springtail_sql_file);
                 bool control_file_found = std::filesystem::exists(springtail_control_file);
                 if (sql_file_found && control_file_found) {
                     return true;
                 }
-                SPDLOG_ERROR("Springtail SQL file: {}, found: {}", springtail_sql_file, sql_file_found);
-                SPDLOG_ERROR("Springtail Control file: {}, found: {}", springtail_control_file, control_file_found);
             } catch (...) {
                 SPDLOG_ERROR("Failed to find postgres config files for springtail");
             }
+
             return false;
         }
+
     public:
         static void SetUpTestSuite() {
             if (!_check_pg_config()) {
