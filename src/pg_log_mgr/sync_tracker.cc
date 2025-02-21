@@ -75,7 +75,7 @@ namespace springtail::pg_log_mgr {
         return first_table;
     }
 
-    std::optional<gc::XidReady>
+    std::optional<pg_log_mgr:XidReady>
     SyncTracker::check_commit(uint64_t db_id,
                               uint32_t pg_xid)
     {
@@ -115,9 +115,9 @@ namespace springtail::pg_log_mgr {
         // We pass the target XID to the committer to be used if the completed XID is not ahead of the committed XID.
         uint64_t xid = _target_xid_map[db_id];
 
-        auto type = gc::XidReady::Type::TABLE_SYNC_SWAP;
+        auto type = pg_log_mgr:XidReady::Type::TABLE_SYNC_SWAP;
         if (db_i->second.empty()) {
-            type = gc::XidReady::Type::TABLE_SYNC_COMMIT;
+            type = pg_log_mgr:XidReady::Type::TABLE_SYNC_COMMIT;
             _sync_map.erase(db_i);
             _target_xid_map.erase(db_id);
         }
@@ -129,12 +129,12 @@ namespace springtail::pg_log_mgr {
         }
         SPDLOG_DEBUG_MODULE(LOG_GC, "Found {} tables", tids.size());
 
-        return gc::XidReady(type, db_id, gc::XidReady::SwapMsg(xid, std::move(tids)));
+        return pg_log_mgr:XidReady(type, db_id, pg_log_mgr:XidReady::SwapMsg(xid, std::move(tids)));
     }
 
     void
     SyncTracker::clear_tables(uint64_t db_id,
-                              const gc::XidReady &commit_msg)
+                              const pg_log_mgr:XidReady &commit_msg)
     {
         SPDLOG_DEBUG_MODULE(LOG_GC, "db {}", db_id);
         boost::unique_lock lock(_mutex);

@@ -16,17 +16,16 @@
 #include <redis/redis_ddl.hh>
 #include <redis/redis_containers.hh>
 
-#include <garbage_collector/xid_ready.hh>
-#include <garbage_collector/indexer.hh>
+#include <pg_log_mgr/xid_ready.hh>
+#include <pg_log_mgr/indexer.hh>
 
 #include <sys_tbl_mgr/table.hh>
-#include <write_cache/write_cache_client.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 
 #include <opentelemetry/context/context.h>
 #include <opentelemetry/metrics/meter.h>
 
-namespace springtail::gc {
+namespace springtail::pg_log_mgr {
     namespace metrics = opentelemetry::metrics;
 
     /**
@@ -47,7 +46,6 @@ namespace springtail::gc {
               _worker_count(worker_count)
         {
             _xid_mgr = XidMgrClient::get_instance();
-            _write_cache = WriteCacheClient::get_instance();
             _worker_id = fmt::format("{}_{}_0", THREAD_TYPE, THREAD_MAIN);
         }
 
@@ -116,9 +114,6 @@ namespace springtail::gc {
 
     private:
         XidMgrClient *_xid_mgr; ///< Pointer to the XidMgr client singleton.
-        WriteCacheClient *_write_cache; ///< Pointer to the WriteCache client singleton.
-
-        RedisQueue<XidReady> _redis; ///< The redis queue to communicate from the PgLogMgr to the Committer.
 
         RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         std::string _worker_id; ///< Unique worker ID for the Committer.

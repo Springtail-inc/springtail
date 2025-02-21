@@ -2,7 +2,7 @@
 
 #include <common/coordinator.hh>
 #include <common/constants.hh>
-#include <garbage_collector/committer.hh>
+#include <pg_log_mgr/committer.hh>
 #include <opentelemetry/metrics/meter.h>
 #include <opentelemetry/metrics/provider.h>
 #include <pg_log_mgr/pg_redis_xact.hh>
@@ -10,7 +10,7 @@
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 
-namespace springtail::gc {
+namespace springtail::pg_log_mgr {
 
     bool _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
     {
@@ -59,7 +59,7 @@ namespace springtail::gc {
 
             // figure out if there's an XID to process
             // note: this is a blocking call that will timeout after keep_alive secs
-            auto result = _redis.pop(_worker_id, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+            auto result = _committer_queue.pop(_worker_id, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (result == nullptr) {
                 continue; // got a timeout, try again
             }
@@ -72,7 +72,7 @@ namespace springtail::gc {
                 _block_commit.insert(db_id);
 
                 // commit this work item and continue
-                _redis.commit(_worker_id);
+                _committer_queue.commit(_worker_id);
                 continue;
             }
 
@@ -178,7 +178,7 @@ namespace springtail::gc {
                 }
 
                 // commit this work item and continue
-                _redis.commit(_worker_id);
+                _committer_queue.commit(_worker_id);
                 continue;
             }
 
@@ -199,7 +199,7 @@ namespace springtail::gc {
             bool tid_done = false;
             while (!tid_done) {
                 // query the write cache for the tables modified through this XID
-                auto table_list = _write_cache->list_tables(db_id, xid, 100, table_cursor);
+                auto table_list = WriteCacheFuncImpl::list_tables(db_id, xid, 100, table_cursor);
 
                 SPDLOG_DEBUG_MODULE(LOG_GC, "Got {} tables from the write cache", table_list.size());
 
@@ -272,7 +272,7 @@ namespace springtail::gc {
             SPDLOG_DEBUG_MODULE(LOG_GC, "XID completed: {}@{}", db_id, xid);
 
             // mark the XID message as complete in the redis queue
-            _redis.commit(_worker_id);
+            _committer_queue.commit(_worker_id);
         }
 
         // join all of the worker threads
@@ -494,7 +494,7 @@ namespace springtail::gc {
         while (true) {
             // XXX would be better if we could perform an async prefetch to reduce IO latency
             PostgresTimestamp commit_ts;
-            auto &&extent_list = _write_cache->get_extents(db_id, tid, xid, 1, extent_cursor, commit_ts);
+            auto &&extent_list = WriteCacheFuncImpl::get_extents(db_id, tid, xid, 1, extent_cursor, commit_ts);
             if (!min_commit_ts || commit_ts < *min_commit_ts) {
                 min_commit_ts = commit_ts;
             }

@@ -11,7 +11,7 @@
 #include <common/tracing.hh>
 #include <common/timestamp.hh>
 
-#include <garbage_collector/xid_ready.hh>
+#include <pg_log_mgr/xid_ready.hh>
 
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_msg_stream.hh>

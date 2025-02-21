@@ -93,5 +93,48 @@ namespace springtail {
             WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
             index->abort(pg_xids);
         }
+
+        /**
+         * @brief List tables for a given XID
+         * @param db_id database ID
+         * @param xid Springtail XID
+         * @param count number of tables to return
+         * @param cursor cursor for pagination
+         * @return vector of table IDs
+         */
+        static std::vector<uint64_t> list_tables(uint64_t db_id, uint64_t xid, uint32_t count, uint64_t cursor)
+        {
+            WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
+            std::vector<uint64_t> table_ids;
+
+            auto &&tids = index->get_tids(xid, count, cursor);
+            for (auto tid: tids) {
+                table_ids.push_back(tid);
+            }
+
+            return table_ids;
+        }
+
+        static std::vector<Extent> get_extents(uint64_t db_id, uint64_t tid, uint64_t xid,
+                                  uint32_t count, uint64_t &cursor, PostgresTimestamp &commit_ts)
+        {
+            WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
+            std::vector<Extent> extents;
+            std::vector<WriteCacheIndexExtentPtr> extents =
+                index->get_extents(tid, xid, count, cursor, commit_ts);
+
+            for (const auto &e: extents) {
+                thrift::write_cache::Extent extent;
+                extent.xid = e->xid;
+                extent.xid_seq = e->xid_seq;
+
+                // serialze the extent data
+                extent.__set_data(e->data->serialize());
+
+                extents.push_back(std::move(extent));
+            }
+
+            return extents;
+        }
     };
 } // namespace springtail

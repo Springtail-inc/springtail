@@ -362,10 +362,7 @@ namespace springtail::pg_log_mgr {
 
             // notify the Committer to stop committing XIDs
             if (sync_start) {
-                RedisQueue<gc::XidReady>
-                    committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
-                                                Properties::get_db_instance_id()));
-                committer_queue.push(gc::XidReady(_db_id));
+                _committer_queue.push(pg_log_mgr:XidReady(_db_id));
             }
         }
 

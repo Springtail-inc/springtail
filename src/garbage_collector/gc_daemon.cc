@@ -3,10 +3,10 @@
 
 #include <common/common.hh>
 #include <common/coordinator.hh>
-#include <garbage_collector/committer.hh>
+#include <pg_log_mgr/committer.hh>
 
 namespace {
-    std::shared_ptr<springtail::gc::Committer> committer;
+    std::shared_ptr<springtail::pg_log_mgr::Committer> committer;
 
     void shutdown_handler(int signal) {
         committer->shutdown();
@@ -44,7 +44,7 @@ main(int argc,
 
     // the GC components
     // note: each performs any crash cleanup for their components prior to startup
-    committer = std::make_shared<springtail::gc::Committer>(1);
+    committer = std::make_shared<springtail::pg_log_mgr::Committer>(1);
 
     // signal handler for shutdown
     std::signal(SIGINT, shutdown_handler);

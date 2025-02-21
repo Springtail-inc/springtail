@@ -2,12 +2,12 @@
 #include <stop_token>
 #include <assert.h>
 #include <algorithm>
-#include <garbage_collector/indexer.hh>
+#include <pg_log_mgr/indexer.hh>
 #include <common/logging.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <sys_tbl_mgr/client.hh>
 
-namespace springtail::gc {
+namespace springtail::pg_log_mgr {
 
     Indexer::Indexer(uint32_t worker_count) 
     {
