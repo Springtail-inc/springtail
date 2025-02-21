@@ -1,6 +1,6 @@
 #include <opentelemetry/common/key_value_iterable_view.h>
-#include <opentelemetry/exporters/otlp/otlp_grpc_exporter.h>
-#include <opentelemetry/exporters/otlp/otlp_grpc_metric_exporter.h>
+#include <opentelemetry/exporters/otlp/otlp_http_exporter.h>
+#include <opentelemetry/exporters/otlp/otlp_http_metric_exporter.h>
 #include <opentelemetry/metrics/provider.h>
 #include <opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader.h>
 #include <opentelemetry/sdk/metrics/meter_provider.h>
@@ -12,8 +12,8 @@
 #include <common/json.hh>
 #include <common/properties.hh>
 #include <common/tracing.hh>
-#include "opentelemetry/exporters/otlp/otlp_grpc_metric_exporter_factory.h"
-#include "opentelemetry/exporters/otlp/otlp_grpc_metric_exporter_options.h"
+#include "opentelemetry/exporters/otlp/otlp_http_metric_exporter_factory.h"
+#include "opentelemetry/exporters/otlp/otlp_http_metric_exporter_options.h"
 #include "opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_factory.h"
 #include "opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_options.h"
 #include "opentelemetry/sdk/metrics/meter_context.h"
@@ -96,10 +96,10 @@ init_metrics(const opentelemetry::sdk::resource::Resource& resource)
     auto host = Json::get<std::string>(json, "metrics_host");
     auto port = Json::get<int>(json, "metrics_port");
 
-    opentelemetry::exporter::otlp::OtlpGrpcMetricExporterOptions options;
+    opentelemetry::exporter::otlp::OtlpHttpMetricExporterOptions options;
     if (host && port) {
-        options.endpoint = fmt::format("http://{}:{}", *host, *port);
-        SPDLOG_INFO("Enabling OTel metrics over gRPC");
+        options.url = fmt::format("http://{}:{}/v1/metrics", *host, *port);
+        SPDLOG_INFO("Enabling OTel metrics over HTTP");
     }
     opentelemetry::sdk::metrics::PeriodicExportingMetricReaderOptions reader_options;
     auto export_interval_millis = Json::get<int>(json, "metrics_export_interval_millis");
@@ -111,7 +111,7 @@ init_metrics(const opentelemetry::sdk::resource::Resource& resource)
         reader_options.export_timeout_millis = std::chrono::milliseconds(*export_timeout_millis);
     }
 
-    auto exporter = opentelemetry::exporter::otlp::OtlpGrpcMetricExporterFactory::Create(options);
+    auto exporter = opentelemetry::exporter::otlp::OtlpHttpMetricExporterFactory::Create(options);
     auto reader = opentelemetry::sdk::metrics::PeriodicExportingMetricReaderFactory::Create(
         std::move(exporter), reader_options);
 
@@ -151,16 +151,16 @@ init_tracing(const opentelemetry::sdk::resource::Resource& resource)
     auto host = Json::get<std::string>(json, "host");
     auto port = Json::get<int>(json, "port");
     if (host && port) {
-        opentelemetry::exporter::otlp::OtlpGrpcExporterOptions options;
-        options.endpoint = fmt::format("http://{}:{}", *host, *port);
+        opentelemetry::exporter::otlp::OtlpHttpExporterOptions options;
+        options.url = fmt::format("http://{}:{}/v1/traces", *host, *port);
 
         std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> otlp_exporter =
-            std::make_unique<opentelemetry::exporter::otlp::OtlpGrpcExporter>(options);
+            std::make_unique<opentelemetry::exporter::otlp::OtlpHttpExporter>(options);
         std::unique_ptr<opentelemetry::sdk::trace::SpanProcessor> otlp_processor =
             std::make_unique<opentelemetry::sdk::trace::SimpleSpanProcessor>(
                 std::move(otlp_exporter));
 
-        SPDLOG_INFO("Enabling OTel over gRPC");
+        SPDLOG_INFO("Enabling OTel over HTTP");
         multi_processor->AddProcessor(std::move(otlp_processor));
     }
 

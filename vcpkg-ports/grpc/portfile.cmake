@@ -2,10 +2,13 @@ if(VCPKG_TARGET_IS_WINDOWS)
     vcpkg_check_linkage(ONLY_STATIC_LIBRARY)
 endif()
 
+# Extract base version without the -withotel suffix
+string(REGEX REPLACE "-.*$" "" BASE_VERSION "${VERSION}")
+
 vcpkg_from_github(
     OUT_SOURCE_PATH SOURCE_PATH
     REPO grpc/grpc
-    REF "v${VERSION}"
+    REF "v${BASE_VERSION}"
     SHA512 8f595429afc86e8ef7e1ba7d8b9fb579e9e334f822a4a26ab2cbd0ab13bcb421afaab21febffd023fbd688cfa2b8be834f9047aa70e6561bc181ba6737892304
     HEAD_REF master
     PATCHES
@@ -47,6 +50,7 @@ vcpkg_check_features(
     OUT_FEATURE_OPTIONS FEATURE_OPTIONS
     FEATURES
         codegen gRPC_BUILD_CODEGEN
+        otel gRPC_BUILD_GRPCPP_OTEL_PLUGIN
 )
 
 vcpkg_cmake_configure(
@@ -69,7 +73,6 @@ vcpkg_cmake_configure(
         -DgRPC_INSTALL_CMAKEDIR:STRING=share/grpc
         "-D_gRPC_PROTOBUF_PROTOC_EXECUTABLE=${CURRENT_HOST_INSTALLED_DIR}/tools/protobuf/protoc${VCPKG_HOST_EXECUTABLE_SUFFIX}"
         "-DProtobuf_PROTOC_EXECUTABLE=${CURRENT_HOST_INSTALLED_DIR}/tools/protobuf/protoc${VCPKG_HOST_EXECUTABLE_SUFFIX}"
-        -DgRPC_BUILD_GRPCPP_OTEL_PLUGIN=OFF
         -DgRPC_DOWNLOAD_ARCHIVES=OFF
     MAYBE_UNUSED_VARIABLES
         gRPC_MSVC_STATIC_RUNTIME
