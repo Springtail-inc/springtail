@@ -23,7 +23,7 @@
 	{ "name": "opentelemetry-cpp",
 	  "features": ["otlp-grpc"] }
     ],
-    "builtin-baseline": "2e7fd315d713e9eac52f6bdb24afbf1b4dbbe1e5",
+    "builtin-baseline": "6f29f12e82a8293156836ad81cc9bf5af41fe836",
     "overrides": [
       { "name": "thrift", "version": "0.20.0#1"},
       { "name": "redis-plus-plus", "version": "1.3.13" }

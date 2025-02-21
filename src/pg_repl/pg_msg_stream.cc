@@ -10,7 +10,7 @@
 #include <nlohmann/json.hpp>
 
 #include <common/common.hh>
-#include <common/pg_common.hh>
+#include <pg_repl/pg_common.hh>
 #include <common/exception.hh>
 #include <common/logging.hh>
 

@@ -10,7 +10,7 @@
 
 // springtail includes
 #include <common/common.hh>
-#include <common/pg_common.hh>
+#include <pg_repl/pg_common.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 #include <common/thread_pool.hh>

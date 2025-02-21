@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ostream>
-#include <common/pg_common.hh>
+#include <pg_repl/pg_common.hh>
 
 namespace springtail {
 

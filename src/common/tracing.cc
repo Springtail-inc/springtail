@@ -1,3 +1,4 @@
+#include <opentelemetry/common/key_value_iterable_view.h>
 #include <opentelemetry/exporters/otlp/otlp_grpc_exporter.h>
 #include <opentelemetry/exporters/otlp/otlp_grpc_metric_exporter.h>
 #include <opentelemetry/metrics/provider.h>
@@ -11,7 +12,6 @@
 #include <common/json.hh>
 #include <common/properties.hh>
 #include <common/tracing.hh>
-
 #include "opentelemetry/exporters/otlp/otlp_grpc_metric_exporter_factory.h"
 #include "opentelemetry/exporters/otlp/otlp_grpc_metric_exporter_options.h"
 #include "opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_factory.h"
@@ -21,6 +21,18 @@
 #include "opentelemetry/sdk/metrics/meter_provider_factory.h"
 
 namespace springtail::tracing {
+
+static opentelemetry::context::Context _context;
+
+/**
+ * @brief Map of counter names to their corresponding counters
+ */
+static std::map<std::string_view, opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Counter<uint64_t>>> counters;
+
+/**
+ * @brief Map of histogram names to their corresponding histograms
+ */
+static std::map<std::string_view, opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Histogram<double>>> histograms;
 
 static std::shared_ptr<opentelemetry::sdk::metrics::MeterProvider> meter_provider;
 
@@ -45,6 +57,35 @@ create_default_otel_resource(std::string_view component_name)
         resource_attributes["service.name"] = std::string(component_name);
     }
     return opentelemetry::sdk::resource::Resource::Create(resource_attributes);
+}
+
+/**
+ * @brief Register the metrics
+ */
+void _register_metrics(){
+    // register the counters
+    _register_counters();
+
+    // register the histograms
+    _register_histograms(); 
+}
+
+/**
+ * @brief Register the counters
+ */
+void _register_counters(){
+    for (const auto &counter : metrics::_counter_metrics) {  
+        _register_counter(counter.first, counter.second, "calls");
+    }
+}
+
+/**
+ * @brief Register the histograms
+ */
+void _register_histograms(){
+    for (const auto &histogram : metrics::_histogram_metrics) {
+        _register_histogram(histogram.first, histogram.second, "ms");
+    }
 }
 
 static void
@@ -85,6 +126,10 @@ init_metrics(const opentelemetry::sdk::resource::Resource& resource)
     // Set as the global meter provider
     opentelemetry::metrics::Provider::SetMeterProvider(
         std::dynamic_pointer_cast<opentelemetry::metrics::MeterProvider>(meter_provider));
+
+    // register the metrics
+    _register_metrics();
+
 }
 
 static void
@@ -165,6 +210,116 @@ tracer(const std::string_view& name)
 {
     auto provider = opentelemetry::trace::Provider::GetTracerProvider();
     return provider->GetTracer(name.data());
+}
+
+std::unordered_map<std::string, std::string>
+_set_default_attributes(const std::unordered_map<std::string, std::string>& input_attributes)
+{
+    auto attributes = input_attributes;
+
+    if (attributes.empty()) {
+        attributes = std::unordered_map<std::string, std::string>();
+    }
+
+    auto db_instance_id = Properties::get_db_instance_id();
+    auto organization_id = Properties::get_organization_id();
+    auto account_id = Properties::get_account_id();
+    
+    attributes["organization_id"] = organization_id;
+    attributes["account_id"] = account_id;
+    attributes["db_instance_id"] = std::to_string(db_instance_id);
+
+    return attributes;
+}
+
+std::unordered_map<std::string, std::string>
+get_db_id_xid_map(uint64_t db_id, uint64_t xid)
+{
+    return std::unordered_map<std::string, std::string>{
+        {"db_id", std::to_string(db_id)},
+        {"xid", std::to_string(xid)}
+    };
+}
+
+/**
+ * @brief Increment a counter
+ * @param name The name of the counter
+ * @param attributes The attributes to record
+ */
+void
+increment_counter(std::string_view name, const std::unordered_map<std::string, std::string>& attributes)
+{
+    auto counter = counters[name];
+    if(counter){
+        counter->Add(1, _set_default_attributes(attributes), _context);
+    } else {
+        SPDLOG_ERROR("Counter '{}' not found", name);
+    }
+}
+
+/**
+ * @brief Record a value in the histogram
+ * @param name The name of the histogram
+ * @param value The value to record
+ * @param attributes The attributes to record
+ */
+void
+record_histogram(std::string_view name, double value, const std::unordered_map<std::string, std::string>& attributes)
+{
+    auto histogram = histograms[name];
+    if(histogram){
+        histogram->Record(value, _set_default_attributes(attributes), _context);
+    } else {
+        SPDLOG_ERROR("Histogram '{}' not found", name);
+    }
+}
+
+/**
+ * @brief Create a uint64 counter with the given name, description, and unit
+ * @param name The name of the counter
+ * @param description The description of the counter
+ * @param unit The unit of the counter
+ */
+opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Counter<uint64_t>>
+_create_uint64_counter(const std::string name, const std::string description, const std::string unit)
+{
+    auto meter = opentelemetry::metrics::Provider::GetMeterProvider()->GetMeter(name);
+    return meter->CreateUInt64Counter(name, description, unit);
+}
+
+/**
+ * @brief Create a double histogram with the given name, description, and unit
+ * @param name The name of the histogram
+ * @param description The description of the histogram
+ * @param unit The unit of the histogram
+ */
+opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Histogram<double>>
+_create_double_histogram(const std::string name, const std::string description, const std::string unit)
+{
+    auto meter = opentelemetry::metrics::Provider::GetMeterProvider()->GetMeter(name);
+    return meter->CreateDoubleHistogram(name, description, unit);
+}
+
+/**
+ * @brief Register a counter with the given name, description, and unit
+ * @param name The name of the counter
+ * @param description The description of the counter
+ * @param unit The unit of the counter
+ */
+void _register_counter(std::string_view name, std::string_view description, std::string_view unit)
+{
+    counters[name] = _create_uint64_counter(std::string(name), std::string(description), std::string(unit));
+}
+
+/**
+ * @brief Register a histogram with the given name, description, and unit
+ * @param name The name of the histogram
+ * @param description The description of the histogram
+ * @param unit The unit of the histogram
+ */
+void _register_histogram(std::string_view name, std::string_view description, std::string_view unit)
+{
+    histograms[name] = _create_double_histogram(std::string(name), std::string(description), std::string(unit));
 }
 
 }  // namespace springtail::tracing

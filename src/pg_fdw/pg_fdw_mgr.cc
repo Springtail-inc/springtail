@@ -6,7 +6,7 @@
 #include <nlohmann/json.hpp>
 
 #include <common/common.hh>
-#include <common/pg_common.hh>
+#include <pg_repl/pg_common.hh>
 #include <common/exception.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
@@ -558,16 +558,15 @@ namespace springtail::pg_fdw {
             pg_state->scan_asc = (reversed == false);
         }
 
-        auto check_index = [&pg_state](const Index& idx, const List* sortgroup) -> List* {
+        auto check_index = [pg_state](const Index& idx, const List* sortgroup) -> List* {
             int i = 0;
-            ListCell   *lc;
+            ListCell *lc;
             std::vector<DeparsedSortGroup*> keys;
             foreach(lc, sortgroup) {
                 DeparsedSortGroup *pathkey = static_cast<DeparsedSortGroup *>(lfirst(lc));
-                int attnum = pathkey->attnum;
 
                 // must match sortgroup completely
-                if (i == idx.columns.size() || attnum != idx.columns[i].position) {
+                if (i == idx.columns.size() || pathkey->attnum != idx.columns[i].position) {
                     return {};
                 }
 
@@ -1107,6 +1106,9 @@ namespace springtail::pg_fdw {
             case CHAROID:
             case UUIDOID:
                 return true;
+            case NUMERICOID: //DECIMAL(x,y)
+                //TODO: https://linear.app/springtail/issue/SPR-556/
+                return false;
             case VARCHAROID:
             case TEXTOID:
                 // due to different collations/encodings we only support equality for text

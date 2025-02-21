@@ -6,7 +6,7 @@
 
 #include <common/logging.hh>
 #include <common/common.hh>
-#include <common/pg_common.hh>
+#include <pg_repl/pg_common.hh>
 
 #include <pg_repl/exception.hh>
 #include <pg_repl/pg_repl_msg.hh>
