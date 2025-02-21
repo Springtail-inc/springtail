@@ -131,7 +131,7 @@ namespace springtail::pg_fdw {
 
         _init_fdw(username, password);
 
-        _thread_manager = std::make_shared<MultiQueueThreadManager>(MAX_THREAD_POOL_SIZE);
+        _thread_manager = std::make_shared<common::MultiQueueThreadManager>(MAX_THREAD_POOL_SIZE);
         _thread_manager->start();
     }
 
@@ -276,7 +276,7 @@ namespace springtail::pg_fdw {
                 }
                 db_lock.unlock();
 
-                _thread_manager->queue_request(std::make_shared<MultiQueueRequest>(
+                _thread_manager->queue_request(std::make_shared<common::MultiQueueRequest>(
                     db_id, [this, &redis_ddl, db_id, schema_xid, ddls]() {
                         try {
                             // apply the DDL statements
@@ -292,8 +292,11 @@ namespace springtail::pg_fdw {
                             // success, update schema XID if applied, otherwise they may be queued
                             SPDLOG_DEBUG_MODULE(LOG_FDW, "Updating redis ddl @ schema XID: {}, db_id: {}", schema_xid, db_id);
                             redis_ddl.update_schema_xid(_fdw_id, db_id, schema_xid);
+
                             std::unique_lock db_lock_unique(_db_mutex);
                             _db_xid_map[db_id] = schema_xid;
+                            db_lock_unique.unlock();
+
                         } catch (Error &e) {
                             SPDLOG_ERROR("Springtail exception in thread manager task");
                             DCHECK(false); // assert in debug

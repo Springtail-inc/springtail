@@ -1,6 +1,6 @@
-#include <common/multi-queue-thread-manager.hh>
+#include <common/multi_queue_thread_manager.hh>
 
-namespace springtail::pg_fdw {
+namespace springtail::common {
 
     void
     MultiQueueThreadManager::_drain_incoming_queue()

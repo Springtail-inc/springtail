@@ -9,6 +9,7 @@
 #include <common/properties.hh>
 #include <common/object_cache.hh>
 #include <common/singleton.hh>
+#include <common/multi_queue_thread_manager.hh>
 
 #include <redis/redis_ddl.hh>
 
@@ -16,9 +17,6 @@
 #include <sys_tbl_mgr/table_mgr.hh>
 
 #include <pg_repl/libpq_connection.hh>
-
-#include <common/multi-queue-thread-manager.hh>
-
 
 /* These are defined by Thrift imported from xid_mgr_client.h and
  * must be undefined before including postgres.h */
@@ -66,7 +64,7 @@ namespace springtail::pg_fdw {
     private:
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections
         RedisCache::RedisChangeWatcherPtr _cache_watcher;           ///< redis cache callback object
-        std::shared_ptr<MultiQueueThreadManager> _thread_manager;   ///< thread manager that processes DDL requests
+        std::shared_ptr<common::MultiQueueThreadManager> _thread_manager;   ///< thread manager that processes DDL requests
 
         std::string _fdw_id;                       ///< FDW ID
 

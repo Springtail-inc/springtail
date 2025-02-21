@@ -2,7 +2,7 @@
 
 #include <common/thread_pool.hh>
 
-namespace springtail::pg_fdw {
+namespace springtail::common {
     /**
      * @brief Multiple Queue Request object definition. It contains the id of the queue that
      *      it belongs in.
