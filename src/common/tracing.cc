@@ -1,3 +1,5 @@
+#include <memory>
+
 #include <opentelemetry/common/key_value_iterable_view.h>
 #include <opentelemetry/exporters/otlp/otlp_http_exporter.h>
 #include <opentelemetry/exporters/otlp/otlp_http_metric_exporter.h>
@@ -12,6 +14,7 @@
 #include <common/json.hh>
 #include <common/properties.hh>
 #include <common/tracing.hh>
+#include <grpcpp/ext/otel_plugin.h>
 #include "opentelemetry/exporters/otlp/otlp_http_metric_exporter_factory.h"
 #include "opentelemetry/exporters/otlp/otlp_http_metric_exporter_options.h"
 #include "opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_factory.h"
@@ -88,7 +91,7 @@ void _register_histograms(){
     }
 }
 
-static void
+static std::shared_ptr<opentelemetry::sdk::metrics::MeterProvider>
 init_metrics(const opentelemetry::sdk::resource::Resource& resource)
 {
     // check if we should send to an otlp server
@@ -120,7 +123,7 @@ init_metrics(const opentelemetry::sdk::resource::Resource& resource)
 
     auto base_meter_provider =
         opentelemetry::sdk::metrics::MeterProviderFactory::Create(std::move(context));
-    meter_provider = std::unique_ptr<opentelemetry::sdk::metrics::MeterProvider>(
+    meter_provider = std::shared_ptr<opentelemetry::sdk::metrics::MeterProvider>(
         static_cast<opentelemetry::sdk::metrics::MeterProvider*>(base_meter_provider.release()));
 
     // Set as the global meter provider
@@ -130,6 +133,7 @@ init_metrics(const opentelemetry::sdk::resource::Resource& resource)
     // register the metrics
     _register_metrics();
 
+    return meter_provider;
 }
 
 static void
@@ -181,8 +185,18 @@ init_tracing_and_metrics(std::string_view component_name)
 
     if (enabled) {
         auto resource = create_default_otel_resource(component_name);
-        init_metrics(resource);
+        auto meter_provider = init_metrics(resource);
         init_tracing(resource);
+
+        // Initialize the OpenTelemetry gRPC plugin with the global meter provider
+        auto status = grpc::OpenTelemetryPluginBuilder()
+            .SetMeterProvider(meter_provider)
+            .BuildAndRegisterGlobal();
+        if (!status.ok()) {
+            SPDLOG_WARN("Failed to initialize OpenTelemetry gRPC plugin: {}", status.ToString());
+        } else {
+            SPDLOG_INFO("Initialized OpenTelemetry gRPC plugin");
+        }
     } else {
         // use the Noop provider to drop all collected metrics
         SPDLOG_INFO("Disabling OTel via NoopTracer/MeterProvider");
