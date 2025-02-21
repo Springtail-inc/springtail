@@ -41,6 +41,7 @@ else()
 endif()
 
 target_link_libraries(springtail_pg_fdw
+    PRIVATE springtail_pg
     PRIVATE springtail_common
     PRIVATE springtail_storage
     PRIVATE springtail_xid_mgr
