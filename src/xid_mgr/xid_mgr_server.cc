@@ -11,9 +11,11 @@
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/json.hh>
+#include <common/tracing.hh>
 
 #include <xid_mgr/xid_mgr_server.hh>
 #include <xid_mgr/xid_mgr_service.hh>
+
 
 namespace springtail::xid_mgr {
 
@@ -139,6 +141,8 @@ namespace springtail::xid_mgr {
         _partition_map[db_id] = partition;
         _partitions.push_back(partition);
 
+        tracing::increment_counter(XID_MGR_GET_PARTITION_CALLS, tracing::get_db_id_xid_map(db_id, 0));
+
         return partition;
     }
 
@@ -156,12 +160,18 @@ namespace springtail::xid_mgr {
             return 0;
         }
 
+        auto attributes = tracing::get_db_id_xid_map(db_id, schema_xid);
+
+        tracing::increment_counter(XID_MGR_GET_COMMITTED_XID_CALLS, attributes);
+
         return partition->get_committed_xid(db_id, schema_xid);
     }
 
     void
     XidMgrServer::commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_changes)
     {
+        auto start_time = std::chrono::system_clock::now();
+
         PartitionPtr partition;
         // first try to get partition without write lock
         std::shared_lock rd_lock(_mutex);
@@ -184,6 +194,16 @@ namespace springtail::xid_mgr {
         // exclusive lock held for insert/create
         partition->commit_xid(db_id, xid, has_schema_changes);
 
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now() -
+            start_time);
+
+        auto attributes = tracing::get_db_id_xid_map(db_id, xid);
+
+        tracing::record_histogram(XID_MGR_COMMIT_XID_LATENCIES, duration.count(), attributes);
+
+        tracing::increment_counter(XID_MGR_COMMIT_XID_CALLS, attributes);
+
         return;
     }
 
@@ -192,6 +212,7 @@ namespace springtail::xid_mgr {
                                     uint64_t xid)
     {
         // note: code is nearly identical to commit_xid()... make sure they stay in sync
+        auto start_time = std::chrono::system_clock::now();
 
         PartitionPtr partition;
 
@@ -214,6 +235,15 @@ namespace springtail::xid_mgr {
 
         // exclusive lock held for insert/create
         partition->record_ddl_change(db_id, xid);
-    }
 
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now() -
+            start_time);
+
+        auto attributes = tracing::get_db_id_xid_map(db_id, xid);
+
+        tracing::record_histogram(XID_MGR_RECORD_DDL_CHANGE_LATENCIES, duration.count(), attributes);
+
+        tracing::increment_counter(XID_MGR_RECORD_DDL_CHANGE_CALLS, attributes);
+    }
 }
