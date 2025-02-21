@@ -14,6 +14,7 @@
 #include <common/properties.hh>
 #include <common/state_synchronizer.hh>
 
+#include <pg_log_mgr/pg_log_mgr_common.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_copy_table.hh>
 

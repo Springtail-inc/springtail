@@ -2,7 +2,6 @@
 
 #include <common/logging.hh>
 #include <common/tracing.hh>
-#include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
 #include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/sync_tracker.hh>
@@ -415,7 +414,7 @@ namespace springtail::pg_log_mgr {
 
                     // notify the Committer to stop committing XIDs
                     if (is_first) {
-                        _committer_queue.push(pg_log_mgr:XidReady(_db));
+                        _committer_queue.push(std::make_shared<XidReady>(_db));
                     }
                 } else if (action.get<std::string>() != "no_change") {
                     redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
@@ -652,7 +651,7 @@ namespace springtail::pg_log_mgr {
         if (xid_msg) {
             // synchronously issue the swap/commit at the GC-2 prior to processing this xid
             SPDLOG_DEBUG_MODULE(LOG_GC, "Issue TABLE_SYNC_COMMIT on {} @ {}", db_id, xid);
-            _committer_queue.push(*xid_msg);
+            _committer_queue.push(std::make_shared<XidReady>(xid_msg.value()));
 
             // once the swap/commit is complete, we can clear the entry from the sync
             // tracker and continue processing
@@ -715,7 +714,8 @@ namespace springtail::pg_log_mgr {
 
         // message the Committer
         SPDLOG_DEBUG_MODULE(LOG_GC, "Issue XID to committer on {} @ {}", _db_id, xid);
-        committer_queue.push(pg_log_mgr::XidReady(_db_id, pg_log_mgr::XidReady::XactMsg(xid)));
+        auto committer_entry = std::make_shared<XidReady>(_db_id, XidReady::XactMsg(xid));
+        _committer_queue.push(committer_entry);
 
         // pass the xact to the xact logging thread
         xact->springtail_xid = xid;
@@ -783,7 +783,7 @@ namespace springtail::pg_log_mgr {
         _batch_map.erase(commit_msg.xid);
 
         // message the Committer
-        _committer_queue.push(pg_log_mgr::XidReady(_db_id, pg_log_mgr::XidReady::XactMsg(xid)));
+        _committer_queue.push(std::make_shared<XidReady>(_db_id, XidReady::XactMsg(xid)));
 
         // pass the xact to the xact logging thread
         xact->springtail_xid = xid;

@@ -362,7 +362,8 @@ namespace springtail::pg_log_mgr {
 
             // notify the Committer to stop committing XIDs
             if (sync_start) {
-                _committer_queue.push(pg_log_mgr:XidReady(_db_id));
+                auto committer_entry = std::make_shared<XidReady>(_db_id);
+                _committer_queue.push(committer_entry);
             }
         }
 

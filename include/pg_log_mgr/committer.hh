@@ -16,7 +16,7 @@
 #include <redis/redis_ddl.hh>
 #include <redis/redis_containers.hh>
 
-#include <pg_log_mgr/xid_ready.hh>
+#include <pg_log_mgr/pg_log_mgr_common.hh>
 #include <pg_log_mgr/indexer.hh>
 
 #include <sys_tbl_mgr/table.hh>
@@ -24,6 +24,8 @@
 
 #include <opentelemetry/context/context.h>
 #include <opentelemetry/metrics/meter.h>
+
+#include <write_cache/write_cache_client.hh>
 
 namespace springtail::pg_log_mgr {
     namespace metrics = opentelemetry::metrics;
@@ -42,8 +44,7 @@ namespace springtail::pg_log_mgr {
     class Committer {
     public:
         Committer(uint32_t worker_count)
-            : _redis(fmt::format(redis::QUEUE_GC_XID_READY, Properties::get_db_instance_id())),
-              _worker_count(worker_count)
+            : _worker_count(worker_count)
         {
             _xid_mgr = XidMgrClient::get_instance();
             _worker_id = fmt::format("{}_{}_0", THREAD_TYPE, THREAD_MAIN);

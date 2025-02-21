@@ -115,15 +115,15 @@ namespace springtail {
             return table_ids;
         }
 
-        static std::vector<Extent> get_extents(uint64_t db_id, uint64_t tid, uint64_t xid,
-                                  uint32_t count, uint64_t &cursor, PostgresTimestamp &commit_ts)
+        static std::vector<springtail::thrift::write_cache::Extent>
+        get_extents(uint64_t db_id, uint64_t tid, uint64_t xid, uint32_t count, uint64_t &cursor, PostgresTimestamp &commit_ts)
         {
             WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
-            std::vector<Extent> extents;
-            std::vector<WriteCacheIndexExtentPtr> extents =
+            std::vector<springtail::thrift::write_cache::Extent> extents;
+            std::vector<WriteCacheIndexExtentPtr> idx_extents =
                 index->get_extents(tid, xid, count, cursor, commit_ts);
 
-            for (const auto &e: extents) {
+            for (const auto &e: idx_extents) {
                 thrift::write_cache::Extent extent;
                 extent.xid = e->xid;
                 extent.xid_seq = e->xid_seq;
@@ -131,7 +131,7 @@ namespace springtail {
                 // serialze the extent data
                 extent.__set_data(e->data->serialize());
 
-                extents.push_back(std::move(extent));
+                extents.push_back(extent);
             }
 
             return extents;
