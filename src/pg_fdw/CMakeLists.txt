@@ -41,6 +41,7 @@ else()
 endif()
 
 target_link_libraries(springtail_pg_fdw
+    PRIVATE springtail_pg
     PRIVATE springtail_common
     PRIVATE springtail_storage
     PRIVATE springtail_xid_mgr
@@ -78,6 +79,7 @@ set(END_GROUP "")
 endif()
 
 target_link_libraries(dump_table
+     PRIVATE springtail_pg
      PRIVATE springtail_common
      PRIVATE springtail_storage
      PRIVATE springtail_sys_tbl_mgr
@@ -110,6 +112,7 @@ target_include_directories(test_where
     PRIVATE ${PostgreSQL_INCLUDE_DIRS}
 )
 target_link_libraries(test_where
+    PRIVATE springtail_pg
     PRIVATE springtail_common
     PRIVATE springtail_test
     PRIVATE ${START_GROUP}

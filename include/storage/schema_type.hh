@@ -1,26 +1,9 @@
 #pragma once
 
-#include <cstdint>
-#include <map>
+#include <ostream>
+#include <pg_repl/pg_common.hh>
 
 namespace springtail {
-
-    /** The available types for fields. */
-    enum class SchemaType : uint8_t {
-        TEXT = 1, // text, varchar, bpchar
-        UINT64,
-        INT64, // int8, money, time, timestamp, timestamptz, xid8
-        UINT32,
-        INT32, // int4, cid, date, xid
-        UINT16,
-        INT16, // int2
-        UINT8,
-        INT8, // char
-        BOOLEAN, // bool
-        FLOAT64, // float8
-        FLOAT32, // float4
-        BINARY // all other types
-    };
 
     inline std::ostream& operator<<(std::ostream& os, SchemaType type) {
         switch (type) {
