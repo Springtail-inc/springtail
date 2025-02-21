@@ -30,12 +30,7 @@ PgXactLogWriter::PgXactLogWriter(const std::filesystem::path &base_dir)
     std::filesystem::create_directories(base_dir);
 
     // construct the log file name
-    _file = fs::find_latest_modified_file(base_dir, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX);
-    if (_file.empty()) {
-        _file = base_dir / fmt::format("{}{:04d}{}", PgLogMgr::LOG_PREFIX_XACT, 0, PgLogMgr::LOG_SUFFIX);
-    } else {
-        _file = fs::get_next_file(_file, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX);
-    }
+    _file = fs::create_log_file(base_dir, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX);
 
     // construct the schema of the log file
     std::vector<SchemaColumn> columns = {
@@ -83,7 +78,7 @@ PgXactLogWriter::_flush_extent(ExtentPtr extent)
 
     // rotate if the filesize has crossed a given threshold
     if (filesize > PG_XLOG_MAX_FILE_SIZE) {
-        _file = fs::get_next_file(_file, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX);
+        _file = fs::create_log_file(_file.parent_path(), PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX);
     }
 }
 

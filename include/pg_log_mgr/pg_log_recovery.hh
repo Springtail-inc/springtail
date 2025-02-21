@@ -23,12 +23,12 @@ public:
      * records.  Returns the last postgres LSN seen in the replication logs to allow the replication
      * stream to restart from the correct point.
      */
-    uint64_t recover();
+    uint64_t repair_logs();
 
     /**
      * Replays any uncommitted operations from the replication log.
      */
-    void replay();
+    void replay_logs();
 
 private:
     /** Skip all of the committed transactions from the replication log, while tracking (1) any
@@ -38,8 +38,10 @@ private:
     bool _skip_committed();
 
     /** Helper to process an individual message during _skip_committed() */
-    bool _process_msg(PgMsgPtr msg, uint32_t log_number, const std::filesystem::path &repl_log,
-                      PgXactLogReader &xact_reader, uint32_t &cur_pgxid);
+    bool _process_msg(PgMsgPtr msg,
+                      uint32_t log_number,
+                      PgXactLogReader &xact_reader,
+                      uint32_t &cur_pgxid);
 
     /** Play back only the "active" transaction from the replication log until we have replayed the
         first uncommitted transaciton. */
@@ -79,6 +81,7 @@ private:
 
     /** Interface for reading the replication log. */
     PgMsgStreamReader _repl_reader;
+    std::optional<std::filesystem::path> _repl_log; ///< The current replication log file
 
     /** Map of pg xid -> Position.  Tracks the "active" transactions as we scan the log. */
     std::unordered_map<uint32_t, Position> _active_map;

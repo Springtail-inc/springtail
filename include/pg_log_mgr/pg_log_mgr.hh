@@ -86,13 +86,16 @@ namespace springtail::pg_log_mgr {
          */
         PgLogMgr(const std::filesystem::path &repl_log_path,
                  const std::filesystem::path &xact_log_path)
-        : _db_id(1), _db_instance_id(Properties::get_db_instance_id()),
-          _internal_state(STATE_RUNNING),
-          _repl_log_path(repl_log_path),
-          // XXX 8192
-          _pg_log_reader(_db_id, 8192, xact_log_path), _xact_log_path(xact_log_path),
-          _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
-        {}
+            : _db_id(1),
+              _db_instance_id(Properties::get_db_instance_id()),
+              _internal_state(STATE_RUNNING),
+              _repl_log_path(repl_log_path),
+              _xact_log_path(xact_log_path),
+              _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
+        {
+            // XXX 8192
+            _pg_log_reader = std::make_shared<PgLogReader>(_db_id, 8192, xact_log_path);
+        }
 
         /** Start the pipeline; setup the log reader/writer log files etc. */
         void startup();
@@ -124,12 +127,6 @@ namespace springtail::pg_log_mgr {
     protected:
         /** Helper to create log writer -- one per log file */
         PgLogWriterPtr _create_repl_logger();
-
-        /** Create xact log writer */
-        PgXactLogWriterPtr _create_xact_logger();
-
-        /** Process transaction record -- write it to log and to Redis queue */
-        void _process_xact(const PgTransactionPtr xact);
 
     private:
         /** minimum size for log rollover */
@@ -172,7 +169,7 @@ namespace springtail::pg_log_mgr {
         void _startup_init();
 
         /** normal startup from running state */
-        uint64_t _startup_running();
+        void _startup_running();
 
         /** Setup streaming and startup threads */
         void _start_streaming(uint64_t lsn = INVALID_LSN);
@@ -188,9 +185,9 @@ namespace springtail::pg_log_mgr {
         /** callback from log writer class to update lsn from fsync thread*/
         void _lsn_callback(LSN_t lsn);
 
-        ///// Stage 2 of pipeline, reading replication log and parsing xacts
-        std::thread _reader_thread;         ///< log reader thread
-        PgLogReader _pg_log_reader;         ///< log reader
+        ///// Stage 2 of pipeline, reading replication log and updating the write cache
+        std::thread _reader_thread; ///< log reader thread
+        std::shared_ptr<PgLogReader> _pg_log_reader; ///< log reader
 
         /** Consume data from queue, scan log entries and notify GC */
         void _log_reader_thread();
@@ -201,9 +198,6 @@ namespace springtail::pg_log_mgr {
         PgXactLogWriterPtr _xact_logger = nullptr; ///< xact log writer
 
         LSN_t _last_pushed_lsn = INVALID_LSN;      ///< last pushed lsn to redis queue for GC
-
-        /** transaction worker -- thread fn */
-        void _xact_handler_thread();
 
         /** notify xact handler to start sync */
         void _notify_xact_start_sync();

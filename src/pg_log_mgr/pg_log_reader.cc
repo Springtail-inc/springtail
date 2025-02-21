@@ -19,10 +19,10 @@
 namespace springtail::pg_log_mgr {
 
     PgLogReader::PgLogReader(uint64_t db_id, uint32_t queue_size,
-                             const std::filesystem::path &log_path)
+                             const std::filesystem::path &xact_log_path)
         : _db_id(db_id),
           _msg_queue(queue_size),
-          _xact_log_writer(log_path)
+          _xact_log_writer(xact_log_path)
     {
         // retrieve the most recently committed XID at startup
         _committed_xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
@@ -498,7 +498,6 @@ namespace springtail::pg_log_mgr {
         }
     }
 
-#if 0
     void
     PgLogReader::process_log(const std::filesystem::path &path,
                              uint64_t start_offset,
@@ -545,7 +544,6 @@ namespace springtail::pg_log_mgr {
             }
         }
     }
-#endif
 
     void
     PgLogReader::_process_msg(PgMsgPtr msg)

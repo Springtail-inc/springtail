@@ -45,7 +45,7 @@ namespace springtail::pg_log_mgr {
          * @param queue queue to enqueue parsed xactions for xid logger and GC
          */
         PgLogReader(uint64_t db_id, uint32_t queue_size,
-                    const std::filesystem::path &log_path);
+                    const std::filesystem::path &xact_log_path);
 
         /**
          * @brief Queues a message to be processed by the log reader.
@@ -59,17 +59,9 @@ namespace springtail::pg_log_mgr {
          * @param start_offset starting file offset
          * @param num_messages number of messages to process (-1 read until end of file)
          */
-        // void process_log(const std::filesystem::path &path,
-        //                  uint64_t start_offset,
-        //                  int num_messages);
-
-        /**
-         * @brief Set the xact map object; moves contents of xact_map to _xact_map
-         * @param xact_map xact map -- will be empty after call
-         */
-        // void set_xact_map(std::map<uint32_t, PgTransactionPtr> &xact_map) {
-        //     _xact_map.swap(xact_map);
-        // }
+        void process_log(const std::filesystem::path &path,
+                         uint64_t start_offset,
+                         int num_messages);
 
         /**
          * Set the starting point for XID assignment.

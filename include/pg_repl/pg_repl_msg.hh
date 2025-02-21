@@ -290,9 +290,9 @@ namespace springtail
             TYPE_PIPELINE_STALL = 3 ///< stalls the pipeline for table sync
         };
 
-        LSN_t xact_lsn;          ///< xact lsn (final lsn of xact; begin_msg.xact_lsn)
-        uint8_t type;            ///< transaction record type (see enum above)
-        uint32_t xid;                      ///< postgres xid
+        LSN_t xact_lsn;  ///< xact lsn (final lsn of xact; begin_msg.xact_lsn)
+        uint8_t type;    ///< transaction record type (see enum above)
+        uint32_t xid;    ///< postgres xid
 
         PgTransaction(uint8_t type) : type(type) {}
 

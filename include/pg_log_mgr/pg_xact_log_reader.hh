@@ -49,7 +49,7 @@ namespace springtail::pg_log_mgr {
         std::filesystem::path _base_dir;      
         std::string _file_prefix;             
         std::string _file_suffix;             
-        std::filesystem::path _current_file;  
+        std::optional<std::filesystem::path> _current_file;  
         
         ExtentPtr _current_extent;
         Extent::Iterator _current_row;

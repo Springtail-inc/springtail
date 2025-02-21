@@ -5,21 +5,27 @@
 namespace springtail::pg_log_mgr {
 
 uint64_t
-PgLogRecovery::recover()
+PgLogRecovery::repair_logs()
 {
     uint64_t lsn = INVALID_LSN;
 
-    std::filesystem::path latest_log =
+    // create directories if they don't exist
+    // XXX shouldn't these always exist if we're starting up from running?  Maybe we should skip
+    //     recovery if the directories didn't exist?
+    std::filesystem::create_directories(_repl_path);
+    std::filesystem::create_directories(_xact_path);
+
+    auto latest_log =
         fs::find_latest_modified_file(_repl_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
-    if (!latest_log.empty()) {
-        lsn = PgMsgStreamReader::scan_log(latest_log, true);
+    if (latest_log) {
+        lsn = PgMsgStreamReader::scan_log(*latest_log, true);
     }
 
     return lsn;
 }
 
 void
-PgLogRecovery::replay()
+PgLogRecovery::replay_logs()
 {
     // scan the replication log to skip any already committed records
     bool has_more = _skip_committed();
@@ -40,9 +46,13 @@ bool
 PgLogRecovery::_skip_committed()
 {
     // open the repl log
-    std::filesystem::path repl_log = fs::find_earliest_modified_file(
-        _repl_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
-    _repl_reader.set_file(repl_log);
+    _repl_log = fs::find_earliest_modified_file(_repl_path, PgLogMgr::LOG_PREFIX_REPL,
+                                                PgLogMgr::LOG_SUFFIX);
+    if (!_repl_log) {
+        return false;
+    }
+
+    _repl_reader.set_file(*_repl_log);
 
     // Open the xact log
     PgXactLogReader xact_reader(_xact_path, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX);
@@ -62,18 +72,19 @@ PgLogRecovery::_skip_committed()
         bool eob, eos;
         auto msg = _repl_reader.read_message(filter, eob, eos);
         if (msg != nullptr) {
-            done = _process_msg(msg, log_number, repl_log, xact_reader, cur_pgxid);
+            done = _process_msg(msg, log_number, xact_reader, cur_pgxid);
         }
 
         // check if we need to move to the next replication log file
         if (!done && eos) {
-            repl_log = fs::get_next_file(repl_log, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
-            if (!std::filesystem::exists(repl_log)) {
+            _repl_log =
+                fs::get_next_log_file(*_repl_log, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
+            if (!_repl_log) {
                 return false;
             }
 
             ++log_number;
-            _repl_reader.set_file(repl_log);
+            _repl_reader.set_file(*_repl_log);
         }
     }
 
@@ -83,7 +94,6 @@ PgLogRecovery::_skip_committed()
 bool
 PgLogRecovery::_process_msg(PgMsgPtr msg,
                             uint32_t log_number,
-                            const std::filesystem::path &repl_log,
                             PgXactLogReader &xact_reader,
                             uint32_t &cur_pgxid)
 {
@@ -92,7 +102,7 @@ PgLogRecovery::_process_msg(PgMsgPtr msg,
             // starting point for the scan along with pgxid
         case PgMsgEnum::BEGIN: {
             auto &begin_msg = std::get<PgMsgBegin>(msg->msg);
-            Position p(log_number, _repl_reader.header_offset(), repl_log);
+            Position p(log_number, _repl_reader.header_offset(), *_repl_log);
             _active_map.try_emplace(begin_msg.xid, p);
             cur_pgxid = begin_msg.xid;
             return false;
@@ -100,7 +110,7 @@ PgLogRecovery::_process_msg(PgMsgPtr msg,
         case PgMsgEnum::STREAM_START: {
             auto &start_msg = std::get<PgMsgStreamStart>(msg->msg);
             if (start_msg.first) {
-                Position p(log_number, _repl_reader.header_offset(), repl_log);
+                Position p(log_number, _repl_reader.header_offset(), *_repl_log);
                 _active_map.try_emplace(start_msg.xid, p);
             }
             cur_pgxid = start_msg.xid;
@@ -139,7 +149,7 @@ PgLogRecovery::_process_msg(PgMsgPtr msg,
             _active_map.erase(pgxid);
 
             if (xact_reader.get_xid() == _committed_xid) {
-                _final_committed = {log_number, _repl_reader.block_end_offset(), repl_log};
+                _final_committed = {log_number, _repl_reader.block_end_offset(), *_repl_log};
                 done = true;
             } else {
                 done = !xact_reader.next();  // move to the next record in the xact log
@@ -170,8 +180,8 @@ PgLogRecovery::_replay_active()
     CHECK(min_i != _active_map.end());
 
     uint64_t start_offset = min_i->second.offset;
-    std::filesystem::path repl_log = min_i->second.file;
-    _repl_reader.set_file(repl_log, start_offset);
+    _repl_log = min_i->second.file;
+    _repl_reader.set_file(*_repl_log, start_offset);
 
     // replay repl log entries for the active set... skip everything else until we get to the end of
     // the _final_committed transaction
@@ -201,7 +211,7 @@ PgLogRecovery::_replay_active()
 
         if (skip) {
             // if skipping the block then reposition the reader
-            _repl_reader.set_file(repl_log, _repl_reader.block_end_offset());
+            _repl_reader.set_file(*_repl_log, _repl_reader.block_end_offset());
             eos = _repl_reader.end_of_stream();
 
             // check if we just passed the first uncommitted pgxid
@@ -220,12 +230,13 @@ PgLogRecovery::_replay_active()
 
         // check if we need to move to the next file
         if (eos) {
-            repl_log = fs::get_next_file(repl_log, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
-            if (!std::filesystem::exists(repl_log)) {
+            _repl_log =
+                fs::get_next_log_file(*_repl_log, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
+            if (!_repl_log) {
                 return false;  // no more logs to process
             }
 
-            _repl_reader.set_file(repl_log);
+            _repl_reader.set_file(*_repl_log);
         }
     }
 
@@ -243,8 +254,7 @@ PgLogRecovery::_replay_uncommitted()
                              // create_index, drop_index
     };
 
-    bool done = false;
-    while (!done) {
+    while (_repl_log) {
         bool eob, eos;
         auto msg = _repl_reader.read_message(filter, eos, eob);
         if (msg != nullptr) {
@@ -254,12 +264,10 @@ PgLogRecovery::_replay_uncommitted()
 
         // check if we need to move to the next file
         if (eos) {
-            std::filesystem::path repl_log =
-                fs::get_next_file(repl_log, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
-            if (!std::filesystem::exists(repl_log)) {
-                done = true;
-            } else {
-                _repl_reader.set_file(repl_log);
+            _repl_log =
+                fs::get_next_log_file(*_repl_log, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
+            if (_repl_log) {
+                _repl_reader.set_file(*_repl_log);
             }
         }
     }

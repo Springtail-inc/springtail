@@ -43,7 +43,7 @@ PgXactLogReader::begin()
 {
     // Find first file
     _current_file = fs::find_earliest_modified_file(_base_dir, _file_prefix, _file_suffix);
-    if (_current_file.empty()) {
+    if (!_current_file) {
         return false;
     }
 
@@ -78,14 +78,14 @@ PgXactLogReader::_load_next_extent()
 bool 
 PgXactLogReader::_open_next_file()
 {
-    if (_current_file.empty()) {
+    if (!_current_file) {
         return false;
     }
 
     // If this isn't our first file, get the next one
     if (_current_extent) {
-        _current_file = fs::get_next_file(_current_file, _file_prefix, _file_suffix);
-        if (_current_file.empty() || !std::filesystem::exists(_current_file)) {
+        _current_file = fs::get_next_log_file(*_current_file, _file_prefix, _file_suffix);
+        if (!_current_file) {
             _current_extent = nullptr;
             _current_handle = nullptr;
             return false;
@@ -93,7 +93,7 @@ PgXactLogReader::_open_next_file()
     }
 
     // Open the file and read the first extent
-    _current_handle = IOMgr::get_instance()->open(_current_file, IOMgr::IO_MODE::READ, false);
+    _current_handle = IOMgr::get_instance()->open(*_current_file, IOMgr::IO_MODE::READ, false);
     _current_offset = 0;
         
     // Load the first extent
