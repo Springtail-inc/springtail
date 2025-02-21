@@ -28,7 +28,7 @@ namespace {
         char buffer[128];
 
         using Deleter = int(*)(FILE*);
-        std::unique_ptr<FILE, Deleter> pipe(popen(command.c_str(), "r"), pclose);
+        std::unique_ptr<FILE, Deleter> pipe(popen(command.c_str(), "r"), &pclose);
 
         if (!pipe) {
             throw std::runtime_error("popen() failed!");
