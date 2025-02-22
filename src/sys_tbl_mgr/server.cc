@@ -1,35 +1,37 @@
-#include <iostream>
-#include <mutex>
-#include <memory>
-
-#include <nlohmann/json.hpp>
-
 #include <common/common.hh>
+#include <common/json.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
-#include <common/json.hh>
-
+#include <nlohmann/json.hpp>
 #include <sys_tbl_mgr/server.hh>
-
-namespace at = apache::thrift;
+#include <sys_tbl_mgr/service.hh>
 
 namespace springtail::sys_tbl_mgr {
 
-    Server::Server()
-    {
-        nlohmann::json json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
-        nlohmann::json rpc_json;
+Server::Server()
+{
+    auto json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
+    nlohmann::json rpc_json;
 
-        // fetch RPC properties for the sys_tbl_mgr server
-        if (!Json::get_to(json, "rpc_config", rpc_json)) {
-            throw Error("SysTblMgr RPC settings are not found");
-        }
-        init(rpc_json);
+    // fetch RPC properties for the sys_tbl_mgr server
+    if (!Json::get_to(json, "rpc_config", rpc_json)) {
+        throw Error("SysTblMgr RPC settings are not found");
     }
 
-    void
-    Server::_internal_shutdown()
-    {
-        stop();
-    }
+    _grpc_server_manager.init(rpc_json);
+    _grpc_server_manager.addService(Service::get_instance());
 }
+
+void
+Server::startup()
+{
+    _grpc_server_manager.startup();
+}
+
+void
+Server::shutdown()
+{
+    _grpc_server_manager.shutdown();
+}
+
+}  // namespace springtail::sys_tbl_mgr

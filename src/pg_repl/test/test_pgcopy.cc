@@ -2,22 +2,18 @@
 
 #include <common/common.hh>
 #include <common/json.hh>
-#include <common/properties.hh>
 #include <common/logging.hh>
-#include <common/redis.hh>
+#include <common/properties.hh>
 #include <common/redis_types.hh>
-
-#include <redis/redis_containers.hh>
-
+#include <common/redis.hh>
 #include <pg_repl/pg_copy_table.hh>
-
+#include <proto/pg_copy_table.pb.h>
+#include <redis/redis_containers.hh>
 #include <sys_tbl_mgr/client.hh>
-#include <sys_tbl_mgr/table.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
-
-#include <xid_mgr/xid_mgr_client.hh>
-
+#include <sys_tbl_mgr/table.hh>
 #include <test/services.hh>
+#include <xid_mgr/xid_mgr_client.hh>
 
 using namespace springtail;
 
@@ -99,27 +95,34 @@ namespace {
 
         for (const std::string &hkey : hkeys) {
             auto &&value = redis->hget(key, hkey);
-            auto json = nlohmann::json::parse(*value);
+            proto::CopyTableInfo copy_info;
+            if (!copy_info.ParseFromString(*value)) {
+                throw Error("Failed to parse CopyTableInfo from string");
+            }
 
             // perform the table swap
             // note: we wait to perform this operation in the GC-2 to ensure that all system
             //       table mutations up to this XID have already been applied, otherwise we
             //       could potentially get a stray column added before the swap XID showing
             //       up in the schema since it wouldn't get deleted by the DROP TABLE
-            auto namespace_req = common::json_to_thrift<sys_tbl_mgr::NamespaceRequest>(json[0]);
-            namespace_req.xid = xid;
-            namespace_req.lsn = constant::MAX_LSN - 2;
+            auto* namespace_req = copy_info.mutable_namespace_req();
+            namespace_req->set_xid(xid);
+            namespace_req->set_lsn(constant::MAX_LSN - 2);
 
-            auto create_req = common::json_to_thrift<sys_tbl_mgr::TableRequest>(json[1]);
-            create_req.xid = xid;
-            create_req.lsn = constant::MAX_LSN - 1;
+            auto* create_req = copy_info.mutable_table_req();
+            create_req->set_xid(xid);
+            create_req->set_lsn(constant::MAX_LSN - 1);
 
-            auto index_reqs = common::json_to_thrift_vector<sys_tbl_mgr::IndexRequest>(json[2]);
+            auto *indexes = copy_info.mutable_index_reqs();
+            std::vector<proto::IndexRequest> index_reqs;
+            for (auto &index : *indexes) {
+                index_reqs.push_back(index);
+            }
+            auto *roots_req = copy_info.mutable_roots_req();
+            roots_req->set_xid(xid);
 
-            auto roots_req = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[3]);
-            roots_req.xid = xid;
-
-            client->swap_sync_table(namespace_req, create_req, index_reqs, roots_req);
+            // Perform the table swap using the updated copy_info
+            client->swap_sync_table(*namespace_req, *create_req, index_reqs, *roots_req);
 
             // clear the table entry from the hash
             redis->hdel(key, hkey);
