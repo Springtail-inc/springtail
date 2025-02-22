@@ -11,7 +11,6 @@
 #include <xid_mgr/xid_mgr_server.hh>
 
 using namespace springtail;
-using namespace springtail::xid_mgr;
 
 namespace {
     /**
@@ -31,14 +30,12 @@ namespace {
             // clear xid directory
             std::filesystem::remove_all(base_path);
 
-            XidMgrServer *server = XidMgrServer::get_instance();
+            xid_mgr::XidMgrServer *server = xid_mgr::XidMgrServer::get_instance();
 
             SPDLOG_INFO("Starting server");
 
             // startup server
-            _server_thread = std::thread([&server](){
-                server->startup();
-            });
+            server->startup();
 
             sleep(1);
         }
@@ -52,9 +49,7 @@ namespace {
             XidMgrClient::shutdown();
             // shutdown server
             SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Shutting down server");
-            XidMgrServer *server = XidMgrServer::get_instance();
-            server->stop();
-            _server_thread.join();
+            xid_mgr::XidMgrServer *server = xid_mgr::XidMgrServer::get_instance();
             server->shutdown();
         }
 
@@ -72,7 +67,6 @@ namespace {
         int THREADS = 500;
         int ITERS = 100;
 
-        std::thread _server_thread;
         std::vector<std::thread> _threads;
     };
 

@@ -1,4 +1,6 @@
 #include "pg_repl/pg_repl_msg.hh"
+
+#include <iostream>
 #include <stdlib.h>
 #include <stdio.h>
 #include <cassert>

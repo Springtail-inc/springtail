@@ -18,6 +18,7 @@ namespace {
             //      properly. Unfortunately, springtail_init() brings a lot of noise that I did not want
             //      to deal with at the moment.
             Properties::get_instance()->init(true);
+            Properties::get_instance()->init_cache();
             init_exception();
         }
 

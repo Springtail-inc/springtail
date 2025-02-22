@@ -67,10 +67,28 @@ namespace springtail {
          */
         void init(bool load_redis);
 
+        /**
+         * @brief Function for separate redis cache initialization
+         *
+         */
+        void init_cache() { _cache = std::make_shared<RedisCache>(true); }
+
         /** Helper to get db instance id */
         static inline uint64_t get_db_instance_id() {
             _assert_instance();
             return  get_instance()->_get_db_instance_id();
+        }
+
+        /** Helper to get organization id */
+        static inline std::string get_organization_id() {
+            _assert_instance();
+            return get_instance()->_get_organization_id();
+        }
+
+        /** Helper to get account id */
+        static inline std::string get_account_id() {
+            _assert_instance();
+            return get_instance()->_get_account_id();
         }
 
         /** Helper to get fs mount point */
@@ -214,6 +232,28 @@ namespace springtail {
             assert (_json.contains(ORG_CONFIG));
             assert (_json[ORG_CONFIG].contains("db_instance_id"));
             return _json[ORG_CONFIG]["db_instance_id"];
+        }
+
+        /**
+         * @brief Internal get organization id
+         *
+         * @return std::string
+         */
+        std::string _get_organization_id() {
+            assert (_json.contains(ORG_CONFIG));
+            assert (_json[ORG_CONFIG].contains("organization_id"));
+            return _json[ORG_CONFIG]["organization_id"];
+        }
+
+        /**
+         * @brief Internal get account id
+         *
+         * @return std::string
+         */
+        std::string _get_account_id() {
+            assert (_json.contains(ORG_CONFIG));
+            assert (_json[ORG_CONFIG].contains("account_id"));
+            return _json[ORG_CONFIG]["account_id"];
         }
 
         /**

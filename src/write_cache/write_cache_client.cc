@@ -1,264 +1,260 @@
-#include <string>
-#include <string_view>
-#include <memory>
-#include <cassert>
-
 #include <absl/log/check.h>
-#include <nlohmann/json.hpp>
+#include <google/protobuf/empty.pb.h>
+#include <grpcpp/grpcpp.h>
+#include <proto/write_cache.grpc.pb.h>
 
-#include <thrift/transport/TSocket.h>
-#include <thrift/transport/TBufferTransports.h>
-#include <thrift/protocol/TCompactProtocol.h>
+#include <cassert>
+#include <memory>
+#include <string>
 
-#include <common/properties.hh>
-#include <common/logging.hh>
-#include <common/json.hh>
-#include <common/object_cache.hh>
 #include <common/common.hh>
 #include <common/exception.hh>
-
-#include <thrift/write_cache/ThriftWriteCache.h>
-
+#include <common/grpc_client.hh>
+#include <common/json.hh>
+#include <common/logging.hh>
+#include <common/object_cache.hh>
+#include <common/properties.hh>
+#include <nlohmann/json.hpp>
 #include <write_cache/write_cache_client.hh>
 
 namespace springtail {
-    WriteCacheClient::WriteCacheClient()
-    {
-        nlohmann::json json = Properties::get(Properties::WRITE_CACHE_CONFIG);
-        nlohmann::json rpc_json;
 
-        // fetch RPC properties for the write cache client
-        if (!Json::get_to(json, "rpc_config", rpc_json)) {
-            throw Error("Write cache RPC settings are not found");
-        }
+WriteCacheClient::WriteCacheClient() : GrpcClient<WriteCacheClient>()
+{
+    nlohmann::json json = Properties::get(Properties::WRITE_CACHE_CONFIG);
+    nlohmann::json rpc_json;
 
-        std::string server = Properties::get_write_cache_hostname();
-
-        init(server, rpc_json);
+    if (!Json::get_to(json, "rpc_config", rpc_json)) {
+        throw Error("Write cache RPC settings are not found");
     }
 
-    // exposed client service interface below
+    std::string server = Properties::get_write_cache_hostname();
+    _channel = create_channel(server, rpc_json);
+    _stub = proto::WriteCache::NewStub(_channel);
+}
 
-    void
-    WriteCacheClient::ping()
-    {
-        thrift::write_cache::Status result;
+void 
+WriteCacheClient::ping()
+{
+    google::protobuf::Empty request;
+    google::protobuf::Empty response;
 
-        _invoke_with_retries([&result](ThriftClient &c) {
-            c.client->ping(result);
-        });
+    retry_rpc(
+        [&]() {
+            grpc::ClientContext context;
+            return _stub->Ping(&context, request, &response);
+        },
+        "Ping");
+}
 
-        std::cout << "Ping got: " << result.message << std::endl;
-        return;
+std::vector<uint64_t> 
+WriteCacheClient::list_tables(uint64_t db_id,
+                             uint64_t xid,
+                             uint32_t count,
+                             uint64_t &cursor)
+{
+    proto::ListTablesRequest request;
+    proto::ListTablesResponse response;
+
+    request.set_db_id(db_id);
+    request.set_xid(xid);
+    request.set_count(count);
+    request.set_cursor(cursor);
+
+    retry_rpc(
+        [&]() {
+            grpc::ClientContext context;
+            return _stub->ListTables(&context, request, &response);
+        },
+        "ListTables");
+    
+    cursor = response.cursor();
+    return std::vector<uint64_t>(response.table_ids().begin(),
+                                response.table_ids().end());
+}
+
+std::vector<WriteCacheClient::WriteCacheExtent>
+WriteCacheClient::get_extents(uint64_t db_id,
+                              uint64_t tid,
+                              uint64_t xid,
+                              uint32_t count,
+                              uint64_t &cursor,
+                              PostgresTimestamp &commit_ts)
+{
+    proto::GetExtentsRequest request;
+    proto::GetExtentsResponse response;
+
+    request.set_db_id(db_id);
+    request.set_table_id(tid);
+    request.set_xid(xid);
+    request.set_count(count);
+    request.set_cursor(cursor);
+
+    retry_rpc(
+        [&]() {
+            grpc::ClientContext context;
+            return _stub->GetExtents(&context, request, &response);
+        },
+        "GetExtents");
+
+    CHECK_EQ(response.table_id(), tid);
+    cursor = response.cursor();
+    commit_ts = PostgresTimestamp(response.commit_ts());
+
+    std::vector<WriteCacheExtent> extents;
+    for (const auto &e : response.extents()) {
+        WriteCacheExtent extent;
+        extent.xid = e.xid();
+        extent.lsn = e.xid_seq();
+        extent.data = e.data();
+        extents.push_back(std::move(extent));
     }
+    return extents;
+}
 
-    std::vector<uint64_t>
-    WriteCacheClient::list_tables(uint64_t db_id, uint64_t xid, uint32_t count, uint64_t &cursor)
-    {
-        thrift::write_cache::ListTablesRequest request;
-        thrift::write_cache::ListTablesResponse response;
+void
+WriteCacheClient::evict_table(uint64_t db_id, uint64_t tid, uint64_t xid)
+{
+    proto::EvictTableRequest request;
+    google::protobuf::Empty response;
 
-        request.db_id = db_id;
-        request.xid = xid;
-        request.count = count;
-        request.cursor = cursor;
+    request.set_db_id(db_id);
+    request.set_table_id(tid);
+    request.set_xid(xid);
 
-        _invoke_with_retries([&response, &request](ThriftClient &c) {
-            c.client->list_tables(response, request);
-        });
+    retry_rpc(
+        [&]() {
+            grpc::ClientContext context;
+            return _stub->EvictTable(&context, request, &response);
+        },
+        "EvictTable");
+}
 
-        cursor = response.cursor;
+void
+WriteCacheClient::evict_xid(uint64_t db_id, uint64_t xid)
+{
+    proto::EvictXidRequest request;
+    google::protobuf::Empty response;
 
-        return std::vector<uint64_t>(response.table_ids.begin(), response.table_ids.end());
-    }
+    request.set_db_id(db_id);
+    request.set_xid(xid);
 
-    std::vector<WriteCacheClient::WriteCacheExtent>
-    WriteCacheClient::get_extents(uint64_t db_id, uint64_t tid, uint64_t xid,
-                                  uint32_t count, uint64_t &cursor, PostgresTimestamp &commit_ts)
-    {
-        thrift::write_cache::GetExtentsRequest request;
-        thrift::write_cache::GetExtentsResponse response;
+    retry_rpc(
+        [&]() {
+            grpc::ClientContext context;
+            return _stub->EvictXid(&context, request, &response);
+        },
+        "EvictXid");
+}
 
-        request.db_id = db_id;
-        request.table_id = tid;
-        request.xid = xid;
-        request.count = count;
-        request.cursor = cursor;
+void
+WriteCacheClient::add_mapping(uint64_t db_id,
+                              uint64_t tid,
+                              uint64_t target_xid,
+                              uint64_t old_eid,
+                              const std::vector<uint64_t> &new_eids)
+{
+    proto::AddMappingRequest request;
+    google::protobuf::Empty response;
 
-        _invoke_with_retries([&response, &request](ThriftClient &c) {
-            c.client->get_extents(response, request);
-        });
+    request.set_db_id(db_id);
+    request.set_table_id(tid);
+    request.set_target_xid(target_xid);
+    request.set_old_eid(old_eid);
+    *request.mutable_new_eids() = {new_eids.begin(), new_eids.end()};
 
-        CHECK_EQ(response.table_id, tid);
-        cursor = response.cursor;
-        commit_ts = PostgresTimestamp(response.commit_ts);
-        std::vector<WriteCacheExtent> extents;
-        for (const auto &e: response.extents) {
-            WriteCacheExtent extent;
+    retry_rpc(
+        [&]() {
+            grpc::ClientContext context;
+            return _stub->AddMapping(&context, request, &response);
+        },
+        "AddMapping");
+}
 
-            extent.xid = e.xid;
-            extent.lsn = e.xid_seq;
-            extent.data = std::move(e.data);
+void
+WriteCacheClient::set_lookup(uint64_t db_id, uint64_t tid, uint64_t target_xid, uint64_t extent_id)
+{
+    proto::SetLookupRequest request;
+    google::protobuf::Empty response;
 
-            extents.push_back(std::move(extent));
-        }
+    request.set_db_id(db_id);
+    request.set_table_id(tid);
+    request.set_target_xid(target_xid);
+    request.set_extent_id(extent_id);
 
-        return extents;
-    }
+    retry_rpc(
+        [&]() {
+            grpc::ClientContext context;
+            return _stub->SetLookup(&context, request, &response);
+        },
+        "SetLookup");
+}
 
-    void
-    WriteCacheClient::evict_table(uint64_t db_id, uint64_t tid, uint64_t xid)
-    {
-        thrift::write_cache::EvictTableRequest request;
-        thrift::write_cache::Status result;
+std::vector<uint64_t>
+WriteCacheClient::forward_map(uint64_t db_id,
+                              uint64_t tid,
+                              uint64_t target_xid,
+                              uint64_t extent_id)
+{
+    proto::ForwardMapRequest request;
+    proto::ExtentMapResponse response;
 
-        request.db_id = db_id;
-        request.table_id = tid;
-        request.xid = xid;
+    request.set_db_id(db_id);
+    request.set_table_id(tid);
+    request.set_target_xid(target_xid);
+    request.set_extent_id(extent_id);
 
-        _invoke_with_retries([&result, &request](ThriftClient &c) {
-            c.client->evict_table(result, request);
-        });
+    retry_rpc(
+        [&]() {
+            grpc::ClientContext context;
+            return _stub->ForwardMap(&context, request, &response);
+        },
+        "ForwardMap");
 
-        if (result.status != thrift::write_cache::StatusCode::SUCCESS) {
-            throw Error("RPC failed");
-        }
+    return std::vector<uint64_t>(response.extent_ids().begin(),
+                                response.extent_ids().end());
+}
 
-        return;
-    }
+std::vector<uint64_t>
+WriteCacheClient::reverse_map(
+    uint64_t db_id, uint64_t tid, uint64_t access_xid, uint64_t target_xid, uint64_t extent_id)
+{
+    proto::ReverseMapRequest request;
+    proto::ExtentMapResponse response;
 
-    void
-    WriteCacheClient::evict_xid(uint64_t db_id, uint64_t xid)
-    {
-        thrift::write_cache::EvictXidRequest request;
-        thrift::write_cache::Status result;
+    request.set_db_id(db_id);
+    request.set_table_id(tid);
+    request.set_access_xid(access_xid);
+    request.set_target_xid(target_xid);
+    request.set_extent_id(extent_id);
 
-        request.db_id = db_id;
-        request.xid = xid;
+    retry_rpc(
+        [&]() {
+            grpc::ClientContext context;
+            return _stub->ReverseMap(&context, request, &response);
+        },
+        "ReverseMap");
 
-        _invoke_with_retries([&result, &request](ThriftClient &c) {
-            c.client->evict_xid(result, request);
-        });
+    return std::vector<uint64_t>(response.extent_ids().begin(),
+                                response.extent_ids().end());
+}
 
-        if (result.status != thrift::write_cache::StatusCode::SUCCESS) {
-            throw Error("RPC failed");
-        }
+void
+WriteCacheClient::expire_map(uint64_t db_id, uint64_t tid, uint64_t commit_xid)
+{
+    proto::ExpireMapRequest request;
+    google::protobuf::Empty response;
 
-        return;
-    }
+    request.set_db_id(db_id);
+    request.set_table_id(tid);
+    request.set_commit_xid(commit_xid);
 
-    void
-    WriteCacheClient::add_mapping(uint64_t db_id, uint64_t tid,
-                                  uint64_t target_xid,
-                                  uint64_t old_eid,
-                                  const std::vector<uint64_t> &new_eids)
-    {
-        thrift::write_cache::AddMappingRequest request;
-        thrift::write_cache::Status result;
+    retry_rpc(
+        [&]() {
+            grpc::ClientContext context;
+            return _stub->ExpireMap(&context, request, &response);
+        },
+        "ExpireMap");
+}
 
-        request.db_id = db_id;
-        request.table_id = tid;
-        request.target_xid = target_xid;
-        request.old_eid = old_eid;
-
-        // note: performs a copy due to differing types
-        std::copy(new_eids.begin(), new_eids.end(), std::back_inserter(request.new_eids));
-
-        _invoke_with_retries([&result, &request](ThriftClient &c) {
-            c.client->add_mapping(result, request);
-        });
-
-        if (result.status != thrift::write_cache::StatusCode::SUCCESS) {
-            throw Error("RPC failed");
-        }
-    }
-
-    void
-    WriteCacheClient::set_lookup(uint64_t db_id, uint64_t tid,
-                                 uint64_t target_xid,
-                                 uint64_t extent_id)
-    {
-        thrift::write_cache::SetLookupRequest request;
-        thrift::write_cache::Status result;
-
-        request.db_id = db_id;
-        request.table_id = tid;
-        request.target_xid = target_xid;
-        request.extent_id = extent_id;
-
-        _invoke_with_retries([&result, &request](ThriftClient &c) {
-            c.client->set_lookup(result, request);
-        });
-
-        if (result.status != thrift::write_cache::StatusCode::SUCCESS) {
-            throw Error("RPC failed");
-        }
-    }
-
-    std::vector<uint64_t>
-    WriteCacheClient::forward_map(uint64_t db_id, uint64_t tid,
-                                  uint64_t target_xid,
-                                  uint64_t extent_id)
-    {
-        thrift::write_cache::ForwardMapRequest request;
-        thrift::write_cache::ExtentMapResponse result;
-
-        request.db_id = db_id;
-        request.table_id = tid;
-        request.target_xid = target_xid;
-        request.extent_id = extent_id;
-
-        _invoke_with_retries([&result, &request](ThriftClient &c) {
-            c.client->forward_map(result, request);
-        });
-
-        std::vector<uint64_t> extent_ids;
-        extent_ids.insert(extent_ids.end(), result.extent_ids.begin(), result.extent_ids.end());
-        return extent_ids;
-    }
-
-    std::vector<uint64_t>
-    WriteCacheClient::reverse_map(uint64_t db_id, uint64_t tid,
-                                  uint64_t access_xid,
-                                  uint64_t target_xid,
-                                  uint64_t extent_id)
-    {
-        thrift::write_cache::ReverseMapRequest request;
-        thrift::write_cache::ExtentMapResponse result;
-
-        request.db_id = db_id;
-        request.table_id = tid;
-        request.access_xid = access_xid;
-        request.target_xid = target_xid;
-        request.extent_id = extent_id;
-
-        _invoke_with_retries([&result, &request](ThriftClient &c) {
-            c.client->reverse_map(result, request);
-        });
-
-        std::vector<uint64_t> extent_ids;
-        extent_ids.insert(extent_ids.end(), result.extent_ids.begin(), result.extent_ids.end());
-        return extent_ids;
-    }
-
-    void
-    WriteCacheClient::expire_map(uint64_t db_id, uint64_t tid,
-                                 uint64_t commit_xid)
-    {
-        thrift::write_cache::ExpireMapRequest request;
-        thrift::write_cache::Status result;
-
-        request.db_id = db_id;
-        request.table_id = tid;
-        request.commit_xid = commit_xid;
-
-        _invoke_with_retries([&result, &request](ThriftClient &c) {
-            c.client->expire_map(result, request);
-        });
-
-        if (result.status != thrift::write_cache::StatusCode::SUCCESS) {
-            throw Error("RPC failed");
-        }
-    }
-
-} // namespace
+}  // namespace springtail

@@ -30,6 +30,7 @@ namespace springtail::xid_mgr {
     void
     Partition::_sync_thread_func()
     {
+        RedisDDL redis_ddl;
         while (!_shutdown) {
             std::unique_lock<std::mutex> _shutdown_lock(_shutdown_mutex);
             _shutdown_cv.wait_for(_shutdown_lock, std::chrono::seconds(SYNC_SLEEP_TIME_SECS));
@@ -38,6 +39,8 @@ namespace springtail::xid_mgr {
                 _dirty = false; // reset dirty flag before we write them out
                 _write_committed_xids();
             }
+
+            _cleanup_history(redis_ddl);
         }
 
         // shutdown, write out the last batch
@@ -137,6 +140,35 @@ namespace springtail::xid_mgr {
             _history[db_id] = {xid};
         } else {
             it->second.push_back(xid);
+        }
+    }
+
+    void
+    Partition::_cleanup_history(RedisDDL &redis_ddl)
+    {
+        // get the list of databases and extract all database ids
+        std::map<uint64_t, std::string> databases = Properties::get_databases();
+        auto key_view = std::views::keys(databases);
+        std::vector<int> db_ids{ key_view.begin(), key_view.end() };
+
+        std::unique_lock lock(_map_mutex);
+        // walk through all database ids
+        for (auto db_id: db_ids) {
+            // we are only interested in the database ids that are in the history
+            if (_history.contains(db_id)) {
+                // get min schema id
+                uint64_t min_schema_xid = redis_ddl.min_schema_xid(db_id);
+                if (!_history[db_id].empty()) {
+                    // find lower_bound range and remove it
+                    auto it = std::ranges::lower_bound(_history[db_id].begin(), _history[db_id].end(), min_schema_xid);
+                    _history[db_id].erase(_history[db_id].begin(), it);
+                    if (_history[db_id].empty()) {
+                        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Partition: the history for db_id={} is now empty", db_id);
+                    } else {
+                        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Partition: the history for db_id={} now starts with xid={}", db_id, _history[db_id].front());
+                    }
+                }
+            }
         }
     }
 

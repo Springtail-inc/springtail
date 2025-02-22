@@ -10,6 +10,7 @@
 
 // springtail includes
 #include <common/common.hh>
+#include <pg_repl/pg_common.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 #include <common/thread_pool.hh>
@@ -33,6 +34,9 @@
 #include <sys_tbl_mgr/table_mgr.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
+
+#include <proto/sys_tbl_mgr.pb.h>
+#include <proto/pg_copy_table.pb.h>
 
 extern "C" {
     #include <postgres.h>
@@ -112,6 +116,36 @@ namespace springtail
         "AND nspname NOT LIKE 'pg_%' "  // exclude system schemas
         "AND nspname != 'information_schema' "
         "ORDER BY pg_class.oid";
+
+    static constexpr char EXCLUSION_ITEMS_QUERY[] =
+        "SELECT "
+        "    n.nspname AS schema_name, "
+        "    c.relname AS table_name, "
+        "    a.attname AS column_name, "
+        "    t.typname AS type_name, "
+        "    CASE WHEN a.attgenerated = 's' THEN "
+        "        pg_get_expr(pg_attrdef.adbin, pg_attrdef.adrelid) "
+        "        ELSE NULL "
+        "    END AS generation_expression, "
+        "    col.collname AS collation, "
+        "    bool_or(a.attgenerated = 's') OVER w AS has_generated_column, "
+        "    bool_or(t.typnamespace != 'pg_catalog'::regnamespace) OVER w AS has_user_defined_type, "
+        "    bool_or(col.collname IS NOT NULL AND col.collname NOT IN ('C', 'en_US.UTF-8', 'default')) OVER w AS has_non_standard_collation "
+        "FROM pg_attribute a "
+        "JOIN pg_class c ON a.attrelid = c.oid "
+        "JOIN pg_namespace n ON c.relnamespace = n.oid "
+        "JOIN pg_type t ON a.atttypid = t.oid "
+        "LEFT JOIN pg_attrdef ON a.attrelid = pg_attrdef.adrelid AND a.attnum = pg_attrdef.adnum "
+        "LEFT JOIN pg_collation col ON a.attcollation = col.oid AND a.attcollation <> 0 "
+        "WHERE c.relkind = 'r' "
+        "AND a.attnum > 0 "
+        "AND n.nspname NOT LIKE 'pg_%' "
+        "AND n.nspname != 'information_schema' "
+        "AND (a.attgenerated = 's' "
+        "    OR (col.collname IS NOT NULL AND col.collname NOT IN ('C', 'en_US.UTF-8', 'default')) "
+        "    OR (t.typnamespace != 'pg_catalog'::regnamespace)) " // exclude pg_catalog types and only consider user-defined types
+        "WINDOW w AS (PARTITION BY n.nspname, c.relname) "
+        "ORDER BY schema_name, table_name, column_name";
 
     /** Get table name, schema name, oid for all tables in a schema */
     static constexpr char TABLES_SCHEMA_QUERY[] =
@@ -313,7 +347,7 @@ namespace springtail
                 column.pg_type = _connection.get_int32(i, 4);
 
                 // springtail type
-                column.type = pg_msg::convert_pg_type(column.pg_type);
+                column.type = convert_pg_type(column.pg_type);
 
                 // is primary key
                 bool is_pkey = _connection.get_boolean(i, 5);
@@ -426,74 +460,63 @@ namespace springtail
         // get secondary indexes XXX not fully supported yet
         _get_secondary_indexes();
 
-        // store the system table operations in a JSON array
-        nlohmann::json ops;
+        // Create a single protobuf message containing all operations
+        proto::CopyTableInfo copy_info;
 
-        // generate a TableRequest message
-        {
-            // request to create the namespace if it doesn't exist
-            sys_tbl_mgr::NamespaceRequest ns_req;
-            ns_req.db_id = db_id;
-            ns_req.namespace_id = _schema.schema_oid;
-            ns_req.name = _schema.schema_name;
-            ns_req.xid = xid.xid;
-            ns_req.lsn = 1;
-            auto &&ns_json = common::thrift_to_json<sys_tbl_mgr::NamespaceRequest>(ns_req);
-            ops.push_back(ns_json);
+        // Set namespace request
+        auto* ns_req = copy_info.mutable_namespace_req();
+        ns_req->set_db_id(db_id);
+        ns_req->set_namespace_id(_schema.schema_oid);
+        ns_req->set_name(_schema.schema_name);
+        ns_req->set_xid(xid.xid);
+        ns_req->set_lsn(1);
 
-            // request to create the table
-            sys_tbl_mgr::TableRequest request;
-            request.db_id = db_id;
-            request.xid = xid.xid;
-            request.lsn = 1;
-            request.table.id = table_oid;
-            request.table.namespace_name = _schema.schema_name;
-            request.table.name = _schema.table_name;
-            for (const auto &col : _schema.columns) {
-                sys_tbl_mgr::TableColumn column;
-                column.__set_name(col.name);
-                column.__set_type(static_cast<int8_t>(col.type));
-                column.__set_pg_type(col.pg_type);
-                column.__set_position(col.position);
-                column.__set_is_nullable(col.nullable);
-                column.__set_is_generated(false);
-                if (col.pkey_position) {
-                    column.__set_pk_position(*col.pkey_position);
-                }
-                if (col.default_value) {
-                    column.__set_default_value(*col.default_value);
-                }
+        // Set table request
+        auto* table_req = copy_info.mutable_table_req();
+        table_req->set_db_id(db_id);
+        table_req->set_xid(xid.xid);
+        table_req->set_lsn(1);
 
-                request.table.columns.push_back(column);
+        auto* table_info = table_req->mutable_table();
+        table_info->set_id(table_oid);
+        table_info->set_namespace_name(_schema.schema_name);
+        table_info->set_name(_schema.table_name);
+
+        for (const auto &col : _schema.columns) {
+            auto* column = table_info->add_columns();
+            column->set_name(col.name);
+            column->set_type(static_cast<int32_t>(col.type));
+            column->set_pg_type(col.pg_type);
+            column->set_position(col.position);
+            column->set_is_nullable(col.nullable);
+            column->set_is_generated(false);
+            if (col.pkey_position) {
+                column->set_pk_position(*col.pkey_position);
             }
-            auto &&create_json = common::thrift_to_json<sys_tbl_mgr::TableRequest>(request);
-            ops.push_back(create_json);
+            if (col.default_value) {
+                column->set_default_value(*col.default_value);
+            }
         }
 
-        {
-            std::vector<sys_tbl_mgr::IndexRequest> requests;
-            for (const auto &index : _schema.secondary_keys) {
-                sys_tbl_mgr::IndexRequest request;
-                request.db_id = db_id;
-                request.xid = xid.xid;
-                request.lsn = constant::MAX_LSN-1;
-                request.index.id = index.id;
-                request.index.table_id = _schema.table_oid;
-                request.index.namespace_name = _schema.schema_name;
-                request.index.is_unique = index.is_unique;
-                for (const auto &column : index.columns){
-                    sys_tbl_mgr::IndexColumn index_column;
-                    index_column.idx_position = column.idx_position;
-                    index_column.position = column.position;
-                    request.index.columns.push_back(index_column);
-                }
-                request.index.name = index.name;
-                requests.push_back(request);   
+        // Add index requests
+        for (const auto &index : _schema.secondary_keys) {
+            auto* index_req = copy_info.add_index_reqs();
+            index_req->set_db_id(db_id);
+            index_req->set_xid(xid.xid);
+            index_req->set_lsn(constant::MAX_LSN-1);
+
+            auto* index_info = index_req->mutable_index();
+            index_info->set_id(index.id);
+            index_info->set_table_id(_schema.table_oid);
+            index_info->set_namespace_name(_schema.schema_name);
+            index_info->set_is_unique(index.is_unique);
+            index_info->set_name(index.name);
+
+            for (const auto &column : index.columns) {
+                auto* index_column = index_info->add_columns();
+                index_column->set_idx_position(column.idx_position);
+                index_column->set_position(column.position);
             }
-
-            auto &&index_json = common::thrift_vector_to_json<sys_tbl_mgr::IndexRequest>(requests);
-
-            ops.push_back(index_json);
         }
 
         auto schema = std::make_shared<ExtentSchema>(_schema.columns);
@@ -542,28 +565,26 @@ namespace springtail
         // flush the table data to disk
         auto &&metadata = table->finalize();
 
-        // pack the table metadata operation
-        {
-            sys_tbl_mgr::UpdateRootsRequest request;
-            request.db_id = db_id;
-            request.xid = xid.xid;
-            request.table_id = table_oid;
-            for (auto const& [index, extent]: metadata.roots) {
-                sys_tbl_mgr::RootInfo ri;
-                ri.index_id = index;
-                ri.extent_id = extent;
-                request.roots.push_back(ri);
-            }
-            request.stats.row_count = metadata.stats.row_count;
-            request.snapshot_xid = metadata.snapshot_xid;
-            auto &&update_json = common::thrift_to_json<sys_tbl_mgr::UpdateRootsRequest>(request);
-            ops.push_back(update_json);
+        // Set roots request
+        auto* roots_req = copy_info.mutable_roots_req();
+        roots_req->set_db_id(db_id);
+        roots_req->set_xid(xid.xid);
+        roots_req->set_table_id(table_oid);
+
+        for (auto const& [index, extent]: metadata.roots) {
+            auto* root_info = roots_req->add_roots();
+            root_info->set_index_id(index);
+            root_info->set_extent_id(extent);
         }
 
-        // store the system table operations into redis for the GC-2
+        auto* stats = roots_req->mutable_stats();
+        stats->set_row_count(metadata.stats.row_count);
+        roots_req->set_snapshot_xid(metadata.snapshot_xid);
+
+        // store the serialized protobuf operation into redis for the GC-2
         auto &&key = fmt::format(redis::HASH_SYNC_TABLE_OPS, Properties::get_db_instance_id(), db_id);
         auto redis = RedisMgr::get_instance()->get_client();
-        redis->hset(key, fmt::format("{}", table_oid), ops.dump());
+        redis->hset(key, fmt::format("{}", table_oid), copy_info.SerializeAsString());
     }
 
     int32_t PgCopyTable::_verify_copy_header(const std::string_view &header)
@@ -610,7 +631,7 @@ namespace springtail
 
             // get the underlying springtail type
             int32_t pg_type = _schema.columns[i].pg_type;
-            auto type = pg_msg::convert_pg_type(pg_type);
+            auto type = convert_pg_type(pg_type);
 
             // check if null
             if (length == -1) {
@@ -710,8 +731,65 @@ namespace springtail
     }
 
     void
+    PgCopyTable::_populate_excluded_items()
+    {
+        // do the tables query
+        _connection.exec(EXCLUSION_ITEMS_QUERY);
+
+        if (_connection.ntuples() == 0) {
+            SPDLOG_ERROR("No tables found in database");
+            _connection.clear();
+            return;
+        }
+
+        nlohmann::json result;
+
+        // iterate through the results and organize by schema and table
+        for (int i = 0; i < _connection.ntuples(); i++) {
+            std::string schema_name = _connection.get_string(i, 0);
+            std::string table_name = _connection.get_string(i, 1); 
+            std::string column_name = _connection.get_string(i, 2);
+            std::string type_name = _connection.get_string(i, 3);
+            std::string generation_expression = _connection.get_string_optional(i, 4).value_or("");
+            std::string collation = _connection.get_string(i, 5);
+            bool has_generated_column = _connection.get_boolean(i, 6);
+            bool has_user_defined_type = _connection.get_boolean(i, 7);
+            bool has_non_standard_collation = _connection.get_boolean(i, 8);
+
+            // Skip columns that are not UTF-8 encoded or generated columns
+            if ( !has_generated_column && !has_user_defined_type && !has_non_standard_collation ) {
+                continue;
+            }
+
+            // Create schema entry if it doesn't exist
+            if (!result.contains(schema_name)) {
+                result[schema_name] = nlohmann::json::object();
+            }
+
+            // Create table entry if it doesn't exist
+            if (!result[schema_name].contains(table_name)) {
+                result[schema_name][table_name] = {
+                    {"columns", nlohmann::json::array()}
+                };
+            }
+
+            // Add column information
+            result[schema_name][table_name]["columns"].push_back({
+                {"name", column_name},
+                {"type", type_name},
+                {"generation_expression", generation_expression},
+                {"collation", collation}
+            });
+        }
+
+        _connection.clear();
+        _excluded_items = result;
+    }
+
+    void
     PgCopyTable::_get_table_oids(const std::string &query,
-                                 std::set<TableMetadata> &table_oids)
+                                 std::set<TableMetadata> &table_oids,
+                                 uint64_t db_id)
     {
         // do the tables query
         _connection.exec(query);
@@ -728,6 +806,26 @@ namespace springtail
             std::string schema_name = _connection.get_string(i, 1);
             uint32_t table_oid = _connection.get_int32(i, 2);
             uint32_t schema_oid = _connection.get_int32(i, 3);
+
+            if (_excluded_items.contains(schema_name) && 
+                _excluded_items[schema_name].contains(table_name)) {
+                SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Skipping table: {}.{}", schema_name, table_name);
+                
+                // Create JSON object for the skipped table
+                nlohmann::json table_info = {
+                    {"schema", schema_name},
+                    {"table", table_name},
+                    {"columns", _excluded_items[schema_name][table_name]["columns"]}
+                };
+
+                // Store in Redis
+                auto &&key = fmt::format(redis::HASH_EXCLUDED_ITEMS, Properties::get_db_instance_id(), db_id);
+                auto redis = RedisMgr::get_instance()->get_client();
+                auto field_key = fmt::format("{}", table_oid);
+                redis->hset(key, field_key, table_info.dump());
+                continue;
+            }
+
             table_oids.insert({schema_name, table_name, schema_oid, table_oid});
         }
 
@@ -736,7 +834,8 @@ namespace springtail
 
     void
     PgCopyTable::_get_table_oids(const nlohmann::json &include_json,
-                                 std::set<TableMetadata> &table_oids)
+                                 std::set<TableMetadata> &table_oids,
+                                 uint64_t db_id)
     {
         // get schemas array from json into vector of strings
 
@@ -746,7 +845,7 @@ namespace springtail
             if (!schemas.empty()) {
                 if (schemas[0] == "*") {
                     // all tables in db
-                    _get_table_oids(std::string(TABLES_QUERY), table_oids);
+                    _get_table_oids(std::string(TABLES_QUERY), table_oids, db_id);
                     return;
                 }
 
@@ -758,7 +857,7 @@ namespace springtail
 
                 _get_table_oids(fmt::format(TABLES_SCHEMA_QUERY,
                                 common::join_string(",", schema_names.begin(), schema_names.end())),
-                                table_oids);
+                                table_oids, db_id);
             }
         }
 
@@ -775,7 +874,7 @@ namespace springtail
 
             if (!pairs.empty()) {
                 // issue query by joining all the schema, table pairs
-                _get_table_oids(fmt::format(TABLE_SCHEMA_PAIR_QUERY, common::join_string(",", pairs.begin(), pairs.end())), table_oids);
+                _get_table_oids(fmt::format(TABLE_SCHEMA_PAIR_QUERY, common::join_string(",", pairs.begin(), pairs.end())), table_oids, db_id);
             }
         }
     }
@@ -976,12 +1075,12 @@ namespace springtail
         for (const auto &namespace_info : namespaces) {
             SPDLOG_DEBUG("Creating namespace: {}", namespace_info.second);
             
-            sys_tbl_mgr::NamespaceRequest ns_req;
-            ns_req.db_id = db_id;
-            ns_req.namespace_id = namespace_info.first;
-            ns_req.name = namespace_info.second;
-            ns_req.xid = xid;
-            ns_req.lsn = 0;
+            proto::NamespaceRequest ns_req;
+            ns_req.set_db_id(db_id);
+            ns_req.set_namespace_id(namespace_info.first);
+            ns_req.set_name(namespace_info.second);
+            ns_req.set_xid(xid);
+            ns_req.set_lsn(0);
 
             // create the namespace
             client->create_namespace(ns_req);
@@ -1004,6 +1103,9 @@ namespace springtail
         PgCopyTable copy_table;
         copy_table.connect(db_id);
 
+        // populate the excluded items
+        copy_table._populate_excluded_items();
+
         // fetch the table oids
         std::set<TableMetadata> table_oids;
 
@@ -1012,21 +1114,21 @@ namespace springtail
             // by schema name, need to escape the schema name
             // escape the schema name
             std::string schema = "'" + copy_table._connection.escape_string(schema_name.value()) + "'";
-            copy_table._get_table_oids(fmt::format(TABLES_SCHEMA_QUERY, schema), table_oids);
+            copy_table._get_table_oids(fmt::format(TABLES_SCHEMA_QUERY, schema), table_oids, db_id);
         } else if (table_tids.has_value()) {
             // by table oids
             std::string tids = common::join_string(",", table_tids.value().begin(), table_tids.value().end());
-            copy_table._get_table_oids(fmt::format(TABLE_QUERY, tids), table_oids);
+            copy_table._get_table_oids(fmt::format(TABLE_QUERY, tids), table_oids, db_id);
         } else if (schema_table.has_value()) {
             // by schema, table pair
             std::string schema = copy_table._connection.escape_string(schema_table.value().first);
             std::string table = copy_table._connection.escape_string(schema_table.value().second);
-            copy_table._get_table_oids(fmt::format(TABLE_OID_QUERY, table, schema), table_oids);
+            copy_table._get_table_oids(fmt::format(TABLE_OID_QUERY, table, schema), table_oids, db_id);
         } else if (include_json.has_value()) {
-            copy_table._get_table_oids(include_json.value(), table_oids);
+            copy_table._get_table_oids(include_json.value(), table_oids, db_id);
         } else {
             // all tables in db
-            copy_table._get_table_oids(std::string(TABLES_QUERY), table_oids);
+            copy_table._get_table_oids(std::string(TABLES_QUERY), table_oids, db_id);
         }
 
         // close this connection

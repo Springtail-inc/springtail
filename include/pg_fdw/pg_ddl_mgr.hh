@@ -9,6 +9,7 @@
 #include <common/properties.hh>
 #include <common/object_cache.hh>
 #include <common/singleton.hh>
+#include <common/multi_queue_thread_manager.hh>
 
 #include <redis/redis_ddl.hh>
 
@@ -17,24 +18,19 @@
 
 #include <pg_repl/libpq_connection.hh>
 
-
-/* These are defined by Thrift imported from xid_mgr_client.h and
- * must be undefined before including postgres.h */
-#undef PACKAGE_STRING
-#undef PACKAGE_VERSION
-#undef UINT64CONST
-
 namespace springtail::pg_fdw {
 
     /**
      * @brief DDL Mgr, applies changes from Redis queue
      * to the FDW tables
      */
-    class PgDDLMgr final : public SingletonWithThread<PgDDLMgr> {
-        friend class SingletonWithThread<PgDDLMgr>;
+    class PgDDLMgr final : public Singleton<PgDDLMgr> {
+            friend class Singleton<PgDDLMgr>;
     public:
         /** Max number of connections to cache */
         static constexpr int MAX_CONNECTION_CACHE_SIZE = 10;
+        /** Max number of threads in the thread manager pool */
+        static constexpr int MAX_THREAD_POOL_SIZE = 4;
 
         /**
          * Start the main thread
@@ -48,9 +44,21 @@ namespace springtail::pg_fdw {
                   const std::string &password,
                   const std::optional<std::string> &hostname = std::nullopt);
 
+        /**
+         * @brief This function runs the main loop of DDL manager
+         *
+         */
+        void run();
+
+        /**
+         * @brief This function notifies DDL manager to exit the main loop
+         *
+         */
+        void notify_shutdown() { _is_shutting_down = true; }
     private:
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections
         RedisCache::RedisChangeWatcherPtr _cache_watcher;           ///< redis cache callback object
+        std::shared_ptr<common::MultiQueueThreadManager> _thread_manager;   ///< thread manager that processes DDL requests
 
         std::string _fdw_id;                       ///< FDW ID
 
@@ -66,6 +74,7 @@ namespace springtail::pg_fdw {
         std::map<uint64_t, uint64_t> _db_xid_map;  ///< map of db id to max schema xid (applied)
 
         std::map<uint32_t, std::string> _type_map;  ///< map of PG type OIDs to type names
+        std::atomic<bool> _is_shutting_down{false}; ///< shutting down flag
 
         /** Private constructor */
         PgDDLMgr();
@@ -77,11 +86,6 @@ namespace springtail::pg_fdw {
 
         /** Initialize the FDW */
         void _init_fdw(const std::string &username, const std::string &password);
-
-        /**
-         * Main thread entry point; loops checking redis for DDL changes
-         */
-        void _internal_run() override;
 
         /**
          * Method to get the create schema query
@@ -101,14 +105,12 @@ namespace springtail::pg_fdw {
 
         /**
          * @brief Helper to apply outstanding DDL changes to the FDW tables.
-         * @param redis RedisDDL instance
          * @param db_id The database ID to apply the changes to.
          * @param schema_xid The XID at which the DDL changes were applied.
          * @param ddls A JSON array of DDL statements to apply.
          * @return Status of the operation. True if successful, false otherwise.
          */
-        bool _update_schemas(RedisDDL &redis,
-                             uint64_t db_id,
+        bool _update_schemas(uint64_t db_id,
                              uint64_t schema_xid,
                              const nlohmann::json &ddls);
 

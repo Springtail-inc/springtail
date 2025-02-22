@@ -16,10 +16,7 @@ namespace springtail::pg_log_mgr {
         std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
         redis_cache->remove_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
 
-        // shutdown the write cache thread
-        WriteCacheServer::get_instance()->stop();
-        _write_cache_thread.join();
-        WriteCacheServer::shutdown();
+        WriteCacheServer::get_instance()->shutdown();
 
         // shut down all log managers
         std::unique_lock lock(_mutex);
@@ -86,12 +83,8 @@ namespace springtail::pg_log_mgr {
             uint64_t db_id = db.first;
             _add_database(db_id);
         }
-
-        // create a thread for the write cache
-        _write_cache_thread = std::thread([](){
-            WriteCacheServer::get_instance()->startup();
-        });
-   }
+        WriteCacheServer::get_instance()->startup();
+    }
 
     void
     PgLogCoordinator::_add_database(uint64_t db_id)

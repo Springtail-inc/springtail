@@ -45,6 +45,7 @@ namespace springtail::pg_log_mgr {
     PgLogReader::Batch::commit(uint64_t xid, PostgresTimestamp commit_ts)
     {
         auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+        _span->AddEvent("commit", {{"pg_commit_time", commit_ts.to_unix_ns()}});
 
         // go through each subtxn and push it's outstanding batches to the WriteCache
         std::vector<uint64_t> pg_xids;
@@ -79,14 +80,18 @@ namespace springtail::pg_log_mgr {
         WriteCacheFuncImpl::commit(_db, xid, pg_xids, commit_ts);
 
         // stop timing for this transaction
-        _span->SetAttribute("xid", static_cast<int64_t>(xid));
+        if (_span->IsRecording()) {
+            _span->SetAttribute("xid", static_cast<int64_t>(xid));
+            _span->SetAttribute("pg_xids", fmt::format("{}", fmt::join(pg_xids, ",")));
+        }
         _span->End();
     }
 
     void
-    PgLogReader::Batch::abort()
+    PgLogReader::Batch::abort(PostgresTimestamp abort_ts)
     {
         auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+        _span->AddEvent("aborted", {{"pg_abort_time", abort_ts.to_unix_ns()}});
 
         // drop any batches for all active txns
         for (auto &&entry : _txns) {
@@ -99,9 +104,15 @@ namespace springtail::pg_log_mgr {
     }
 
     void
-    PgLogReader::Batch::abort_subtxn(int32_t pg_xid)
+    PgLogReader::Batch::abort_subtxn(int32_t pg_xid, PostgresTimestamp abort_ts)
     {
         auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+
+        // Add subtransaction abort event with the provided timestamp
+        _span->AddEvent("subtransaction_abort", {
+            {"sub_xid", pg_xid},
+            {"pg_abort_time", abort_ts.to_unix_ns()}
+        });
 
         // find the txn to abort it
         auto itr = _txns.find(pg_xid);
@@ -859,11 +870,11 @@ namespace springtail::pg_log_mgr {
             _xact_map.erase(itr);
 
             // abort the txn
-            _current_batch->abort();
+            _current_batch->abort(PostgresTimestamp(abort_msg.abort_ts));
             _batch_map.erase(abort_msg.xid);
         } else {
             // abort the subtxn
-            _current_batch->abort_subtxn(abort_msg.sub_xid);
+            _current_batch->abort_subtxn(abort_msg.sub_xid, PostgresTimestamp(abort_msg.abort_ts));
             _batch_map.erase(abort_msg.sub_xid);
         }
 

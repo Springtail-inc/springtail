@@ -16,7 +16,7 @@ namespace {
     {
         pg_fdw::PgDDLMgr *ddl_mgr = pg_fdw::PgDDLMgr::get_instance();
         if (ddl_mgr != nullptr) {
-            ddl_mgr->stop_thread();
+            ddl_mgr->notify_shutdown();
         }
     }
 }
@@ -92,6 +92,8 @@ int main(int argc, char *argv[])
     // get the DDL Mgr instance
     pg_fdw::PgDDLMgr *ddl_mgr = pg_fdw::PgDDLMgr::get_instance();
     ddl_mgr->init(fdw_id, username, password, socket_hostname);
+
+    ddl_mgr->run();
 
     // wait for shutdown; wait for main thread to join
     ddl_mgr->shutdown();
