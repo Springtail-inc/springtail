@@ -7,6 +7,7 @@ set(PG_LIB_SOURCES
     pg_copy_table.cc
     pg_msg_stream.cc
     pg_msg_log_gen.cc
+    pg_common.cc
 )
 
 # dependencies

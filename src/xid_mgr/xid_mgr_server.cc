@@ -10,7 +10,9 @@
 #include <grpcpp/grpcpp.h>
 #include <nlohmann/json.hpp>
 #include <proto/xid_manager.grpc.pb.h>
+
 #include <xid_mgr/xid_mgr_service.hh>
+
 
 namespace springtail::xid_mgr {
 
@@ -168,6 +170,16 @@ void XidMgrServer::commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_chan
         // shared lock held for update
         partition->commit_xid(db_id, xid, has_schema_changes);
 
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now() -
+            start_time);
+
+        auto attributes = tracing::get_db_id_xid_map(db_id, xid);
+
+        tracing::record_histogram(XID_MGR_COMMIT_XID_LATENCIES, duration.count(), attributes);
+
+        tracing::increment_counter(XID_MGR_COMMIT_XID_CALLS, attributes);
+
         return;
     }
 
@@ -210,5 +222,4 @@ void XidMgrServer::record_ddl_change(uint64_t db_id, uint64_t xid)
     // exclusive lock held for insert/create
     partition->record_ddl_change(db_id, xid);
 }
-
 }  // namespace springtail::xid_mgr

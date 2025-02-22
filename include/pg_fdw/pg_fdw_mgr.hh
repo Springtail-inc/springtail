@@ -259,6 +259,6 @@ namespace springtail::pg_fdw {
                                              const FieldArrayPtr qual_fields);
 
         friend std::vector<ConstQualPtr>
-        _get_index_quals(Index const& idx, List const* qual_list);
+        _get_index_quals(const PgFdwState *state, Index const& idx, List const* qual_list);
     };
 } // namespace springtail::pg_fdw

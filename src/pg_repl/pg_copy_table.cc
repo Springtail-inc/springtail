@@ -10,6 +10,7 @@
 
 // springtail includes
 #include <common/common.hh>
+#include <pg_repl/pg_common.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 #include <common/thread_pool.hh>
@@ -346,7 +347,7 @@ namespace springtail
                 column.pg_type = _connection.get_int32(i, 4);
 
                 // springtail type
-                column.type = pg_msg::convert_pg_type(column.pg_type);
+                column.type = convert_pg_type(column.pg_type);
 
                 // is primary key
                 bool is_pkey = _connection.get_boolean(i, 5);
@@ -630,7 +631,7 @@ namespace springtail
 
             // get the underlying springtail type
             int32_t pg_type = _schema.columns[i].pg_type;
-            auto type = pg_msg::convert_pg_type(pg_type);
+            auto type = convert_pg_type(pg_type);
 
             // check if null
             if (length == -1) {

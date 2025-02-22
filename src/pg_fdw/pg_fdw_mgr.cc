@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 
 #include <common/common.hh>
+#include <pg_repl/pg_common.hh>
 #include <common/exception.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
@@ -48,16 +49,21 @@ namespace springtail::pg_fdw {
     // The intersection must start at the first index column and be
     // continuous.
     std::vector<ConstQualPtr>
-    _get_index_quals(Index const& idx, List const* qual_list) {
-
+    _get_index_quals(const PgFdwState *state, Index const& idx, List const* qual_list) {
         if (!qual_list) {
             return {};
         }
 
-        auto find_qual = [&qual_list](auto pos) -> ConstQualPtr {
+        auto find_qual = [&state, &qual_list](auto pos) -> ConstQualPtr {
             const ListCell *lc{};
             foreach(lc, qual_list) {
                 ConstQualPtr qual = static_cast<ConstQualPtr>(lfirst(lc));
+                
+                //must be of the same internal type
+                if (convert_pg_type(state->columns.at(pos).pg_type) != convert_pg_type(qual->base.typeoid)) {
+                    continue;
+                }
+
                 if (PgFdwMgr::_is_type_sortable(qual->base.typeoid, qual->base.op) && 
                         qual->base.isArray == false &&  
                         qual->base.varattno == pos ) {
@@ -321,7 +327,7 @@ namespace springtail::pg_fdw {
             std::vector<ConstQualPtr> best;
 
             for (auto const& idx: state->indexes) {
-                auto index_quals = _get_index_quals(idx, qual_list);
+                auto index_quals = _get_index_quals(state, idx, qual_list);
                 if (index_quals.empty()) {
                     continue;
                 }
@@ -343,7 +349,7 @@ namespace springtail::pg_fdw {
             // Always use the sortgroup index
             state->index = *state->sortgroup_index;
 
-            auto index_quals = _get_index_quals(*state->sortgroup_index, qual_list);
+            auto index_quals = _get_index_quals(state, *state->sortgroup_index, qual_list);
             if (!index_quals.empty()) {
                 state->filtered_quals = std::move(index_quals);
             }
@@ -552,18 +558,23 @@ namespace springtail::pg_fdw {
             pg_state->scan_asc = (reversed == false);
         }
 
-        auto check_index = [](const Index& idx, const List* sortgroup) -> List* {
+        auto check_index = [pg_state](const Index& idx, const List* sortgroup) -> List* {
             int i = 0;
-            ListCell   *lc;
+            ListCell *lc;
             std::vector<DeparsedSortGroup*> keys;
             foreach(lc, sortgroup) {
                 DeparsedSortGroup *pathkey = static_cast<DeparsedSortGroup *>(lfirst(lc));
-                int attnum = pathkey->attnum;
 
                 // must match sortgroup completely
-                if (i == idx.columns.size() || attnum != idx.columns[i].position) {
+                if (i == idx.columns.size() || pathkey->attnum != idx.columns[i].position) {
                     return {};
                 }
+
+                CHECK(idx.columns[i].position > 0);
+                if (!_is_type_sortable(pg_state->columns.at(idx.columns[i].position).pg_type, LESS_THAN)) {
+                    return {};
+                }
+
                 keys.push_back(pathkey);
                 i++;
             }
@@ -1095,6 +1106,9 @@ namespace springtail::pg_fdw {
             case CHAROID:
             case UUIDOID:
                 return true;
+            case NUMERICOID: //DECIMAL(x,y)
+                //TODO: https://linear.app/springtail/issue/SPR-556/
+                return false;
             case VARCHAROID:
             case TEXTOID:
                 // due to different collations/encodings we only support equality for text

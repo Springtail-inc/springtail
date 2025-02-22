@@ -382,7 +382,7 @@ Service::_drop_index(const XidLsn& xid,
 
     // update columns with the state XID
     _write_index(xid, db_id, index_info.table_id(), index_id, keys);
-
+    
     {
         boost::unique_lock lock(_mutex);
         index_info.set_state(static_cast<int8_t>(sys_tbl::IndexNames::State::DELETED));
@@ -560,7 +560,7 @@ Service::AlterTable(grpc::ServerContext* context,
                            request->table().name(), request->table().namespace_name(), xid);
     }
 
-    response->set_statement(nlohmann::to_string(ddl));
+  response->set_statement(nlohmann::to_string(ddl));
     return grpc::Status::OK;
 }
 
@@ -890,6 +890,7 @@ Service::GetRoots(grpc::ServerContext* context,
     *response = *info;
     return grpc::Status::OK;
 }
+
 
 grpc::Status
 Service::GetSchema(grpc::ServerContext* context,
