@@ -169,17 +169,6 @@ void XidMgrServer::commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_chan
     if (partition != nullptr) {
         // shared lock held for update
         partition->commit_xid(db_id, xid, has_schema_changes);
-
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now() -
-            start_time);
-
-        auto attributes = tracing::get_db_id_xid_map(db_id, xid);
-
-        tracing::record_histogram(XID_MGR_COMMIT_XID_LATENCIES, duration.count(), attributes);
-
-        tracing::increment_counter(XID_MGR_COMMIT_XID_CALLS, attributes);
-
         return;
     }
 
