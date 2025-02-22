@@ -736,9 +736,11 @@ namespace springtail::pg_log_mgr {
         // and the Committer got ahead of the XactLog flushing so that the committed XID is ahead of
         // the most recently written PGXID -> Springtail XID mapping.
         if (xid <= _committed_xid) {
-            _current_batch->abort(); // we abort this batch since it was already processed
+            // we abort this batch since it was already processed
+            _current_batch->abort(PostgresTimestamp(commit_msg.commit_ts));
         } else {
-            _current_batch->commit(xid, PostgresTimestamp(commit_msg.commit_ts)); // update the write cache and system tables as needed
+            // update the write cache and system tables as needed
+            _current_batch->commit(xid, PostgresTimestamp(commit_msg.commit_ts));
         }
 
         // clear the current batch
@@ -826,9 +828,11 @@ namespace springtail::pg_log_mgr {
         // and the Committer got ahead of the XactLog flushing so that the committed XID is ahead of
         // the most recently written PGXID -> Springtail XID mapping.
         if (xid <= _committed_xid) {
-            _current_batch->abort(); // we abort this batch since it was already processed
+            // we abort this batch since it was already processed
+            _current_batch->abort(PostgresTimestamp(commit_msg.commit_ts));
         } else {
-            _current_batch->commit(xid, PostgresTimestamp(commit_msg.commit_ts)); // update the write cache and system tables as needed
+            // update the write cache and system tables as needed
+            _current_batch->commit(xid, PostgresTimestamp(commit_msg.commit_ts));
         }
 
         // free the batch

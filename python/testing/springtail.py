@@ -249,7 +249,7 @@ def start_replication(props : Properties, build_dir : str) -> None:
     conn.close()
 
 
-def fdw_import(props : Properties, build_dir : str, config_file : str) -> None:
+def start_fdw_daemons(props : Properties, build_dir : str, config_file : str) -> None:
     """Import the foreign data wrapper schemas."""
     fdw_config = props.get_fdw_config()
     db_configs = props.get_db_configs()
@@ -502,11 +502,10 @@ def start(config_file: str,
     print("\nWaiting for running state...")
     wait_for_running(props)
 
-    if do_init:
-        # import the fdw schemas
-        print("\nImporting foreign data wrapper schemas...")
-        fdw_import(props, build_dir, config_file)
-        fixup_log_perms(props)
+    # start the fdw daemons (e.g., ddl manager to import schemas)
+    print("\nStarting FDW daemons...")
+    start_fdw_daemons(props, build_dir, config_file)
+    fixup_log_perms(props)
 
     print("\nSpringtail system started successfully.")
 
