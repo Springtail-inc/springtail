@@ -107,9 +107,9 @@ namespace springtail::pg_log_mgr {
         // XXX currently we perform full recovery any time that the state is not INITIALIZE, but if
         //     we had a clean shutdown mechanism, we could start up without any recovery
         uint64_t lsn = INVALID_LSN;
-        bool do_recovery = (state != redis::db_state_change::REDIS_STATE_INITIALIZE);
+        bool do_init = (state == redis::db_state_change::REDIS_STATE_INITIALIZE);
         PgLogRecovery recovery(_db_id, _repl_log_path, _xact_log_path, _pg_log_reader);
-        if (!do_recovery) {
+        if (do_init) {
             _startup_init();
         } else {
             lsn = recovery.repair_logs();
@@ -120,12 +120,23 @@ namespace springtail::pg_log_mgr {
         // for table re-syncs that might have to be run
         _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
 
-        // perform the actual log recovery here
-        if (do_recovery) {
+        // start the log reader thread since it is also used to process recovery messages
+        _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
+
+        // note: we wait to perform these actions until the log reader has been started
+        if (do_init) {
+            // // copy the namespaces during initialization
+            // auto xid = _pg_log_reader->get_next_xid();
+            // PgCopyTable::create_namespaces(_db_id, xid);
+
+            // // perform the table copies during initialization
+            // _do_table_copies();
+        } else {
+            // perform the any required log recovery here
             recovery.replay_logs();
         }
 
-        // start streaming
+        // system is ready to start streaming
         _start_streaming(lsn);
     }
 
@@ -161,13 +172,6 @@ namespace springtail::pg_log_mgr {
         _redis_sync_queue.clear();
 
         _internal_state.set(STATE_STARTUP_SYNC);
-
-        // copy the namespaces during initialization
-        auto xid = _pg_log_reader->get_next_xid();
-        PgCopyTable::create_namespaces(_db_id, xid);
-
-        // perform the table copies during initialization
-        _do_table_copies();
     }
 
     void
@@ -199,6 +203,16 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_copy_thread()
     {
+        // check initial state on thread startup
+        // if in startup_sync state then switch to syncing
+        if (_internal_state.is(STATE_STARTUP_SYNC)) {
+            // Create the namespaces before starting the copy thread
+            auto xid = _pg_log_reader->get_next_xid();
+            PgCopyTable::create_namespaces(_db_id, xid);
+
+            _do_table_copies();
+        }
+
         while (!_shutdown) {
             std::vector<uint32_t> table_ids;
 
@@ -342,9 +356,8 @@ namespace springtail::pg_log_mgr {
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Starting streaming: lsn={}", lsn);
         _pg_conn.start_streaming(lsn);
 
-        // create the worker threads
+        // create the WAL writer thread
         _writer_thread = std::thread(&PgLogMgr::_log_writer_thread, this);
-        _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
     }
 
     void

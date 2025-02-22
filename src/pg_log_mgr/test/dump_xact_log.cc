@@ -17,7 +17,7 @@ int main(int argc, char *argv[])
 
     std::filesystem::path log_dir = argv[1];
 
-    PgXactLogReader reader(log_dir, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX);
+    PgXactLogReader reader(log_dir);
     reader.begin();
 
     bool has_more;

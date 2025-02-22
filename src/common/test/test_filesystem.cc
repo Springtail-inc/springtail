@@ -48,17 +48,26 @@ namespace {
         std::filesystem::path p = "/tmp/test_1.log";
         std::filesystem::path p2 = "/tmp/test_2.log";
         std::filesystem::path p3 = "/tmp/test_3.log";
-        std::filesystem::create_directories(p);
-        std::filesystem::create_directories(p2);
-        std::filesystem::create_directories(p3);
-
+        
+        // Create empty files
+        std::ofstream(p).close();  // Creates empty file test_1.log
+        std::ofstream(p2).close(); // Creates empty file test_2.log
+        std::ofstream(p3).close(); // Creates empty file test_3.log
+        
         std::string prefix = "test_";
         std::string suffix = ".log";
 
         auto find_p2 = fs::get_next_log_file(p, prefix, suffix);
+        ASSERT_TRUE(find_p2);
         ASSERT_EQ(*find_p2, "/tmp/test_2.log");
 
         auto find_p3 = fs::get_next_log_file(*find_p2, prefix, suffix);
+        ASSERT_TRUE(find_p3);
         ASSERT_EQ(*find_p3, "/tmp/test_3.log");
+
+        // Cleanup - remove the files
+        std::filesystem::remove(p);
+        std::filesystem::remove(p2);
+        std::filesystem::remove(p3);
     }
 }

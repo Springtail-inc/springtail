@@ -437,6 +437,7 @@ def start(config_file: str,
           build_dir: str,
           sql_file: str = None,
           do_cleanup: bool = True,
+          do_init: bool = True,
           start_xid: int = None) -> None:
     """Main function to start the Springtail system."""
     # get absolute path for config_file
@@ -457,6 +458,9 @@ def start(config_file: str,
     stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
 
     if do_cleanup:
+        # must do init if we are performing cleanup
+        do_init = True
+
         # Clear file system data
         print("\nClearing file system data...")
         cleanup_filesystem(props)
@@ -470,7 +474,7 @@ def start(config_file: str,
         print(f"\nExecuting startup SQL file: {sql_file}")
         execute_startup_sql(props, sql_file)
 
-    if do_cleanup:
+    if do_init:
         # install fdw
         print("\nInstalling foreign data wrapper...")
         install_fdw(build_dir)
@@ -498,7 +502,7 @@ def start(config_file: str,
     print("\nWaiting for running state...")
     wait_for_running(props)
 
-    if do_cleanup:
+    if do_init:
         # import the fdw schemas
         print("\nImporting foreign data wrapper schemas...")
         fdw_import(props, build_dir, config_file)

@@ -25,7 +25,7 @@ namespace {
     };
 
     TEST_F(XactLogRW_Test, XactLogWriter) {
-        std::filesystem::path p = "/tmp/test_xlog/test_1.log";
+        std::filesystem::path p = "/tmp/test_xlog";
         PgXactLogWriter writer(p);
 
         writer.log(1, 10);
@@ -34,7 +34,7 @@ namespace {
         writer.close();
 
         // read the log file and verify
-        PgXactLogReader reader("/tmp/test_xlog", "test_", ".log");
+        PgXactLogReader reader(p);
         reader.begin();
 
         ASSERT_EQ(reader.get_pg_xid(), 1);

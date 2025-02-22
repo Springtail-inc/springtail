@@ -118,7 +118,7 @@ class TestSet:
 
         # start Springtail
         logging.debug('Starting the Springtail instance')
-        springtail.start(self._config_file, self._build_dir, do_cleanup=False)
+        springtail.start(self._config_file, self._build_dir, do_cleanup=False, do_init=True)
 
         # run the tests
         logging.info(f'Run the tests: {self._test_files}')

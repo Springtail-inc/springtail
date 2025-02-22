@@ -18,6 +18,7 @@ PgLogRecovery::repair_logs()
     auto latest_log =
         fs::find_latest_modified_file(_repl_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
     if (latest_log) {
+        SPDLOG_DEBUG("Found latest log file: {}", *latest_log);
         lsn = PgMsgStreamReader::scan_log(*latest_log, true);
     }
 
@@ -55,7 +56,7 @@ PgLogRecovery::_skip_committed()
     _repl_reader.set_file(*_repl_log);
 
     // Open the xact log
-    PgXactLogReader xact_reader(_xact_path, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX);
+    PgXactLogReader xact_reader(_xact_path);
 
     // note: once we are garbage collecting old log files, we'll need a way to ensure that the
     //       two log positions are aligned with eachother
