@@ -440,12 +440,16 @@ def start(config_file: str,
           do_init: bool = True,
           start_xid: int = None) -> None:
     """Main function to start the Springtail system."""
+    # must do init if we are performing cleanup
+    if do_cleanup:
+        do_init = True
+
     # get absolute path for config_file
     config_file = os.path.abspath(config_file)
 
     # Load the system properties from the system.json file
     # also does a load redis from the system file if do_cleanup is True
-    props = Properties(config_file, do_cleanup)
+    props = Properties(config_file, do_init)
 
     # Print the system properties
     print_sys_props(props, config_file)
@@ -458,9 +462,6 @@ def start(config_file: str,
     stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
 
     if do_cleanup:
-        # must do init if we are performing cleanup
-        do_init = True
-
         # Clear file system data
         print("\nClearing file system data...")
         cleanup_filesystem(props)
