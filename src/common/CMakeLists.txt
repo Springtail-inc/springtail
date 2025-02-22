@@ -16,6 +16,7 @@ set(COMMON_LIB_SOURCES
   properties.cc
   redis.cc
   redis_cache.cc
+  multi_queue_thread_manager.cc
   timestamp.cc
   tracing.cc
   tracking_allocator.cc
@@ -91,6 +92,11 @@ target_include_directories(test_redis_cache PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_redis_cache PRIVATE springtail_common Boost::thread GTest::gtest_main)
 add_dsymutil_command(test_redis_cache)
 
+add_executable(test_thread_manager test/test_thread_manager.cc multi_queue_thread_manager.cc)
+target_include_directories(test_thread_manager PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_thread_manager PRIVATE springtail_common GTest::gtest_main)
+add_dsymutil_command(test_thread_manager)
+
 add_executable(test_timestamp test/test_timestamp.cc)
 target_include_directories(test_timestamp PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_timestamp PRIVATE springtail_common GTest::gtest_main)
@@ -106,4 +112,5 @@ gtest_discover_tests(test_synchronizer)
 gtest_discover_tests(test_exception)
 gtest_discover_tests(test_coordinator)
 gtest_discover_tests(test_redis_cache)
+gtest_discover_tests(test_thread_manager)
 gtest_discover_tests(test_timestamp)
