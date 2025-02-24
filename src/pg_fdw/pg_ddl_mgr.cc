@@ -131,8 +131,8 @@ namespace springtail::pg_fdw {
 
         _init_fdw(username, password);
 
-        // start the main thread
-        start_thread();
+        _thread_manager = std::make_shared<common::MultiQueueThreadManager>(MAX_THREAD_POOL_SIZE);
+        _thread_manager->start();
     }
 
     std::set<std::string>
@@ -243,7 +243,7 @@ namespace springtail::pg_fdw {
     }
 
     void
-    PgDDLMgr::_internal_run()
+    PgDDLMgr::run()
     {
         // init redis ddl client after springtail_init()
         RedisDDL redis_ddl;
@@ -251,7 +251,7 @@ namespace springtail::pg_fdw {
         // move any pending DDLs to the active queue
         redis_ddl.abort_fdw(_fdw_id);
 
-        while (!_is_shutting_down()) {
+        while (!_is_shutting_down) {
             try {
                 // blocking redis call to get next set of DDL statements
                 // XXX we could potentially parallelize updates to different db IDs
@@ -276,32 +276,50 @@ namespace springtail::pg_fdw {
                 }
                 db_lock.unlock();
 
-                // apply the DDL statements
-                bool status = _update_schemas(redis_ddl, db_id, schema_xid, ddls);
-                if (!status) {
-                    // error occured, abort the DDL
-                    SPDLOG_ERROR("Failed to apply DDL statements");
-                    redis_ddl.abort_fdw(_fdw_id);
-                    assert(0);
-                    continue;
-                }
+                _thread_manager->queue_request(std::make_shared<common::MultiQueueRequest>(
+                    db_id, [this, &redis_ddl, db_id, schema_xid, ddls]() {
+                        try {
+                            // apply the DDL statements
+                            bool status = _update_schemas(db_id, schema_xid, ddls);
+                            if (!status) {
+                                // error occured, abort the DDL
+                                SPDLOG_ERROR("Failed to apply DDL statements");
+                                redis_ddl.abort_fdw(_fdw_id);
+                                DCHECK(false);
+                                return;
+                            }
 
-                // success, update schema XID if applied, otherwise they may be queued
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Updating redis ddl @ schema XID: {}, db_id: {}", schema_xid, db_id);
-                redis_ddl.update_schema_xid(_fdw_id, db_id, schema_xid);
-                std::unique_lock db_lock_unique(_db_mutex);
-                _db_xid_map[db_id] = schema_xid;
+                            // success, update schema XID if applied, otherwise they may be queued
+                            SPDLOG_DEBUG_MODULE(LOG_FDW, "Updating redis ddl @ schema XID: {}, db_id: {}", schema_xid, db_id);
+                            redis_ddl.update_schema_xid(_fdw_id, db_id, schema_xid);
 
+                            std::unique_lock db_lock_unique(_db_mutex);
+                            _db_xid_map[db_id] = schema_xid;
+                            db_lock_unique.unlock();
+
+                        } catch (Error &e) {
+                            SPDLOG_ERROR("Springtail exception in thread manager task");
+                            DCHECK(false); // assert in debug
+                            e.log_backtrace();
+                        } catch (...) {
+                            // handle exception
+                            SPDLOG_ERROR("Exception in thread manager task");
+                            DCHECK(false); // assert in debug
+                        }
+                    }
+                ));
             } catch (Error &e) {
                 SPDLOG_ERROR("Springtail exception in DDL thread");
-                assert(0); // assert in debug
+                DCHECK(false); // assert in debug
                 e.log_backtrace();
             } catch (...) {
                 // handle exception
                 SPDLOG_ERROR("Exception in DDL thread");
-                assert(0); // assert in debug
+                DCHECK(false); // assert in debug
             }
         }
+        _thread_manager->notify_shutdown();
+        _thread_manager->shutdown();
     }
 
     LibPqConnectionPtr
@@ -341,8 +359,7 @@ namespace springtail::pg_fdw {
     }
 
     bool
-    PgDDLMgr::_update_schemas(RedisDDL &redis,
-                              uint64_t db_id,
+    PgDDLMgr::_update_schemas(uint64_t db_id,
                               uint64_t schema_xid,
                               const nlohmann::json &ddls)
     {

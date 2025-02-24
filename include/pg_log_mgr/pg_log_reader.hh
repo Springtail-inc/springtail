@@ -106,13 +106,13 @@ namespace springtail::pg_log_mgr {
             /**
              * Abort the entire transaction.  Drop all related batches from the WriteCache.
              */
-            void abort();
+            void abort(PostgresTimestamp abort_ts);
 
             /**
              * Aborts a subtxn by removing those entries from the WriteCache, dropping any in-memory
              * extents, and rolling back the set of schema changes.
              */
-            void abort_subtxn(int32_t pg_xid);
+            void abort_subtxn(int32_t pg_xid, PostgresTimestamp abort_ts);
 
             /**
              * Adds a mutation to a given table's batch.

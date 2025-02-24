@@ -1,26 +1,26 @@
 #include <memory>
 
-#include <common/coordinator.hh>
 #include <common/constants.hh>
+#include <common/coordinator.hh>
 #include <garbage_collector/committer.hh>
 #include <opentelemetry/metrics/meter.h>
 #include <opentelemetry/metrics/provider.h>
 #include <pg_log_mgr/pg_redis_xact.hh>
+#include <proto/pg_copy_table.pb.h>
 #include <redis/db_state_change.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 
 namespace springtail::gc {
 
-    bool _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
-    {
-        auto meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, tid, xid);
-        auto it = std::ranges::find_if(meta->roots, [&](auto const& v) {
-                    return index_id == v.index_id;
-                });
-        return it != meta->roots.end();
-    }
-
+bool
+_index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
+{
+    auto meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, tid, xid);
+    auto it =
+        std::ranges::find_if(meta->roots, [&](auto const &v) { return index_id == v.index_id; });
+    return it != meta->roots.end();
+}
 
     void
     Committer::run()
@@ -120,33 +120,39 @@ namespace springtail::gc {
                 // go through the hash of sys tbl operations
                 for (auto table_id : result->swap().tids()) {
                     auto ops_str = redis->hget(key, fmt::format("{}", table_id));
-                    SPDLOG_DEBUG_MODULE(LOG_GC, "table_id {}, ops: {}", table_id, *ops_str);
-                    auto json = nlohmann::json::parse(*ops_str);
+                    SPDLOG_DEBUG_MODULE(LOG_GC, "table_id {}, ops: {} bytes", table_id,
+                                        ops_str->size());
+                    proto::CopyTableInfo copy_info;
+                    if (!copy_info.ParseFromString(*ops_str)) {
+                        throw Error("Failed to parse CopyTableInfo from string");
+                    }
 
                     // perform the table swap
                     // note: we wait to perform this operation in the GC-2 to ensure that all system
                     //       table mutations up to this XID have already been applied, otherwise we
                     //       could potentially get a stray column added before the swap XID showing
                     //       up in the schema since it wouldn't get deleted by the DROP TABLE
-                    auto namespace_req = common::json_to_thrift<sys_tbl_mgr::NamespaceRequest>(json[0]);
-                    namespace_req.xid = completed_xid;
-                    namespace_req.lsn = constant::MAX_LSN - 2;
+                    auto *namespace_req = copy_info.mutable_namespace_req();
+                    namespace_req->set_xid(completed_xid);
+                    namespace_req->set_lsn(constant::MAX_LSN - 2);
+                    auto *create = copy_info.mutable_table_req();
+                    create->set_xid(completed_xid);
+                    create->set_lsn(constant::MAX_LSN - 1);
 
-                    auto create = common::json_to_thrift<sys_tbl_mgr::TableRequest>(json[1]);
-                    create.xid = completed_xid;
-                    create.lsn = constant::MAX_LSN - 1;
-
-                    auto indexes = common::json_to_thrift_vector<sys_tbl_mgr::IndexRequest>(json[2]);
-                    for (auto &index : indexes) {
-                        index.xid = completed_xid;
-                        index.lsn = constant::MAX_LSN - 1;
+                    auto *indexes = copy_info.mutable_index_reqs();
+                    std::vector<proto::IndexRequest> indexes_vec;
+                    for (auto &index : *indexes) {
+                        index.set_xid(completed_xid);
+                        index.set_lsn(constant::MAX_LSN - 1);
+                        indexes_vec.push_back(index);
                     }
 
-                    auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[3]);
-                    roots.xid = completed_xid;
+                    auto *roots = copy_info.mutable_roots_req();
+                    roots->set_xid(completed_xid);
 
                     // note: this will also invalidate the table's client cache entry
-                    auto ddl_str = client->swap_sync_table(namespace_req, create, indexes, roots);
+                    auto ddl_str =
+                        client->swap_sync_table(*namespace_req, *create, indexes_vec, *roots);
 
                     // store the ddl mutations for the FDWs
                     ddls = nlohmann::json::parse(ddl_str);
@@ -178,7 +184,8 @@ namespace springtail::gc {
 
                 if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
                     // notify everyone that the database is now in the "ready" state
-                    redis::db_state_change::set_db_state(db_id, redis::db_state_change::DB_STATE_RUNNING);
+                    redis::db_state_change::set_db_state(db_id,
+                                                         redis::db_state_change::DB_STATE_RUNNING);
 
                     // allow commits on future XIDs
                     _block_commit.erase(db_id);
@@ -196,7 +203,8 @@ namespace springtail::gc {
             SPDLOG_INFO("Process XID: {}@{}", db_id, xid);
             assert(xid > completed_xid);
 
-            // check if there were DDL mutations as part of this txn, invalidate the schema cache accordingly
+            // check if there were DDL mutations as part of this txn, invalidate the schema cache
+            // accordingly
             nlohmann::json completed_ddls = _redis_ddl.get_ddls_xid(db_id, xid);
             if (!completed_ddls.is_null()) {
                 _invalidate_systbl_cache(db_id, completed_ddls);
@@ -209,7 +217,8 @@ namespace springtail::gc {
                 // query the write cache for the tables modified through this XID
                 auto table_list = _write_cache->list_tables(db_id, xid, 100, table_cursor);
 
-                SPDLOG_DEBUG_MODULE(LOG_GC, "Got {} tables from the write cache", table_list.size());
+                SPDLOG_DEBUG_MODULE(LOG_GC, "Got {} tables from the write cache",
+                                    table_list.size());
 
                 // check if we are done processing this XID
                 if (table_list.empty()) {
@@ -607,4 +616,4 @@ namespace springtail::gc {
             }
         }
     }
-}
+}  // namespace springtail::gc

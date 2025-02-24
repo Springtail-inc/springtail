@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package springtail.proto;
+
+import "google/protobuf/empty.proto";
+
+// Request message for commit_xid
+message CommitXidRequest {
+  int64 db_id = 1;
+  int64 xid = 2;
+  bool has_schema_changes = 3;
+}
+
+// Request message for record_ddl_change
+message RecordDdlChangeRequest {
+  int64 db_id = 1;
+  int64 xid = 2;
+}
+
+// Request message for get_committed_xid
+message GetCommittedXidRequest {
+  int64 db_id = 1;
+  int64 schema_xid = 2;
+}
+
+// Response message for get_committed_xid
+message GetCommittedXidResponse {
+  int64 xid = 1;
+}
+
+// XID Manager service definition
+service XidManager {
+  // Health check
+  rpc Ping(google.protobuf.Empty) returns (google.protobuf.Empty) {}
+
+  // Commit up to and including the provided XID
+  rpc CommitXid(CommitXidRequest) returns (google.protobuf.Empty) {}
+
+  // Record that the given XID contains a schema change, without committing the XID
+  rpc RecordDdlChange(RecordDdlChangeRequest) returns (google.protobuf.Empty) {}
+
+  // Get latest committed XID
+  rpc GetCommittedXid(GetCommittedXidRequest) returns (GetCommittedXidResponse) {}
+} 

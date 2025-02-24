@@ -3,10 +3,8 @@
 #include <queue>
 #include <mutex>
 #include <condition_variable>
-#include <thread>
 #include <atomic>
 #include <memory>
-#include <type_traits>
 
 namespace springtail {
     /**

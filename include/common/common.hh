@@ -3,18 +3,16 @@
 #include <unistd.h>
 #include <sys/time.h>
 
-#include <cstdio>
 #include <csignal>
+#include <cstdio>
+#include <deque>
+#include <optional>
 #include <string>
 #include <vector>
-#include <optional>
 
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/exception.hh>
-
-#include <thrift/transport/TBufferTransports.h>
-#include <thrift/protocol/TJSONProtocol.h>
 
 namespace springtail {
     /**
@@ -124,80 +122,6 @@ namespace springtail {
             std::vector<std::string> out_vector;
             split_string(delimiter, string_value, out_vector);
             std::move(out_vector.begin(), out_vector.end(), std::back_inserter(out_queue));
-        }
-
-        template <typename T>
-        nlohmann::json
-        thrift_to_json(const T &obj)
-        {
-            auto buffer = std::make_shared<apache::thrift::transport::TMemoryBuffer>();
-            apache::thrift::protocol::TJSONProtocol protocol(buffer);
-
-            // serialize the object
-            obj.write(&protocol);
-
-            return nlohmann::json::parse(buffer->getBufferAsString());
-        }
-
-        template <typename T>
-        nlohmann::json
-        thrift_vector_to_json(const std::vector<T> &vec_obj)
-        {
-            nlohmann::json jsonArray = nlohmann::json::array();
-
-            for (const auto &obj : vec_obj) {
-                // Convert the buffer content to a string
-                auto jsonObj = thrift_to_json(obj);
-
-                // Parse and add to the JSON array
-                jsonArray.push_back(jsonObj);
-            }
-            return jsonArray;
-        }
-
-        template <typename T>
-        T
-        json_to_thrift(const nlohmann::json &json)
-        {
-            std::string data = json.dump();
-            auto buffer = std::make_shared<apache::thrift::transport::TMemoryBuffer>
-                (const_cast<uint8_t *>(reinterpret_cast<const uint8_t *>(data.c_str())),
-                 data.size());
-            apache::thrift::protocol::TJSONProtocol protocol(buffer);
-
-            // deserialize the object
-            T obj;
-            obj.read(&protocol);
-
-            return obj;
-        }
-
-        template <typename T>
-        std::vector<T>
-        json_to_thrift_vector(const nlohmann::json &json)
-        {
-            std::vector<T> result;
-            if (json.is_null() || !json.is_array()) {
-                return result; // Return an empty vector
-            }
-            std::string data = json.dump();
-            auto buffer = std::make_shared<apache::thrift::transport::TMemoryBuffer>();
-            apache::thrift::protocol::TJSONProtocol protocol(buffer);
-
-            for (const auto& jsonElement : json) {
-                buffer->resetBuffer();
-
-                auto jsonStr = jsonElement.dump();
-
-                buffer->write(reinterpret_cast<const uint8_t*>(jsonStr.c_str()), jsonStr.size());
-
-                // Create a new Thrift object and read from the protocol
-                T obj;
-                obj.read(&protocol);
-                result.push_back(obj);
-            }
-
-            return result;
         }
 
         /**

@@ -178,6 +178,16 @@ public:
             sinks.push_back(console_sink);
         }
 
+        // create all directories in log path
+        auto path = std::filesystem::path(log_path_str).parent_path();
+        if (!std::filesystem::exists(path)) {
+            std::filesystem::create_directories(path);
+            std::filesystem::permissions(path,
+                std::filesystem::perms::owner_all |
+                std::filesystem::perms::group_all |
+                std::filesystem::perms::others_all);
+        }
+
         // file sink
         auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(log_path_str, max_size, max_files);
         set_level(file_sink, log_level);
