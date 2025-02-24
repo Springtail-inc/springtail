@@ -20,12 +20,11 @@
 #include <pg_log_mgr/indexer.hh>
 
 #include <sys_tbl_mgr/table.hh>
+#include <write_cache/write_cache_client.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 
 #include <opentelemetry/context/context.h>
 #include <opentelemetry/metrics/meter.h>
-
-#include <write_cache/write_cache_client.hh>
 
 namespace springtail::pg_log_mgr {
     namespace metrics = opentelemetry::metrics;

@@ -60,7 +60,7 @@ namespace springtail::pg_log_mgr {
 
             // figure out if there's an XID to process
             // note: this is a blocking call that will timeout after keep_alive secs
-            auto result = _committer_queue.pop(COORDINATOR_KEEP_ALIVE_TIMEOUT);
+            auto result = _committer_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (result == nullptr) {
                 continue; // got a timeout, try again
             }
