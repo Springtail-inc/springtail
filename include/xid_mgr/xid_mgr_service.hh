@@ -1,31 +1,41 @@
 #pragma once
 
-#include <thrift/transport/TSocket.h>
-
 #include <common/singleton.hh>
 #include <common/logging.hh>
 
-#include <thrift/xid_mgr/ThriftXidMgr.h>
+#include <proto/xid_manager.grpc.pb.h>
+#include <google/protobuf/empty.pb.h>
+#include <grpcpp/grpcpp.h>
 
 namespace springtail {
 
     /**
-     * @brief This is the implementation of the ThriftXidMgrIf that is generated
-     *        from the .thrift file.  It contains the service (handler) for actually
+     * @brief This is the implementation of the XidManager gRPC service that is generated
+     *        from the .proto file. It contains the service (handler) for actually
      *        implementing the remote procedure calls.
      */
-    class ThriftXidMgrService final : public thrift::xid_mgr::ThriftXidMgrIf, public Singleton<ThriftXidMgrService>
+    class GrpcXidMgrService final : public proto::XidManager::Service, public Singleton<GrpcXidMgrService>
     {
-        friend class Singleton<ThriftXidMgrService>;
+        friend class Singleton<GrpcXidMgrService>;
     public:
+        grpc::Status Ping(grpc::ServerContext* context,
+                         const google::protobuf::Empty* request,
+                         google::protobuf::Empty* response) override;
 
-        void ping(thrift::xid_mgr::Status& _return) override;
-        void commit_xid(thrift::xid_mgr::Status& _return, const int64_t db_id, const thrift::xid_mgr::xid_t xid, bool has_schema_changes) override;
-        void record_ddl_change(thrift::xid_mgr::Status& _return, const int64_t db_id, const thrift::xid_mgr::xid_t xid) override;
-        thrift::xid_mgr::xid_t get_committed_xid(const int64_t db_id, thrift::xid_mgr::xid_t schema_xid) override;
+        grpc::Status CommitXid(grpc::ServerContext* context,
+                              const proto::CommitXidRequest* request,
+                              google::protobuf::Empty* response) override;
+
+        grpc::Status RecordDdlChange(grpc::ServerContext* context,
+                                    const proto::RecordDdlChangeRequest* request,
+                                    google::protobuf::Empty* response) override;
+
+        grpc::Status GetCommittedXid(grpc::ServerContext* context,
+                                    const proto::GetCommittedXidRequest* request,
+                                    proto::GetCommittedXidResponse* response) override;
 
     private:
-        ThriftXidMgrService() = default;
-        ~ThriftXidMgrService() = default;
+        GrpcXidMgrService() = default;
+        ~GrpcXidMgrService() = default;
     };
 }

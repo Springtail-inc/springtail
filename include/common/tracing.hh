@@ -2,6 +2,7 @@
 
 #include <string_view>
 #include <memory>
+#include <unordered_map>
 
 #include <opentelemetry/exporters/ostream/span_exporter_factory.h>
 #include <opentelemetry/sdk/trace/exporter.h>
@@ -15,6 +16,7 @@
 #include <opentelemetry/trace/span.h>
 #include <opentelemetry/trace/tracer.h>
 
+#include <common/metric_constants.hh>
 #include <common/logging.hh>
 
 namespace springtail::tracing {
@@ -97,4 +99,47 @@ void shutdown_tracing_and_metrics();
  * @brief Retrieve the otel Tracer by name.
  */
 opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer(const std::string_view& name);
+
+
+/**
+ * @brief Register the metrics
+ */
+void _register_metrics();
+
+/**
+ * @brief Register the default counters
+ */
+void _register_counters();
+
+/**
+ * @brief Register the default histograms
+ */
+void _register_histograms();
+
+/**
+ * @brief Register a counter
+ */
+void _register_counter(std::string_view name, std::string_view description, std::string_view unit);
+
+/**
+ * @brief Register a histogram
+ */
+void _register_histogram(std::string_view name, std::string_view description, std::string_view unit);
+
+/**
+ * @brief Increment a counter
+ */
+void increment_counter(std::string_view name, 
+    const std::unordered_map<std::string, std::string>& attributes = {});
+
+/**
+ * @brief Record a histogram
+ */
+void record_histogram(std::string_view name, double value,
+    const std::unordered_map<std::string, std::string>& attributes = {});
+
+/**
+ * @brief Get the db id xid map
+ */
+std::unordered_map<std::string, std::string> get_db_id_xid_map(uint64_t db_id, uint64_t xid);
 }  // namespace springtail::tracing

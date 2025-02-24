@@ -77,7 +77,7 @@ namespace springtail {
          */
         void abort(std::vector<uint64_t> pg_xids);
 
-        //// Thrift interface
+        //// RPC interface
 
         /**
          * @brief Get the table ids for a given XID
@@ -112,7 +112,6 @@ namespace springtail {
          */
         std::vector<WriteCacheIndexExtentPtr> get_extents(uint64_t tid, uint64_t xid,
                                                           uint32_t count, uint64_t &cursor, PostgresTimestamp &commit_ts);
-
 
     private:
         /** Set of partitions to hold table data, enables more parallelism */

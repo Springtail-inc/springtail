@@ -1,5 +1,7 @@
 find_package(Boost COMPONENTS program_options REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(gRPC CONFIG REQUIRED)
+find_package(Protobuf CONFIG REQUIRED)
 
 # source files
 set(XID_MGR_SOURCES
@@ -11,10 +13,21 @@ set(XID_MGR_SOURCES
 
 # add the library target
 add_library(springtail_xid_mgr ${XID_MGR_SOURCES})
-target_include_directories(springtail_xid_mgr PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(springtail_xid_mgr
+    PUBLIC
+    ${CMAKE_BINARY_DIR}/src  # For generated protobuf files
+    PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+)
 target_link_libraries(springtail_xid_mgr
-    PUBLIC springtail_common springtail_redis
-    PRIVATE thrift_xid_mgr nlohmann_json::nlohmann_json
+    PUBLIC
+    springtail_common
+    springtail_redis
+    PRIVATE
+    proto_xid_manager
+    nlohmann_json::nlohmann_json
+    gRPC::grpc++
+    protobuf::libprotobuf
 )
 
 add_executable(xid_mgr_daemon xid_mgr_daemon.cc)

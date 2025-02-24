@@ -94,7 +94,7 @@ set(MODULES
   sys_tbl_mgr
   pg_log_mgr
   xid_mgr
-  thrift
+  proto
   proxy
   pg_fdw
   test

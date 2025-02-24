@@ -40,7 +40,6 @@ namespace springtail::pg_log_mgr {
         std::string _user_name;                    ///< user name for connecting to database
         std::string _password;                     ///< password for connecting to database
         int _port;                                 ///< port for connecting to database
-        std::thread _write_cache_thread;           ///< thread for the write cache thrift interface
 
         /**
          * @brief Function for performing shutdown that is called by Singleton

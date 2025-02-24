@@ -158,35 +158,35 @@ namespace springtail::pg_log_mgr {
 
         XidLsn xid{idx._xid};
 
-        sys_tbl_mgr::IndexInfo info = client->get_index_info(db_id, index_id, xid);
-        if (info.id == 0) {
+        proto::IndexInfo info = client->get_index_info(db_id, index_id, xid);
+        if (info.id() == 0) {
             //TODO: it seems like PG generates DROP INDEX with table ids, need
             //to investigate it more.
             SPDLOG_INFO("The index is not valid: {}", index_id);
             return;
         }
 
-        auto exists = TableMgr::get_instance()->exists(db_id, info.table_id, xid.xid, xid.lsn);
+        auto exists = TableMgr::get_instance()->exists(db_id, info.table_id(), xid.xid, xid.lsn);
         if (!exists) {
             // when dropping a table, PG generates DROP TABLE first
             // following by DROP INDEX. We ignore DROP INDEX after DROP TABLE.
-            SPDLOG_INFO("Table doesn't exists: {}, {}", info.table_id, index_id);
+            SPDLOG_INFO("Table doesn't exists: {}, {}", info.table_id(), index_id);
             return;
         }
 
         // index column positions
         std::vector<uint32_t> idx_cols;
-        for (auto const& col: info.columns) {
-            idx_cols.push_back(col.position);
+        for (auto const& col : info.columns()) {
+            idx_cols.push_back(col.position());
         }
 
-        auto meta = client->get_roots(db_id, info.table_id, idx._xid);
-        auto it = std::ranges::find_if(meta->roots, [&](auto const& v) {
-            return index_id == v.index_id;
-        });
+        auto meta = client->get_roots(db_id, info.table_id(), idx._xid);
+        auto it = std::ranges::find_if(meta->roots,
+                                       [&](auto const& v) { return index_id == v.index_id; });
         CHECK(it != meta->roots.end());
 
-        auto table = TableMgr::get_instance()->get_mutable_table(db_id, info.table_id, idx._xid, idx._xid);
+        auto table =
+            TableMgr::get_instance()->get_mutable_table(db_id, info.table_id(), idx._xid, idx._xid);
         auto root = table->create_index_root(index_id, idx_cols);
         if (it->extent_id != constant::UNKNOWN_EXTENT) {
             root->init(it->extent_id);
@@ -197,12 +197,13 @@ namespace springtail::pg_log_mgr {
         root->finalize();
 
         meta->roots.erase(it);
-        client->update_roots(db_id, info.table_id, idx._xid, *meta);
+        client->update_roots(db_id, info.table_id(), idx._xid, *meta);
 
         SPDLOG_INFO("Index dropped: {}:{}", db_id, index_id);
     }
 
-    MutableBTreePtr Indexer::_build(std::stop_token st, const Key& key, const IndexParams& idx)
+    MutableBTreePtr
+    Indexer::_build(std::stop_token st, const Key& key, const IndexParams& idx)
     {
         constexpr int DROP_CHECK_PERIOD = 1000;
 
@@ -218,7 +219,7 @@ namespace springtail::pg_log_mgr {
 
         // index column positions
         std::vector<uint32_t> idx_cols;
-        for (auto const& col: idx._ddl["columns"]) {
+        for (auto const& col : idx._ddl["columns"]) {
             idx_cols.push_back(col["position"]);
         }
 
@@ -241,7 +242,7 @@ namespace springtail::pg_log_mgr {
 
         auto table = TableMgr::get_instance()->get_table(db_id, tid, idx._xid);
         for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
-            if(st.stop_requested()) {
+            if (st.stop_requested()) {
                 root->truncate();
                 return {};
             }
@@ -253,8 +254,8 @@ namespace springtail::pg_log_mgr {
 
             if (extent_id != current_extent_id) {
                 // We are scanning in primary key order. It guarantees that
-                // row IDs start from zero and be in ascending order for 
-                // each new extent. Note: The extent IDs (offsets) may 
+                // row IDs start from zero and be in ascending order for
+                // each new extent. Note: The extent IDs (offsets) may
                 // be at any order.
                 current_extent_id = extent_id;
                 current_row_id = 0;
@@ -263,7 +264,7 @@ namespace springtail::pg_log_mgr {
             (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(current_row_id);
 
             // insert key
-            auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, *row_i);
+            auto&& svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, *row_i);
             root->insert(svalue);
 
             ++current_row_id;
@@ -273,7 +274,9 @@ namespace springtail::pg_log_mgr {
         return root;
     }
 
-    bool Indexer::_was_dropped(const Key& key) {
+    bool
+    Indexer::_was_dropped(const Key& key)
+    {
         std::unique_lock g(_m);
         auto const& params = _work_set[key];
         // index drop requested while we've been building it
@@ -283,12 +286,13 @@ namespace springtail::pg_log_mgr {
         return false;
     }
 
-    void Indexer::_commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx) 
+    void
+    Indexer::_commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx)
     {
         if (!root) {
-            //The build was cancelled as due to a shutdown.
-            //When the system restarts it will check the redis precommit hash
-            //and restart the build process.
+            // The build was cancelled as due to a shutdown.
+            // When the system restarts it will check the redis precommit hash
+            // and restart the build process.
             return;
         }
 
@@ -312,17 +316,17 @@ namespace springtail::pg_log_mgr {
             auto meta = client->get_roots(db_id, tid, idx._xid);
             meta->roots.emplace_back(key.second, extent_id);
             client->update_roots(db_id, tid, idx._xid, *meta);
-        } else{
+        } else {
             // the index was deleted while we were building it
             root->truncate();
-            //TODO: figure out out how to change the index state here to DELETED with the same XID
+            // TODO: figure out out how to change the index state here to DELETED with the same XID
             assert(work_item._xid > idx._xid);
             XidLsn xid{work_item._xid};
             client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
         }
 
-        // TODO: revisit it when we support asynchronous index builds 
+        // TODO: revisit it when we support asynchronous index builds
         // so that the lock and _cv_done are not required while
         // root->finalize() and sys table updates.
     }
-}
+}  // namespace springtail::gc
