@@ -1,14 +1,10 @@
 #pragma once
 
-#include <mutex>
-#include <queue>
 #include <thread>
 #include <memory>
 #include <vector>
 #include <functional>
-#include <condition_variable>
 #include <iostream>
-#include <atomic>
 
 #include <common/exception.hh>
 #include <common/logging.hh>

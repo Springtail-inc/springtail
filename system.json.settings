@@ -29,7 +29,7 @@
     },
     "write_cache": {
         "rpc_config" : {
-            "server_port": 55051,
+            "server_port": 5051,
             "server_worker_threads": 8,
             "server_cert" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_server_00_intermediate.pem",
             "server_key" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_server_00.key",
@@ -44,7 +44,7 @@
     },
     "xid_mgr": {
         "rpc_config" : {
-            "server_port": 55052,
+            "server_port": 5052,
             "server_worker_threads": 32,
             "server_cert" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_server_00_intermediate.pem",
             "server_key" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_server_00.key",
@@ -59,7 +59,7 @@
     },
     "sys_tbl_mgr": {
         "rpc_config" : {
-            "server_port": 55053,
+            "server_port": 5053,
             "server_worker_threads": 16,
             "server_cert" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_server_00_intermediate.pem",
             "server_key" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_server_00.key",

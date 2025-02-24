@@ -72,6 +72,12 @@ jobs:
           cp system.json.settings system.json.test
           mkdir -p /opt/springtail/pids
           service redis-server start
+          
+          # Copies over the fdw_config file to the designated location
+          conf_file=/etc/postgresql/16/main/postgresql.conf
+          fdw_config_file_path=$(grep -E "^springtail_fdw.config_file_path" $conf_file | awk '{print $3}' | tr -d "'")
+          mkdir -p $(dirname $fdw_config_file_path)
+          cp system.json.settings $fdw_config_file_path
 
       - name: Build
         run: |
