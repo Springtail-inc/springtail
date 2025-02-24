@@ -22,6 +22,7 @@
 #include "opentelemetry/sdk/metrics/meter_context.h"
 #include "opentelemetry/sdk/metrics/meter_context_factory.h"
 #include "opentelemetry/sdk/metrics/meter_provider_factory.h"
+#include <opentelemetry/semconv/service_attributes.h>
 
 namespace springtail::tracing {
 
@@ -57,7 +58,7 @@ create_default_otel_resource(std::string_view component_name)
         resource_attributes["springtail.db_instance_id"] = std::to_string(*db_instance_id);
     }
     if (!component_name.empty()) {
-        resource_attributes["service.name"] = std::string(component_name);
+        resource_attributes[opentelemetry::semconv::service::kServiceName] = std::string(component_name);
     }
     return opentelemetry::sdk::resource::Resource::Create(resource_attributes);
 }
@@ -102,7 +103,7 @@ init_metrics(const opentelemetry::sdk::resource::Resource& resource)
     opentelemetry::exporter::otlp::OtlpHttpMetricExporterOptions options;
     if (host && port) {
         options.url = fmt::format("http://{}:{}/v1/metrics", *host, *port);
-        SPDLOG_INFO("Enabling OTel metrics over HTTP");
+        SPDLOG_INFO("Enabling OTel metrics over HTTP: {}", options.url);
     }
     opentelemetry::sdk::metrics::PeriodicExportingMetricReaderOptions reader_options;
     auto export_interval_millis = Json::get<int>(json, "metrics_export_interval_millis");
@@ -164,14 +165,14 @@ init_tracing(const opentelemetry::sdk::resource::Resource& resource)
             std::make_unique<opentelemetry::sdk::trace::SimpleSpanProcessor>(
                 std::move(otlp_exporter));
 
-        SPDLOG_INFO("Enabling OTel over HTTP");
+        SPDLOG_INFO("Enabling OTel over HTTP: {}", options.url);
         multi_processor->AddProcessor(std::move(otlp_processor));
     }
 
     std::unique_ptr<opentelemetry::sdk::trace::SpanProcessor> processor =
         std::move(multi_processor);
     std::shared_ptr<opentelemetry::trace::TracerProvider> provider =
-        std::make_shared<opentelemetry::sdk::trace::TracerProvider>(std::move(processor));
+        std::make_shared<opentelemetry::sdk::trace::TracerProvider>(std::move(processor), resource);
     opentelemetry::trace::Provider::SetTracerProvider(provider);
 }
 
