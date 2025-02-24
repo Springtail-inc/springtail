@@ -3,6 +3,7 @@
 
 #include <common/common.hh>
 #include <common/exception.hh>
+#include <common/grpc_client.hh>
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/object_cache.hh>
@@ -23,21 +24,21 @@ XidMgrClient::XidMgrClient()
     }
 
     std::string server = Properties::get_xid_mgr_hostname();
-    _channel = create_channel(server, rpc_json);
+    _channel = grpc_client::create_channel("XidManager", server, rpc_json);
     _stub = proto::XidManager::NewStub(_channel);
 }
 
 void
 XidMgrClient::ping()
 {
-    retry_rpc(
-        [this]() {
-            grpc::ClientContext context;
+    grpc_client::retry_rpc(
+        "XidManager",
+        "Ping",
+        [this](grpc::ClientContext* context) {
             google::protobuf::Empty request;
             google::protobuf::Empty response;
-            return _stub->Ping(&context, request, &response);
-        },
-        "Ping");
+            return _stub->Ping(context, request, &response);
+        });
 }
 
 void
@@ -49,12 +50,12 @@ XidMgrClient::commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_changes)
     request.set_has_schema_changes(has_schema_changes);
     google::protobuf::Empty response;
 
-    retry_rpc(
-        [&]() {
-            grpc::ClientContext context;
-            return _stub->CommitXid(&context, request, &response);
-        },
-        "CommitXid");
+    grpc_client::retry_rpc(
+        "XidManager",
+        "CommitXid",
+        [&](grpc::ClientContext* context) {
+            return _stub->CommitXid(context, request, &response);
+        });
 }
 
 void
@@ -65,12 +66,12 @@ XidMgrClient::record_ddl_change(uint64_t db_id, uint64_t xid)
     request.set_xid(xid);
     google::protobuf::Empty response;
 
-    retry_rpc(
-        [&]() {
-            grpc::ClientContext context;
-            return _stub->RecordDdlChange(&context, request, &response);
-        },
-        "RecordDdlChange");
+    grpc_client::retry_rpc(
+        "XidManager", 
+        "RecordDdlChange",
+        [&](grpc::ClientContext* context) {
+            return _stub->RecordDdlChange(context, request, &response);
+        });
 }
 
 uint64_t
@@ -81,12 +82,12 @@ XidMgrClient::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
     request.set_schema_xid(schema_xid);
     proto::GetCommittedXidResponse response;
 
-    retry_rpc(
-        [&]() {
-            grpc::ClientContext context;
-            return _stub->GetCommittedXid(&context, request, &response);
-        },
-        "GetCommittedXid");
+    grpc_client::retry_rpc(
+        "XidManager",
+        "GetCommittedXid", 
+        [&](grpc::ClientContext* context) {
+            return _stub->GetCommittedXid(context, request, &response);
+        });
 
     return response.xid();
 }

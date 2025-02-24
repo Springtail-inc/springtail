@@ -4,7 +4,6 @@
 #include <string>
 
 #include <common/singleton.hh>
-#include <common/grpc_client.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <proto/sys_tbl_mgr.pb.h>
 #include <storage/xid.hh>
@@ -15,7 +14,7 @@
 
 namespace springtail::sys_tbl_mgr {
 
-class Client : public Singleton<Client>, public GrpcClient<Client> {
+class Client : public Singleton<Client> {
     friend class Singleton<Client>;
 public:
     void ping();
@@ -80,6 +79,7 @@ private:
     /** Cache for Schema objects. */
     std::shared_ptr<SchemaCache> _schema_cache;
 
+    std::shared_ptr<grpc::Channel> _channel;
     std::unique_ptr<proto::SysTblMgr::Stub> _stub;
 };
 

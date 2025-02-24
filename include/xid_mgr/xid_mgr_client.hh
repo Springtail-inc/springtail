@@ -5,11 +5,10 @@
 #include <common/singleton.hh>
 #include <grpcpp/grpcpp.h>
 #include <proto/xid_manager.grpc.pb.h>
-#include <common/grpc_client.hh>
 
 namespace springtail {
 
-class XidMgrClient : public Singleton<XidMgrClient>, public GrpcClient<XidMgrClient> {
+class XidMgrClient : public Singleton<XidMgrClient> {
     friend class Singleton<XidMgrClient>;
 
 public:
