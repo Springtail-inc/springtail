@@ -1,53 +1,64 @@
-#include <thrift/xid_mgr/ThriftXidMgr.h>
+#include <iostream>
+
 #include <xid_mgr/xid_mgr_server.hh>
+#include <xid_mgr/xid_mgr_service.hh>
 
 namespace springtail {
 
-    void
-    ThriftXidMgrService::ping(thrift::xid_mgr::Status& _return)
-    {
-        xid_mgr::XidMgrServer::call_wrapper([&_return]() {
-            _return.__set_status(thrift::xid_mgr::StatusCode::SUCCESS);
-            _return.__set_message("PONG");
-
-            std::cout << "Got ping\n";
-        });
-    }
-
-    void
-    ThriftXidMgrService::commit_xid(thrift::xid_mgr::Status& _return,
-                                    const int64_t db_id,
-                                    const thrift::xid_mgr::xid_t xid,
-                                    bool has_schema_changes)
-    {
-        xid_mgr::XidMgrServer::call_wrapper([&_return, db_id, xid, has_schema_changes]() {
-            xid_mgr::XidMgrServer *server = xid_mgr::XidMgrServer::get_instance();
-            server->commit_xid(db_id, xid, has_schema_changes);
-            _return.__set_status(thrift::xid_mgr::StatusCode::SUCCESS);
-        });
-    }
-
-    void
-    ThriftXidMgrService::record_ddl_change(thrift::xid_mgr::Status& _return,
-                                           const int64_t db_id,
-                                           const thrift::xid_mgr::xid_t xid)
-    {
-        xid_mgr::XidMgrServer::call_wrapper([&_return, db_id, xid]() {
-            xid_mgr::XidMgrServer *server = xid_mgr::XidMgrServer::get_instance();
-            server->record_ddl_change(db_id, xid);
-            _return.__set_status(thrift::xid_mgr::StatusCode::SUCCESS);
-        });
-    }
-
-    thrift::xid_mgr::xid_t
-    ThriftXidMgrService::get_committed_xid(const int64_t db_id,
-                                           const thrift::xid_mgr::xid_t schema_xid)
-    {
-        uint64_t xid = 0;
-        xid_mgr::XidMgrServer::call_wrapper([db_id, schema_xid, &xid]() {
-            xid_mgr::XidMgrServer *server = xid_mgr::XidMgrServer::get_instance();
-            xid = server->get_committed_xid(db_id, schema_xid);
-        });
-        return xid;
+grpc::Status
+GrpcXidMgrService::Ping(grpc::ServerContext* context,
+                        const google::protobuf::Empty* request,
+                        google::protobuf::Empty* response)
+{
+    try {
+        std::cout << "Got ping\n";
+        return grpc::Status::OK;
+    } catch (const std::exception& e) {
+        return grpc::Status(grpc::StatusCode::INTERNAL, e.what());
     }
 }
+
+grpc::Status
+GrpcXidMgrService::CommitXid(grpc::ServerContext* context,
+                             const proto::CommitXidRequest* request,
+                             google::protobuf::Empty* response)
+{
+    try {
+        xid_mgr::XidMgrServer* server = xid_mgr::XidMgrServer::get_instance();
+        server->commit_xid(request->db_id(), request->xid(), request->has_schema_changes());
+        return grpc::Status::OK;
+    } catch (const std::exception& e) {
+        return grpc::Status(grpc::StatusCode::INTERNAL, e.what());
+    }
+}
+
+grpc::Status
+GrpcXidMgrService::RecordDdlChange(grpc::ServerContext* context,
+                                   const proto::RecordDdlChangeRequest* request,
+                                   google::protobuf::Empty* response)
+{
+    try {
+        xid_mgr::XidMgrServer* server = xid_mgr::XidMgrServer::get_instance();
+        server->record_ddl_change(request->db_id(), request->xid());
+        return grpc::Status::OK;
+    } catch (const std::exception& e) {
+        return grpc::Status(grpc::StatusCode::INTERNAL, e.what());
+    }
+}
+
+grpc::Status
+GrpcXidMgrService::GetCommittedXid(grpc::ServerContext* context,
+                                   const proto::GetCommittedXidRequest* request,
+                                   proto::GetCommittedXidResponse* response)
+{
+    try {
+        xid_mgr::XidMgrServer* server = xid_mgr::XidMgrServer::get_instance();
+        uint64_t xid = server->get_committed_xid(request->db_id(), request->schema_xid());
+        response->set_xid(xid);
+        return grpc::Status::OK;
+    } catch (const std::exception& e) {
+        return grpc::Status(grpc::StatusCode::INTERNAL, e.what());
+    }
+}
+
+}  // namespace springtail

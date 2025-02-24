@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package springtail.proto;
+
+import "sys_tbl_mgr.proto";
+
+// Contains all information needed for a table copy operation
+message CopyTableInfo {
+    // Namespace creation request
+    NamespaceRequest namespace_req = 1;
+
+    // Table creation request
+    TableRequest table_req = 2;
+
+    // Secondary index requests
+    repeated IndexRequest index_reqs = 3;
+
+    // Root pointers and stats update
+    UpdateRootsRequest roots_req = 4;
+}

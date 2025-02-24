@@ -1,22 +1,26 @@
+#include <unistd.h>
+
 #include <iostream>
 
 #include <boost/program_options.hpp>
-
 #include <common/common.hh>
 #include <sys_tbl_mgr/server.hh>
 
 using namespace springtail;
 
 namespace {
-    void
-    handle_sigint(int signal)
-    {
-        sys_tbl_mgr::Server::get_instance()->stop();
-    }
+volatile std::sig_atomic_t shutdown_requested = 0;
+
+void
+handle_sigint(int signal)
+{
+    shutdown_requested = 1;
 }
+}  // namespace
 
-
-int main(int argc, char *argv[]) {
+int
+main(int argc, char *argv[])
+{
     namespace po = boost::program_options;
     po::options_description desc("Allowed options");
     desc.add_options()("help,h", "Help message.");
@@ -44,7 +48,14 @@ int main(int argc, char *argv[]) {
     // start the server
     sys_tbl_mgr::Server::get_instance()->startup();
 
-    // shutdown the server
-    sys_tbl_mgr::Server::shutdown();
+    // Block until SIGINT is received. If any other signal wakes the process,
+    // pause() will return and the loop will continue until shutdown_requested is set.
+    while (!shutdown_requested) {
+        // Technically there is a race here, where if a SIGINT is received before pause() is called,
+        // we will ignore the SIGINT.
+        pause();
+    }
+
+    sys_tbl_mgr::Server::get_instance()->shutdown();
     return 0;
 }

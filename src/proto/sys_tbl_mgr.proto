@@ -1,0 +1,247 @@
+syntax = "proto3";
+
+package springtail.proto;
+
+import "google/protobuf/empty.proto";
+
+message DDLStatement {
+  string statement = 1;
+}
+
+message TableColumn {
+  string name = 1;
+  int32 type = 2;
+  int32 pg_type = 3;
+  int32 position = 4;
+  bool is_nullable = 5;
+  bool is_generated = 6;
+  optional int32 pk_position = 7;
+  optional string default_value = 8;
+}
+
+message TableInfo {
+  int64 id = 1;
+  string namespace_name = 2;
+  string name = 3;
+  repeated TableColumn columns = 4;
+}
+
+message TableRequest {
+  int64 db_id = 1;
+  int64 xid = 2;
+  int64 lsn = 3;
+  TableInfo table = 4;
+  int64 snapshot_xid = 5;
+}
+
+message DropTableRequest {
+  int64 db_id = 1;
+  int64 xid = 2;
+  int64 lsn = 3;
+  int64 table_id = 4;
+  string namespace_name = 5;
+  string name = 6;
+}
+
+message NamespaceRequest {
+  int64 db_id = 1;
+  int64 namespace_id = 2;
+  string name = 3;
+  int64 xid = 4;
+  int64 lsn = 5;
+}
+
+message TableStats {
+  int64 row_count = 1;
+}
+
+message RootInfo {
+  uint64 index_id = 1;
+  uint64 extent_id = 2;
+}
+
+message IndexColumn {
+  string name = 1;
+  int32 position = 2;
+  int32 idx_position = 3;
+}
+
+message IndexInfo {
+  int64 id = 1;
+  string namespace_name = 2;
+  string name = 3;
+  bool is_unique = 4;
+  int64 table_id = 5;
+  string table_name = 6;
+  int32 state = 7;
+  repeated IndexColumn columns = 8;
+}
+
+message IndexRequest {
+  int64 db_id = 1;
+  int64 xid = 2;
+  int64 lsn = 3;
+  IndexInfo index = 4;
+}
+
+message SetIndexStateRequest {
+  int64 db_id = 1;
+  int64 xid = 2;
+  int64 lsn = 3;
+  uint64 table_id = 4;
+  uint64 index_id = 5;
+  int32 state = 6;
+}
+
+message DropIndexRequest {
+  int64 db_id = 1;
+  int64 xid = 2;
+  int64 lsn = 3;
+  uint64 index_id = 4;
+  string namespace_name = 5;
+  string name = 6;
+}
+
+message GetIndexInfoRequest {
+  int64 db_id = 1;
+  int64 xid = 2;
+  int64 lsn = 3;
+  uint64 index_id = 4;
+  optional int64 table_id = 5;
+}
+
+message UpdateRootsRequest {
+  int64 db_id = 1;
+  int64 xid = 2;
+  int64 table_id = 3;
+  repeated RootInfo roots = 4;
+  TableStats stats = 5;
+  int64 snapshot_xid = 6;
+}
+
+message FinalizeRequest {
+  int64 db_id = 1;
+  int64 xid = 2;
+}
+
+message GetRootsRequest {
+  int64 db_id = 1;
+  int64 xid = 2;
+  int64 table_id = 3;
+}
+
+message GetRootsResponse {
+  repeated RootInfo roots = 1;
+  TableStats stats = 2;
+  int64 snapshot_xid = 3;
+}
+
+message GetSchemaRequest {
+  int64 db_id = 1;
+  int64 table_id = 2;
+  int64 xid = 3;
+  int64 lsn = 4;
+}
+
+message GetTargetSchemaRequest {
+  int64 db_id = 1;
+  int64 table_id = 2;
+  int64 access_xid = 3;
+  int64 access_lsn = 4;
+  int64 target_xid = 5;
+  int64 target_lsn = 6;
+}
+
+message ColumnHistory {
+  int64 xid = 1;
+  int64 lsn = 2;
+  bool exists = 3;
+  int32 update_type = 4;
+  optional TableColumn column = 5;
+  optional IndexColumn index_column = 6;
+}
+
+message GetSchemaResponse {
+  repeated TableColumn columns = 1;
+  repeated ColumnHistory history = 2;
+  repeated IndexInfo indexes = 3;
+  int64 access_xid_start = 4;
+  int64 access_lsn_start = 5;
+  int64 access_xid_end = 6;
+  int64 access_lsn_end = 7;
+  int64 target_xid_start = 8;
+  int64 target_lsn_start = 9;
+  int64 target_xid_end = 10;
+  int64 target_lsn_end = 11;
+}
+
+message ExistsRequest {
+  int64 db_id = 1;
+  int64 table_id = 2;
+  int64 xid = 3;
+  int64 lsn = 4;
+}
+
+message SwapSyncTableRequest {
+  NamespaceRequest namespace_req = 1;
+  TableRequest create_req = 2;
+  repeated IndexRequest index_reqs = 3;
+  UpdateRootsRequest roots_req = 4;
+}
+
+// Service for managing system tables
+service SysTblMgr {
+  // Health check
+  rpc Ping(google.protobuf.Empty) returns (google.protobuf.Empty) {}
+
+  // Create a new index
+  rpc CreateIndex(IndexRequest) returns (DDLStatement) {}
+
+  // Drop an existing index
+  rpc DropIndex(DropIndexRequest) returns (DDLStatement) {}
+
+  // Set index state
+  rpc SetIndexState(SetIndexStateRequest) returns (google.protobuf.Empty) {}
+
+  // Get index info
+  rpc GetIndexInfo(GetIndexInfoRequest) returns (IndexInfo) {}
+
+  // Create a new table
+  rpc CreateTable(TableRequest) returns (DDLStatement) {}
+
+  // Alter existing table
+  rpc AlterTable(TableRequest) returns (DDLStatement) {}
+
+  // Drop existing table
+  rpc DropTable(DropTableRequest) returns (DDLStatement) {}
+
+  // Create namespace
+  rpc CreateNamespace(NamespaceRequest) returns (DDLStatement) {}
+
+  // Alter namespace
+  rpc AlterNamespace(NamespaceRequest) returns (DDLStatement) {}
+
+  // Drop namespace
+  rpc DropNamespace(NamespaceRequest) returns (DDLStatement) {}
+
+  // Update root pointers and stats
+  rpc UpdateRoots(UpdateRootsRequest) returns (google.protobuf.Empty) {}
+
+  // Finalize system tables
+  rpc Finalize(FinalizeRequest) returns (google.protobuf.Empty) {}
+
+  // Get root pointers and stats
+  rpc GetRoots(GetRootsRequest) returns (GetRootsResponse) {}
+
+  // Get schema information
+  rpc GetSchema(GetSchemaRequest) returns (GetSchemaResponse) {}
+
+  // Get schema information with target
+  rpc GetTargetSchema(GetTargetSchemaRequest) returns (GetSchemaResponse) {}
+
+  // Check if table exists -- returns grpc::Status::NOT_FOUND if table does not exist
+  rpc Exists(ExistsRequest) returns (google.protobuf.Empty) {}
+
+  // Swap sync table operation
+  rpc SwapSyncTable(SwapSyncTableRequest) returns (DDLStatement) {}
+}

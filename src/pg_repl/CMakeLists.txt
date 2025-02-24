@@ -7,6 +7,7 @@ set(PG_LIB_SOURCES
     pg_copy_table.cc
     pg_msg_stream.cc
     pg_msg_log_gen.cc
+    pg_common.cc
 )
 
 # dependencies
@@ -51,7 +52,7 @@ target_include_directories(pg_wal_decode
 
 # libs to link against
 target_link_libraries(springtail_pg
-    PRIVATE PostgreSQL::PostgreSQL
+    PRIVATE PostgreSQL::PostgreSQL proto_pg_copy_table
     PUBLIC springtail_common springtail_sys_tbl_mgr
 )
 

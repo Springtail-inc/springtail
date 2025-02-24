@@ -1,8 +1,5 @@
 #pragma once
 
-#include <vector>
-#include <thread>
-
 namespace springtail::test {
     class Services {
     public:
@@ -14,6 +11,5 @@ namespace springtail::test {
 
     private:
         bool _xid_mgr, _sys_tbl_mgr, _write_cache;
-        std::vector<std::thread> _threads;
     };
 }
