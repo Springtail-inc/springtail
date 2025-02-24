@@ -1,7 +1,5 @@
 #pragma once
 
-#include <memory>
-
 #include <common/grpc_server_manager.hh>
 #include <common/singleton.hh>
 
@@ -12,7 +10,6 @@ class Server final : public Singleton<Server> {
 
 public:
     void startup();
-    void shutdown();
 
     ~Server() override = default;
 
@@ -20,6 +17,8 @@ private:
     Server();
 
     GrpcServerManager _grpc_server_manager;
+
+    void _internal_shutdown() override;
 };
 
 }  // namespace springtail::sys_tbl_mgr
