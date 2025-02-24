@@ -28,7 +28,6 @@ namespace springtail {
         }
 
         void startup();
-        void shutdown();
 
     private:
         WriteCacheServer();
@@ -41,6 +40,8 @@ namespace springtail {
         std::map<uint64_t, WriteCacheIndexPtr> _indexes;
 
         GrpcServerManager _grpc_server_manager;
+
+        void _internal_shutdown() override;
     };
 
 } // namespace springtail
