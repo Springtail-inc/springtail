@@ -25,7 +25,6 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
     void
     Committer::run()
     {
-        std::unique_ptr<opentelemetry::context::Token> token;
         // perform cleanup for any Committer threads in a previous run
         cleanup();
         _create_indexer();

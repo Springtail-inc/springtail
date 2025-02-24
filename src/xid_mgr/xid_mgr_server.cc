@@ -190,6 +190,7 @@ void XidMgrServer::commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_chan
 void XidMgrServer::record_ddl_change(uint64_t db_id, uint64_t xid)
 {
     // note: code is nearly identical to commit_xid()... make sure they stay in sync
+
     auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(xid)}});
     PartitionPtr partition;
 

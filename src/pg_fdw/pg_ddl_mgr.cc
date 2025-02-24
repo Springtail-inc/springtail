@@ -693,6 +693,7 @@ namespace springtail::pg_fdw {
                     const uint64_t db_id,
                     const std::string &db_name)
     {
+
         auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}});
         RedisDDL redis_ddl;
 

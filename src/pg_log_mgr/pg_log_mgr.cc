@@ -243,14 +243,13 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_copy_thread()
     {
-        std::unique_ptr<opentelemetry::context::Token> token;
         // check initial state on thread startup
         // if in startup_sync state then switch to syncing
         if (_internal_state.is(STATE_STARTUP_SYNC)) {
             // Create the namespaces before starting the copy thread
             auto xid = _pg_log_reader.get_next_xid();
 
-            token = logging::set_context_variables({{"db_id", std::to_string(_db_id)}, {"xid", std::to_string(xid)}});
+            auto token_init = logging::set_context_variables({{"db_id", std::to_string(_db_id)}, {"xid", std::to_string(xid)}});
 
             PgCopyTable::create_namespaces(_db_id, xid);
 
@@ -283,7 +282,7 @@ namespace springtail::pg_log_mgr {
                 continue;
             }
 
-            token = logging::set_context_variables({{"db_id", std::to_string(_db_id)}});
+            auto token_commit_worker = logging::set_context_variables({{"db_id", std::to_string(_db_id)}});
             // copy tables
             _do_table_copies(table_ids);
 

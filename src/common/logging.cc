@@ -24,8 +24,6 @@ namespace springtail {
 namespace logging {
     uint32_t _log_mask = LOG_ALL;
 
-    thread_local std::unordered_map<std::string, int64_t> otel_context;
-
     std::shared_ptr<spdlog::logger> get_logger(uint32_t log_id)
     {
         if ((log_id & _log_mask) == 0) {
