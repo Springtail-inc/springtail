@@ -650,7 +650,7 @@ namespace springtail::pg_log_mgr {
         auto &&xid_msg = SyncTracker::get_instance()->check_commit(db_id, pg_xid);
         if (xid_msg) {
             // synchronously issue the swap/commit at the GC-2 prior to processing this xid
-            SPDLOG_DEBUG_MODULE(LOG_GC, "Issue TABLE_SYNC_COMMIT on {} @ {}", db_id, xid);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Issue TABLE_SYNC_COMMIT on {} @ {}", db_id, xid);
             _committer_queue.push(std::make_shared<XidReady>(xid_msg.value()));
 
             // once the swap/commit is complete, we can clear the entry from the sync
@@ -713,9 +713,8 @@ namespace springtail::pg_log_mgr {
                             duration.count());
 
         // message the Committer
-        SPDLOG_DEBUG_MODULE(LOG_GC, "Issue XID to committer on {} @ {}", _db_id, xid);
-        auto committer_entry = std::make_shared<XidReady>(_db_id, XidReady::XactMsg(xid));
-        _committer_queue.push(committer_entry);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Issue XID to committer on {} @ {}", _db_id, xid);
+        _committer_queue.push(std::make_shared<XidReady>(_db_id, XidReady::XactMsg(xid)));
 
         // pass the xact to the xact logging thread
         xact->springtail_xid = xid;

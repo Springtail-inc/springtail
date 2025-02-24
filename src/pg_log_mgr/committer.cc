@@ -29,7 +29,7 @@ namespace springtail::pg_log_mgr {
         // perform cleanup for any Committer threads in a previous run
         cleanup();
         _create_indexer();
-        auto meter = metrics::Provider::GetMeterProvider()->GetMeter("gc");
+        auto meter = metrics::Provider::GetMeterProvider()->GetMeter("pg_log_mgr");
         _btree_write_latencies = std::shared_ptr<metrics::Histogram<double>>(
             meter
                 ->CreateDoubleHistogram(
@@ -68,7 +68,7 @@ namespace springtail::pg_log_mgr {
 
             // handle a TABLE_SYNC_START
             if (result->type() == XidReady::Type::TABLE_SYNC_START) {
-                SPDLOG_DEBUG_MODULE(LOG_GC, "Stop committing due to table sync: {}", db_id);
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Stop committing due to table sync: {}", db_id);
                 // stop performing commits on this db until the table syncs are complete and aligned
                 _block_commit.insert(db_id);
 
@@ -90,7 +90,7 @@ namespace springtail::pg_log_mgr {
             // handle a TABLE_SYNC_COMMIT
             if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT ||
                 result->type() == XidReady::Type::TABLE_SYNC_SWAP) {
-                SPDLOG_DEBUG_MODULE(LOG_GC, "Handle a TABLE_SYNC_SWAP/COMMIT: {}, {}, completed xid @{}",
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Handle a TABLE_SYNC_SWAP/COMMIT: {}, {}, completed xid @{}",
                                     static_cast<char>(result->type()), db_id, completed_xid);
 
                 nlohmann::json ddls;
@@ -112,7 +112,7 @@ namespace springtail::pg_log_mgr {
                 // go through the hash of sys tbl operations
                 for (auto table_id : result->swap().tids()) {
                     auto ops_str = redis->hget(key, fmt::format("{}", table_id));
-                    SPDLOG_DEBUG_MODULE(LOG_GC, "table_id {}, ops: {}", table_id, *ops_str);
+                    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "table_id {}, ops: {}", table_id, *ops_str);
                     auto json = nlohmann::json::parse(*ops_str);
 
                     // perform the table swap
@@ -198,7 +198,7 @@ namespace springtail::pg_log_mgr {
                 // query the write cache for the tables modified through this XID
                 auto table_list = WriteCacheFuncImpl::list_tables(db_id, xid, 100, table_cursor);
 
-                SPDLOG_DEBUG_MODULE(LOG_GC, "Got {} tables from the write cache", table_list.size());
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Got {} tables from the write cache", table_list.size());
 
                 // check if we are done processing this XID
                 if (table_list.empty()) {
@@ -207,7 +207,7 @@ namespace springtail::pg_log_mgr {
                 }
 
                 for (auto tid : table_list) {
-                    SPDLOG_DEBUG_MODULE(LOG_GC, "Pass table {} to a worker", tid);
+                    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Pass table {} to a worker", tid);
                     // mark this table as in-flight
                     {
                         boost::unique_lock lock(_mutex);
@@ -223,12 +223,12 @@ namespace springtail::pg_log_mgr {
             // wait for tables to complete their processing
             // XXX ideally we could start working on the next XID while the finalize() operations
             //     are being completed.
-            SPDLOG_DEBUG_MODULE(LOG_GC, "Wait for {} tables to complete", _tid_set.size());
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Wait for {} tables to complete", _tid_set.size());
             {
                 boost::unique_lock lock(_mutex);
                 _cv.wait(lock, [this]() { return _tid_set.empty(); });
             }
-            SPDLOG_DEBUG_MODULE(LOG_GC, "All table processing complete for XID {}", xid);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "All table processing complete for XID {}", xid);
 
             nlohmann::json index_ddls = _redis_ddl.get_index_ddls_xid(db_id, xid);
 
@@ -266,7 +266,7 @@ namespace springtail::pg_log_mgr {
                 _redis_ddl.commit_ddl(db_id, xid);
             }
 
-            SPDLOG_DEBUG_MODULE(LOG_GC, "XID completed: {}@{}", db_id, xid);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "XID completed: {}@{}", db_id, xid);
         }
 
         // join all of the worker threads
@@ -278,7 +278,7 @@ namespace springtail::pg_log_mgr {
         coordinator->unregister_thread(daemon_type, _worker_id);
 
         _indexer.reset();
-        SPDLOG_DEBUG_MODULE(LOG_GC, "Committer shutdown");
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Committer shutdown");
     }
 
     void
@@ -385,7 +385,7 @@ namespace springtail::pg_log_mgr {
                         // this is very unlikely. It would mean that the system went down
                         // after the index build was finalized but before it had a chance
                         // to commit the DDL to redis.
-                        SPDLOG_DEBUG_MODULE(LOG_GC, "* Uncommitted index {}@{} -- {} {}", db_id, xid, tid, index_id);
+                        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "* Uncommitted index {}@{} -- {} {}", db_id, xid, tid, index_id);
                     } else {
                         // reconstruct the log message
                         PgMsgIndex msg;
@@ -512,7 +512,7 @@ namespace springtail::pg_log_mgr {
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - min_commit_ts->to_system_time());
             _btree_write_latencies->Record(duration.count(), _context);
-            SPDLOG_DEBUG_MODULE(LOG_GC, "Processed table {} in {} milliseconds", tid, duration.count());
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Processed table {} in {} milliseconds", tid, duration.count());
             SPDLOG_ERROR("Processed table {} in {} milliseconds", tid, duration.count());
         }
         // update the system table roots

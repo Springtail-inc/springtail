@@ -206,7 +206,7 @@ namespace springtail::pg_log_mgr {
     {
         constexpr int DROP_CHECK_PERIOD = 1000;
 
-        SPDLOG_DEBUG_MODULE(LOG_GC, "Build index: {}:{} - {}", key.first, key.second, idx._ddl.dump());
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Build index: {}:{} - {}", key.first, key.second, idx._ddl.dump());
 
         auto [db_id, index_id] = key;
         auto tid = idx._ddl["table_id"];
@@ -269,7 +269,7 @@ namespace springtail::pg_log_mgr {
             ++current_row_id;
             ++row_cnt;
         }
-        SPDLOG_DEBUG_MODULE(LOG_GC, "Index build finished: {}:{}, rows={}", db_id, index_id, row_cnt);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Index build finished: {}:{}, rows={}", db_id, index_id, row_cnt);
         return root;
     }
 
