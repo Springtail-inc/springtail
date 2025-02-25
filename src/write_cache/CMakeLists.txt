@@ -34,14 +34,6 @@ target_link_libraries(springtail_write_cache
 )
 
 ## tests
-#add_executable(test_threaded test/write_cache_index_test.cc)
-#target_include_directories(test_threaded PRIVATE ${CMAKE_SOURCE_DIR}/include ${THRIFT_GEN_PATH})
-#target_link_libraries(test_threaded
-#    PUBLIC springtail_write_cache
-#    PRIVATE GTest::gtest_main
-#)
-#add_dsymutil_command(test_threaded)
-
 add_executable(test_wc_index test/test_wc_index.cc)
 target_include_directories(test_wc_index PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_wc_index
