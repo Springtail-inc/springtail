@@ -84,7 +84,7 @@ namespace springtail::committer {
         // wait for the key {db, tid} to be removed from the working set
         std::unique_lock g(_m);
         while( find_work()  ) {
-            _cv_done.wait(g, [&]{return !find_work();});
+            _cv_done.wait(g, [&find_work]{return !find_work();});
         }
     }
 
@@ -104,7 +104,7 @@ namespace springtail::committer {
         // wait for the key {db, tid} to be removed from the working set
         std::unique_lock g(_m);
         while( find_work()  ) {
-            _cv_done.wait(g, [&]{return !find_work();});
+            _cv_done.wait(g, [&find_work]{return !find_work();});
         }
     }
 
@@ -117,7 +117,7 @@ namespace springtail::committer {
             // get the next work item
             {
                 std::unique_lock g(_m);
-                if (!_cv.wait(g, st, [&] { return !_queue.empty(); })) {
+                if (!_cv.wait(g, st, [this]{ return !_queue.empty(); })) {
                     break;
                 }
 
