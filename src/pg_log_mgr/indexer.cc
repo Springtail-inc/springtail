@@ -83,9 +83,7 @@ namespace springtail::committer {
 
         // wait for the key {db, tid} to be removed from the working set
         std::unique_lock g(_m);
-        while( find_work()  ) {
-            _cv_done.wait(g, [&find_work]{return !find_work();});
-        }
+        _cv_done.wait(g, [&find_work]{return !find_work();});
     }
 
     void Indexer::wait_for_completion(uint64_t db_id, uint64_t tid)
