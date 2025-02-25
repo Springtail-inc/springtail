@@ -79,7 +79,7 @@ PgXactLogReader::_load_next_extent()
 {
     // Read the extent data from the file at the current offset
     auto response = _current_handle->read(_current_offset);
-    if (!response) {
+    if (response->data.empty()) {
         return false;
     }
         
@@ -112,7 +112,7 @@ PgXactLogReader::_open_next_file()
     }
 
     // Open the file and read the first extent
-    _current_handle = IOMgr::get_instance()->open(*_current_file, IOMgr::IO_MODE::READ, false);
+    _current_handle = IOMgr::get_instance()->open(*_current_file, IOMgr::IO_MODE::READ, true);
     _current_offset = 0;
         
     // Load the first extent

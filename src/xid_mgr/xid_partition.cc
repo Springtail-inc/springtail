@@ -184,6 +184,10 @@ namespace springtail::xid_mgr {
 
             _committed_xids[db_id] = xid;
             _dirty = true;
+        } else {
+            SPDLOG_WARN("Partition: commit xid: db_id={}, xid={}, was already committed at {}", db_id, xid, it->second);
+            it->second = xid;
+            _dirty = true;
         }
 
         // if the XID contains schema changes, add it to the history

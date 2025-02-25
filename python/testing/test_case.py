@@ -181,6 +181,14 @@ class TestCase:
                             'type': 'sync'
                         }, section, is_threaded, cur_txn, line_num)
 
+                    elif directive[0] == 'force_recovery':
+                        if section != 'test':
+                            self._raise_error(f'{line_num}: "force_recovery" must be part of the "test" section')
+                        self._append_command({
+                            'type': 'force_recovery',
+                            'count': directive[1]
+                        }, section, is_threaded, cur_txn, line_num)
+
                     elif directive[0] == 'schema_check':
                         if section != 'verify':
                             self._raise_error(f'{line_num}: "schema_check" must be part of the "verify" section')
@@ -276,6 +284,18 @@ class TestCase:
         if command['type'] == 'sleep':
             # sleep for 'duration' seconds
             time.sleep(command['duration'])
+            return None
+
+        if command['type'] == 'force_recovery':
+            # XXX check the current XID
+            current_xid = xid_mgr.get_current_xid()
+            target_xid = current_xid - command['count']
+            
+            # shutdown Springtail
+            springtail.stop(self.config_file, do_cleanup=False)
+
+            # re-start at an earlier XID, should automatically trigger recovery from that point
+            springtail.start(self.config_file, self.build_dir, do_cleanup=False, do_init=False, start_xid=target_xid)
             return None
 
         # handle SQL statements

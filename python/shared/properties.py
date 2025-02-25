@@ -200,6 +200,8 @@ class Properties:
             print('No config file provided')
             sys.exit(1)
 
+        logging.debug("Called __load_redis()?")
+
         # re-initialize the properties
         self.init(config_file)
 

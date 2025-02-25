@@ -724,7 +724,7 @@ if __name__ == "__main__":
 
         if args.start:
             start(args.config_file, args.build_dir, args.sql_file, 
-                  do_cleanup=not args.no_cleanup, start_xid=args.start_xid)
+                  do_cleanup=not args.no_cleanup, do_init=not args.no_cleanup, start_xid=args.start_xid)
 
     except Exception as e:
         print(f"Caught error: {e}")

@@ -124,14 +124,7 @@ namespace springtail::pg_log_mgr {
         _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
 
         // note: we wait to perform these actions until the log reader has been started
-        if (do_init) {
-            // // copy the namespaces during initialization
-            // auto xid = _pg_log_reader->get_next_xid();
-            // PgCopyTable::create_namespaces(_db_id, xid);
-
-            // // perform the table copies during initialization
-            // _do_table_copies();
-        } else {
+        if (!do_init) {
             // perform the any required log recovery here
             recovery.replay_logs();
         }
