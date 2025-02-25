@@ -41,13 +41,11 @@ XidMgrServer::XidMgrServer() {
     _grpc_server_manager.addService(GrpcXidMgrService::get_instance());
 }
 
-XidMgrServer::~XidMgrServer() = default;
-
 void XidMgrServer::startup() {
     _grpc_server_manager.startup();
 }
 
-void XidMgrServer::shutdown() {
+void XidMgrServer::_internal_shutdown() {
     _grpc_server_manager.shutdown();
     std::unique_lock lock(_mutex);
     // iterate over partitions and shutdown
