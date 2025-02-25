@@ -51,6 +51,5 @@ target_link_libraries(test_extent_mapper
 add_dsymutil_command(test_extent_mapper)
 
 # hook tests into gtest framework
-#gtest_discover_tests(test_threaded)
 gtest_discover_tests(test_extent_mapper)
 gtest_discover_tests(test_wc_index)
