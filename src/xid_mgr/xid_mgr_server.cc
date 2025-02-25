@@ -144,6 +144,7 @@ PartitionPtr XidMgrServer::_get_partition(uint64_t db_id, bool create)
 uint64_t XidMgrServer::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
 {
     PartitionPtr partition;
+    auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
     // first try to get partition without write lock
     std::shared_lock lock(_mutex);
     partition = _get_partition(db_id, false);
@@ -160,6 +161,7 @@ uint64_t XidMgrServer::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
 void XidMgrServer::commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_changes)
 {
     PartitionPtr partition;
+    auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(xid)}});
     // first try to get partition without write lock
     std::shared_lock rd_lock(_mutex);
     partition = _get_partition(db_id, false);
@@ -187,6 +189,7 @@ void XidMgrServer::record_ddl_change(uint64_t db_id, uint64_t xid)
 {
     // note: code is nearly identical to commit_xid()... make sure they stay in sync
 
+    auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(xid)}});
     PartitionPtr partition;
 
     // first try to get partition without write lock
