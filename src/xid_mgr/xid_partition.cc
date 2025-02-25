@@ -30,6 +30,7 @@ namespace springtail::xid_mgr {
     void
     Partition::_sync_thread_func()
     {
+        auto token = logging::set_context_variables({{"partition_id", std::to_string(_id)}});
         RedisDDL redis_ddl;
         while (!_shutdown) {
             std::unique_lock<std::mutex> _shutdown_lock(_shutdown_mutex);

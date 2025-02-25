@@ -66,6 +66,8 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             }
             uint64_t db_id = result->db();
 
+            auto token_1 = logging::set_context_variables({{"db_id", std::to_string(db_id)}});
+
             // handle a TABLE_SYNC_START
             if (result->type() == XidReady::Type::TABLE_SYNC_START) {
                 SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Stop committing due to table sync: {}", db_id);
@@ -85,6 +87,8 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             } else {
                 completed_xid = itr->second;
             }
+
+            auto token_2 = logging::set_context_variables({{"xid", std::to_string(completed_xid)}});
             SPDLOG_INFO("Last completed XID: {}@{}", db_id, completed_xid);
 
             // handle a TABLE_SYNC_COMMIT
@@ -105,6 +109,8 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 if (completed_xid == _committed_xids[db_id]) {
                     completed_xid = result->swap().xid();
                 }
+
+                auto token_3 = logging::set_context_variables({{"xid", std::to_string(completed_xid)}});
 
                 // for operations at the SysTblMgr
                 auto client = sys_tbl_mgr::Client::get_instance();
@@ -189,6 +195,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             // note: from here we know we have an XACT_MSG
             assert(result->type() == XidReady::Type::XACT_MSG);
             uint64_t xid = result->xact().xid();
+            auto token_4 = logging::set_context_variables({{"xid", std::to_string(xid)}});
             SPDLOG_INFO("Process XID: {}@{}", db_id, xid);
             assert(xid > completed_xid);
 
