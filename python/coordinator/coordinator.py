@@ -14,6 +14,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Add the /shared directory to the Python path
 sys.path.append(os.path.join(project_root, 'shared'))
+sys.path.append(os.path.join(project_root, 'grpc'))
 
 # import the Properties class
 from properties import Properties
@@ -23,7 +24,8 @@ from component_factory import ComponentFactory
 from scheduler import Scheduler
 
 # import the xid_mgr_client
-from thrift_clients import ping_xid_mgr, ping_sys_tbl_mgr
+from xid_mgr import XidManagerClient
+from sys_tbl_mgr import SysTblManagerClient
 
 # import production utils
 from production import (
@@ -106,6 +108,7 @@ def setup_props(yaml_config: dict) -> Properties:
 
     return props
 
+
 def wait_for_ingestion(props: Properties) -> None:
     """
     Wait for the ingestion service to be ready.
@@ -117,11 +120,25 @@ def wait_for_ingestion(props: Properties) -> None:
             break
         time.sleep(1)
 
+    system_config = props.get_system_config()
+    xid_port = system_config['xid_mgr']['rpc_config']['server_port']
+    sys_tbl_port = system_config['sys_tbl_mgr']['rpc_config']['server_port']
+
     while True:
-        success, message = ping_xid_mgr(host, props.get_port('ingestion'))
-        if success:
+        try:
+            XidManagerClient(host, xid_port).ping()
+            logger.info("XidManager is ready")
             break
-        time.sleep(1)
+        except Exception as e:
+            continue
+
+    while True:
+        try:
+            SysTblManagerClient(host, sys_tbl_port).ping()
+            logger.info("SysTblManager is ready")
+            break
+        except Exception as e:
+            continue
 
 
 if __name__ == "__main__":
