@@ -124,19 +124,23 @@ def wait_for_ingestion(props: Properties) -> None:
     xid_port = system_config['xid_mgr']['rpc_config']['server_port']
     sys_tbl_port = system_config['sys_tbl_mgr']['rpc_config']['server_port']
 
-    while True:
+    waiting = True
+    while waiting:
         try:
-            XidManagerClient(host, xid_port).ping()
-            logger.info("XidManager is ready")
-            break
+            with XidManagerClient(host, xid_port) as client:
+                client.ping()
+                logger.info("XidManager is ready")
+                waiting = False
         except Exception as e:
             continue
 
-    while True:
+    waiting = True
+    while waiting:
         try:
-            SysTblManagerClient(host, sys_tbl_port).ping()
-            logger.info("SysTblManager is ready")
-            break
+            with SysTblManagerClient(host, sys_tbl_port) as client:
+                client.ping()
+                logger.info("SysTblManager is ready")
+                waiting = False
         except Exception as e:
             continue
 
