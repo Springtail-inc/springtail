@@ -255,12 +255,14 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_copy_thread()
     {
-
         // check initial state on thread startup
         // if in startup_sync state then switch to syncing
         if (_internal_state.is(STATE_STARTUP_SYNC)) {
             // Create the namespaces before starting the copy thread
             auto xid = _pg_log_reader.get_next_xid();
+
+            auto token_init = logging::set_context_variables({{"db_id", std::to_string(_db_id)}, {"xid", std::to_string(xid)}});
+
             PgCopyTable::create_namespaces(_db_id, xid);
 
             _do_table_copies();
@@ -292,6 +294,7 @@ namespace springtail::pg_log_mgr {
                 continue;
             }
 
+            auto token_commit_worker = logging::set_context_variables({{"db_id", std::to_string(_db_id)}});
             // copy tables
             _do_table_copies(table_ids);
 
@@ -321,6 +324,8 @@ namespace springtail::pg_log_mgr {
         // copy tables
         std::vector<PgCopyResultPtr> res;
         auto xid = _pg_log_reader.get_next_xid();
+
+        auto token = logging::set_context_variables({{"xid", std::to_string(xid)}});
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Copying tables; target xid={}", xid);
         if (table_ids.has_value()) {
             res = PgCopyTable::copy_tables(_db_id, xid, table_ids.value());

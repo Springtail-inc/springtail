@@ -49,8 +49,7 @@ namespace {
             XidMgrClient::shutdown();
             // shutdown server
             SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Shutting down server");
-            xid_mgr::XidMgrServer *server = xid_mgr::XidMgrServer::get_instance();
-            server->shutdown();
+            xid_mgr::XidMgrServer::shutdown();
         }
 
         static void run_clients(int thread_id, int iterations)
