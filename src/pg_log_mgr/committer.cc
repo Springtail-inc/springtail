@@ -508,6 +508,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
             // process each extent of ordered mutations
             for (auto wc_extent : extent_list) {
+                SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Processing extent {} with data {}", wc_extent.xid, wc_extent.data);
                 _process_extent(db_id, tid, table, wc_extent);
             }
         }

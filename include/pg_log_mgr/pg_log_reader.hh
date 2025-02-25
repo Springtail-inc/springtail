@@ -36,7 +36,7 @@ namespace springtail::pg_log_mgr {
     public:
         /** convenience type for the shared transaction queue */
         using PgTransactionQueuePtr = std::shared_ptr<ConcurrentQueue<PgTransaction>>;
-        using CommitterQueuePtr = std::shared_ptr<ConcurrentQueue<springtail::committer::XidReady>>;
+        using CommitterQueuePtr = std::shared_ptr<ConcurrentQueue<committer::XidReady>>;
 
         /**
          * @brief Construct a new Pg Log Reader object

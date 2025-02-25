@@ -44,7 +44,7 @@ namespace springtail::pg_log_mgr {
     public:
         /** convenience type for the shared transaction queue */
         using PgTransactionQueuePtr = std::shared_ptr<ConcurrentQueue<PgTransaction>>;
-        using CommitterQueuePtr = std::shared_ptr<ConcurrentQueue<springtail::committer::XidReady>>;
+        using CommitterQueuePtr = std::shared_ptr<ConcurrentQueue<committer::XidReady>>;
         using StringPtr = std::shared_ptr<std::string>;
 
         /** replication and transaction log prefixes and suffix */
@@ -80,7 +80,7 @@ namespace springtail::pg_log_mgr {
                  const std::string &user_name, const std::string &password,
                  const std::string &pub_name, const std::string &slot_name,
                  int port,
-                 std::shared_ptr<ConcurrentQueue<springtail::committer::XidReady>> committer_queue);
+                 std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue);
 
         /**
          * @brief Construct a new Pg Log Mgr object (for testing only)
@@ -93,7 +93,7 @@ namespace springtail::pg_log_mgr {
           _internal_state(STATE_RUNNING),
           _repl_log_path(repl_log_path),
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
-          _committer_queue(std::make_shared<ConcurrentQueue<springtail::committer::XidReady>>()),
+          _committer_queue(std::make_shared<ConcurrentQueue<committer::XidReady>>()),
           _pg_log_reader(_db_id, _xact_queue, _committer_queue), _xact_log_path(xact_log_path),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
         {}

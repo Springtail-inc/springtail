@@ -64,7 +64,7 @@ namespace springtail::pg_log_mgr {
         Properties::get_primary_db_config(_host, _port, _user_name, _password);
 
         // initialize committer queue
-        _committer_queue = std::make_shared<ConcurrentQueue<springtail::committer::XidReady>>();
+        _committer_queue = std::make_shared<ConcurrentQueue<committer::XidReady>>();
 
         // read log mgr config
         nlohmann::json log_mgr_config = Properties::get(Properties::LOG_MGR_CONFIG);

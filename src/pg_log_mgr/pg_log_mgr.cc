@@ -29,7 +29,7 @@ namespace springtail::pg_log_mgr {
         const std::string &user_name, const std::string &password,
         const std::string &pub_name, const std::string &slot_name,
         int port,
-        std::shared_ptr<ConcurrentQueue<springtail::committer::XidReady>> committer_queue)
+        std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue)
             : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
             _host(host), _db_name(db_name), _user_name(user_name),
             _password(password), _pub_name(pub_name), _slot_name(slot_name), _port(port),
@@ -364,7 +364,7 @@ namespace springtail::pg_log_mgr {
 
             // notify the Committer to stop committing XIDs
             if (sync_start) {
-                _committer_queue->push(std::make_shared<springtail::committer::XidReady>(_db_id));
+                _committer_queue->push(std::make_shared<committer::XidReady>(_db_id));
             }
         }
 

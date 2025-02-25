@@ -137,6 +137,7 @@ namespace springtail {
             for (const auto &e: idx_extents) {
                 springtail::WriteCacheClient::WriteCacheExtent extent;
                 extent.xid = e->xid;
+                extent.data = e->data->serialize();
 
                 extents.push_back(extent);
             }

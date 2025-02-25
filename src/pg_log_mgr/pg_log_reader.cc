@@ -415,7 +415,7 @@ namespace springtail::pg_log_mgr {
 
                     // notify the Committer to stop committing XIDs
                     if (is_first) {
-                        _committer_queue->push(std::make_shared<springtail::committer::XidReady>(_db));
+                        _committer_queue->push(std::make_shared<committer::XidReady>(_db));
                     }
                 } else if (action.get<std::string>() != "no_change") {
                     redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
@@ -652,7 +652,7 @@ namespace springtail::pg_log_mgr {
         if (xid_msg) {
             // synchronously issue the swap/commit at the GC-2 prior to processing this xid
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Issue TABLE_SYNC_COMMIT on {} @ {}", db_id, xid);
-            _committer_queue->push(std::make_shared<springtail::committer::XidReady>(xid_msg.value()));
+            _committer_queue->push(std::make_shared<committer::XidReady>(xid_msg.value()));
 
             // once the swap/commit is complete, we can clear the entry from the sync
             // tracker and continue processing
@@ -715,7 +715,7 @@ namespace springtail::pg_log_mgr {
 
         // message the Committer
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Issue XID to committer on {} @ {}", _db_id, xid);
-        _committer_queue->push(std::make_shared<springtail::committer::XidReady>(_db_id, springtail::committer::XidReady::XactMsg(xid)));
+        _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::XactMsg(xid)));
 
         // pass the xact to the xact logging thread
         xact->springtail_xid = xid;
@@ -783,7 +783,7 @@ namespace springtail::pg_log_mgr {
         _batch_map.erase(commit_msg.xid);
 
         // message the Committer
-        _committer_queue->push(std::make_shared<springtail::committer::XidReady>(_db_id, springtail::committer::XidReady::XactMsg(xid)));
+        _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::XactMsg(xid)));
 
         // pass the xact to the xact logging thread
         xact->springtail_xid = xid;

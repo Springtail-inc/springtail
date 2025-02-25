@@ -42,7 +42,7 @@ namespace springtail::committer {
      */
     class Committer {
     public:
-        Committer(uint32_t worker_count, std::shared_ptr<ConcurrentQueue<springtail::committer::XidReady>> committer_queue)
+        Committer(uint32_t worker_count, std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue)
             : _worker_count(worker_count),
               _committer_queue(committer_queue)
         {
