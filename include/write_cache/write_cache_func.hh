@@ -103,7 +103,7 @@ namespace springtail {
          * @param cursor cursor for pagination
          * @return vector of table IDs
          */
-        static std::vector<uint64_t> list_tables(uint64_t db_id, uint64_t xid, uint32_t count, uint64_t cursor)
+        static std::vector<uint64_t> list_tables(uint64_t db_id, uint64_t xid, uint32_t count, uint64_t& cursor)
         {
             WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
             std::vector<uint64_t> table_ids;
