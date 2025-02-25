@@ -16,7 +16,7 @@
 #include <redis/redis_ddl.hh>
 #include <redis/redis_containers.hh>
 
-#include <pg_log_mgr/pg_log_mgr_common.hh>
+#include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/indexer.hh>
 
 #include <sys_tbl_mgr/table.hh>
@@ -26,7 +26,7 @@
 #include <opentelemetry/context/context.h>
 #include <opentelemetry/metrics/meter.h>
 
-namespace springtail::pg_log_mgr {
+namespace springtail::committer {
     namespace metrics = opentelemetry::metrics;
 
     /**
@@ -42,8 +42,9 @@ namespace springtail::pg_log_mgr {
      */
     class Committer {
     public:
-        Committer(uint32_t worker_count)
-            : _worker_count(worker_count)
+        Committer(uint32_t worker_count, std::shared_ptr<ConcurrentQueue<springtail::committer::XidReady>> committer_queue)
+            : _worker_count(worker_count),
+              _committer_queue(committer_queue)
         {
             _xid_mgr = XidMgrClient::get_instance();
             _worker_id = fmt::format("{}_{}_0", THREAD_TYPE, THREAD_MAIN);
@@ -120,6 +121,7 @@ namespace springtail::pg_log_mgr {
 
         uint32_t _worker_count;
         ConcurrentQueue<WorkerEntry> _worker_queue; ///< The queue of work for the worker threads.
+        std::shared_ptr<ConcurrentQueue<XidReady>> _committer_queue;
         std::vector<std::thread> _worker_threads; ///< The worker threads.
 
         std::atomic<uint64_t> _shutdown = false; ///< Causes the committer to shut down when set to true.

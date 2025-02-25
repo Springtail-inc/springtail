@@ -12,7 +12,6 @@
 using namespace springtail;
 
 namespace {
-    std::shared_ptr<springtail::pg_log_mgr::Committer> committer;
 
     void
     handle_sigint(int signal)
@@ -21,9 +20,8 @@ namespace {
         if (log_co != nullptr) {
             log_co->notify_shutdown();
         }
-        XidMgrClient::get_instance()->notify_shutdown();
-        sys_tbl_mgr::Client::get_instance()->notify_shutdown();
-        committer->shutdown();
+        sys_tbl_mgr::Client::shutdown();
+        XidMgrClient::shutdown();
     }
 }
 
@@ -58,9 +56,6 @@ int main(int argc, char *argv[])
     std::signal(SIGINT, handle_sigint);
 
     log_co->init();
-
-    committer = std::make_shared<springtail::pg_log_mgr::Committer>(1);
-    committer->run();
 
     log_co->wait_shutdown();
 

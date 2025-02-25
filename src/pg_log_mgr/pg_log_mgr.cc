@@ -28,14 +28,16 @@ namespace springtail::pg_log_mgr {
         const std::string &host, const std::string &db_name,
         const std::string &user_name, const std::string &password,
         const std::string &pub_name, const std::string &slot_name,
-        int port)
+        int port,
+        std::shared_ptr<ConcurrentQueue<springtail::committer::XidReady>> committer_queue)
             : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
             _host(host), _db_name(db_name), _user_name(user_name),
             _password(password), _pub_name(pub_name), _slot_name(slot_name), _port(port),
             _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
             _repl_log_path(repl_log_path),
             _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
-            _pg_log_reader(db_id, _xact_queue), _xact_log_path(xact_log_path),
+            _committer_queue(committer_queue),
+            _pg_log_reader(db_id, _xact_queue, _committer_queue), _xact_log_path(xact_log_path),
             _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
     {
         _cache_watcher_db_states = std::make_shared<RedisCache::RedisChangeWatcher>(
@@ -362,7 +364,7 @@ namespace springtail::pg_log_mgr {
 
             // notify the Committer to stop committing XIDs
             if (sync_start) {
-                _committer_queue.push(std::make_shared<XidReady>(_db_id));
+                _committer_queue->push(std::make_shared<springtail::committer::XidReady>(_db_id));
             }
         }
 

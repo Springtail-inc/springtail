@@ -3,7 +3,7 @@
 #include <common/common.hh>
 #include <fmt/ranges.h>
 
-namespace springtail::pg_log_mgr {
+namespace springtail::committer {
 
     /**
      * Object used to communicate which XID the LogParser has completed so that the Committer can

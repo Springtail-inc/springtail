@@ -3,8 +3,10 @@
 #include <common/json.hh>
 #include <common/properties.hh>
 
+#include <pg_log_mgr/committer.hh>
 #include <pg_log_mgr/pg_log_coordinator.hh>
 #include <pg_log_mgr/pg_log_mgr.hh>
+#include <pg_log_mgr/xid_ready.hh>
 
 #include <write_cache/write_cache_server.hh>
 
@@ -61,6 +63,9 @@ namespace springtail::pg_log_mgr {
         // read instance config
         Properties::get_primary_db_config(_host, _port, _user_name, _password);
 
+        // initialize committer queue
+        _committer_queue = std::make_shared<ConcurrentQueue<springtail::committer::XidReady>>();
+
         // read log mgr config
         nlohmann::json log_mgr_config = Properties::get(Properties::LOG_MGR_CONFIG);
         auto optional_repl_log = Json::get<std::string>(log_mgr_config, "replication_log_path");
@@ -83,6 +88,11 @@ namespace springtail::pg_log_mgr {
             uint64_t db_id = db.first;
             _add_database(db_id);
         }
+
+        // Start the committer thread
+        auto committer = std::make_shared<springtail::committer::Committer>(1, _committer_queue);
+        committer->run();
+
         WriteCacheServer::get_instance()->startup();
     }
 
@@ -108,7 +118,7 @@ namespace springtail::pg_log_mgr {
         std::unique_lock lock(_mutex);
 
         // create log mgr
-        PgLogMgrPtr log_mgr = std::make_shared<PgLogMgr>(db_id, repl_log_path, xact_log_path, _host, db_name, _user_name, _password, pub_name, slot_name, _port);
+        PgLogMgrPtr log_mgr = std::make_shared<PgLogMgr>(db_id, repl_log_path, xact_log_path, _host, db_name, _user_name, _password, pub_name, slot_name, _port, _committer_queue);
         _log_mgrs[db_id] = log_mgr;
 
         lock.unlock();

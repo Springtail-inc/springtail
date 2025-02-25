@@ -12,7 +12,7 @@
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_func.hh>
 
-namespace springtail::pg_log_mgr {
+namespace springtail::committer {
 
 bool
 _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
@@ -29,7 +29,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         // perform cleanup for any Committer threads in a previous run
         cleanup();
         _create_indexer();
-        auto meter = metrics::Provider::GetMeterProvider()->GetMeter("pg_log_mgr");
+        auto meter = metrics::Provider::GetMeterProvider()->GetMeter("committer");
         _btree_write_latencies = std::shared_ptr<metrics::Histogram<double>>(
             meter
                 ->CreateDoubleHistogram(
@@ -60,7 +60,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
             // figure out if there's an XID to process
             // note: this is a blocking call that will timeout after keep_alive secs
-            auto result = _committer_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+            auto result = _committer_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (result == nullptr) {
                 continue; // got a timeout, try again
             }
@@ -68,7 +68,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
             // handle a TABLE_SYNC_START
             if (result->type() == XidReady::Type::TABLE_SYNC_START) {
-                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Stop committing due to table sync: {}", db_id);
+                SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Stop committing due to table sync: {}", db_id);
                 // stop performing commits on this db until the table syncs are complete and aligned
                 _block_commit.insert(db_id);
 
@@ -90,7 +90,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             // handle a TABLE_SYNC_COMMIT
             if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT ||
                 result->type() == XidReady::Type::TABLE_SYNC_SWAP) {
-                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Handle a TABLE_SYNC_SWAP/COMMIT: {}, {}, completed xid @{}",
+                SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Handle a TABLE_SYNC_SWAP/COMMIT: {}, {}, completed xid @{}",
                                     static_cast<char>(result->type()), db_id, completed_xid);
 
                 nlohmann::json ddls;
@@ -112,7 +112,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 // go through the hash of sys tbl operations
                 for (auto table_id : result->swap().tids()) {
                     auto ops_str = redis->hget(key, fmt::format("{}", table_id));
-                    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "table_id {}, ops: {} bytes", table_id,
+                    SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "table_id {}, ops: {} bytes", table_id,
                                         ops_str->size());
                     proto::CopyTableInfo copy_info;
                     if (!copy_info.ParseFromString(*ops_str)) {
@@ -206,7 +206,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 // query the write cache for the tables modified through this XID
                 auto table_list = WriteCacheFuncImpl::list_tables(db_id, xid, 100, table_cursor);
 
-                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Got {} tables from the write cache", table_list.size());
+                SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Got {} tables from the write cache", table_list.size());
 
                 // check if we are done processing this XID
                 if (table_list.empty()) {
@@ -215,7 +215,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 }
 
                 for (auto tid : table_list) {
-                    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Pass table {} to a worker", tid);
+                    SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Pass table {} to a worker", tid);
                     // mark this table as in-flight
                     {
                         boost::unique_lock lock(_mutex);
@@ -231,12 +231,12 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             // wait for tables to complete their processing
             // XXX ideally we could start working on the next XID while the finalize() operations
             //     are being completed.
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Wait for {} tables to complete", _tid_set.size());
+            SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Wait for {} tables to complete", _tid_set.size());
             {
                 boost::unique_lock lock(_mutex);
                 _cv.wait(lock, [this]() { return _tid_set.empty(); });
             }
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "All table processing complete for XID {}", xid);
+            SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "All table processing complete for XID {}", xid);
 
             nlohmann::json index_ddls = _redis_ddl.get_index_ddls_xid(db_id, xid);
 
@@ -274,7 +274,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 _redis_ddl.commit_ddl(db_id, xid);
             }
 
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "XID completed: {}@{}", db_id, xid);
+            SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "XID completed: {}@{}", db_id, xid);
         }
 
         // join all of the worker threads
@@ -286,7 +286,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         coordinator->unregister_thread(daemon_type, _worker_id);
 
         _indexer.reset();
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Committer shutdown");
+        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Committer shutdown");
     }
 
     void
@@ -393,7 +393,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                         // this is very unlikely. It would mean that the system went down
                         // after the index build was finalized but before it had a chance
                         // to commit the DDL to redis.
-                        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "* Uncommitted index {}@{} -- {} {}", db_id, xid, tid, index_id);
+                        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "* Uncommitted index {}@{} -- {} {}", db_id, xid, tid, index_id);
                     } else {
                         // reconstruct the log message
                         PgMsgIndex msg;
@@ -520,7 +520,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - min_commit_ts->to_system_time());
             _btree_write_latencies->Record(duration.count(), _context);
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Processed table {} in {} milliseconds", tid, duration.count());
+            SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Processed table {} in {} milliseconds", tid, duration.count());
             SPDLOG_ERROR("Processed table {} in {} milliseconds", tid, duration.count());
         }
         // update the system table roots

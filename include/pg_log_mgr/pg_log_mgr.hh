@@ -14,13 +14,13 @@
 #include <common/properties.hh>
 #include <common/state_synchronizer.hh>
 
-#include <pg_log_mgr/pg_log_mgr_common.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_copy_table.hh>
 
 #include <pg_log_mgr/pg_log_queue.hh>
 #include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
+#include <pg_log_mgr/xid_ready.hh>
 
 #include <pg_log_mgr/pg_xact_log_reader.hh>
 #include <pg_log_mgr/pg_xact_log_writer.hh>
@@ -44,6 +44,7 @@ namespace springtail::pg_log_mgr {
     public:
         /** convenience type for the shared transaction queue */
         using PgTransactionQueuePtr = std::shared_ptr<ConcurrentQueue<PgTransaction>>;
+        using CommitterQueuePtr = std::shared_ptr<ConcurrentQueue<springtail::committer::XidReady>>;
         using StringPtr = std::shared_ptr<std::string>;
 
         /** replication and transaction log prefixes and suffix */
@@ -78,7 +79,8 @@ namespace springtail::pg_log_mgr {
                  const std::string &host, const std::string &db_name,
                  const std::string &user_name, const std::string &password,
                  const std::string &pub_name, const std::string &slot_name,
-                 int port);
+                 int port,
+                 std::shared_ptr<ConcurrentQueue<springtail::committer::XidReady>> committer_queue);
 
         /**
          * @brief Construct a new Pg Log Mgr object (for testing only)
@@ -91,7 +93,8 @@ namespace springtail::pg_log_mgr {
           _internal_state(STATE_RUNNING),
           _repl_log_path(repl_log_path),
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
-          _pg_log_reader(_db_id, _xact_queue), _xact_log_path(xact_log_path),
+          _committer_queue(std::make_shared<ConcurrentQueue<springtail::committer::XidReady>>()),
+          _pg_log_reader(_db_id, _xact_queue, _committer_queue), _xact_log_path(xact_log_path),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
         {}
 
@@ -194,6 +197,7 @@ namespace springtail::pg_log_mgr {
         ///// Stage 2 of pipeline, reading replication log and parsing xacts
         std::thread _reader_thread;         ///< log reader thread
         PgTransactionQueuePtr _xact_queue;  ///< queue between reader and xact thread
+        CommitterQueuePtr _committer_queue; ///< queue between reader and committer
         PgLogReader _pg_log_reader;         ///< log reader
 
         /** Consume data from queue, scan log entries and notify GC */

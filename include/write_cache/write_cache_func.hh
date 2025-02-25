@@ -116,6 +116,16 @@ namespace springtail {
             return table_ids;
         }
 
+        /**
+         * @brief Get extents for a given XID
+         * @param db_id database ID
+         * @param tid table ID
+         * @param xid Springtail XID
+         * @param count number of extents to return
+         * @param cursor cursor for pagination
+         * @param commit_ts out; postgres-reported commit ts of xid
+         * @return vector of extents
+         */
         static std::vector<springtail::WriteCacheClient::WriteCacheExtent>
         get_extents(uint64_t db_id, uint64_t tid, uint64_t xid, uint32_t count, uint64_t &cursor, PostgresTimestamp &commit_ts)
         {
