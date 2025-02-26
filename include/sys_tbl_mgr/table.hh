@@ -456,6 +456,13 @@ namespace springtail {
                      ExtentSchemaPtr schema,
                      bool for_gc = false);
 
+        ~MutableTable() {
+            // if we have a dirty, empty page, then evict it
+            if (_empty_page) {
+                _empty_page->evict();
+            }
+        }
+
         /**
          * Returns the file of the raw data associated with the table.
          */
