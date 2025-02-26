@@ -23,7 +23,7 @@ namespace {
 }
 
 namespace springtail {
-    static std::vector<int> signals{
+    static const std::vector<int> signals{
         SIGABRT, // Abort signal from abort(3)
         SIGBUS,  // Bus error (bad memory access)
         SIGFPE,  // Floating point exception

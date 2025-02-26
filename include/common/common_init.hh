@@ -9,7 +9,7 @@ namespace springtail::init {
 // Daemon init
 class DaemonRunner : public ServiceRunner {
 public:
-    DaemonRunner(const std::optional<std::string> &daemon_pid)
+    explicit DaemonRunner(const std::optional<std::string> &daemon_pid)
         : ServiceRunner("Daemon"), _daemon_pid(daemon_pid)
     {
     }
@@ -28,7 +28,7 @@ private:
 // Exception init
 class ExceptionRunner : public ServiceRunner {
 public:
-    ExceptionRunner() : ServiceRunner("Exception") {}
+    explicit ExceptionRunner() : ServiceRunner("Exception") {}
     bool start() override
     {
         init_exception();
@@ -40,7 +40,7 @@ public:
 // Properties Init
 class PropertiesRunner : public ServiceRunner {
 public:
-    PropertiesRunner(bool load_redis) : ServiceRunner("Properties"), _load_redis(load_redis) {}
+    explicit PropertiesRunner(bool load_redis) : ServiceRunner("Properties"), _load_redis(load_redis) {}
     bool start() override
     {
         Properties::get_instance()->init(_load_redis);
@@ -55,7 +55,7 @@ private:
 // Properties cache inint
 class PropertiesCacheRunner : public ServiceRunner {
 public:
-    PropertiesCacheRunner() : ServiceRunner("PropertiesCache") {}
+    explicit PropertiesCacheRunner() : ServiceRunner("PropertiesCache") {}
     bool start() override
     {
         Properties::get_instance()->init_cache();
@@ -66,7 +66,7 @@ public:
 // Logging init
 class LoggingRunner : public ServiceRunner {
 public:
-    LoggingRunner(const std::optional<std::string> &log_filename,
+    explicit LoggingRunner(const std::optional<std::string> &log_filename,
                   const std::optional<std::string> &daemon_pid,
                   const std::optional<uint32_t> &logging_mask)
         : ServiceRunner("Logging"),
@@ -89,7 +89,7 @@ private:
 
 class DefaultLoggingRunner : public ServiceRunner {
 public:
-    DefaultLoggingRunner() : ServiceRunner("Default Logging") {}
+    explicit DefaultLoggingRunner() : ServiceRunner("Default Logging") {}
     void stop() override { shutdown_logging(); }
 
 private:
@@ -98,7 +98,7 @@ private:
 // Tracing init
 class TracingRunner : public ServiceRunner {
 public:
-    TracingRunner(const std::optional<std::string> &name) : ServiceRunner("Tracing"), _name(name) {}
+    explicit TracingRunner(const std::optional<std::string> &name) : ServiceRunner("Tracing"), _name(name) {}
     bool start() override
     {
         tracing::TracingAndMetrics::get_instance()->init(_name.value_or(""));
@@ -113,7 +113,7 @@ private:
 // Termination signals handling init
 class TermSignalRunner : public ServiceRunner {
 public:
-    TermSignalRunner(std::vector<int> &signals, void (*handler)(int))
+    explicit TermSignalRunner(std::vector<int> &signals, void (*handler)(int))
         : ServiceRunner("TermSignal"), _signals(signals)
     {
         _handler = handler;
