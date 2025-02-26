@@ -82,7 +82,6 @@ TEST_P(RedisPubSub_Test, SingleSubscriberTest) {
             fmt::format(redis::DB_CONFIG, "5050"),
             fmt::format(redis::HASH_FDW, "5050"),
             fmt::format(redis::DB_INSTANCE_STATE, "5050"),
-            fmt::format(redis::QUEUE_GC_XID_READY, "5050"),
             fmt::format(redis::QUEUE_DDL_XID, "5050", "4242", "2222"),
             fmt::format(redis::HASH_DDL_PRECOMMIT, "5050"),
             fmt::format(redis::QUEUE_DDL_FDW, "5050", "4242"),
