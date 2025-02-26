@@ -750,11 +750,6 @@ namespace springtail {
         ExtentHeader header(ExtentType(), _target_xid, _schema->row_size(), old_eid);
         auto &&offsets = page->flush(header);
 
-        // record the mapping into the extent map
-        if (_for_gc) {
-            WriteCacheClient::get_instance()->add_mapping(_db_id, _id, _target_xid, old_eid, offsets);
-        }
-
         auto value_fields = std::make_shared<FieldArray>(1);
         for (auto extent_id : offsets) {
             auto new_page = StorageCache::get_instance()->get(_data_file, extent_id, _target_xid);

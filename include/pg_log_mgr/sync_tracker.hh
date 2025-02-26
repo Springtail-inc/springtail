@@ -1,7 +1,7 @@
 #include <boost/thread.hpp>
 
 #include <common/singleton.hh>
-#include <garbage_collector/xid_ready.hh>
+#include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
 
 namespace springtail::pg_log_mgr {
@@ -33,14 +33,14 @@ namespace springtail::pg_log_mgr {
          * @param pg_xid The pg_xid of the current transaction.
          * @return An optional XidReady containing the swap/commit details if available.
          */
-        std::optional<gc::XidReady> check_commit(uint64_t db_id, uint32_t pg_xid);
+        std::optional<committer::XidReady> check_commit(uint64_t db_id, uint32_t pg_xid);
 
         /**
          * Clears any tables that were part of the swap/commit.
          * @param db_id The database to clear.
          * @param commit_msg The XidReady containing the swap/commit details.
          */
-        void clear_tables(uint64_t db_id, const gc::XidReady &commit_msg);
+        void clear_tables(uint64_t db_id, const committer::XidReady &commit_msg);
 
         /**
          * Remove a given table from the sync tracker.  Called after we have passed all of the

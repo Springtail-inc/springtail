@@ -173,7 +173,8 @@ namespace {
         FILE *_fp = nullptr;
         std::filesystem::path _log_file{LOG_FILE};
         PgLogReader::PgTransactionQueuePtr _queue = std::make_shared<ConcurrentQueue<PgTransaction>>();
-        PgLogReader _log_reader{1, _queue}; // note: hard-codes DB ID as 1
+        PgLogReader::CommitterQueuePtr _committer_queue = std::make_shared<ConcurrentQueue<committer::XidReady>>();
+        PgLogReader _log_reader{1, _queue, _committer_queue}; // note: hard-codes DB ID as 1
         std::vector<PgTransactionPtr> _xact_list;
         std::shared_ptr<TestLogMgr> _log_mgr;
     };

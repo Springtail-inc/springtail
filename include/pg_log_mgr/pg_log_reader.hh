@@ -9,13 +9,13 @@
 #include <common/tracing.hh>
 #include <common/timestamp.hh>
 
-#include <garbage_collector/xid_ready.hh>
-
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_msg_stream.hh>
 
 #include <redis/redis_containers.hh>
 #include <redis/redis_ddl.hh>
+
+#include <pg_log_mgr/xid_ready.hh>
 
 #include <storage/extent.hh>
 #include <storage/field.hh>
@@ -34,12 +34,13 @@ namespace springtail::pg_log_mgr {
     public:
         /** convenience type for the shared transaction queue */
         using PgTransactionQueuePtr = std::shared_ptr<ConcurrentQueue<PgTransaction>>;
+        using CommitterQueuePtr = std::shared_ptr<ConcurrentQueue<committer::XidReady>>;
 
         /**
          * @brief Construct a new Pg Log Reader object
          * @param queue queue to enqueue parsed xactions for xid logger and GC
          */
-        PgLogReader(uint64_t db_id, const PgTransactionQueuePtr queue);
+        PgLogReader(uint64_t db_id, const PgTransactionQueuePtr queue, const CommitterQueuePtr committer_queue);
 
         /**
          * @brief Process next set of messages from log file
@@ -84,8 +85,8 @@ namespace springtail::pg_log_mgr {
             static constexpr uint32_t MAX_BATCH_SIZE = 4 * 1024 * 1024;
 
         public:
-            Batch(uint64_t db_id, int32_t pg_xid)
-                : _db(db_id), _pg_xid(pg_xid)
+            Batch(uint64_t db_id, int32_t pg_xid, const CommitterQueuePtr committer_queue)
+                : _db(db_id), _pg_xid(pg_xid), _committer_queue(committer_queue)
             {
                 auto tracer = tracing::tracer("PgLogReader");
                 _span = tracer->StartSpan("Transaction");
@@ -205,6 +206,7 @@ namespace springtail::pg_log_mgr {
             uint64_t _lsn = 0; ///< The LSN counter
 
             tracing::SpanPtr _span; ///< Timing for the txn processing.
+            CommitterQueuePtr _committer_queue; ///< Reference to the committer queue
         };
         using BatchPtr = std::shared_ptr<Batch>;
 
@@ -212,6 +214,7 @@ namespace springtail::pg_log_mgr {
         std::filesystem::path _current_path; ///< current log file path
         PgMsgStreamReader _reader;           ///< msg stream reader for log file
         PgTransactionQueuePtr _queue;        ///< shared queue for xactions
+        CommitterQueuePtr _committer_queue;  ///< shared queue for committer
         PgTransactionPtr _current_xact;      ///< current transaction
         std::map<uint32_t, PgTransactionPtr> _xact_map; ///< in progress xact map
         std::atomic<uint64_t> _next_xid{0};        ///< next xid in xid range

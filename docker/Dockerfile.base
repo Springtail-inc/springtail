@@ -17,6 +17,9 @@ RUN apt-get update && apt-get install -y \
 
 RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get -y install tzdata
 
+# python protobuf and GRPC modules
+RUN pip-install --break-system-packages grpcio protobuf
+
 ARG conf_file=/etc/postgresql/16/main/postgresql.conf
 ARG hba_file=/etc/postgresql/16/main/pg_hba.conf
 ARG redis_conf=/etc/redis/redis.conf

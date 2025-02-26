@@ -42,7 +42,7 @@ namespace springtail {
         LOG_FDW = 0x100,
         LOG_CACHE = 0x200,
         LOG_SCHEMA = 0x400,
-        LOG_GC = 0x800,
+        LOG_COMMITTER = 0x800,
         LOG_SYS_TBL_MGR = 0x1000,
         LOG_ALL = 0xFFFFFFFF
     };
@@ -59,7 +59,8 @@ namespace springtail {
         {"fdw", LOG_FDW},
         {"cache", LOG_CACHE},
         {"schema", LOG_SCHEMA},
-        {"gc", LOG_GC},
+        {"committer", LOG_COMMITTER},
+        {"sys_tbl_mgr", LOG_SYS_TBL_MGR},
         {"none", LOG_NONE},
         {"all", LOG_ALL}
     };
