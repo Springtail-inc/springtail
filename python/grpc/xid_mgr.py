@@ -10,7 +10,7 @@ import xid_manager_pb2
 import xid_manager_pb2_grpc
 from google.protobuf import empty_pb2
 
-class XidManagerClient:
+class XidMgrClient:
     def __init__(self, host: str, port: int):
         """Initialize XidManager client with server connection details.
 
@@ -100,7 +100,7 @@ class XidManagerClient:
 
 if __name__ == "__main__":
     # Example usage
-    with XidManagerClient('localhost', 5052) as client:
+    with XidMgrClient('localhost', 5052) as client:
         client.ping()
         print("Ping successful")
         xid = client.get_committed_xid(1)

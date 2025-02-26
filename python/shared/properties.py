@@ -145,6 +145,9 @@ class Properties:
         if 'fdw_config' in self.cache and not nocache:
             return self.cache['fdw_config']
 
+        if not self.fdw_id:
+            return {}
+
         config = json.loads(self.redis.hget(key, self.fdw_id))
         config['password'] = self.fdw_user_password
         self.cache[key] = config
@@ -376,19 +379,40 @@ class Properties:
         # set the state to initialize
         self.redis.hset(self.db_instance_id + ':instance_state', new_id, 'initialize')
 
-def get_coordinator_state(self) -> str:
-    """Return the coordinator state."""
-    key = self.db_instance_id + ':coordinator_state'
-    if not self.service_name or not self.instance_key:
-        return 'running' # for test env.
-    field_key = self.service_name + ':' + self.instance_key
-    return self.redis.hget(key, field_key)
+    def get_coordinator_state(self) -> str:
+        """Return the coordinator state."""
+        key = self.db_instance_id + ':coordinator_state'
+        if not self.service_name or not self.instance_key:
+            return 'running' # for test env.
+        field_key = self.service_name + ':' + self.instance_key
+        return self.redis.hget(key, field_key)
 
-def set_coordinator_state(self, state: str) -> None:
-    """Set the coordinator state."""
-    if not self.service_name or not self.instance_key:
-        return # for test env.
-    key = self.db_instance_id + ':coordinator_state'
-    field_key = self.service_name + ':' + self.instance_key
-    self.redis.hset(key, field_key, state)
+    def set_coordinator_state(self, state: str) -> None:
+        """Set the coordinator state."""
+        if not self.service_name or not self.instance_key:
+            return # for test env.
+        key = self.db_instance_id + ':coordinator_state'
+        field_key = self.service_name + ':' + self.instance_key
+        self.redis.hset(key, field_key, state)
 
+def main():
+    # call the get functions and print the results
+    props = Properties()
+    print(f"db_configs: {props.get_db_configs()}")
+    print(f"db_instance_config: {props.get_db_instance_config()}")
+    if props.get_fdw_id():
+        print(f"fdw_config: {props.get_fdw_config()}")
+    print(f"proxy_config: {props.get_proxy_config()}")
+    print(f"system_config: {props.get_system_config()}")
+    print(f"mount_path: {props.get_mount_path()}")
+    print(f"fdw_id: {props.get_fdw_id()}")
+    print(f"db_instance_id: {props.get_db_instance_id()}")
+    print(f"liveness_hash: {props.get_liveness_hash()}")
+    print(f"liveness_notification_pubsub: {props.get_liveness_notification_pubsub()}")
+    print(f"pid_path: {props.get_pid_path()}")
+    print(f"log_path: {props.get_log_path()}")
+    print(f"hostname: {props.get_hostname('ingestion')}")
+    print(f"coordinator_state: {props.get_coordinator_state()}")
+
+if __name__ == "__main__":
+    main()

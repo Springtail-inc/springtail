@@ -24,8 +24,8 @@ from component_factory import ComponentFactory
 from scheduler import Scheduler
 
 # import the xid_mgr_client
-from xid_mgr import XidManagerClient
-from sys_tbl_mgr import SysTblManagerClient
+from xid_mgr import XidMgrClient
+from sys_tbl_mgr import SysTblMgrClient
 
 # import production utils
 from production import (
@@ -127,7 +127,7 @@ def wait_for_ingestion(props: Properties) -> None:
     waiting = True
     while waiting:
         try:
-            with XidManagerClient(host, xid_port) as client:
+            with XidMgrClient(host, xid_port) as client:
                 client.ping()
                 logger.info("XidManager is ready")
                 waiting = False
@@ -137,7 +137,7 @@ def wait_for_ingestion(props: Properties) -> None:
     waiting = True
     while waiting:
         try:
-            with SysTblManagerClient(host, sys_tbl_port) as client:
+            with SysTblMgrClient(host, sys_tbl_port) as client:
                 client.ping()
                 logger.info("SysTblManager is ready")
                 waiting = False

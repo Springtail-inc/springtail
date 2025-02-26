@@ -16,8 +16,7 @@ sys.path.append(os.path.join(project_root, 'shared'))
 
 from common import (
     run_command,
-    makedir,
-    grep_file
+    makedir
 )
 
 S3_BIN_FOLDER = 'packages'
@@ -151,27 +150,26 @@ def __send_sns_notification(
     logger = logging.getLogger("SNS")
 
     try:
-        kwargs = {
-            'TopicArn': topic_arn,
-            'Message': message
-        }
-
-        if subject:
-            kwargs['Subject'] = subject
 
         if attributes:
-            kwargs['MessageAttributes'] = attributes
+            message_attributes = {
+                k: {'DataType': 'String', 'StringValue': str(v)}
+                for k, v in attributes.items()
+            }
+        else:
+            message_attributes = {}
 
-        sns.publish(**kwargs)
+        sns.publish(TopicArn=topic_arn, Message=message, Subject=subject, MessageAttributes=message_attributes)
+
         return True
 
     except ClientError as e:
         error_code = e.response['Error']['Code']
         logger.error(f"Failed to send sns message: {error_code}")
-        return None
+        return False
     except Exception as e:
         logger.error(f"Failed to send sns message: {str(e)}")
-        return None
+        return False
 
 
 def install_binaries(install_path : str) -> None:
@@ -179,6 +177,8 @@ def install_binaries(install_path : str) -> None:
     Install the springtail binaries on the local system.
     Current s3 bucket: s3://data-share.springtail.internal/packages/
     """
+    global S3_DOWNLOAD_PATH, S3_BIN_FOLDER
+
     # Download the springtail binaries
     s3_bucket = os.environ.get('S3_BUCKET',"data-share.springtail.internal")
     if not s3_bucket:
@@ -259,10 +259,12 @@ def _extract_attributes() -> Dict[str, Any]:
     """
     Extract attributes from environment variables.
     """
+    global SNS_ENV_VARS
+
     attributes = {}
 
     # extract attributes from environment variables
-    for var in ENV_VARS:
+    for var in SNS_ENV_VARS:
         value = os.environ.get(var)
         if value:
             attributes[var] = value
@@ -289,6 +291,7 @@ def send_sns(
     Send a message to the SNS topic.
     """
 
+    global TOPIC_ARN, SNS_ATTRIBUTES
     if not TOPIC_ARN:
         TOPIC_ARN = os.environ.get('SNS_TOPIC_ARN')
         if not TOPIC_ARN:
@@ -328,6 +331,9 @@ def send_sns(
     elif type == 'install_failed':
         subject = f"New version install failed: {srn}, {service_name} @{timestamp}"
         attributes['version'] = version
+    else:
+        logging.error(f"Unknown SNS message type: {type}")
+        return
 
     message = f"{subject}\n\n{attributes}"
 
