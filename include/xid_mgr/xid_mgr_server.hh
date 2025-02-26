@@ -3,7 +3,6 @@
 #include <shared_mutex>
 #include <filesystem>
 #include <vector>
-#include <unordered_map>
 
 #include <common/singleton.hh>
 #include <common/grpc_server_manager.hh>
@@ -16,7 +15,6 @@ class XidMgrServer : public Singleton<XidMgrServer> {
 
 public:
     void startup();
-    void shutdown();
 
     /**
      * @brief commit up to and including given xid
@@ -40,10 +38,9 @@ public:
      */
     uint64_t get_committed_xid(uint64_t db_id, uint64_t schema_xid);
 
-    ~XidMgrServer() override;
-
 private:
     XidMgrServer();
+    ~XidMgrServer() override = default;
 
     springtail::GrpcServerManager _grpc_server_manager;
 
@@ -70,6 +67,8 @@ private:
      * @brief Load partitions from base path
      */
     void _load_partitions();
+
+    void _internal_shutdown() override;
 };
 
 }  // namespace springtail::xid_mgr

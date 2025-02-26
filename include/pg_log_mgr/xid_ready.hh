@@ -3,7 +3,7 @@
 #include <common/common.hh>
 #include <fmt/ranges.h>
 
-namespace springtail::gc {
+namespace springtail::committer {
 
     /**
      * Object used to communicate which XID the LogParser has completed so that the Committer can
@@ -18,13 +18,13 @@ namespace springtail::gc {
             friend XidReady;
 
             /** Internal constructor for constructing from a packed string. */
-            XactMsg(const std::span<std::string> &values)
+            explicit XactMsg(const std::span<std::string> &values)
             {
                 _xid = std::stoull(values[0]);
             }
 
         public:
-            XactMsg(uint64_t xid)
+            explicit XactMsg(uint64_t xid)
                 : _xid(xid)
             { }
 
@@ -47,7 +47,7 @@ namespace springtail::gc {
             friend XidReady;
 
             /** Internal constructor for constructing from a packed string. */
-            SwapMsg(const std::span<std::string> &values)
+            explicit SwapMsg(const std::span<std::string> &values)
             {
                 // sanity check
                 assert(values.size() > 1);
@@ -105,7 +105,7 @@ namespace springtail::gc {
         }
 
         /** Constructor for TABLE_SYNC_START messages. */
-        XidReady(uint64_t db_id)
+        explicit XidReady(uint64_t db_id)
             : _type(Type::TABLE_SYNC_START),
               _db_id(db_id)
         { }
@@ -118,7 +118,7 @@ namespace springtail::gc {
         { }
 
         /** Constructor for parsing an XidReady out of a redis value. */
-        XidReady(const std::string &value)
+        explicit XidReady(const std::string &value)
         {
             std::vector<std::string> split;
             common::split_string(":", value, split);

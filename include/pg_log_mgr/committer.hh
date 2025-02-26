@@ -16,17 +16,17 @@
 #include <redis/redis_ddl.hh>
 #include <redis/redis_containers.hh>
 
-#include <garbage_collector/xid_ready.hh>
-#include <garbage_collector/indexer.hh>
+#include <pg_log_mgr/xid_ready.hh>
+#include <pg_log_mgr/indexer.hh>
 
 #include <sys_tbl_mgr/table.hh>
-#include <write_cache/write_cache_client.hh>
+#include <write_cache/write_cache_index.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 
 #include <opentelemetry/context/context.h>
 #include <opentelemetry/metrics/meter.h>
 
-namespace springtail::gc {
+namespace springtail::committer {
     namespace metrics = opentelemetry::metrics;
 
     /**
@@ -42,12 +42,11 @@ namespace springtail::gc {
      */
     class Committer {
     public:
-        Committer(uint32_t worker_count)
-            : _redis(fmt::format(redis::QUEUE_GC_XID_READY, Properties::get_db_instance_id())),
-              _worker_count(worker_count)
+        Committer(uint32_t worker_count, std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue)
+            : _worker_count(worker_count),
+              _committer_queue(committer_queue)
         {
             _xid_mgr = XidMgrClient::get_instance();
-            _write_cache = WriteCacheClient::get_instance();
             _worker_id = fmt::format("{}_{}_0", THREAD_TYPE, THREAD_MAIN);
         }
 
@@ -106,7 +105,7 @@ namespace springtail::gc {
          * @param wc_extent The WriteCacheExtent containing the mutations
          */
         void _process_extent(uint64_t db_id, uint64_t tid, MutableTablePtr table,
-                             const WriteCacheClient::WriteCacheExtent &wc_extent);
+                             const std::shared_ptr<springtail::WriteCacheIndexExtent> wc_extent);
 
         /**
          * Shifts the provided metadata to start at the new future XID.  Returns true if the
@@ -116,15 +115,13 @@ namespace springtail::gc {
 
     private:
         XidMgrClient *_xid_mgr; ///< Pointer to the XidMgr client singleton.
-        WriteCacheClient *_write_cache; ///< Pointer to the WriteCache client singleton.
-
-        RedisQueue<XidReady> _redis; ///< The redis queue to communicate from the PgLogMgr to the Committer.
 
         RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         std::string _worker_id; ///< Unique worker ID for the Committer.
 
         uint32_t _worker_count;
         ConcurrentQueue<WorkerEntry> _worker_queue; ///< The queue of work for the worker threads.
+        std::shared_ptr<ConcurrentQueue<XidReady>> _committer_queue;
         std::vector<std::thread> _worker_threads; ///< The worker threads.
 
         std::atomic<uint64_t> _shutdown = false; ///< Causes the committer to shut down when set to true.

@@ -24,27 +24,31 @@
 namespace springtail::pg_log_mgr {
 
     PgLogMgr::PgLogMgr(uint64_t db_id,
-        const std::filesystem::path &repl_log_path,
-        const std::filesystem::path &xact_log_path,
-        const std::string &host, const std::string &db_name,
-        const std::string &user_name, const std::string &password,
-        const std::string &pub_name, const std::string &slot_name,
-        int port)
-        : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
-          _host(host), _db_name(db_name), _user_name(user_name),
-          _password(password), _pub_name(pub_name), _slot_name(slot_name), _port(port),
-          _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
-          _repl_log_path(repl_log_path),
-          _xact_log_path(xact_log_path),
-          _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
+                       const std::filesystem::path &repl_log_path,
+                       const std::filesystem::path &xact_log_path,
+                       const std::string &host, const std::string &db_name,
+                       const std::string &user_name, const std::string &password,
+                       const std::string &pub_name, const std::string &slot_name,
+                       int port,
+                       std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue)
+    : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
+      _host(host), _db_name(db_name), _user_name(user_name),
+      _password(password), _pub_name(pub_name), _slot_name(slot_name), _port(port),
+      _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
+      _repl_log_path(repl_log_path),
+      _committer_queue(committer_queue),
+      _xact_log_path(xact_log_path),
+      _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
     {
-        _pg_log_reader = std::make_shared<PgLogReader>(_db_id, 8192, xact_log_path);
+        _pg_log_reader = std::make_shared<PgLogReader>(_db_id, 8192, xact_log_path, _committer_queue);
 
+        // construct the callback for watching for database state changes
         _cache_watcher_db_states = std::make_shared<RedisCache::RedisChangeWatcher>(
             [this](const std::string &path, const nlohmann::json &new_value) -> void {
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR,"Replicated database state change; path: {}, state: {}",
                     path, new_value.dump(4));
                 CHECK(path.starts_with(Properties::DATABASE_STATE_PATH));
+
                 // extract database id
                 std::vector<std::string> path_parts;
                 common::split_string("/", path, path_parts);
@@ -57,7 +61,7 @@ namespace springtail::pg_log_mgr {
                     return;
                 }
 
-                // extract state
+                // extract state and handle state change
                 CHECK(new_value.type() == nlohmann::json::value_t::string);
                 std::string state_str = new_value.get<std::string>();
                 redis::db_state_change::DBState state = redis::db_state_change::db_state_map[state_str];
@@ -83,10 +87,15 @@ namespace springtail::pg_log_mgr {
             Properties::set_db_state(_db_id, state);
         }
 
-        // reset state if we were stuck in syncing
+        // reset state if we were stuck in syncing or copy tables
         if (state == redis::db_state_change::REDIS_STATE_SYNCING) {
-            // XXX need to handle, not sure whether to reset to running or initialize
-            assert(false);
+            // reset state to running; GC will move us back to syncing
+            state = redis::db_state_change::REDIS_STATE_RUNNING;
+            Properties::set_db_state(_db_id, state);
+        } else if (state == redis::db_state_change::REDIS_STATE_COPY_TABLES) {
+            // we were in copy tables state, reset to initialize to restart copy tables
+            state = redis::db_state_change::REDIS_STATE_INITIALIZE;
+            Properties::set_db_state(_db_id, state);
         }
 
         // add redis cache callback for watching database state changes
@@ -96,6 +105,10 @@ namespace springtail::pg_log_mgr {
             _cache_watcher_db_states);
 
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Starting up: DB state: {}", state);
+
+        // need to add back table sync worker items to redis sync queue and clear the queue
+        _redis_sync_queue.abort(REDIS_WORKER_ID);
+        _redis_sync_queue.clear();
 
         // fetch latest xid from xid mgr
         XidMgrClient *xid_mgr = XidMgrClient::get_instance();
@@ -160,10 +173,10 @@ namespace springtail::pg_log_mgr {
         std::filesystem::create_directories(_repl_log_path);
         std::filesystem::create_directories(_xact_log_path);
 
-        // clear out Redis
-        // Table sync queue
-        _redis_sync_queue.clear();
+        // set state to copy tables
+        Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_COPY_TABLES);
 
+        // set internal state to copy tables
         _internal_state.set(STATE_STARTUP_SYNC);
     }
 
@@ -172,25 +185,29 @@ namespace springtail::pg_log_mgr {
     {
         StateEnum internal_state = _internal_state.get();
 
-        if (new_state == redis::db_state_change::DB_STATE_RUNNING) {
-            if (internal_state == STATE_RUNNING) {
-                // already in running state
-                return;
-            }
-
-            // if the new state is running, then we should have been in the replay done state
-            // otherwise ignore the state change
-            if (internal_state == STATE_SYNC_STALL ||
-                internal_state == STATE_STARTUP_SYNC) {
-                // if in replaying, ignore message will switch to running when replay is done
-                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received state change to running from replaying");
-                return;
-            }
-
-            // if in replay done set to running XXX
-            _internal_state.test_and_set(STATE_REPLAYING, STATE_RUNNING);
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Current state is running: {}", (_internal_state.get() == STATE_RUNNING));
+        // we only care about running state changes
+        if (new_state != redis::db_state_change::DB_STATE_RUNNING) {
+            return;
         }
+
+        // new state is running, check internal state
+        if (internal_state == STATE_RUNNING) {
+            // already in running state
+            return;
+        }
+
+        // if the new state is running, then we should have been in the replay done state
+        // otherwise ignore the state change
+        if (internal_state == STATE_SYNC_STALL ||
+            internal_state == STATE_STARTUP_SYNC) {
+            // if in replaying, ignore message will switch to running when replay is done
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received state change to running from replaying");
+            return;
+        }
+
+        // if in replay done set to running XXX
+        _internal_state.test_and_set(STATE_REPLAYING, STATE_RUNNING);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Current state is running: {}", (_internal_state.get() == STATE_RUNNING));
     }
 
     void
@@ -201,6 +218,8 @@ namespace springtail::pg_log_mgr {
         if (_internal_state.is(STATE_STARTUP_SYNC)) {
             // Create the namespaces before starting the copy thread
             auto xid = _pg_log_reader->get_next_xid();
+            auto token_init = logging::set_context_variables({{"db_id", std::to_string(_db_id)}, {"xid", std::to_string(xid)}});
+
             PgCopyTable::create_namespaces(_db_id, xid);
 
             _do_table_copies();
@@ -232,6 +251,7 @@ namespace springtail::pg_log_mgr {
                 continue;
             }
 
+            auto token_commit_worker = logging::set_context_variables({{"db_id", std::to_string(_db_id)}});
             // copy tables
             _do_table_copies(table_ids);
 
@@ -261,6 +281,8 @@ namespace springtail::pg_log_mgr {
         // copy tables
         std::vector<PgCopyResultPtr> res;
         auto xid = _pg_log_reader->get_next_xid();
+
+        auto token = logging::set_context_variables({{"xid", std::to_string(xid)}});
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Copying tables; target xid={}", xid);
         if (table_ids.has_value()) {
             res = PgCopyTable::copy_tables(_db_id, xid, table_ids.value());
@@ -314,10 +336,7 @@ namespace springtail::pg_log_mgr {
 
             // notify the Committer to stop committing XIDs
             if (sync_start) {
-                RedisQueue<gc::XidReady>
-                    committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
-                                                Properties::get_db_instance_id()));
-                committer_queue.push(gc::XidReady(_db_id));
+                _committer_queue->push(std::make_shared<committer::XidReady>(_db_id));
             }
         }
 

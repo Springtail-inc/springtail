@@ -18,7 +18,7 @@ PgLogRecovery::repair_logs()
     auto latest_log =
         fs::find_latest_modified_file(_repl_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
     if (latest_log) {
-        SPDLOG_DEBUG_MODULE(LOG_GC, "Found latest log file: {}", *latest_log);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Found latest log file: {}", *latest_log);
         lsn = PgMsgStreamReader::scan_log(*latest_log, true);
     }
 
@@ -28,7 +28,7 @@ PgLogRecovery::repair_logs()
 void
 PgLogRecovery::replay_logs()
 {
-    SPDLOG_DEBUG_MODULE(LOG_GC, "Start log replay");
+    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Start log replay");
 
     // scan the replication log to skip any already committed records
     bool has_more = _skip_committed();
@@ -52,7 +52,7 @@ PgLogRecovery::_skip_committed()
     //     require changing the xact log to capture all of the relevant messages and their positions
     //     in the repl log so that we can replicate this behavior
 
-    SPDLOG_DEBUG_MODULE(LOG_GC, "Skip already committed records");
+    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Skip already committed records");
 
     // open the repl log
     _repl_log = fs::find_earliest_modified_file(_repl_path, PgLogMgr::LOG_PREFIX_REPL,
@@ -61,7 +61,7 @@ PgLogRecovery::_skip_committed()
         return false;
     }
 
-    SPDLOG_DEBUG_MODULE(LOG_GC, "Start with file {}", *_repl_log);
+    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Start with file {}", *_repl_log);
 
     _repl_reader.set_file(*_repl_log);
 
@@ -84,10 +84,10 @@ PgLogRecovery::_skip_committed()
         bool eob = false, eos = false;
         auto msg = _repl_reader.read_message(filter, eos, eob);
         if (msg != nullptr) {
-            SPDLOG_DEBUG_MODULE(LOG_GC, "Found message {}, eob {}, eos {}", static_cast<int>(msg->msg_type), eob, eos);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Found message {}, eob {}, eos {}", static_cast<int>(msg->msg_type), eob, eos);
             done = _process_msg(msg, log_number, xact_reader, cur_pgxid);
         } else {
-            SPDLOG_DEBUG_MODULE(LOG_GC, "Skipping message in repl log; offset {}, eob {}, eos {}", _repl_reader.offset(), eob, eos);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Skipping message in repl log; offset {}, eob {}, eos {}", _repl_reader.offset(), eob, eos);
         }
 
         // check if we need to move to the next replication log file
@@ -185,7 +185,7 @@ PgLogRecovery::_replay_active()
 {
     CHECK(!_active_map.empty());
 
-    SPDLOG_DEBUG_MODULE(LOG_GC, "Replay active messages");
+    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replay active messages");
 
     // Otherwise, we need to re-process all of the in-flight active xacts.  Find the earliest
     // starting position of an active transaction.
@@ -227,7 +227,7 @@ PgLogRecovery::_replay_active()
                 auto &begin_msg = std::get<PgMsgBegin>(msg->msg);
                 skip = !_active_map.contains(begin_msg.xid);
                 filter = (skip) ? scan_filter : process_filter;
-                SPDLOG_DEBUG_MODULE(LOG_GC, "Found BEGIN; pgxid {}, skip {}", begin_msg.xid, skip);
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Found BEGIN; pgxid {}, skip {}", begin_msg.xid, skip);
                 break;
             }
             case PgMsgEnum::STREAM_START: {
@@ -235,7 +235,7 @@ PgLogRecovery::_replay_active()
                 auto &start_msg = std::get<PgMsgBegin>(msg->msg);
                 skip = !_active_map.contains(start_msg.xid);
                 filter = (skip) ? scan_filter : process_filter;
-                SPDLOG_DEBUG_MODULE(LOG_GC, "Found STREAM_START; pgxid {}, skip {}", start_msg.xid, skip);
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Found STREAM_START; pgxid {}, skip {}", start_msg.xid, skip);
                 break;
             }
             case PgMsgEnum::STREAM_ABORT: {
@@ -243,7 +243,7 @@ PgLogRecovery::_replay_active()
                 auto &abort_msg = std::get<PgMsgStreamAbort>(msg->msg);
                 skip = !_active_map.contains(abort_msg.xid);
                 filter = (skip) ? scan_filter : process_filter;
-                SPDLOG_DEBUG_MODULE(LOG_GC, "Found STREAM_ABORT; pgxid {}, skip {}", abort_msg.xid, skip);
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Found STREAM_ABORT; pgxid {}, skip {}", abort_msg.xid, skip);
                 break;
             }
             case PgMsgEnum::STREAM_COMMIT: {
@@ -251,7 +251,7 @@ PgLogRecovery::_replay_active()
                 auto &commit_msg = std::get<PgMsgStreamCommit>(msg->msg);
                 skip = !_active_map.contains(commit_msg.xid);
                 filter = (skip) ? scan_filter : process_filter;
-                SPDLOG_DEBUG_MODULE(LOG_GC, "Found STREAM_COMMIT; pgxid {}, skip {}", commit_msg.xid, skip);
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Found STREAM_COMMIT; pgxid {}, skip {}", commit_msg.xid, skip);
                 break;
             }
             default:
@@ -261,7 +261,7 @@ PgLogRecovery::_replay_active()
 
             // if we aren't skipping the message, process it
             if (!skip) {
-                SPDLOG_DEBUG_MODULE(LOG_GC, "Process msg {}", static_cast<int>(msg->msg_type));
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Process msg {}", static_cast<int>(msg->msg_type));
                 _pg_log_reader->enqueue_msg(msg);
             }
         }
@@ -292,7 +292,7 @@ PgLogRecovery::_replay_uncommitted()
                              // create_index, drop_index
     };
 
-    SPDLOG_DEBUG_MODULE(LOG_GC, "Replay remaining uncommitted messages");
+    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replay remaining uncommitted messages");
 
     while (_repl_log) {
         bool eob, eos;

@@ -41,10 +41,9 @@ public:
      */
     uint64_t get_committed_xid(uint64_t db_id, uint64_t schema_xid);
 
-    ~XidMgrClient() override = default;
-
 private:
     XidMgrClient();
+    ~XidMgrClient() override = default;
 
     std::shared_ptr<grpc::Channel> _channel;
     std::unique_ptr<proto::XidManager::Stub> _stub;

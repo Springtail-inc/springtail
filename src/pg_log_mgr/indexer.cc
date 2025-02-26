@@ -2,12 +2,12 @@
 #include <stop_token>
 #include <assert.h>
 #include <algorithm>
-#include <garbage_collector/indexer.hh>
+#include <pg_log_mgr/indexer.hh>
 #include <common/logging.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <sys_tbl_mgr/client.hh>
 
-namespace springtail::gc {
+namespace springtail::committer {
 
     Indexer::Indexer(uint32_t worker_count) 
     {
@@ -83,9 +83,7 @@ namespace springtail::gc {
 
         // wait for the key {db, tid} to be removed from the working set
         std::unique_lock g(_m);
-        while( find_work()  ) {
-            _cv_done.wait(g, [&]{return !find_work();});
-        }
+        _cv_done.wait(g, [&find_work]{return !find_work();});
     }
 
     void Indexer::wait_for_completion(uint64_t db_id, uint64_t tid)
@@ -104,7 +102,7 @@ namespace springtail::gc {
         // wait for the key {db, tid} to be removed from the working set
         std::unique_lock g(_m);
         while( find_work()  ) {
-            _cv_done.wait(g, [&]{return !find_work();});
+            _cv_done.wait(g, [&find_work]{return !find_work();});
         }
     }
 
@@ -117,7 +115,7 @@ namespace springtail::gc {
             // get the next work item
             {
                 std::unique_lock g(_m);
-                if (!_cv.wait(g, st, [&] { return !_queue.empty(); })) {
+                if (!_cv.wait(g, st, [this]{ return !_queue.empty(); })) {
                     break;
                 }
 
@@ -207,8 +205,7 @@ namespace springtail::gc {
     {
         constexpr int DROP_CHECK_PERIOD = 1000;
 
-        SPDLOG_DEBUG_MODULE(LOG_GC, "Build index: {}:{} - {}", key.first, key.second,
-                            idx._ddl.dump());
+        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Build index: {}:{} - {}", key.first, key.second, idx._ddl.dump());
 
         auto [db_id, index_id] = key;
         auto tid = idx._ddl["table_id"];
@@ -271,8 +268,7 @@ namespace springtail::gc {
             ++current_row_id;
             ++row_cnt;
         }
-        SPDLOG_DEBUG_MODULE(LOG_GC, "Index build finished: {}:{}, rows={}", db_id, index_id,
-                            row_cnt);
+        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Index build finished: {}:{}, rows={}", db_id, index_id, row_cnt);
         return root;
     }
 

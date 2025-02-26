@@ -162,7 +162,8 @@ namespace {
         bool using_redis = false;
         FILE *_fp = nullptr;
         std::filesystem::path _log_file{LOG_FILE};
-        PgLogReader _log_reader{1, 8192, XACT_LOG_DIR}; // note: hard-codes DB ID as 1
+        PgLogReader::CommitterQueuePtr _committer_queue = std::make_shared<ConcurrentQueue<committer::XidReady>>();
+        PgLogReader _log_reader{1, 8192, XACT_LOG_DIR, _committer_queue}; // note: hard-codes DB ID as 1
         std::vector<PgTransactionPtr> _xact_list;
         std::shared_ptr<TestLogMgr> _log_mgr;
     };

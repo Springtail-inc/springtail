@@ -25,8 +25,6 @@ class Service final : public proto::SysTblMgr::Service, public Singleton<Service
     friend class Singleton<Service>;
 
 public:
-    ~Service() override = default;
-
     /** Simple interface to help ensure that the server is still running. */
     grpc::Status Ping(grpc::ServerContext* context,
                       const google::protobuf::Empty* request,
@@ -125,6 +123,7 @@ public:
 
 private:
     Service() = default;
+    ~Service() override = default;
 
     // CACHE FOR NAMES
 

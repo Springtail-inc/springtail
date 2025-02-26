@@ -1,8 +1,8 @@
 #include <memory>
 
 #include <common/constants.hh>
+#include <pg_log_mgr/committer.hh>
 #include <common/coordinator.hh>
-#include <garbage_collector/committer.hh>
 #include <opentelemetry/metrics/meter.h>
 #include <opentelemetry/metrics/provider.h>
 #include <pg_log_mgr/pg_redis_xact.hh>
@@ -10,8 +10,9 @@
 #include <redis/db_state_change.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
+#include <write_cache/write_cache_func.hh>
 
-namespace springtail::gc {
+namespace springtail::committer {
 
 bool
 _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
@@ -28,7 +29,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         // perform cleanup for any Committer threads in a previous run
         cleanup();
         _create_indexer();
-        auto meter = metrics::Provider::GetMeterProvider()->GetMeter("gc");
+        auto meter = metrics::Provider::GetMeterProvider()->GetMeter("committer");
         _btree_write_latencies = std::shared_ptr<metrics::Histogram<double>>(
             meter
                 ->CreateDoubleHistogram(
@@ -59,20 +60,20 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
             // figure out if there's an XID to process
             // note: this is a blocking call that will timeout after keep_alive secs
-            auto result = _redis.pop(_worker_id, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+            auto result = _committer_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (result == nullptr) {
                 continue; // got a timeout, try again
             }
             uint64_t db_id = result->db();
 
+            auto token_1 = logging::set_context_variables({{"db_id", std::to_string(db_id)}});
+
             // handle a TABLE_SYNC_START
             if (result->type() == XidReady::Type::TABLE_SYNC_START) {
-                SPDLOG_DEBUG_MODULE(LOG_GC, "Stop committing due to table sync: {}", db_id);
+                SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Stop committing due to table sync: {}", db_id);
                 // stop performing commits on this db until the table syncs are complete and aligned
                 _block_commit.insert(db_id);
 
-                // commit this work item and continue
-                _redis.commit(_worker_id);
                 continue;
             }
 
@@ -86,12 +87,14 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             } else {
                 completed_xid = itr->second;
             }
+
+            auto token_2 = logging::set_context_variables({{"xid", std::to_string(completed_xid)}});
             SPDLOG_INFO("Last completed XID: {}@{}", db_id, completed_xid);
 
             // handle a TABLE_SYNC_COMMIT
             if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT ||
                 result->type() == XidReady::Type::TABLE_SYNC_SWAP) {
-                SPDLOG_DEBUG_MODULE(LOG_GC, "Handle a TABLE_SYNC_SWAP/COMMIT: {}, {}, completed xid @{}",
+                SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Handle a TABLE_SYNC_SWAP/COMMIT: {}, {}, completed xid @{}",
                                     static_cast<char>(result->type()), db_id, completed_xid);
 
                 nlohmann::json ddls;
@@ -107,13 +110,15 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     completed_xid = result->swap().xid();
                 }
 
+                auto token_3 = logging::set_context_variables({{"xid", std::to_string(completed_xid)}});
+
                 // for operations at the SysTblMgr
                 auto client = sys_tbl_mgr::Client::get_instance();
 
                 // go through the hash of sys tbl operations
                 for (auto table_id : result->swap().tids()) {
                     auto ops_str = redis->hget(key, fmt::format("{}", table_id));
-                    SPDLOG_DEBUG_MODULE(LOG_GC, "table_id {}, ops: {} bytes", table_id,
+                    SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "table_id {}, ops: {} bytes", table_id,
                                         ops_str->size());
                     proto::CopyTableInfo copy_info;
                     if (!copy_info.ParseFromString(*ops_str)) {
@@ -184,14 +189,13 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     _block_commit.erase(db_id);
                 }
 
-                // commit this work item and continue
-                _redis.commit(_worker_id);
                 continue;
             }
 
             // note: from here we know we have an XACT_MSG
             assert(result->type() == XidReady::Type::XACT_MSG);
             uint64_t xid = result->xact().xid();
+            auto token_4 = logging::set_context_variables({{"xid", std::to_string(xid)}});
             SPDLOG_INFO("Process XID: {}@{}", db_id, xid);
             assert(xid > completed_xid);
 
@@ -207,10 +211,9 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             bool tid_done = false;
             while (!tid_done) {
                 // query the write cache for the tables modified through this XID
-                auto table_list = _write_cache->list_tables(db_id, xid, 100, table_cursor);
+                auto table_list = WriteCacheFuncImpl::list_tables(db_id, xid, 100, table_cursor);
 
-                SPDLOG_DEBUG_MODULE(LOG_GC, "Got {} tables from the write cache",
-                                    table_list.size());
+                SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Got {} tables from the write cache", table_list.size());
 
                 // check if we are done processing this XID
                 if (table_list.empty()) {
@@ -219,7 +222,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 }
 
                 for (auto tid : table_list) {
-                    SPDLOG_DEBUG_MODULE(LOG_GC, "Pass table {} to a worker", tid);
+                    SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Pass table {} to a worker", tid);
                     // mark this table as in-flight
                     {
                         boost::unique_lock lock(_mutex);
@@ -235,12 +238,12 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             // wait for tables to complete their processing
             // XXX ideally we could start working on the next XID while the finalize() operations
             //     are being completed.
-            SPDLOG_DEBUG_MODULE(LOG_GC, "Wait for {} tables to complete", _tid_set.size());
+            SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Wait for {} tables to complete", _tid_set.size());
             {
                 boost::unique_lock lock(_mutex);
                 _cv.wait(lock, [this]() { return _tid_set.empty(); });
             }
-            SPDLOG_DEBUG_MODULE(LOG_GC, "All table processing complete for XID {}", xid);
+            SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "All table processing complete for XID {}", xid);
 
             nlohmann::json index_ddls = _redis_ddl.get_index_ddls_xid(db_id, xid);
 
@@ -278,10 +281,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 _redis_ddl.commit_ddl(db_id, xid);
             }
 
-            SPDLOG_DEBUG_MODULE(LOG_GC, "XID completed: {}@{}", db_id, xid);
-
-            // mark the XID message as complete in the redis queue
-            _redis.commit(_worker_id);
+            SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "XID completed: {}@{}", db_id, xid);
         }
 
         // join all of the worker threads
@@ -293,7 +293,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         coordinator->unregister_thread(daemon_type, _worker_id);
 
         _indexer.reset();
-        SPDLOG_DEBUG_MODULE(LOG_GC, "Committer shutdown");
+        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Committer shutdown");
     }
 
     void
@@ -400,7 +400,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                         // this is very unlikely. It would mean that the system went down
                         // after the index build was finalized but before it had a chance
                         // to commit the DDL to redis.
-                        SPDLOG_DEBUG_MODULE(LOG_GC, "* Uncommitted index {}@{} -- {} {}", db_id, xid, tid, index_id);
+                        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "* Uncommitted index {}@{} -- {} {}", db_id, xid, tid, index_id);
                     } else {
                         // reconstruct the log message
                         PgMsgIndex msg;
@@ -503,7 +503,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         while (true) {
             // XXX would be better if we could perform an async prefetch to reduce IO latency
             PostgresTimestamp commit_ts;
-            auto &&extent_list = _write_cache->get_extents(db_id, tid, xid, 1, extent_cursor, commit_ts);
+            auto &&extent_list = WriteCacheFuncImpl::get_extents(db_id, tid, xid, 1, extent_cursor, commit_ts);
             if (!min_commit_ts || commit_ts < *min_commit_ts) {
                 min_commit_ts = commit_ts;
             }
@@ -527,7 +527,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - min_commit_ts->to_system_time());
             _btree_write_latencies->Record(duration.count(), _context);
-            SPDLOG_DEBUG_MODULE(LOG_GC, "Processed table {} in {} milliseconds", tid, duration.count());
+            SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Processed table {} in {} milliseconds", tid, duration.count());
             SPDLOG_ERROR("Processed table {} in {} milliseconds", tid, duration.count());
         }
         // update the system table roots
@@ -538,11 +538,11 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
     Committer::_process_extent(uint64_t db_id,
                                uint64_t tid,
                                MutableTablePtr table,
-                               const WriteCacheClient::WriteCacheExtent &wc_extent)
+                               const std::shared_ptr<springtail::WriteCacheIndexExtent> wc_extent)
     {
         // get the schema at the given XID/LSN
         // note: we are guaranteed that the entire batch will utilize the same schema
-        XidLsn xid(wc_extent.xid, wc_extent.lsn);
+        XidLsn xid(wc_extent->xid, wc_extent->xid_seq);
         auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, tid, xid);
 
         auto sort_keys = schema->get_sort_keys();
@@ -556,10 +556,8 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
         auto wc_schema = schema->create_schema(columns, new_columns, sort_keys);
 
-        // deserialize the extent
-        ExtentHeader header(ExtentType(), wc_extent.xid, wc_schema->row_size());
-        Extent extent(header);
-        extent.deserialize(wc_extent.data);
+        // Get the extent from the write cache index
+        Extent extent(*wc_extent->data);
 
         // process the rows
         auto op_f = wc_schema->get_field("__springtail_op");
@@ -577,13 +575,13 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             case INSERT:
                 {
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
-                    table->insert(tuple, wc_extent.xid, constant::UNKNOWN_EXTENT);
+                    table->insert(tuple, wc_extent->xid, constant::UNKNOWN_EXTENT);
                     break;
                 }
             case UPDATE:
                 {
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
-                    table->update(tuple, wc_extent.xid, constant::UNKNOWN_EXTENT);
+                    table->update(tuple, wc_extent->xid, constant::UNKNOWN_EXTENT);
                     break;
                 }
             case DELETE:
@@ -591,10 +589,10 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     if (wc_key_fields->empty()) {
                         // no sort key, so need to handle non-primary key by using the entire row
                         auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
-                        table->remove(tuple, wc_extent.xid, constant::UNKNOWN_EXTENT);
+                        table->remove(tuple, wc_extent->xid, constant::UNKNOWN_EXTENT);
                     } else {
                         auto tuple = std::make_shared<FieldTuple>(wc_key_fields, row);
-                        table->remove(tuple, wc_extent.xid, constant::UNKNOWN_EXTENT);
+                        table->remove(tuple, wc_extent->xid, constant::UNKNOWN_EXTENT);
                     }
                     break;
                 }

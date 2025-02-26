@@ -41,6 +41,7 @@ target_link_libraries(springtail_common
 	 opentelemetry-cpp::otlp_grpc_client
 	 opentelemetry-cpp::otlp_grpc_exporter
 	 opentelemetry-cpp::otlp_grpc_metrics_exporter
+   opentelemetry-cpp::otlp_grpc_log_record_exporter
 )
 
 add_executable(test_thread test/test_thread.cc)
