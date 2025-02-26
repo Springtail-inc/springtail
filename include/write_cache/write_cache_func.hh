@@ -126,23 +126,14 @@ namespace springtail {
          * @param commit_ts out; postgres-reported commit ts of xid
          * @return vector of extents
          */
-        static std::vector<springtail::WriteCacheClient::WriteCacheExtent>
+        static std::vector<WriteCacheIndexExtentPtr>
         get_extents(uint64_t db_id, uint64_t tid, uint64_t xid, uint32_t count, uint64_t &cursor, PostgresTimestamp &commit_ts)
         {
             WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
-            std::vector<springtail::WriteCacheClient::WriteCacheExtent> extents;
             std::vector<WriteCacheIndexExtentPtr> idx_extents =
                 index->get_extents(tid, xid, count, cursor, commit_ts);
 
-            for (const auto &e: idx_extents) {
-                springtail::WriteCacheClient::WriteCacheExtent extent;
-                extent.xid = e->xid;
-                extent.data = e->data->serialize();
-
-                extents.push_back(extent);
-            }
-
-            return extents;
+            return idx_extents;
         }
     };
 } // namespace springtail

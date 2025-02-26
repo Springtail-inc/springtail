@@ -20,7 +20,7 @@
 #include <pg_log_mgr/indexer.hh>
 
 #include <sys_tbl_mgr/table.hh>
-#include <write_cache/write_cache_client.hh>
+#include <write_cache/write_cache_index.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 
 #include <opentelemetry/context/context.h>
@@ -105,7 +105,7 @@ namespace springtail::committer {
          * @param wc_extent The WriteCacheExtent containing the mutations
          */
         void _process_extent(uint64_t db_id, uint64_t tid, MutableTablePtr table,
-                             const WriteCacheClient::WriteCacheExtent &wc_extent);
+                             const std::shared_ptr<springtail::WriteCacheIndexExtent> wc_extent);
 
         /**
          * Shifts the provided metadata to start at the new future XID.  Returns true if the

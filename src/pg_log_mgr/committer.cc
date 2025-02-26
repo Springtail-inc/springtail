@@ -515,7 +515,6 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
             // process each extent of ordered mutations
             for (auto wc_extent : extent_list) {
-                SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Processing extent {} with data {}", wc_extent.xid, wc_extent.data);
                 _process_extent(db_id, tid, table, wc_extent);
             }
         }
@@ -539,11 +538,11 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
     Committer::_process_extent(uint64_t db_id,
                                uint64_t tid,
                                MutableTablePtr table,
-                               const WriteCacheClient::WriteCacheExtent &wc_extent)
+                               const std::shared_ptr<springtail::WriteCacheIndexExtent> wc_extent)
     {
         // get the schema at the given XID/LSN
         // note: we are guaranteed that the entire batch will utilize the same schema
-        XidLsn xid(wc_extent.xid, wc_extent.lsn);
+        XidLsn xid(wc_extent->xid, wc_extent->xid_seq);
         auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, tid, xid);
 
         auto sort_keys = schema->get_sort_keys();
@@ -557,10 +556,8 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
         auto wc_schema = schema->create_schema(columns, new_columns, sort_keys);
 
-        // deserialize the extent
-        ExtentHeader header(ExtentType(), wc_extent.xid, wc_schema->row_size());
-        Extent extent(header);
-        extent.deserialize(wc_extent.data);
+        // Get the extent from the write cache index
+        Extent extent(*wc_extent->data);
 
         // process the rows
         auto op_f = wc_schema->get_field("__springtail_op");
@@ -578,13 +575,13 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             case INSERT:
                 {
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
-                    table->insert(tuple, wc_extent.xid, constant::UNKNOWN_EXTENT);
+                    table->insert(tuple, wc_extent->xid, constant::UNKNOWN_EXTENT);
                     break;
                 }
             case UPDATE:
                 {
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
-                    table->update(tuple, wc_extent.xid, constant::UNKNOWN_EXTENT);
+                    table->update(tuple, wc_extent->xid, constant::UNKNOWN_EXTENT);
                     break;
                 }
             case DELETE:
@@ -592,10 +589,10 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     if (wc_key_fields->empty()) {
                         // no sort key, so need to handle non-primary key by using the entire row
                         auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
-                        table->remove(tuple, wc_extent.xid, constant::UNKNOWN_EXTENT);
+                        table->remove(tuple, wc_extent->xid, constant::UNKNOWN_EXTENT);
                     } else {
                         auto tuple = std::make_shared<FieldTuple>(wc_key_fields, row);
-                        table->remove(tuple, wc_extent.xid, constant::UNKNOWN_EXTENT);
+                        table->remove(tuple, wc_extent->xid, constant::UNKNOWN_EXTENT);
                     }
                     break;
                 }
