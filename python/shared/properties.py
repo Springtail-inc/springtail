@@ -22,7 +22,7 @@ class Properties:
         self.cache = {}
 
         if config_file is None and 'SPRINGTAIL_PROPERTIES_FILE' in os.environ:
-            self.config_file = os.environ.get('SPRINGTAIL_PROPERTIES_FILE')
+            config_file = os.environ.get('SPRINGTAIL_PROPERTIES_FILE')
 
         if config_file:
             # remove the environment variable; prevents daemons from reloading redis
@@ -48,6 +48,10 @@ class Properties:
                 self.fdw_id = system_json['org']['fdw_id']
                 self.replication_user_password = system_json['org']['replication_user_password']
                 self.fdw_user_password = system_json['org']['fdw_user_password']
+
+                # not in config file, but will be set in production env
+                self.instance_key = None
+                self.service_name = None
 
                 # set the environment variables
                 env_vars = {
@@ -90,6 +94,10 @@ class Properties:
             self.fdw_user_password = os.environ.get('FDW_USER_PASSWORD', None)
             self.fdw_id = os.environ.get('FDW_ID', None)
 
+            # not in config file, but will be set in production env
+            self.instance_key = os.environ.get('INSTANCE_KEY', None)
+            self.service_name = os.environ.get('SERVICE_NAME', None)
+
         self.redis = redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db, ssl=self.redis_ssl,
                                        username=self.redis_user, password=self.redis_password, encoding="utf-8", decode_responses=True)
 
@@ -131,11 +139,14 @@ class Properties:
 
         return config
 
-    def get_fdw_config(self) -> dict:
+    def get_fdw_config(self, nocache : bool = False) -> dict:
         """Return a config object for foreign data wrapper configuration."""
         key = str(self.db_instance_id) + ':fdw'
-        if 'fdw_config' in self.cache:
+        if 'fdw_config' in self.cache and not nocache:
             return self.cache['fdw_config']
+
+        if not self.fdw_id:
+            return {}
 
         config = json.loads(self.redis.hget(key, self.fdw_id))
         config['password'] = self.fdw_user_password
@@ -293,7 +304,13 @@ class Properties:
         system_config = self.get_system_config()
         if 'log_path' not in system_config['logging']:
             raise Exception('log_path not found in system settings')
-        log_path = os.path.dirname(system_config['logging']['log_path'])
+
+        log_path = system_config['logging']['log_path']
+
+        # check if the log path is a file; if so return the directory
+        if os.path.isfile(log_path):
+            log_path = os.path.dirname(system_config['logging']['log_path'])
+
         return log_path
 
     def get_data_redis(self) -> redis.StrictRedis:
@@ -301,6 +318,17 @@ class Properties:
         return redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_data_db,
                                  username=self.redis_user, password=self.redis_password,
                                  encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
+
+    def get_config_redis(self) -> redis.StrictRedis:
+        """Return the config redis object."""
+        return redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db,
+                                 username=self.redis_user, password=self.redis_password,
+                                 encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
+
+    def get_hostname(self, type : str) -> str:
+        """Return the hostname for the given type."""
+        key = self.db_instance_id + ':instance_config'
+        return self.redis.hget(key, f'hostname:{type}')
 
     def set_db_state(self, dbname : str, state :str) -> None:
         """Set the state of a database, use cautiously."""
@@ -351,4 +379,40 @@ class Properties:
         # set the state to initialize
         self.redis.hset(self.db_instance_id + ':instance_state', new_id, 'initialize')
 
+    def get_coordinator_state(self) -> str:
+        """Return the coordinator state."""
+        key = self.db_instance_id + ':coordinator_state'
+        if not self.service_name or not self.instance_key:
+            return 'running' # for test env.
+        field_key = self.service_name + ':' + self.instance_key
+        return self.redis.hget(key, field_key)
 
+    def set_coordinator_state(self, state: str) -> None:
+        """Set the coordinator state."""
+        if not self.service_name or not self.instance_key:
+            return # for test env.
+        key = self.db_instance_id + ':coordinator_state'
+        field_key = self.service_name + ':' + self.instance_key
+        self.redis.hset(key, field_key, state)
+
+def main():
+    # call the get functions and print the results
+    props = Properties()
+    print(f"db_configs: {props.get_db_configs()}")
+    print(f"db_instance_config: {props.get_db_instance_config()}")
+    if props.get_fdw_id():
+        print(f"fdw_config: {props.get_fdw_config()}")
+    print(f"proxy_config: {props.get_proxy_config()}")
+    print(f"system_config: {props.get_system_config()}")
+    print(f"mount_path: {props.get_mount_path()}")
+    print(f"fdw_id: {props.get_fdw_id()}")
+    print(f"db_instance_id: {props.get_db_instance_id()}")
+    print(f"liveness_hash: {props.get_liveness_hash()}")
+    print(f"liveness_notification_pubsub: {props.get_liveness_notification_pubsub()}")
+    print(f"pid_path: {props.get_pid_path()}")
+    print(f"log_path: {props.get_log_path()}")
+    print(f"hostname: {props.get_hostname('ingestion')}")
+    print(f"coordinator_state: {props.get_coordinator_state()}")
+
+if __name__ == "__main__":
+    main()

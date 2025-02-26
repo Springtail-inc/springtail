@@ -538,6 +538,8 @@ def check_logs(config_file: str) -> List[str]:
     props = Properties(os.path.abspath(config_file), False)
     log_path = props.get_log_path()
 
+    fixup_log_perms(props)
+
     # Check the logs for errors
     error_logs = check_backtrace(log_path)
     if error_logs:

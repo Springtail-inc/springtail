@@ -40,11 +40,13 @@ namespace springtail::pg_log_mgr {
             _pg_log_reader(db_id, _xact_queue, _committer_queue), _xact_log_path(xact_log_path),
             _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
     {
+        // construct the callback for watching for database state changes
         _cache_watcher_db_states = std::make_shared<RedisCache::RedisChangeWatcher>(
             [this](const std::string &path, const nlohmann::json &new_value) -> void {
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR,"Replicated database state change; path: {}, state: {}",
                     path, new_value.dump(4));
                 CHECK(path.starts_with(Properties::DATABASE_STATE_PATH));
+
                 // extract database id
                 std::vector<std::string> path_parts;
                 common::split_string("/", path, path_parts);
@@ -57,7 +59,7 @@ namespace springtail::pg_log_mgr {
                     return;
                 }
 
-                // extract state
+                // extract state and handle state change
                 CHECK(new_value.type() == nlohmann::json::value_t::string);
                 std::string state_str = new_value.get<std::string>();
                 redis::db_state_change::DBState state = redis::db_state_change::db_state_map[state_str];
@@ -83,10 +85,15 @@ namespace springtail::pg_log_mgr {
             Properties::set_db_state(_db_id, state);
         }
 
-        // reset state if we were stuck in syncing
+        // reset state if we were stuck in syncing or copy tables
         if (state == redis::db_state_change::REDIS_STATE_SYNCING) {
-            // XXX need to handle, not sure whether to reset to running or initialize
-            assert(false);
+            // reset state to running; GC will move us back to syncing
+            state = redis::db_state_change::REDIS_STATE_RUNNING;
+            Properties::set_db_state(_db_id, state);
+        } else if (state == redis::db_state_change::REDIS_STATE_COPY_TABLES) {
+            // we were in copy tables state, reset to initialize to restart copy tables
+            state = redis::db_state_change::REDIS_STATE_INITIALIZE;
+            Properties::set_db_state(_db_id, state);
         }
 
         // add redis cache callback for watching database state changes
@@ -96,6 +103,10 @@ namespace springtail::pg_log_mgr {
             _cache_watcher_db_states);
 
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Starting up: DB state: {}", state);
+
+        // need to add back table sync worker items to redis sync queue and clear the queue
+        _redis_sync_queue.abort(REDIS_WORKER_ID);
+        _redis_sync_queue.clear();
 
         // fetch latest xid from xid mgr
         XidMgrClient *xid_mgr = XidMgrClient::get_instance();
@@ -186,9 +197,6 @@ namespace springtail::pg_log_mgr {
             }
         }
 
-        // need to add back table sync worker items to redis sync queue
-        _redis_sync_queue.abort(REDIS_WORKER_ID);
-
         // set state to running
         Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_RUNNING);
 
@@ -209,10 +217,10 @@ namespace springtail::pg_log_mgr {
         std::filesystem::create_directories(_repl_log_path);
         std::filesystem::create_directories(_xact_log_path);
 
-        // clear out Redis
-        // Table sync queue
-        _redis_sync_queue.clear();
+        // set state to copy tables
+        Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_COPY_TABLES);
 
+        // set internal state to copy tables
         _internal_state.set(STATE_STARTUP_SYNC);
     }
 
@@ -221,25 +229,29 @@ namespace springtail::pg_log_mgr {
     {
         StateEnum internal_state = _internal_state.get();
 
-        if (new_state == redis::db_state_change::DB_STATE_RUNNING) {
-            if (internal_state == STATE_RUNNING) {
-                // already in running state
-                return;
-            }
-
-            // if the new state is running, then we should have been in the replay done state
-            // otherwise ignore the state change
-            if (internal_state == STATE_SYNC_STALL ||
-                internal_state == STATE_STARTUP_SYNC) {
-                // if in replaying, ignore message will switch to running when replay is done
-                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received state change to running from replaying");
-                return;
-            }
-
-            // if in replay done set to running XXX
-            _internal_state.test_and_set(STATE_REPLAYING, STATE_RUNNING);
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Current state is running: {}", (_internal_state.get() == STATE_RUNNING));
+        // we only care about running state changes
+        if (new_state != redis::db_state_change::DB_STATE_RUNNING) {
+            return;
         }
+
+        // new state is running, check internal state
+        if (internal_state == STATE_RUNNING) {
+            // already in running state
+            return;
+        }
+
+        // if the new state is running, then we should have been in the replay done state
+        // otherwise ignore the state change
+        if (internal_state == STATE_SYNC_STALL ||
+            internal_state == STATE_STARTUP_SYNC) {
+            // if in replaying, ignore message will switch to running when replay is done
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received state change to running from replaying");
+            return;
+        }
+
+        // if in replay done set to running XXX
+        _internal_state.test_and_set(STATE_REPLAYING, STATE_RUNNING);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Current state is running: {}", (_internal_state.get() == STATE_RUNNING));
     }
 
     void
