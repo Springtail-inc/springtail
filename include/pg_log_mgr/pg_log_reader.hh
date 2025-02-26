@@ -1,10 +1,8 @@
 #pragma once
 
 #include <memory>
-#include <fstream>
 #include <filesystem>
 #include <map>
-#include <vector>
 
 #include <common/concurrent_queue.hh>
 #include <common/redis_types.hh>
@@ -89,8 +87,7 @@ namespace springtail::pg_log_mgr {
             Batch(uint64_t db_id, int32_t pg_xid)
                 : _db(db_id), _pg_xid(pg_xid)
             {
-                auto provider = opentelemetry::trace::Provider::GetTracerProvider();
-                auto tracer = provider->GetTracer("PgLogReader");
+                auto tracer = tracing::tracer("PgLogReader");
                 _span = tracer->StartSpan("Transaction");
                 _span->SetAttribute("pg_xid", pg_xid);
             }

@@ -50,6 +50,32 @@ namespace springtail {
     }
 
     void
+    shutdown_exception()
+    {
+        // register the signal handlers for backtraces
+        std::vector<int> signals{
+            SIGABRT, // Abort signal from abort(3)
+            SIGBUS,  // Bus error (bad memory access)
+            SIGFPE,  // Floating point exception
+            SIGILL,  // Illegal Instruction
+            SIGIOT,  // IOT trap. A synonym for SIGABRT
+            SIGQUIT, // Quit from keyboard
+            SIGSEGV, // Invalid memory reference
+            SIGSYS,  // Bad argument to routine (SVr4)
+            SIGTRAP, // Trace/breakpoint trap
+            SIGXCPU, // CPU time limit exceeded (4.2BSD)
+            SIGXFSZ, // File size limit exceeded (4.2BSD)
+#if defined(__APPLE__)
+            SIGEMT, // emulation instruction executed
+#endif
+        };
+
+        for (int s : signals) {
+            std::signal(s, SIG_DFL);
+        }
+    }
+
+    void
     Error::log_backtrace() const
     {
         std::stringstream ss;

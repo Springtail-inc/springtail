@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
-#include <common/common.hh>
+#include <common/common_init.hh>
 #include <common/json.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
@@ -19,7 +19,7 @@ namespace {
     class XidMgr_Test : public testing::Test {
     protected:
         void SetUp() override {
-            springtail_init();
+            init::springtail_init();
 
             nlohmann::json json = Properties::get(Properties::XID_MGR_CONFIG);
 
@@ -50,6 +50,7 @@ namespace {
             // shutdown server
             SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Shutting down server");
             xid_mgr::XidMgrServer::shutdown();
+            init::springtail_shutdown();
         }
 
         static void run_clients(int thread_id, int iterations)

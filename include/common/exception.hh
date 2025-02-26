@@ -39,4 +39,6 @@ namespace springtail {
      * Intialize the exception and backtrace handling.
      */
     void init_exception(void);
+
+    void shutdown_exception(void);
 }

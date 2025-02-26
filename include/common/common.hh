@@ -15,6 +15,9 @@
 #include <common/exception.hh>
 
 namespace springtail {
+    void
+    daemonize(const std::string &pid_file);
+
     /**
      * @brief Initialize the springtail system
      * @param log_filename log filename override
