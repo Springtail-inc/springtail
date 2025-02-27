@@ -6,6 +6,7 @@ import argparse
 import string
 import signal
 import time
+import boto3
 from typing import Optional
 from random import SystemRandom
 
@@ -21,7 +22,7 @@ from properties import Properties
 
 # import the ComponentFactory class and the Scheduler class
 from component_factory import ComponentFactory
-from scheduler import Scheduler
+from scheduler import Scheduler, CoordinatorState
 
 # import the xid_mgr_client
 from xid_mgr import XidMgrClient
@@ -175,6 +176,9 @@ if __name__ == "__main__":
                         handlers=handlers)
 
     logger = logging.getLogger("Coordinator")
+    logging.getLogger('boto3').setLevel(logging.WARNING)
+    logging.getLogger('botocore').setLevel(logging.WARNING)
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
 
     # Get the service type
     service_name = args.service
@@ -194,12 +198,16 @@ if __name__ == "__main__":
         logger.debug("Checking properties for production")
         production = True
 
+        state = props.get_coordinator_state()
+        logger.info(f"Coordinator state: {state}")
+
         # Install binaries
         try:
-            install_binaries(install_path)
+            if state == CoordinatorState.STARTUP:
+                logger.debug("Installing binaries")
+                install_binaries(install_path)
         except Exception as e:
             raise ValueError("Failed to install binaries: " + str(e))
-
 
     # Create scheduler
     logger.debug("Starting scheduler")
@@ -228,8 +236,7 @@ if __name__ == "__main__":
     if service_name == "ingestion":
         scheduler.register_component(factory.create_xid_mgr_daemon(), 1)
         scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 2)
-        scheduler.register_component(factory.create_gc_daemon(), 3)
-        scheduler.register_component(factory.create_log_mgr_daemon(), 4)
+        scheduler.register_component(factory.create_log_mgr_daemon(), 3)
 
     elif service_name == "fdw":
         try:

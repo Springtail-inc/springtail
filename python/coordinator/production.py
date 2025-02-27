@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import tempfile
+import json
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from botocore.exceptions import ClientError
@@ -275,8 +276,8 @@ def _extract_attributes() -> Dict[str, Any]:
 
     attributes['AWS_INSTANCE_ID'] = instance_id
 
-    # generate SRN
-    srn = f"{attributes['ORGANIZATION_ID']}:{attributes['ACCOUNT_ID']}:aws:dbi:{attributes['DATABASE_INSTANCE_ID']}"
+    # generate SRN: format: srn:1:1:aws:dbi/82
+    srn = f"srn:{attributes['ORGANIZATION_ID']}:{attributes['ACCOUNT_ID']}:aws:dbi/{attributes['DATABASE_INSTANCE_ID']}"
     attributes['SRN'] = srn
 
     return {k.lower(): v for k, v in attributes.items()}
@@ -311,6 +312,7 @@ def send_sns(
     attributes = dict(SNS_ATTRIBUTES)
     attributes['epoch_ms'] = timestamp_ms
     attributes['timestamp'] = timestamp
+    attributes['source'] = 'coordinator'
 
     if type == 'startup':
         subject = f"Instance startup: {srn}, {service_name} @{timestamp}"
@@ -335,6 +337,6 @@ def send_sns(
         logging.error(f"Unknown SNS message type: {type}")
         return
 
-    message = f"{subject}\n\n{attributes}"
+    message = f"{subject}\n\n{json.dumps(attributes)}"
 
     __send_sns_notification(TOPIC_ARN, subject, message, attributes)
