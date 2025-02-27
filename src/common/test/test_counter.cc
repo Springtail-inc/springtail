@@ -17,15 +17,15 @@ TEST(CounterTest, SimpleTest) {
     // construct two threads that will do concurrent decrement
     std::thread t1([&counter]() {
         for (int i = 0; i < 4; ++i) {
-            counter.decrement();
             std::this_thread::sleep_for(std::chrono::seconds(1));
+            counter.decrement();
         }
     });
 
     std::thread t2([&counter]() {
         for (int i = 0; i < 4; ++i) {
-            counter.decrement();
             std::this_thread::sleep_for(std::chrono::seconds(1));
+            counter.decrement();
         }
     });
 
