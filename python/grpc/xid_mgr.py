@@ -2,23 +2,53 @@ import sys
 import os
 import grpc
 import time
+from typing import Optional
 
 # Add the directory containing the generated gRPC files to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'xid_manager')))
 
-import xid_manager_pb2
-import xid_manager_pb2_grpc
+import xid_manager_pb2, xid_manager_pb2_grpc
 from google.protobuf import empty_pb2
 
 class XidMgrClient:
-    def __init__(self, host: str, port: int):
+    def __init__(self,
+                 host: str,
+                 port: int,
+                 ca_cert_path: Optional[str] = "",
+                 ca_client_key_path: Optional[str] = "",
+                 ca_client_cert_path: Optional[str] = ""):
         """Initialize XidManager client with server connection details.
 
         Args:
             host: The hostname of the XidManager server
             port: The port number of the XidManager server
+            ca_cert_path: The path to the CA certificate file
+            ca_client_key_path: The path to the client key file
+            ca_client_cert_path: The path to the client certificate file
         """
-        self.channel = grpc.insecure_channel(f"{host}:{port}")
+
+        if ca_cert_path and ca_client_key_path and ca_client_cert_path:
+            with open(ca_cert_path, 'rb') as ca_cert_file, \
+                 open(ca_client_key_path, 'rb') as ca_client_key_file, \
+                 open(ca_client_cert_path, 'rb') as ca_client_cert_file:
+                ca_cert = ca_cert_file.read()
+                client_cert = ca_client_cert_file.read()
+                client_key = ca_client_key_file.read()
+
+            # Create gRPC channel with SSL credentials
+            creds = grpc.ssl_channel_credentials(
+                root_certificates=ca_cert,   # Verify server certificate
+                private_key=client_key,      # Client private key
+                certificate_chain=client_cert  # Client certificate
+            )
+
+            # Override the target name to match the server certificate's CN
+            channel_options = (("grpc.ssl_target_name_override", "springtail_server"),)
+
+            self.channel = grpc.secure_channel(f"{host}:{port}", creds, options=channel_options)
+        else:
+            self.channel = grpc.insecure_channel(f"{host}:{port}")
+
         self.stub = xid_manager_pb2_grpc.XidManagerStub(self.channel)
 
     def ping(self, count: int = 1, sleep_time: int = 1):
@@ -100,7 +130,11 @@ class XidMgrClient:
 
 if __name__ == "__main__":
     # Example usage
-    with XidMgrClient('localhost', 5052) as client:
+    client_cert = "/home/dev/springtail/ca_certs/client_cert.pem"
+    client_key = "/home/dev/springtail/ca_certs/client_key.pem"
+    root_cert = "/home/dev/springtail/ca_certs/ca_cert.pem"
+
+    with XidMgrClient('localhost', 5052, root_cert, client_key, client_cert) as client:
         client.ping()
         print("Ping successful")
         xid = client.get_committed_xid(1)
