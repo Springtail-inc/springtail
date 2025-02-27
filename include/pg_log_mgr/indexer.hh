@@ -11,7 +11,7 @@
 #include <boost/functional/hash.hpp>
 #include <storage/mutable_btree.hh>
 
-namespace springtail::gc {
+namespace springtail::committer {
 
     /**
      * Indexer is responsible for building table secondary indexes.

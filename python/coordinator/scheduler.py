@@ -18,20 +18,41 @@ sys.path.append(os.path.join(project_root, 'shared'))
 # Now import the Properties class
 from properties import Properties
 
-from production import send_sns
+from production import (
+    install_binaries,
+    install_pgfdw,
+    send_sns
+)
+
+class CoordinatorState:
+    """Coordinator state class"""
+    SHUTDOWN = 'shutdown'
+    STARTUP = 'startup'
+    RUNNING = 'running'
+    DEAD = 'dead'
+    RELOAD = 'reload'
 
 class Scheduler:
     """Scheduler class to manage the lifecycle of components"""
 
-    def __init__(self, props: Properties, allowed_timeout_secs: int = 15):
+    def __init__(self,
+        props: Properties,
+        service_name : str,
+        production : bool,
+        allowed_timeout_secs: int = 15
+    ):
         """
         Initialize a new scheduler
         Arguments:
             props -- the properties object
+            service_name -- the name of the service
+            production -- whether the service is in production
             allowed_timeout -- the allowed timeout for components in seconds
                 NOTE: see constants.hh for the default keep alive timeout
         """
         self.props = props
+        self.service_name = service_name
+        self.production = production
         self.redis = props.get_data_redis()
         self.liveness_hash = props.get_liveness_hash()
         self.liveness_pubsub = props.get_liveness_notification_pubsub()
@@ -134,6 +155,7 @@ class Scheduler:
                     return False
 
                 self.logger.error(f"PubSub: Error for component: {id}: {self.components[id].name}")
+                send_sns('failure', component=self.components[id].name)
                 return True
 
         except redis.TimeoutError:
@@ -175,6 +197,7 @@ class Scheduler:
             if timestamp < min_time:
                 self.logger.error(f"Timeout for component: {self.components[id].name}, {timestamp} < {min_time} {time.time() * 1000 - timestamp}")
                 if id in self.components:  # this should always be true
+                    send_sns('failure', component=self.components[id].name)
                     return True
 
         return False
@@ -189,6 +212,7 @@ class Scheduler:
         for id, component in self.components.items():
             if not component.is_alive():
                 self.logger.error(f"Component {component.name} is not running")
+                send_sns('failure', component=component.name)
                 failed = True
 
         return failed
@@ -209,6 +233,41 @@ class Scheduler:
             if id in self.components:
                 self.redis.hdel(self.liveness_hash, key)
 
+    def __check_coordinator_state(self) -> None:
+        """
+        Check the coordinator state
+        """
+        if not self.production:
+            return
+
+        coordinator_state = self.props.get_coordinator_state()
+
+        if coordinator_state == CoordinatorState.RUNNING:
+            return
+
+        if coordinator_state == CoordinatorState.SHUTDOWN:
+            self.logger.info("Coordinator state is shutdown, exiting")
+            self.shutdown()
+
+        if coordinator_state == CoordinatorState.STARTUP:
+            self.logger.info("Coordinator state is startup, setting running state")
+            self.props.set_coordinator_state(CoordinatorState.RUNNING)
+            return
+
+        if coordinator_state == CoordinatorState.RELOAD:
+            self.logger.info("Coordinator state is reload, shutting down services")
+            self.shutdown_all()
+            self.logger.info("Shutting down services complete, installing binaries")
+            install_binaries()
+            if self.service_name == 'fdw':
+                self.logger.info("Installing postgres_fdw")
+                install_pgfdw()
+            self.logger.info("Restarting services")
+            self.restart_all()
+            self.props.set_coordinator_state(CoordinatorState.RUNNING)
+            self.logger.info("Restarting services complete")
+            return;
+
     def monitor_timeouts(self) -> None:
         """
         Monitor Redis queue for timeout events
@@ -217,10 +276,18 @@ class Scheduler:
         # This will clear any existing timeouts from Redis
         self.__init_timeouts()
 
-        while not self.shutdown_event.is_set():
+        while True:
             try:
+                # get the coordinator state
+                self.__check_coordinator_state()
+
+                # check if shutdown event is set, if so, break
+                if self.shutdown_event.is_set():
+                    break
+
+                # check for pubsub messages, timeouts, or component failures
                 if (
-                   self.__check_pubsub() or    # check for messages on the pubsub channel
+                   self.__check_pubsub() or    # check for pubsub ; blocks 1 second if no messages
                    self.__check_timeouts() or  # check for timeouts
                    self.__check_components()   # check for component failures
                 ):
@@ -232,7 +299,7 @@ class Scheduler:
 
                     if not self.restart_all():
                         # XXX handle
-
+                        send_sns('failure', component='all')
                         self.logger.error("Failed to restart all components")
                         break
 
@@ -247,6 +314,16 @@ class Scheduler:
                 self.logger.error(error_message)
                 continue
 
-        # end of loop, continue
+        # end of while loop
+
+        # shutdown all components
+        self.shutdown_all()
+
+        # close the pubsub
         self.pubsub.close()
+
+        # close the redis connection
         self.redis.close()
+
+        # set dead state
+        self.props.set_coordinator_state(CoordinatorState.DEAD)

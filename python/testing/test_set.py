@@ -139,10 +139,11 @@ class TestSet:
                 self._tests[test_file].verify()
 
             except Exception as e:
-                logging.error(f'Error: {e}')
+                logging.error(f'Error: exception: [{e}] result: {self._tests[test_file].get_result()["result"]}')
                 if self._tests[test_file].get_result()['result'] == 'FAILED':
                     test_failed = True
                 else:
+                    logging.info(f'Skipping the test: {test_file}')
                     self._tests[test_file].skip()
 
             # save the logs

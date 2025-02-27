@@ -54,8 +54,7 @@ FDW_SYSTEM_CATALOG = '__pg_springtail_catalog'
 CORE_DAEMONS = [
     ('xid_mgr_daemon', 'src/xid_mgr/xid_mgr_daemon', '-x,10'),
     ('sys_tbl_mgr_daemon', 'src/sys_tbl_mgr/sys_tbl_mgr_daemon'),
-    ('pg_log_mgr_daemon', 'src/pg_log_mgr/pg_log_mgr_daemon'),
-    ('gc_daemon', 'src/garbage_collector/gc_daemon')
+    ('pg_log_mgr_daemon', 'src/pg_log_mgr/pg_log_mgr_daemon')
 ]
 
 FDW_DAEMONS = [
@@ -538,6 +537,8 @@ def check_logs(config_file: str) -> List[str]:
     # Load the system properties from the system.json file
     props = Properties(os.path.abspath(config_file), False)
     log_path = props.get_log_path()
+
+    fixup_log_perms(props)
 
     # Check the logs for errors
     error_logs = check_backtrace(log_path)
