@@ -90,7 +90,7 @@ GrpcXidMgrService::Subscribe(
         grpc::CallbackServerContext* context,
         const proto::SubscribeRequest* request)
 {
-    auto notifier = new Notifier(*this);
+    auto notifier = new Notifier(*this); //NOSONAR reason: The object lifetime is controlled by GRPC
 
     // register the notifiers
     std::scoped_lock<std::mutex> l(_m);
@@ -177,7 +177,7 @@ GrpcXidMgrService::Notifier::OnDone()
     if (!_finish) {
         _service._unsubscribe(this);
     }
-    delete this;
+    delete this; //NOSONAR reason: The object lifetime is controlled by GRPC
 }
 
 void 

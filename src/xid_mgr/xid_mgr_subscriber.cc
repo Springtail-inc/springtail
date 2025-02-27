@@ -52,7 +52,7 @@ void XidMgrSubscriber::OnDone(const grpc::Status& s)
         _cb->disconnect();
         _cb = {};
     }
-    delete this;
+    delete this; //NOSONAR reason: The object lifetime is controlled by GRPC
 }
 
 }
