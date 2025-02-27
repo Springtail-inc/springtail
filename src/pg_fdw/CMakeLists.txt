@@ -2,6 +2,7 @@ enable_language(C)
 
 find_package(PostgreSQL REQUIRED)
 find_package(Boost COMPONENTS program_options REQUIRED)
+find_package(Boost COMPONENTS interprocess REQUIRED)
 
 include(FdwTestSetup)
 
@@ -62,6 +63,21 @@ target_link_libraries(pg_ddl_daemon
     PRIVATE Boost::program_options
 )
 add_dsymutil_command(pg_ddl_daemon)
+
+add_executable(pg_xid_subscriber_daemon pg_xid_subscriber_daemon.cc)
+target_include_directories(pg_xid_subscriber_daemon
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+    PRIVATE ${PostgreSQL_INCLUDE_DIRS}
+)
+
+target_link_libraries(pg_xid_subscriber_daemon
+    PRIVATE springtail_common
+    PRIVATE springtail_pg
+    PRIVATE springtail_redis
+    PRIVATE Boost::program_options
+    PRIVATE Boost::interprocess
+)
+add_dsymutil_command(pg_xid_subscriber_daemon)
 
 # Extract transitive dependencies of libraryC
 get_target_property(POSTGRES_DEP_LIBS PostgreSQL::PostgreSQL INTERFACE_LINK_LIBRARIES)
@@ -136,6 +152,11 @@ install(TARGETS
     springtail_pg_fdw
     regress
     LIBRARY DESTINATION lib
+)
+
+install(TARGETS
+    pg_xid_subscriber_daemon
+    RUNTIME DESTINATION bin/system
 )
 
 # install fdw files into share

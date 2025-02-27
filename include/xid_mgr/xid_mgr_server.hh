@@ -7,6 +7,7 @@
 #include <common/singleton.hh>
 #include <common/grpc_server_manager.hh>
 #include <xid_mgr/xid_partition.hh>
+#include <xid_mgr/xid_mgr_service.hh>
 
 namespace springtail::xid_mgr {
 
@@ -41,6 +42,8 @@ public:
 private:
     XidMgrServer();
     ~XidMgrServer() override = default;
+
+    std::unique_ptr<GrpcXidMgrService> _service;
 
     springtail::GrpcServerManager _grpc_server_manager;
 

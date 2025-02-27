@@ -28,6 +28,16 @@ message GetCommittedXidResponse {
   int64 xid = 1;
 }
 
+// Request message to subsribe for XID push notifications
+message SubscribeRequest {
+}
+
+// Push stream message of committed xid's
+message XidPushResponse {
+  int64 db_id = 1;
+  int64 xid = 2;
+}
+
 // XID Manager service definition
 service XidManager {
   // Health check
@@ -41,4 +51,7 @@ service XidManager {
 
   // Get latest committed XID
   rpc GetCommittedXid(GetCommittedXidRequest) returns (GetCommittedXidResponse) {}
+
+  // Subscribe for push notifications
+  rpc Subscribe(SubscribeRequest) returns (stream XidPushResponse) {}
 } 
