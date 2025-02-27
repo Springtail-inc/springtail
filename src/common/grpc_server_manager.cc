@@ -94,7 +94,6 @@ GrpcServerManager::shutdown()
         _server->Shutdown();
         _server.reset();
     }
-    _server.reset();
 }
 
 }  // namespace springtail
