@@ -54,15 +54,6 @@ int main(int argc, char *argv[])
 
     springtail_init(runners, "pg_log_mgr", pidfile);
 
-    /*
-    pg_log_mgr::PgLogCoordinator *log_co = pg_log_mgr::PgLogCoordinator::get_instance();
-
-    // register the SIGINT handler
-    std::signal(SIGINT, handle_sigint);
-
-    log_co->init();
-    */
-
     pg_log_mgr::PgLogCoordinator::get_instance()->wait_shutdown();
 
     sys_tbl_mgr::Client::shutdown();
