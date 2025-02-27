@@ -12,7 +12,8 @@ int
 main(int argc,
      char *argv[])
 {
-    springtail_init();
+    std::vector<ServiceRunner *> runners;
+    springtail_init(runners, false);
 
     // open the file and scan the header of each extent
     auto handle = IOMgr::get_instance()->open(argv[1], IOMgr::IO_MODE::READ, true);

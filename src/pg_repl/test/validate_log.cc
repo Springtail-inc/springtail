@@ -38,7 +38,7 @@ int main(int argc, char* argv[])
 
     // init logging/backtrace
     std::vector<ServiceRunner *> runners;
-    springtail_init(runners, std::nullopt, std::nullopt, LOG_PG_REPL);
+    springtail_init(runners, false, std::nullopt, std::nullopt, LOG_PG_REPL);
 
     uint64_t last_lsn = PgMsgStreamReader::scan_log(file);
 

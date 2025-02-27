@@ -52,7 +52,7 @@ main(int argc, char* argv[])
         new xid_mgr::XidMgrRunner(vm.count("xid") && vm.count("dbid"), db_id, starting_xid)
     };
 
-    springtail_init(runners, "xid_mgr", pidfile);
+    springtail_init(runners, !pidfile.has_value(), "xid_mgr", pidfile);
 
     // Block until SIGINT is received. If any other signal wakes the process,
     // pause() will return and the loop will continue until shutdown_requested is set.

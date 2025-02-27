@@ -60,7 +60,7 @@ int main(int argc, char* argv[])
 
     std::vector<ServiceRunner *> runners;
     // init logging/backtrace
-    springtail_init(runners, std::nullopt, std::nullopt, LOG_PG_REPL);
+    springtail_init(runners, false, std::nullopt, std::nullopt, LOG_PG_REPL);
 
     // create postgres connection
     PgReplConnection pg_conn(port, host, db_name, user_name, password, pub_name, slot_name);

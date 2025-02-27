@@ -10,7 +10,8 @@ int
 main(int argc,
      char *argv[])
 {
-    springtail_init();
+    std::vector<ServiceRunner *> runners;
+    springtail_init(runners, false);
 
     // construct a schema for testing
     std::vector<SchemaColumn> columns({

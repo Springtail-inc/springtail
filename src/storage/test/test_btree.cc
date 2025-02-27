@@ -40,7 +40,7 @@ namespace {
             ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
 
             std::vector<ServiceRunner *> runners;
-            springtail_init(runners, std::nullopt, std::nullopt, LOG_ALL ^ LOG_STORAGE);
+            springtail_init(runners, true, std::nullopt, std::nullopt, LOG_ALL ^ LOG_STORAGE);
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({

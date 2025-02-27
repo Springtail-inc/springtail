@@ -17,7 +17,8 @@ main(int argc, char **argv)
     uint64_t xid = 0;
     uint64_t db_id = 1;
 
-    springtail_init();
+    std::vector<ServiceRunner *> runners;
+    springtail_init(runners, false);
 
     // parse the arguments
     namespace po = boost::program_options;

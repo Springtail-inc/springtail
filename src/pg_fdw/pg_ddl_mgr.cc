@@ -240,7 +240,7 @@ namespace springtail::pg_fdw {
     void
     PgDDLMgr::run()
     {
-        // init redis ddl client after springtail_init()
+        // init redis ddl client
         RedisDDL redis_ddl;
 
         // move any pending DDLs to the active queue

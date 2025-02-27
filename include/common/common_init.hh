@@ -20,6 +20,7 @@ daemonize(const std::string &pid_file);
  */
 
 void springtail_init(const std::vector<ServiceRunner *> &runners = std::vector<ServiceRunner *>(),
+                     const bool load_redis = true,
                      const std::optional<std::string> &log_filename = std::nullopt,
                      const std::optional<std::string> &daemon_pid = std::nullopt,
                      const std::optional<uint32_t> &logging_mask = std::nullopt);

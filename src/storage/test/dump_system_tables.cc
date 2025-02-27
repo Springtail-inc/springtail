@@ -18,7 +18,7 @@ main(int argc,
 
     // no logging
     std::vector<ServiceRunner *> runners;
-    springtail_init(runners, std::nullopt, std::nullopt, LOG_NONE);
+    springtail_init(runners, false, std::nullopt, std::nullopt, LOG_NONE);
 
     // takes the database ID from the first argument
     uint64_t db_id = std::stoull(argv[1]);

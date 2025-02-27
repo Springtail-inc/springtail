@@ -22,7 +22,8 @@ void error() {
 
 int main() {
     // initialize the common framework
-    springtail::springtail_init();
+    std::vector<springtail::ServiceRunner *> runners;
+    springtail::springtail_init(runners, false);
 
     std::cout << "Throw!" << std::endl;
     try {

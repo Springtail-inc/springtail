@@ -121,7 +121,7 @@ namespace springtail::pg_fdw {
 
         if (init) {
             std::vector<ServiceRunner *> runners;
-            springtail_init(runners, PG_FDW_LOG_FILE_PREFIX, std::nullopt, LOG_ALL);
+            springtail_init(runners, false, PG_FDW_LOG_FILE_PREFIX, std::nullopt, LOG_ALL);
         }
 
         SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing PgFdwMgr");

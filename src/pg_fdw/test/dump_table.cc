@@ -239,7 +239,8 @@ int main(int argc, char *argv[])
     uint64_t tid=0;
     bool list = false;
 
-    springtail_init();
+    std::vector<ServiceRunner *> runners;
+    springtail_init(runners, false);
 
     // parse the arguments
     namespace po = boost::program_options;

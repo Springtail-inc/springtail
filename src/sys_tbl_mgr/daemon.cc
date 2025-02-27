@@ -46,7 +46,7 @@ main(int argc, char *argv[])
         new sys_tbl_mgr::SysTblMgrRunner()
     };
 
-    springtail_init(runners, "sys_tbl_mgr", pidfile);
+    springtail_init(runners, !pidfile.has_value(),"sys_tbl_mgr", pidfile);
 
     // Block until SIGINT is received. If any other signal wakes the process,
     // pause() will return and the loop will continue until shutdown_requested is set.

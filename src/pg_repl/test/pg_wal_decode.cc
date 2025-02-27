@@ -37,7 +37,8 @@ int main(int argc, char* argv[])
     }
 
     // init logging/backtrace
-    springtail_init();
+    std::vector<ServiceRunner *> runners;
+    springtail_init(runners, false);
 
     PgMsgStreamReader reader(file);
 

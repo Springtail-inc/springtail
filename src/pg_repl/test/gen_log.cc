@@ -37,7 +37,8 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    springtail_init();
+    std::vector<ServiceRunner *> runners;
+    springtail_init(runners, false);
 
     PgLogGenJson log_gen(output_file);
     log_gen.parse_commands(input_file);

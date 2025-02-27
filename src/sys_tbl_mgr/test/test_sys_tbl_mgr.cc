@@ -30,7 +30,7 @@ namespace {
     class SysTblMgr_Test : public testing::Test {
     public:
         static void SetUpTestSuite() {
-            springtail_init(test::getServices(true, true, false),
+            springtail_init(test::getServices(true, true, false), true,
                             std::nullopt, std::nullopt, LOG_ALL ^ (LOG_CACHE | LOG_STORAGE));
 
             // create the public namespace

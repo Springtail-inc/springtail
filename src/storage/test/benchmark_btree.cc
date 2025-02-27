@@ -148,7 +148,7 @@ int main(int argc, char **argv) {
     benchmark::Initialize(&argc, argv);
     auto logging = LOG_NONE;
     std::vector<ServiceRunner *> runners;
-    springtail_init(runners, std::nullopt, std::nullopt, logging);
+    springtail_init(runners, false, std::nullopt, std::nullopt, logging);
     benchmark::RunSpecifiedBenchmarks();
     springtail_shutdown();
     return 0;
