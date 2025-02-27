@@ -37,7 +37,7 @@ namespace {
 
             SPDLOG_DEBUG("Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}",
                         fdw_id, _username, _password, _hostname.value_or(""));
-            pg_fdw::PgDDLMgr::get_instance()->init(_fdw_id, _username, _password, _hostname);
+            pg_fdw::PgDDLMgr::get_instance()->init(fdw_id, _username, _password, _hostname);
             return true;
         }
 
@@ -47,7 +47,6 @@ namespace {
         }
 
     private:
-        std::string _fdw_id;                       ///< FDW ID
         std::string _username;                     ///< username
         std::string _password;                     ///< password
         std::optional<std::string> _hostname;      ///< hostname
