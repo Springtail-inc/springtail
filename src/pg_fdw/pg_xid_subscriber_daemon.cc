@@ -11,6 +11,7 @@ namespace {
     void
     handle_sigint(int signal)
     {
+        //placeholder for now
     }
 }
 
