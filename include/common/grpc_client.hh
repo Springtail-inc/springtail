@@ -90,10 +90,12 @@ protected:
                                                   const nlohmann::json& rpc_json)
     {
         bool ssl = Json::get_or<bool>(rpc_json, "ssl", false);
+
+        grpc::ChannelArguments args;
         std::shared_ptr<grpc::ChannelCredentials> creds;
         if (ssl) {
             std::string cert_file_path;
-            Json::get_to<std::string>(rpc_json, "server_cert", cert_file_path);
+            Json::get_to<std::string>(rpc_json, "client_cert", cert_file_path);
             if (cert_file_path.empty() || !std::filesystem::exists(cert_file_path)) {
                 SPDLOG_ERROR("{}: Invalid configuration for certificate file {}", _type_name,
                              cert_file_path);
@@ -101,7 +103,7 @@ protected:
             }
 
             std::string key_file_path;
-            Json::get_to<std::string>(rpc_json, "server_key", key_file_path);
+            Json::get_to<std::string>(rpc_json, "client_key", key_file_path);
             if (key_file_path.empty() || !std::filesystem::exists(key_file_path)) {
                 SPDLOG_ERROR("{}: Invalid configuration for key file {}", _type_name,
                              key_file_path);
@@ -109,7 +111,7 @@ protected:
             }
 
             std::string trusted_file_path;
-            Json::get_to<std::string>(rpc_json, "server_trusted", trusted_file_path);
+            Json::get_to<std::string>(rpc_json, "client_trusted", trusted_file_path);
             if (trusted_file_path.empty() || !std::filesystem::exists(trusted_file_path)) {
                 SPDLOG_ERROR("{}: Invalid configuration for trusted certificates file {}",
                              _type_name, trusted_file_path);
@@ -122,13 +124,15 @@ protected:
             ssl_opts.pem_cert_chain = read_file_contents(cert_file_path);
 
             creds = grpc::SslCredentials(ssl_opts);
+            args.SetSslTargetNameOverride("springtail_server");  // This must match CN in the server cert
         } else {
             creds = grpc::InsecureChannelCredentials();
         }
-        grpc::ChannelArguments args;
+
         int port;
         Json::get_to<int>(rpc_json, "server_port", port);
         std::string server_addr = server_hostname + ":" + std::to_string(port);
+
         SPDLOG_DEBUG("{}: Creating channel to {} with SSL: {}", _type_name, server_addr, ssl);
         return grpc::CreateCustomChannel(server_addr, creds, args);
     }
