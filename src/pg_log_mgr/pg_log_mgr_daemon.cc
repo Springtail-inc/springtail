@@ -52,7 +52,7 @@ int main(int argc, char *argv[])
         new pg_log_mgr::PgLogCoordinatorRunner()
     };
 
-    springtail_init(runners, "pg_log_mgr", pidfile);
+    springtail_init(runners, !pidfile->empty(), "pg_log_mgr", pidfile);
 
     pg_log_mgr::PgLogCoordinator::get_instance()->wait_shutdown();
 
