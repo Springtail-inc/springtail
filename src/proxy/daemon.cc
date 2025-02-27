@@ -141,7 +141,7 @@ int main(int argc, char* argv[])
         new ProxyRunner(force_shadow, force_primary)
     };
 
-    springtail_init(runners, !pidfile.has_value(), "proxy", pidfile, LOG_PROXY);
+    springtail_init(runners, false, "proxy", pidfile, LOG_PROXY);
 
     ProxyServer::get_instance()->run();
 

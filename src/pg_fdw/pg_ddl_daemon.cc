@@ -117,7 +117,7 @@ int main(int argc, char *argv[])
         new PgDDLMgrRunner(username, password, socket_hostname)
     };
 
-    springtail::springtail_init(runners, !pidfile.has_value(), "pg_ddl_mgr", pidfile, LOG_ALL);
+    springtail::springtail_init(runners, false, "pg_ddl_mgr", pidfile, LOG_ALL);
 
     pg_fdw::PgDDLMgr::get_instance()->run();
 
