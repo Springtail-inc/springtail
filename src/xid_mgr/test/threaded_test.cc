@@ -52,8 +52,9 @@ namespace {
             void on_push(uint64_t db_id, uint64_t xid)
             {
                 ++_push_cnt;
-                ASSERT_EQ(db_id, 1);
                 ASSERT_GT(xid, 0);
+                _last_xid = xid;
+                _db_id = db_id;
             }
 
             void on_disconnect()
@@ -70,6 +71,8 @@ namespace {
             std::condition_variable _cv_done;
 
             bool _disconnect = false;
+            uint64_t _last_xid;
+            uint64_t _db_id;
         };
 
         void SetUp() override {
@@ -132,6 +135,13 @@ namespace {
         }
 
         _threads.clear();
+        sleep(1);
+
+        XidMgrClient *client = XidMgrClient::get_instance();
+        uint64_t xid = client->get_committed_xid(1, 0);
+        ASSERT_EQ(_subscriber->_last_xid, xid);
+        ASSERT_EQ(_subscriber->_db_id, 1);
+
         _subscriber->cancel();
         ASSERT_GE(_subscriber->_push_cnt, THREADS);
     }
