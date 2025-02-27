@@ -16,9 +16,11 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Add the /shared directory to the Python path
 sys.path.append(os.path.join(project_root, 'shared'))
+sys.path.append(os.path.join(project_root, 'grpc'))
 
 # Now import the Properties class
 from properties import Properties
+from xid_mgr import XidMgrClient
 
 from common import (
     connect_db,
@@ -248,35 +250,38 @@ def start_replication(props : Properties, build_dir : str) -> None:
     conn.close()
 
 
-def start_fdw_daemons(props : Properties, build_dir : str, config_file : str) -> None:
+def start_fdw_daemons(props : Properties,
+                      build_dir : str,
+                      config_file : str = None) -> None:
     """Import the foreign data wrapper schemas."""
     fdw_config = props.get_fdw_config()
     db_configs = props.get_db_configs()
     mount_path = props.get_mount_path()
 
-    print(f"Copying config file to mount path: {os.path.join(mount_path, 'system.json')}")
-    shutil.copy(config_file, os.path.join(mount_path, 'system.json'))
-    config_file = os.path.join(mount_path, 'system.json')
+    if config_file is not None:
+        print(f"Copying config file to mount path: {os.path.join(mount_path, 'system.json')}")
+        shutil.copy(config_file, os.path.join(mount_path, 'system.json'))
+        config_file = os.path.join(mount_path, 'system.json')
 
-    # Connect to the foreign data wrapper instance
-    conn = connect_fdw_instance(props)
-
-    rows = execute_sql_select(conn, "SHOW \"springtail_fdw.config_file_path\";")
-    if len(rows) == 0 or rows[0][0] != config_file:
-        # Set the config file option 'springtail_fdw.config_file_path' to the config file path and reload
-        execute_sql(conn, "ALTER SYSTEM SET \"springtail_fdw.config_file_path\" TO %s;", config_file)
-        execute_sql(conn, "SELECT pg_reload_conf();")
-
-        conn.close()
-
-        # Re-connect to the foreign data wrapper instance, not sure why but
-        # the reload doesn't seem to take effect immediately
+        # Connect to the foreign data wrapper instance
         conn = connect_fdw_instance(props)
 
-        # verify the config file path
         rows = execute_sql_select(conn, "SHOW \"springtail_fdw.config_file_path\";")
         if len(rows) == 0 or rows[0][0] != config_file:
-            raise Exception("Failed to set the config file path")
+            # Set the config file option 'springtail_fdw.config_file_path' to the config file path and reload
+            execute_sql(conn, "ALTER SYSTEM SET \"springtail_fdw.config_file_path\" TO %s;", config_file)
+            execute_sql(conn, "SELECT pg_reload_conf();")
+
+            conn.close()
+
+            # Re-connect to the foreign data wrapper instance, not sure why but
+            # the reload doesn't seem to take effect immediately
+            conn = connect_fdw_instance(props)
+
+            # verify the config file path
+            rows = execute_sql_select(conn, "SHOW \"springtail_fdw.config_file_path\";")
+            if len(rows) == 0 or rows[0][0] != config_file:
+                raise Exception("Failed to set the config file path")
 
     # startup pg_ddl_daemon; schema import done by pg_ddl_daemon
     print("Starting pg_ddl_daemon...")
@@ -430,6 +435,49 @@ def gen_dump_tarball(props : Properties, build_dir : str) -> str:
         print(f"Log files dumped to tarball: {os.path.join(dumps_dir, tarfile)}")
 
         return os.path.join(dumps_dir, tarfile)
+
+
+def current_xid(props: Properties, db_id: int) -> int:
+    config = props.get_system_config()
+
+    hostname = props.get_hostname('ingestion')
+    port = config['xid_mgr']['rpc_config']['server_port']
+
+    client = XidMgrClient(hostname, port)
+    return client.get_committed_xid(db_id)
+
+
+def restart(props: Properties,
+            build_dir: str,
+            start_xid: int = None) -> None:
+    # Stop the daemons
+    print("\nStopping daemons...")
+    stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
+
+    # start daemons with XID if specified
+    print("\nStarting daemons...")
+    if start_xid is not None:
+        # Modify xid_mgr_daemon args to include starting XID
+        modified_daemons = []
+        for daemon in CORE_DAEMONS:
+            if daemon[0] == 'xid_mgr_daemon':
+                modified_daemons.append((daemon[0], daemon[1], f'-x,{start_xid}'))
+            else:
+                modified_daemons.append(daemon)
+        start_daemons(build_dir, modified_daemons)
+    else:
+        start_daemons(build_dir, CORE_DAEMONS)
+
+    # wait for running state
+    print("\nWaiting for running state...")
+    wait_for_running(props)
+
+    # start the fdw daemons (e.g., ddl manager to import schemas)
+    print("\nStarting FDW daemons...")
+    start_fdw_daemons(props, build_dir)
+    fixup_log_perms(props)
+
+    print("\nSpringtail system restarted successfully.")
 
 
 def start(config_file: str,

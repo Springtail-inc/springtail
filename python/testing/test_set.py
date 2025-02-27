@@ -37,7 +37,7 @@ class TestSet:
         self._props = springtail.Properties(config_file, True)
 
         # constuct the special "config" test case for global setup and cleanup
-        self._config = TestCase(os.path.join(directory, _GLOBAL_CONFIG_FILE), self._props, ['setup', 'cleanup'])
+        self._config = TestCase(os.path.join(directory, _GLOBAL_CONFIG_FILE), self._props, self._build_dir, ['setup', 'cleanup'])
         self._config.parse_file()
 
         # collect and parse the test cases from the directory
@@ -56,7 +56,7 @@ class TestSet:
 
             try:
                 # parse the test
-                self._tests[test_file] = TestCase(os.path.join(directory, test_file), self._props)
+                self._tests[test_file] = TestCase(os.path.join(directory, test_file), self._props, self._build_dir)
                 self._tests[test_file].parse_file()
 
                 # if only a subset of test cases was requsted, limit them here

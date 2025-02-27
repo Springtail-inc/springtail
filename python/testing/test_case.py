@@ -10,8 +10,6 @@ import sysutils
 import time
 import common
 
-import common
-
 class TestCase:
     """Class to manage a single test-case.  Handles all phases of the
     test case and stores the result of the test.
@@ -20,12 +18,14 @@ class TestCase:
     def __init__(self,
                  filename: str,
                  props: springtail.Properties,
+                 build_dir: str,
                  valid_sections: list = ['test', 'verify', 'cleanup']) -> None:
         """Initialize the test case"""
         self._filename = os.path.abspath(filename)
         self._name = os.path.basename(self._filename)
         self._directory = os.path.dirname(self._filename)
         self._props = props
+        self._build_dir = build_dir
         self._status = 'INIT'
         self._result = 'UNKNOWN'
         self._duration = 0
@@ -187,7 +187,7 @@ class TestCase:
                             self._raise_error(f'{line_num}: "force_recovery" must be part of the "test" section')
                         self._append_command({
                             'type': 'force_recovery',
-                            'count': directive[1]
+                            'count': int(directive[1])
                         }, section, is_threaded, cur_txn, line_num)
 
                     elif directive[0] == 'schema_check':
@@ -288,15 +288,16 @@ class TestCase:
             return None
 
         if command['type'] == 'force_recovery':
-            # XXX check the current XID
-            current_xid = xid_mgr.get_current_xid()
+            # check the current XID and revert to an earlier target XID
+            db_id_str = self._props.get_db_configs()[0]['id']
+            logging.debug(f'Force recovery for {db_id_str}')
+            db_id = int(db_id_str)
+            current_xid = springtail.current_xid(self._props, db_id)
             target_xid = current_xid - command['count']
+            logging.debug(f'Force recovery from {current_xid} to {target_xid}')
             
-            # shutdown Springtail
-            springtail.stop(self.config_file, do_cleanup=False)
-
-            # re-start at an earlier XID, should automatically trigger recovery from that point
-            springtail.start(self.config_file, self.build_dir, do_cleanup=False, do_init=False, start_xid=target_xid)
+            # restart Springtail at the target XID
+            springtail.restart(self._props, self._build_dir, start_xid=target_xid)
             return None
 
         # handle SQL statements
