@@ -1,7 +1,6 @@
-#include <chrono>
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/common_init.hh>
 #include <write_cache/extent_mapper.hh>
 
 using namespace springtail;
@@ -24,7 +23,7 @@ namespace {
         }
 
         void TearDown() override {
-
+            springtail_shutdown();
         }
 
         ExtentMapper *_extent_mapper;

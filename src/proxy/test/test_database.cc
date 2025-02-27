@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include <memory>
-#include <common/common.hh>
+#include <common/common_init.hh>
 #include <proxy/database.hh>
 #include <proxy/server_session.hh>
 
@@ -96,6 +96,11 @@ namespace {
         static void SetUpTestSuite()
         {
             springtail_init();
+        }
+
+        static void TearDownTestSuite()
+        {
+            springtail_shutdown();
         }
 
         void SetUp() override

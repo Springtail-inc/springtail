@@ -1,11 +1,10 @@
 #include <filesystem>
-#include <iostream>
 #include <cstdio>
 #include <memory>
 
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/common_init.hh>
 #include <common/json.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
@@ -77,10 +76,8 @@ namespace {
                 GTEST_SKIP() << "Postgres replica config problem, skipping test";
             }
 
-            springtail_init();
+            springtail_init(test::getServices(true, false, false));
             RedisMgr::get_instance();
-            // start XidMgr needed by PgDDLMgr
-            _services.init();
 
             // set schemas to public in config
             RedisClientPtr redis_config_client;
@@ -114,9 +111,8 @@ namespace {
                 _pg_ddl_mgr_thread.value().join();
             }
             PgDDLMgr::shutdown();
-            _services.shutdown();
             RedisMgr::shutdown();
-            Properties::shutdown();
+            springtail_shutdown();
         }
     protected:
         static void _create_replica_connection() {
@@ -147,7 +143,6 @@ namespace {
         }
 
         static inline std::optional<std::thread> _pg_ddl_mgr_thread;
-        static inline test::Services _services{true, false, false};
         static inline std::string _db_id_str{"1"};
         static inline std::string _fdw_id_str{"1"};
         static inline LibPqConnectionPtr _conn;

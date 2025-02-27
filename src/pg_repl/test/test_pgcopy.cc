@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/common_init.hh>
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
@@ -24,8 +24,7 @@ namespace {
         std::filesystem::path _base_dir;
 
         static void SetUpTestSuite() {
-            springtail_init();
-            _services.init();
+            springtail_init(test::getServices(true, true, true));
 
             // create the public namespace
             auto client = sys_tbl_mgr::Client::get_instance();
@@ -42,10 +41,8 @@ namespace {
         }
 
         static void TearDownTestSuite() {
-            _services.shutdown();
+            springtail_shutdown();
         }
-
-        static test::Services _services;
 
         void SetUp() override {
             nlohmann::json db_config = Properties::get_db_config(db_id);
@@ -65,8 +62,6 @@ namespace {
 
         uint64_t db_id = 1;
     };
-
-    test::Services PgCopyTable_Test::_services{true, true, true};
 
     TEST_F(PgCopyTable_Test, CopyTable)
     {

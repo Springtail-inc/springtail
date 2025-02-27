@@ -1,11 +1,10 @@
-#include <fstream>
 #include <iostream>
 #include <cstdio>
 
 #include <boost/program_options.hpp>
 
 // springtail includes
-#include <common/common.hh>
+#include <common/common_init.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_msg_stream.hh>
 
@@ -54,4 +53,5 @@ int main(int argc, char* argv[])
             std::cout << s;
         }
     }
+    springtail_shutdown();
 }

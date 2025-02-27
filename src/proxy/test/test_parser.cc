@@ -1,9 +1,8 @@
 #include <vector>
-#include <iostream>
 
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/common_init.hh>
 #include <common/logging.hh>
 #include <proxy/parser.hh>
 
@@ -82,4 +81,6 @@ TEST(ProxyParser_Test, TestParser)
         EXPECT_EQ(is_readable, expected_readable);
         EXPECT_EQ(name, std::get<2>(tests[i]));
     }
+
+    springtail_shutdown();
 }

@@ -6,7 +6,7 @@
 
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/common_init.hh>
 #include <common/constants.hh>
 #include <common/json.hh>
 #include <common/object_cache.hh>
@@ -30,9 +30,8 @@ namespace {
     class SysTblMgr_Test : public testing::Test {
     public:
         static void SetUpTestSuite() {
-            springtail_init(std::nullopt, std::nullopt, LOG_ALL ^ (LOG_CACHE | LOG_STORAGE));
-
-            _services.init();
+            springtail_init(test::getServices(true, true, false),
+                            std::nullopt, std::nullopt, LOG_ALL ^ (LOG_CACHE | LOG_STORAGE));
 
             // create the public namespace
             auto client = sys_tbl_mgr::Client::get_instance();
@@ -49,11 +48,9 @@ namespace {
         }
 
         static void TearDownTestSuite() {
-            sys_tbl_mgr::Client::shutdown();
-            _services.shutdown();
+            springtail_shutdown();
         }
 
-        static test::Services _services;
         static std::mutex _mutex;
         static XidLsn _xid;
         static uint64_t _db;
@@ -74,7 +71,6 @@ namespace {
         sys_tbl_mgr::Client *_client = sys_tbl_mgr::Client::get_instance();
     };
 
-    test::Services SysTblMgr_Test::_services(true, true, false);
     XidLsn SysTblMgr_Test::_xid(1, 0);
     std::mutex SysTblMgr_Test::_mutex;
     uint64_t SysTblMgr_Test::_db = 1;

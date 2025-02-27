@@ -3,7 +3,7 @@
 
 #include <boost/program_options.hpp>
 
-#include <common/common.hh>
+#include <common/common_init.hh>
 
 #include <pg_repl/pg_msg_log_gen.hh>
 
@@ -45,6 +45,7 @@ int main(int argc, char **argv)
     if (dump) {
         PgMsgLogGen::dump_file(output_file);
     }
+    springtail_shutdown();
 
     return 0;
 }

@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/common_init.hh>
 #include <pg_repl/libpq_connection.hh>
 #include <proxy/database.hh>
 #include <proxy/user_mgr.hh>
@@ -43,6 +43,7 @@ namespace {
             pg_proxy::UserMgr::shutdown();
             pg_proxy::DatabaseMgr::shutdown();
             _db_conn.disconnect();
+            springtail_shutdown();
         }
 
         void SetUp() override

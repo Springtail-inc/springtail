@@ -4,7 +4,7 @@
 #include <filesystem>
 #include <vector>
 
-#include <common/common_init.hh>
+#include <common/service_register.hh>
 #include <common/singleton.hh>
 #include <common/grpc_server_manager.hh>
 #include <xid_mgr/xid_partition.hh>
@@ -74,7 +74,7 @@ private:
 
 class XidMgrRunner : public ServiceRunner {
 public:
-    XidMgrRunner(bool commit_starting_xid, uint64_t db_id, uint64_t starting_xid) :
+    explicit XidMgrRunner(bool commit_starting_xid, uint64_t db_id, uint64_t starting_xid) :
         ServiceRunner("XidMgr"),
         _commit_starting_xid(commit_starting_xid),
         _db_id(db_id), _starting_xid(starting_xid) {}

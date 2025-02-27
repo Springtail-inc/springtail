@@ -9,7 +9,6 @@ find_package(PostgreSQL REQUIRED)
 
 set(COMMON_LIB_SOURCES
   coordinator.cc
-  common.cc
   common_init.cc
   dns_resolver.cc
   exception.cc

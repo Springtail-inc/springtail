@@ -1,5 +1,4 @@
 #include <iostream>
-#include <thread>
 #include <sys/socket.h>
 #include <sys/eventfd.h>
 
@@ -313,11 +312,7 @@ namespace springtail::pg_proxy {
     void
     ProxyServer::_internal_shutdown()
     {
-        // send signal to shutdown
         SPDLOG_INFO("Proxy server shutting down");
-        _shutdown = true;
-        _wake_event_loop();
-        // other cleanup is down after while loop in run()
     }
 
     void

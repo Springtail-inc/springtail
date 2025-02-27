@@ -3,7 +3,7 @@
 #include <boost/program_options.hpp>
 
 // springtail includes
-#include <common/common.hh>
+#include <common/common_init.hh>
 #include <common/properties.hh>
 
 #include <pg_log_mgr/pg_log_coordinator.hh>
@@ -19,6 +19,40 @@ namespace {
             ddl_mgr->notify_shutdown();
         }
     }
+
+    class PgDDLMgrRunner : public ServiceRunner {
+    public:
+        explicit PgDDLMgrRunner(const std::string &username,
+                                const std::string &password,
+                                const std::optional<std::string> &hostname) :
+            ServiceRunner("PgDDLMgr"),
+            _username(username),
+            _password(password),
+            _hostname(hostname) {}
+
+        bool start() override
+        {
+            // start the ddl main thread
+            std::string fdw_id = Properties::get_fdw_id();
+
+            SPDLOG_DEBUG("Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}",
+                        fdw_id, _username, _password, _hostname.value_or(""));
+            pg_fdw::PgDDLMgr::get_instance()->init(_fdw_id, _username, _password, _hostname);
+            return true;
+        }
+
+        void stop() override
+        {
+            pg_fdw::PgDDLMgr::shutdown();
+        }
+
+    private:
+        std::string _fdw_id;                       ///< FDW ID
+        std::string _username;                     ///< username
+        std::string _password;                     ///< password
+        std::optional<std::string> _hostname;      ///< hostname
+    };
+
 }
 
 int main(int argc, char *argv[])
@@ -57,13 +91,6 @@ int main(int argc, char *argv[])
     if (vm.count("daemonize")) {
         pidfile = "pg_ddl_mgr.pid";
     }
-    springtail::springtail_init("pg_ddl_mgr", pidfile, LOG_ALL);
-
-    // register the SIGINT handler; do this before starting the main thread
-    std::signal(SIGINT, handle_sigint);
-
-    // start the ddl main thread
-    std::string fdw_id = Properties::get_fdw_id();
 
     // check if the socket path is valid
     if (!socket_host_str.empty()) {
@@ -86,17 +113,17 @@ int main(int argc, char *argv[])
         }
     }
 
-    SPDLOG_DEBUG("Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}",
-                 fdw_id, username, password, socket_hostname.value_or(""));
+    std::vector<ServiceRunner *> runners = {
+        new TermSignalRunner(handle_sigint),
+        new PgDDLMgrRunner(username, password, socket_hostname)
+    };
 
-    // get the DDL Mgr instance
-    pg_fdw::PgDDLMgr *ddl_mgr = pg_fdw::PgDDLMgr::get_instance();
-    ddl_mgr->init(fdw_id, username, password, socket_hostname);
+    springtail::springtail_init(runners, "pg_ddl_mgr", pidfile, LOG_ALL);
 
-    ddl_mgr->run();
+    pg_fdw::PgDDLMgr::get_instance()->run();
 
     // wait for shutdown; wait for main thread to join
-    ddl_mgr->shutdown();
+    pg_fdw::PgDDLMgr::shutdown();
 
     return 0;
 }

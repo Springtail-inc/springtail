@@ -4,7 +4,7 @@
 
 #include <stdio.h>
 
-#include <common/common.hh>
+#include <common/common_init.hh>
 #include <common/logging.hh>
 #include <common/exception.hh>
 
@@ -19,11 +19,18 @@ namespace {
     class MsgStreamReader_Test : public ::testing::Test {
     protected:
         static constexpr char const * const LOG_FILE = "/tmp/test_log_reader.log";
-
-        void SetUp() override {
+        static void SetUpTestSuite()
+        {
             // code here will execute just before the test ensues
             springtail_init();
+        }
 
+        static void TearDownTestSuite()
+        {
+            springtail_shutdown();
+        }
+
+        void SetUp() override {
             // create a new log file for output log
             _log_file = std::filesystem::path(LOG_FILE);
 

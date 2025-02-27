@@ -3,7 +3,7 @@
 #include <iostream>
 
 #include <boost/program_options.hpp>
-#include <common/common.hh>
+#include <common/common_init.hh>
 #include <sys_tbl_mgr/server.hh>
 
 using namespace springtail;
@@ -40,13 +40,13 @@ main(int argc, char *argv[])
     if (vm.count("daemonize")) {
         pidfile = "sys_tbl_mgr.pid";
     }
-    springtail_init("sys_tbl_mgr", pidfile);
 
-    // register the SIGINT handler
-    std::signal(SIGINT, handle_sigint);
+    std::vector<ServiceRunner *> runners = {
+        new TermSignalRunner(handle_sigint),
+        new sys_tbl_mgr::SysTblMgrRunner()
+    };
 
-    // start the server
-    sys_tbl_mgr::Server::get_instance()->startup();
+    springtail_init(runners, "sys_tbl_mgr", pidfile);
 
     // Block until SIGINT is received. If any other signal wakes the process,
     // pause() will return and the loop will continue until shutdown_requested is set.
@@ -56,6 +56,6 @@ main(int argc, char *argv[])
         pause();
     }
 
-    sys_tbl_mgr::Server::get_instance()->shutdown();
+    springtail_shutdown();
     return 0;
 }

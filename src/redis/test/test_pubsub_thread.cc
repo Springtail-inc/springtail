@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/common_init.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 
@@ -24,6 +24,7 @@ namespace {
         }
         static void TearDownTestSuite() {
             RedisMgr::get_instance()->shutdown();
+            springtail_shutdown();
         }
     protected:
         std::mutex _data_mutex;

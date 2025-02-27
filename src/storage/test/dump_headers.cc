@@ -1,4 +1,4 @@
-#include <common/common.hh>
+#include <common/common_init.hh>
 #include <common/constants.hh>
 
 #include <storage/field.hh>
@@ -30,4 +30,5 @@ main(int argc,
 
         pos += response->next_offset;
     }
+    springtail_shutdown();
 }

@@ -19,7 +19,7 @@ namespace {
     class XidMgr_Test : public testing::Test {
     protected:
         void SetUp() override {
-            init::springtail_init();
+            springtail_init();
 
             nlohmann::json json = Properties::get(Properties::XID_MGR_CONFIG);
 
@@ -50,7 +50,7 @@ namespace {
             // shutdown server
             SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Shutting down server");
             xid_mgr::XidMgrServer::shutdown();
-            init::springtail_shutdown();
+            springtail_shutdown();
         }
 
         static void run_clients(int thread_id, int iterations)

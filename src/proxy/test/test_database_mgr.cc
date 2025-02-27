@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
-#include <common/common.hh>
+#include <common/common_init.hh>
 #include <common/json.hh>
 #include <common/redis.hh>
 #include <proxy/database.hh>
@@ -29,6 +29,7 @@ namespace {
         {
             DatabaseMgr::shutdown();
             RedisMgr::shutdown();
+            springtail_shutdown();
         }
         static inline RedisClientPtr _config_client;
         static inline RedisClientPtr _data_client;

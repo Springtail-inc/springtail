@@ -47,13 +47,12 @@ main(int argc, char* argv[])
         pidfile = "xid_mgr.pid";
     }
 
-    std::vector<int> signals{SIGINT, SIGTERM, SIGQUIT, SIGUSR1, SIGUSR2};
     std::vector<ServiceRunner *> runners = {
-        new init::TermSignalRunner(signals, handle_sigint),
+        new TermSignalRunner(handle_sigint),
         new xid_mgr::XidMgrRunner(vm.count("xid") && vm.count("dbid"), db_id, starting_xid)
     };
 
-    init::springtail_init(runners, "xid_mgr", pidfile);
+    springtail_init(runners, "xid_mgr", pidfile);
 
     // Block until SIGINT is received. If any other signal wakes the process,
     // pause() will return and the loop will continue until shutdown_requested is set.
@@ -62,6 +61,6 @@ main(int argc, char* argv[])
         pause();
     }
 
-    init::springtail_shutdown();
+    springtail_shutdown();
     return 0;
 }

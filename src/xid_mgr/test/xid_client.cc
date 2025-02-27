@@ -1,7 +1,7 @@
 #include <iostream>
 #include <boost/program_options.hpp>
 
-#include <common/common.hh>
+#include <common/common_init.hh>
 #include <common/properties.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
@@ -73,5 +73,6 @@ main(int argc, char **argv)
     }
 
     XidMgrClient::shutdown();
+    springtail_shutdown();
     return 0;
 }

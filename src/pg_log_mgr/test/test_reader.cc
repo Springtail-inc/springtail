@@ -5,7 +5,7 @@
 
 #include <stdio.h>
 
-#include <common/common.hh>
+#include <common/common_init.hh>
 #include <common/logging.hh>
 #include <common/exception.hh>
 #include <common/concurrent_queue.hh>
@@ -67,8 +67,7 @@ namespace {
         static constexpr char const * const XACT_LOG_DIR = "/tmp/test_xact_log";
 
         static void SetUpTestSuite() {
-            springtail_init();
-            _services.init();
+            springtail_init(test::getServices(true, true, false));
 
             // create the public namespace
             auto client = sys_tbl_mgr::Client::get_instance();
@@ -85,10 +84,8 @@ namespace {
         }
 
         static void TearDownTestSuite() {
-            _services.shutdown();
+            springtail_shutdown();
         }
-
-        static test::Services _services;
 
         void SetUp() override {
             // create a new log file
@@ -178,8 +175,6 @@ namespace {
         std::vector<PgTransactionPtr> _xact_list;
         std::shared_ptr<TestLogMgr> _log_mgr;
     };
-
-    test::Services LogReader_Test::_services{true, true, false};
 
     TEST_F(LogReader_Test, ProcessLog)
     {

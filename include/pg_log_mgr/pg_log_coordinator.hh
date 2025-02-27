@@ -4,6 +4,7 @@
 #include <mutex>
 
 #include <common/counter.hh>
+#include <common/service_register.hh>
 #include <common/singleton.hh>
 
 #include <pg_log_mgr/pg_log_mgr.hh>
@@ -62,5 +63,21 @@ namespace springtail::pg_log_mgr {
          * @param db_id - database id
          */
         void _remove_database(uint64_t db_id);
+    };
+
+    class PgLogCoordinatorRunner : public ServiceRunner {
+    public:
+        explicit PgLogCoordinatorRunner() : ServiceRunner("PgLogCoordinator") {}
+
+        bool start() override
+        {
+            pg_log_mgr::PgLogCoordinator::get_instance()->init();
+            return true;
+        }
+
+        void stop() override
+        {
+            pg_log_mgr::PgLogCoordinator::shutdown();
+        }
     };
 }

@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/common_init.hh>
 #include <common/redis.hh>
 #include <common/threaded_test.hh>
 
@@ -13,11 +13,19 @@ namespace {
      * Framework for Redis testing.
      */
     class Redis_Test : public testing::Test {
+    public:
+        static void SetUpTestSuite() {
+            // Init springtail
+            springtail_init();
+        }
+
+        static void TearDownTestSuite() {
+            springtail_shutdown();
+        }
+
     protected:
         void SetUp() override {
             _has_redis = false;
-
-            springtail_init();
 
             // See if redis is enabled
             try {

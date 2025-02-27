@@ -5,6 +5,7 @@
 #include <memory>
 
 #include <common/grpc_server_manager.hh>
+#include <common/service_register.hh>
 #include <common/singleton.hh>
 #include <write_cache/write_cache_index.hh>
 
@@ -42,6 +43,19 @@ namespace springtail {
         GrpcServerManager _grpc_server_manager;
 
         void _internal_shutdown() override;
+    };
+
+    class WriteCacheRunner : public ServiceRunner {
+    public:
+        explicit WriteCacheRunner() :
+            ServiceRunner("WriteCacheServer") {}
+        bool start() override {
+            WriteCacheServer::get_instance()->startup();
+            return true;
+        }
+        void stop() override {
+            WriteCacheServer::shutdown();
+        }
     };
 
 } // namespace springtail

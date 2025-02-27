@@ -2,7 +2,7 @@
 
 #include <common/exception.hh>
 #include <common/logging.hh>
-#include <common/common.hh>
+#include <common/common_init.hh>
 
 class CrashError : public springtail::Error {
 public:
@@ -34,5 +34,7 @@ int main() {
 
     std::cout << "Crash!" << std::endl;
     crash(nullptr);
+
+    springtail::springtail_shutdown();
     return 0;
 }
