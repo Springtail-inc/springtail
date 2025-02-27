@@ -214,7 +214,4 @@ GrpcXidMgrService::NotificationThread::task(std::stop_token st)
     }
 }
 
-GrpcXidMgrService::~GrpcXidMgrService() {
-}
-
 }  // namespace springtail

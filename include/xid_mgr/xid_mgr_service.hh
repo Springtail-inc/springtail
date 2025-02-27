@@ -27,7 +27,7 @@ namespace xid_mgr {
     public:
         explicit GrpcXidMgrService(xid_mgr::XidMgrServer& s) : _srv{s}
         {}
-        ~GrpcXidMgrService();
+        ~GrpcXidMgrService() = default;
 
         void shutdown();
 

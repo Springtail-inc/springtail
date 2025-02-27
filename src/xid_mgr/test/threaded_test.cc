@@ -37,13 +37,15 @@ namespace {
                     [this](uint64_t db, uint64_t xid){ on_push(db, xid); },
                     [this](){on_disconnect();}
                 };
-                _s = new XidMgrSubscriber(client->get_channel(), cb);
+                _s = std::make_unique<XidMgrSubscriber>(client->get_channel(), cb);
             }
 
             void cancel() {
-                _s->cancel();
+                // GRPC is supposed to delete it after cancel()
+                auto p = _s.release();
+                p->cancel();
                 std::unique_lock<std::mutex> l(_m);
-                auto st = _cv_done.wait_for(l, std::chrono::seconds(5), [&]() { return _disconnect; });
+                auto st = _cv_done.wait_for(l, std::chrono::seconds(5), [this]() { return _disconnect; });
                 ASSERT_EQ(st, true);
             }
 
@@ -61,7 +63,7 @@ namespace {
                 _cv_done.notify_one();
             }
 
-            XidMgrSubscriber* _s;
+            std::unique_ptr<XidMgrSubscriber> _s;
             uint64_t _push_cnt = 0;
             
             std::mutex _m;
@@ -118,22 +120,18 @@ namespace {
             SPDLOG_INFO("Thread: {}, finished", thread_id);
         }
 
-        std::vector<std::thread> _threads;
+        std::vector<std::jthread> _threads;
         std::unique_ptr<Subscriber> _subscriber;
     };
 
     TEST_F(XidMgr_Test, ThreadedTest) {
         // startup clients
         for (int i = 0; i < THREADS; i++) {
-            _threads.push_back(std::thread([&](){run_clients(i, ITERS);}));
+            _threads.emplace_back([this, i](){run_clients(i, ITERS);});
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
 
-        // wait for clients to finish
-        for (auto &t : _threads) {
-            t.join();
-        }
-
+        _threads.clear();
         _subscriber->cancel();
         ASSERT_GE(_subscriber->_push_cnt, THREADS);
     }
