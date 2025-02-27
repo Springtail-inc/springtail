@@ -10,6 +10,11 @@ struct XidMgrSubscriber : public grpc::ClientReadReactor<proto::XidPushResponse>
     using PushCallback = std::function<void(uint64_t, uint64_t)>;
     using DisconnectCallback = std::function<void()>;
 
+
+    /**
+     * @brief Subscriber callbacks. The callbacks are called in the context of
+     *        an internal thread.
+     */
     struct Callbacks
     {
         PushCallback push;
@@ -26,11 +31,11 @@ struct XidMgrSubscriber : public grpc::ClientReadReactor<proto::XidPushResponse>
 
     void cancel();
 
+private:
     // GRPC callbacks
     void OnReadDone(bool ok) override;
     void OnDone(const grpc::Status& s) override;
 
-private:
     std::shared_ptr<grpc::Channel> _channel;
     std::optional<Callbacks> _cb;
 

@@ -44,13 +44,14 @@ namespace {
                 _s->cancel();
                 std::unique_lock<std::mutex> l(_m);
                 auto st = _cv_done.wait_for(l, std::chrono::seconds(5), [&]() { return _disconnect; });
-                CHECK(st == true);
+                ASSERT_EQ(st, true);
             }
 
             void on_push(uint64_t db_id, uint64_t xid)
             {
-                CHECK_EQ(db_id, 1);
                 ++_push_cnt;
+                ASSERT_EQ(db_id, 1);
+                ASSERT_GT(xid, 0);
             }
 
             void on_disconnect()
