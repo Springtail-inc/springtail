@@ -2,6 +2,7 @@ import sys
 import os
 import grpc
 import time
+from typing import Optional
 
 # Add the directory containing the generated gRPC files to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'sys_tbl_mgr')))
@@ -12,14 +13,44 @@ from google.protobuf import empty_pb2
 class SysTblMgrClient:
     """Client for the SysTblMgr gRPC service"""
 
-    def __init__(self, host, port):
-        """Initialize the client with a host and port
+    def __init__(self,
+                 host : str,
+                 port: int,
+                 ca_cert_path: Optional[str] = "",
+                 ca_client_key_path: Optional[str] = "",
+                 ca_client_cert_path: Optional[str] = ""):
+        """Initialize SysTableMgr client with server connection details.
 
         Args:
-            host: Hostname or IP address of the gRPC server
-            port: Port number of the gRPC server
+            host: The hostname of the SysTblManager server
+            port: The port number of the SysTblManager server
+            ca_cert_path: The path to the CA certificate file
+            ca_client_key_path: The path to the client key file
+            ca_client_cert_path: The path to the client certificate file
         """
-        self.channel = grpc.insecure_channel(f'{host}:{port}')
+
+        if ca_cert_path and ca_client_key_path and ca_client_cert_path:
+            with open(ca_cert_path, 'rb') as ca_cert_file, \
+                 open(ca_client_key_path, 'rb') as ca_client_key_file, \
+                 open(ca_client_cert_path, 'rb') as ca_client_cert_file:
+                ca_cert = ca_cert_file.read()
+                client_cert = ca_client_cert_file.read()
+                client_key = ca_client_key_file.read()
+
+            # Create gRPC channel with SSL credentials
+            creds = grpc.ssl_channel_credentials(
+                root_certificates=ca_cert,   # Verify server certificate
+                private_key=client_key,      # Client private key
+                certificate_chain=client_cert  # Client certificate
+            )
+
+            # Override the target name to match the server certificate's CN
+            channel_options = (("grpc.ssl_target_name_override", "springtail_server"),)
+
+            self.channel = grpc.secure_channel(f"{host}:{port}", creds, options=channel_options)
+        else:
+            self.channel = grpc.insecure_channel(f"{host}:{port}")
+
         self.stub = sys_tbl_mgr_pb2_grpc.SysTblMgrStub(self.channel)
 
     def ping(self, count: int = 1, sleep_time: int = 1):
