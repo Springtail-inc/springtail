@@ -828,6 +828,8 @@ Service::Finalize(grpc::ServerContext* context,
     // block all mutations
     boost::unique_lock wlock(_write_mutex);
 
+    // note: it is safe to pre-write data from later XIDs into the system tables during a finalize
+    //       since if there is a failure they will simply be overwritten during recovery
     auto write_xid = _get_write_xid(request->db_id());
     SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Finalize system tables: {}@{} >= {}", request->db_id(),
                         request->xid(), write_xid);
@@ -847,9 +849,6 @@ Service::Finalize(grpc::ServerContext* context,
 
     // block all read access while we swap access roots
     boost::unique_lock rlock(_read_mutex);
-
-    // validate the current target XID against the requested XID
-    assert(write_xid <= request->xid());
 
     // move the read_xid to the request xid, and move the write_xid to just beyond the
     // provided request xid
