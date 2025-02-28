@@ -13,6 +13,20 @@ namespace springtail {
         { }
     };
 
+    class PgUnrecoverableError : public Error{
+    public:
+        PgUnrecoverableError() { }
+        PgUnrecoverableError(const std::string &error)
+            : Error(error)
+        { }
+    };
+
+    class PgReplicationSlotError : public PgUnrecoverableError {
+        const char *what() const noexcept {
+            return "Replication slot error";
+        }
+    };
+
     class PgNotConnectedError : public PgConnectionError {
         const char *what() const noexcept {
             return "The connection is closed";

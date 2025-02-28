@@ -304,7 +304,7 @@ def wait_for_running(props : Properties) -> None:
     # Wait for the system to be in a running state
     db_config = props.get_db_configs()[0]
     id = db_config['id']
-    props.wait_for_state('running', id)
+    props.wait_for_state('running', id, 'failed')
 
 
 def execute_startup_sql(props : Properties, sql_file : str) -> None:

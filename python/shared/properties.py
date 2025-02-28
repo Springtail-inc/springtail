@@ -273,7 +273,7 @@ class Properties:
             self.redis.hset(fdw_key, fdw_id, fdw_json_str)
             self.redis.sadd(fdw_key + '_ids', fdw_id)
 
-    def wait_for_state(self, state, id, timeout=600) -> None:
+    def wait_for_state(self, state : str, id : int, error_state : str = "", timeout : int = 600) -> None:
         """Wait for the database state to reach the desired state.
         :param state: the state to wait for
         :param id: the database id to check
@@ -282,8 +282,11 @@ class Properties:
         key = self.db_instance_id + ':instance_state'
         start = time.time()
         while True:
-            if self.redis.hget(key, str(id)) == state:
+            current_state = self.redis.hget(key, str(id))
+            if current_state == state:
                 return
+            if error_state != "" and current_state == error_state:
+                raise Exception(f"Database {id} entered error state {error_state}")
             time.sleep(1)
             if time.time() - start > timeout:
                 break

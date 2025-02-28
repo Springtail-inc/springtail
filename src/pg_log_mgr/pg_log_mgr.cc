@@ -71,7 +71,6 @@ namespace springtail::pg_log_mgr {
     }
 
 
-    // XXX make sure GC is shutdown -- assume it for now
     void
     PgLogMgr::startup()
     {
@@ -94,6 +93,9 @@ namespace springtail::pg_log_mgr {
             // we were in copy tables state, reset to initialize to restart copy tables
             state = redis::db_state_change::REDIS_STATE_INITIALIZE;
             Properties::set_db_state(_db_id, state);
+        } else if (state == redis::db_state_change::REDIS_STATE_FAILED) {
+            SPDLOG_ERROR("Database in failed state, cannot start up, db_id={}", _db_id);
+            return;
         }
 
         // add redis cache callback for watching database state changes
@@ -116,6 +118,7 @@ namespace springtail::pg_log_mgr {
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Last committed XID: {}", next_xid-1);
 
         uint64_t lsn = INVALID_LSN;
+        bool do_init = (state == redis::db_state_change::REDIS_STATE_INITIALIZE);
         if (state == redis::db_state_change::REDIS_STATE_INITIALIZE) {
             _startup_init();
         } else {
@@ -126,7 +129,7 @@ namespace springtail::pg_log_mgr {
         _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
 
         // start streaming
-        _start_streaming(lsn);
+        _start_streaming(lsn, do_init);
     }
 
     uint64_t
@@ -392,26 +395,47 @@ namespace springtail::pg_log_mgr {
     }
 
     void
-    PgLogMgr::_start_streaming(uint64_t lsn)
+    PgLogMgr::_start_streaming(uint64_t lsn, bool do_init)
     {
-        _pg_conn.connect();
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Connecting to postgres server: {}\n", _host);
+        try {
+            _pg_conn.connect();
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Connecting to postgres server: {}\n", _host);
 
-        // create slot if need be
-        bool create_slot = !_pg_conn.check_slot_exists();
+            // create slot if need be
+            bool create_slot = !_pg_conn.check_slot_exists();
 
-        if (create_slot) {
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Creating replication slot: {}\n", _slot_name);
-            _pg_conn.create_replication_slot(false,  // export
-                                             false); // temporary
+            if (create_slot) {
+                if (do_init) {
+                    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Creating replication slot: {}\n", _slot_name);
+                    lsn = _pg_conn.create_replication_slot();
+                } else {
+                    SPDLOG_ERROR("Replication slot does not exist: db_id={}, slot={}", _db_id, _slot_name);
+                    // shutdown
+                    Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
+                    return;
+                }
+            }
+
+            // get the protocol version
+            _proto_version = _pg_conn.get_protocol_version();
+
+            // start steaming
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Starting streaming: lsn={}", lsn);
+            _pg_conn.start_streaming(lsn, do_init);
+        } catch (const PgConnectionError &e) {
+            // this may be recoverable if we can reconnect, but not handled right now
+            SPDLOG_ERROR("Connection error starting streaming in db_id={}: {}, setting state to failed",
+                         _db_id, e.what());
+            // shutdown
+            Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
+            return;
+        } catch (const PgUnrecoverableError &e) {
+            SPDLOG_ERROR("Unrecoverable Error starting streaming in db_id={}: {}, setting state to failed",
+                         _db_id, e.what());
+            // shutdown
+            Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
+            return;
         }
-
-        // get the protocol version
-        _proto_version = _pg_conn.get_protocol_version();
-
-        // start steaming
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Starting streaming: lsn={}", lsn);
-        _pg_conn.start_streaming(lsn);
 
         // create the worker threads
         _writer_thread = std::thread(&PgLogMgr::_log_writer_thread, this);
