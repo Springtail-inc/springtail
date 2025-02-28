@@ -1,6 +1,5 @@
 #pragma once
 
-#include <common/singleton.hh>
 #include <common/logging.hh>
 
 #include <proto/xid_manager.grpc.pb.h>
@@ -23,7 +22,6 @@ namespace xid_mgr {
      */
     class GrpcXidMgrService final : public proto::XidManager::CallbackService
     {
-        friend class Singleton<GrpcXidMgrService>;
     public:
         explicit GrpcXidMgrService(xid_mgr::XidMgrServer& s) : _srv{s}
         {}
@@ -66,12 +64,12 @@ namespace xid_mgr {
             void notify(const proto::XidPushResponse& msg);
             void finish();
 
+        private:
             // GRPC callbacks
             void OnWriteDone(bool ok) override;
             void OnDone() override;
             void OnCancel() override;
 
-        private:
             std::mutex _m;
             bool _writing = false;
             std::optional<proto::XidPushResponse> _last_msg;
