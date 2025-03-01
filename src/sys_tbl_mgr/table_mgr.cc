@@ -109,6 +109,11 @@ namespace springtail {
         auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY; });
         std::vector<Index> secondary_indexes(filtered.begin(), filtered.end());
 
+        SPDLOG_DEBUG_MODULE(LOG_BTREE, "Get mutable table: table {}, access_xid {}", table_id, access_xid);
+        for (auto &root : tbl_meta->roots) {
+            SPDLOG_DEBUG_MODULE(LOG_BTREE, "Get mutable table: index {}, root {}", root.index_id, root.extent_id);
+        }
+
         return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid,
                                               _table_base, schema->get_sort_keys(), secondary_indexes,
                                               *tbl_meta, schema, for_gc);
@@ -123,6 +128,14 @@ namespace springtail {
     {
         TableMetadata tbl_meta;
         tbl_meta.snapshot_xid = snapshot_xid;
+
+        // note: in the case of a failure, there may be a partially copied table already present in
+        //       the directory structure, so we need to make sure to delete it before we try to
+        //       create it below
+        auto table_dir = table_helpers::get_table_dir(_table_base, db_id, table_id, snapshot_xid);
+        if (std::filesystem::exists(table_dir)) {
+            std::filesystem::remove_all(table_dir);
+        }
 
         // construct an empty mutable table with the provided snapshot XID and return it
         return std::make_shared<MutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,

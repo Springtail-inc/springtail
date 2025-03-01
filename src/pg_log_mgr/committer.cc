@@ -254,10 +254,10 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
                 _redis_ddl.commit_index_ddl(db_id, xid);
             } else {
-                if (!completed_ddls.is_null()) {
-                    // finalize the system metadata
-                    sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
-                }
+                // finalize the system metadata
+                // note: we do this even without DDL changes to ensure the primary and secondary
+                //       index root offsets are written to disk
+                sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
             }
 
             if (!completed_ddls.is_null()) {
