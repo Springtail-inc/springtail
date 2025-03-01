@@ -439,11 +439,15 @@ def gen_dump_tarball(props : Properties, build_dir : str) -> str:
 
 def current_xid(props: Properties, db_id: int) -> int:
     config = props.get_system_config()
+    rpc_config = config['xid_mgr']['rpc_config']
 
     hostname = props.get_hostname('ingestion')
-    port = config['xid_mgr']['rpc_config']['server_port']
-
-    client = XidMgrClient(hostname, port)
+    port = rpc_config['server_port']
+    if not rpc_config['ssl']:
+        client = XidMgrClient(hostname, port)
+    else:
+        client = XidMgrClient(hostname, port, rpc_config['client_trusted'],
+                              rpc_config['client_key'], rpc_config['client_cert'])
     return client.get_committed_xid(db_id)
 
 

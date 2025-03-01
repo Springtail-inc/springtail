@@ -60,6 +60,8 @@ namespace springtail::pg_log_mgr {
         static constexpr char const * const READER_WORKER_ID = "reader_{}";
         static constexpr char const * const XACT_WORKER_ID = "xact_{}";
 
+        static constexpr int QUEUE_SIZE = 256;
+
         /**
          * @brief Construct a new Pg Log Mgr object
          * @param db_id db id
@@ -96,8 +98,7 @@ namespace springtail::pg_log_mgr {
           _xact_log_path(xact_log_path),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
         {
-            // XXX 8192
-            _pg_log_reader = std::make_shared<PgLogReader>(_db_id, 8192, xact_log_path, _committer_queue);
+            _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, xact_log_path, _committer_queue);
         }
 
         /** Start the pipeline; setup the log reader/writer log files etc. */

@@ -40,7 +40,7 @@ namespace springtail::pg_log_mgr {
       _xact_log_path(xact_log_path),
       _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
     {
-        _pg_log_reader = std::make_shared<PgLogReader>(_db_id, 8192, xact_log_path, _committer_queue);
+        _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, xact_log_path, _committer_queue);
 
         // construct the callback for watching for database state changes
         _cache_watcher_db_states = std::make_shared<RedisCache::RedisChangeWatcher>(

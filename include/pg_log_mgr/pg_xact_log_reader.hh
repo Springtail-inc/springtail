@@ -22,7 +22,7 @@ public:
      * @brief Construct a new Pg Xact Log Reader object
      * @param base_dir    base directory for log files
      */
-    PgXactLogReader(const std::filesystem::path &base_dir);
+    explicit PgXactLogReader(const std::filesystem::path &base_dir);
 
     /**
      * @brief Begin reading from the first log file
