@@ -125,7 +125,7 @@ class Component:
 
         return None
 
-    def id(self) -> str:
+    def get_id(self) -> str:
         """
         Get the ID of the component
         Returns:
@@ -133,7 +133,7 @@ class Component:
         """
         return self.id
 
-    def name(self) -> str:
+    def get_name(self) -> str:
         """
         Get the name of the component
         Returns:

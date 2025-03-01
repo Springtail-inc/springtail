@@ -6,7 +6,6 @@ import argparse
 import string
 import signal
 import time
-import boto3
 from typing import Optional
 from random import SystemRandom
 
@@ -23,17 +22,12 @@ from properties import Properties
 # import the ComponentFactory class and the Scheduler class
 from component_factory import ComponentFactory
 from scheduler import Scheduler, CoordinatorState
+from production import Production
 
 # import the xid_mgr_client
 from xid_mgr import XidMgrClient
 from sys_tbl_mgr import SysTblMgrClient
 
-# import production utils
-from production import (
-    install_binaries,
-    install_pgfdw,
-    send_sns
-)
 
 def check_properties(props: Properties) -> None:
     """
@@ -176,9 +170,6 @@ if __name__ == "__main__":
                         handlers=handlers)
 
     logger = logging.getLogger("Coordinator")
-    logging.getLogger('boto3').setLevel(logging.WARNING)
-    logging.getLogger('botocore').setLevel(logging.WARNING)
-    logging.getLogger('urllib3').setLevel(logging.WARNING)
 
     # Get the service type
     service_name = args.service
@@ -187,16 +178,18 @@ if __name__ == "__main__":
         if not service_name:
             raise ValueError("Service type not provided")
 
-    send_sns('startup')
-
     # get install path
     install_path = yaml_config.get('install_dir')
 
     # Check the properties for production
-    production = False
+    is_production = False
+    production = None
+
     if yaml_config.get('production'):
         logger.debug("Checking properties for production")
-        production = True
+        is_production = True
+        production = Production(install_path)
+        production.send_sns('startup')
 
         state = props.get_coordinator_state()
         logger.info(f"Coordinator state: {state}")
@@ -205,7 +198,7 @@ if __name__ == "__main__":
         try:
             if state == CoordinatorState.STARTUP:
                 logger.debug("Installing binaries")
-                install_binaries(install_path)
+                production.install_binaries()
         except Exception as e:
             raise ValueError("Failed to install binaries: " + str(e))
 
@@ -240,7 +233,8 @@ if __name__ == "__main__":
 
     elif service_name == "fdw":
         try:
-            install_pgfdw(install_path)
+            if production:
+                production.install_pgfdw()
         except Exception as e:
             raise ValueError("Failed to install postgres_fdw: " + str(e))
 
@@ -272,7 +266,8 @@ if __name__ == "__main__":
     # Start all components
     if not scheduler.start_all():
         logger.error("Failed to start all components")
-        send_sns('shutdown')
+        if production:
+            production.send_sns('shutdown')
         raise ValueError("Failed to start all components")
 
     logger.info("All components started successfully")
@@ -286,4 +281,5 @@ if __name__ == "__main__":
     logger.debug("Shutting down all components")
     scheduler.shutdown_all()
 
-    send_sns('shutdown')
+    if production:
+        production.send_sns('shutdown')
