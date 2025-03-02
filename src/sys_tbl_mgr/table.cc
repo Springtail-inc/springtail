@@ -9,21 +9,26 @@
 
 namespace springtail {
 
+namespace table_helpers {
+
+std::filesystem::path
+get_table_dir(const std::filesystem::path &base,
+              uint64_t db_id,
+              uint64_t table_id,
+              uint64_t snapshot_xid)
+{
+    std::string db_dir = std::to_string(db_id);
+    std::string table_dir = fmt::format("{}-{}", table_id, snapshot_xid);
+    return base / db_dir / table_dir;
+}
+
+} // namespace table_helpers
+
     namespace {
         const static std::vector<SchemaColumn> ROOTS_SCHEMA = {
             { "root", 1, SchemaType::UINT64, 20, true },
             { "index_id", 2, SchemaType::UINT64, 20, false },
         };
-
-        std::filesystem::path _get_table_dir(const std::filesystem::path &base,
-                                             uint64_t db_id,
-                                             uint64_t table_id,
-                                             uint64_t snapshot_xid)
-        {
-            std::string db_dir = std::to_string(db_id);
-            std::string table_dir = fmt::format("{}-{}", table_id, snapshot_xid);
-            return base / db_dir / table_dir;
-        }
 
         std::vector<std::string> 
         _get_column_names(ExtentSchemaPtr schema, const std::vector<uint32_t>& col_position)
@@ -72,7 +77,7 @@ namespace springtail {
           _stats(metadata.stats)
     {
         // construct the table's data directory
-        _table_dir = _get_table_dir(table_base, db_id, table_id, metadata.snapshot_xid);
+        _table_dir = table_helpers::get_table_dir(table_base, db_id, table_id, metadata.snapshot_xid);
 
         // check if the table directory exists; if not, table is considered vacant/empty
         if (!std::filesystem::exists(_table_dir)) {
@@ -212,6 +217,12 @@ namespace springtail {
     Table::Iterator
     Table::lower_bound(TuplePtr search_key, uint32_t index_id)
     {
+        // check if the table is vacant
+        if (_primary_index == nullptr) {
+            return end(index_id);
+        }
+
+        // check for secondary index lookup
         if (index_id != constant::INDEX_PRIMARY) {
             auto const& [btree, cols] = _secondary_indexes.at(index_id);
             auto index_schema = _create_index_schema(_schema, cols);
@@ -222,10 +233,6 @@ namespace springtail {
                 return end(index_id);
             }
             return Iterator(this, btree, i, index_schema);
-        }
-        // check if the table is vacant
-        if (_primary_index == nullptr) {
-            return end();
         }
 
         BTreePtr btree = index(index_id);
@@ -251,6 +258,11 @@ namespace springtail {
     Table::Iterator
     Table::upper_bound(TuplePtr search_key, uint32_t index_id)
     {
+        // check if the table is vacant
+        if (_primary_index == nullptr) {
+            return end(index_id);
+        }
+
         if (index_id != constant::INDEX_PRIMARY) {
             auto const& [btree, cols] = _secondary_indexes.at(index_id);
             auto index_schema = _create_index_schema(_schema, cols);
@@ -261,11 +273,6 @@ namespace springtail {
                 return end(index_id);
             }
             return Iterator(this, btree, i, index_schema);
-        }
-
-        // check if the table is vacant
-        if (_primary_index == nullptr) {
-            return end();
         }
 
         // find the extent that could contain the upper_bound() key
@@ -287,11 +294,31 @@ namespace springtail {
     }
 
     Table::Iterator
-    Table::inverse_lower_bound(TuplePtr search_key)
+    Table::inverse_lower_bound(TuplePtr search_key, uint32_t index_id)
     {
         // check if the table is vacant
         if (_primary_index == nullptr) {
-            return end();
+            return end(index_id);
+        }
+
+        // check if it's a secondary index lookup
+        if (index_id != constant::INDEX_PRIMARY) {
+            auto const& [btree, cols] = _secondary_indexes.at(index_id);
+            auto index_schema = _create_index_schema(_schema, cols);
+
+            // find the extent that could contain the lower_bound() key
+            auto &&i = btree->lower_bound(search_key);
+
+            // for secondary indexes, it's a row-based index, so finding begin() means there's no
+            // row before the search key
+            if (i == btree->begin()) {
+                return end(index_id);
+            }
+
+            // for secondary indexes, always decrement since it's a row-based index
+            --i;
+
+            return Iterator(this, btree, i, index_schema);
         }
 
         // if the priamry index is empty, return end()
@@ -320,15 +347,31 @@ namespace springtail {
         return Iterator(this, _primary_index, i, std::move(page), j);
     }
 
+    bool
+    Table::empty() const
+    {
+        // check if the table is vacant
+        if (_primary_index == nullptr) {
+            return true;
+        }
+
+        // check if the table is constructed but empty
+        if (_primary_index->begin() == _primary_index->end()) {
+            return true;
+        }
+
+        return false;
+    }
+
     Table::Iterator
     Table::begin(uint32_t index_id)
     {
-        if (index_id == constant::INDEX_PRIMARY) {
-            // check if the table is vacant
-            if (_primary_index == nullptr) {
-                return end();
-            }
+        // check if the table is vacant
+        if (_primary_index == nullptr) {
+            return end(index_id);
+        }
 
+        if (index_id == constant::INDEX_PRIMARY) {
             // check if the table is empty
             auto &&index_i = _primary_index->begin();
             if (index_i == _primary_index->end()) {
@@ -402,7 +445,7 @@ namespace springtail {
       _for_gc(for_gc)
     {
         // construct the table's data directory
-        _table_dir = _get_table_dir(table_base, db_id, table_id, metadata.snapshot_xid);
+        _table_dir = table_helpers::get_table_dir(table_base, db_id, table_id, metadata.snapshot_xid);
         _data_file = _table_dir / constant::DATA_FILE;
 
         // make sure that the table directory exists
@@ -711,11 +754,6 @@ namespace springtail {
         // retrieve the extent offsets of the new page
         ExtentHeader header(ExtentType(), _target_xid, _schema->row_size(), old_eid);
         auto &&offsets = page->flush(header);
-
-        // record the mapping into the extent map
-        if (_for_gc) {
-            WriteCacheClient::get_instance()->add_mapping(_db_id, _id, _target_xid, old_eid, offsets);
-        }
 
         auto value_fields = std::make_shared<FieldArray>(1);
         for (auto extent_id : offsets) {

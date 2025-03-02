@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package springtail.proto;
+
+import "google/protobuf/empty.proto";
+
+// Extent object
+message Extent {
+  int64 xid = 1;
+  int64 xid_seq = 2;
+  bytes data = 3;
+}
+
+// Request message for get_extents
+message GetExtentsRequest {
+  int64 db_id = 1;
+  int64 table_id = 2;
+  int64 xid = 3;
+  int64 cursor = 4;
+  int32 count = 5;
+}
+
+// Response message for get_extents
+message GetExtentsResponse {
+  int64 table_id = 1;
+  int64 cursor = 2;
+  repeated Extent extents = 3;
+  int64 commit_ts = 4;  // Postgres timestamp in microseconds since 2000-01-01
+}
+
+// Request message for list_tables
+message ListTablesRequest {
+  int64 db_id = 1;
+  int64 xid = 2;
+  int64 cursor = 3;
+  int32 count = 4;
+}
+
+// Response message for list_tables
+message ListTablesResponse {
+  int64 cursor = 1;
+  repeated int64 table_ids = 2;
+}
+
+// Request message for evict_table
+message EvictTableRequest {
+  int64 db_id = 1;
+  int64 table_id = 2;
+  int64 xid = 3;
+}
+
+// Request message for evict_xid
+message EvictXidRequest {
+  int64 db_id = 1;
+  int64 xid = 2;
+}
+
+// ExtentMapper messages
+message AddMappingRequest {
+  int64 db_id = 1;
+  int64 table_id = 2;
+  int64 target_xid = 3;
+  int64 old_eid = 4;
+  repeated int64 new_eids = 5;
+}
+
+message SetLookupRequest {
+  int64 db_id = 1;
+  int64 table_id = 2;
+  int64 target_xid = 3;
+  int64 extent_id = 4;
+}
+
+message ForwardMapRequest {
+  int64 db_id = 1;
+  int64 table_id = 2;
+  int64 target_xid = 3;
+  int64 extent_id = 4;
+}
+
+message ReverseMapRequest {
+  int64 db_id = 1;
+  int64 table_id = 2;
+  int64 access_xid = 3;
+  int64 target_xid = 4;
+  int64 extent_id = 5;
+}
+
+message ExpireMapRequest {
+  int64 db_id = 1;
+  int64 table_id = 2;
+  int64 commit_xid = 3;
+}
+
+message ExtentMapResponse {
+  repeated int64 extent_ids = 1;
+}
+
+// WriteCache service definition
+service WriteCache {
+  // Health check
+  rpc Ping(google.protobuf.Empty) returns (google.protobuf.Empty) {}
+
+  // Core write cache functions
+  rpc GetExtents(GetExtentsRequest) returns (GetExtentsResponse) {}
+  rpc ListTables(ListTablesRequest) returns (ListTablesResponse) {}
+  rpc EvictTable(EvictTableRequest) returns (google.protobuf.Empty) {}
+  rpc EvictXid(EvictXidRequest) returns (google.protobuf.Empty) {}
+
+  // Extent mapper functions
+  rpc AddMapping(AddMappingRequest) returns (google.protobuf.Empty) {}
+  rpc SetLookup(SetLookupRequest) returns (google.protobuf.Empty) {}
+  rpc ForwardMap(ForwardMapRequest) returns (ExtentMapResponse) {}
+  rpc ReverseMap(ReverseMapRequest) returns (ExtentMapResponse) {}
+  rpc ExpireMap(ExpireMapRequest) returns (google.protobuf.Empty) {}
+}

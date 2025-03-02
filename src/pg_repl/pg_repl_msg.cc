@@ -1,13 +1,12 @@
 #include <cstdlib>
 #include <sstream>
-#include <variant>
-#include <algorithm>
 
 #include <fmt/core.h>
 #include <nlohmann/json.hpp>
 
 #include <common/logging.hh>
 #include <common/common.hh>
+#include <pg_repl/pg_common.hh>
 
 #include <pg_repl/exception.hh>
 #include <pg_repl/pg_repl_msg.hh>
@@ -72,48 +71,6 @@ namespace pg_msg {
         uint64_t lsn_lower = strtol(end_ptr+1, nullptr, 16);
 
         return (lsn_higher << 32) | (0xFFFFFFFF & lsn_lower);
-    }
-
-    SchemaType
-    convert_pg_type(int32_t pg_type)
-    {
-        switch (pg_type) {
-        case INT4OID:
-        case DATEOID:
-            return SchemaType::INT32;
-
-        case TEXTOID:
-        case VARCHAROID:
-        case BPCHAROID:
-            return SchemaType::TEXT;
-
-        case INT8OID:
-        case TIMESTAMPOID:
-        case TIMESTAMPTZOID:
-        case TIMEOID:
-        case TIMETZOID:
-        case MONEYOID:
-            return SchemaType::INT64;
-
-        case BOOLOID:
-            return SchemaType::BOOLEAN;
-
-        case INT2OID:
-            return SchemaType::INT16;
-
-        case FLOAT4OID:
-            return SchemaType::FLOAT32;
-
-        case FLOAT8OID:
-            return SchemaType::FLOAT64;
-
-        case CHAROID:
-            return SchemaType::INT8;
-
-        default:
-            // put all other types into BINARY data for now
-            return SchemaType::BINARY;
-        }
     }
 
     /**
@@ -290,7 +247,7 @@ namespace pg_msg {
                 }
                 ss << "  oid=" << table.oid << std::endl;
                 ss << "  LSN=" << table.lsn << std::endl;
-                ss << "  schema=" << table.schema << std::endl;
+                ss << "  namespace=" << table.namespace_name << std::endl;
                 ss << "  table=" << table.table << std::endl;
                 ss << "  columns=" << table.columns.size() << std::endl;
 
@@ -315,7 +272,7 @@ namespace pg_msg {
                 }
                 ss << "  oid=" << table.oid << std::endl;
                 ss << "  LSN=" << table.lsn << std::endl;
-                ss << "  schema=" << table.schema << std::endl;
+                ss << "  namespace=" << table.namespace_name << std::endl;
                 ss << "  table=" << table.table << std::endl;
                 ss << "  columns=" << table.columns.size() << std::endl;
 
@@ -338,8 +295,43 @@ namespace pg_msg {
                 }
                 ss << "  oid=" << drop_table.oid << std::endl;
                 ss << "  LSN=" << drop_table.lsn << std::endl;
-                ss << "  schema=" << drop_table.schema << std::endl;
+                ss << "  namespace=" << drop_table.namespace_name << std::endl;
                 ss << "  table=" << drop_table.table << std::endl;
+                break;
+            }
+
+            case CREATE_NAMESPACE: {
+                PgMsgNamespace create_namespace = std::get<PgMsgNamespace>(msg.msg);
+                ss << "\nCREATE SCHEMA" << std::endl;
+                if (msg.is_streaming) {
+                    ss << "  xid=" << create_namespace.xid << std::endl;
+                }
+                ss << "  oid=" << create_namespace.oid << std::endl;
+                ss << "  LSN=" << create_namespace.lsn << std::endl;
+                ss << "  namespace=" << create_namespace.name << std::endl;
+                break;
+            }
+
+            case ALTER_NAMESPACE: {
+                PgMsgNamespace alter_namespace = std::get<PgMsgNamespace>(msg.msg);
+                ss << "\nALTER SCHEMA" << std::endl;
+                if (msg.is_streaming) {
+                    ss << "  xid=" << alter_namespace.xid << std::endl;
+                }
+                ss << "  oid=" << alter_namespace.oid << std::endl;
+                ss << "  LSN=" << alter_namespace.lsn << std::endl;
+                ss << "  namespace=" << alter_namespace.name << std::endl;
+                break;
+            }
+
+            case DROP_NAMESPACE: {
+                PgMsgNamespace create_namespace = std::get<PgMsgNamespace>(msg.msg);
+                ss << "\nDROP SCHEMA" << std::endl;
+                if (msg.is_streaming) {
+                    ss << "  xid=" << create_namespace.xid << std::endl;
+                }
+                ss << "  oid=" << create_namespace.oid << std::endl;
+                ss << "  LSN=" << create_namespace.lsn << std::endl;
                 break;
             }
 

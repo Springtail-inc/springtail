@@ -20,6 +20,51 @@
 
 namespace springtail::pg_proxy {
 
+    ProxyConnection::ProxyConnection(int socket)
+        : _socket(socket), _endpoint(_get_peer_name())
+    {}
+
+
+    std::string
+    ProxyConnection::_get_peer_name()
+    {
+        char host[NI_MAXHOST];
+        char service[NI_MAXSERV];
+        struct sockaddr_storage addr;
+        socklen_t len = sizeof(addr);
+
+        if (getpeername(_socket, (struct sockaddr *)&addr, &len) == -1) {
+            SPDLOG_ERROR("Error getting peer name: {}", strerror(errno));
+            return "unknown";
+        }
+
+        int rc = getnameinfo((struct sockaddr *)&addr, len, host, sizeof(host), service, sizeof(service), NI_NUMERICHOST | NI_NUMERICSERV);
+        if (rc != 0) {
+            SPDLOG_ERROR("Error getting name info: {}", gai_strerror(rc));
+            return "unknown";
+        }
+
+        return std::string(host) + ":" + std::string(service);
+    }
+
+    void
+    ProxyConnection::close()
+    {
+        if (_closed.test_and_set()) {
+            // already closed
+            return;
+        }
+
+        // free ssl object
+        if (_ssl != nullptr && _ssl_enabled) {
+            ::SSL_shutdown(_ssl);
+        }
+        if (_ssl != nullptr) {
+            ::SSL_free(_ssl);
+        }
+        ::close(_socket);
+     }
+
     ssize_t
     ProxyConnection::write(const char *buffer, int size, bool more)
     {
@@ -217,62 +262,47 @@ namespace springtail::pg_proxy {
         return bytes_read;
     }
 
-    static std::string hostname_to_ip(const std::string &hostname)
-    {
-	    struct hostent *he;
-	    struct in_addr **addr_list;
-	    int i;
-
-	    if ( (he = gethostbyname( hostname.c_str() ) ) == nullptr) {
-		    // get the host info
-		    SPDLOG_ERROR("gethostbyname");
-		    return {};
-	    }
-
-	    addr_list = (struct in_addr **) he->h_addr_list;
-
-	    for(i = 0; addr_list[i] != nullptr; i++) {
-		    // return the first one;
-		    return {inet_ntoa(*addr_list[i])};
-	    }
-
-    	return {};
-    }
 
     ProxyConnectionPtr
     ProxyConnection::create(const std::string &hostname, int port)
     {
-        int sock = socket(AF_INET, SOCK_STREAM, 0);
+        struct addrinfo hints, *res, *p;
+        int sock = -1;
+
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_UNSPEC; // Allow IPv4 or IPv6
+        hints.ai_socktype = SOCK_STREAM;
+
+        std::string port_str = std::to_string(port);
+        int status = getaddrinfo(hostname.c_str(), port_str.c_str(), &hints, &res);
+        if (status != 0) {
+            SPDLOG_ERROR("Error resolving hostname {}: {}", hostname, gai_strerror(status));
+            throw ProxyIOConnectionError();
+        }
+
+        for (p = res; p != nullptr; p = p->ai_next) {
+            sock = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+            if (sock == -1) {
+                continue;
+            }
+
+            if (connect(sock, p->ai_addr, p->ai_addrlen) == -1) {
+                ::close(sock);
+                sock = -1;
+                continue;
+            }
+
+            break; // Successfully connected
+        }
+
+        freeaddrinfo(res);
+
         if (sock == -1) {
-            SPDLOG_ERROR("Error creating socket: {}", strerror(errno));
-            throw ProxyIOConnectionError();
-        }
-
-        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Connecting to {}:{}", hostname, port);
-
-        std::string ip = hostname_to_ip(hostname);
-        if (ip.empty()) {
-            SPDLOG_ERROR("Error resolving hostname: {}", hostname);
-            ::close(sock);
-            throw ProxyIOConnectionError();
-        }
-
-        struct sockaddr_in addr;
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(port);
-        if (inet_pton(AF_INET, ip.c_str(), &addr.sin_addr) <= 0) {
-            SPDLOG_ERROR("Error converting hostname {} to address: {}", hostname, strerror(errno));
-            ::close(sock);
-            throw ProxyIOConnectionError();
-        }
-
-        if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
             SPDLOG_ERROR("Error connecting to {}:{}", hostname, port);
-            ::close(sock);
             throw ProxyIOConnectionError();
         }
 
-        return std::make_shared<ProxyConnection>(sock, addr);
+        return std::make_shared<ProxyConnection>(sock);
     }
 
     void
@@ -289,7 +319,7 @@ namespace springtail::pg_proxy {
         // it is set back to blocking after the handshake (after ssl_accept/connect)
         _set_non_blocking();
 
-    #if SPDLOG_ACTIVE_LEVEL==SPDLOG_ACTIVE_DEBUG
+    #if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG
         // set the connection object in the SSL ex data for debugging
         SSL_set_ex_data(ssl, 0, this);
     #endif
@@ -321,7 +351,7 @@ namespace springtail::pg_proxy {
     ProxyConnection::_handle_ssl_error(int rc)
     {
         int err = SSL_get_error(rc);
-        char *msg = ::ERR_error_string(err, NULL);
+        char *msg = ::ERR_error_string(err, nullptr);
         switch (err) {
             case SSL_ERROR_WANT_READ:
             case SSL_ERROR_WANT_WRITE:
@@ -379,6 +409,36 @@ namespace springtail::pg_proxy {
         _set_blocking();
 
         return 0;
+    }
+
+    bool
+    ProxyConnection::has_pending(std::vector<ProxyConnectionPtr> connections,
+                                 std::set<int> &fds)
+    {
+        struct pollfd pfds[connections.size()];
+        fds.clear();
+
+        int i = 0;
+        for (auto &conn : connections) {
+            if (conn->_ssl_enabled && ::SSL_pending(conn->_ssl) > 0) {
+                fds.insert(conn->get_socket());
+            }
+            pfds[i].fd = conn->get_socket();
+            pfds[i].events = POLLIN;
+            pfds[i].revents = 0;
+            i++;
+        }
+
+        int n = poll(pfds, connections.size(), 0);
+        if (n > 0) {
+            for (i = 0; i < connections.size(); i++) {
+                if (pfds[i].revents & POLLIN) {
+                    fds.insert(pfds[i].fd);
+                }
+            }
+        }
+
+        return fds.size() > 0;
     }
 
     /** Does connection have pending data */

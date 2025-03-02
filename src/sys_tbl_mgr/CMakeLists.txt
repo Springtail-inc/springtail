@@ -5,18 +5,19 @@ set(SYS_TBL_MGR_SOURCES
     client.cc
     server.cc
     service.cc
-    table_mgr.cc
+    schema_cache.cc
     schema_mgr.cc
-    table.cc
     system_tables.cc
+    table.cc
+    table_mgr.cc
 )
 
 # add the library target
 add_library(springtail_sys_tbl_mgr ${SYS_TBL_MGR_SOURCES})
-target_include_directories(springtail_sys_tbl_mgr PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(springtail_sys_tbl_mgr PUBLIC ${CMAKE_BINARY_DIR}/src PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(springtail_sys_tbl_mgr
   PUBLIC springtail_common springtail_storage springtail_xid_mgr
-  PRIVATE thrift_sys_tbl_mgr
+  PRIVATE proto_sys_tbl_mgr
   PRIVATE Boost::thread)
 
 # daemon executable
@@ -38,9 +39,18 @@ target_link_libraries(test_sys_tbl_mgr
 )
 add_dsymutil_command(test_sys_tbl_mgr)
 
+add_executable(test_schema_cache test/test_schema_cache.cc)
+target_include_directories(test_schema_cache PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_schema_cache
+  PUBLIC springtail_test
+  PRIVATE GTest::gtest_main
+)
+add_dsymutil_command(test_schema_cache)
+
 
 # hook tests into gtest framework
 gtest_discover_tests(test_sys_tbl_mgr)
+gtest_discover_tests(test_schema_cache)
 
 # install daemon to install directory
 install(TARGETS sys_tbl_mgr_daemon RUNTIME DESTINATION bin/system)

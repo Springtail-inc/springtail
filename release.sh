@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 if [ $(uname -p) == aarch64 ]; then
     export VCPKG_FORCE_SYSTEM_BINARIES=1
 fi
@@ -18,7 +20,9 @@ if [ ! -d release ]; then
     if [ $DOCKER -eq 1 ]; then
         echo "Building inside a container; symlinking release dir"
         mkdir -p /home/dev/release
+        mkdir -p /home/dev/install
         ln -s /home/dev/release release
+        ln -s /home/dev/install install
     else
         mkdir -p release
     fi
@@ -29,6 +33,10 @@ cmake -B release -S . \
       -DNDEBUG=1 \
       -DVCPKG_INSTALL_OPTIONS="--allow-unsupported"
 
-# build the code
 cd release
-make $1 $2
+if command -v nproc >/dev/null 2>&1; then
+    ncpus=$(nproc)
+else
+    ncpus=4
+fi
+make -j${ncpus} $1 $2

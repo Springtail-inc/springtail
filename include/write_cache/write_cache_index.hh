@@ -7,6 +7,8 @@
 
 #include <fmt/core.h>
 
+#include <common/timestamp.hh>
+
 #include <write_cache/write_cache_index_common.hh>
 #include <write_cache/write_cache_table_set.hh>
 
@@ -44,15 +46,17 @@ namespace springtail {
          * @brief Add a mapping from springtail XID to Postgres XID
          * @param pg_xid Postgres XID
          * @param xid springtail XID
+         * @param commit_ts postgres commit ts
          */
-        void commit(uint64_t pg_xid, uint64_t xid);
+        void commit(uint64_t pg_xid, uint64_t xid, PostgresTimestamp commit_ts);
 
         /**
          * @brief Add a mapping from springtail XID to Postgres XID
          * @param pg_xids Postgres XID
          * @param xid springtail XID
+         * @param commit_ts postgres commit ts
          */
-        void commit(std::vector<uint64_t> pg_xids, uint64_t xid);
+        void commit(std::vector<uint64_t> pg_xids, uint64_t xid, PostgresTimestamp commit_ts);
 
         /**
          * @brief Drop a table from the index
@@ -73,7 +77,7 @@ namespace springtail {
          */
         void abort(std::vector<uint64_t> pg_xids);
 
-        //// Thrift interface
+        //// RPC interface
 
         /**
          * @brief Get the table ids for a given XID
@@ -103,11 +107,11 @@ namespace springtail {
          * @param xid springtail XID
          * @param count max. number of extents to fetch; done when count >= vector size
          * @param cursor In/Out cursor, in: set to 0 for start of range, out: current position
+         * @param commit_ts out; postgres-reported commit ts of xid
          * @return std::vector<WriteCacheIndexExtentPtr>
          */
         std::vector<WriteCacheIndexExtentPtr> get_extents(uint64_t tid, uint64_t xid,
-                                                          uint32_t count, uint64_t &cursor);
-
+                                                          uint32_t count, uint64_t &cursor, PostgresTimestamp &commit_ts);
 
     private:
         /** Set of partitions to hold table data, enables more parallelism */

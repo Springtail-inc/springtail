@@ -159,12 +159,11 @@ def start_daemons(build_dir : str, daemons : List[tuple], restart : bool = True)
         if not os.path.exists(cmd_dir):
             raise Exception(f"Daemon {daemon[0]} not found: {cmd_dir}")
 
-        print(f"Starting daemon: {daemon[0]}")
-
         args = ['--daemon']
         if len(daemon) > 2:
             args += daemon[2].split(',')
 
+        print(f"Starting daemon: {daemon[0]} with args {args}")
         run_command(cmd_dir, args)
 
         time.sleep(2)

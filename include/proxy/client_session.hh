@@ -4,15 +4,16 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <set>
 #include <unordered_map>
+#include <fmt/core.h>
 
 #include <proxy/session.hh>
 #include <proxy/buffer_pool.hh>
 #include <proxy/connection.hh>
-#include <proxy/auth/md5.h>
-#include <proxy/auth/scram.hh>
 #include <proxy/history_cache.hh>
 #include <proxy/parser.hh>
+#include <proxy/authorization.hh>
 
 namespace springtail::pg_proxy {
 
@@ -25,17 +26,26 @@ namespace springtail::pg_proxy {
     class ClientSession : public Session
     {
     public:
-        constexpr static char SERVER_VERSION[] = "16.0 (Springtail)";
         constexpr static int STATEMENT_CACHE_SIZE = 100;
 
         ClientSession(const ClientSession&) = delete;
         ClientSession& operator=(const ClientSession&) = delete;
 
         /** Construct a connection with the given socket. */
-        ClientSession(ProxyConnectionPtr connection,
-                      ProxyServerPtr server);
+        explicit ClientSession(ProxyConnectionPtr connection);
 
         ~ClientSession();
+
+        /** Entry point from runnable */
+        void run(std::set<int> &fds) override;
+
+        /** Runnable name */
+        std::string name() const override {
+            return fmt::format("Client[{}]", _id);
+        }
+
+        /** Callback from Session::_handle_error() to shutdown the session */
+        void shutdown_session() override;
 
         /**
          * @brief Is client session in shadow mode: sending to primary and replica,
@@ -83,7 +93,6 @@ namespace springtail::pg_proxy {
             return _replica_session;
         }
 
-
         /**
          * @brief Get a shared pointer to this client session
          * @return std::shared_ptr<ClientSession> shared pointer to this client session
@@ -93,24 +102,31 @@ namespace springtail::pg_proxy {
         }
 
         /**
-         * @brief Shutdown the client session; send shutdown message to server sessions
+         * @brief Callback from Server indicating that authentication is done
          */
-        void shutdown_server_sessions();
-
-    protected:
+        void server_auth_done(ServerSessionPtr session, const std::unordered_map<std::string, std::string> &parameters);
 
         /**
-         * @brief Entry point for data from the connection
+         * @brief Callback from Server indicating that a message is ready
+         * @param msg message containing query statement
+         * @param success true if successful, false if error
          */
-        void _process_connection() override;
+        void server_msg_response(SessionMsgPtr msg, bool success);
 
         /**
-         * @brief Entry point for a message from the server (normally a reply))
-         * @param msg message from the server
+         * @brief Callback from Server indicating reception of ready for query message
+         * @param xact_status transaction status: I - Idle, T - Transaction, E - Error in transaction
          */
-        void _process_msg(SessionMsgPtr msg) override;
+        void server_ready_msg(char xact_status);
+
+        /**
+         * @brief Callback from Server indicating that it is shutting down
+         * @param session session that is shutting down
+         */
+        void server_shutdown(ServerSessionPtr session);
 
     private:
+
         /** cache of statements, transaction history and session history */
         StatementCache _stmt_cache;
 
@@ -122,38 +138,66 @@ namespace springtail::pg_proxy {
         bool _shadow_mode = false;  ///< shadow mode flag; if true, send to primary and replica
         bool _primary_mode = false; ///< primary mode flag; if true, send to primary only
 
-        void _process_startup_msg(int32_t msg_length, uint64_t seq_id);
-        void _process_ssl_request();
+        ClientAuthorizationPtr _auth; ///< client authorization
 
-        void _encode_parameter_status(BufferPtr buffer, const std::string &key, const std::string &value);
-        void _encode_auth_md5(BufferPtr buffer);
-        void _encode_auth_ok(BufferPtr buffer);
-        void _encode_auth_scram(BufferPtr buffer);
+        std::deque<SessionMsgPtr> _msg_queue; ///< queue of messages to be processed
 
-        BufferPtr _encode_session_param_query();
+        /** Helper to queue message internally, for batch push to server session */
+        void _queue_msg(SessionMsgPtr msg) {
+            _msg_queue.push_back(msg);
+        }
 
+        /** Helper to send message queue to server */
+        void _send_msg_queue();
+
+        /**
+         * @brief Check for pending data on any associated connections
+         * @param fds set of fds; set socket if socket has data
+         * @return true if any socket has data
+         * @return false if no socket has data
+         */
+        bool _has_pending_data(std::set<int> &fds) const;
+
+        /**
+         * @brief Entry point for data from the connection, called from _run()
+         */
+        void _process_connection();
+
+        /**
+         * @brief Read in data from client, parse queries and dispatch to server session
+         */
         void _handle_request();
-        void _handle_startup();
-        void _handle_ssl_handshake();
-        void _handle_auth();
-        void _handle_scram_auth(const std::string_view data, uint64_t seq_id);
-        void _handle_scram_auth_continue(const std::string_view data, uint64_t seq_id);
-        void _handle_server_error(const std::string_view msg);
 
+        /** Handle simple query request */
         void _handle_simple_query(BufferPtr buffer, uint64_t seq_id);
+
+        /** Handle parse request */
         void _handle_parse(BufferPtr buffer, uint64_t seq_id);
+
+        /** Handle bind request */
         void _handle_bind(BufferPtr buffer, uint64_t seq_id);
+
+        /** Handle describe request */
         void _handle_describe(BufferPtr buffer, uint64_t seq_id);
+
+        /** Handle execute request */
         void _handle_execute(BufferPtr buffer, uint64_t seq_id);
+
+        /** Handle close request */
         void _handle_close(BufferPtr buffer, uint64_t seq_id);
+
+        /** Handle sync request */
         void _handle_sync(BufferPtr buffer, uint64_t seq_id);
+
+        /** Handle function call request */
         void _handle_function_call(BufferPtr buffer, uint64_t seq_id);
 
-        void _forward_to_server(BufferPtr buffer, uint64_t seq_id);
-
-        void _send_auth_req(uint64_t seq_id);
-        void _send_auth_done(uint64_t seq_id);
-
+        /**
+         * @brief Create a server session of a certain type: primary or replica
+         * @param type type of server session to create (PRIMARY or REPLICA)
+         * @param seq_id sequence id
+         * @return ServerSessionPtr server session
+         */
         ServerSessionPtr _create_server_session(Session::Type type, uint64_t seq_id);
 
         /**
@@ -172,11 +216,19 @@ namespace springtail::pg_proxy {
          */
         QueryStmt::Type _remap_parse_type(const Parser::StmtContextPtr context) const;
 
-        /** Select a server session based on type */
+        /**
+         * @brief Select a server session based on type; tries to use
+         * associated session or _primary, _replica before calling create.
+         * @param type type of server session to select
+         * @param seq_id sequence id
+         * @return ServerSessionPtr server session
+         */
         ServerSessionPtr _select_session(Type type, uint64_t seq_id);
 
-        /** Send message to session, if session is null, select session first */
-        void _send_msg(SessionMsgPtr msg, bool is_readonly, SessionPtr session=nullptr);
+        /** Helper associated session as a server session ptr */
+        ServerSessionPtr _get_associated_session() {
+            return std::static_pointer_cast<ServerSession>(get_associated_session());
+        }
     };
     using ClientSessionPtr = std::shared_ptr<ClientSession>;
 } // namespace springtail::pg_proxy

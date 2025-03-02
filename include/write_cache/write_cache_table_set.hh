@@ -9,9 +9,7 @@
 #include <cassert>
 #include <vector>
 
-#include <thrift/write_cache/ThriftWriteCache.h>
-#include <thrift/write_cache/write_cache_types.h>
-
+#include <common/timestamp.hh>
 #include <write_cache/write_cache_index_common.hh>
 #include <write_cache/write_cache_index_node.hh>
 
@@ -53,15 +51,17 @@ namespace springtail {
          * @brief Add mapping from springtail XID to Postgres XID
          * @param pg_xid Postgres XID
          * @param xid springtail XID
+         * @param commit_ts postgres commit ts
          */
-        void commit(uint64_t pg_xid, uint64_t xid);
+        void commit(uint64_t pg_xid, uint64_t xid, PostgresTimestamp commit_ts);
 
         /**
          * @brief Add mapping from springtail XID to Postgres XID
          * @param pg_xids Postgres XID
          * @param xid springtail XID
+         * @param commit_ts postgres commit ts
          */
-        void commit(std::vector<uint64_t> pg_xids, uint64_t xid);
+        void commit(std::vector<uint64_t> pg_xids, uint64_t xid, PostgresTimestamp commit_ts);
 
         /**
          * @brief Get a list of table IDs
@@ -82,12 +82,13 @@ namespace springtail {
          * @param count number of items to return
          * @param start_offset offset at which to start searching
          * @param cursor out; set to the offset of the last extent returned
+         * @param commit_ts out; postgres-reported commit ts of xid
          * @param result reference to result vector
          * @return int number of elements added
          */
         int get_extents(uint64_t tid, uint64_t xid, uint32_t count,
                         uint64_t start_offset, uint64_t &cursor,
-                        std::vector<WriteCacheIndexExtentPtr> &result);
+                        std::vector<WriteCacheIndexExtentPtr> &result, PostgresTimestamp &commit_ts);
 
         /**
          * @brief Evict all data for table, fixup indexes
@@ -114,7 +115,10 @@ namespace springtail {
         /** map of sp xid to pg_xids (there may be multiple pg_xids due to subtransactions) */
         std::unordered_multimap<uint64_t, uint64_t> _xid_map;
 
-        /** mutex for _xid_map */
+        /** map of sp xid to Postgres commit ts */
+        std::unordered_map<uint64_t, PostgresTimestamp> _xid_ts_map;
+
+        /** mutex for _xid_map and _xid_ts_map */
         std::shared_mutex _xid_map_mutex;
 
         /**
@@ -126,9 +130,10 @@ namespace springtail {
         /**
          * @brief Get pg_xids that map to a springtail XID
          * @param xid Springtail XID
-         * @return std::set<uint64_t> of springtail XIDs
+         * @param commit_ts out; commit ts of xid
+         * @return std::set<uint64_t> of PG XIDs
          */
-            std::set<uint64_t> lookup_pgxid(uint64_t xid);
+        std::set<uint64_t> lookup_pgxid(uint64_t xid, PostgresTimestamp *commit_ts=nullptr);
     };
     typedef std::shared_ptr<WriteCacheTableSet> WriteCacheTableSetPtr;
 }

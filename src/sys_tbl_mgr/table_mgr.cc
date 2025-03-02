@@ -14,7 +14,7 @@ namespace springtail {
         std::vector<Index> keys;
         Index idx;
         idx.id = 1;
-        idx.table_id = sys_tbl::TableNames::ID;
+        idx.table_id = Table::ID;
         idx.is_unique = false;
         idx.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
 
@@ -64,14 +64,12 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
         // pass secondary indexes only
-        auto it = std::ranges::find_if(meta.indexes, [](auto const& v) { return v.id == constant::INDEX_PRIMARY; } );
-        if (it != meta.indexes.end()) {
-            meta.indexes.erase(it);
-        }
+        auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY; });
+        std::vector<Index> secondary_indexes(filtered.begin(), filtered.end());
 
         return std::make_shared<Table>(db_id, table_id, xid, _table_base,
-                                       schema->get_sort_keys(), meta.indexes,
-                                       tbl_meta, schema);
+                                       schema->get_sort_keys(), secondary_indexes,
+                                       *tbl_meta, schema);
     }
 
     bool
@@ -108,28 +106,38 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
         // pass secondary indexes only
-        auto it = std::ranges::find_if(meta.indexes, [](auto const& v) { return v.id == constant::INDEX_PRIMARY; } );
-        if (it != meta.indexes.end()) {
-            meta.indexes.erase(it);
+        auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY; });
+        std::vector<Index> secondary_indexes(filtered.begin(), filtered.end());
+
+        SPDLOG_DEBUG_MODULE(LOG_BTREE, "Get mutable table: table {}, access_xid {}", table_id, access_xid);
+        for (auto &root : tbl_meta->roots) {
+            SPDLOG_DEBUG_MODULE(LOG_BTREE, "Get mutable table: index {}, root {}", root.index_id, root.extent_id);
         }
 
         return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid,
-                                              _table_base, schema->get_sort_keys(), meta.indexes,
-                                              tbl_meta, schema, for_gc);
+                                              _table_base, schema->get_sort_keys(), secondary_indexes,
+                                              *tbl_meta, schema, for_gc);
     }
 
     MutableTablePtr
     TableMgr::get_snapshot_table(uint64_t db_id,
                                  uint64_t table_id,
                                  uint64_t snapshot_xid,
-                                 ExtentSchemaPtr schema)
+                                 ExtentSchemaPtr schema,
+                                 const std::vector<Index>& secondary_keys)
     {
         TableMetadata tbl_meta;
         tbl_meta.snapshot_xid = snapshot_xid;
 
+        // note: in the case of a failure, there may be a partially copied table already present in
+        //       the directory structure, so we need to make sure to delete it before we try to
+        //       create it below
+        auto table_dir = table_helpers::get_table_dir(_table_base, db_id, table_id, snapshot_xid);
+        if (std::filesystem::exists(table_dir)) {
+            std::filesystem::remove_all(table_dir);
+        }
+
         // construct an empty mutable table with the provided snapshot XID and return it
-        // XXX we need to eventually get these secondary keys passed down from the table copy code
-        std::vector<Index> secondary_keys;
         return std::make_shared<MutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
                                               _table_base, schema->get_sort_keys(), secondary_keys,
                                               tbl_meta, schema, false);
@@ -215,6 +223,12 @@ namespace springtail {
                                            sys_tbl::IndexNames::Primary::KEY,
                                            secondary_keys, tbl_meta, schema);
         }
+        case (sys_tbl::NamespaceNames::ID): {
+            secondary_keys = _get_secondary_keys<sys_tbl::NamespaceNames>();
+            return std::make_shared<Table>(db_id, table_id, xid, _table_base,
+                                           sys_tbl::NamespaceNames::Primary::KEY,
+                                           secondary_keys, tbl_meta, schema);
+        }
         default:
             CHECK(0);
         }
@@ -278,6 +292,12 @@ namespace springtail {
         case (sys_tbl::IndexNames::ID): {
             return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                   sys_tbl::IndexNames::Primary::KEY, secondary_keys,
+                                                  tbl_meta, schema);
+        }
+        case (sys_tbl::NamespaceNames::ID): {
+            secondary_keys = _get_secondary_keys<sys_tbl::NamespaceNames>();
+            return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
+                                                  sys_tbl::NamespaceNames::Primary::KEY, secondary_keys,
                                                   tbl_meta, schema);
         }
         default:

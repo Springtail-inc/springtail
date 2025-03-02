@@ -21,7 +21,11 @@
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_msg_stream.hh>
 
+#include <sys_tbl_mgr/client.hh>
+
 #include <test/services.hh>
+
+#include <xid_mgr/xid_mgr_client.hh>
 
 using namespace springtail;
 using namespace springtail::pg_log_mgr;
@@ -44,16 +48,6 @@ namespace {
         {
             return _create_repl_logger();
         }
-
-        PgXactLogWriterPtr create_xact_log_writer()
-        {
-            return _create_xact_logger();
-        }
-
-        void process_xact(PgTransactionPtr xact)
-        {
-            _process_xact(xact);
-        }
     };
 
     class LogReader_Test : public ::testing::Test {
@@ -62,27 +56,31 @@ namespace {
         static constexpr char const * const JSON_FILE = "test_reader.json";
         static constexpr char const * const XACT_LOG_DIR = "/tmp/test_xact_log";
 
+        static void SetUpTestSuite() {
+            springtail_init();
+            _services.init();
+
+            // create the public namespace
+            auto client = sys_tbl_mgr::Client::get_instance();
+            auto xid_client = XidMgrClient::get_instance();
+            uint64_t target_xid = xid_client->get_committed_xid(1, 0) + 1;
+
+            // create the public namespace in the sys_tbl_mgr
+            PgMsgNamespace ns_msg;
+            ns_msg.oid = 90000;
+            ns_msg.name = "public";
+            client->create_namespace(1, XidLsn(target_xid, 0), ns_msg);
+
+            xid_client->commit_xid(1, target_xid, false);
+        }
+
+        static void TearDownTestSuite() {
+            _services.shutdown();
+        }
+
+        static test::Services _services;
+
         void SetUp() override {
-            // code here will execute just before the test ensues
-            struct Initializer
-            {
-                test::Services _s;
-
-                Initializer() : _s{true, true, false}
-                {
-                    springtail_init();
-                    _s.init();
-                }
-                Initializer(const Initializer&) = delete;
-                Initializer& operator=(const Initializer&) = delete;
-                ~Initializer()
-                {
-                    _s.shutdown();
-                }
-
-            };
-            static Initializer init;
-
             // create a new log file
             _log_file = std::filesystem::path(LOG_FILE);
 
@@ -164,16 +162,23 @@ namespace {
         bool using_redis = false;
         FILE *_fp = nullptr;
         std::filesystem::path _log_file{LOG_FILE};
-        PgLogReader::PgTransactionQueuePtr _queue = std::make_shared<ConcurrentQueue<PgTransaction>>();
-        PgLogReader _log_reader{1, _queue}; // note: hard-codes DB ID as 1
+        PgLogReader::CommitterQueuePtr _committer_queue = std::make_shared<ConcurrentQueue<committer::XidReady>>();
+        PgLogReader _log_reader{1, 8192, XACT_LOG_DIR, _committer_queue}; // note: hard-codes DB ID as 1
         std::vector<PgTransactionPtr> _xact_list;
         std::shared_ptr<TestLogMgr> _log_mgr;
     };
+
+    test::Services LogReader_Test::_services{true, true, false};
 
     TEST_F(LogReader_Test, ProcessLog)
     {
         // create a new log file
         process_json_cmd_file(std::filesystem::path(JSON_FILE));
+
+        // set the XID for assignment in the reader
+        auto xid_mgr = XidMgrClient::get_instance();
+        uint64_t next_xid = xid_mgr->get_committed_xid(1, 0) + 1; // hard-codes DB as 1
+        _log_reader.set_next_xid(next_xid);
 
         // read the header
         uint64_t offset = 0;
@@ -224,15 +229,17 @@ namespace {
             GTEST_SKIP() << "Redis is not running, skipping test";
         }
 
-        // initialize the log mgr
-        PgXactLogWriterPtr xact_writer = _log_mgr->create_xact_log_writer();
-
         // create a new log file
         process_json_cmd_file(std::filesystem::path(JSON_FILE));
 
         std::vector<PgTransactionPtr> xact_list;
         uint64_t offset = 0;
         uint32_t msg_length;
+
+        // set the XID for assignment in the reader
+        auto xid_mgr = XidMgrClient::get_instance();
+        uint64_t next_xid = xid_mgr->get_committed_xid(1, 0) + 1; // hard-codes DB as 1
+        _log_reader.set_next_xid(next_xid);
 
         // loop reading the header and process the log
         while ((msg_length = read_header(offset)) > 0) {

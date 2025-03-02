@@ -121,9 +121,8 @@ namespace springtail {
         /** Interface to access a row in an extent. */
         class Row {
         public:
-            Row(Extent *e, uint32_t o)
-                : extent(e), offset(o)
-            { }
+            Row() : extent(nullptr), offset(0) {}
+            Row(Extent *e, uint32_t o) : extent(e), offset(o) {}
 
             /** Retrieve text from the variable data. */
             std::string_view get_text(uint32_t offset) {
@@ -149,7 +148,7 @@ namespace springtail {
                 return extent->_fixed_data->data() + offset;
             }
 
-            bool operator==(const Row &rhs) {
+            bool operator==(const Row &rhs) const {
                 return (extent == rhs.extent && offset == rhs.offset);
             }
 
@@ -175,9 +174,7 @@ namespace springtail {
             { }
 
         public:
-            Iterator()
-                : _row(nullptr, 0)
-            { }
+            Iterator() : _row(nullptr, 0) {}
 
             using iterator_category = std::random_access_iterator_tag;
             using difference_type   = std::ptrdiff_t;

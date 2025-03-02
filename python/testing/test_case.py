@@ -8,6 +8,7 @@ import psycopg2
 import springtail
 import sysutils
 import time
+import common
 
 class TestCase:
     """Class to manage a single test-case.  Handles all phases of the
@@ -17,12 +18,14 @@ class TestCase:
     def __init__(self,
                  filename: str,
                  props: springtail.Properties,
+                 build_dir: str,
                  valid_sections: list = ['test', 'verify', 'cleanup']) -> None:
         """Initialize the test case"""
         self._filename = os.path.abspath(filename)
         self._name = os.path.basename(self._filename)
         self._directory = os.path.dirname(self._filename)
         self._props = props
+        self._build_dir = build_dir
         self._status = 'INIT'
         self._result = 'UNKNOWN'
         self._duration = 0
@@ -179,6 +182,14 @@ class TestCase:
                             'type': 'sync'
                         }, section, is_threaded, cur_txn, line_num)
 
+                    elif directive[0] == 'force_recovery':
+                        if section != 'test':
+                            self._raise_error(f'{line_num}: "force_recovery" must be part of the "test" section')
+                        self._append_command({
+                            'type': 'force_recovery',
+                            'count': int(directive[1])
+                        }, section, is_threaded, cur_txn, line_num)
+
                     elif directive[0] == 'schema_check':
                         if section != 'verify':
                             self._raise_error(f'{line_num}: "schema_check" must be part of the "verify" section')
@@ -260,7 +271,7 @@ class TestCase:
             self._raise_failure(f'Query timed out: {e}')
         except Exception as e:
             self._raise_failure(f'Unknown error: {e}')
-        
+
 
     def _execute_command(self, command: dict, do_fetch: bool = False) -> list:
         """Execute a sql command or test directive.  When executing a
@@ -274,6 +285,19 @@ class TestCase:
         if command['type'] == 'sleep':
             # sleep for 'duration' seconds
             time.sleep(command['duration'])
+            return None
+
+        if command['type'] == 'force_recovery':
+            # check the current XID and revert to an earlier target XID
+            db_id_str = self._props.get_db_configs()[0]['id']
+            logging.debug(f'Force recovery for {db_id_str}')
+            db_id = int(db_id_str)
+            current_xid = springtail.current_xid(self._props, db_id)
+            target_xid = current_xid - command['count']
+            logging.debug(f'Force recovery from {current_xid} to {target_xid}')
+            
+            # restart Springtail at the target XID
+            springtail.restart(self._props, self._build_dir, start_xid=target_xid)
             return None
 
         # handle SQL statements
@@ -292,20 +316,17 @@ class TestCase:
                 self._sync_step += 1
                 self._execute_sql(cursor, f"BEGIN; INSERT INTO sync_control (sync, test) VALUES ({self._sync_step}, '{self._name}'); COMMIT;", False)
 
-                # wait for it to appear in the replica
-                with self._fdw.cursor() as rc:
-                    done = False
-                    start = time.time()
-                    while not done and time.time() < start + self._metadata['sync_timeout']:
-                        result = self._execute_sql(rc, f"SELECT MAX(sync) FROM sync_control WHERE test = '{self._name}';", True)
-                        if len(result) > 0 and result[0][0] == self._sync_step:
-                            done = True
-                        else:
-                            time.sleep(1)
+                # Wait for sync row to appear in replica
+                try:
+                    sync_time = common.wait_for_replica_condition(
+                        self._fdw,
+                        f"SELECT MAX(sync) FROM sync_control WHERE test = '{self._name}'",
+                        (self._sync_step,),
+                        timeout=self._metadata['sync_timeout']
+                    )
+                except Exception as e:
+                    self._raise_failure(f'Sync control error: {e}')
 
-                    if not done:
-                        # fail if it takes longer than the timeout
-                        self._raise_failure(f'"sync" operation timed out after {self._metadata["sync_timeout"]} seconds')
                 return []
 
             elif command['type'] == 'schema_check':
@@ -353,10 +374,11 @@ class TestCase:
                 results = {}
 
                 # retrieve the column data
-                with_sql = f"""SELECT table_id, exists
-                                 FROM "__pg_springtail_catalog"."table_names"
-                                WHERE namespace = '{command["schema"]}' AND name = '{command["table"]}'
-                                ORDER BY xid DESC, lsn DESC
+                with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists"
+                                FROM "__pg_springtail_catalog"."table_names"
+                                JOIN "__pg_springtail_catalog"."namespace_names" ON "namespace_names"."namespace_id" = "table_names"."namespace_id"
+                                WHERE "namespace_names"."name" = '{command["schema"]}' AND "table_names"."name" = '{command["table"]}'
+                                ORDER BY "table_names"."xid" DESC, "table_names"."lsn" DESC
                                 LIMIT 1"""
                 ranking_sql = """SELECT *,
                                  ROW_NUMBER() OVER (PARTITION BY name ORDER BY xid DESC, lsn DESC) AS rn
@@ -368,17 +390,18 @@ class TestCase:
                 results['columns'] = self._execute_sql(cursor, sql, True)
 
                 # retrieve the primary key data
-                with_sql = f"""SELECT table_id, exists
-                                 FROM "__pg_springtail_catalog"."table_names"
-                                WHERE namespace = '{command["schema"]}' AND name = '{command["table"]}'
+                with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists"
+                                FROM "__pg_springtail_catalog"."table_names"
+                                JOIN "__pg_springtail_catalog"."namespace_names" ON "namespace_names"."namespace_id" = "table_names"."namespace_id"
+                                WHERE "namespace_names"."name" = '{command["schema"]}' AND "table_names"."name" = '{command["table"]}'
+                                ORDER BY "table_names"."xid" DESC, "table_names"."lsn" DESC
+                                LIMIT 1"""
+                xid_sql = """SELECT "indexes"."xid", "indexes"."lsn"
+                                FROM "__pg_springtail_catalog"."indexes"
+                                WHERE table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)
+                                AND index_id = 0
                                 ORDER BY xid DESC, lsn DESC
                                 LIMIT 1"""
-                xid_sql = """SELECT xid, lsn
-                               FROM "__pg_springtail_catalog"."indexes"
-                              WHERE table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)
-                                AND index_id = 0
-                              ORDER BY xid DESC, lsn DESC
-                              LIMIT 1"""
                 ranking_sql = f"""SELECT *
                                   FROM "__pg_springtail_catalog"."indexes"
                                   WHERE table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)
@@ -565,7 +588,7 @@ class TestCase:
         for connection in self._connections:
             self._connections[connection].close()
             self._connections[connection] = springtail.connect_db_instance(self._props, self._primary_name)
-            
+
         # run the cleanup commands
         if len(self._sections['cleanup']) > 0:
             self._execute_commands(self._sections['cleanup'][0]['sequential'])
@@ -582,7 +605,7 @@ class TestCase:
             return # if no errors, return
 
         logging.error(f'Found errors in logs: {error_logs}')
-        
+
         for log in error_logs:
             backtrace = sysutils.extract_backtrace(log)
             if backtrace:
@@ -613,7 +636,7 @@ class TestCase:
             error = etree.Element('error')
             error.text = self._error
             root.append(error)
-            
+
         elif self._result == 'FAILED':
             failure = etree.Element('failure')
             failure.text = self._error
@@ -642,5 +665,5 @@ class TestCase:
             root.append(system_err)
 
         return root
-            
-        
+
+

@@ -21,12 +21,6 @@
 
 #include <xid_mgr/xid_mgr_client.hh>
 
-/* These are defined by Thrift imported from xid_mgr_client.h and
- * must be undefined before including postgres.h */
-#undef PACKAGE_STRING
-#undef PACKAGE_VERSION
-#undef UINT64CONST
-
 extern "C" {
     #include <postgres.h>
     #include <nodes/pg_list.h>
@@ -97,6 +91,7 @@ namespace springtail::pg_fdw {
         static constexpr char CATALOG_TABLE_SCHEMAS[] = "schemas";        ///< Table name for system table schemas
         static constexpr char CATALOG_TABLE_STATS[] = "table_stats";      ///< Table name for system table stats
         static constexpr char CATALOG_INDEX_NAMES[] = "index_names";      ///< Table name for system index names
+        static constexpr char CATALOG_NAMESPACE_NAMES[] = "namespace_names";      ///< Table name for system index names
 
         static constexpr char PG_FDW_LOG_FILE_PREFIX[] = "pg_fdw";         ///< Log file prefix
 
@@ -205,6 +200,8 @@ namespace springtail::pg_fdw {
         std::shared_mutex _mutex;               ///< Mutex for xid map
         std::map<uint64_t, uint64_t> _xid_map;  ///< Map of pg XID to springtail XID
 
+        std::atomic<uint64_t> _schema_xid; ///< The most recently seen schema XID
+
         // static methods
 
         /** Helper to convert field to PG Datum */
@@ -262,6 +259,6 @@ namespace springtail::pg_fdw {
                                              const FieldArrayPtr qual_fields);
 
         friend std::vector<ConstQualPtr>
-        _get_index_quals(Index const& idx, List const* qual_list);
+        _get_index_quals(const PgFdwState *state, Index const& idx, List const* qual_list);
     };
 } // namespace springtail::pg_fdw

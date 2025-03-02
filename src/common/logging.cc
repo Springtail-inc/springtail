@@ -8,6 +8,7 @@
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/sinks/basic_file_sink.h>
 
 #include <absl/log/log_sink.h>
 #include <absl/log/log_sink_registry.h>
@@ -17,6 +18,7 @@
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/json.hh>
+#include <common/opentelemetry_sink.hh>
 
 namespace springtail {
 
@@ -29,6 +31,36 @@ namespace logging {
             return nullptr;
         }
         return spdlog::default_logger();
+    }
+
+    std::unique_ptr<opentelemetry::context::Token>
+    set_context_variables(const std::unordered_map<std::string, std::string>& attributes) {
+        auto ctx = opentelemetry::context::RuntimeContext::GetCurrent();
+
+        auto baggage = opentelemetry::baggage::GetBaggage(ctx);
+
+        // Iterate over attributes and set baggage values
+        for (const auto& attribute : attributes) {
+            baggage = baggage->Set(attribute.first, attribute.second);
+        }
+
+        auto updated_context = opentelemetry::baggage::SetBaggage(ctx, baggage);
+        return opentelemetry::context::RuntimeContext::Attach(updated_context);
+    }
+
+    std::unordered_map<std::string, std::string>
+    get_context_variables() {
+        auto ctx = opentelemetry::context::RuntimeContext::GetCurrent();
+        auto baggage = opentelemetry::baggage::GetBaggage(ctx);
+        std::unordered_map<std::string, std::string> attributes;
+
+        // Iterate over all the baggage entries and populate the attributes object
+        baggage->GetAllEntries([&attributes](opentelemetry::nostd::string_view key, opentelemetry::nostd::string_view value) {
+            attributes[std::string(key)] = std::string(value);
+            return true;
+        });
+
+        return attributes;
     }
 } // namespace logging
 
@@ -91,11 +123,12 @@ public:
         uint32_t module_mask = module_mask_opt.has_value() ? module_mask_opt.value() : LOG_ALL;
 
         // configuration options
-        std::string log_path_str = Json::get_or<std::string>(props, "log_path", "/tmp/springtail_log.txt");
+        std::string log_path_str = Json::get_or<std::string>(props, "log_path", "/tmp/");
         int max_size = Json::get_or<int>(props, "log_file_size", 1024 * 1024 * 5);
         int max_files = Json::get_or<int>(props, "log_file_count", 5);
         std::string log_level = Json::get_or<std::string>(props, "log_level", "trace");
         std::string pattern = Json::get_or<std::string>(props, "log_pattern", "[%Y-%m-%d %T.%e %z] [%^%l%$] [%s:%#:%!] [thread %t] %v");
+        bool log_rotation_enabled = Json::get_or<bool>(props, "log_rotation_enabled", true);
 
         // if the mask wasn't passed in then check if log_module is set in properties
         if (!module_mask_opt && props.contains("log_modules")) {
@@ -130,6 +163,13 @@ public:
                 log_path = log_path.parent_path() / log_name_path;
             }
             log_path_str = log_path.string();
+
+        } else {
+            std::filesystem::path log_path{log_path_str};
+            if (!log_path.has_extension()) {
+                log_path = log_path.parent_path() / "springtail.log";
+                log_path_str = log_path.string();
+            }
         }
 
         // log bitmask
@@ -145,12 +185,47 @@ public:
             sinks.push_back(console_sink);
         }
 
-        // file sink
-        auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(log_path_str, max_size, max_files);
-        set_level(file_sink, log_level);
-        sinks.push_back(file_sink);
+        // create all directories in log path
+        auto path = std::filesystem::path(log_path_str).parent_path();
+        if (!std::filesystem::exists(path)) {
+            std::filesystem::create_directories(path);
+            std::filesystem::permissions(path,
+                std::filesystem::perms::owner_all |
+                std::filesystem::perms::group_all |
+                std::filesystem::perms::others_all);
+        }
 
-        // create the logger for both console and file sink
+        // file sink
+        if (log_rotation_enabled) {
+            auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(log_path_str, max_size, max_files);
+            set_level(file_sink, log_level);
+            sinks.push_back(file_sink);
+        } else {
+            auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_path_str);
+            set_level(file_sink, log_level);
+            sinks.push_back(file_sink);
+        }
+
+        // Check OpenTelemetry configuration
+        auto otel_config = Properties::get(Properties::OTEL_CONFIG);
+        bool otel_enabled = Json::get_or<bool>(otel_config, "enabled", true);
+
+        if (otel_enabled) {
+            auto host = Json::get<std::string>(otel_config, "host");
+            auto port = Json::get<int>(otel_config, "port");
+
+            if (host && port) {
+                std::string endpoint = fmt::format("http://{}:{}", *host, *port);
+                auto otel_sink = std::make_shared<OpenTelemetrySinkMt>("springtail", endpoint);
+                set_level(otel_sink, log_level);
+                sinks.push_back(otel_sink);
+                SPDLOG_INFO("Enabling OTel logging sink with endpoint: {}", endpoint);
+            }
+        } else {
+            SPDLOG_INFO("OpenTelemetry logging sink disabled via configuration");
+        }
+
+        // create the logger with all sinks
         auto logger = std::make_shared<spdlog::logger>("springtail",
                                                        std::begin(sinks), std::end(sinks));
         logger->set_pattern(pattern);

@@ -4,17 +4,21 @@ find_package(GTest CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(c-ares CONFIG REQUIRED)
 find_package(opentelemetry-cpp CONFIG REQUIRED)
-find_package(protobuf CONFIG REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
+find_package(PostgreSQL REQUIRED)
 
 set(COMMON_LIB_SOURCES
   coordinator.cc
   common.cc
   dns_resolver.cc
   exception.cc
+  grpc_server_manager.cc
   logging.cc
   properties.cc
   redis.cc
+  redis_cache.cc
+  multi_queue_thread_manager.cc
+  timestamp.cc
   tracing.cc
   tracking_allocator.cc
 )
@@ -32,9 +36,12 @@ target_link_libraries(springtail_common
 	 opentelemetry-cpp::api
 	 opentelemetry-cpp::sdk
 	 opentelemetry-cpp::trace
+	 opentelemetry-cpp::metrics
 	 opentelemetry-cpp::ostream_span_exporter
 	 opentelemetry-cpp::otlp_grpc_client
 	 opentelemetry-cpp::otlp_grpc_exporter
+	 opentelemetry-cpp::otlp_grpc_metrics_exporter
+   opentelemetry-cpp::otlp_grpc_log_record_exporter
 )
 
 add_executable(test_thread test/test_thread.cc)
@@ -82,6 +89,21 @@ target_include_directories(test_coordinator PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_coordinator PRIVATE springtail_common GTest::gtest_main)
 add_dsymutil_command(test_coordinator)
 
+add_executable(test_redis_cache test/test_redis_cache.cc)
+target_include_directories(test_redis_cache PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_redis_cache PRIVATE springtail_common Boost::thread GTest::gtest_main)
+add_dsymutil_command(test_redis_cache)
+
+add_executable(test_thread_manager test/test_thread_manager.cc multi_queue_thread_manager.cc)
+target_include_directories(test_thread_manager PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_thread_manager PRIVATE springtail_common GTest::gtest_main)
+add_dsymutil_command(test_thread_manager)
+
+add_executable(test_timestamp test/test_timestamp.cc)
+target_include_directories(test_timestamp PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_timestamp PRIVATE springtail_common GTest::gtest_main)
+add_dsymutil_command(test_timestamp)
+
 gtest_discover_tests(test_thread)
 gtest_discover_tests(test_queue)
 gtest_discover_tests(test_common)
@@ -91,3 +113,6 @@ gtest_discover_tests(test_dns)
 gtest_discover_tests(test_synchronizer)
 gtest_discover_tests(test_exception)
 gtest_discover_tests(test_coordinator)
+gtest_discover_tests(test_redis_cache)
+gtest_discover_tests(test_thread_manager)
+gtest_discover_tests(test_timestamp)

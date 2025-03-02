@@ -4,7 +4,6 @@
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
-#include <atomic>
 #include <set>
 #include <map>
 #include <utility>
@@ -77,7 +76,7 @@ namespace springtail::pg_proxy {
         void dump() const {
             std::shared_lock lock(_mutex);
             SPDLOG_DEBUG("DatabasePool size: {}", count);
-            for (const auto &it : _free_sessions) {
+            for ([[maybe_unused]] const auto &it : _free_sessions) {
                 SPDLOG_DEBUG("DatabasePool db_id: {} username: {} size: {}", it.first.first, it.first.second, it.second.size());
             }
         }
@@ -142,14 +141,12 @@ namespace springtail::pg_proxy {
         /**
          * @brief Allocate a session from the db instance.  Creates a new session.
          * Virtual to allow override in testing.
-         * @param server ProxyServerPtr server object
          * @param user UserPtr user
          * @param db_id uint64_t database id
          * @param parameters std::unordered_map<std::string, std::string> parameters
          * @return ServerSessionPtr session
          */
-        virtual ServerSessionPtr allocate_session(ProxyServerPtr server,
-            UserPtr user,
+        virtual ServerSessionPtr allocate_session(UserPtr user,
             uint64_t db_id,
             const std::unordered_map<std::string, std::string> &parameters);
 
@@ -208,14 +205,12 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Allocate a session from the db instance.  Creates a new session.
-         * @param server ProxyServerPtr server object
          * @param user UserPtr user
          * @param db_id uint64_t database id
          * @param parameters std::unordered_map<std::string, std::string> parameters
          * @return ServerSessionPtr session
          */
-        virtual ServerSessionPtr allocate_session(ProxyServerPtr server,
-            UserPtr user,
+        virtual ServerSessionPtr allocate_session(UserPtr user,
             uint64_t db_id,
             const std::unordered_map<std::string, std::string> &parameters) = 0;
 
@@ -238,15 +233,13 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Allocate a session from the db instance.  Creates a new session.
-         * @param server ProxyServerPtr server object
          * @param user UserPtr user
          * @param db_id uint64_t database id
          * @param parameters std::unordered_map<std::string, std::string> parameters
          * @param instance DatabaseInstancePtr instance
          * @return ServerSessionPtr session
          */
-        virtual ServerSessionPtr _allocate_session(ProxyServerPtr server,
-            UserPtr user,
+        virtual ServerSessionPtr _allocate_session(UserPtr user,
             uint64_t db_id,
             const std::unordered_map<std::string, std::string> &parameters,
             DatabaseInstancePtr instance);
@@ -320,14 +313,12 @@ namespace springtail::pg_proxy {
         /**
          * @brief Allocate a session from the db instance.  Creates a new session.
          * Allocated sessions are tracked by the _instance_sessions and _db_sessions maps.
-         * @param server ProxyServerPtr server object
          * @param user UserPtr user
          * @param db_id uint64_t database id
          * @param parameters std::unordered_map<std::string, std::string> parameters
          * @return ServerSessionPtr session
          */
-        ServerSessionPtr allocate_session(ProxyServerPtr server,
-            UserPtr user,
+        ServerSessionPtr allocate_session(UserPtr user,
             uint64_t db_id,
             const std::unordered_map<std::string, std::string> &parameters) override;
 
@@ -373,14 +364,12 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Allocate a session from the db instance.  Creates a new session.
-         * @param server ProxyServerPtr server object
          * @param user UserPtr user
          * @param db_id uint64_t database id
          * @param parameters std::unordered_map<std::string, std::string> parameters
          * @return ServerSessionPtr session
          */
-        ServerSessionPtr allocate_session(ProxyServerPtr server,
-            UserPtr user,
+        ServerSessionPtr allocate_session(UserPtr user,
             uint64_t db_id,
             const std::unordered_map<std::string, std::string> &parameters) override;
 
@@ -607,17 +596,16 @@ namespace springtail::pg_proxy {
          * @param parameters - startup parameters
          * @return ServerSessionPtr
          */
-        ServerSessionPtr allocate_session(ProxyServerPtr server,
-                                          const Session::Type type,
+        ServerSessionPtr allocate_session(const Session::Type type,
                                           const uint64_t db_id,
                                           UserPtr user,
                                           const std::unordered_map<std::string, std::string> &parameters) {
             if (type == Session::Type::PRIMARY) {
                 assert(_primary_set != nullptr);
-                return _primary_set->allocate_session(server, user, db_id, parameters);
+                return _primary_set->allocate_session(user, db_id, parameters);
             } else if (type == Session::Type::REPLICA) {
                 assert(_replica_set != nullptr);
-                return _replica_set->allocate_session(server, user, db_id, parameters);
+                return _replica_set->allocate_session(user, db_id, parameters);
             }
             assert (0);
             return nullptr;
@@ -646,7 +634,9 @@ namespace springtail::pg_proxy {
     private:
         uint64_t _db_instance_id;           ///< primary database instance id
 
-        PubSubThread _config_sub_thread;    ///< pubsub thread for redis config database
+        RedisCache::RedisChangeWatcherPtr _cache_watcher_db_ids; ///< callback for redis cache db ids
+        RedisCache::RedisChangeWatcherPtr _cache_watcher_db_states; ///< callback for redis cache database replica state
+
         PubSubThread _data_sub_thread;      ///< pubsub thread for redis data database
 
         DatabasePrimarySetPtr _primary_set; ///< set of primary database and standby database
@@ -661,23 +651,12 @@ namespace springtail::pg_proxy {
         /**
          * @brief Construct a new Database Mgr object
          */
-        DatabaseMgr() :
-            _config_sub_thread(1, true),
-            _data_sub_thread(1, false),
-            _primary_set(std::make_shared<DatabasePrimarySet>(POOL_SESSIONS_PER_INSTANCE)),
-            _replica_set(std::make_shared<DatabaseReplicaSet>(POOL_SESSIONS_PER_INSTANCE))
-        {}
+        DatabaseMgr();
 
         /**
          * @brief Destroy the Database Mgr object
          */
         ~DatabaseMgr() override = default;
-
-        /**
-         * @brief Database state change handling
-         * @param msg - message
-         */
-        void _handle_db_state_change(const std::string &msg);
 
         /**
          * @brief Database schema and table change handling
@@ -686,25 +665,14 @@ namespace springtail::pg_proxy {
         void _handle_db_table_change(const std::string &msg);
 
         /**
-         * @brief Replicated database change handling
-         * @param msg - message
-         */
-        void _handle_replicated_dbs_change(const std::string &msg);
-
-        /**
-         * @brief Initialize pubsub thread for database state change
-         */
-        void _init_db_states_subscriber();
-
-        /**
          * @brief Initialize pubsub thread for database tables subscriber
          */
         void _init_db_tables_subscriber();
 
         /**
-         * @brief Initialize pubsub thread for adding and removing databases
+         * @brief Initialize replicated databases
          */
-        void _init_replicated_dbs_subscriber();
+        void _init_replicated_dbs();
 
         /**
          * @brief add replicated database

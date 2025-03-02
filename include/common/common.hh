@@ -3,18 +3,16 @@
 #include <unistd.h>
 #include <sys/time.h>
 
-#include <cstdio>
 #include <csignal>
+#include <cstdio>
+#include <deque>
+#include <optional>
 #include <string>
 #include <vector>
-#include <optional>
 
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/exception.hh>
-
-#include <thrift/transport/TBufferTransports.h>
-#include <thrift/protocol/TJSONProtocol.h>
 
 namespace springtail {
     /**
@@ -110,34 +108,20 @@ namespace springtail {
             }
         }
 
-        template <typename T>
-        nlohmann::json
-        thrift_to_json(const T &obj)
+        /**
+         * @brief Split a string based on a delimiter
+         * @param delimiter delimiter string (e.g., ":")
+         * @param string_value string to split (e.g., "this:is:a:string")
+         * @param out_queue output queue of strings
+         */
+        static inline void
+        split_string(const std::string &delimiter,
+                     const std::string &string_value,
+                     std::deque<std::string> &out_queue)
         {
-            auto buffer = std::make_shared<apache::thrift::transport::TMemoryBuffer>();
-            apache::thrift::protocol::TJSONProtocol protocol(buffer);
-
-            // serialize the object
-            obj.write(&protocol);
-
-            return nlohmann::json::parse(buffer->getBufferAsString());
-        }
-
-        template <typename T>
-        T
-        json_to_thrift(const nlohmann::json &json)
-        {
-            std::string data = json.dump();
-            auto buffer = std::make_shared<apache::thrift::transport::TMemoryBuffer>
-                (const_cast<uint8_t *>(reinterpret_cast<const uint8_t *>(data.c_str())),
-                 data.size());
-            apache::thrift::protocol::TJSONProtocol protocol(buffer);
-
-            // deserialize the object
-            T obj;
-            obj.read(&protocol);
-
-            return obj;
+            std::vector<std::string> out_vector;
+            split_string(delimiter, string_value, out_vector);
+            std::move(out_vector.begin(), out_vector.end(), std::back_inserter(out_queue));
         }
 
         /**
@@ -256,6 +240,23 @@ namespace springtail {
                 return true;
             }
             return false;
+        }
+
+        static inline std::string
+        trim(const std::string& str)
+        {
+            // Find the first non-whitespace character
+            auto start = std::find_if_not(str.begin(), str.end(), [](unsigned char c) {
+                return std::isspace(c);
+            });
+
+            // Find the last non-whitespace character
+            auto end = std::find_if_not(str.rbegin(), str.rend(), [](unsigned char c) {
+                return std::isspace(c);
+            }).base();
+
+            // Return the trimmed string
+            return (start < end) ? std::string(start, end) : std::string();
         }
     }
 }

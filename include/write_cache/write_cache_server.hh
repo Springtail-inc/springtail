@@ -1,26 +1,16 @@
 #pragma once
 
+#include <map>
 #include <mutex>
 #include <memory>
-#include <vector>
-#include <string>
-#include <string_view>
 
+#include <common/grpc_server_manager.hh>
 #include <common/singleton.hh>
-
 #include <write_cache/write_cache_index.hh>
-#include <write_cache/write_cache_service.hh>
-#include <thrift/common/thrift_server.hh>
 
 namespace springtail {
 
-    class WriteCacheServer final :
-        public springtail::thrift::Server<WriteCacheServer,
-                                        thrift::write_cache::ThriftWriteCacheProcessorFactory,
-                                        ThriftWriteCacheService,
-                                        thrift::write_cache::ThriftWriteCacheIfFactory,
-                                        thrift::write_cache::ThriftWriteCacheIf>,
-        public Singleton<WriteCacheServer>
+    class WriteCacheServer final : public Singleton<WriteCacheServer>
     {
         friend class Singleton<WriteCacheServer>;
     public:
@@ -37,25 +27,21 @@ namespace springtail {
             return it->second;
         }
 
+        void startup();
+
     private:
-        /**
-         * @brief Construct a new Write Cache Server object
-         */
         WriteCacheServer();
-
-        /**
-         * @brief Destroy the Write Cache Server object; shouldn't be called directly use shutdown()
-         */
-         ~WriteCacheServer() override = default;
-
-        /** shutdown from shutdown(), called once */
-        void _internal_shutdown();
+        ~WriteCacheServer() override = default;
 
         /** indexes mutex */
         std::mutex _mutex;
 
         /** map of indexes by db_id */
         std::map<uint64_t, WriteCacheIndexPtr> _indexes;
+
+        GrpcServerManager _grpc_server_manager;
+
+        void _internal_shutdown() override;
     };
 
 } // namespace springtail

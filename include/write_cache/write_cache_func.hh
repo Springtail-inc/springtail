@@ -1,6 +1,8 @@
 #pragma once
 
+#include <common/timestamp.hh>
 #include <write_cache/write_cache_index.hh>
+#include <write_cache/write_cache_client.hh>
 #include <write_cache/write_cache_server.hh>
 #include <storage/extent.hh>
 
@@ -52,10 +54,10 @@ namespace springtail {
          * @param xid Springtail XID
          * @param pg_xid Postgres XIDs
          */
-        static void commit(uint64_t db_id, uint64_t xid, std::vector<uint64_t> pg_xids)
+        static void commit(uint64_t db_id, uint64_t xid, std::vector<uint64_t> pg_xids, PostgresTimestamp commit_ts)
         {
             WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
-            index->commit(pg_xids, xid);
+            index->commit(pg_xids, xid, commit_ts);
         }
 
         /**
@@ -63,11 +65,12 @@ namespace springtail {
          * @param db_id database ID
          * @param xid Springtail XID
          * @param pg_xid Postgres XIDs
+         * @param commit_ts Postgres commit ts
          */
-        static void commit(uint64_t db_id, uint64_t xid, uint64_t pg_xid)
+        static void commit(uint64_t db_id, uint64_t xid, uint64_t pg_xid, PostgresTimestamp commit_ts)
         {
             WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
-            index->commit(pg_xid, xid);
+            index->commit(pg_xid, xid, commit_ts);
         }
 
         /**
@@ -90,6 +93,47 @@ namespace springtail {
         {
             WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
             index->abort(pg_xids);
+        }
+
+        /**
+         * @brief List tables for a given XID
+         * @param db_id database ID
+         * @param xid Springtail XID
+         * @param count number of tables to return
+         * @param cursor cursor for pagination
+         * @return vector of table IDs
+         */
+        static std::vector<uint64_t> list_tables(uint64_t db_id, uint64_t xid, uint32_t count, uint64_t& cursor)
+        {
+            WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
+            std::vector<uint64_t> table_ids;
+
+            auto &&tids = index->get_tids(xid, count, cursor);
+            for (auto tid: tids) {
+                table_ids.push_back(tid);
+            }
+
+            return table_ids;
+        }
+
+        /**
+         * @brief Get extents for a given XID
+         * @param db_id database ID
+         * @param tid table ID
+         * @param xid Springtail XID
+         * @param count number of extents to return
+         * @param cursor cursor for pagination
+         * @param commit_ts out; postgres-reported commit ts of xid
+         * @return vector of extents
+         */
+        static std::vector<WriteCacheIndexExtentPtr>
+        get_extents(uint64_t db_id, uint64_t tid, uint64_t xid, uint32_t count, uint64_t &cursor, PostgresTimestamp &commit_ts)
+        {
+            WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
+            std::vector<WriteCacheIndexExtentPtr> idx_extents =
+                index->get_extents(tid, xid, count, cursor, commit_ts);
+
+            return idx_extents;
         }
     };
 } // namespace springtail

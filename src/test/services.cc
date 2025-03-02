@@ -1,8 +1,12 @@
+#include <test/services.hh>
+
 #include <common/json.hh>
 #include <common/properties.hh>
+#include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/server.hh>
-#include <test/services.hh>
+#include <write_cache/write_cache_client.hh>
 #include <write_cache/write_cache_server.hh>
+#include <xid_mgr/xid_mgr_client.hh>
 #include <xid_mgr/xid_mgr_server.hh>
 
 namespace springtail::test {
@@ -39,10 +43,7 @@ namespace springtail::test {
             Json::get_to<std::filesystem::path>(json, "base_path", xid_dir);
             xid_dir = Properties::make_absolute_path(xid_dir);
             std::filesystem::remove_all(xid_dir);
-
-            _threads.push_back(std::thread([] {
-                xid_mgr::XidMgrServer::get_instance()->startup();
-            }));
+            xid_mgr::XidMgrServer::get_instance()->startup();
         }
 
         // start the SysTbl mgr
@@ -53,18 +54,14 @@ namespace springtail::test {
             Json::get_to<std::filesystem::path>(json, "table_dir", table_dir);
             table_dir = Properties::make_absolute_path(table_dir);
             std::filesystem::remove_all(table_dir);
-
-            _threads.push_back(std::thread([] {
-                sys_tbl_mgr::Server::get_instance()->startup();
-            }));
+            sys_tbl_mgr::Server::get_instance()->startup();
         }
 
-        // start the Write Cache
+        // start the write cache
         if (_write_cache) {
-            _threads.push_back(std::thread([] {
-                WriteCacheServer::get_instance()->startup();
-            }));
+            WriteCacheServer::get_instance()->startup();
         }
+
         // give everyting a chance to startup
         sleep(1);
     }
@@ -74,26 +71,20 @@ namespace springtail::test {
     {
         // shut down the write_cache
         if (_write_cache) {
-            WriteCacheServer::get_instance()->stop();
-            _threads.back().join();
-            _threads.pop_back();
-            WriteCacheServer::shutdown();
+            WriteCacheClient::shutdown();
+            WriteCacheServer::get_instance()->shutdown();
         }
 
         // shut down the sys_tbl_mgr
         if (_sys_tbl_mgr) {
-            sys_tbl_mgr::Server::get_instance()->stop();
-            _threads.back().join();
-            _threads.pop_back();
-            sys_tbl_mgr::Server::shutdown();
+            sys_tbl_mgr::Client::shutdown();
+            sys_tbl_mgr::Server::get_instance()->shutdown();
         }
 
         // shut down the xid_mgr
         if (_xid_mgr) {
-            xid_mgr::XidMgrServer::get_instance()->stop();
-            _threads.back().join();
-            _threads.pop_back();
-            xid_mgr::XidMgrServer::shutdown();
+            XidMgrClient::shutdown();
+            xid_mgr::XidMgrServer::get_instance()->shutdown();
         }
     }
 }

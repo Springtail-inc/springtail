@@ -1,5 +1,5 @@
 #pragma once
-
+#include <cassert>
 #include <cstdint>
 #include <boost/thread.hpp>
 
@@ -31,10 +31,21 @@ namespace springtail {
             ++_count;
         }
 
+        /**
+         * @brief Increment the counter by given number
+         *
+         * @param incr - increment value
+         */
+        void increment_by(uint64_t incr) {
+            boost::unique_lock lock(_mutex);
+            _count += incr;
+        }
+
         /** Decrements the counter. */
         void decrement() {
             boost::unique_lock lock(_mutex);
             --_count;
+            assert(_count >= 0);
             if (_count == 0) {
                 _cv.notify_all();
             }
@@ -46,10 +57,15 @@ namespace springtail {
             _cv.wait(lock, [this]{ return this->_count == 0; });
         }
 
+        uint64_t get_count() const {
+            boost::unique_lock lock(_mutex);
+            return _count;
+        }
+
     private:
         boost::condition_variable _cv; ///< Condition variable for waiting.
-        boost::mutex _mutex; ///< Access mutex to provide thread-safety.
-        uint64_t _count; ///< The underlying counter.
+        mutable boost::mutex _mutex; ///< Access mutex to provide thread-safety.
+        int64_t _count; ///< The underlying counter.
     };
     typedef std::shared_ptr<Counter> CounterPtr;
 

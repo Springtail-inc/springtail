@@ -1,6 +1,7 @@
 #include <iostream>
 #include <thread>
 #include <sys/socket.h>
+#include <sys/eventfd.h>
 
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -33,31 +34,34 @@ namespace springtail::pg_proxy {
     /** Default log level for the proxy server */
     LogLevel proxy_log_level = LOG_LEVEL_DEBUG1;
 
-    ProxyServer::ProxyServer(int proxy_port,
-                             int thread_pool_size,
-                             const std::filesystem::path &cert_file,
-                             const std::filesystem::path &key_file,
-                             MODE mode,
-                             bool enable_ssl,
-                             LoggerPtr shadow_logger)
-      : _id(arc4random()),
-        _thread_pool(thread_pool_size),
-        _enable_ssl(enable_ssl),
-        _mode(mode),
-        _logger(shadow_logger)
+    void
+    ProxyServer::init(int proxy_port,
+                      int thread_pool_size,
+                      const std::filesystem::path &cert_file,
+                      const std::filesystem::path &key_file,
+                      MODE mode,
+                      bool enable_ssl,
+                      LoggerPtr shadow_logger)
     {
+        _thread_pool = std::make_shared<ThreadPool<Session>>(thread_pool_size);
+        _id = arc4random();
+        _enable_ssl = enable_ssl;
+        _mode = mode;
+        _logger = shadow_logger;
+
         // Initialize SSL
         if (_enable_ssl) {
             _ssl_ctx_server = _setup_SSL_context(cert_file, key_file);
             _ssl_ctx_client = _setup_SSL_context();
         }
 
-        _socket = socket(AF_INET, SOCK_STREAM, 0);
+        _socket = socket(AF_INET6, SOCK_STREAM, 0);
 
-        struct sockaddr_in serv_addr;
-        serv_addr.sin_family = AF_INET;
-        serv_addr.sin_addr.s_addr = INADDR_ANY;
-        serv_addr.sin_port = htons(proxy_port);
+        struct sockaddr_in6 serv_addr;
+        memset(&serv_addr, 0, sizeof(serv_addr));
+        serv_addr.sin6_family = AF_INET6;
+        serv_addr.sin6_addr = in6addr_any;
+        serv_addr.sin6_port = htons(proxy_port);
 
         int flags = 1;
         if (setsockopt(_socket, SOL_SOCKET, SO_REUSEADDR, &flags, sizeof(int)) < 0) {
@@ -84,17 +88,10 @@ namespace springtail::pg_proxy {
             exit(1);
         }
 
-        if (pipe(_pipe) < 0) {
-            std::cerr << "Error creating pipe" << std::endl;
+
+        if ((_efd = eventfd(0, EFD_NONBLOCK | EFD_SEMAPHORE)) < 0) {
+            SPDLOG_ERROR("Error creating eventfd\n");
             close(_socket);
-            exit(1);
-        }
-        // set pipe read non-blocking
-        if (fcntl(_pipe[0], F_SETFL, O_NONBLOCK) < 0) {
-            std::cerr << "Error setting pipe read non-blocking" << std::endl;
-            close(_socket);
-            close(_pipe[0]);
-            close(_pipe[1]);
             exit(1);
         }
 
@@ -114,14 +111,14 @@ namespace springtail::pg_proxy {
     }
 
     /** Callback to get more info about what is going on in SSL */
-    static void
+    [[maybe_unused]] static void
     ssl_info_callback(const SSL *s, int where, int ret)
     {
-        const char *str;
+        [[maybe_unused]] const char *str;
         int w = where & ~SSL_ST_MASK;
 
         ProxyConnection *conn = static_cast<ProxyConnection *>(SSL_get_ex_data(s, 0));
-        int fd = conn->get_socket();
+        [[maybe_unused]] int fd = conn->get_socket();
 
         if (w & SSL_ST_CONNECT) {
             str = "SSL_connect";
@@ -171,7 +168,7 @@ namespace springtail::pg_proxy {
             exit(1);
         }
 
-#if SPDLOG_ACTIVE_LEVEL==SPDLOG_ACTIVE_DEBUG
+#if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG
         // set the info callback
         SSL_CTX_set_info_callback(ssl_ctx, ssl_info_callback);
 #endif
@@ -219,7 +216,7 @@ namespace springtail::pg_proxy {
     }
 
     void
-    ProxyServer::_log_connect(SessionPtr session)
+    ProxyServer::log_connect(SessionPtr session)
     {
         if (!_logger) {
             return;
@@ -249,7 +246,7 @@ namespace springtail::pg_proxy {
     }
 
     void
-    ProxyServer::_log_disconnect(SessionPtr session)
+    ProxyServer::log_disconnect(SessionPtr session)
     {
         if (!_logger) {
             return;
@@ -286,11 +283,8 @@ namespace springtail::pg_proxy {
             // accept is non-blocking and will return when no more connections
             PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Accepting new connection");
 
-            struct sockaddr_in client_address;
-            socklen_t client_address_size = sizeof(client_address);
-
             // accept a new connection
-            int client_socket = accept(_socket, (struct sockaddr*)&client_address, &client_address_size);
+            int client_socket = accept(_socket, nullptr, nullptr);
             if (client_socket == -1) {
                 if (errno != EAGAIN && errno != EWOULDBLOCK) {
                     std::cerr << "Error accepting connection: " << strerror(errno) << std::endl;
@@ -306,29 +300,31 @@ namespace springtail::pg_proxy {
             }
 
             // create the connection and attach it to a client session
-            ProxyConnectionPtr connection = std::make_shared<ProxyConnection>(client_socket, client_address);
-            ClientSessionPtr session = std::make_shared<ClientSession>(connection, shared_from_this());
+            ProxyConnectionPtr connection = std::make_shared<ProxyConnection>(client_socket);
+            ClientSessionPtr session = std::make_shared<ClientSession>(connection);
+            log_connect(session);
 
             // add session to the waiting sessions list
             // and to the session map
-            register_session(session, true);
+            register_session(session, nullptr, client_socket, true);
         }
     }
 
     void
-    ProxyServer::shutdown()
+    ProxyServer::_internal_shutdown()
     {
         // send signal to shutdown
+        SPDLOG_INFO("Proxy server shutting down");
         _shutdown = true;
-        char buf[1] = {0};
-        std::ignore = write(_pipe[1], buf, 1);
-
+        _wake_event_loop();
         // other cleanup is down after while loop in run()
     }
 
     void
     ProxyServer::run()
     {
+        std::set<SessionPtr, Session::SessionComparator> runnable_sessions;
+
         while (!_shutdown) {
             // poll for readable sockets
             // lock the waiting sessions mutex
@@ -338,31 +334,32 @@ namespace springtail::pg_proxy {
             fds[0].fd = _socket;
             fds[0].events = POLLIN;
 
-            fds[1].fd = _pipe[0];
+            fds[1].fd = _efd;
             fds[1].events = POLLIN;
 
-            int i = 2;
+            int nfds = 2;
             for (auto &session_socket : _waiting_sessions) {
                 PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Adding socket to poll list: {}", session_socket);
-                fds[i].fd = session_socket;
-                fds[i].events = POLLIN;
-                i++;
+                fds[nfds].fd = session_socket;
+                fds[nfds].events = POLLIN;
+                fds[nfds].revents = 0;
+                nfds++;
             }
 
             lock.unlock();
 
             PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Polling for sockets: size={}", _waiting_sessions.size());
 
-            int n = poll(fds, i, -1);
+            int n = poll(fds, nfds, -1);
             if (n == -1) {
-                std::cerr << "Error polling sockets: " << strerror(errno) << std::endl;
+                SPDLOG_ERROR("Error polling sockets: errno={}", strerror(errno));
                 if (errno == EINTR || errno == EAGAIN) {
                     // if interrupted or no data, continue
                     continue;
                 }
                 break;
             }
-            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Poll returned: {}", n);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Poll returned: {}", n);
 
             // handle any new accepts
             if (fds[0].revents & POLLIN) {
@@ -370,65 +367,78 @@ namespace springtail::pg_proxy {
                 n--;
             }
 
-            // read from the pipe; drain it
+            // read from the eventfd; drain it
             if (fds[1].revents & POLLIN) {
-                char buf[128];
-                while (read(_pipe[0], buf, 128) > 0) {
-                    // drain the pipe (we don't care about the data, just the signal)
-                }
+                // drain the pipe (we don't care about the data, just the signal)
+                uint64_t val;
+                [[maybe_unused]] int ret = read(_efd, &val, 8);
+                PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Draining eventfd: {}", ret);
                 n--;
             }
 
-            // go through fds and find the sessions that are now runnable
-            // remove them from waiting sessions list, insert them into runnable sessions list
-            std::set<SessionPtr> runnable_sessions;
-
+            // go through fds and find the sessions that are now session
+            // remove them from waiting sessions list, insert them into session sessions list
             std::unique_lock<std::mutex> lock2(_waiting_sessions_mutex);
-            for (int i = 2; i < _sessions.size() + 2 && n > 0; i++) {
+            for (int i = 2; i < nfds + 2 && n > 0; i++) {
                 if (fds[i].revents & POLLIN) {
-                    auto session = _sessions.find(fds[i].fd);
-                    PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Socket {} is now runnable", fds[i].fd);
-                    if (session != _sessions.end()) {
-                        runnable_sessions.insert(session->second);
-                        _waiting_sessions.erase(fds[i].fd);
+                    int fd = fds[i].fd;
+                    auto session_itr = _sessions.find(fd);
+                    PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Socket {} is now runnable", fd);
+
+                    // lookup fd in sessions map
+                    if (session_itr != _sessions.end()) {
+                        // find session object and insert into session sessions
+                        auto session = session_itr->second;
+                        // for this session update the set of fds that have data
+                        session->add_fd(fd);
+                        // insert into set of runnable sessions
+                        auto ins_res = runnable_sessions.insert(session);
+                        if (!ins_res.second) {
+                            // already inserted session into runnable set, socket should not be waiting_sessions
+                            DCHECK_EQ(_waiting_sessions.erase(fd), 0);
+                        } else {
+                            // remove all associated sockets from the waiting sessions list
+                            auto it = _session_sockets.find(session);
+                            CHECK(it != _session_sockets.end());
+
+                            for (auto socket : it->second) {
+                                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Removing socket {} from waiting sessions for {}", socket, session->name());
+                                CHECK_EQ(_waiting_sessions.erase(socket), 1);
+                            }
+                        }
                     } else {
-                        SPDLOG_ERROR("Socket {} not found in sessions map", fds[i].fd);
-                        _waiting_sessions.erase(fds[i].fd);
+                        SPDLOG_WARN("Socket {} not found in sessions map", fd);
+                        CHECK_EQ(_waiting_sessions.erase(fd), 1);
                     }
                     n--;
                 }
             }
             lock2.unlock();
 
-            // queue the sessions that are now runnable
+            // queue the sessions that are now session
             PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Queueing {} sessions", runnable_sessions.size());
             for (auto &session : runnable_sessions) {
-                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Queueing session: [{}:{}]",
-                            session->type_str(), session->id());
-                _thread_pool.queue(session);
+                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Queueing session {}", session->name());
+                _thread_pool->queue(session);
             }
-        }
-    }
 
-    void
-    ProxyServer::cleanup() {
-        // do cleanup
+            runnable_sessions.clear();
+        }
+
         SPDLOG_INFO("Proxy server shutting down");
 
         // close socket
         ::close(_socket);
 
-        // close pipe
-        ::close(_pipe[0]);
-        ::close(_pipe[1]);
+        // close eventfd
+        ::close(_efd);
 
         // shutdown ssl
         if (_enable_ssl) {
-            ::SSL_CTX_free(_ssl_ctx_server);
             ::SSL_CTX_free(_ssl_ctx_client);
         }
 
-        _thread_pool.shutdown();
+        _thread_pool->shutdown();
         pg_proxy::UserMgr::get_instance()->stop_thread();
         UserMgr::shutdown();
         DatabaseMgr::shutdown();
@@ -441,42 +451,106 @@ namespace springtail::pg_proxy {
     }
 
     void
-    ProxyServer::signal(ProxyConnectionPtr connection)
+    ProxyServer::signal(SessionPtr session)
     {
         std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
-        _waiting_sessions.insert(connection->get_socket());
-        lock.unlock();
+        session->clear_fds();
 
-        char buf[1] = {0};
-        std::ignore = write(_pipe[1], buf, 1);
+        // lookup session in the session map
+        auto session_itr = _session_sockets.find(session);
+        CHECK(session_itr != _session_sockets.end());
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Signaled server waiting on socket {}", connection->get_socket());
+        // go through the list of sockets and add them back to the waiting sessions list
+        for (auto socket: session_itr->second) {
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Signaled server waiting on socket {}", socket);
+            _waiting_sessions.insert(socket);
+        }
+         lock.unlock();
+
+        // signal the eventfd to wake up the main loop
+        _wake_event_loop();
     }
 
     void
     ProxyServer::shutdown_session(SessionPtr session)
     {
-        int socket = session->get_connection()->get_socket();
-        _log_disconnect(session);
         std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
-        _sessions.erase(socket);
-        _waiting_sessions.erase(socket);
+        _internal_shutdown_session(session, lock);
+        lock.unlock();
+
+        _wake_event_loop();
     }
 
     void
-    ProxyServer::register_session(SessionPtr session,
+    ProxyServer::_internal_shutdown_session(SessionPtr session, std::unique_lock<std::mutex> &lock)
+    {
+        CHECK(lock.owns_lock());
+
+        auto session_itr = _session_sockets.find(session);
+        if (session_itr == _session_sockets.end()) {
+            SPDLOG_WARN("Session not found in session sockets map: {}", session->name());
+            return;
+        }
+
+        // go through the list of sockets and remove them
+        for (auto socket: session_itr->second) {
+            _waiting_sessions.erase(socket);
+            _sessions.erase(socket);
+        }
+
+        // remove the session from the sockets map (session->socket)
+        _session_sockets.erase(session_itr);
+    }
+
+    void
+    ProxyServer::register_session(SessionPtr new_session,
+                                  SessionPtr old_session,
+                                  int socket,
                                   bool waiting_session_insert)
     {
-        // all new sessions must be registered, so good place to log it
-        _log_connect(session);
+        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Registering socket {} with session: {}", socket, new_session->name());
+
+        if (old_session != nullptr) {
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "De-registering session: {}", old_session->name());
+        }
 
         // add the session to the list of sessions
-        int socket = session->get_connection()->get_socket();
         std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
-        _sessions.insert(std::make_pair(socket, session));
+
+        // first do a removal based on socket
+        if (old_session != nullptr) {
+            _internal_shutdown_session(old_session, lock);
+        }
+
+        // double check the socket isn't registered
+        _sessions.erase(socket);
+
+        // then do the insert; <socket, session>
+        auto ins_res = _sessions.insert(std::make_pair(socket, new_session));
+        CHECK(ins_res.second);
+
+        // then do the insert; <session, vector:socket>
+        auto res = _session_sockets.insert(std::make_pair(new_session, std::vector<int>()));
+        res.first->second.push_back(socket);
+
         if (waiting_session_insert) {
             _waiting_sessions.insert(socket);
+        } else {
+            int n = _waiting_sessions.erase(socket);
+            DCHECK_EQ(n, 0);
         }
+        lock.unlock();
+
+        _wake_event_loop();
+    }
+
+    void
+    ProxyServer::_wake_event_loop()
+    {
+        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Waking up event loop");
+        uint64_t val = 1;
+        [[maybe_unused]] int ret = write(_efd, &val, sizeof(uint64_t));
+        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Wrote to eventfd: {}", ret);
     }
 
 } // namespace springtail::pg_proxy

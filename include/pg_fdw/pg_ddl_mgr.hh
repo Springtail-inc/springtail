@@ -1,8 +1,5 @@
 #pragma once
 
-#include <thread>
-#include <mutex>
-#include <atomic>
 #include <vector>
 #include <set>
 #include <optional>
@@ -12,17 +9,14 @@
 #include <common/properties.hh>
 #include <common/object_cache.hh>
 #include <common/singleton.hh>
+#include <common/multi_queue_thread_manager.hh>
 
 #include <redis/redis_ddl.hh>
-#include <redis/pubsub_thread.hh>
+
+#include <sys_tbl_mgr/system_tables.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 
 #include <pg_repl/libpq_connection.hh>
-
-
-/* These are defined by Thrift imported from xid_mgr_client.h and
- * must be undefined before including postgres.h */
-#undef PACKAGE_STRING
-#undef PACKAGE_VERSION
 
 namespace springtail::pg_fdw {
 
@@ -30,11 +24,13 @@ namespace springtail::pg_fdw {
      * @brief DDL Mgr, applies changes from Redis queue
      * to the FDW tables
      */
-    class PgDDLMgr final : public SingletonWithThread<PgDDLMgr> {
-        friend class SingletonWithThread<PgDDLMgr>;
+    class PgDDLMgr final : public Singleton<PgDDLMgr> {
+            friend class Singleton<PgDDLMgr>;
     public:
         /** Max number of connections to cache */
         static constexpr int MAX_CONNECTION_CACHE_SIZE = 10;
+        /** Max number of threads in the thread manager pool */
+        static constexpr int MAX_THREAD_POOL_SIZE = 4;
 
         /**
          * Start the main thread
@@ -44,13 +40,25 @@ namespace springtail::pg_fdw {
          * @param hostname optional hostname for connection
          */
         void init(const std::string &fdw_id,
-                     const std::string &username,
-                     const std::string &password,
-                     const std::optional<std::string> &hostname = std::nullopt);
+                  const std::string &username,
+                  const std::string &password,
+                  const std::optional<std::string> &hostname = std::nullopt);
 
+        /**
+         * @brief This function runs the main loop of DDL manager
+         *
+         */
+        void run();
+
+        /**
+         * @brief This function notifies DDL manager to exit the main loop
+         *
+         */
+        void notify_shutdown() { _is_shutting_down = true; }
     private:
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections
-        PubSubThread _config_sub_thread;           ///< pubsub thread for redis config database
+        RedisCache::RedisChangeWatcherPtr _cache_watcher;           ///< redis cache callback object
+        std::shared_ptr<common::MultiQueueThreadManager> _thread_manager;   ///< thread manager that processes DDL requests
 
         std::string _fdw_id;                       ///< FDW ID
 
@@ -62,26 +70,32 @@ namespace springtail::pg_fdw {
         uint64_t _db_instance_id;                  ///< database instance id
         int _port;                                 ///< port
 
-        std::shared_mutex _db_mutex;               ///< shared mutex for read/write access to _db_xid_map and _db_schemas maps
+        std::shared_mutex _db_mutex;               ///< shared mutex for read/write access to _db_xid_map
         std::map<uint64_t, uint64_t> _db_xid_map;  ///< map of db id to max schema xid (applied)
 
-        std::map<uint64_t, std::set<std::string>> _db_schemas;  ///< map of db id to set of schemas
-
         std::map<uint32_t, std::string> _type_map;  ///< map of PG type OIDs to type names
+        std::atomic<bool> _is_shutting_down{false}; ///< shutting down flag
 
         /** Private constructor */
-        PgDDLMgr() : _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE), _config_sub_thread(1, true) {};
-        ~PgDDLMgr() {
-            _config_sub_thread.shutdown();
-        }
+        PgDDLMgr();
+        /** Private destructor */
+        ~PgDDLMgr() override = default;
+
+        /** Function for shutdown */
+        void _internal_shutdown() override;
 
         /** Initialize the FDW */
         void _init_fdw(const std::string &username, const std::string &password);
 
         /**
-         * Main thread entry point; loops checking redis for DDL changes
+         * Method to get the create schema query
          */
-        void _internal_run() override;
+        std::string _get_create_schema_with_grants_query(std::string_view schema);
+
+        /**
+         * Method to get the alter schema query
+         */
+        std::string _get_alter_schema_with_grants_query(std::string_view old_schema, std::string_view new_schema);
 
         /** Helper to connect to fdw db */
         LibPqConnectionPtr _connect_fdw(std::optional<uint64_t> db_id, const std::string &db_name);
@@ -91,14 +105,12 @@ namespace springtail::pg_fdw {
 
         /**
          * @brief Helper to apply outstanding DDL changes to the FDW tables.
-         * @param redis RedisDDL instance
          * @param db_id The database ID to apply the changes to.
          * @param schema_xid The XID at which the DDL changes were applied.
          * @param ddls A JSON array of DDL statements to apply.
          * @return Status of the operation. True if successful, false otherwise.
          */
-        bool _update_schemas(RedisDDL &redis,
-                             uint64_t db_id,
+        bool _update_schemas(uint64_t db_id,
                              uint64_t schema_xid,
                              const nlohmann::json &ddls);
 
@@ -115,8 +127,7 @@ namespace springtail::pg_fdw {
         void _execute_ddl(LibPqConnectionPtr conn,
                           uint64_t db_id,
                           uint64_t schema_xid,
-                          const std::vector<std::string> &sql,
-                          const std::set<std::string> &schemas);
+                          const std::vector<std::string> &sql);
 
         /**
          * @brief Helper to get schemas from db config
@@ -206,14 +217,6 @@ namespace springtail::pg_fdw {
          */
         void
         _remove_replicated_database(uint64_t db_id);
-
-        /**
-         * @brief Function for handling database change notifications from redis
-         *
-         * @param msg - message
-         */
-        void
-        _handle_replicated_dbs_change(const std::string &msg);
 
     };
 }

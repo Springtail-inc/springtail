@@ -10,6 +10,7 @@ namespace springtail {
         /** Database state names that are used in redis */
         static constexpr char const * const REDIS_STATE_STARTUP = "startup";
         static constexpr char const * const REDIS_STATE_INITIALIZE = "initialize";
+        static constexpr char const * const REDIS_STATE_COPY_TABLES = "copy_tables";
         static constexpr char const * const REDIS_STATE_RUNNING = "running";
         static constexpr char const * const REDIS_STATE_SYNCING = "synchronizing";
         static constexpr char const * const REDIS_STATE_STOPPED = "stopped";
@@ -22,15 +23,17 @@ namespace springtail {
         enum DBState : uint8_t {
             DB_STATE_STARTUP = 0,
             DB_STATE_INITIALIZE = 1,
-            DB_STATE_RUNNING = 2,
-            DB_STATE_SYNCING = 3,
-            DB_STATE_STOPPED = 4
+            DB_STATE_COPY_TABLES = 2,
+            DB_STATE_RUNNING = 3,
+            DB_STATE_SYNCING = 4,
+            DB_STATE_STOPPED = 5
         };
 
         /** Mapping from database state name to database state enum value */
         static std::map<std::string, DBState> db_state_map = {
             {REDIS_STATE_STARTUP, DB_STATE_STARTUP },
             {REDIS_STATE_INITIALIZE, DB_STATE_INITIALIZE },
+            {REDIS_STATE_COPY_TABLES, DB_STATE_COPY_TABLES },
             {REDIS_STATE_RUNNING, DB_STATE_RUNNING },
             {REDIS_STATE_SYNCING, DB_STATE_SYNCING },
             {REDIS_STATE_STOPPED, DB_STATE_STOPPED }
@@ -40,6 +43,7 @@ namespace springtail {
         static std::string db_state_to_name[] = {
             REDIS_STATE_STARTUP,
             REDIS_STATE_INITIALIZE,
+            REDIS_STATE_COPY_TABLES,
             REDIS_STATE_RUNNING,
             REDIS_STATE_SYNCING,
             REDIS_STATE_STOPPED

@@ -1,0 +1,246 @@
+name: Nightly Build Workflow
+
+on:
+  schedule:
+    # Runs at 07:00 UTC, which corresponds to 11:00 PM PT
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  checks: write
+
+
+jobs:
+  nightly_job:
+    name: Nightly Job
+    runs-on: warp-ubuntu-latest-arm64-4x
+    timeout-minutes: 90
+    container:
+      image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
+      credentials:
+        username: AWS
+        password: ${{ secrets.DEV_SUPPORT_ECR_PW }}
+
+    # You can use this environment variable to access the current working directory
+    env:
+      VCPKG_FORCE_SYSTEM_BINARIES: 1
+      VCPKG_ROOT: /home/dev/external/vcpkg
+      DOCKER: 1
+      ZIC: true
+      USER: root
+      PYTHONUNBUFFERED: 1
+      CWD: ${{ github.workspace }}
+      DATA_SHARE_BUCKET_NAME: data-share.springtail.internal
+      DEVSUPPORT_BUCKET_NAME: devsupport.springtail.internal
+      PACKAGES_S3_PREFIX: nightly-builds
+      TEST_LOGS_S3_PREFIX: nightly-testlogs
+      NUM_PROCS: ${{ vars.NUM_PROCS }}
+      INTEGRATION_TEST_ITERATIONS: ${{ vars.INTEGRATION_TEST_ITERATIONS || 5 }}
+      # The path to the Springtail logs, keep consistent with the `log_path` inside
+      # system.json.test
+      SPRINGTAIL_LOG_PATH: /opt/springtail/logs
+
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: install-aws-cli-action
+        uses: unfor19/install-aws-cli-action@v1
+        with:
+          version: 2                         # default
+          verbose: false                     # default
+          arch: arm64
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.DEV_AWS_ROLE_ARN }}
+          role-session-name: tempSession
+          aws-region: us-east-1
+
+      - name: Prepare Tests
+        run: |
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
+          cp system.json.settings system.json.test
+          mkdir -p /opt/springtail/pids
+          service redis-server start
+
+      - name: Build
+        run: |
+          ln -s /home/dev/external external
+          ./clean.sh
+          ./debug.sh -j ${NUM_PROCS}          
+
+      - name: Set common env vars
+        run: |
+          # This is the last path segment for on S3 for segmenting the logs
+          CURRENT_DATE=$(date +'%Y/%m/%d/%H')
+          echo "CURRENT_DATE=${CURRENT_DATE}" >> $GITHUB_ENV
+          echo "GITHUB_SHORT_SHA=$(echo $GITHUB_SHA | cut -c1-7)" >> $GITHUB_ENV
+          # This is the prefix for the logs on S3, including the S3 scheme, buket name all the way to the "folder"
+          echo "TEST_LOG_S3_FULL_PREFIX=s3://${DEVSUPPORT_BUCKET_NAME}/${TEST_LOGS_S3_PREFIX}/${CURRENT_DATE}" >> $GITHUB_ENV
+
+      - name: Prepare DB for Unit Tests
+        run: |
+          service postgresql start
+          USER_EXISTS=$(sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='springtail'")
+          if [ "$USER_EXISTS" != "1" ]; then
+            sudo -u postgres psql -c "CREATE USER springtail WITH PASSWORD 'springtail' SUPERUSER LOGIN" 
+          fi
+          sudo -u postgres psql -c "CREATE DATABASE springtail WITH OWNER springtail"
+          # Create triggers
+          sudo -u postgres psql -d springtail -f ${GITHUB_WORKSPACE}/scripts/triggers.sql
+
+      - name: Run Unit Tests
+        if: success()
+        run: |
+          cd python/testing
+          python3 springtail.py -f ../../system.json.test --load-redis --build-dir ../../debug
+          cd ../../debug
+          
+          # Per SPR-501: break upon test failures - "--gtest_break_on_failure"
+          make test ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose --stop-on-failure" 2>&1 | tee tmplog
+          
+          # List the open listening ports and processes info after tests are done
+          sudo apt update
+          sudo apt install net-tools          
+          echo "==== Listening Ports ===="
+          netstat -tulnp
+          # Show the full launching command of each
+          netstat -tulnp | awk '{print $7}' | grep -o '[0-9]*' | while read pid; do
+            cmd=$(ps -p $pid -o args=)
+            echo "$pid - $cmd"
+          done
+          
+          # Grab the success/failure status of the unit tests
+          _LOG_FLAG="succeeded"
+          if !  grep -qE "100% tests passed" tmplog
+          then 
+            _LOG_FLAG="failed"
+          fi
+          
+          _TIMESTAMP=$(date +%s)
+          log_file="unit-test-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log" 
+          log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${log_file}"
+          aws s3 cp tmplog $log_s3_key
+          echo "*** Unit Test Log S3 Key: $log_s3_key"
+          rm -rf tmplog
+
+      - name: Cleanup Unit Test
+        if: success() || failure()      # run this step even if previous step failed
+        run: |
+          # Drop the springtail database 
+          sudo -u postgres psql -c "DROP DATABASE springtail"
+          service postgresql stop
+
+      - name: Unit Test Report
+        uses: dorny/test-reporter@v1
+        if: success() || failure()      # run this step even if previous step failed
+        with:
+          name: Unit Tests             # Name of the check run which will be created
+          path: ./debug/unit-test-report.xml
+          reporter: java-junit
+
+      - uses: actions/upload-artifact@v4
+        if: success() || failure()      # run this step even if previous step failed
+        with:
+          name: 'Unit Test Logs'
+          path: debug/unit-test-*.log
+
+      # Nightly run of integration tests, run N times in a loop.
+      - name: Create Superuser for test
+        if: success() || failure()      # run this step even if previous step failed
+        run: |
+          service postgresql start
+          USER_EXISTS=$(sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='springtail'")
+          if [ "$USER_EXISTS" != "1" ]; then
+            sudo -u postgres psql -c "CREATE USER springtail WITH PASSWORD 'springtail' SUPERUSER LOGIN" 
+          fi
+          service postgresql stop
+
+      - name: Run nightly tests
+        run: |
+          cd python/testing
+          service postgresql start
+          ./startup.sh -s data_init.sql
+          
+          # Run integration tests
+          for i in $(seq 1 ${INTEGRATION_TEST_ITERATIONS}) ; 
+          do
+            # Note: there might be discrepancies between the _LOG_TIMESTAMP and the _LOG_DATE due to the time it takes to run the integration tests
+            # it may run across a day. This is fine as long as the logs are grouped by _LOG_DATE
+            echo "*** Starting iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
+            python3 test_runner.py -c config.yaml -j ${GITHUB_WORKSPACE}/integration-test-report.xml 2>&1 | tee tmplog
+          
+            echo "*** Finished iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
+
+            # Grab the success/failure status of the integration tests
+            _LOG_FLAG="succeeded"
+            if grep -qE "Tests failed: [1-9][0-9]*" tmplog
+            then 
+              _LOG_FLAG="failed"
+            fi
+          
+            _TIMESTAMP=$(date +%s)
+          
+            # Test logs
+            log_file="integration-test-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log" 
+            log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${log_file}"
+            aws s3 cp tmplog $log_s3_key
+            echo "*** Integration Test Log S3 Key: $log_s3_key"
+            rm -f tmplog
+          
+            # Springtail service logs
+            springtail_log_file="springtail-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.tar.gz"
+            output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../debug)
+            fname=$(echo $output  | cut -f2 -d':' | xargs | head -1)
+            springtail_log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${springtail_log_file}"
+            aws s3 cp $fname $springtail_log_s3_key
+            echo "*** Springtail Log S3 Key: $springtail_log_s3_key"
+            rm -f $fname
+          done
+
+      - name: Run nightly build (if above tests pass)
+        if: success()
+        run: |
+          rm -rf releases
+          cd debug
+          make install -j ${NUM_PROCS}
+
+      - name: Run Proxy Tests
+        if: success()
+        run: |
+          cd python/testing/proxy
+          python3 test_runner.py -t -s postgres_all
+          
+          _TIMESTAMP=$(date +%s)
+          
+          # Test log
+          log_file="proxy-regress-${GITHUB_SHORT_SHA}-${_TIMESTAMP}.log" 
+          log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${log_file}"
+          aws s3 cp proxy_regress.log $log_s3_key
+          echo "*** Proxy Test Log S3 Key: $log_s3_key"
+          
+          # Springtail service logs (proxy)
+          springtail_proxy_log_file="proxy-springtail-svc-${GITHUB_SHORT_SHA}-${_TIMESTAMP}.tar.gz"
+          # tar all logs starting with `proxy*` under the Springtail log path 
+          tar -czf $springtail_proxy_log_file ${SPRINGTAIL_LOG_PATH}/proxy*
+          springtail_log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${springtail_proxy_log_file}"
+          aws s3 cp $springtail_proxy_log_file $springtail_log_s3_key
+          echo "*** Springtail Proxy Logs S3 Key: $springtail_log_s3_key"
+          
+          # Find the file matching this name exactly: `regression.diff.proxy.out`
+          # under the $TMPDIR directory (recursive) and upload it to S3
+          regression_diff_file=$(find /tmp -name "regression.diff.proxy.out")
+          regression_diff_s3_key="${TEST_LOG_S3_FULL_PREFIX}/regression.diff.proxy-${GITHUB_SHORT_SHA}-${_TIMESTAMP}.out"  
+          aws s3 cp $regression_diff_file $regression_diff_s3_key
+          echo "*** Proxy Regression Diff S3 Key: $regression_diff_s3_key"
+
+      - name: Package and Upload Build artifacts to S3
+        if: success()
+        run: |
+          ./package.sh
+          aws s3 cp "releases/$(ls -t releases/*.tgz | head -n1)" s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/

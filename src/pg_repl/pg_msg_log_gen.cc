@@ -1,4 +1,6 @@
 #include "pg_repl/pg_repl_msg.hh"
+
+#include <iostream>
 #include <stdlib.h>
 #include <stdio.h>
 #include <cassert>
@@ -181,15 +183,11 @@ namespace springtail {
         _current_xact = std::make_shared<PgTransaction>();
         _current_xact->xid = _xid;
         _current_xact->xact_lsn = _begin_lsn;
-        _current_xact->begin_offset = _header_offset; // go back to start of message block header
-        _current_xact->begin_path = _file_name;
     }
 
     void
     PgMsgLogGen::_add_end_xact()
     {
-        _current_xact->commit_offset = ::ftell(_fp);
-        _current_xact->commit_path = _file_name;
         _current_xact->type = PgTransaction::TYPE_COMMIT;
         _xact_list.push_back(_current_xact);
     }
@@ -199,8 +197,6 @@ namespace springtail {
     {
         PgTransactionPtr xact = std::make_shared<PgTransaction>();
 
-        xact->begin_offset = _header_offset;
-        xact->begin_path = _file_name;
         xact->xid = _xid;
         xact->type = type;
         xact->xact_lsn = _begin_lsn;
@@ -235,8 +231,6 @@ namespace springtail {
 
         msg["columns"] = columns_json;
 
-        _current_xact->oids.insert(oid);
-
         _write_message(pg_msg::MSG_PREFIX_CREATE_INDEX, msg);
 
         return oid;
@@ -258,8 +252,6 @@ namespace springtail {
         msg["columns"] = _gen_table_schema(table_id, columns);
         msg["table"] = table_name;
 
-        _current_xact->oids.insert(table_id);
-
         _write_message(pg_msg::MSG_PREFIX_CREATE_TABLE, msg);
 
         return table_id;
@@ -277,9 +269,46 @@ namespace springtail {
         msg["columns"] = _gen_table_schema(table_id, columns);
         msg["table"] = _table_id_to_name[table_id];
 
-        _current_xact->oids.insert(table_id);
-
         _write_message(pg_msg::MSG_PREFIX_ALTER_TABLE, msg);
+    }
+
+    void
+    PgMsgLogGen::create_schema(uint32_t schema_id, const std::string_view schema_name)
+    {
+        nlohmann::json msg;
+
+        msg["cmd"] = "CREATE SCHEMA";
+        msg["oid"] = schema_id;
+        msg["name"] = schema_name;
+        msg["obj"] = "schema";
+
+        _write_message(pg_msg::MSG_PREFIX_CREATE_NAMESPACE, msg);
+    }
+
+    void
+    PgMsgLogGen::alter_schema(uint32_t schema_id, const std::string_view schema_name)
+    {
+        nlohmann::json msg;
+
+        msg["cmd"] = "ALTER SCHEMA";
+        msg["oid"] = schema_id;
+        msg["name"] = schema_name;
+        msg["obj"] = "schema";
+
+        _write_message(pg_msg::MSG_PREFIX_ALTER_NAMESPACE, msg);
+    }
+
+    void
+    PgMsgLogGen::drop_schema(uint32_t schema_id, const std::string_view schema_name)
+    {
+        nlohmann::json msg;
+
+        msg["cmd"] = "DROP SCHEMA";
+        msg["oid"] = schema_id;
+        msg["name"] = schema_name;
+        msg["obj"] = "schema";
+
+        _write_message(pg_msg::MSG_PREFIX_DROP_NAMESPACE, msg);
     }
 
     void
@@ -292,8 +321,6 @@ namespace springtail {
         msg["schema"] = "public";
         msg["identity"] = "public." + _table_id_to_name[table_id];
         msg["name"] = _table_id_to_name[table_id];
-
-        _current_xact->oids.insert(table_id);
 
         _write_message(pg_msg::MSG_PREFIX_DROP_TABLE, msg);
     }
@@ -584,6 +611,18 @@ namespace springtail {
             _parse_alter_table(json);
             return;
         }
+        if (cmd == PG_OP_CREATE_SCHEMA) {
+            _parse_create_schema(json);
+            return;
+        }
+        if (cmd == PG_OP_ALTER_SCHEMA) {
+            _parse_alter_schema(json);
+            return;
+        }
+        if (cmd == PG_OP_DROP_SCHEMA) {
+            _parse_drop_schema(json);
+            return;
+        }
         if (cmd == PG_OP_DROP_TABLE) {
             _parse_drop_table(json);
             return;
@@ -694,6 +733,30 @@ namespace springtail {
         std::vector<PgMsgSchemaColumn> columns = _parse_columns(json);
         uint32_t table_id = _get_table_id(table);
         _log_gen.alter_table(table_id, columns);
+    }
+
+    void
+    PgLogGenJson::_parse_create_schema(const nlohmann::json &json)
+    {
+        std::string name = json["name"];
+        std::uint64_t schema_id = json["oid"];
+        _log_gen.create_schema(schema_id, name);
+    }
+
+    void
+    PgLogGenJson::_parse_alter_schema(const nlohmann::json &json)
+    {
+        std::string name = json["name"];
+        std::uint64_t schema_id = json["oid"];
+        _log_gen.alter_schema(schema_id, name);
+    }
+
+    void
+    PgLogGenJson::_parse_drop_schema(const nlohmann::json &json)
+    {
+        std::string name = json["name"];
+        std::uint64_t schema_id = json["oid"];
+        _log_gen.drop_schema(schema_id, name);
     }
 
     void

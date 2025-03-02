@@ -1,5 +1,5 @@
 #pragma once
-#include <vector>
+#include <cstdint>
 #include <optional>
 #include <utility>
 #include <memory>
@@ -7,10 +7,16 @@
 #include <string>
 #include <optional>
 
+#include <fmt/core.h>
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 #include <fmt/std.h>
 
+#include <opentelemetry/baggage/baggage.h>
+#include <opentelemetry/baggage/baggage_context.h>
+#include <opentelemetry/context/context.h>
+#include <opentelemetry/context/context_value.h>
+#include <opentelemetry/context/runtime_context.h>
 #include <spdlog/spdlog.h>
 
 #if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG
@@ -36,7 +42,7 @@ namespace springtail {
         LOG_FDW = 0x100,
         LOG_CACHE = 0x200,
         LOG_SCHEMA = 0x400,
-        LOG_GC = 0x800,
+        LOG_COMMITTER = 0x800,
         LOG_SYS_TBL_MGR = 0x1000,
         LOG_ALL = 0xFFFFFFFF
     };
@@ -53,7 +59,8 @@ namespace springtail {
         {"fdw", LOG_FDW},
         {"cache", LOG_CACHE},
         {"schema", LOG_SCHEMA},
-        {"gc", LOG_GC},
+        {"committer", LOG_COMMITTER},
+        {"sys_tbl_mgr", LOG_SYS_TBL_MGR},
         {"none", LOG_NONE},
         {"all", LOG_ALL}
     };
@@ -72,6 +79,10 @@ namespace springtail {
     namespace logging {
         /** Internal call to get a logger based on log id */
         std::shared_ptr<spdlog::logger> get_logger(uint32_t log_id);
+
+        std::unique_ptr<opentelemetry::context::Token> set_context_variables(const std::unordered_map<std::string, std::string>& attributes);
+
+        std::unordered_map<std::string, std::string> get_context_variables();
 
         /** Internal call to handle debug logging filtered by module */
         template <typename... Args> void

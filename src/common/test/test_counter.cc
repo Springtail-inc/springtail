@@ -17,15 +17,15 @@ TEST(CounterTest, SimpleTest) {
     // construct two threads that will do concurrent decrement
     std::thread t1([&counter]() {
         for (int i = 0; i < 4; ++i) {
-            counter.decrement();
             std::this_thread::sleep_for(std::chrono::seconds(1));
+            counter.decrement();
         }
     });
 
     std::thread t2([&counter]() {
         for (int i = 0; i < 4; ++i) {
-            counter.decrement();
             std::this_thread::sleep_for(std::chrono::seconds(1));
+            counter.decrement();
         }
     });
 
@@ -34,11 +34,11 @@ TEST(CounterTest, SimpleTest) {
         counter.wait();
     });
 
-    // should not take 3 seconds
+    // should take more than 3 seconds
     EXPECT_TRUE(future.wait_until(start + std::chrono::seconds(3)) == std::future_status::timeout);
 
-    // should not take 5 seconds (3+2)
-    EXPECT_FALSE(future.wait_until(start + std::chrono::seconds(5)) == std::future_status::timeout);
+    // should not take 9 seconds (6+3)
+    EXPECT_FALSE(future.wait_until(start + std::chrono::seconds(6)) == std::future_status::timeout);
 
     // cleanup the threads
     t1.join();

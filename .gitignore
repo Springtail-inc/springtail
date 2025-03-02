@@ -17,5 +17,5 @@ system.json.test
 **/.DS_Store
 .cache
 **/core
-python/testing/__pycache__
+python/**/__pycache__
 .aws

@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 
 #include <common/common.hh>
+#include <pg_repl/pg_common.hh>
 #include <common/exception.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
@@ -17,6 +18,8 @@
 
 #include <pg_fdw/exception.hh>
 #include <pg_fdw/pg_fdw_mgr.hh>
+
+#include <sys_tbl_mgr/client.hh>
 
 extern "C" {
     #include <postgres.h>
@@ -46,16 +49,21 @@ namespace springtail::pg_fdw {
     // The intersection must start at the first index column and be
     // continuous.
     std::vector<ConstQualPtr>
-    _get_index_quals(Index const& idx, List const* qual_list) {
-
+    _get_index_quals(const PgFdwState *state, Index const& idx, List const* qual_list) {
         if (!qual_list) {
             return {};
         }
 
-        auto find_qual = [&qual_list](auto pos) -> ConstQualPtr {
+        auto find_qual = [&state, &qual_list](auto pos) -> ConstQualPtr {
             const ListCell *lc{};
             foreach(lc, qual_list) {
                 ConstQualPtr qual = static_cast<ConstQualPtr>(lfirst(lc));
+                
+                //must be of the same internal type
+                if (convert_pg_type(state->columns.at(pos).pg_type) != convert_pg_type(qual->base.typeoid)) {
+                    continue;
+                }
+
                 if (PgFdwMgr::_is_type_sortable(qual->base.typeoid, qual->base.op) && 
                         qual->base.isArray == false &&  
                         qual->base.varattno == pos ) {
@@ -132,6 +140,12 @@ namespace springtail::pg_fdw {
                                uint64_t schema_xid)
     {
         uint64_t xid; // springtail xid
+
+        // check if the schema_xid has progressed, if so, invalidate the schema cache
+        const uint64_t prev_schema_xid = _schema_xid.exchange(schema_xid);
+        if (prev_schema_xid < schema_xid) {
+            sys_tbl_mgr::Client::get_instance()->invalidate_db(db_id, XidLsn(schema_xid));
+        }
 
         // lookup pg_xid in xid_map;
         // if doesn't exist, get a new xid from xid_mgr and add to map
@@ -242,8 +256,8 @@ namespace springtail::pg_fdw {
         // for DESC order, scan from iter_end to iter_end with (iter_end--)
         // make sure to handle the special case for NOT_EQUALS while scanning
         if (!state->index.has_value()) {
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full table scan: ASC={}",
-                    state->scan_asc);
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full table scan: tid={}, ASC={}",
+                    state->tid, state->scan_asc);
             state->iter_start.emplace(state->table->begin());
             state->iter_end.emplace(state->table->end());
             return;
@@ -251,8 +265,8 @@ namespace springtail::pg_fdw {
 
         if (state->filtered_quals.empty()) {
             // Usually the index is defined by sortgroup in this case.
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full index scan: {}, ASC={}",
-                    state->index->id, state->scan_asc);
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full index scan: tid={}, index={}, ASC={}",
+                    state->tid ,state->index->id, state->scan_asc);
             state->iter_start.emplace(state->table->begin(state->index->id));
             state->iter_end.emplace(state->table->end(state->index->id));
             return;
@@ -265,8 +279,8 @@ namespace springtail::pg_fdw {
         FieldTuplePtr tuple = _gen_qual_tuple(state->filtered_quals, state->qual_fields);
         QualOpName op = qual->base.op;
 
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for qual scan: op: {}, fields: {}",
-                            qual->base.opname, tuple->to_string());
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for qual scan: tid: {}, index: {}, op: {}, fields: {}",
+                            state->tid, state->index->id, qual->base.opname, tuple->to_string());
 
         switch (op) {
             case LESS_THAN:
@@ -313,7 +327,7 @@ namespace springtail::pg_fdw {
             std::vector<ConstQualPtr> best;
 
             for (auto const& idx: state->indexes) {
-                auto index_quals = _get_index_quals(idx, qual_list);
+                auto index_quals = _get_index_quals(state, idx, qual_list);
                 if (index_quals.empty()) {
                     continue;
                 }
@@ -335,7 +349,7 @@ namespace springtail::pg_fdw {
             // Always use the sortgroup index
             state->index = *state->sortgroup_index;
 
-            auto index_quals = _get_index_quals(*state->sortgroup_index, qual_list);
+            auto index_quals = _get_index_quals(state, *state->sortgroup_index, qual_list);
             if (!index_quals.empty()) {
                 state->filtered_quals = std::move(index_quals);
             }
@@ -544,18 +558,23 @@ namespace springtail::pg_fdw {
             pg_state->scan_asc = (reversed == false);
         }
 
-        auto check_index = [](const Index& idx, const List* sortgroup) -> List* {
+        auto check_index = [pg_state](const Index& idx, const List* sortgroup) -> List* {
             int i = 0;
-            ListCell   *lc;
+            ListCell *lc;
             std::vector<DeparsedSortGroup*> keys;
             foreach(lc, sortgroup) {
                 DeparsedSortGroup *pathkey = static_cast<DeparsedSortGroup *>(lfirst(lc));
-                int attnum = pathkey->attnum;
 
                 // must match sortgroup completely
-                if (i == idx.columns.size() || attnum != idx.columns[i].position) {
+                if (i == idx.columns.size() || pathkey->attnum != idx.columns[i].position) {
                     return {};
                 }
+
+                CHECK(idx.columns[i].position > 0);
+                if (!_is_type_sortable(pg_state->columns.at(idx.columns[i].position).pg_type, LESS_THAN)) {
+                    return {};
+                }
+
                 keys.push_back(pathkey);
                 i++;
             }
@@ -863,6 +882,7 @@ namespace springtail::pg_fdw {
         import_catalog.operator()<sys_tbl::Schemas>(CATALOG_TABLE_SCHEMAS);
         import_catalog.operator()<sys_tbl::TableStats>(CATALOG_TABLE_STATS);
         import_catalog.operator()<sys_tbl::IndexNames>(CATALOG_INDEX_NAMES);
+        import_catalog.operator()<sys_tbl::NamespaceNames>(CATALOG_NAMESPACE_NAMES);
 
         return commands;
     }
@@ -876,6 +896,7 @@ namespace springtail::pg_fdw {
                                         const std::string &db_name,
                                         uint64_t schema_xid)
     {
+        auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
         List                 *commands = NIL;
         std::set<std::string> table_set;
 
@@ -895,6 +916,33 @@ namespace springtail::pg_fdw {
             return _import_springtail_catalog(server, table_set, exclude, limit);
         }
 
+        // lookup the namespace_id for the requested schema
+        auto ns_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, schema_xid);
+        auto ns_key = sys_tbl::NamespaceNames::Secondary::key_tuple(schema, schema_xid, constant::MAX_LSN);
+        auto ns_i = ns_table->inverse_lower_bound(ns_key, 1);
+
+        // verify that the name is present and exists
+        if (ns_i == ns_table->end(1)) {
+            SPDLOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
+                        schema, schema_xid, constant::MAX_LSN);
+            return commands;
+        }
+
+        auto ns_fields = ns_table->extent_schema()->get_fields();
+        if (schema != ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(*ns_i)) {
+            SPDLOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
+                        schema, schema_xid, constant::MAX_LSN);
+            return commands;
+        }
+        if (!ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*ns_i)) {
+            SPDLOG_WARN("Namespace marked as not-exists {} @ {}:{}",
+                        schema, schema_xid, constant::MAX_LSN);
+            return commands;
+        }
+
+        // record the namespace ID
+        uint64_t namespace_id = ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(*ns_i);
+
         // get the table names table to iterate over
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID,
                                                          schema_xid);
@@ -906,23 +954,23 @@ namespace springtail::pg_fdw {
 
         // iterate over the table names table and populate the table map
         for (auto row : (*table)) {
-            std::string schema_name(fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row));
+            auto table_ns_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(row);
 
-            // check for schema match
-            if (schema_name != schema) {
+            // check for schema-namespace match
+            if (table_ns_id != namespace_id) {
                 continue;
             }
 
             std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row));
             // handle limit and exclude
             if (exclude && table_set.contains(table_name)) {
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Excluding table {}.{}", schema_name, table_name);
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Excluding table {}.{}", schema, table_name);
                 continue;
             }
 
             // XXX should really stop after we have found all tables in limit
             if (limit && !table_set.contains(table_name)) {
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Limit, skipping table {}.{}", schema_name, table_name);
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Limit, skipping table {}.{}", schema, table_name);
                 continue;
             }
 
@@ -942,12 +990,12 @@ namespace springtail::pg_fdw {
                 continue;
             }
 
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Found table {}.{} tid={}, xid={}", schema_name, table_name, tid, xid);
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Found table {}.{} tid={}, xid={}", schema, table_name, tid, xid);
 
             // lookup table in map, if found the xid if it is newer
             auto entry = table_map.insert({table_name, {tid, xid}});
             if (entry.second == false) {
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Table {} already exists in schema {}", table_name, schema_name);
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Table {} already exists in schema {}", table_name, schema);
                 // update if xid is newer
                 if (xid > entry.first->second.second) {
                     entry.first->second = {tid, xid};
@@ -1059,6 +1107,9 @@ namespace springtail::pg_fdw {
             case CHAROID:
             case UUIDOID:
                 return true;
+            case NUMERICOID: //DECIMAL(x,y)
+                //TODO: https://linear.app/springtail/issue/SPR-556/
+                return false;
             case VARCHAROID:
             case TEXTOID:
                 // due to different collations/encodings we only support equality for text
@@ -1150,7 +1201,7 @@ namespace springtail::pg_fdw {
         columns = SchemaMgr::get_instance()->get_columns(table->db(), tid, { xid, constant::MAX_LSN });
         if (tid > constant::MAX_SYSTEM_TABLE_ID) {
             auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(table->db(), tid, { xid, constant::MAX_LSN });
-            indexes = std::move(meta.indexes);
+            indexes = meta->indexes;
         }
     }
 } // namespace springtail::pg_fdw

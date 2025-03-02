@@ -1,11 +1,7 @@
 #pragma once
 
-#include <iostream>
 #include <memory>
 #include <filesystem>
-#include <queue>
-#include <mutex>
-#include <condition_variable>
 #include <thread>
 #include <atomic>
 
@@ -24,6 +20,7 @@
 #include <pg_log_mgr/pg_log_queue.hh>
 #include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
+#include <pg_log_mgr/xid_ready.hh>
 
 #include <pg_log_mgr/pg_xact_log_reader.hh>
 #include <pg_log_mgr/pg_xact_log_writer.hh>
@@ -47,6 +44,7 @@ namespace springtail::pg_log_mgr {
     public:
         /** convenience type for the shared transaction queue */
         using PgTransactionQueuePtr = std::shared_ptr<ConcurrentQueue<PgTransaction>>;
+        using CommitterQueuePtr = std::shared_ptr<ConcurrentQueue<committer::XidReady>>;
         using StringPtr = std::shared_ptr<std::string>;
 
         /** replication and transaction log prefixes and suffix */
@@ -61,6 +59,8 @@ namespace springtail::pg_log_mgr {
         static constexpr char const * const WRITER_WORKER_ID = "writer_{}";
         static constexpr char const * const READER_WORKER_ID = "reader_{}";
         static constexpr char const * const XACT_WORKER_ID = "xact_{}";
+
+        static constexpr int QUEUE_SIZE = 256;
 
         /**
          * @brief Construct a new Pg Log Mgr object
@@ -81,16 +81,8 @@ namespace springtail::pg_log_mgr {
                  const std::string &host, const std::string &db_name,
                  const std::string &user_name, const std::string &password,
                  const std::string &pub_name, const std::string &slot_name,
-                 int port)
-        : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
-          _host(host), _db_name(db_name), _user_name(user_name),
-          _password(password), _pub_name(pub_name), _slot_name(slot_name), _port(port),
-          _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
-          _repl_log_path(repl_log_path),
-          _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
-          _pg_log_reader(db_id, _xact_queue), _xact_log_path(xact_log_path),
-          _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
-        {}
+                 int port,
+                 std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue);
 
         /**
          * @brief Construct a new Pg Log Mgr object (for testing only)
@@ -102,27 +94,29 @@ namespace springtail::pg_log_mgr {
         : _db_id(1), _db_instance_id(Properties::get_db_instance_id()),
           _internal_state(STATE_RUNNING),
           _repl_log_path(repl_log_path),
-          _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
-          _pg_log_reader(_db_id, _xact_queue), _xact_log_path(xact_log_path),
+          _committer_queue(std::make_shared<ConcurrentQueue<committer::XidReady>>()),
+          _xact_log_path(xact_log_path),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
-        {}
+        {
+            _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, xact_log_path, _committer_queue);
+        }
 
         /** Start the pipeline; setup the log reader/writer log files etc. */
         void startup();
 
         /** Wait for threads */
         void join() {
+            std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
+            redis_cache->remove_callback(
+                std::string(Properties::DATABASE_STATE_PATH) + "/" + std::to_string(_db_id),
+                _cache_watcher_db_states);
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "joining threads");
             _writer_thread.join();
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "writer thread joined");
             _reader_thread.join();
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "reader thread joined");
-            _xact_thread.join();
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "xact thread joined");
             _table_copy_thread.join();
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "copy thread joined");
-            _pubsub_thread.join();
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "pubsub thread joined");
         }
 
         /** Set shutdown flag */
@@ -137,12 +131,6 @@ namespace springtail::pg_log_mgr {
     protected:
         /** Helper to create log writer -- one per log file */
         PgLogWriterPtr _create_repl_logger();
-
-        /** Create xact log writer */
-        PgXactLogWriterPtr _create_xact_logger();
-
-        /** Process transaction record -- write it to log and to Redis queue */
-        void _process_xact(const PgTransactionPtr xact);
 
     private:
         /** minimum size for log rollover */
@@ -185,7 +173,7 @@ namespace springtail::pg_log_mgr {
         void _startup_init();
 
         /** normal startup from running state */
-        uint64_t _startup_running();
+        void _startup_running();
 
         /** Setup streaming and startup threads */
         void _start_streaming(uint64_t lsn = INVALID_LSN);
@@ -201,10 +189,10 @@ namespace springtail::pg_log_mgr {
         /** callback from log writer class to update lsn from fsync thread*/
         void _lsn_callback(LSN_t lsn);
 
-        ///// Stage 2 of pipeline, reading replication log and parsing xacts
+        ///// Stage 2 of pipeline, reading replication log and updating the write cache
         std::thread _reader_thread;         ///< log reader thread
-        PgTransactionQueuePtr _xact_queue;  ///< queue between reader and xact thread
-        PgLogReader _pg_log_reader;         ///< log reader
+        CommitterQueuePtr _committer_queue; ///< queue between reader and committer
+        std::shared_ptr<PgLogReader> _pg_log_reader;         ///< log reader
 
         /** Consume data from queue, scan log entries and notify GC */
         void _log_reader_thread();
@@ -212,13 +200,9 @@ namespace springtail::pg_log_mgr {
         ///// Stage 3 of pipeline, mapping pg xids to xids; notify GC
         std::filesystem::path _xact_log_path;      ///< xact log base path
         std::filesystem::path _xact_sync_log_file; ///< xact table copy log base path
-        std::thread _xact_thread;                  ///< xact worker thread
         PgXactLogWriterPtr _xact_logger = nullptr; ///< xact log writer
 
         LSN_t _last_pushed_lsn = INVALID_LSN;      ///< last pushed lsn to redis queue for GC
-
-        /** transaction worker -- thread fn */
-        void _xact_handler_thread();
 
         /** notify xact handler to start sync */
         void _notify_xact_start_sync();
@@ -236,11 +220,8 @@ namespace springtail::pg_log_mgr {
         /** Process copy table results; insert into redis */
         void _process_copy_results(const std::vector<PgCopyResultPtr> &res);
 
-        //// Redis pub/sub
-        std::thread _pubsub_thread;          ///< redis pub/sub thread
-
-        /** Redis pub/sub thread entry point */
-        void _redis_pubsub_thread();
+        /** Redis cache callback for watching database state change */
+        RedisCache::RedisChangeWatcherPtr _cache_watcher_db_states;
 
         /** Handle state change; callback from Redis pubsub */
         void _handle_external_state_change(const redis::db_state_change::DBState new_state);

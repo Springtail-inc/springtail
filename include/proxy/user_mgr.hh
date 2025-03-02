@@ -8,6 +8,7 @@
 #include <shared_mutex>
 #include <mutex>
 #include <thread>
+#include <condition_variable>
 
 #include <common/logging.hh>
 #include <common/singleton.hh>
@@ -16,8 +17,7 @@
 #include <proxy/auth/scram.hh>
 #include <proxy/auth/scram-common.h>
 
-namespace springtail {
-namespace pg_proxy {
+namespace springtail::pg_proxy {
 
     /** Auth type, if this changes, change string mapping in user_mgr.cc */
     enum AuthType : int8_t {
@@ -120,7 +120,10 @@ namespace pg_proxy {
             return _password;
         }
 
-        /** add database */
+        /**
+         * @brief Add database to user's list of connected databases
+         * @param name - database name
+         */
         void add_database(const std::string &name) {
             std::unique_lock lock(_user_mutex);
             _connected_databases.insert(name);
@@ -128,7 +131,6 @@ namespace pg_proxy {
 
          /**
          * @brief Set user list of databases
-         *
          * @param databases
          */
         void set_databases(const std::set<std::string> &databases) {
@@ -138,7 +140,6 @@ namespace pg_proxy {
 
         /**
          * @brief Verify if the user is allowed to access database
-         *
          * @param database - database name
          * @return true - allowed
          * @return false - not allowed
@@ -153,7 +154,6 @@ namespace pg_proxy {
 
         /**
          * @brief Change user password
-         *
          * @param password - password
          */
         void set_password(const std::string &password);
@@ -183,12 +183,16 @@ namespace pg_proxy {
     public:
         /**
          * @brief Initialize UserMgr object
-         *
          * @param sleep_interval - UserMgr thread sleep interval in seconds
          */
         void init(const uint32_t sleep_interval) {
             _sleep_interval = sleep_interval;
             start_thread();
+        }
+
+        void stop_thread() override {
+            SingletonWithThread<UserMgr>::stop_thread();
+            _sleep_cv.notify_all();
         }
 
         /**
@@ -248,6 +252,9 @@ namespace pg_proxy {
         std::thread::id _id;                    ///< user manager thread id
         uint32_t _sleep_interval;               ///< sleep interval in seconds
 
+        std::mutex _sleep_mutex;                ///< mutex for sleep
+        std::condition_variable _sleep_cv;      ///< condition variable for sleep
+
         /**
          * @brief Add new user to the user map
          * @param username users name
@@ -269,5 +276,4 @@ namespace pg_proxy {
         void _internal_run() override;
 
     };
-} // namespace pg_proxy
-} // namespace springtail
+} // namespace springtail::pg_proxy

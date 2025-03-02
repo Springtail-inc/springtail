@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 if [ $(uname -p) == aarch64 ]; then
     export VCPKG_FORCE_SYSTEM_BINARIES=1
 fi
@@ -18,7 +20,9 @@ if [ ! -d debug ]; then
     if [ $DOCKER -eq 1 ]; then
         echo "Building inside a container; symlinking debug dir"
         mkdir -p /home/dev/debug
+        mkdir -p /home/dev/install
         ln -s /home/dev/debug debug
+        ln -s /home/dev/install install
     else
         mkdir -p debug
     fi
@@ -30,4 +34,9 @@ cmake -B debug -S . \
 
 # build the code
 cd debug
-make $1 $2
+if command -v nproc >/dev/null 2>&1; then
+    ncpus=$(nproc)
+else
+    ncpus=4
+fi
+make -j${ncpus} $1 $2

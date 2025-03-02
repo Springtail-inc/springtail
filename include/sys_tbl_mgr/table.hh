@@ -12,6 +12,14 @@
 
 namespace springtail {
 
+namespace table_helpers {
+
+/** Constructs the full directory path for a table given the parameters. */
+std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t db_id,
+                                    uint64_t table_id, uint64_t snapshot_xid);
+
+} // namespace table_helpers
+
     /**
      * Structure to hold table statistics.  Currently only holds the row count of the table.
      */
@@ -35,6 +43,7 @@ namespace springtail {
         TableStats stats;
         uint64_t snapshot_xid = 0;
     };
+    using TableMetadataPtr = std::shared_ptr<TableMetadata>;
 
     /**
      * Read-only interface to a table at a fixed XID.  Provides interfaces for accessing table
@@ -320,6 +329,8 @@ namespace springtail {
             return _id;
         }
 
+        bool empty() const;
+
         /** This will convert column positions to column names based on the table schema
          */
         std::vector<std::string> get_column_names(const std::vector<uint32_t>& col_position);
@@ -336,7 +347,7 @@ namespace springtail {
          * Returns an iterator to the first row that is less than or equal to the provided search
          * key.  Search key must match the primary index order.
          */
-        Iterator inverse_lower_bound(TuplePtr search_key);
+        Iterator inverse_lower_bound(TuplePtr search_key, uint32_t index_id = constant::INDEX_PRIMARY);
 
         /**
          * An iterator to the start of the table.
@@ -563,7 +574,7 @@ namespace springtail {
             if (idx == 0) {
                 return _primary_index;
             }
-            return _secondary_indexes[idx].first;
+            return _secondary_indexes.at(idx).first;
         }
 
         /** This will convert column positions to column names based on the table schema

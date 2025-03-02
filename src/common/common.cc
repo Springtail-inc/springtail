@@ -20,7 +20,7 @@ namespace springtail {
         void
         daemonize(const std::string &pid_file)
         {
-            std::string pid_path = Properties::get_pid_path();
+            std::string pid_path = Properties::get_instance()->get_pid_path();
 
             std::filesystem::path pid_filename(pid_path);
             pid_filename /= pid_file;
@@ -77,7 +77,7 @@ namespace springtail {
 
         // init system properties
         // only load redis from properties if no daemon pid is set
-        Properties::init(!daemon_pid.has_value());
+        Properties::get_instance()->init(!daemon_pid.has_value());
 
         // if requested, daemonize the process
         if (daemon_pid) {
@@ -88,13 +88,16 @@ namespace springtail {
         init_logging(logging_mask, log_filename, daemon_pid.has_value());
 
         // initialize the tracing infrastructure
-        tracing::init_tracing();
+        tracing::init_tracing_and_metrics(log_filename.value_or(""));
+
+        // initialize redis cache
+        Properties::get_instance()->init_cache();
     }
 
-    void springtail_init(const std::string &log_filename,
-                         uint32_t logging_mask)
+    void
+    springtail_init(const std::string &log_filename, uint32_t logging_mask)
     {
         springtail_init(log_filename, std::nullopt, logging_mask);
     }
 
-}
+}  // namespace springtail

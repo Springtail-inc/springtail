@@ -1,101 +1,152 @@
 #pragma once
 
-#include <opentelemetry/exporters/ostream/span_exporter_factory.h>
+#include <string_view>
+#include <memory>
+#include <unordered_map>
 
+#include <opentelemetry/exporters/ostream/span_exporter_factory.h>
 #include <opentelemetry/sdk/trace/exporter.h>
 #include <opentelemetry/sdk/trace/processor.h>
+#include <opentelemetry/sdk/trace/recordable.h>
 #include <opentelemetry/sdk/trace/simple_processor_factory.h>
 #include <opentelemetry/sdk/trace/span_data.h>
-#include <opentelemetry/sdk/trace/recordable.h>
 #include <opentelemetry/sdk/trace/tracer_provider.h>
 #include <opentelemetry/sdk/trace/tracer_provider_factory.h>
-
 #include <opentelemetry/trace/provider.h>
 #include <opentelemetry/trace/span.h>
 #include <opentelemetry/trace/tracer.h>
 
+#include <common/metric_constants.hh>
 #include <common/logging.hh>
 
 namespace springtail::tracing {
-    /** Convenience name */
-    using SpanPtr = opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>;
+/** Convenience name */
+using SpanPtr = opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>;
 
-    class SpdlogExporter : public opentelemetry::sdk::trace::SpanExporter {
-    public:
-        std::unique_ptr<opentelemetry::sdk::trace::Recordable>
-        MakeRecordable() noexcept override
-        {
-            return std::make_unique<opentelemetry::sdk::trace::SpanData>();
+/**
+ * @brief A custom span exporter that logs OpenTelemetry spans using spdlog
+ * 
+ * This exporter implements the OpenTelemetry SpanExporter interface to export
+ * tracing spans by logging them through spdlog. It processes each span's name,
+ * attributes, and other properties and outputs them as structured log messages.
+ */
+class SpdlogExporter : public opentelemetry::sdk::trace::SpanExporter {
+public:
+    std::unique_ptr<opentelemetry::sdk::trace::Recordable> MakeRecordable() noexcept override
+    {
+        return std::make_unique<opentelemetry::sdk::trace::SpanData>();
+    }
+
+    bool Shutdown(std::chrono::microseconds timeout) noexcept override { return true; }
+
+    // Export a batch of spans (but we log each span individually in this example)
+    opentelemetry::sdk::common::ExportResult Export(
+        const opentelemetry::nostd::span<std::unique_ptr<opentelemetry::sdk::trace::Recordable>>&
+            spans) noexcept override
+    {
+        for (const auto& span : spans) {
+            const auto* span_data =
+                dynamic_cast<const opentelemetry::sdk::trace::SpanData*>(span.get());
+            log_span(*span_data);  // Log each span using spdlog
         }
+        return opentelemetry::sdk::common::ExportResult::kSuccess;
+    }
 
-        bool
-        Shutdown(std::chrono::microseconds timeout) noexcept override
-        {
-            return true;
-        }
+private:
+    void log_span(const opentelemetry::sdk::trace::SpanData& span)
+    {
+        // Log basic span information
+        SPDLOG_INFO("Span Name: {}", span.GetName().data());
 
-        // Export a batch of spans (but we log each span individually in this example)
-        opentelemetry::sdk::common::ExportResult
-        Export(const opentelemetry::nostd::span<std::unique_ptr<opentelemetry::sdk::trace::Recordable>> &spans) noexcept override
-        {
-            for (const auto& span : spans) {
-                const auto* span_data = dynamic_cast<const opentelemetry::sdk::trace::SpanData*>(span.get());
-                log_span(*span_data); // Log each span using spdlog
+        // You can log other properties (e.g., span attributes, start/end times, etc.)
+        const auto& attributes = span.GetAttributes();
+        for (const auto& [key, value] : attributes) {
+            std::string value_str;
+
+            // Handle different attribute types
+            if (std::holds_alternative<std::string>(value)) {
+                value_str = std::get<std::string>(value);
+            } else if (std::holds_alternative<int64_t>(value)) {
+                value_str = std::to_string(std::get<int64_t>(value));
+            } else if (std::holds_alternative<int32_t>(value)) {
+                value_str = std::to_string(std::get<int32_t>(value));
+            } else if (std::holds_alternative<double>(value)) {
+                value_str = std::to_string(std::get<double>(value));
+            } else if (std::holds_alternative<bool>(value)) {
+                value_str = std::to_string(std::get<bool>(value));
+            } else {
+                value_str = fmt::format("Unsupported Type: {}", value.index());
             }
-            return opentelemetry::sdk::common::ExportResult::kSuccess;
+
+            SPDLOG_INFO("Attribute - {}: {}", key, value_str);
         }
 
-    private:
-        void
-        log_span(const opentelemetry::sdk::trace::SpanData& span)
-        {
-            // Log basic span information
-            SPDLOG_INFO("Span Name: {}", span.GetName().data());
+        // Span's start and end time can be logged if needed (if available)
+        auto start_time = span.GetStartTime();
+        auto duration = span.GetDuration();
+        SPDLOG_INFO(
+            "Start Time: {} | Duration: {}",
+            std::chrono::duration_cast<std::chrono::milliseconds>(start_time.time_since_epoch())
+                .count(),
+            std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
+    }
+};
 
-            // You can log other properties (e.g., span attributes, start/end times, etc.)
-            const auto& attributes = span.GetAttributes();
-            for (const auto& [key, value] : attributes) {
-                std::string value_str;
+/**
+ * @brief Initialize the tracing system
+ */
+void init_tracing_and_metrics(std::string_view component_name);
 
-                // Handle different attribute types
-                if (std::holds_alternative<std::string>(value)) {
-                    value_str = std::get<std::string>(value);
-                } else if (std::holds_alternative<int64_t>(value)) {
-                    value_str = std::to_string(std::get<int64_t>(value));
-                } else if (std::holds_alternative<int32_t>(value)) {
-                    value_str = std::to_string(std::get<int32_t>(value));
-                } else if (std::holds_alternative<double>(value)) {
-                    value_str = std::to_string(std::get<double>(value));
-                } else if (std::holds_alternative<bool>(value)) {
-                    value_str = std::to_string(std::get<bool>(value));
-                } else {
-                    value_str = fmt::format("Unsupported Type: {}", value.index());
-                }
+/**
+ * @brief Shutdown the tracing system
+ */
+void shutdown_tracing_and_metrics();
 
-                SPDLOG_INFO("Attribute - {}: {}", key, value_str);
-            }
+/**
+ * @brief Retrieve the otel Tracer by name.
+ */
+opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer(const std::string_view& name);
 
-            // Span's start and end time can be logged if needed (if available)
-            auto start_time = span.GetStartTime();
-            auto duration = span.GetDuration();
-            SPDLOG_INFO("Start Time: {} | Duration: {}",
-                        std::chrono::duration_cast<std::chrono::milliseconds>(start_time.time_since_epoch()).count(),
-                        std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
-        }
-    };
 
-    /**
-     * @brief Initialize the tracing system
-     */
-    void init_tracing();
+/**
+ * @brief Register the metrics
+ */
+void _register_metrics();
 
-    /**
-     * @brief Shutdown the tracing system
-     */
-    void shutdown_tracing();
+/**
+ * @brief Register the default counters
+ */
+void _register_counters();
 
-    /**
-     * @brief Retrieve the otel Tracer by name.
-     */
-    opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer(const std::string_view &name);
-}
+/**
+ * @brief Register the default histograms
+ */
+void _register_histograms();
+
+/**
+ * @brief Register a counter
+ */
+void _register_counter(std::string_view name, std::string_view description, std::string_view unit);
+
+/**
+ * @brief Register a histogram
+ */
+void _register_histogram(std::string_view name, std::string_view description, std::string_view unit);
+
+/**
+ * @brief Increment a counter
+ */
+void increment_counter(std::string_view name, 
+    const std::unordered_map<std::string, std::string>& attributes = {});
+
+/**
+ * @brief Record a histogram
+ */
+void record_histogram(std::string_view name, double value,
+    const std::unordered_map<std::string, std::string>& attributes = {});
+
+/**
+ * @brief Get the db id xid map
+ */
+std::unordered_map<std::string, std::string> get_db_id_xid_map(uint64_t db_id, uint64_t xid);
+}  // namespace springtail::tracing

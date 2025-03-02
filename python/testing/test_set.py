@@ -37,7 +37,7 @@ class TestSet:
         self._props = springtail.Properties(config_file, True)
 
         # constuct the special "config" test case for global setup and cleanup
-        self._config = TestCase(os.path.join(directory, _GLOBAL_CONFIG_FILE), self._props, ['setup', 'cleanup'])
+        self._config = TestCase(os.path.join(directory, _GLOBAL_CONFIG_FILE), self._props, self._build_dir, ['setup', 'cleanup'])
         self._config.parse_file()
 
         # collect and parse the test cases from the directory
@@ -47,6 +47,7 @@ class TestSet:
             # skip the test set configuration file
             if test_file == _GLOBAL_CONFIG_FILE:
                 continue
+            logging.info(f'Processing test file {test_file}')
 
             # test files must be of the form "<name>.sql"
             if not test_file.endswith('.sql'):
@@ -55,16 +56,18 @@ class TestSet:
 
             try:
                 # parse the test
-                self._tests[test_file] = TestCase(os.path.join(directory, test_file), self._props)
+                self._tests[test_file] = TestCase(os.path.join(directory, test_file), self._props, self._build_dir)
                 self._tests[test_file].parse_file()
 
                 # if only a subset of test cases was requsted, limit them here
                 if test_files and test_file not in test_files:
+                    logging.warning(f'skipping test file {test_file} -- not in the requested tests')
                     self._tests[test_file].skip()
                 else:
                     self._test_files.append(test_file)
 
-            except:
+            except Exception as e:
+                logging.error(f'Error parsing test -- {e}')
                 pass # this test was recorded as an error and we continue
 
 
@@ -115,7 +118,7 @@ class TestSet:
 
         # start Springtail
         logging.debug('Starting the Springtail instance')
-        springtail.start(self._config_file, self._build_dir, do_cleanup=False)
+        springtail.start(self._config_file, self._build_dir, do_cleanup=False, do_init=True)
 
         # run the tests
         logging.info(f'Run the tests: {self._test_files}')
@@ -136,9 +139,12 @@ class TestSet:
                 self._tests[test_file].verify()
 
             except Exception as e:
-                logging.error(f'Error: {e}')
+                logging.error(f'Error: exception: [{e}] result: {self._tests[test_file].get_result()["result"]}')
                 if self._tests[test_file].get_result()['result'] == 'FAILED':
                     test_failed = True
+                else:
+                    logging.info(f'Skipping the test: {test_file}')
+                    self._tests[test_file].skip()
 
             # save the logs
             self._tests[test_file].stop_capture()
