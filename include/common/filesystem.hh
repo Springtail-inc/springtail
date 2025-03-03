@@ -2,6 +2,9 @@
 
 #include <filesystem>
 #include <iostream>
+#include <optional>
+
+#include <fmt/format.h>
 
 namespace springtail {
     class fs {
@@ -13,14 +16,14 @@ namespace springtail {
          * @param suffix file name suffix (removed to find number)
          * @return std::filesystem::path path to the latest modified file
          */
-        static std::filesystem::path
+        static std::optional<std::filesystem::path>
         find_latest_modified_file(const std::filesystem::path& directory,
                                   const std::string& prefix,
                                   const std::string& suffix)
         {
-            // Initialize variables to store the latest file and its modification time
+            // Initialize variables to store the latest file and its timestamp
             std::filesystem::path latest_file;
-            std::filesystem::file_time_type latest_mtime;
+            std::optional<uint64_t> latest_timestamp;
 
             // check if directory exists, if not return empty path
             if (!std::filesystem::exists(directory)) {
@@ -33,20 +36,12 @@ namespace springtail {
                 if (!std::filesystem::is_regular_file(entry)) {
                     continue;
                 }
-                // Get the modification time of the current file
-                std::filesystem::file_time_type current_mtime = std::filesystem::last_write_time(entry);
 
-                // If the current file is newer than the previous, update latest_file and latest_mtime
-                if (latest_file.empty() || current_mtime > latest_mtime) {
-                    latest_file = entry;
-                    latest_mtime = current_mtime;
-                } else if (current_mtime == latest_mtime) {
-                    int current_id = _extract_id_from_file(entry, prefix, suffix);
-                    int latest_id = _extract_id_from_file(latest_file, prefix, suffix);
-                    if (current_id > latest_id) {
-                        latest_file = entry;
-                        latest_mtime = current_mtime;
-                    }
+                // Extract the timestamp from the file name
+                auto current_timestamp = _extract_timestamp_from_file(entry.path(), prefix, suffix);
+                if (current_timestamp && (!latest_timestamp || *current_timestamp > *latest_timestamp)) {
+                    latest_file = entry.path();
+                    latest_timestamp = current_timestamp;
                 }
             }
 
@@ -61,14 +56,14 @@ namespace springtail {
          * @param suffix file name suffix (removed to find number)
          * @return std::filesystem::path path to the earliest modified file
          */
-        static std::filesystem::path
+        static std::optional<std::filesystem::path>
         find_earliest_modified_file(const std::filesystem::path& directory,
                                     const std::string& prefix,
                                     const std::string& suffix)
         {
-            // Initialize variables to store the earliest file and its modification time
+            // Initialize variables to store the earliest file and its timestamp
             std::filesystem::path earliest_file;
-            std::filesystem::file_time_type earliest_mtime;
+            std::optional<uint64_t> earliest_timestamp;
 
             // check if directory exists, if not return empty path
             if (!std::filesystem::exists(directory)) {
@@ -81,20 +76,12 @@ namespace springtail {
                 if (!std::filesystem::is_regular_file(entry)) {
                     continue;
                 }
-                // Get the modification time of the current file
-                std::filesystem::file_time_type current_mtime = std::filesystem::last_write_time(entry);
 
-                // If the current file is newer than the previous, update latest_file and latest_mtime
-                if (earliest_file.empty() || current_mtime < earliest_mtime) {
-                    earliest_file = entry;
-                    earliest_mtime = current_mtime;
-                } else if (current_mtime == earliest_mtime) {
-                    int current_id = _extract_id_from_file(entry, prefix, suffix);
-                    int earliest_id = _extract_id_from_file(earliest_file, prefix, suffix);
-                    if (current_id < earliest_id) {
-                        earliest_file = entry;
-                        earliest_mtime = current_mtime;
-                    }
+                // Extract the timestamp from the file name
+                auto current_timestamp = _extract_timestamp_from_file(entry.path(), prefix, suffix);
+                if (current_timestamp && (!earliest_timestamp || *current_timestamp < *earliest_timestamp)) {
+                    earliest_file = entry.path();
+                    earliest_timestamp = current_timestamp;
                 }
             }
 
@@ -103,49 +90,91 @@ namespace springtail {
         }
 
         /**
-         * @brief Given a file path, suffix and prefix, increment the number in the file name
-         * @param path   file path with filename like: prefix<number>suffix
-         * @param prefix file name prefix (removed to find number)
-         * @param suffix file name suffix (removed to find number)
-         * @return std::filesystem::path new path with incremented number
+         * Creates a new log file name using the current timestamp.
+         * @param dir The directory in which to create the log file.
+         * @param prefix The prefix of the log file name.
+         * @param suffix The suffix of the log file name (should contain '.').
+         * @return std::filesystem::path Path to a new log file.
          */
         static std::filesystem::path
-        get_next_file(const std::filesystem::path& path,
-                      const std::string& prefix,
-                      const std::string& suffix)
+        create_log_file(const std::filesystem::path &dir,
+                        std::string_view prefix,
+                        std::string_view suffix)
         {
-            int number = _extract_id_from_file(path, prefix, suffix);
-            number++;
-
-            // Add the prefix and suffix back to the file variable
-            std::string file = prefix + std::to_string(number) + suffix;
-
-            // Reconstruct the path with the modified file name
-            std::filesystem::path modified_path = path;
-            modified_path.replace_filename(file);
-
-            return modified_path;
+            auto now = std::chrono::system_clock::now();
+            auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
+            return dir / fmt::format("{}{}{}", prefix, timestamp.count(), suffix);
         }
+
+        /**
+         * @brief Given a log file path, finds the next log file in sequence.  Assumes that the log
+         *        files are in a directory together and that the files have been constructed using
+         *        create_log_file().
+         * @param path   file path with filename like: prefix<timestamp>suffix
+         * @param prefix the prefix portion of the path
+         * @param suffix the suffix portion of the path
+         * @return An std::optional containing the path to the next log file in the directory, or
+         *         empty if there is no such log file.
+         */
+        static std::optional<std::filesystem::path>
+        get_next_log_file(const std::filesystem::path& path,
+                          std::string_view prefix,
+                          std::string_view suffix)
+        {
+            std::filesystem::path dir = path.parent_path();
+            std::string current_file = path.filename().string();
+
+            // Extract the timestamp from the current log file using the helper function
+            auto current_timestamp = _extract_timestamp_from_file(path, prefix, suffix);
+            if (!current_timestamp) {
+                return std::nullopt; // Return empty if the current file format is incorrect
+            }
+
+            // Initialize a variable to store the next log file path
+            std::optional<std::filesystem::path> next_log_file;
+            std::optional<uint64_t> found_timestamp;
+
+            // Iterate through all files in the directory
+            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                // Check if it's a regular file and matches the prefix and suffix
+                if (std::filesystem::is_regular_file(entry) &&
+                    entry.path().filename().string().find(prefix) == 0 &&
+                    entry.path().filename().string().find(suffix) != std::string::npos) {
+                    
+                    // Extract the timestamp from the file name
+                    auto timestamp = _extract_timestamp_from_file(entry.path(), prefix, suffix);
+
+                    // Check if this timestamp is greater than the current timestamp
+                    if (timestamp && *timestamp > *current_timestamp) {
+                        // If it's the first valid next log file found, store it
+                        if (!next_log_file || *timestamp < *found_timestamp) {
+                            next_log_file = entry.path();
+                            found_timestamp = timestamp;
+                        }
+                    }
+                }
+            }
+
+            return next_log_file; // Return the path to the next log file, or empty if none found
+        }
+
     private:
-        static int
-        _extract_id_from_file(const std::filesystem::path& path,
-                              const std::string& prefix,
-                              const std::string& suffix)
+        static std::optional<uint64_t>
+        _extract_timestamp_from_file(const std::filesystem::path& path,
+                                     std::string_view prefix,
+                                     std::string_view suffix)
         {
             std::string file = path.filename().string();
-
-            // Remove the prefix and suffix from the file variable
             size_t prefix_length = prefix.length();
             size_t suffix_length = suffix.length();
-            if (file.substr(0, prefix_length) == prefix) {
-                file = file.substr(prefix_length);
-            }
-            if (file.substr(file.length() - suffix_length) == suffix) {
-                file = file.substr(0, file.length() - suffix_length);
-            }
 
-            // Convert the remaining part to a number, increment that number, and reconstruct the file name
-            return std::stoi(file);
+            // Ensure the file name has the correct prefix and suffix
+            if (file.substr(0, prefix_length) == prefix && 
+                file.substr(file.length() - suffix_length) == suffix) {
+                std::string timestamp_str = file.substr(prefix_length, file.length() - prefix_length - suffix_length);
+                return std::stoll(timestamp_str); // Convert to long long for timestamp
+            }
+            return std::nullopt; // Return nullopt if the format is incorrect
         }
     };
 } // namespace springtail
