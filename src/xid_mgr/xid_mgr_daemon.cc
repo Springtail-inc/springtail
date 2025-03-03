@@ -26,9 +26,8 @@ main(int argc, char* argv[])
     namespace po = boost::program_options;
     po::options_description desc("Allowed options");
     desc.add_options()("help,h", "Help message.");
-    desc.add_options()("xid,x", po::value<uint64_t>(&starting_xid)->default_value(2),
-                       "The starting XID.");
-    desc.add_options()("dbid,d", po::value<uint64_t>(&db_id)->default_value(1), "DB ID.");
+    desc.add_options()("xid,x", po::value<uint64_t>(&starting_xid), "The starting XID.");
+    desc.add_options()("dbid,d", po::value<uint64_t>(&db_id), "DB ID.");
     desc.add_options()("daemonize", "Start the server as a daemon");
 
     po::variables_map vm;

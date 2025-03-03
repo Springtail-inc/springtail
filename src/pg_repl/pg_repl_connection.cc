@@ -147,6 +147,7 @@ namespace springtail
                 try {
                     drop_replication_slot();
                     LSN = create_replication_slot();
+                    confirmed_flush_lsn = LSN;
                 } catch (const std::exception& e) {
                     SPDLOG_ERROR("Failed to recreate replication slot: {}", e.what());
                     throw PgReplicationSlotError();
@@ -817,7 +818,7 @@ namespace springtail
 
         std::string slot_name = _connection->escape_string(_slot_name);
 
-        std::string cmd = fmt::format("SELECT pg_drop_replication_slot({})", slot_name);
+        std::string cmd = fmt::format("SELECT pg_drop_replication_slot('{}')", slot_name);
 
         // execute query
         SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Executing query drop replication slot: cmd={}", cmd);
@@ -844,7 +845,7 @@ namespace springtail
 
         std::string slot_name = _connection->escape_string(_slot_name);
 
-        std::string cmd = fmt::format("SELECT * FROM pg_create_logical_replication_slot({}, 'pgoutput')", slot_name);
+        std::string cmd = fmt::format("SELECT * FROM pg_create_logical_replication_slot('{}', 'pgoutput')", slot_name);
 
         // execute query
         SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Executing query create replication slot: cmd={}", cmd);
