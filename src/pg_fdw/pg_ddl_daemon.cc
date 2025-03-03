@@ -81,10 +81,9 @@ int main(int argc, char *argv[])
 
     std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
     runners.emplace();
-    runners->emplace_back(std::make_unique<TermSignalRunner>(handle_sigint));
     runners->emplace_back(std::make_unique<pg_fdw::PgDDLMgrRunner>(username, password, socket_hostname));
 
-    springtail::springtail_init(runners, false, "pg_ddl_mgr", pidfile, LOG_ALL);
+    springtail::springtail_init_daemon(handle_sigint, runners, "pg_ddl_mgr", pidfile, LOG_ALL);
 
     pg_fdw::PgDDLMgr::get_instance()->run();
 

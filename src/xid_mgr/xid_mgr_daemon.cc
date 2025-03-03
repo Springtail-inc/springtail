@@ -49,10 +49,9 @@ main(int argc, char* argv[])
 
     std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
     runners.emplace();
-    runners->emplace_back(std::make_unique<TermSignalRunner>(handle_sigint));
     runners->emplace_back(std::make_unique<xid_mgr::XidMgrRunner>(vm.count("xid") && vm.count("dbid"), db_id, starting_xid));
 
-    springtail_init(runners, false, "xid_mgr", pidfile);
+    springtail_init_daemon(handle_sigint, runners, "xid_mgr", pidfile);
 
     // Block until SIGINT is received. If any other signal wakes the process,
     // pause() will return and the loop will continue until shutdown_requested is set.

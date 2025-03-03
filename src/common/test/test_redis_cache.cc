@@ -11,7 +11,7 @@ namespace {
     protected:
         static void SetUpTestSuite()
         {
-            springtail_init();
+            springtail_init_test();
         }
 
         static void TearDownTestSuite()

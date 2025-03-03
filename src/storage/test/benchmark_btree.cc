@@ -147,7 +147,7 @@ BENCHMARK(BM_BTreeInsert)
 int main(int argc, char **argv) {
     benchmark::Initialize(&argc, argv);
     auto logging = LOG_NONE;
-    springtail_init(std::nullopt, false, std::nullopt, std::nullopt, logging);
+    springtail_init(std::nullopt, false, std::nullopt, logging);
     benchmark::RunSpecifiedBenchmarks();
     springtail_shutdown();
     return 0;

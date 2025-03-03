@@ -12,7 +12,7 @@ namespace {
     class RedisPubSub_Test : public testing::TestWithParam<bool> {
     protected:
         static void SetUpTestSuite() {
-            springtail_init();
+            springtail_init_test();
 
             // See if redis is enabled
             try {

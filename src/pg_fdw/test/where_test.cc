@@ -31,7 +31,7 @@ namespace {
             runners.emplace();
             std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
 
-            springtail_init(runners);
+            springtail_init_test(runners);
 
             PgFdwMgr::fdw_init(nullptr, false);
 

@@ -23,7 +23,7 @@ namespace {
     protected:
         static void SetUpTestSuite()
         {
-            springtail_init();
+            springtail_init_test();
 
             pg_proxy::DatabaseMgr::get_instance()->init();
             pg_proxy::UserMgr *user_mgr = pg_proxy::UserMgr::get_instance();

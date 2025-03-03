@@ -13,7 +13,7 @@ namespace {
     class ExtentMapper_Test : public testing::Test {
     protected:
         void SetUp() override {
-            springtail_init();
+            springtail_init_test();
             _extent_mapper = ExtentMapper::get_instance(1);
 
             _gc1_xid = 1;

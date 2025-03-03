@@ -26,7 +26,7 @@ namespace {
             runners.emplace();
             std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
 
-            springtail_init(runners);
+            springtail_init_test(runners);
         }
 
         void TearDown() override {
@@ -34,8 +34,6 @@ namespace {
             for (auto &t : _threads) {
                 t.join();
             }
-            // shutdown client
-            XidMgrClient::shutdown();
             // shutdown server
             SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Shutting down server");
             springtail_shutdown();

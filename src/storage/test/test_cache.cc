@@ -39,7 +39,7 @@ namespace {
                                                 sizes.data_cache_size, sizes.page_cache_size, sizes.btree_cache_size, sizes.max_extent_per_page);
             ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
 
-            springtail_init(std::nullopt, true, std::nullopt, std::nullopt, LOG_ALL ^ LOG_STORAGE);
+            springtail_init_test(std::nullopt, LOG_ALL ^ LOG_STORAGE);
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({

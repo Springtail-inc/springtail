@@ -16,7 +16,7 @@ using namespace springtail;
 class CoordinatorTest : public ::testing::Test {
 protected:
     static void SetUpTestSuite() {
-        springtail_init();
+        springtail_init_test();
     }
 
     static void TearDownTestSuite() {

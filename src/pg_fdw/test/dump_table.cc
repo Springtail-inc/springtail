@@ -239,7 +239,7 @@ int main(int argc, char *argv[])
     uint64_t tid=0;
     bool list = false;
 
-    springtail_init(std::nullopt, false);
+    springtail_init_test(std::nullopt, false);
 
     // parse the arguments
     namespace po = boost::program_options;

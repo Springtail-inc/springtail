@@ -18,11 +18,18 @@ namespace springtail {
  */
 
 void springtail_init(const std::optional<std::vector<std::unique_ptr<ServiceRunner>>> &runners = std::nullopt,
-                     const bool load_redis = true,
+                     const bool load_redis = false,
                      const std::optional<std::string> &log_filename = std::nullopt,
-                     const std::optional<std::string> &daemon_pid = std::nullopt,
                      const std::optional<uint32_t> &logging_mask = std::nullopt);
 
+void springtail_init_daemon(void (*handler)(int),
+                            const std::optional<std::vector<std::unique_ptr<ServiceRunner>>> &runners = std::nullopt,
+                            const std::optional<std::string> &log_filename = std::nullopt,
+                            const std::optional<std::string> &daemon_pid = std::nullopt,
+                            const std::optional<uint32_t> &logging_mask = std::nullopt);
+
+void springtail_init_test(const std::optional<std::vector<std::unique_ptr<ServiceRunner>>> &runners = std::nullopt,
+                          const std::optional<uint32_t> &logging_mask = std::nullopt);
 
 void springtail_init_custom(std::vector<std::unique_ptr<ServiceRunner>> &runners);
 

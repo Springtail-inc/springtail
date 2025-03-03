@@ -51,7 +51,7 @@ namespace {
             runners.emplace();
             std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
 
-            springtail_init(runners);
+            springtail_init_test(runners);
 
             auto client = sys_tbl_mgr::Client::get_instance();
 

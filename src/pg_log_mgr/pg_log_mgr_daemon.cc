@@ -49,10 +49,9 @@ int main(int argc, char *argv[])
 
     std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
     runners.emplace();
-    runners->emplace_back(std::make_unique<TermSignalRunner>(handle_sigint));
     runners->emplace_back(std::make_unique<pg_log_mgr::PgLogCoordinatorRunner>());
 
-    springtail_init(runners, false, "pg_log_mgr", pidfile);
+    springtail_init_daemon(handle_sigint, runners, "pg_log_mgr", pidfile);
 
     pg_log_mgr::PgLogCoordinator::get_instance()->wait_shutdown();
 

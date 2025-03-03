@@ -145,9 +145,9 @@ class IOTest : public ::testing::Test {
 public:
     static void SetUpTestSuite() {
         // Init springtail
-        springtail::springtail_init();
+        springtail::springtail_init_test();
     }
-    
+
     static void TearDownTestSuite() {
         springtail::springtail_shutdown();
     }

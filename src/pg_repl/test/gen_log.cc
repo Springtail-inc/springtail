@@ -37,7 +37,7 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    springtail_init(std::nullopt, false);
+    springtail_init();
 
     PgLogGenJson log_gen(output_file);
     log_gen.parse_commands(input_file);

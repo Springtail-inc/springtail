@@ -95,7 +95,7 @@ namespace {
     protected:
         static void SetUpTestSuite()
         {
-            springtail_init();
+            springtail_init_test();
         }
 
         static void TearDownTestSuite()
@@ -215,7 +215,11 @@ namespace {
     protected:
         static void SetUpTestSuite()
         {
-            springtail_init();
+            springtail_init_test();
+        }
+        static void TearDownTestSuite()
+        {
+            springtail_shutdown();
         }
 
         void SetUp() override

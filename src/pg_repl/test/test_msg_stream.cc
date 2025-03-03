@@ -22,7 +22,7 @@ namespace {
         static void SetUpTestSuite()
         {
             // code here will execute just before the test ensues
-            springtail_init();
+            springtail_init_test();
         }
 
         static void TearDownTestSuite()

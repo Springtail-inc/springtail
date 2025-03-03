@@ -16,7 +16,7 @@ namespace {
     class SchemaCache_Test : public testing::Test {
     public:
         static void SetUpTestSuite() {
-            springtail_init();
+            springtail_init_test();
         }
 
         static void TearDownTestSuite() {

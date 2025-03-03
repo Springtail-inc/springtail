@@ -17,7 +17,7 @@ main(int argc, char **argv)
     uint64_t xid = 0;
     uint64_t db_id = 1;
 
-    springtail_init(std::nullopt, false);
+    springtail_init();
 
     // parse the arguments
     namespace po = boost::program_options;

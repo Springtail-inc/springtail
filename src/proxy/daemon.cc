@@ -138,10 +138,9 @@ int main(int argc, char* argv[])
 
     std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
     runners.emplace();
-    runners->emplace_back(std::make_unique<TermSignalRunner>(handle_sigint));
     runners->emplace_back(std::make_unique<ProxyRunner>(force_shadow, force_primary));
 
-    springtail_init(runners, false, "proxy", pidfile, LOG_PROXY);
+    springtail_init_daemon(handle_sigint, runners, "proxy", pidfile, LOG_PROXY);
 
     ProxyServer::get_instance()->run();
 

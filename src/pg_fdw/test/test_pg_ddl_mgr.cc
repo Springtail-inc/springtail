@@ -87,7 +87,7 @@ namespace {
             std::string socket_hostname{"/var/run/postgresql"};
             runners->emplace_back(new PgDDLMgrRunner(username, password, socket_hostname));
 
-            springtail_init(runners);
+            springtail_init_test(runners);
 
             _fdw_id_str = Properties::get_fdw_id();
 

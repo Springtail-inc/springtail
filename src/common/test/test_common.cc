@@ -25,7 +25,7 @@ TEST(CommonTest, SplitString2) {
 }
 
 TEST(LoggingTest, Logging) {
-    springtail_init();
+    springtail_init_test();
     SPDLOG_DEBUG_MODULE(0x01, "Test log message, no args");
     SPDLOG_DEBUG_MODULE(0x01, "Test log message: 1 arg {}", 1);
     SPDLOG_DEBUG_MODULE(0x01, "Test log message: 2 args {} {}", 1, 2);

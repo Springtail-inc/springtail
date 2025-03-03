@@ -54,18 +54,66 @@ void
 springtail_init(const std::optional<std::vector<std::unique_ptr<ServiceRunner>>> &runners,
                 const bool load_redis,
                 const std::optional<std::string> &log_filename,
-                const std::optional<std::string> &daemon_pid,
                 const std::optional<uint32_t> &logging_mask)
 {
     std::vector<std::unique_ptr<ServiceRunner>> service_runners;
     service_runners.emplace_back(std::make_unique<DefaultLoggingRunner>());
     service_runners.emplace_back(std::make_unique<ExceptionRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesRunner>(load_redis));
+    service_runners.emplace_back(std::make_unique<LoggingRunner>(log_filename, std::nullopt, logging_mask));
+    service_runners.emplace_back(std::make_unique<TracingRunner>(log_filename));
+    service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
+    service_runners.emplace_back(std::make_unique<PropertiesCacheRunner>());
+
+    if (runners.has_value()) {
+        std::vector<std::unique_ptr<ServiceRunner>> *non_const_runners = const_cast<std::vector<std::unique_ptr<ServiceRunner>> *>(&runners.value());
+        std::move(non_const_runners->begin(), non_const_runners->end(), std::back_inserter(service_runners));
+    }
+
+    if (!ServiceRegister::get_instance()->start(service_runners)) {
+        exit(1);
+    }
+}
+
+void springtail_init_daemon(void (*handler)(int),
+                            const std::optional<std::vector<std::unique_ptr<ServiceRunner>>> &runners,
+                            const std::optional<std::string> &log_filename,
+                            const std::optional<std::string> &daemon_pid,
+                            const std::optional<uint32_t> &logging_mask)
+{
+    std::vector<std::unique_ptr<ServiceRunner>> service_runners;
+    service_runners.emplace_back(std::make_unique<DefaultLoggingRunner>());
+    service_runners.emplace_back(std::make_unique<ExceptionRunner>());
+    service_runners.emplace_back(std::make_unique<PropertiesRunner>(false));
     if (daemon_pid.has_value()) {
         service_runners.emplace_back(std::make_unique<DaemonRunner>(daemon_pid.value()));
     }
     service_runners.emplace_back(std::make_unique<LoggingRunner>(log_filename, daemon_pid, logging_mask));
     service_runners.emplace_back(std::make_unique<TracingRunner>(log_filename));
+    service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
+    service_runners.emplace_back(std::make_unique<PropertiesCacheRunner>());
+    service_runners.emplace_back(std::make_unique<TermSignalRunner>(handler));
+
+    if (runners.has_value()) {
+        std::vector<std::unique_ptr<ServiceRunner>> *non_const_runners = const_cast<std::vector<std::unique_ptr<ServiceRunner>> *>(&runners.value());
+        std::move(non_const_runners->begin(), non_const_runners->end(), std::back_inserter(service_runners));
+    }
+
+    if (!ServiceRegister::get_instance()->start(service_runners)) {
+        exit(1);
+    }
+}
+
+void
+springtail_init_test(const std::optional<std::vector<std::unique_ptr<ServiceRunner>>> &runners,
+                     const std::optional<uint32_t> &logging_mask)
+{
+    std::vector<std::unique_ptr<ServiceRunner>> service_runners;
+    service_runners.emplace_back(std::make_unique<DefaultLoggingRunner>());
+    service_runners.emplace_back(std::make_unique<ExceptionRunner>());
+    service_runners.emplace_back(std::make_unique<PropertiesRunner>(true));
+    service_runners.emplace_back(std::make_unique<LoggingRunner>(std::nullopt, std::nullopt, logging_mask));
+    service_runners.emplace_back(std::make_unique<TracingRunner>(std::nullopt));
     service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesCacheRunner>());
 

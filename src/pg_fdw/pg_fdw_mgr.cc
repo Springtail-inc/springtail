@@ -120,7 +120,7 @@ namespace springtail::pg_fdw {
         }
 
         if (init) {
-            springtail_init(std::nullopt, false, PG_FDW_LOG_FILE_PREFIX, std::nullopt, LOG_ALL);
+            springtail_init(std::nullopt, false, PG_FDW_LOG_FILE_PREFIX, LOG_ALL);
         }
 
         SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing PgFdwMgr");

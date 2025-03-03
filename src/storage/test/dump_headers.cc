@@ -12,7 +12,7 @@ int
 main(int argc,
      char *argv[])
 {
-    springtail_init(std::nullopt, false);
+    springtail_init();
 
     // open the file and scan the header of each extent
     auto handle = IOMgr::get_instance()->open(argv[1], IOMgr::IO_MODE::READ, true);

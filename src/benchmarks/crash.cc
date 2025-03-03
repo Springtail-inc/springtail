@@ -22,7 +22,7 @@ void error() {
 
 int main() {
     // initialize the common framework
-    springtail::springtail_init(std::nullopt, false);
+    springtail::springtail_init();
 
     std::cout << "Throw!" << std::endl;
     try {

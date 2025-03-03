@@ -10,7 +10,7 @@ int
 main(int argc,
      char *argv[])
 {
-    springtail_init(std::nullopt, false);
+    springtail_init();
 
     // construct a schema for testing
     std::vector<SchemaColumn> columns({

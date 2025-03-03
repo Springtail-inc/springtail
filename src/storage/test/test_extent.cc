@@ -14,7 +14,7 @@ namespace {
     public:
         static void SetUpTestSuite() {
             // Init springtail
-            springtail_init();
+            springtail_init_test();
         }
 
         static void TearDownTestSuite() {
