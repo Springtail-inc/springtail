@@ -1,6 +1,6 @@
 #pragma once
 
-#include <common/grpc_server_manager.hh>
+#include <grpc/grpc_server_manager.hh>
 #include <common/service_register.hh>
 #include <common/singleton.hh>
 

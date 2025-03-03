@@ -4,7 +4,7 @@ find_package(GTest CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(c-ares CONFIG REQUIRED)
 find_package(opentelemetry-cpp CONFIG REQUIRED)
-find_package(gRPC CONFIG REQUIRED)
+# find_package(gRPC CONFIG REQUIRED)
 find_package(PostgreSQL REQUIRED)
 
 set(COMMON_LIB_SOURCES
@@ -12,7 +12,7 @@ set(COMMON_LIB_SOURCES
   init.cc
   dns_resolver.cc
   exception.cc
-  grpc_server_manager.cc
+  # grpc_server_manager.cc
   logging.cc
   properties.cc
   redis.cc

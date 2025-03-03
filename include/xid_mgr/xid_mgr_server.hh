@@ -6,7 +6,7 @@
 
 #include <common/service_register.hh>
 #include <common/singleton.hh>
-#include <common/grpc_server_manager.hh>
+#include <grpc/grpc_server_manager.hh>
 #include <xid_mgr/xid_partition.hh>
 
 namespace springtail::xid_mgr {

@@ -9,7 +9,7 @@
 
 #include <common/common.hh>
 #include <common/exception.hh>
-#include <common/grpc_client.hh>
+#include <grpc/grpc_client.hh>
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/object_cache.hh>
@@ -33,7 +33,7 @@ WriteCacheClient::WriteCacheClient() : GrpcClient<WriteCacheClient>()
     _stub = proto::WriteCache::NewStub(_channel);
 }
 
-void 
+void
 WriteCacheClient::ping()
 {
     google::protobuf::Empty request;
@@ -47,7 +47,7 @@ WriteCacheClient::ping()
         "Ping");
 }
 
-std::vector<uint64_t> 
+std::vector<uint64_t>
 WriteCacheClient::list_tables(uint64_t db_id,
                              uint64_t xid,
                              uint32_t count,
@@ -67,7 +67,7 @@ WriteCacheClient::list_tables(uint64_t db_id,
             return _stub->ListTables(&context, request, &response);
         },
         "ListTables");
-    
+
     cursor = response.cursor();
     return std::vector<uint64_t>(response.table_ids().begin(),
                                 response.table_ids().end());

@@ -22,6 +22,7 @@ target_include_directories(springtail_xid_mgr
 target_link_libraries(springtail_xid_mgr
     PUBLIC
     springtail_common
+    springtail_grpc
     springtail_redis
     PRIVATE
     proto_xid_manager
