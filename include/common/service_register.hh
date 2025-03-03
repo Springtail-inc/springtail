@@ -64,7 +64,6 @@ private:
              reverse_iter++) {
             SPDLOG_INFO("Stoping service {}", (*reverse_iter)->get_name());
             (*reverse_iter)->stop();
-            // delete (*reverse_iter);
         }
         _service_list.clear();
     }

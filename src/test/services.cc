@@ -84,15 +84,12 @@ namespace springtail::test {
         std::vector<std::unique_ptr<ServiceRunner>> services;
         if (xid_mgr) {
             services.emplace_back(std::make_unique<XidMgrTestRunner>());
-            // services.push_back(std::move(std::unique_ptr<ServiceRunner>(new XidMgrTestRunner())));
         }
         if (sys_tbl_mgr) {
             services.emplace_back(std::make_unique<SysTblMgrTestRunner>());
-            // services.push_back(new SysTblMgrTestRunner());
         }
         if (write_cache) {
             services.emplace_back(std::make_unique<WriteCacheTestRunner>());
-            // services.push_back(new WriteCacheTestRunner());
         }
         return services;
     }
