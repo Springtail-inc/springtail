@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <common/json.hh>
 #include <common/redis.hh>
 #include <proxy/database.hh>
@@ -28,7 +28,6 @@ namespace {
         static void TearDownTestSuite()
         {
             DatabaseMgr::shutdown();
-            RedisMgr::shutdown();
             springtail_shutdown();
         }
         static inline RedisClientPtr _config_client;

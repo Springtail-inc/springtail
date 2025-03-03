@@ -3,7 +3,7 @@
  */
 #include <gtest/gtest.h>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <sys_tbl_mgr/schema_cache.hh>
 #include <test/services.hh>
 

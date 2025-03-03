@@ -5,7 +5,7 @@
 #include <fmt/core.h>
 #include <nlohmann/json.hpp>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <pg_repl/pg_common.hh>
 #include <common/exception.hh>
 #include <common/logging.hh>
@@ -120,8 +120,7 @@ namespace springtail::pg_fdw {
         }
 
         if (init) {
-            std::vector<ServiceRunner *> runners;
-            springtail_init(runners, false, PG_FDW_LOG_FILE_PREFIX, std::nullopt, LOG_ALL);
+            springtail_init(std::nullopt, false, PG_FDW_LOG_FILE_PREFIX, std::nullopt, LOG_ALL);
         }
 
         SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing PgFdwMgr");

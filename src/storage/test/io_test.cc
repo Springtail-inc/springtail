@@ -10,7 +10,7 @@
 #include <storage/io_request.hh>
 #include <storage/io_mgr.hh>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 
 /**
  * @brief Helper to generate random data

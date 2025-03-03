@@ -4,7 +4,7 @@
 
 #include <fmt/core.h>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <common/coordinator.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>

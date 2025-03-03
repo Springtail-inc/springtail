@@ -43,6 +43,7 @@ add_executable(threaded_test test/threaded_test.cc)
 target_include_directories(threaded_test PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
 target_link_libraries(threaded_test
     PUBLIC springtail_common
+           springtail_test
            springtail_xid_mgr
     PRIVATE Boost::program_options
             GTest::gtest_main

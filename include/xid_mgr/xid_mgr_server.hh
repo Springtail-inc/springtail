@@ -78,6 +78,7 @@ public:
         ServiceRunner("XidMgr"),
         _commit_starting_xid(commit_starting_xid),
         _db_id(db_id), _starting_xid(starting_xid) {}
+
     bool start() override {
         if (_commit_starting_xid) {
             xid_mgr::XidMgrServer::get_instance()->commit_xid(_db_id, _starting_xid, false);
@@ -85,9 +86,11 @@ public:
         xid_mgr::XidMgrServer::get_instance()->startup();
         return true;
     }
+
     void stop() override {
         xid_mgr::XidMgrServer::shutdown();
     }
+
 private:
     bool _commit_starting_xid;
     uint64_t _db_id;

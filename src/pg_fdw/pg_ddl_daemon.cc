@@ -3,7 +3,7 @@
 #include <boost/program_options.hpp>
 
 // springtail includes
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <common/properties.hh>
 
 #include <pg_log_mgr/pg_log_coordinator.hh>
@@ -19,39 +19,6 @@ namespace {
             ddl_mgr->notify_shutdown();
         }
     }
-
-    class PgDDLMgrRunner : public ServiceRunner {
-    public:
-        explicit PgDDLMgrRunner(const std::string &username,
-                                const std::string &password,
-                                const std::optional<std::string> &hostname) :
-            ServiceRunner("PgDDLMgr"),
-            _username(username),
-            _password(password),
-            _hostname(hostname) {}
-
-        bool start() override
-        {
-            // start the ddl main thread
-            std::string fdw_id = Properties::get_fdw_id();
-
-            SPDLOG_DEBUG("Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}",
-                        fdw_id, _username, _password, _hostname.value_or(""));
-            pg_fdw::PgDDLMgr::get_instance()->init(fdw_id, _username, _password, _hostname);
-            return true;
-        }
-
-        void stop() override
-        {
-            pg_fdw::PgDDLMgr::shutdown();
-        }
-
-    private:
-        std::string _username;                     ///< username
-        std::string _password;                     ///< password
-        std::optional<std::string> _hostname;      ///< hostname
-    };
-
 }
 
 int main(int argc, char *argv[])
@@ -112,17 +79,16 @@ int main(int argc, char *argv[])
         }
     }
 
-    std::vector<ServiceRunner *> runners = {
-        new TermSignalRunner(handle_sigint),
-        new PgDDLMgrRunner(username, password, socket_hostname)
-    };
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<TermSignalRunner>(handle_sigint));
+    runners->emplace_back(std::make_unique<pg_fdw::PgDDLMgrRunner>(username, password, socket_hostname));
 
     springtail::springtail_init(runners, false, "pg_ddl_mgr", pidfile, LOG_ALL);
 
     pg_fdw::PgDDLMgr::get_instance()->run();
 
-    // wait for shutdown; wait for main thread to join
-    pg_fdw::PgDDLMgr::shutdown();
+    springtail::springtail_shutdown();
 
     return 0;
 }

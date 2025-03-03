@@ -4,7 +4,7 @@
 #include <boost/program_options.hpp>
 
 // springtail includes
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_msg_stream.hh>
 
@@ -37,8 +37,7 @@ int main(int argc, char* argv[])
     }
 
     // init logging/backtrace
-    std::vector<ServiceRunner *> runners;
-    springtail_init(runners, false);
+    springtail_init(std::nullopt, false);
 
     PgMsgStreamReader reader(file);
 

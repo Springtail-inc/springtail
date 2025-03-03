@@ -3,7 +3,7 @@
 #include <iostream>
 
 #include <boost/program_options.hpp>
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <sys_tbl_mgr/server.hh>
 
 using namespace springtail;
@@ -41,10 +41,10 @@ main(int argc, char *argv[])
         pidfile = "sys_tbl_mgr.pid";
     }
 
-    std::vector<ServiceRunner *> runners = {
-        new TermSignalRunner(handle_sigint),
-        new sys_tbl_mgr::SysTblMgrRunner()
-    };
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<TermSignalRunner>(handle_sigint));
+    runners->emplace_back(std::make_unique<sys_tbl_mgr::SysTblMgrRunner>());
 
     springtail_init(runners, false,"sys_tbl_mgr", pidfile);
 

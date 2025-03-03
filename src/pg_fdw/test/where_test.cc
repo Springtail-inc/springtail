@@ -1,7 +1,7 @@
 #include "common/constants.hh"
 #include <gtest/gtest.h>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
 
@@ -26,7 +26,13 @@ namespace {
         // Called once per testsuite.  Create a table and populate it with data
         static void SetUpTestSuite()
         {
-            springtail_init(test::getServices(true, true, true));
+            std::vector<std::unique_ptr<ServiceRunner>> service_runners = test::get_services(true, true, true);
+            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+            runners.emplace();
+            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
+
+            springtail_init(runners);
+
             PgFdwMgr::fdw_init(nullptr, false);
 
             _columns = {

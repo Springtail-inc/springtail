@@ -3,7 +3,7 @@
 #include <boost/program_options.hpp>
 
 // springtail includes
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/json.hh>
@@ -136,10 +136,10 @@ int main(int argc, char* argv[])
         pidfile = "proxy.pid";
     }
 
-    std::vector<ServiceRunner *> runners = {
-        new TermSignalRunner(handle_sigint),
-        new ProxyRunner(force_shadow, force_primary)
-    };
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<TermSignalRunner>(handle_sigint));
+    runners->emplace_back(std::make_unique<ProxyRunner>(force_shadow, force_primary));
 
     springtail_init(runners, false, "proxy", pidfile, LOG_PROXY);
 

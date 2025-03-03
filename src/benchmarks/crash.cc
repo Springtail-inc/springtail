@@ -2,7 +2,7 @@
 
 #include <common/exception.hh>
 #include <common/logging.hh>
-#include <common/common_init.hh>
+#include <common/init.hh>
 
 class CrashError : public springtail::Error {
 public:
@@ -22,8 +22,7 @@ void error() {
 
 int main() {
     // initialize the common framework
-    std::vector<springtail::ServiceRunner *> runners;
-    springtail::springtail_init(runners, false);
+    springtail::springtail_init(std::nullopt, false);
 
     std::cout << "Throw!" << std::endl;
     try {

@@ -1,7 +1,7 @@
 #include <fmt/core.h>
 #include <cassert>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <common/timestamp.hh>
 #include <common/threaded_test.hh>
 #include <common/tracking_allocator.hh>

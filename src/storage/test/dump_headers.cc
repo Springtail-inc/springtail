@@ -1,4 +1,4 @@
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <common/constants.hh>
 
 #include <storage/field.hh>
@@ -12,8 +12,7 @@ int
 main(int argc,
      char *argv[])
 {
-    std::vector<ServiceRunner *> runners;
-    springtail_init(runners, false);
+    springtail_init(std::nullopt, false);
 
     // open the file and scan the header of each extent
     auto handle = IOMgr::get_instance()->open(argv[1], IOMgr::IO_MODE::READ, true);

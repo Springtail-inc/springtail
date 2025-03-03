@@ -2,7 +2,7 @@
 
 #include <fmt/format.h>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 
 #include <storage/field.hh>
 #include <storage/extent.hh>
@@ -117,8 +117,7 @@ int main(int argc, char **argv)
 
     std::cout << "searching for: " << val << " op: " << direction << std::endl;
 
-    std::vector<ServiceRunner *> runners;
-    springtail_init(runners, false, std::nullopt, std::nullopt, 0);
+    springtail_init(std::nullopt, false, std::nullopt, std::nullopt, 0);
 
     // convert operator to enum
     QualOpName op;

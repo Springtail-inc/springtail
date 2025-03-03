@@ -1,7 +1,7 @@
 #include <iostream>
 #include <boost/program_options.hpp>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <common/properties.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
@@ -17,8 +17,7 @@ main(int argc, char **argv)
     uint64_t xid = 0;
     uint64_t db_id = 1;
 
-    std::vector<ServiceRunner *> runners;
-    springtail_init(runners, false);
+    springtail_init(std::nullopt, false);
 
     // parse the arguments
     namespace po = boost::program_options;

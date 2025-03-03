@@ -3,7 +3,7 @@
 
 #include <boost/program_options.hpp>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 
 #include <pg_repl/pg_msg_log_gen.hh>
 
@@ -37,8 +37,7 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    std::vector<ServiceRunner *> runners;
-    springtail_init(runners, false);
+    springtail_init(std::nullopt, false);
 
     PgLogGenJson log_gen(output_file);
     log_gen.parse_commands(input_file);

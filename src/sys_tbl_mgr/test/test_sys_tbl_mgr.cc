@@ -6,7 +6,7 @@
 
 #include <gtest/gtest.h>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <common/constants.hh>
 #include <common/json.hh>
 #include <common/object_cache.hh>
@@ -30,7 +30,11 @@ namespace {
     class SysTblMgr_Test : public testing::Test {
     public:
         static void SetUpTestSuite() {
-            springtail_init(test::getServices(true, true, false), true,
+            std::vector<std::unique_ptr<ServiceRunner>> service_runners = test::get_services(true, true, false);
+            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+            runners.emplace();
+            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
+            springtail_init(runners, true,
                             std::nullopt, std::nullopt, LOG_ALL ^ (LOG_CACHE | LOG_STORAGE));
 
             // create the public namespace

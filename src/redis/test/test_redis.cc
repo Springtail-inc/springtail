@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <common/redis.hh>
 #include <common/threaded_test.hh>
 

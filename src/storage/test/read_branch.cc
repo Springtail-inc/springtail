@@ -1,4 +1,4 @@
-#include <common/common_init.hh>
+#include <common/init.hh>
 
 #include <storage/csv_field.hh>
 #include <storage/btree.hh>
@@ -10,7 +10,7 @@ int
 main(int argc,
      char *argv[])
 {
-    springtail_init();
+    springtail_init(std::nullopt, false);
 
     // construct a schema for testing
     std::vector<SchemaColumn> columns({

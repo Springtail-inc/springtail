@@ -14,9 +14,8 @@ namespace springtail::test {
     class XidMgrTestRunner : public ServiceRunner {
     public:
     explicit XidMgrTestRunner() :
-        ServiceRunner("XidMgrServer") {
+        ServiceRunner("XidMgrServer") {}
 
-        }
         bool start() override {
             std::filesystem::path xid_dir;
 
@@ -36,6 +35,7 @@ namespace springtail::test {
             xid_mgr::XidMgrServer::get_instance()->startup();
             return true;
         }
+
         void stop() override {
             XidMgrClient::shutdown();
             xid_mgr::XidMgrServer::shutdown();
@@ -44,8 +44,9 @@ namespace springtail::test {
 
     class SysTblMgrTestRunner : public ServiceRunner {
     public:
-    explicit SysTblMgrTestRunner() :
-        ServiceRunner("SysTblMgrServer") {}
+        explicit SysTblMgrTestRunner() :
+            ServiceRunner("SysTblMgrServer") {}
+
         bool start() override {
             std::filesystem::path table_dir;
 
@@ -56,6 +57,7 @@ namespace springtail::test {
             sys_tbl_mgr::Server::get_instance()->startup();
             return true;
         }
+
         void stop() override {
             sys_tbl_mgr::Client::shutdown();
             sys_tbl_mgr::Server::shutdown();
@@ -65,28 +67,32 @@ namespace springtail::test {
     class WriteCacheTestRunner : public WriteCacheRunner {
     public:
         explicit WriteCacheTestRunner() : WriteCacheRunner() {}
+
         void stop() override {
             WriteCacheClient::shutdown();
             WriteCacheRunner::stop();
         }
     };
 
-    std::vector<ServiceRunner *>
-    getServices(bool xid_mgr,
+    std::vector<std::unique_ptr<ServiceRunner>>
+    get_services(bool xid_mgr,
                 bool sys_tbl_mgr,
                 bool write_cache) {
         if (sys_tbl_mgr || write_cache) {
             xid_mgr = true;
         }
-        std::vector<ServiceRunner *> services;
+        std::vector<std::unique_ptr<ServiceRunner>> services;
         if (xid_mgr) {
-            services.push_back(new XidMgrTestRunner());
+            services.emplace_back(std::make_unique<XidMgrTestRunner>());
+            // services.push_back(std::move(std::unique_ptr<ServiceRunner>(new XidMgrTestRunner())));
         }
         if (sys_tbl_mgr) {
-            services.push_back(new SysTblMgrTestRunner());
+            services.emplace_back(std::make_unique<SysTblMgrTestRunner>());
+            // services.push_back(new SysTblMgrTestRunner());
         }
         if (write_cache) {
-            services.push_back(new WriteCacheTestRunner());
+            services.emplace_back(std::make_unique<WriteCacheTestRunner>());
+            // services.push_back(new WriteCacheTestRunner());
         }
         return services;
     }

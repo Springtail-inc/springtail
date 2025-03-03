@@ -5,7 +5,7 @@
 
 #include <stdio.h>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <common/logging.hh>
 #include <common/exception.hh>
 #include <common/concurrent_queue.hh>
@@ -67,7 +67,12 @@ namespace {
         static constexpr char const * const XACT_LOG_DIR = "/tmp/test_xact_log";
 
         static void SetUpTestSuite() {
-            springtail_init(test::getServices(true, true, false));
+            std::vector<std::unique_ptr<ServiceRunner>> service_runners = test::get_services(true, true, false);
+            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+            runners.emplace();
+            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
+
+            springtail_init(runners);
 
             // create the public namespace
             auto client = sys_tbl_mgr::Client::get_instance();

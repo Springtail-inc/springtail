@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <common/environment.hh>
 #include <common/threaded_test.hh>
 
@@ -39,8 +39,7 @@ namespace {
                                                 sizes.data_cache_size, sizes.page_cache_size, sizes.btree_cache_size, sizes.max_extent_per_page);
             ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
 
-            std::vector<ServiceRunner *> runners;
-            springtail_init(runners, true, std::nullopt, std::nullopt, LOG_ALL ^ LOG_STORAGE);
+            springtail_init(std::nullopt,true, std::nullopt, std::nullopt, LOG_ALL ^ LOG_STORAGE);
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({

@@ -1,4 +1,4 @@
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <common/constants.hh>
 
 #include <storage/field.hh>
@@ -17,8 +17,7 @@ main(int argc,
     }
 
     // no logging
-    std::vector<ServiceRunner *> runners;
-    springtail_init(runners, false, std::nullopt, std::nullopt, LOG_NONE);
+    springtail_init(std::nullopt, false, std::nullopt, std::nullopt, LOG_NONE);
 
     // takes the database ID from the first argument
     uint64_t db_id = std::stoull(argv[1]);

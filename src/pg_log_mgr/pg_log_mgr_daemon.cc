@@ -1,7 +1,7 @@
 #include <boost/program_options.hpp>
 
 // springtail includes
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <common/properties.hh>
 
 #include <pg_log_mgr/pg_log_coordinator.hh>
@@ -47,10 +47,10 @@ int main(int argc, char *argv[])
         pidfile = "pg_log_mgr.pid";
     }
 
-    std::vector<ServiceRunner *> runners = {
-        new TermSignalRunner(handle_sigint),
-        new pg_log_mgr::PgLogCoordinatorRunner()
-    };
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<TermSignalRunner>(handle_sigint));
+    runners->emplace_back(std::make_unique<pg_log_mgr::PgLogCoordinatorRunner>());
 
     springtail_init(runners, false, "pg_log_mgr", pidfile);
 

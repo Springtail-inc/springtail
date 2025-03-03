@@ -9,7 +9,7 @@
 #include <boost/program_options.hpp>
 #include <nlohmann/json.hpp>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <common/constants.hh>
 #include <common/json.hh>
 
@@ -239,8 +239,7 @@ int main(int argc, char *argv[])
     uint64_t tid=0;
     bool list = false;
 
-    std::vector<ServiceRunner *> runners;
-    springtail_init(runners, false);
+    springtail_init(std::nullopt, false);
 
     // parse the arguments
     namespace po = boost::program_options;

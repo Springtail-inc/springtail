@@ -8,23 +8,23 @@
 
 namespace springtail {
 
-void
-daemonize(const std::string &pid_file);
-
 /**
  * @brief Initialize the springtail system
  * @param runners list of additional services to start
+ * @param load_redis flag for loading redis
  * @param log_filename log filename override
  * @param daemon_pid if set, daemonize the process and store the pid in the provided file
  * @param logging_mask logging mask override
  */
 
-void springtail_init(const std::vector<ServiceRunner *> &runners = std::vector<ServiceRunner *>(),
+void springtail_init(const std::optional<std::vector<std::unique_ptr<ServiceRunner>>> &runners = std::nullopt,
                      const bool load_redis = true,
                      const std::optional<std::string> &log_filename = std::nullopt,
                      const std::optional<std::string> &daemon_pid = std::nullopt,
                      const std::optional<uint32_t> &logging_mask = std::nullopt);
 
+
+void springtail_init_custom(std::vector<std::unique_ptr<ServiceRunner>> &runners);
 
 /**
  * @brief Services shutdown function
@@ -35,35 +35,13 @@ void springtail_shutdown();
 // Daemon init
 class DaemonRunner : public ServiceRunner {
 public:
-    explicit DaemonRunner(const std::optional<std::string> &daemon_pid)
-        : ServiceRunner("Daemon"), _daemon_pid(daemon_pid)
-    {
-    }
+    explicit DaemonRunner(const std::string &daemon_pid)
+        : ServiceRunner("Daemon"), _daemon_pid(daemon_pid) {}
 
-    bool start() override
-    {
-        if (_daemon_pid.has_value()) {
-            daemonize(*_daemon_pid);
-        }
-        return true;
-    }
+    bool start() override;
 
 private:
-    const std::optional<std::string> &_daemon_pid;
-};
-
-// Exception init
-class ExceptionRunner : public ServiceRunner {
-public:
-    explicit ExceptionRunner() : ServiceRunner("Exception") {}
-
-    bool start() override
-    {
-        init_exception();
-        return true;
-    }
-
-    void stop() override { shutdown_exception(); }
+    const std::string _daemon_pid;
 };
 
 // Properties Init
@@ -171,6 +149,20 @@ public:
 private:
     const std::vector<int> _signals{SIGINT, SIGTERM, SIGQUIT, SIGUSR1, SIGUSR2};
     void (*_handler)(int);
+};
+
+// RedisMgr init
+class RedisMgrRunner : public ServiceRunner {
+public:
+    explicit RedisMgrRunner() : ServiceRunner("RedisMgr") {}
+
+    bool start() override
+    {
+        RedisMgr::get_instance();
+        return true;
+    }
+
+    void stop() override { RedisMgr::shutdown(); }
 };
 
 };  // namespace springtail::init

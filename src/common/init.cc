@@ -1,18 +1,17 @@
 #include <iostream>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 
 using namespace springtail;
 
 namespace springtail {
 
-void
-daemonize(const std::string &pid_file)
+bool DaemonRunner::start()
 {
     std::string pid_path = Properties::get_instance()->get_pid_path();
 
     std::filesystem::path pid_filename(pid_path);
-    pid_filename /= pid_file;
+    pid_filename /= _daemon_pid;
 
     std::cout << "Daemonizing process, writing pid to: " << pid_filename << std::endl;
 
@@ -48,26 +47,41 @@ daemonize(const std::string &pid_file)
         // exit cleanly
         std::exit(0);
     }
+    return true;
 }
 
 void
-springtail_init(const std::vector<ServiceRunner *> &runners,
+springtail_init(const std::optional<std::vector<std::unique_ptr<ServiceRunner>>> &runners,
                 const bool load_redis,
                 const std::optional<std::string> &log_filename,
                 const std::optional<std::string> &daemon_pid,
                 const std::optional<uint32_t> &logging_mask)
 {
-    std::vector<ServiceRunner *> service_runners = {
-        new DefaultLoggingRunner(),
-        new ExceptionRunner(),
-        new PropertiesRunner(load_redis),
-        new DaemonRunner(daemon_pid),
-        new LoggingRunner(log_filename, daemon_pid, logging_mask),
-        new TracingRunner(log_filename),
-        new PropertiesCacheRunner()};
+    std::vector<std::unique_ptr<ServiceRunner>> service_runners;
+    service_runners.emplace_back(std::make_unique<DefaultLoggingRunner>());
+    service_runners.emplace_back(std::make_unique<ExceptionRunner>());
+    service_runners.emplace_back(std::make_unique<PropertiesRunner>(load_redis));
+    if (daemon_pid.has_value()) {
+        service_runners.emplace_back(std::make_unique<DaemonRunner>(daemon_pid.value()));
+    }
+    service_runners.emplace_back(std::make_unique<LoggingRunner>(log_filename, daemon_pid, logging_mask));
+    service_runners.emplace_back(std::make_unique<TracingRunner>(log_filename));
+    service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
+    service_runners.emplace_back(std::make_unique<PropertiesCacheRunner>());
 
-    service_runners.insert(service_runners.end(), runners.begin(), runners.end());
+    if (runners.has_value()) {
+        std::vector<std::unique_ptr<ServiceRunner>> *non_const_runners = const_cast<std::vector<std::unique_ptr<ServiceRunner>> *>(&runners.value());
+        std::move(non_const_runners->begin(), non_const_runners->end(), std::back_inserter(service_runners));
+    }
+
     if (!ServiceRegister::get_instance()->start(service_runners)) {
+        exit(1);
+    }
+}
+
+void springtail_init_custom(std::vector<std::unique_ptr<ServiceRunner>> &runners)
+{
+    if (!ServiceRegister::get_instance()->start(runners)) {
         exit(1);
     }
 }

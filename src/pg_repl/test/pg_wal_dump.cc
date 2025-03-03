@@ -4,7 +4,7 @@
 #include <boost/program_options.hpp>
 
 // springtail includes
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <common/logging.hh>
 
 #include <pg_repl/pg_types.hh>
@@ -58,9 +58,8 @@ int main(int argc, char* argv[])
         return -1;
     }
 
-    std::vector<ServiceRunner *> runners;
     // init logging/backtrace
-    springtail_init(runners, false, std::nullopt, std::nullopt, LOG_PG_REPL);
+    springtail_init(std::nullopt, false, std::nullopt, std::nullopt, LOG_PG_REPL);
 
     // create postgres connection
     PgReplConnection pg_conn(port, host, db_name, user_name, password, pub_name, slot_name);

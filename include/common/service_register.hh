@@ -28,9 +28,9 @@ class ServiceRegister : public Singleton<ServiceRegister> {
     friend class Singleton<ServiceRegister>;
 
 public:
-    bool start(std::vector<ServiceRunner *> &service_list)
+    bool start(std::vector<std::unique_ptr<ServiceRunner>> &service_list)
     {
-        _service_list = service_list;
+        std::move(service_list.begin(), service_list.end(), std::back_inserter(_service_list));
         auto reverse_iter = _service_list.rend();
         for (auto iter = _service_list.begin(); iter != _service_list.end(); iter++) {
             SPDLOG_INFO("Starting service {}", (*iter)->get_name());
@@ -56,7 +56,7 @@ private:
     ServiceRegister() = default;
     ~ServiceRegister() override = default;
 
-    std::vector<ServiceRunner *> _service_list;
+    std::vector<std::unique_ptr<ServiceRunner>> _service_list;
 
     void _internal_shutdown() override
     {
@@ -64,7 +64,7 @@ private:
              reverse_iter++) {
             SPDLOG_INFO("Stoping service {}", (*reverse_iter)->get_name());
             (*reverse_iter)->stop();
-            delete (*reverse_iter);
+            // delete (*reverse_iter);
         }
         _service_list.clear();
     }

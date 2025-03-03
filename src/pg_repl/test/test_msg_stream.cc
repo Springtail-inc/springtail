@@ -4,7 +4,7 @@
 
 #include <stdio.h>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <common/logging.hh>
 #include <common/exception.hh>
 

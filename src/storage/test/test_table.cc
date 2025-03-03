@@ -2,7 +2,7 @@
 #include <sys_tbl_mgr/system_tables.hh>
 #include <gtest/gtest.h>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <common/environment.hh>
 #include <common/object_cache.hh>
 #include <common/threaded_test.hh>
@@ -46,7 +46,12 @@ namespace {
             _base_dir = std::filesystem::temp_directory_path() / "test_table";
             std::filesystem::remove_all(_base_dir);
 
-            springtail_init(test::getServices(true, true, false));
+            std::vector<std::unique_ptr<ServiceRunner>> service_runners = test::get_services(true, true, false);
+            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+            runners.emplace();
+            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
+
+            springtail_init(runners);
 
             auto client = sys_tbl_mgr::Client::get_instance();
 

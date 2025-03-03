@@ -3,7 +3,7 @@
 #include <boost/program_options.hpp>
 #include <unistd.h>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <xid_mgr/xid_mgr_server.hh>
 
 using namespace springtail;
@@ -47,10 +47,10 @@ main(int argc, char* argv[])
         pidfile = "xid_mgr.pid";
     }
 
-    std::vector<ServiceRunner *> runners = {
-        new TermSignalRunner(handle_sigint),
-        new xid_mgr::XidMgrRunner(vm.count("xid") && vm.count("dbid"), db_id, starting_xid)
-    };
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<TermSignalRunner>(handle_sigint));
+    runners->emplace_back(std::make_unique<xid_mgr::XidMgrRunner>(vm.count("xid") && vm.count("dbid"), db_id, starting_xid));
 
     springtail_init(runners, false, "xid_mgr", pidfile);
 

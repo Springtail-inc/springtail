@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <common/common_init.hh>
+#include <common/init.hh>
 #include <pg_repl/libpq_connection.hh>
 #include <proxy/database.hh>
 #include <proxy/user_mgr.hh>
