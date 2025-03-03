@@ -50,12 +50,13 @@ int main(int argc, char *argv[])
     std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
     runners.emplace();
     runners->emplace_back(std::make_unique<pg_log_mgr::PgLogCoordinatorRunner>());
+    runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
+    runners->emplace_back(std::make_unique<GrpcClientRunner<sys_tbl_mgr::Client>>());
 
     springtail_init_daemon(handle_sigint, runners, "pg_log_mgr", pidfile);
 
     pg_log_mgr::PgLogCoordinator::get_instance()->wait_shutdown();
 
-    sys_tbl_mgr::Client::shutdown();
     XidMgrClient::shutdown();
 
     springtail_shutdown();

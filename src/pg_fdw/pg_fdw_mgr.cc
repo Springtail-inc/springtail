@@ -120,7 +120,11 @@ namespace springtail::pg_fdw {
         }
 
         if (init) {
-            springtail_init(std::nullopt, false, PG_FDW_LOG_FILE_PREFIX, LOG_ALL);
+            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+            runners.emplace();
+            runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
+            runners->emplace_back(std::make_unique<GrpcClientRunner<sys_tbl_mgr::Client>>());
+            springtail_init(runners, false, PG_FDW_LOG_FILE_PREFIX, LOG_ALL);
         }
 
         SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing PgFdwMgr");

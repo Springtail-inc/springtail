@@ -17,7 +17,10 @@ main(int argc, char **argv)
     uint64_t xid = 0;
     uint64_t db_id = 1;
 
-    springtail_init();
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
+    springtail_init(runners);
 
     // parse the arguments
     namespace po = boost::program_options;
@@ -72,7 +75,6 @@ main(int argc, char **argv)
         xid_mgr->commit_xid(db_id, xid, schema_change);
     }
 
-    XidMgrClient::shutdown();
     springtail_shutdown();
     return 0;
 }

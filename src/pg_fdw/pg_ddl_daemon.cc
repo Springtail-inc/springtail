@@ -82,6 +82,7 @@ int main(int argc, char *argv[])
     std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
     runners.emplace();
     runners->emplace_back(std::make_unique<pg_fdw::PgDDLMgrRunner>(username, password, socket_hostname));
+    runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
 
     springtail::springtail_init_daemon(handle_sigint, runners, "pg_ddl_mgr", pidfile, LOG_ALL);
 
