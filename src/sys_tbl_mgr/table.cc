@@ -9,21 +9,26 @@
 
 namespace springtail {
 
+namespace table_helpers {
+
+std::filesystem::path
+get_table_dir(const std::filesystem::path &base,
+              uint64_t db_id,
+              uint64_t table_id,
+              uint64_t snapshot_xid)
+{
+    std::string db_dir = std::to_string(db_id);
+    std::string table_dir = fmt::format("{}-{}", table_id, snapshot_xid);
+    return base / db_dir / table_dir;
+}
+
+} // namespace table_helpers
+
     namespace {
         const static std::vector<SchemaColumn> ROOTS_SCHEMA = {
             { "root", 1, SchemaType::UINT64, 20, true },
             { "index_id", 2, SchemaType::UINT64, 20, false },
         };
-
-        std::filesystem::path _get_table_dir(const std::filesystem::path &base,
-                                             uint64_t db_id,
-                                             uint64_t table_id,
-                                             uint64_t snapshot_xid)
-        {
-            std::string db_dir = std::to_string(db_id);
-            std::string table_dir = fmt::format("{}-{}", table_id, snapshot_xid);
-            return base / db_dir / table_dir;
-        }
 
         std::vector<std::string> 
         _get_column_names(ExtentSchemaPtr schema, const std::vector<uint32_t>& col_position)
@@ -72,7 +77,7 @@ namespace springtail {
           _stats(metadata.stats)
     {
         // construct the table's data directory
-        _table_dir = _get_table_dir(table_base, db_id, table_id, metadata.snapshot_xid);
+        _table_dir = table_helpers::get_table_dir(table_base, db_id, table_id, metadata.snapshot_xid);
 
         // check if the table directory exists; if not, table is considered vacant/empty
         if (!std::filesystem::exists(_table_dir)) {
@@ -440,7 +445,7 @@ namespace springtail {
       _for_gc(for_gc)
     {
         // construct the table's data directory
-        _table_dir = _get_table_dir(table_base, db_id, table_id, metadata.snapshot_xid);
+        _table_dir = table_helpers::get_table_dir(table_base, db_id, table_id, metadata.snapshot_xid);
         _data_file = _table_dir / constant::DATA_FILE;
 
         // make sure that the table directory exists

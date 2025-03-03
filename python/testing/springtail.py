@@ -16,9 +16,11 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Add the /shared directory to the Python path
 sys.path.append(os.path.join(project_root, 'shared'))
+sys.path.append(os.path.join(project_root, 'grpc'))
 
 # Now import the Properties class
 from properties import Properties
+from xid_mgr import XidMgrClient
 
 from common import (
     connect_db,
@@ -248,35 +250,38 @@ def start_replication(props : Properties, build_dir : str) -> None:
     conn.close()
 
 
-def fdw_import(props : Properties, build_dir : str, config_file : str) -> None:
+def start_fdw_daemons(props : Properties,
+                      build_dir : str,
+                      config_file : str = None) -> None:
     """Import the foreign data wrapper schemas."""
     fdw_config = props.get_fdw_config()
     db_configs = props.get_db_configs()
     mount_path = props.get_mount_path()
 
-    print(f"Copying config file to mount path: {os.path.join(mount_path, 'system.json')}")
-    shutil.copy(config_file, os.path.join(mount_path, 'system.json'))
-    config_file = os.path.join(mount_path, 'system.json')
+    if config_file is not None:
+        print(f"Copying config file to mount path: {os.path.join(mount_path, 'system.json')}")
+        shutil.copy(config_file, os.path.join(mount_path, 'system.json'))
+        config_file = os.path.join(mount_path, 'system.json')
 
-    # Connect to the foreign data wrapper instance
-    conn = connect_fdw_instance(props)
-
-    rows = execute_sql_select(conn, "SHOW \"springtail_fdw.config_file_path\";")
-    if len(rows) == 0 or rows[0][0] != config_file:
-        # Set the config file option 'springtail_fdw.config_file_path' to the config file path and reload
-        execute_sql(conn, "ALTER SYSTEM SET \"springtail_fdw.config_file_path\" TO %s;", config_file)
-        execute_sql(conn, "SELECT pg_reload_conf();")
-
-        conn.close()
-
-        # Re-connect to the foreign data wrapper instance, not sure why but
-        # the reload doesn't seem to take effect immediately
+        # Connect to the foreign data wrapper instance
         conn = connect_fdw_instance(props)
 
-        # verify the config file path
         rows = execute_sql_select(conn, "SHOW \"springtail_fdw.config_file_path\";")
         if len(rows) == 0 or rows[0][0] != config_file:
-            raise Exception("Failed to set the config file path")
+            # Set the config file option 'springtail_fdw.config_file_path' to the config file path and reload
+            execute_sql(conn, "ALTER SYSTEM SET \"springtail_fdw.config_file_path\" TO %s;", config_file)
+            execute_sql(conn, "SELECT pg_reload_conf();")
+
+            conn.close()
+
+            # Re-connect to the foreign data wrapper instance, not sure why but
+            # the reload doesn't seem to take effect immediately
+            conn = connect_fdw_instance(props)
+
+            # verify the config file path
+            rows = execute_sql_select(conn, "SHOW \"springtail_fdw.config_file_path\";")
+            if len(rows) == 0 or rows[0][0] != config_file:
+                raise Exception("Failed to set the config file path")
 
     # startup pg_ddl_daemon; schema import done by pg_ddl_daemon
     print("Starting pg_ddl_daemon...")
@@ -432,17 +437,70 @@ def gen_dump_tarball(props : Properties, build_dir : str) -> str:
         return os.path.join(dumps_dir, tarfile)
 
 
+def current_xid(props: Properties, db_id: int) -> int:
+    config = props.get_system_config()
+    rpc_config = config['xid_mgr']['rpc_config']
+
+    hostname = props.get_hostname('ingestion')
+    port = rpc_config['server_port']
+    if not rpc_config['ssl']:
+        client = XidMgrClient(hostname, port)
+    else:
+        client = XidMgrClient(hostname, port, rpc_config['client_trusted'],
+                              rpc_config['client_key'], rpc_config['client_cert'])
+    return client.get_committed_xid(db_id)
+
+
+def restart(props: Properties,
+            build_dir: str,
+            start_xid: int = None) -> None:
+    # Stop the daemons
+    print("\nStopping daemons...")
+    stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
+
+    # start daemons with XID if specified
+    print("\nStarting daemons...")
+    if start_xid is not None:
+        # Modify xid_mgr_daemon args to include starting XID
+        modified_daemons = []
+        for daemon in CORE_DAEMONS:
+            if daemon[0] == 'xid_mgr_daemon':
+                modified_daemons.append((daemon[0], daemon[1], f'-x,{start_xid}'))
+            else:
+                modified_daemons.append(daemon)
+        start_daemons(build_dir, modified_daemons)
+    else:
+        start_daemons(build_dir, CORE_DAEMONS)
+
+    # wait for running state
+    print("\nWaiting for running state...")
+    wait_for_running(props)
+
+    # start the fdw daemons (e.g., ddl manager to import schemas)
+    print("\nStarting FDW daemons...")
+    start_fdw_daemons(props, build_dir)
+    fixup_log_perms(props)
+
+    print("\nSpringtail system restarted successfully.")
+
+
 def start(config_file: str,
           build_dir: str,
           sql_file: str = None,
-          do_cleanup: bool = True) -> None:
+          do_cleanup: bool = True,
+          do_init: bool = True,
+          start_xid: int = None) -> None:
     """Main function to start the Springtail system."""
+    # must do init if we are performing cleanup
+    if do_cleanup:
+        do_init = True
+
     # get absolute path for config_file
     config_file = os.path.abspath(config_file)
 
     # Load the system properties from the system.json file
-    # also does a load redis from the system file
-    props = Properties(config_file, True)
+    # also does a load redis from the system file if do_cleanup is True
+    props = Properties(config_file, do_init)
 
     # Print the system properties
     print_sys_props(props, config_file)
@@ -468,26 +526,37 @@ def start(config_file: str,
         print(f"\nExecuting startup SQL file: {sql_file}")
         execute_startup_sql(props, sql_file)
 
-    # install fdw
-    print("\nInstalling foreign data wrapper...")
-    install_fdw(build_dir)
+    if do_init:
+        # install fdw
+        print("\nInstalling foreign data wrapper...")
+        install_fdw(build_dir)
 
-    # start replication on db instance
-    print("\nStarting replication on database instance...")
-    check_log_writable(props)
-    start_replication(props, build_dir)
+        # start replication on db instance
+        print("\nStarting replication on database instance...")
+        check_log_writable(props)
+        start_replication(props, build_dir)
 
-    # start daemons
+    # start daemons with XID if specified
     print("\nStarting daemons...")
-    start_daemons(build_dir, CORE_DAEMONS)
+    if start_xid is not None:
+        # Modify xid_mgr_daemon args to include starting XID
+        modified_daemons = []
+        for daemon in CORE_DAEMONS:
+            if daemon[0] == 'xid_mgr_daemon':
+                modified_daemons.append((daemon[0], daemon[1], f'-x,{start_xid}'))
+            else:
+                modified_daemons.append(daemon)
+        start_daemons(build_dir, modified_daemons)
+    else:
+        start_daemons(build_dir, CORE_DAEMONS)
 
     # wait for running state
     print("\nWaiting for running state...")
     wait_for_running(props)
 
-    # import the fdw schemas
-    print("\nImporting foreign data wrapper schemas...")
-    fdw_import(props, build_dir, config_file)
+    # start the fdw daemons (e.g., ddl manager to import schemas)
+    print("\nStarting FDW daemons...")
+    start_fdw_daemons(props, build_dir, config_file)
     fixup_log_perms(props)
 
     print("\nSpringtail system started successfully.")
@@ -645,6 +714,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('-f', '--config-file', type=str, required=True, help='Path to the configuration file')
     parser.add_argument('-b', '--build-dir', type=str, required=True, help='Path to the build directory')
     parser.add_argument('-s', '--sql-file', type=str, required=False, help='Path to a sql file to execute prior to startup')
+    parser.add_argument('-x', '--start-xid', type=int, required=False, help='Start the system at a specific XID')
+    parser.add_argument('--no-cleanup', action='store_true', help="Start without reinitializing the system")
     parser.add_argument('--start', action=argparse.BooleanOptionalAction, help="Start the Springtail system")
     parser.add_argument('--status', action=argparse.BooleanOptionalAction, help="Check the status of the Springtail daemons")
     parser.add_argument('--kill', action=argparse.BooleanOptionalAction, help="Kill the Springtail daemons")
@@ -684,7 +755,7 @@ if __name__ == "__main__":
             sys.exit(0)
 
         if args.kill:
-            stop(args.config_file)
+            stop(args.config_file, do_cleanup=not args.no_cleanup)
             sys.exit(0)
 
         if args.check:
@@ -705,7 +776,8 @@ if __name__ == "__main__":
             sys.exit(0)
 
         if args.start:
-            start(args.config_file, args.build_dir, args.sql_file)
+            start(args.config_file, args.build_dir, args.sql_file, 
+                  do_cleanup=not args.no_cleanup, do_init=not args.no_cleanup, start_xid=args.start_xid)
 
     except Exception as e:
         print(f"Caught error: {e}")

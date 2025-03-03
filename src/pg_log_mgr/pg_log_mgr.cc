@@ -18,28 +18,30 @@
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <pg_log_mgr/pg_log_coordinator.hh>
+#include <pg_log_mgr/pg_log_recovery.hh>
 #include <pg_log_mgr/sync_tracker.hh>
 
 namespace springtail::pg_log_mgr {
 
     PgLogMgr::PgLogMgr(uint64_t db_id,
-        const std::filesystem::path &repl_log_path,
-        const std::filesystem::path &xact_log_path,
-        const std::string &host, const std::string &db_name,
-        const std::string &user_name, const std::string &password,
-        const std::string &pub_name, const std::string &slot_name,
-        int port,
-        std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue)
-            : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
-            _host(host), _db_name(db_name), _user_name(user_name),
-            _password(password), _pub_name(pub_name), _slot_name(slot_name), _port(port),
-            _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
-            _repl_log_path(repl_log_path),
-            _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
-            _committer_queue(committer_queue),
-            _pg_log_reader(db_id, _xact_queue, _committer_queue), _xact_log_path(xact_log_path),
-            _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
+                       const std::filesystem::path &repl_log_path,
+                       const std::filesystem::path &xact_log_path,
+                       const std::string &host, const std::string &db_name,
+                       const std::string &user_name, const std::string &password,
+                       const std::string &pub_name, const std::string &slot_name,
+                       int port,
+                       std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue)
+    : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
+      _host(host), _db_name(db_name), _user_name(user_name),
+      _password(password), _pub_name(pub_name), _slot_name(slot_name), _port(port),
+      _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
+      _repl_log_path(repl_log_path),
+      _committer_queue(committer_queue),
+      _xact_log_path(xact_log_path),
+      _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
     {
+        _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, xact_log_path, _committer_queue);
+
         // construct the callback for watching for database state changes
         _cache_watcher_db_states = std::make_shared<RedisCache::RedisChangeWatcher>(
             [this](const std::string &path, const nlohmann::json &new_value) -> void {
@@ -113,100 +115,53 @@ namespace springtail::pg_log_mgr {
         // fetch latest xid from xid mgr
         XidMgrClient *xid_mgr = XidMgrClient::get_instance();
         uint64_t next_xid = xid_mgr->get_committed_xid(_db_id, 0) + 1;
-        _pg_log_reader.set_next_xid(next_xid);
+        _pg_log_reader->set_next_xid(next_xid);
 
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Last committed XID: {}", next_xid-1);
 
+        // XXX currently we perform full recovery any time that the state is not INITIALIZE, but if
+        //     we had a clean shutdown mechanism, we could start up without any recovery
         uint64_t lsn = INVALID_LSN;
         bool do_init = (state == redis::db_state_change::REDIS_STATE_INITIALIZE);
-        if (state == redis::db_state_change::REDIS_STATE_INITIALIZE) {
+        PgLogRecovery recovery(_db_id, _repl_log_path, _xact_log_path, _pg_log_reader);
+        if (do_init) {
             _startup_init();
         } else {
-            lsn = _startup_running();
+            lsn = recovery.repair_logs();
+            _startup_running();
         }
 
-        // initiate table copy thread; do this before we start streaming
+        // initiate table copy thread; do this before we start replaying the log since it's needed
+        // for table re-syncs that might have to be run
         _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
 
-        // start streaming
+        // start the log reader thread since it is also used to process recovery messages
+        _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
+
+        // note: we wait to perform these actions until the log reader has been started
+        if (!do_init) {
+            // perform the any required log recovery here
+            recovery.replay_logs();
+        }
+
+        // system is ready to start streaming
         _start_streaming(lsn, do_init);
     }
 
-    uint64_t
+    void
     PgLogMgr::_startup_running()
     {
-        uint64_t lsn = INVALID_LSN;
+        SPDLOG_INFO("Starting up from the RUNNING state.");
 
-        // create directories if they don't exist
-        std::filesystem::create_directories(_repl_log_path);
-        std::filesystem::create_directories(_xact_log_path);
-
-        // scan latest replication log and extract ending LSN
-        // if we find an empty log then remove file and go to previous log
-        // if last message is truncated (not complete); truncate log file ignoring that message
-        std::filesystem::path latest_log = fs::find_latest_modified_file(_repl_log_path, LOG_PREFIX_REPL, LOG_SUFFIX);
-        if (!latest_log.empty()) {
-            lsn = PgMsgStreamReader::scan_log(latest_log, true);
-        }
-
-        //// Replay xact logs
-
-        // scan xact logs and transfer in progress xacts to log reader
-        // fetch xaction list from xact reader, and add them to Redis
-        // these are transactions with springtail XIDs that are > than last committed XID
-        PgTransactionPtr last_xact = nullptr;
-        uint64_t current_xid = _pg_log_reader.get_current_xid();
-        PgXactLogReader xact_reader(_xact_log_path, LOG_PREFIX_XACT, LOG_SUFFIX, current_xid);
-        xact_reader.begin();
-        while (true) {
-            // go through log and fetch batches of transactions to send to redis
-            std::vector<PgTransactionPtr> committed_xacts;
-            int num_xacts = xact_reader.next(MAX_REDIS_BATCH_SIZE, committed_xacts);
-            if (num_xacts == 0) {
-                break;
-            }
-
-            for (auto &xact: committed_xacts) {
-                CHECK(xact->springtail_xid >= current_xid);
-                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replaying xact to redis: xid={}, type={}", xact->springtail_xid, xact->type);
-            }
-
-            last_xact = committed_xacts.back();
-            committed_xacts.clear();
-        }
-
-        // update next xid if we find an xid higher than committed xid in the log
-        uint64_t last_allocated_xid = xact_reader.get_max_sp_xid();
-        if (last_allocated_xid > current_xid) {
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Updating next xid: {} -> {}", current_xid, last_allocated_xid + 1);
-            _pg_log_reader.set_next_xid(last_allocated_xid + 1);
-        }
-
-        // move contents of stream map into pg log reader, invalidates stream map
-        std::map<uint32_t, springtail::PgTransactionPtr> stream_map = xact_reader.get_stream_map();
-        _pg_log_reader.set_xact_map(stream_map);
-
-        // if xact log is behind pg log then we need to catchup before starting to stream
-        // find last xact from xact_list, and start from there (file + offset)
-        // inserts into xact queue
-        if (last_xact != nullptr) {
-            _pg_log_reader.process_log(last_xact->commit_path, last_xact->commit_offset, -1);
-            std::filesystem::path next_log = fs::get_next_file(last_xact->commit_path, LOG_PREFIX_REPL, LOG_SUFFIX);
-
-            // iterate and process xacts from next log file
-            while (!next_log.empty() && std::filesystem::exists(next_log)) {
-                _pg_log_reader.process_log(next_log, 0, -1);
-                next_log = fs::get_next_file(next_log, LOG_PREFIX_REPL, LOG_SUFFIX);
-            }
-        }
+        // clear out any incomplete table syncs
+        _redis_sync_queue.abort(REDIS_WORKER_ID);
+        _redis_sync_queue.clear();
 
         // set state to running
         Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_RUNNING);
 
         // set internal state to running
         _internal_state.set(STATE_RUNNING);
-
-        return lsn;
     }
 
     void
@@ -264,8 +219,7 @@ namespace springtail::pg_log_mgr {
         // if in startup_sync state then switch to syncing
         if (_internal_state.is(STATE_STARTUP_SYNC)) {
             // Create the namespaces before starting the copy thread
-            auto xid = _pg_log_reader.get_next_xid();
-
+            auto xid = _pg_log_reader->get_next_xid();
             auto token_init = logging::set_context_variables({{"db_id", std::to_string(_db_id)}, {"xid", std::to_string(xid)}});
 
             PgCopyTable::create_namespaces(_db_id, xid);
@@ -328,7 +282,7 @@ namespace springtail::pg_log_mgr {
 
         // copy tables
         std::vector<PgCopyResultPtr> res;
-        auto xid = _pg_log_reader.get_next_xid();
+        auto xid = _pg_log_reader->get_next_xid();
 
         auto token = logging::set_context_variables({{"xid", std::to_string(xid)}});
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Copying tables; target xid={}", xid);
@@ -439,8 +393,6 @@ namespace springtail::pg_log_mgr {
 
         // create the worker threads
         _writer_thread = std::thread(&PgLogMgr::_log_writer_thread, this);
-        _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
-        _xact_thread = std::thread(&PgLogMgr::_xact_handler_thread, this);
     }
 
     void
@@ -524,7 +476,6 @@ namespace springtail::pg_log_mgr {
 
         // shutdown queues queue
         _logger_queue.shutdown();
-        _xact_queue->shutdown();
 
         // shutdown the pg connection
         _pg_conn.close();
@@ -567,8 +518,8 @@ namespace springtail::pg_log_mgr {
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Processing log entry: path={}, start_offset={}, num_messages={}",
                                 log_entry->path, log_entry->start_offset, log_entry->num_messages);
 
-            _pg_log_reader.process_log(log_entry->path, log_entry->start_offset,
-                                       log_entry->num_messages);
+            _pg_log_reader->process_log(log_entry->path, log_entry->start_offset,
+                                        log_entry->num_messages);
         }
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Exiting log reader thread");
     }
@@ -576,92 +527,10 @@ namespace springtail::pg_log_mgr {
     PgLogWriterPtr
     PgLogMgr::_create_repl_logger()
     {
-        std::filesystem::path file = fs::find_latest_modified_file(_repl_log_path, LOG_PREFIX_REPL, LOG_SUFFIX);
-        if (file.empty()) {
-            file = _repl_log_path / fmt::format("{}{:04d}{}", LOG_PREFIX_REPL, 0, LOG_SUFFIX);
-        } else {
-            file = fs::get_next_file(file, LOG_PREFIX_REPL, LOG_SUFFIX);
-        }
+        std::filesystem::path file = fs::create_log_file(_repl_log_path, LOG_PREFIX_REPL, LOG_SUFFIX);
 
         return std::make_shared<PgLogWriter>(file,
             [this](LSN_t lsn) { _pg_conn.set_last_flushed_LSN(lsn); });
-    }
-
-    PgXactLogWriterPtr
-    PgLogMgr::_create_xact_logger()
-    {
-        if (_xact_logger != nullptr) {
-            _xact_logger->close();
-        }
-
-        std::filesystem::path file = fs::find_latest_modified_file(_xact_log_path, LOG_PREFIX_XACT, LOG_SUFFIX);
-        if (file.empty()) {
-            file = _xact_log_path / fmt::format("{}{:04d}{}", LOG_PREFIX_XACT, 0, LOG_SUFFIX);
-        } else {
-            file = fs::get_next_file(file, LOG_PREFIX_XACT, LOG_SUFFIX);
-        }
-
-        _xact_logger = std::make_shared<PgXactLogWriter>(file);
-
-        return _xact_logger;
-    }
-
-    /** Thread for handling transactions from log reader */
-    void
-    PgLogMgr::_xact_handler_thread()
-    {
-        _create_xact_logger(); ///< logger to write out xid log
-
-        auto coordinator = Coordinator::get_instance();
-        std::string coordinator_id = fmt::format(XACT_WORKER_ID, _db_id);
-
-        coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
-
-        while (!_shutdown) {
-
-            // mark alive with coordinator
-            coordinator->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
-
-            PgTransactionPtr xact = _xact_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
-            if (xact == nullptr) {
-                // timeout
-                continue;
-            }
-
-            // process the transaction
-            _process_xact(xact);
-
-            // check to see if we should rollover log
-            if (_xact_logger->size() > LOG_ROLLOVER_SIZE_BYTES) {
-                _create_xact_logger();
-            }
-        }
-
-        // shutdown, close xact logger
-        _xact_logger->close();
-    }
-
-    void
-    PgLogMgr::_process_xact(const PgTransactionPtr xact)
-    {
-        // if stream start, just log it
-        if (xact->type == PgTransaction::TYPE_STREAM_START ||
-            xact->type == PgTransaction::TYPE_STREAM_ABORT) {
-            _xact_logger->log_stream_msg(xact);
-            return;
-        }
-
-        assert (xact->type == PgTransaction::TYPE_COMMIT);
-
-        // check if we've already seen this xact, e.g., during replay
-        if (xact->xact_lsn <= _last_pushed_lsn) {
-            SPDLOG_WARN("Skipping xact (already seen): xact_lsn={}, last_pushed_lsn={}",
-                         xact->xact_lsn, _last_pushed_lsn);
-            return;
-        }
-
-        // log the xact
-        _xact_logger->log_commit(xact);
     }
 
 } // namespace springtail::pg_log_mgr

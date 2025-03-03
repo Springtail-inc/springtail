@@ -11,233 +11,129 @@
 
 #include <pg_repl/pg_repl_msg.hh>
 
+#include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_xact_log_reader.hh>
 #include <pg_log_mgr/pg_xact_log_writer.hh>
 
 namespace springtail::pg_log_mgr {
 
-    int
-    PgXactLogReader::next(int max_records, std::vector<PgTransactionPtr> &committed_xacts)
-    {
-        int records = 0;
+// note: these are hard-coded from the postgres type OIDs to avoid having to include all of the
+//       postgres headers here -- also duplicated in system_tables.cc
+constexpr int32_t INT8OID = 20;
+constexpr int32_t INT4OID = 23;
 
-        if (_current_file.empty()) {
-            return records;
+PgXactLogReader::PgXactLogReader(const std::filesystem::path &base_dir)
+        : _base_dir(base_dir)
+{
+    // construct the schema of the log file
+    std::vector<SchemaColumn> columns = {
+        { "pgxid", 1, SchemaType::UINT32, INT4OID, false },
+        { "xid", 2, SchemaType::UINT64, INT8OID, false }
+    };
+    _schema = std::make_shared<ExtentSchema>(columns);
+    _pg_xid_f = _schema->get_field("pgxid");
+    _xid_f = _schema->get_field("xid");
+}
+
+bool
+PgXactLogReader::next()
+{
+    // Move to next row
+    ++_current_row;
+
+    // If we've reached the end of the current extent
+    if (_current_row == _current_extent->end()) {
+        // Try to load next extent in current file
+        if (_load_next_extent()) {
+            return true;
         }
-
-        // read in records until max_records or end of file
-        while (records < max_records) {
-            // read header
-            // 4B message length + 3B magic + 1B Type
-            char header[8];
-            _stream.read(header, 8);
-            if (_stream.eof()) {
-                _stream.close();
-                // get next file
-                _current_file = fs::get_next_file(_current_file, _file_prefix, _file_suffix);
-                if (_current_file.empty() || !std::filesystem::exists(_current_file)) {
-                    break;
-                }
-                _open(_current_file);
-                continue;
-            }
-
-            // read log header
-            uint32_t msg_len = *reinterpret_cast<uint32_t *>(header);
-            uint8_t magic[3] = {*reinterpret_cast<uint8_t *>(&header[4]),
-                                *reinterpret_cast<uint8_t *>(&header[5]),
-                                *reinterpret_cast<uint8_t *>(&header[6])};
-            uint8_t type = header[7];
-
-            // verify magic
-            CHECK(magic[0] == PgXactLogWriter::PG_XLOG_MAGIC[0] &&
-                  magic[1] == PgXactLogWriter::PG_XLOG_MAGIC[1] &&
-                  magic[2] == PgXactLogWriter::PG_XLOG_MAGIC[2]);
-
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Scan xact log: hdr msg_len={}, type={}\n", msg_len, (int)type);
-
-            msg_len -= 8; // subtract header length
-
-            // handle log entry type
-            switch (type) {
-                case PgTransaction::TYPE_STREAM_START:
-                case PgTransaction::TYPE_STREAM_ABORT:
-                    _read_stream_msg(msg_len, type);
-                    break;
-                case PgTransaction::TYPE_COMMIT: {
-                    PgTransactionPtr xact = _read_commit(msg_len, _min_xid);
-                    if (xact != nullptr) {
-                        committed_xacts.push_back(xact);
-                        records++;
-                    }
-                    break;
-                }
-                default:
-                    SPDLOG_ERROR("Unknown message type: {}", type);
-                    throw Error("Unknown message type");
-            }
-            assert(!_stream.eof());
-        }
-        return records;
-    }
-
-    void
-    PgXactLogReader::begin()
-    {
-        // find first file
-        _current_file = fs::find_earliest_modified_file(_base_dir, _file_prefix, _file_suffix);
-        if (_current_file.empty()) {
-            return;
-        }
-
-        _open(_current_file);
-    }
-
-    void
-    PgXactLogReader::begin(const std::filesystem::path &file)
-    {
-        // iterate through all files, finding next file and scanning each
-        if (!std::filesystem::exists(file)) {
-            return;
-        }
-        _current_file = file;
-
-        _open(_current_file);
-    }
-
-    void
-    PgXactLogReader::_open(const std::filesystem::path &path)
-    {
-        _stream.open(path, std::ios::in);
-        if (!_stream.is_open()) {
-            SPDLOG_ERROR("Error opening file: path={}, errno={}", path.c_str(), errno);
-            throw Error("Error opening file for PgLogFile");
+            
+        // If no more extents, try next file
+        if (!_open_next_file()) {
+            return false;
         }
     }
 
-    PgTransactionPtr
-    PgXactLogReader::_read_commit(uint32_t msg_len, uint64_t committed_xid)
-    {
-        // 4B postgres XID + 8B springtail XID +
-        // 8B lsn + 8B begin offset + 8B commit offset +
-        // 4B path len + path string (starting offset path) +
-        // 4B path len + path string (ending offset path)
-        // 4B oid count + oid list (8B each oid)
-        // 4B xid count + xid list (4B each xid)
+    return true;
+}
 
-        // read in entire record
-        std::vector<char> buffer(msg_len);
-        _stream.read(buffer.data(), msg_len);
-
-        // parse the buffer
-        int offset = 0;
-        uint32_t xid = *reinterpret_cast<uint32_t *>(&buffer[offset]);
-        offset += 4;
-
-        uint64_t springtail_xid = *reinterpret_cast<uint64_t *>(&buffer[offset]);
-        offset += 8;
-
-        // remove from stream map if we find a commit that matches
-        _stream_map.erase(xid);
-
-        // if xid is less than or equal to committed_xid, then skip
-        if (springtail_xid <= committed_xid) {
-            // it is safe to return since we read in entire record
-            return nullptr;
-        }
-
-        // update max springtail xid
-        if (_max_sp_xid < springtail_xid) {
-            _max_sp_xid = springtail_xid;
-        }
-
-        PgTransactionPtr xact= std::make_shared<PgTransaction>();
-
-        xact->type = PgTransaction::TYPE_COMMIT;
-        xact->xid = xid;
-        xact->springtail_xid = springtail_xid;
-
-        xact->xact_lsn = *reinterpret_cast<uint64_t *>(&buffer[offset]);
-        offset += 8;
-
-        xact->begin_offset = *reinterpret_cast<uint64_t *>(&buffer[offset]);
-        offset += 8;
-
-        xact->commit_offset = *reinterpret_cast<uint64_t *>(&buffer[offset]);
-        offset += 8;
-
-        uint32_t begin_path_len = *reinterpret_cast<uint32_t *>(&buffer[offset]);
-        offset += 4;
-
-        uint32_t commit_path_len = *reinterpret_cast<uint32_t *>(&buffer[offset]);
-        offset += 4;
-
-        uint32_t oid_count = *reinterpret_cast<uint32_t *>(&buffer[offset]);
-        offset += 4;
-
-        uint32_t xid_count = *reinterpret_cast<uint32_t *>(&buffer[offset]);
-        offset += 4;
-
-        // read in the path strings
-        xact->begin_path = std::string(&buffer[offset], begin_path_len);
-        offset += begin_path_len;
-
-        xact->commit_path = std::string(&buffer[offset], commit_path_len);
-        offset += commit_path_len;
-
-        // read in the oid list
-        for (int i = 0; i < oid_count; i++) {
-            uint64_t oid = *reinterpret_cast<uint64_t *>(&buffer[offset]);
-            xact->oids.insert(oid);
-            offset += 8;
-        }
-
-        // read in the aborted xid list
-        for (int i = 0; i < xid_count; i++) {
-            uint32_t xid = *reinterpret_cast<uint32_t *>(&buffer[offset]);
-            xact->aborted_xids.insert(xid);
-            offset += 4;
-        }
-
-        CHECK_EQ(offset, msg_len);
-
-        return xact;
+bool
+PgXactLogReader::begin()
+{
+    // Find first file
+    _current_file = fs::find_earliest_modified_file(_base_dir, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX);
+    if (!_current_file) {
+        return false;
     }
 
-    void
-    PgXactLogReader::_read_stream_msg(uint32_t msg_len, uint8_t type)
-    {
-        // 4B postgres XID + 8B LSN + 8B begin offset + 4B path len + path string
-
-        std::vector<char> buffer(msg_len);
-        _stream.read(buffer.data(), msg_len);
-
-        PgTransactionPtr xact= std::make_shared<PgTransaction>();
-
-        // parse the buffer
-        int offset = 0;
-        xact->xid = *reinterpret_cast<uint32_t *>(&buffer[offset]);
-        offset += 4;
-
-        xact->xact_lsn = *reinterpret_cast<uint64_t *>(&buffer[offset]);
-        offset += 8;
-
-        xact->begin_offset = *reinterpret_cast<uint64_t *>(&buffer[offset]);
-        offset += 8;
-
-        uint32_t path_len = *reinterpret_cast<uint32_t *>(&buffer[offset]);
-        offset += 4;
-
-        xact->begin_path = std::string(&buffer[offset], path_len);
-
-        xact->type = type;
-
-        if (type == PgTransaction::TYPE_STREAM_START) {
-            _stream_map.insert({xact->xid, xact});
-        } else if (type == PgTransaction::TYPE_STREAM_ABORT) {
-            _stream_map.erase(xact->xid);
-        }
-
-        return;
+    // Open the file and load first extent
+    if (!_open_next_file()) {
+        return false;
     }
+
+    return true;
+}
+
+bool
+PgXactLogReader::_load_next_extent()
+{
+    // Read the extent data from the file at the current offset
+    auto response = _current_handle->read(_current_offset);
+    if (response->data.empty()) {
+        return false;
+    }
+        
+    // Create the extent from the response data
+    _current_extent = std::make_shared<Extent>(response->data);
+
+    // Update the offset to point after this extent for next read
+    _current_offset = response->next_offset;
+
+    // update the row iterator
+    _current_row = _current_extent->begin();
+    return true;
+}
+
+bool 
+PgXactLogReader::_open_next_file()
+{
+    if (!_current_file) {
+        return false;
+    }
+
+    // If this isn't our first file, get the next one
+    if (_current_extent) {
+        _current_file = fs::get_next_log_file(*_current_file, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX);
+        if (!_current_file) {
+            _current_extent = nullptr;
+            _current_handle = nullptr;
+            return false;
+        }
+    }
+
+    // Open the file and read the first extent
+    _current_handle = IOMgr::get_instance()->open(*_current_file, IOMgr::IO_MODE::READ, true);
+    _current_offset = 0;
+        
+    // Load the first extent
+    if (!_load_next_extent()) {
+        return false;
+    }
+        
+    return true;
+}
+
+// Field accessors
+uint32_t 
+PgXactLogReader::get_pg_xid() const 
+{
+    return _pg_xid_f->get_uint32(*_current_row);
+}
+
+uint64_t 
+PgXactLogReader::get_xid() const 
+{
+    return _xid_f->get_uint64(*_current_row);
+}
+
 } // namespace springtail::pg_log_mgr
