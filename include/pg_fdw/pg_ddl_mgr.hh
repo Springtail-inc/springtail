@@ -222,9 +222,9 @@ namespace springtail::pg_fdw {
 
     class PgDDLMgrRunner : public ServiceRunner {
     public:
-        explicit PgDDLMgrRunner(const std::string &username,
-                                const std::string &password,
-                                const std::optional<std::string> &hostname) :
+        PgDDLMgrRunner(const std::string &username,
+                       const std::string &password,
+                       const std::optional<std::string> &hostname) :
             ServiceRunner("PgDDLMgr"),
             _username(username),
             _password(password),

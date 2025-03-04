@@ -74,7 +74,7 @@ private:
 
 class XidMgrRunner : public ServiceRunner {
 public:
-    explicit XidMgrRunner(bool commit_starting_xid, uint64_t db_id, uint64_t starting_xid) :
+    XidMgrRunner(bool commit_starting_xid, uint64_t db_id, uint64_t starting_xid) :
         ServiceRunner("XidMgr"),
         _commit_starting_xid(commit_starting_xid),
         _db_id(db_id), _starting_xid(starting_xid) {}

@@ -71,7 +71,7 @@ private:
 // Properties cache inint
 class PropertiesCacheRunner : public ServiceRunner {
 public:
-    explicit PropertiesCacheRunner() : ServiceRunner("PropertiesCache") {}
+    PropertiesCacheRunner() : ServiceRunner("PropertiesCache") {}
 
     bool start() override
     {
@@ -83,7 +83,7 @@ public:
 // Logging init
 class LoggingRunner : public ServiceRunner {
 public:
-    explicit LoggingRunner(const std::optional<std::string> &log_filename,
+    LoggingRunner(const std::optional<std::string> &log_filename,
                   const std::optional<std::string> &daemon_pid,
                   const std::optional<uint32_t> &logging_mask)
         : ServiceRunner("Logging"),
@@ -105,7 +105,7 @@ private:
 
 class DefaultLoggingRunner : public ServiceRunner {
 public:
-    explicit DefaultLoggingRunner() : ServiceRunner("Default Logging") {}
+    DefaultLoggingRunner() : ServiceRunner("Default Logging") {}
 
     void stop() override { shutdown_logging(); }
 
@@ -161,7 +161,7 @@ private:
 // RedisMgr init
 class RedisMgrRunner : public ServiceRunner {
 public:
-    explicit RedisMgrRunner() : ServiceRunner("RedisMgr") {}
+    RedisMgrRunner() : ServiceRunner("RedisMgr") {}
 
     bool start() override
     {

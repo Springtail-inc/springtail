@@ -24,7 +24,7 @@ private:
 
 class SysTblMgrRunner : public ServiceRunner {
 public:
-    explicit SysTblMgrRunner() :
+    SysTblMgrRunner() :
         ServiceRunner("SysTblMgr") {}
 
     bool start() override {

@@ -47,7 +47,7 @@ namespace springtail {
 
     class WriteCacheRunner : public ServiceRunner {
     public:
-        explicit WriteCacheRunner() :
+        WriteCacheRunner() :
             ServiceRunner("WriteCacheServer") {}
         bool start() override {
             WriteCacheServer::get_instance()->startup();

@@ -22,7 +22,7 @@ handle_sigint(int signal)
 
 class ProxyRunner : public ServiceRunner {
     public:
-        explicit ProxyRunner(bool force_shadow, bool force_primary) :
+        ProxyRunner(bool force_shadow, bool force_primary) :
             ServiceRunner("ProxyServer"),
             _force_shadow(force_shadow),
             _force_primary(force_primary) {}

@@ -67,7 +67,7 @@ namespace springtail::pg_log_mgr {
 
     class PgLogCoordinatorRunner : public ServiceRunner {
     public:
-        explicit PgLogCoordinatorRunner() : ServiceRunner("PgLogCoordinator") {}
+        PgLogCoordinatorRunner() : ServiceRunner("PgLogCoordinator") {}
 
         bool start() override
         {

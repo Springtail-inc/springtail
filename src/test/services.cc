@@ -13,8 +13,8 @@ namespace springtail::test {
 
     class XidMgrTestRunner : public ServiceRunner {
     public:
-    explicit XidMgrTestRunner() :
-        ServiceRunner("XidMgrServer") {}
+        XidMgrTestRunner() :
+            ServiceRunner("XidMgrServer") {}
 
         bool start() override {
             std::filesystem::path xid_dir;
@@ -44,7 +44,7 @@ namespace springtail::test {
 
     class SysTblMgrTestRunner : public ServiceRunner {
     public:
-        explicit SysTblMgrTestRunner() :
+        SysTblMgrTestRunner() :
             ServiceRunner("SysTblMgrServer") {}
 
         bool start() override {
@@ -66,7 +66,7 @@ namespace springtail::test {
 
     class WriteCacheTestRunner : public WriteCacheRunner {
     public:
-        explicit WriteCacheTestRunner() : WriteCacheRunner() {}
+        WriteCacheTestRunner() : WriteCacheRunner() {}
 
         void stop() override {
             WriteCacheClient::shutdown();

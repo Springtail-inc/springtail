@@ -42,7 +42,7 @@ namespace springtail {
      */
     class ExceptionRunner : public ServiceRunner {
     public:
-        explicit ExceptionRunner();
+        ExceptionRunner();
 
         bool start() override;
 
