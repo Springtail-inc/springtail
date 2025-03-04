@@ -183,15 +183,11 @@ namespace springtail {
         _current_xact = std::make_shared<PgTransaction>();
         _current_xact->xid = _xid;
         _current_xact->xact_lsn = _begin_lsn;
-        _current_xact->begin_offset = _header_offset; // go back to start of message block header
-        _current_xact->begin_path = _file_name;
     }
 
     void
     PgMsgLogGen::_add_end_xact()
     {
-        _current_xact->commit_offset = ::ftell(_fp);
-        _current_xact->commit_path = _file_name;
         _current_xact->type = PgTransaction::TYPE_COMMIT;
         _xact_list.push_back(_current_xact);
     }
@@ -201,8 +197,6 @@ namespace springtail {
     {
         PgTransactionPtr xact = std::make_shared<PgTransaction>();
 
-        xact->begin_offset = _header_offset;
-        xact->begin_path = _file_name;
         xact->xid = _xid;
         xact->type = type;
         xact->xact_lsn = _begin_lsn;
@@ -237,8 +231,6 @@ namespace springtail {
 
         msg["columns"] = columns_json;
 
-        _current_xact->oids.insert(oid);
-
         _write_message(pg_msg::MSG_PREFIX_CREATE_INDEX, msg);
 
         return oid;
@@ -260,8 +252,6 @@ namespace springtail {
         msg["columns"] = _gen_table_schema(table_id, columns);
         msg["table"] = table_name;
 
-        _current_xact->oids.insert(table_id);
-
         _write_message(pg_msg::MSG_PREFIX_CREATE_TABLE, msg);
 
         return table_id;
@@ -278,8 +268,6 @@ namespace springtail {
         msg["schema"] = "public";
         msg["columns"] = _gen_table_schema(table_id, columns);
         msg["table"] = _table_id_to_name[table_id];
-
-        _current_xact->oids.insert(table_id);
 
         _write_message(pg_msg::MSG_PREFIX_ALTER_TABLE, msg);
     }
@@ -333,8 +321,6 @@ namespace springtail {
         msg["schema"] = "public";
         msg["identity"] = "public." + _table_id_to_name[table_id];
         msg["name"] = _table_id_to_name[table_id];
-
-        _current_xact->oids.insert(table_id);
 
         _write_message(pg_msg::MSG_PREFIX_DROP_TABLE, msg);
     }

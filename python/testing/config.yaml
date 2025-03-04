@@ -1,4 +1,4 @@
 test_folder: 'test_cases'
 system_json_path: '../../system.json.test'
 build_dir: '../../debug'
-default_test_sets: ['basic', 'framework']
+default_test_sets: ['basic', 'framework', 'recovery']

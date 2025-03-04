@@ -48,16 +48,6 @@ namespace {
         {
             return _create_repl_logger();
         }
-
-        PgXactLogWriterPtr create_xact_log_writer()
-        {
-            return _create_xact_logger();
-        }
-
-        void process_xact(PgTransactionPtr xact)
-        {
-            _process_xact(xact);
-        }
     };
 
     class LogReader_Test : public ::testing::Test {
@@ -172,9 +162,8 @@ namespace {
         bool using_redis = false;
         FILE *_fp = nullptr;
         std::filesystem::path _log_file{LOG_FILE};
-        PgLogReader::PgTransactionQueuePtr _queue = std::make_shared<ConcurrentQueue<PgTransaction>>();
         PgLogReader::CommitterQueuePtr _committer_queue = std::make_shared<ConcurrentQueue<committer::XidReady>>();
-        PgLogReader _log_reader{1, _queue, _committer_queue}; // note: hard-codes DB ID as 1
+        PgLogReader _log_reader{1, 8192, XACT_LOG_DIR, _committer_queue}; // note: hard-codes DB ID as 1
         std::vector<PgTransactionPtr> _xact_list;
         std::shared_ptr<TestLogMgr> _log_mgr;
     };
@@ -239,9 +228,6 @@ namespace {
             using_redis = false;
             GTEST_SKIP() << "Redis is not running, skipping test";
         }
-
-        // initialize the log mgr
-        PgXactLogWriterPtr xact_writer = _log_mgr->create_xact_log_writer();
 
         // create a new log file
         process_json_cmd_file(std::filesystem::path(JSON_FILE));

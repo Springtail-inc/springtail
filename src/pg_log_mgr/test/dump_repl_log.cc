@@ -37,12 +37,12 @@ int main(int argc, char *argv[])
     std::set<uint32_t> xids;
     std::set<uint32_t> duplicate_xids;
 
-    std::filesystem::path start_file(file);
+    std::optional<std::filesystem::path> start_file(file);
 
-    while (!start_file.empty() && std::filesystem::exists(start_file)) {
+    while (start_file && std::filesystem::exists(*start_file)) {
 
-        PgMsgStreamReader reader(start_file, start_offset, -1);
-        std::cout << "\nScanning log: " << start_file << std::endl;
+        PgMsgStreamReader reader(*start_file, start_offset, -1);
+        std::cout << "\nScanning log: " << *start_file << std::endl;
 
         // consume messages from log; num_messages of -1 means go until eos
         bool eos = false; // end of stream
@@ -75,7 +75,9 @@ int main(int argc, char *argv[])
         }
 
         if (scan_all_files) {
-            start_file = fs::get_next_file(start_file, pg_log_mgr::PgLogMgr::LOG_PREFIX_REPL, pg_log_mgr::PgLogMgr::LOG_SUFFIX);
+            start_file = fs::get_next_log_file(start_file->parent_path(),
+                                               pg_log_mgr::PgLogMgr::LOG_PREFIX_REPL,
+                                               pg_log_mgr::PgLogMgr::LOG_SUFFIX);
         } else {
             break;
         }
