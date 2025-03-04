@@ -108,8 +108,6 @@ public:
     DefaultLoggingRunner() : ServiceRunner("Default Logging") {}
 
     void stop() override { shutdown_logging(); }
-
-private:
 };
 
 // Tracing init

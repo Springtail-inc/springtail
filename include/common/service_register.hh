@@ -10,7 +10,7 @@
 namespace springtail {
 class ServiceRunner {
 public:
-    explicit ServiceRunner(std::string name) : _name(name) {}
+    explicit ServiceRunner(const std::string &name) : _name(name) {}
     virtual ~ServiceRunner() = default;
     virtual bool start()
     {
