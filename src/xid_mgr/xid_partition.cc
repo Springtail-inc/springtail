@@ -30,6 +30,7 @@ namespace springtail::xid_mgr {
     void
     Partition::_sync_thread_func()
     {
+        auto token = logging::set_context_variables({{"partition_id", std::to_string(_id)}});
         RedisDDL redis_ddl;
         while (!_shutdown) {
             std::unique_lock<std::mutex> _shutdown_lock(_shutdown_mutex);
@@ -183,6 +184,10 @@ namespace springtail::xid_mgr {
             SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Partition: commit xid: db_id={}, xid={}", db_id, xid);
 
             _committed_xids[db_id] = xid;
+            _dirty = true;
+        } else {
+            SPDLOG_WARN("Partition: commit xid: db_id={}, xid={}, was already committed at {}", db_id, xid, it->second);
+            it->second = xid;
             _dirty = true;
         }
 

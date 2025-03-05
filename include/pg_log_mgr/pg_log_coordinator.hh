@@ -41,6 +41,8 @@ namespace springtail::pg_log_mgr {
         std::string _password;                     ///< password for connecting to database
         int _port;                                 ///< port for connecting to database
 
+        std::shared_ptr<ConcurrentQueue<committer::XidReady>> _committer_queue;
+
         /**
          * @brief Function for performing shutdown that is called by Singleton
          *

@@ -38,12 +38,6 @@ namespace springtail::redis {
 
     //// Postgres redis key prefixes.  Value defs in: pg_log_mgr/pg_redis_xact.hh
 
-    /**
-     * Queue between the PgLogMgr and the Committer.  Passes an XidReady object.
-     * args: <db_instance_id>
-     */
-    static constexpr char QUEUE_GC_XID_READY[] = "{}:queue:gc_xid_ready";
-
     //// For RedisDDL
 
     /**

@@ -29,7 +29,7 @@ Server::startup()
 }
 
 void
-Server::shutdown()
+Server::_internal_shutdown()
 {
     _grpc_server_manager.shutdown();
 }

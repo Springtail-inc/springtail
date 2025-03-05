@@ -6,7 +6,7 @@ namespace springtail::pg_log_mgr {
     SyncTracker::mark_resync(uint64_t db_id,
                              uint64_t table_id)
     {
-        SPDLOG_DEBUG_MODULE(LOG_GC, "db {} table {}", db_id, table_id);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "db {} table {}", db_id, table_id);
         boost::unique_lock lock(_mutex);
 
         bool first_table = _resync_map[db_id].empty() && !_sync_map.contains(db_id);
@@ -20,7 +20,7 @@ namespace springtail::pg_log_mgr {
     bool
     SyncTracker::add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
     {
-        SPDLOG_DEBUG_MODULE(LOG_GC, "db {} xid {}", sync_msg.db_id, sync_msg.target_xid);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "db {} xid {}", sync_msg.db_id, sync_msg.target_xid);
         boost::unique_lock lock(_mutex);
 
         // clear the resync map for the provided tables in the db
@@ -75,17 +75,17 @@ namespace springtail::pg_log_mgr {
         return first_table;
     }
 
-    std::optional<gc::XidReady>
+    std::optional<committer::XidReady>
     SyncTracker::check_commit(uint64_t db_id,
                               uint32_t pg_xid)
     {
-        SPDLOG_DEBUG_MODULE(LOG_GC, "db {} pg_xid {}", db_id, pg_xid);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "db {} pg_xid {}", db_id, pg_xid);
         boost::unique_lock lock(_mutex);
 
         // get the map for this database
         auto db_i = _sync_map.find(db_id);
         if (db_i == _sync_map.end()) {
-            SPDLOG_DEBUG_MODULE(LOG_GC, "didn't find db {} pg_xid {}", db_id, pg_xid);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "didn't find db {} pg_xid {}", db_id, pg_xid);
             return {}; // no ongoing sync
         }
 
@@ -108,16 +108,16 @@ namespace springtail::pg_log_mgr {
 
         // if nothing is completed, then we have to wait to swap/commit
         if (completed.empty()) {
-            SPDLOG_DEBUG_MODULE(LOG_GC, "no completed db {} pg_xid {}", db_id, pg_xid);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "no completed db {} pg_xid {}", db_id, pg_xid);
             return {};
         }
 
         // We pass the target XID to the committer to be used if the completed XID is not ahead of the committed XID.
         uint64_t xid = _target_xid_map[db_id];
 
-        auto type = gc::XidReady::Type::TABLE_SYNC_SWAP;
+        auto type = committer::XidReady::Type::TABLE_SYNC_SWAP;
         if (db_i->second.empty()) {
-            type = gc::XidReady::Type::TABLE_SYNC_COMMIT;
+            type = committer::XidReady::Type::TABLE_SYNC_COMMIT;
             _sync_map.erase(db_i);
             _target_xid_map.erase(db_id);
         }
@@ -127,16 +127,16 @@ namespace springtail::pg_log_mgr {
         for (auto record : completed) {
             tids.insert(tids.end(), record->tids().begin(), record->tids().end());
         }
-        SPDLOG_DEBUG_MODULE(LOG_GC, "Found {} tables", tids.size());
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Found {} tables", tids.size());
 
-        return gc::XidReady(type, db_id, gc::XidReady::SwapMsg(xid, std::move(tids)));
+        return committer::XidReady(type, db_id, committer::XidReady::SwapMsg(xid, std::move(tids)));
     }
 
     void
     SyncTracker::clear_tables(uint64_t db_id,
-                              const gc::XidReady &commit_msg)
+                              const committer::XidReady &commit_msg)
     {
-        SPDLOG_DEBUG_MODULE(LOG_GC, "db {}", db_id);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "db {}", db_id);
         boost::unique_lock lock(_mutex);
 
         // get the table map for this database
@@ -156,7 +156,7 @@ namespace springtail::pg_log_mgr {
     {
         boost::shared_lock lock(_mutex);
 
-        SPDLOG_DEBUG_MODULE(LOG_GC, "db {} table_id {} pg_xid {}", db_id, table_id, pg_xid);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "db {} table_id {} pg_xid {}", db_id, table_id, pg_xid);
 
         // first check the resync map
         auto resync_i = _resync_map.find(db_id);

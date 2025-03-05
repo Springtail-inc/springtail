@@ -25,7 +25,7 @@ WriteCacheServer::startup()
 }
 
 void
-WriteCacheServer::shutdown()
+WriteCacheServer::_internal_shutdown()
 {
     _grpc_server_manager.shutdown();
 }

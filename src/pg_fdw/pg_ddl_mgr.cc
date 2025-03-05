@@ -669,6 +669,7 @@ namespace springtail::pg_fdw {
                      const uint64_t db_id,
                      const std::string &db_name)
     {
+        auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}});
         SPDLOG_DEBUG_MODULE(LOG_FDW, "Creating DB ID: {}, DB Name: {}", db_id, db_name);
 
         // drop and create database on fdw
@@ -693,6 +694,7 @@ namespace springtail::pg_fdw {
                     const std::string &db_name)
     {
 
+        auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}});
         RedisDDL redis_ddl;
 
         // get schemas, parse include, fetch from primary db if necessary
@@ -764,6 +766,7 @@ namespace springtail::pg_fdw {
     void
     PgDDLMgr::_add_replicated_database(uint64_t db_id)
     {
+        auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}});
         nlohmann::json db_config = Properties::get_db_config(db_id);
         std::string db_name = db_config["name"];
 
@@ -794,6 +797,7 @@ namespace springtail::pg_fdw {
     void
     PgDDLMgr::_remove_replicated_database(uint64_t db_id)
     {
+        auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}});
         std::shared_lock shared_lock(_db_mutex);
         if (!_db_xid_map.contains(db_id)) {
             return;

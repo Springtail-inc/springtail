@@ -82,7 +82,7 @@ class ComponentFactory:
             pid_path=os.path.join(self.pid_dir, 'proxy.pid')
         )
 
-    def create_postgres(self) -> Component:
+    def create_postgres(self) -> PostgresComponent:
         """Create a new postgres component."""
         # get the path to the postgres binary, and the version
         bindir = run_command('pg_config', ['--bindir']).strip()
