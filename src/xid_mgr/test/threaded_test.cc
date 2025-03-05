@@ -21,7 +21,7 @@ namespace {
     class XidMgr_Test : public testing::Test {
     protected:
         void SetUp() override {
-            std::vector<std::unique_ptr<ServiceRunner>> service_runners = test::get_services(true, false, false);
+            auto service_runners = test::get_services(true, false, false);
             std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
             runners.emplace();
             std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));

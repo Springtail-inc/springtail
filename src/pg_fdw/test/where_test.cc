@@ -26,7 +26,7 @@ namespace {
         // Called once per testsuite.  Create a table and populate it with data
         static void SetUpTestSuite()
         {
-            std::vector<std::unique_ptr<ServiceRunner>> service_runners = test::get_services(true, true, true);
+            auto service_runners = test::get_services(true, true, true);
             std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
             runners.emplace();
             std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));

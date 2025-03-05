@@ -46,7 +46,7 @@ namespace {
             _base_dir = std::filesystem::temp_directory_path() / "test_table";
             std::filesystem::remove_all(_base_dir);
 
-            std::vector<std::unique_ptr<ServiceRunner>> service_runners = test::get_services(true, true, false);
+            auto service_runners = test::get_services(true, true, false);
             std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
             runners.emplace();
             std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));

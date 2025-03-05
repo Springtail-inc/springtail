@@ -57,7 +57,7 @@ namespace {
         static constexpr char const * const XACT_LOG_DIR = "/tmp/test_xact_log";
 
         static void SetUpTestSuite() {
-            std::vector<std::unique_ptr<ServiceRunner>> service_runners = test::get_services(true, true, false);
+            auto service_runners = test::get_services(true, true, false);
             std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
             runners.emplace();
             std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
