@@ -215,7 +215,7 @@ public:
             auto port = Json::get<int>(otel_config, "port");
 
             if (host && port) {
-                std::string endpoint = fmt::format("http://{}:{}", *host, *port);
+                std::string endpoint = fmt::format("http://{}:{}/v1/logs", *host, *port);
                 auto otel_sink = std::make_shared<OpenTelemetrySinkMt>("springtail", endpoint);
                 set_level(otel_sink, log_level);
                 sinks.push_back(otel_sink);

@@ -38,10 +38,12 @@ target_link_libraries(springtail_common
 	 opentelemetry-cpp::sdk
 	 opentelemetry-cpp::trace
 	 opentelemetry-cpp::metrics
+	 opentelemetry-cpp::logs
 	 opentelemetry-cpp::ostream_span_exporter
 	 opentelemetry-cpp::otlp_http_client
 	 opentelemetry-cpp::otlp_http_exporter
 	 opentelemetry-cpp::otlp_http_metric_exporter
+	 opentelemetry-cpp::otlp_http_log_record_exporter
 	 gRPC::grpcpp_otel_plugin
 )
 
