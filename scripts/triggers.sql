@@ -365,15 +365,3 @@ BEGIN
     END IF;
 END;
 $$;
-
--- Clean up function to drop the other functions and triggers
-CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_cleanup()
-    RETURNS void LANGUAGE plpgsql AS $$
-BEGIN
-    -- Drop event triggers
-    DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_drops;
-    DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_table_ddl;
-    DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_index_ddl;
-    DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_schema_ddl;
-END;
-$$;
