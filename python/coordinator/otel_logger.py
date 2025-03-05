@@ -70,17 +70,14 @@ def init_otel_logging(endpoint: str):
 
     handler = LoggingHandler(level=logging.INFO, logger_provider=logger_provider)
 
-    print("Initialized OTLP logging")
-
     return handler
 
-def init_logging(otel_config: dict, log_path: str, debug: bool = False):
+def init_logging(otel_config: dict, log_path: str, debug: bool = False, logger_name: str = "coordinator"):
+    """
+    Initialize logging for the coordinator.
+    """
     # Create a custom logger
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)
-
-    # Create a custom logger
-    logger = logging.getLogger("coordinator")
+    logger = logging.getLogger(logger_name)
     if debug:
         logger.setLevel(logging.DEBUG)  # Capture all logs at the logger level
     else:
