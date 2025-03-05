@@ -116,7 +116,11 @@ namespace springtail::pg_log_mgr {
         uint64_t xid = _target_xid_map[db_id];
 
         auto type = committer::XidReady::Type::TABLE_SYNC_SWAP;
-        if (db_i->second.empty()) {
+        if (db_i->second.empty() && _resync_map.find(db_id) == _resync_map.end()) {
+            // there should be no in-flight copies or resync requests in order to commit
+            // note: we had to add the check to the resync map to ensure that a second resync seen
+            //       between the original resync request and the sync completion was also processed
+            //       before the commit
             type = committer::XidReady::Type::TABLE_SYNC_COMMIT;
             _sync_map.erase(db_i);
             _target_xid_map.erase(db_id);

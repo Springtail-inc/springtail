@@ -212,7 +212,7 @@ namespace springtail::pg_log_mgr {
         std::thread _table_copy_thread;            ///< table copy thread
 
         /** Do the table copies; return the results */
-        void _do_table_copies(std::optional<std::vector<uint32_t>> table_ids = std::nullopt);
+        void _do_table_copies(std::optional<std::set<uint32_t>> table_ids = std::nullopt);
 
         /** Copy table thread; waits on table sync queue */
         void _copy_thread();

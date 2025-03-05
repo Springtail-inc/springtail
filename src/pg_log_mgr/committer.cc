@@ -249,15 +249,10 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
             if (!index_ddls.is_null()) {
                 _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
+
+                // build the indexes, stalling the pipeline
                 _indexer->process_ddls(db_id, xid, index_ddls);
                 _indexer->wait_for_completion(db_id);
-                sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
-                _redis_ddl.commit_index_ddl(db_id, xid);
-            } else {
-                // finalize the system metadata
-                // note: we do this even without DDL changes to ensure the primary and secondary
-                //       index root offsets are written to disk
-                sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
             }
 
             if (!completed_ddls.is_null()) {
@@ -267,6 +262,11 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
             // check if we are doing an active table sync, in which case we have to block commits
             if (!_block_commit.contains(db_id)) {
+                // finalize the system metadata
+                // note: we do this even without DDL changes to ensure the primary and secondary
+                //       index root offsets are written to disk
+                sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
+
                 // commit the completed XID
                 _xid_mgr->commit_xid(db_id, xid, !completed_ddls.is_null());
                 _committed_xids[db_id] = xid;
@@ -279,6 +279,10 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             if (!completed_ddls.is_null()) {
                 // push completed DDL changes to the FDWs
                 _redis_ddl.commit_ddl(db_id, xid);
+            }
+
+            if (!index_ddls.is_null()) {
+                _redis_ddl.commit_index_ddl(db_id, xid);
             }
 
             SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "XID completed: {}@{}", db_id, xid);
