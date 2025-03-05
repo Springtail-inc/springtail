@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <storage/extent.hh>
 #include <storage/field.hh>
 
@@ -11,10 +11,18 @@ namespace {
      * Framework for Extent testing.
      */
     class Extent_Test : public testing::Test {
+    public:
+        static void SetUpTestSuite() {
+            // Init springtail
+            springtail_init_test();
+        }
+
+        static void TearDownTestSuite() {
+            springtail_shutdown();
+        }
+
     protected:
         void SetUp() override {
-            springtail_init();
-
             // construct a schema for testing that includes inline data, variable data, bit-data and nullable fields
             std::vector<SchemaColumn> columns({
                     { "variable", 0, SchemaType::TEXT, 0, false },
@@ -119,7 +127,7 @@ namespace {
 
         // serialize
         std::string temp = extent->serialize();
-        
+
         // create an empty extent
         ExtentPtr new_extent = std::make_shared<Extent>(ExtentType{false}, 0, _schema->row_size());
         new_extent->deserialize(temp);

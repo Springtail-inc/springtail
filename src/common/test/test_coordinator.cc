@@ -1,11 +1,10 @@
 #include <gtest/gtest.h>
-#include <thread>
 #include <chrono>
 #include <optional>
 
 #include <fmt/core.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/coordinator.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
@@ -16,10 +15,16 @@ using namespace springtail;
 
 class CoordinatorTest : public ::testing::Test {
 protected:
+    static void SetUpTestSuite() {
+        springtail_init_test();
+    }
+
+    static void TearDownTestSuite() {
+        springtail_shutdown();
+    }
+
     void SetUp() override
     {
-        springtail_init();
-
         _instance_id = Properties::get_db_instance_id();
 
         // See if redis is enabled

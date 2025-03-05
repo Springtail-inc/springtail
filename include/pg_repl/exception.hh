@@ -7,16 +7,16 @@ namespace springtail {
     /** parent connection error */
     class PgConnectionError : public Error {
     public:
-        PgConnectionError() { }
-        PgConnectionError(const std::string &error)
+        PgConnectionError() = default;
+        explicit PgConnectionError(const std::string &error)
             : Error(error)
         { }
     };
 
     class PgUnrecoverableError : public Error{
     public:
-        PgUnrecoverableError() { }
-        PgUnrecoverableError(const std::string &error)
+        PgUnrecoverableError() = default;
+        explicit PgUnrecoverableError(const std::string &error)
             : Error(error)
         { }
     };

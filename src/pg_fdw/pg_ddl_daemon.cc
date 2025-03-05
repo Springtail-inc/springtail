@@ -3,7 +3,7 @@
 #include <boost/program_options.hpp>
 
 // springtail includes
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/properties.hh>
 
 #include <pg_log_mgr/pg_log_coordinator.hh>
@@ -57,13 +57,6 @@ int main(int argc, char *argv[])
     if (vm.count("daemonize")) {
         pidfile = "pg_ddl_mgr.pid";
     }
-    springtail::springtail_init("pg_ddl_mgr", pidfile, LOG_ALL);
-
-    // register the SIGINT handler; do this before starting the main thread
-    std::signal(SIGINT, handle_sigint);
-
-    // start the ddl main thread
-    std::string fdw_id = Properties::get_fdw_id();
 
     // check if the socket path is valid
     if (!socket_host_str.empty()) {
@@ -86,17 +79,16 @@ int main(int argc, char *argv[])
         }
     }
 
-    SPDLOG_DEBUG("Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}",
-                 fdw_id, username, password, socket_hostname.value_or(""));
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<pg_fdw::PgDDLMgrRunner>(username, password, socket_hostname));
+    runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
 
-    // get the DDL Mgr instance
-    pg_fdw::PgDDLMgr *ddl_mgr = pg_fdw::PgDDLMgr::get_instance();
-    ddl_mgr->init(fdw_id, username, password, socket_hostname);
+    springtail::springtail_init_daemon(handle_sigint, runners, "pg_ddl_mgr", pidfile, LOG_ALL);
 
-    ddl_mgr->run();
+    pg_fdw::PgDDLMgr::get_instance()->run();
 
-    // wait for shutdown; wait for main thread to join
-    ddl_mgr->shutdown();
+    springtail::springtail_shutdown();
 
     return 0;
 }
