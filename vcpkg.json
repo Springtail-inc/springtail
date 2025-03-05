@@ -20,8 +20,8 @@
         "vincentlaucsb-csv-parser",
         "openssl",
         "c-ares",
-	{ "name": "opentelemetry-cpp",
-	  "features": ["otlp-grpc"] }
+	{ "name": "grpc", "features": ["codegen"] },
+	{ "name": "opentelemetry-cpp", "features": ["otlp-grpc"] }
     ],
     "builtin-baseline": "6f29f12e82a8293156836ad81cc9bf5af41fe836",
     "overrides": [
