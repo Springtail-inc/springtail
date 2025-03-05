@@ -165,7 +165,7 @@ namespace springtail
             LSN = confirmed_flush_lsn;
         }
 
-        DCHECK_EQ(LSN, confirmed_flush_lsn);
+        DCHECK_GE(LSN, confirmed_flush_lsn);
 
         _last_flushed_lsn = LSN;
 
