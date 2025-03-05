@@ -1,7 +1,8 @@
 -- Triggers for create/alter table and drop table events
 -- https://www.postgresql.org/docs/current/plpgsql-trigger.html
+CREATE SCHEMA IF NOT EXISTS __pg_springtail_triggers;
 
-CREATE OR REPLACE FUNCTION springtail_event_trigger_for_drops()
+CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for_drops()
         RETURNS event_trigger LANGUAGE plpgsql AS $$
 DECLARE
     obj record;
@@ -40,7 +41,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION springtail_event_trigger_for_table_ddl()
+CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for_table_ddl()
         RETURNS event_trigger LANGUAGE plpgsql AS $$
 DECLARE
     obj record;
@@ -186,7 +187,7 @@ END;
 $$;
 
 
-CREATE OR REPLACE FUNCTION springtail_event_trigger_for_index_ddl()
+CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for_index_ddl()
         RETURNS event_trigger LANGUAGE plpgsql AS $$
 DECLARE
     obj record;
@@ -246,7 +247,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION springtail_event_trigger_for_schema_ddl()
+CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for_schema_ddl()
         RETURNS event_trigger LANGUAGE plpgsql AS $$
 DECLARE
     obj record;
@@ -281,31 +282,31 @@ DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_drops;
 CREATE EVENT TRIGGER springtail_event_trigger_for_drops
    ON sql_drop
    WHEN TAG IN ( 'DROP TABLE', 'DROP INDEX', 'DROP SCHEMA' )
-   EXECUTE FUNCTION springtail_event_trigger_for_drops();
+   EXECUTE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for_drops();
 
 DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_table_ddl;
 CREATE EVENT TRIGGER springtail_event_trigger_for_table_ddl
    ON ddl_command_end
    WHEN TAG IN ( 'CREATE TABLE', 'ALTER TABLE' )
-   EXECUTE FUNCTION springtail_event_trigger_for_table_ddl();
+   EXECUTE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for_table_ddl();
 
 DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_schema_ddl;
 CREATE EVENT TRIGGER springtail_event_trigger_for_schema_ddl
    ON ddl_command_end
    WHEN TAG IN ( 'CREATE SCHEMA', 'ALTER SCHEMA' )
-   EXECUTE FUNCTION springtail_event_trigger_for_schema_ddl();
+   EXECUTE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for_schema_ddl();
 
 DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_index_ddl;
 CREATE EVENT TRIGGER springtail_event_trigger_for_index_ddl
    ON ddl_command_end
    WHEN TAG IN ( 'CREATE INDEX' )
-   EXECUTE FUNCTION springtail_event_trigger_for_index_ddl();
+   EXECUTE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for_index_ddl();
 
 
 -- Select all users and their databases with access to springtail
 -- If springtail_user role exists, only users with that role are returned
 -- otherwise all users are returned
-CREATE OR REPLACE FUNCTION public.springtail_get_user_access()
+CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_get_user_access()
     RETURNS TABLE (username text, password text, databases text)
     LANGUAGE plpgsql
     SECURITY DEFINER AS $$
@@ -366,14 +367,14 @@ END;
 $$;
 
 -- Clean up function to drop the other functions and triggers
-CREATE OR REPLACE FUNCTION public.springtail_cleanup()
+CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_cleanup()
     RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
     -- Drop event functions
-    DROP FUNCTION IF EXISTS springtail_event_trigger_for_drops() CASCADE;
-    DROP FUNCTION IF EXISTS springtail_event_trigger_for_table_ddl() CASCADE;
-    DROP FUNCTION IF EXISTS springtail_event_trigger_for_index_ddl() CASCADE;
-    DROP FUNCTION IF EXISTS springtail_get_user_access() CASCADE;
+    DROP FUNCTION IF EXISTS __pg_springtail_triggers.springtail_event_trigger_for_drops() CASCADE;
+    DROP FUNCTION IF EXISTS __pg_springtail_triggers.springtail_event_trigger_for_table_ddl() CASCADE;
+    DROP FUNCTION IF EXISTS __pg_springtail_triggers.springtail_event_trigger_for_index_ddl() CASCADE;
+    DROP FUNCTION IF EXISTS __pg_springtail_triggers.springtail_get_user_access() CASCADE;
     -- Drop event triggers
     DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_drops;
     DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_table_ddl;
