@@ -24,9 +24,10 @@
 #include <common/redis_types.hh>
 
 #include <proxy/client_session.hh>
-#include <proxy/server.hh>
 #include <proxy/logger.hh>
 #include <proxy/logging.hh>
+#include <proxy/server.hh>
+#include <proxy/server_session.hh>
 
 namespace springtail::pg_proxy {
 
@@ -96,9 +97,6 @@ namespace springtail::pg_proxy {
 
         // ignore SIGPIPE signals
         ::signal(SIGPIPE, SIG_IGN);
-
-        DatabaseMgr::get_instance()->init();
-        UserMgr::get_instance()->init(USER_MGR_SLEEP_INTERVAL_SECS);
 
         SPDLOG_INFO("Proxy server initialized and is listening on port={}", proxy_port);
     }
@@ -434,9 +432,6 @@ namespace springtail::pg_proxy {
         }
 
         _thread_pool->shutdown();
-        pg_proxy::UserMgr::get_instance()->stop_thread();
-        UserMgr::shutdown();
-        DatabaseMgr::shutdown();
 
         // flush logger
         if (_logger) {

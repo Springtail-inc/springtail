@@ -9,17 +9,7 @@
 #include <pg_log_mgr/pg_log_coordinator.hh>
 
 using namespace springtail;
-
-namespace {
-    void
-    handle_sigint(int signal)
-    {
-        pg_fdw::PgDDLMgr *ddl_mgr = pg_fdw::PgDDLMgr::get_instance();
-        if (ddl_mgr != nullptr) {
-            ddl_mgr->notify_shutdown();
-        }
-    }
-}
+using namespace springtail::pg_fdw;
 
 int main(int argc, char *argv[])
 {
@@ -81,12 +71,13 @@ int main(int argc, char *argv[])
 
     std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
     runners.emplace();
-    runners->emplace_back(std::make_unique<pg_fdw::PgDDLMgrRunner>(username, password, socket_hostname));
     runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
+    runners->emplace_back(std::make_unique<SchemaMgrRunner>());
+    runners->emplace_back(std::make_unique<TableMgrRunner>());
+    runners->emplace_back(std::make_unique<PgDDLMgrRunner>(username, password, socket_hostname));
 
-    springtail::springtail_init_daemon(handle_sigint, runners, "pg_ddl_mgr", pidfile, LOG_ALL);
-
-    pg_fdw::PgDDLMgr::get_instance()->run();
+    springtail::springtail_init_daemon(runners, "pg_ddl_mgr", pidfile, LOG_ALL);
+    springtail_daemon_run();
 
     springtail::springtail_shutdown();
 

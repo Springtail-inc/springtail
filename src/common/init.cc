@@ -4,6 +4,18 @@
 
 using namespace springtail;
 
+namespace {
+
+    std::atomic<bool> shutdown_flag = false;
+
+    void
+    handle_sigint(int signal)
+    {
+        shutdown_flag = true;
+        shutdown_flag.notify_one();
+    }
+}  // namespace
+
 namespace springtail {
 
 bool DaemonRunner::start()
@@ -75,8 +87,7 @@ springtail_init(const std::optional<std::vector<std::unique_ptr<ServiceRunner>>>
     }
 }
 
-void springtail_init_daemon(void (*handler)(int),
-                            const std::optional<std::vector<std::unique_ptr<ServiceRunner>>> &runners,
+void springtail_init_daemon(const std::optional<std::vector<std::unique_ptr<ServiceRunner>>> &runners,
                             const std::optional<std::string> &log_filename,
                             const std::optional<std::string> &daemon_pid,
                             const std::optional<uint32_t> &logging_mask)
@@ -92,7 +103,7 @@ void springtail_init_daemon(void (*handler)(int),
     service_runners.emplace_back(std::make_unique<TracingRunner>(log_filename));
     service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesCacheRunner>());
-    service_runners.emplace_back(std::make_unique<TermSignalRunner>(handler));
+    service_runners.emplace_back(std::make_unique<TermSignalRunner>());
 
     if (runners.has_value()) {
         std::vector<std::unique_ptr<ServiceRunner>> *non_const_runners = const_cast<std::vector<std::unique_ptr<ServiceRunner>> *>(&runners.value());
@@ -138,6 +149,23 @@ void
 springtail_shutdown()
 {
     ServiceRegister::shutdown();
+}
+
+void
+springtail_daemon_run()
+{
+    while (!shutdown_flag) {
+        shutdown_flag.wait(false);
+    }
+}
+
+bool
+TermSignalRunner::start()
+{
+    for (int sig : _signals) {
+        std::signal(sig, handle_sigint);
+    }
+    return true;
 }
 
 };  // namespace springtail::init

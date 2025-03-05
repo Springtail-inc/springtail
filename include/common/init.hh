@@ -22,8 +22,7 @@ void springtail_init(const std::optional<std::vector<std::unique_ptr<ServiceRunn
                      const std::optional<std::string> &log_filename = std::nullopt,
                      const std::optional<uint32_t> &logging_mask = std::nullopt);
 
-void springtail_init_daemon(void (*handler)(int),
-                            const std::optional<std::vector<std::unique_ptr<ServiceRunner>>> &runners = std::nullopt,
+void springtail_init_daemon(const std::optional<std::vector<std::unique_ptr<ServiceRunner>>> &runners = std::nullopt,
                             const std::optional<std::string> &log_filename = std::nullopt,
                             const std::optional<std::string> &daemon_pid = std::nullopt,
                             const std::optional<uint32_t> &logging_mask = std::nullopt);
@@ -32,6 +31,8 @@ void springtail_init_test(const std::optional<std::vector<std::unique_ptr<Servic
                           const std::optional<uint32_t> &logging_mask = std::nullopt);
 
 void springtail_init_custom(std::vector<std::unique_ptr<ServiceRunner>> &runners);
+
+void springtail_daemon_run();
 
 /**
  * @brief Services shutdown function
@@ -130,19 +131,9 @@ private:
 // Termination signals handling init
 class TermSignalRunner : public ServiceRunner {
 public:
-    explicit TermSignalRunner(void (*handler)(int))
-        : ServiceRunner("TermSignal")
-    {
-        _handler = handler;
-    }
+    TermSignalRunner() : ServiceRunner("TermSignal") {}
 
-    bool start() override
-    {
-        for (int sig : _signals) {
-            std::signal(sig, _handler);
-        }
-        return true;
-    }
+    bool start() override;
 
     void stop() override
     {
@@ -153,7 +144,6 @@ public:
 
 private:
     const std::vector<int> _signals{SIGINT, SIGTERM, SIGQUIT, SIGUSR1, SIGUSR2};
-    void (*_handler)(int);
 };
 
 // RedisMgr init

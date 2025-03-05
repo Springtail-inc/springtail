@@ -4,19 +4,11 @@
 
 #include <boost/program_options.hpp>
 #include <common/init.hh>
+#include <sys_tbl_mgr/schema_mgr.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 #include <sys_tbl_mgr/server.hh>
 
 using namespace springtail;
-
-namespace {
-volatile std::sig_atomic_t shutdown_requested = 0;
-
-void
-handle_sigint(int signal)
-{
-    shutdown_requested = 1;
-}
-}  // namespace
 
 int
 main(int argc, char *argv[])
@@ -43,17 +35,13 @@ main(int argc, char *argv[])
 
     std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
     runners.emplace();
+    runners->emplace_back(std::make_unique<SchemaMgrRunner>());
+    runners->emplace_back(std::make_unique<TableMgrRunner>());
     runners->emplace_back(std::make_unique<sys_tbl_mgr::SysTblMgrRunner>());
 
-    springtail_init_daemon(handle_sigint, runners, "sys_tbl_mgr", pidfile);
+    springtail_init_daemon(runners, "sys_tbl_mgr", pidfile);
 
-    // Block until SIGINT is received. If any other signal wakes the process,
-    // pause() will return and the loop will continue until shutdown_requested is set.
-    while (!shutdown_requested) {
-        // Technically there is a race here, where if a SIGINT is received before pause() is called,
-        // we will ignore the SIGINT.
-        pause();
-    }
+    springtail_daemon_run();
 
     springtail_shutdown();
     return 0;

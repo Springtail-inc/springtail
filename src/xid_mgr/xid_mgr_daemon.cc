@@ -8,16 +8,6 @@
 
 using namespace springtail;
 
-namespace {
-volatile std::sig_atomic_t shutdown_requested = 0;
-
-void
-handle_sigint(int signal)
-{
-    shutdown_requested = 1;
-}
-}  // namespace
-
 int
 main(int argc, char* argv[])
 {
@@ -51,14 +41,9 @@ main(int argc, char* argv[])
     runners.emplace();
     runners->emplace_back(std::make_unique<xid_mgr::XidMgrRunner>(vm.count("xid") && vm.count("dbid"), db_id, starting_xid));
 
-    springtail_init_daemon(handle_sigint, runners, "xid_mgr", pidfile);
+    springtail_init_daemon(runners, "xid_mgr", pidfile);
 
-    // Block until SIGINT is received. If any other signal wakes the process,
-    // pause() will return and the loop will continue until shutdown_requested is set.
-    while (!shutdown_requested) {
-        // Technically there is a race here if SIGINT is received before pause() is called.
-        pause();
-    }
+    springtail_daemon_run();
 
     springtail_shutdown();
     return 0;

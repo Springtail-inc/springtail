@@ -85,7 +85,7 @@ namespace {
             std::string username{"springtail"};
             std::string password{"springtail"};
             std::string socket_hostname{"/var/run/postgresql"};
-            runners->emplace_back(new PgDDLMgrRunner(username, password, socket_hostname));
+            runners->emplace_back(std::make_unique<PgDDLMgrRunner>(username, password, socket_hostname));
 
             springtail_init_test(runners);
 
@@ -100,7 +100,7 @@ namespace {
             std::string key = std::to_string(Properties::get_instance()->get_db_instance_id()) + ":db_config";
             redis_config_client->hset(key, _db_id_str, nlohmann::to_string(db_config));
 
-            _pg_ddl_mgr_thread = std::thread(&PgDDLMgr::run, PgDDLMgr::get_instance());
+            // _pg_ddl_mgr_thread = std::thread(&PgDDLMgr::run, PgDDLMgr::get_instance());
 
             // set up connection to the database
             _create_replica_connection();
@@ -113,10 +113,12 @@ namespace {
             if (_conn != nullptr) {
                 _conn->disconnect();
             }
+            /*
             PgDDLMgr::get_instance()->notify_shutdown();
             if (_pg_ddl_mgr_thread.has_value()) {
                 _pg_ddl_mgr_thread.value().join();
             }
+            */
 
             springtail_shutdown();
         }
@@ -148,7 +150,7 @@ namespace {
             // placeholder, left empty for now
         }
 
-        static inline std::optional<std::thread> _pg_ddl_mgr_thread;
+        // static inline std::optional<std::thread> _pg_ddl_mgr_thread;
         static inline std::string _db_id_str{"1"};
         static inline std::string _fdw_id_str{"1"};
         static inline LibPqConnectionPtr _conn;

@@ -3,7 +3,9 @@
 #include <common/json.hh>
 #include <common/properties.hh>
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/schema_mgr.hh>
 #include <sys_tbl_mgr/server.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_client.hh>
 #include <write_cache/write_cache_server.hh>
 #include <xid_mgr/xid_mgr_client.hh>
@@ -37,7 +39,6 @@ namespace springtail::test {
         }
 
         void stop() override {
-            XidMgrClient::shutdown();
             xid_mgr::XidMgrServer::shutdown();
         }
     };
@@ -59,18 +60,7 @@ namespace springtail::test {
         }
 
         void stop() override {
-            sys_tbl_mgr::Client::shutdown();
             sys_tbl_mgr::Server::shutdown();
-        }
-    };
-
-    class WriteCacheTestRunner : public WriteCacheRunner {
-    public:
-        WriteCacheTestRunner() : WriteCacheRunner() {}
-
-        void stop() override {
-            WriteCacheClient::shutdown();
-            WriteCacheRunner::stop();
         }
     };
 
@@ -83,13 +73,18 @@ namespace springtail::test {
         }
         std::vector<std::unique_ptr<ServiceRunner>> services;
         if (xid_mgr) {
+            services.emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
             services.emplace_back(std::make_unique<XidMgrTestRunner>());
         }
         if (sys_tbl_mgr) {
+            services.emplace_back(std::make_unique<GrpcClientRunner<sys_tbl_mgr::Client>>());
+            services.emplace_back(std::make_unique<SchemaMgrRunner>());
+            services.emplace_back(std::make_unique<TableMgrRunner>());
             services.emplace_back(std::make_unique<SysTblMgrTestRunner>());
         }
         if (write_cache) {
-            services.emplace_back(std::make_unique<WriteCacheTestRunner>());
+            services.emplace_back(std::make_unique<GrpcClientRunner<WriteCacheClient>>());
+            services.emplace_back(std::make_unique<WriteCacheRunner>());
         }
         return services;
     }

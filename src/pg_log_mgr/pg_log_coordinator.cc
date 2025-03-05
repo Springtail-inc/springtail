@@ -3,7 +3,6 @@
 #include <common/json.hh>
 #include <common/properties.hh>
 
-#include <pg_log_mgr/committer.hh>
 #include <pg_log_mgr/pg_log_coordinator.hh>
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/xid_ready.hh>
@@ -18,7 +17,9 @@ namespace springtail::pg_log_mgr {
         std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
         redis_cache->remove_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
 
-        WriteCacheServer::get_instance()->shutdown();
+        // stop committer thread
+        _committer->shutdown();
+        _committer_thread.join();
 
         // shut down all log managers
         std::unique_lock lock(_mutex);
@@ -30,7 +31,7 @@ namespace springtail::pg_log_mgr {
         lock.unlock();
     }
 
-    PgLogCoordinator::PgLogCoordinator() : _shutdown_counter(1)
+    PgLogCoordinator::PgLogCoordinator()
     {
         _cache_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [this](const std::string &path, const nlohmann::json &new_value) -> void {
@@ -90,10 +91,8 @@ namespace springtail::pg_log_mgr {
         }
 
         // Start the committer thread
-        auto committer = std::make_shared<springtail::committer::Committer>(1, _committer_queue);
-        committer->run();
-
-        WriteCacheServer::get_instance()->startup();
+        _committer = std::make_shared<springtail::committer::Committer>(1, _committer_queue);
+        _committer_thread = std::thread(&springtail::committer::Committer::run, _committer);
     }
 
     void

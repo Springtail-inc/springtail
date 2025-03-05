@@ -117,7 +117,12 @@ int main(int argc, char **argv)
 
     std::cout << "searching for: " << val << " op: " << direction << std::endl;
 
-    springtail_init(std::nullopt, false, std::nullopt, 0);
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<SchemaMgrRunner>());
+    runners->emplace_back(std::make_unique<TableMgrRunner>());
+
+    springtail_init(runners, false, std::nullopt, 0);
 
     // convert operator to enum
     QualOpName op;

@@ -239,7 +239,12 @@ int main(int argc, char *argv[])
     uint64_t tid=0;
     bool list = false;
 
-    springtail_init_test(std::nullopt, false);
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<SchemaMgrRunner>());
+    runners->emplace_back(std::make_unique<TableMgrRunner>());
+
+    springtail_init_test(runners, false);
 
     // parse the arguments
     namespace po = boost::program_options;

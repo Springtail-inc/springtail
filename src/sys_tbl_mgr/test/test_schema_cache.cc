@@ -5,7 +5,6 @@
 
 #include <common/init.hh>
 #include <sys_tbl_mgr/schema_cache.hh>
-#include <test/services.hh>
 
 using namespace springtail;
 
