@@ -370,14 +370,10 @@ $$;
 CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_cleanup()
     RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
-    -- Drop event functions
-    DROP FUNCTION IF EXISTS __pg_springtail_triggers.springtail_event_trigger_for_drops() CASCADE;
-    DROP FUNCTION IF EXISTS __pg_springtail_triggers.springtail_event_trigger_for_table_ddl() CASCADE;
-    DROP FUNCTION IF EXISTS __pg_springtail_triggers.springtail_event_trigger_for_index_ddl() CASCADE;
-    DROP FUNCTION IF EXISTS __pg_springtail_triggers.springtail_get_user_access() CASCADE;
     -- Drop event triggers
     DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_drops;
     DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_table_ddl;
     DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_index_ddl;
+    DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_schema_ddl;
 END;
 $$;
