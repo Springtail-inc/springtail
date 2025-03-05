@@ -14,7 +14,7 @@ class Properties:
 
         if load_redis:
             try:
-                self.__load_redis(config_file)
+                self._load_redis(config_file)
             except KeyError as e:
                 raise Exception(f'JSON key error while loading redis, missing key: {e}')
 
@@ -208,7 +208,7 @@ class Properties:
         # see common/redis_types.hh PUBSUB_LIVENESS_NOTIFY
         return self.db_instance_id + ':pubsub:liveness_notify'
 
-    def __load_redis(self, config_file=None) -> None:
+    def _load_redis(self, config_file=None) -> None:
         """Load redis based on a system.json file.
         :param config_file: the system.json file to load, if None
         then use SPRINGTAIL_PROPERTIES_FILE

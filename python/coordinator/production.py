@@ -73,7 +73,7 @@ class Production:
         logging.getLogger('s3transfer').setLevel(logging.CRITICAL)
         logging.getLogger('urllib3').setLevel(logging.CRITICAL)
 
-    def __download_s3_binaries(
+    def _download_s3_binaries(
         self,
         bucket: str,
         folder: str,
@@ -145,7 +145,7 @@ class Production:
             return None
 
 
-    def __send_sns_notification(
+    def _send_sns_notification(
         self,
         topic_arn: str,
         subject: str,
@@ -202,7 +202,7 @@ class Production:
 
         self.logger.info(f"Downloading springtail binaries from {s3_bucket}/{S3_BIN_FOLDER} to {S3_DOWNLOAD_PATH}")
 
-        springtail_tgz = self.__download_s3_binaries(s3_bucket, S3_BIN_FOLDER, S3_DOWNLOAD_PATH)
+        springtail_tgz = self._download_s3_binaries(s3_bucket, S3_BIN_FOLDER, S3_DOWNLOAD_PATH)
 
         if not springtail_tgz:
             raise ValueError("Failed to download springtail binaries")
@@ -355,4 +355,4 @@ class Production:
 
         self.logger.info(f"SNS message: {subject}")
 
-        self.__send_sns_notification(self.topic_arn, subject, message, attributes)
+        self._send_sns_notification(self.topic_arn, subject, message, attributes)

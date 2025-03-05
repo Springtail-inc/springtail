@@ -134,7 +134,7 @@ class Scheduler:
 
         return self.start_all()
 
-    def __track_db_state_changes(self) -> None:
+    def _track_db_state_changes(self) -> None:
         """
         Track database state changes
         """
@@ -149,7 +149,7 @@ class Scheduler:
 
                 self.db_states[id] = state
 
-    def __check_pubsub(self) -> bool:
+    def _check_pubsub(self) -> bool:
         """
         Check for messages on the liveness pubsub channel
         Returns:
@@ -175,7 +175,7 @@ class Scheduler:
             return False
         return False
 
-    def __check_timeouts(self) -> bool:
+    def _check_timeouts(self) -> bool:
         """
         Check the liveness of all components
         Returns:
@@ -216,7 +216,7 @@ class Scheduler:
 
         return False
 
-    def __check_components(self) -> bool:
+    def _check_components(self) -> bool:
         """
         Check the liveness of all components
         Returns:
@@ -238,7 +238,7 @@ class Scheduler:
         """
         self.shutdown_event.set()
 
-    def __init_timeouts(self) -> None:
+    def _init_timeouts(self) -> None:
         """
         Initialize timeouts for all registered components, clear any existing timeouts from redis
         """
@@ -248,7 +248,7 @@ class Scheduler:
             if id in self.components:
                 self.redis.hdel(self.liveness_hash, key)
 
-    def __check_coordinator_state(self) -> None:
+    def _check_coordinator_state(self) -> None:
         """
         Check the coordinator state
         """
@@ -291,15 +291,15 @@ class Scheduler:
         """
         # Initialize timeouts for registered components
         # This will clear any existing timeouts from Redis
-        self.__init_timeouts()
+        self._init_timeouts()
 
         while True:
             try:
                 # get the coordinator state
-                self.__check_coordinator_state()
+                self._check_coordinator_state()
 
                 # track database state changes
-                self.__track_db_state_changes()
+                self._track_db_state_changes()
 
                 # check if shutdown event is set, if so, break
                 if self.shutdown_event.is_set():
@@ -307,9 +307,9 @@ class Scheduler:
 
                 # check for pubsub messages, timeouts, or component failures
                 if (
-                   self.__check_pubsub() or    # check for pubsub ; blocks 1 second if no messages
-                   self.__check_timeouts() or  # check for timeouts
-                   self.__check_components()   # check for component failures
+                   self._check_pubsub() or    # check for pubsub ; blocks 1 second if no messages
+                   self._check_timeouts() or  # check for timeouts
+                   self._check_components()   # check for component failures
                 ):
                     # restart all components
                     self.logger.warning("Restarting all components")

@@ -49,7 +49,7 @@ class Coordinator:
             service_name -- the name of the service
         """
         self.props = props
-        self.__check_properties(props)
+        self._check_properties(props)
 
         # Configure logging
         init_logging(props.get_otel_config(), props.get_log_path(), debug)
@@ -126,11 +126,11 @@ class Coordinator:
                 postgres.start()
 
             # create the ddl user
-            ddl_password = self.__gen_random_string(16)
+            ddl_password = self._gen_random_string(16)
             postgres.create_user('ddl_user', ddl_password, True, True)
 
             # wait for ingestion to be ready
-            self.__wait_for_ingestion(self.props)
+            self._wait_for_ingestion(self.props)
 
             # For testing uncomment lines below since they are needed for ddl daemon
             # but in production they should be running elsewhere
@@ -177,7 +177,7 @@ class Coordinator:
             self.logger.info(f"Received signal {signum}, shutting down...")
             self.scheduler.shutdown()
 
-    def __check_properties(self, props: Properties) -> None:
+    def _check_properties(self, props: Properties) -> None:
         """
         Check the properties; check paths exist.
         Arguments:
@@ -199,7 +199,7 @@ class Coordinator:
             raise ValueError(f"Log path is not writable: {log_path}")
 
 
-    def __gen_random_string(self, length: int) -> str:
+    def _gen_random_string(self, length: int) -> str:
         """
         Generate a random string of the specified length.
         Arguments:
@@ -209,7 +209,7 @@ class Coordinator:
         """
         return ''.join(SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(length))
 
-    def __wait_for_ingestion(self, props: Properties) -> None:
+    def _wait_for_ingestion(self, props: Properties) -> None:
         """
         Wait for the ingestion service to be ready.
         """
