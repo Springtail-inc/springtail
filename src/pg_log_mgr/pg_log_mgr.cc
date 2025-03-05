@@ -228,7 +228,7 @@ namespace springtail::pg_log_mgr {
         }
 
         while (!_shutdown) {
-            std::vector<uint32_t> table_ids;
+            std::set<uint32_t> table_ids;
 
             // block on redis table sync queue w/timeout for shutdown
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Waiting for table sync queue");
@@ -239,17 +239,17 @@ namespace springtail::pg_log_mgr {
 
             // populate the tables to copy; check for more work
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Table sync queue: {}", table_id_ptr->c_str());
-            table_ids.push_back(strtol(table_id_ptr->c_str(), nullptr, 10));
+            table_ids.insert(strtol(table_id_ptr->c_str(), nullptr, 10));
             while (_redis_sync_queue.size() > 0) {
                 table_id_ptr = _redis_sync_queue.pop(REDIS_WORKER_ID, 1);
                 if (table_id_ptr == nullptr) {
                     break;
                 }
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Table sync queue: {}", table_id_ptr->c_str());
-                table_ids.push_back(strtol(table_id_ptr->c_str(), nullptr, 10));
+                table_ids.insert(strtol(table_id_ptr->c_str(), nullptr, 10));
             }
 
-            if (table_ids.size() == 0) {
+            if (table_ids.empty()) {
                 continue;
             }
 
@@ -264,7 +264,7 @@ namespace springtail::pg_log_mgr {
     }
 
     void
-    PgLogMgr::_do_table_copies(std::optional<std::vector<uint32_t>> table_ids)
+    PgLogMgr::_do_table_copies(std::optional<std::set<uint32_t>> table_ids)
     {
         // set state to sync stall, make sure we are in the running or startup sync state first
         _internal_state.wait_and_set({STATE_RUNNING, STATE_STARTUP_SYNC}, STATE_SYNC_STALL);

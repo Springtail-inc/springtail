@@ -888,7 +888,7 @@ namespace springtail
     std::vector<PgCopyResultPtr>
     PgCopyTable::copy_tables(uint64_t db_id,
                              uint64_t xid,
-                             std::vector<uint32_t> table_oids)
+                             const std::set<uint32_t> &table_oids)
     {
         return _internal_copy(db_id, xid, std::nullopt, std::nullopt, table_oids);
     }
@@ -1094,7 +1094,7 @@ namespace springtail
                                 uint64_t target_xid,
                                 std::optional<std::string> schema_name,
                                 std::optional<std::pair<std::string, std::string>> schema_table,
-                                std::optional<std::vector<uint32_t>> table_tids,
+                                std::optional<std::set<uint32_t>> table_tids,
                                 std::optional<nlohmann::json> include_json)
     {
         CopyQueuePtr copy_queue = std::make_shared<CopyQueue>();
