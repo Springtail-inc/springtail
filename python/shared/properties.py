@@ -4,6 +4,7 @@ import sys
 import os
 import time
 import logging
+from typing import Optional
 from common import parse_bool
 
 class Properties:
@@ -177,6 +178,14 @@ class Properties:
 
         return config
 
+    def get_otel_config(self) -> dict:
+        """Return the OpenTelemetry configuration."""
+        system_config = self.get_system_config()
+        if 'otel' not in system_config:
+            raise Exception('otel not found in system settings')
+        otel = system_config['otel']
+        return otel
+
     def get_mount_path(self) -> str:
         """Return the mount point for the file system."""
         return os.environ.get('MOUNT_POINT')
@@ -332,6 +341,11 @@ class Properties:
         """Return the hostname for the given type."""
         key = self.db_instance_id + ':instance_config'
         return self.redis.hget(key, f'hostname:{type}')
+
+    def get_db_states(self) -> dict:
+        """Return a dictionary of database states."""
+        key = self.db_instance_id + ':instance_state'
+        return self.redis.hgetall(key)
 
     def set_db_state(self, dbname : str, state :str) -> None:
         """Set the state of a database, use cautiously."""

@@ -33,7 +33,7 @@ class Scheduler:
 
     def __init__(self,
         props: Properties,
-        service_name : str,
+        service_name : Optional[str],
         production : Optional[Production] = None,
         allowed_timeout_secs: int = 15
     ):
@@ -53,9 +53,10 @@ class Scheduler:
         self.liveness_hash = props.get_liveness_hash()
         self.liveness_pubsub = props.get_liveness_notification_pubsub()
         self.components: Dict[str, Component] = {}
-        self.logger = logging.getLogger("Scheduler")
+        self.logger = logging.getLogger("coordinator")
         self.timeouts = {}
         self.allowed_timeout = allowed_timeout_secs * 1000
+        self.db_states = {}
 
         # Setup pubsub for liveness notifications
         self.pubsub = self.redis.pubsub(ignore_subscribe_messages=True)
@@ -67,7 +68,7 @@ class Scheduler:
         """Register a new component with the scheduler"""
         self.components[component.get_id()] = component
         component.set_startup_order(startup_order)
-        self.logger.info(f"Registered component {component.name}")
+        self.logger.info(f"Scheduler registered component {component.name}")
 
     def start_all(self) -> bool:
         """
@@ -132,6 +133,21 @@ class Scheduler:
             return False
 
         return self.start_all()
+
+    def __track_db_state_changes(self) -> None:
+        """
+        Track database state changes
+        """
+        states = self.props.get_db_states()
+        for id, state in states.items():
+            if id not in self.db_states or self.db_states[id] != state:
+                self.logger.info(f"DB state changed for {id}: {state}", extra={'db_id': id})
+                attrs = {'db_id': id, 'new_state': state, 'old_state': self.db_states.get(id, 'service_startup')}
+
+                if self.production:
+                    self.production.send_sns('db_state_change', attrs=attrs)
+
+                self.db_states[id] = state
 
     def __check_pubsub(self) -> bool:
         """
@@ -281,6 +297,9 @@ class Scheduler:
             try:
                 # get the coordinator state
                 self.__check_coordinator_state()
+
+                # track database state changes
+                self.__track_db_state_changes()
 
                 # check if shutdown event is set, if so, break
                 if self.shutdown_event.is_set():
