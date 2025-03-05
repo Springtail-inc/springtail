@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/json.hh>
 #include <common/redis.hh>
 #include <proxy/database.hh>
@@ -15,7 +15,7 @@ namespace {
     protected:
         static void SetUpTestSuite()
         {
-            springtail_init();
+            springtail_init_test();
 
             DatabaseMgr::get_instance()->init();
 
@@ -28,7 +28,7 @@ namespace {
         static void TearDownTestSuite()
         {
             DatabaseMgr::shutdown();
-            RedisMgr::shutdown();
+            springtail_shutdown();
         }
         static inline RedisClientPtr _config_client;
         static inline RedisClientPtr _data_client;

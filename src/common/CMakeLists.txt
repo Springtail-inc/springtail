@@ -4,15 +4,13 @@ find_package(GTest CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(c-ares CONFIG REQUIRED)
 find_package(opentelemetry-cpp CONFIG REQUIRED)
-find_package(gRPC CONFIG REQUIRED)
 find_package(PostgreSQL REQUIRED)
 
 set(COMMON_LIB_SOURCES
   coordinator.cc
-  common.cc
+  init.cc
   dns_resolver.cc
   exception.cc
-  grpc_server_manager.cc
   logging.cc
   properties.cc
   redis.cc
@@ -31,17 +29,17 @@ target_link_libraries(springtail_common
          spdlog::spdlog
          fmt::fmt
          redis++::redis++_static
-	       nlohmann_json::nlohmann_json
+         nlohmann_json::nlohmann_json
          c-ares::cares
-	 opentelemetry-cpp::api
-	 opentelemetry-cpp::sdk
-	 opentelemetry-cpp::trace
-	 opentelemetry-cpp::metrics
-	 opentelemetry-cpp::ostream_span_exporter
-	 opentelemetry-cpp::otlp_grpc_client
-	 opentelemetry-cpp::otlp_grpc_exporter
-	 opentelemetry-cpp::otlp_grpc_metrics_exporter
-   opentelemetry-cpp::otlp_grpc_log_record_exporter
+         opentelemetry-cpp::api
+         opentelemetry-cpp::sdk
+         opentelemetry-cpp::trace
+         opentelemetry-cpp::metrics
+         opentelemetry-cpp::ostream_span_exporter
+         opentelemetry-cpp::otlp_grpc_client
+         opentelemetry-cpp::otlp_grpc_exporter
+         opentelemetry-cpp::otlp_grpc_metrics_exporter
+         opentelemetry-cpp::otlp_grpc_log_record_exporter
 )
 
 add_executable(test_thread test/test_thread.cc)

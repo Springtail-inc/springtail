@@ -1,10 +1,8 @@
 #pragma once
 
 #include <memory>
-#include <fstream>
 #include <filesystem>
 #include <map>
-#include <vector>
 
 #include <opentelemetry/metrics/meter.h>
 #include <opentelemetry/metrics/provider.h>
@@ -95,8 +93,7 @@ namespace springtail::pg_log_mgr {
             Batch(uint64_t db_id, int32_t pg_xid, const CommitterQueuePtr committer_queue)
                 : _db(db_id), _pg_xid(pg_xid), _committer_queue(committer_queue)
             {
-                auto provider = opentelemetry::trace::Provider::GetTracerProvider();
-                auto tracer = provider->GetTracer("PgLogReader");
+                auto tracer = tracing::tracer("PgLogReader");
                 _span = tracer->StartSpan("Transaction");
                 _span->SetAttribute("pg_xid", pg_xid);
             }

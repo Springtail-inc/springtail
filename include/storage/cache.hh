@@ -1038,6 +1038,11 @@ namespace springtail {
                 return !_p;
             }
 
+            void evict() {
+                _c->evict(_p);
+                _p.reset();
+            }
+
         protected:
             friend StorageCache;
 
@@ -1102,6 +1107,11 @@ namespace springtail {
              * against the page when the page is evicted or flush_file() is called.
              */
             void put(PagePtr page, std::function<bool(std::shared_ptr<Page>)> flush_callback);
+
+            /**
+             * Evicts a dirty page from the cache without writing it's contents to disk.
+             */
+            void evict(PagePtr page);
 
             /**
              * Flushes all of the pages associated with a file that have a registered flush

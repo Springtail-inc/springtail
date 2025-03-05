@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <pg_repl/libpq_connection.hh>
 #include <proxy/database.hh>
 #include <proxy/user_mgr.hh>
@@ -23,7 +23,7 @@ namespace {
     protected:
         static void SetUpTestSuite()
         {
-            springtail_init();
+            springtail_init_test();
 
             pg_proxy::DatabaseMgr::get_instance()->init();
             pg_proxy::UserMgr *user_mgr = pg_proxy::UserMgr::get_instance();
@@ -43,6 +43,7 @@ namespace {
             pg_proxy::UserMgr::shutdown();
             pg_proxy::DatabaseMgr::shutdown();
             _db_conn.disconnect();
+            springtail_shutdown();
         }
 
         void SetUp() override

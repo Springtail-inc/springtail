@@ -2,12 +2,10 @@
 
 #include <atomic>
 #include <memory>
-#include <string>
 #include <map>
 #include <set>
 #include <filesystem>
 #include <mutex>
-#include <shared_mutex>
 #include <unordered_map>
 
 #include <openssl/ssl.h>
@@ -117,6 +115,12 @@ namespace springtail::pg_proxy {
 
         /** Log disconnect */
         void log_disconnect(SessionPtr session);
+
+        void notify_shutdown()
+        {
+            _shutdown = true;
+            _wake_event_loop();
+        }
 
     protected:
 

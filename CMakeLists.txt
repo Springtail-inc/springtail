@@ -87,6 +87,7 @@ endif()
 set(MODULES
   benchmarks
   common
+  grpc
   redis
   storage
   pg_repl

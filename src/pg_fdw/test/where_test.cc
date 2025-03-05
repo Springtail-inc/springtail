@@ -1,7 +1,7 @@
 #include "common/constants.hh"
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
 
@@ -26,26 +26,14 @@ namespace {
         // Called once per testsuite.  Create a table and populate it with data
         static void SetUpTestSuite()
         {
-            struct Initializer
-            {
-                test::Services _s;
+            auto service_runners = test::get_services(true, true, true);
+            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+            runners.emplace();
+            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
 
-                Initializer() : _s{true, true, true}
-                {
-                    springtail_init();
-                    // call springtail_init() here to avoid call in fdw_init()
-                    PgFdwMgr::fdw_init();
-                    _s.init();
-                }
-                Initializer(const Initializer&) = delete;
-                Initializer& operator=(const Initializer&) = delete;
-                ~Initializer()
-                {
-                    _s.shutdown();
-                }
+            springtail_init_test(runners);
 
-            };
-            static Initializer init;
+            PgFdwMgr::fdw_init(nullptr, false);
 
             _columns = {
                 {"col1", static_cast<uint8_t>(SchemaType::INT32), INT4OID, std::nullopt, 1, 0, false, true, false},
@@ -108,6 +96,10 @@ namespace {
             TableMgr::get_instance()->update_roots(_db_id, _tid, target_xid, metadata);
 
             _table_xid = target_xid+1;
+        }
+
+        static void TearDownTestSuite() {
+            springtail_shutdown();
         }
 
         // Pre test setup
@@ -179,7 +171,7 @@ namespace {
         }
 
         static void
-        _create_index(uint64_t db_id, uint64_t table_id, uint64_t xid) 
+        _create_index(uint64_t db_id, uint64_t table_id, uint64_t xid)
         {
 
             std::vector<PgMsgSchemaIndexColumn> columns;
@@ -365,7 +357,7 @@ namespace {
             mgr->fdw_begin_scan(state, _target_list, qual_list, nullptr);
 
             if (index_id == std::numeric_limits<uint32_t>::max()) {
-                // a full scan is expected 
+                // a full scan is expected
                 ASSERT_EQ(state->index.has_value(), false);
             } else {
                 // the index expected to be used for the scan
@@ -626,7 +618,7 @@ namespace {
         // should return all data
         ASSERT_EQ(rows, _data.size());
         rows = test(LESS_THAN, true, 1);
-        // should be empty 
+        // should be empty
         ASSERT_EQ(rows, 0);
 
         test(LESS_THAN_EQUALS, false, 2);
