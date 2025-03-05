@@ -1,8 +1,9 @@
 #include <iostream>
 
 #include <boost/program_options.hpp>
-#include <common/common.hh>
 #include <unistd.h>
+
+#include <common/init.hh>
 #include <xid_mgr/xid_mgr_server.hh>
 
 using namespace springtail;
@@ -45,20 +46,12 @@ main(int argc, char* argv[])
     if (vm.count("daemonize")) {
         pidfile = "xid_mgr.pid";
     }
-    springtail_init("xid_mgr", pidfile);
 
-    auto* server = xid_mgr::XidMgrServer::get_instance();
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<xid_mgr::XidMgrRunner>(vm.count("xid") && vm.count("dbid"), db_id, starting_xid));
 
-    if (vm.count("xid") && vm.count("dbid")) {
-        // note: since the defaults are set this always commits the starting_xid of 2 for db_id 1
-        server->commit_xid(db_id, starting_xid, false);
-    }
-
-    // register the SIGINT handler
-    std::signal(SIGINT, handle_sigint);
-
-    // start the server
-    server->startup();
+    springtail_init_daemon(handle_sigint, runners, "xid_mgr", pidfile);
 
     // Block until SIGINT is received. If any other signal wakes the process,
     // pause() will return and the loop will continue until shutdown_requested is set.
@@ -67,6 +60,6 @@ main(int argc, char* argv[])
         pause();
     }
 
-    server->shutdown();
+    springtail_shutdown();
     return 0;
 }

@@ -1,7 +1,7 @@
 #include <boost/program_options.hpp>
 
 // springtail includes
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/properties.hh>
 
 #include <pg_log_mgr/pg_log_coordinator.hh>
@@ -20,8 +20,6 @@ namespace {
         if (log_co != nullptr) {
             log_co->notify_shutdown();
         }
-        sys_tbl_mgr::Client::shutdown();
-        XidMgrClient::shutdown();
     }
 }
 
@@ -48,20 +46,20 @@ int main(int argc, char *argv[])
     if (vm.count("daemonize")) {
         pidfile = "pg_log_mgr.pid";
     }
-    springtail::springtail_init("pg_log_mgr", pidfile);
 
-    pg_log_mgr::PgLogCoordinator *log_co = pg_log_mgr::PgLogCoordinator::get_instance();
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<pg_log_mgr::PgLogCoordinatorRunner>());
+    runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
+    runners->emplace_back(std::make_unique<GrpcClientRunner<sys_tbl_mgr::Client>>());
 
-    // register the SIGINT handler
-    std::signal(SIGINT, handle_sigint);
+    springtail_init_daemon(handle_sigint, runners, "pg_log_mgr", pidfile);
 
-    log_co->init();
+    pg_log_mgr::PgLogCoordinator::get_instance()->wait_shutdown();
 
-    log_co->wait_shutdown();
-
-    pg_log_mgr::PgLogCoordinator::shutdown();
-    sys_tbl_mgr::Client::shutdown();
     XidMgrClient::shutdown();
+
+    springtail_shutdown();
 
     return 0;
 }

@@ -1,4 +1,4 @@
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/constants.hh>
 
 #include <storage/field.hh>
@@ -17,7 +17,7 @@ main(int argc,
     }
 
     // no logging
-    springtail_init(std::nullopt, std::nullopt, LOG_NONE);
+    springtail_init(std::nullopt, false, std::nullopt, LOG_NONE);
 
     // takes the database ID from the first argument
     uint64_t db_id = std::stoull(argv[1]);
@@ -45,4 +45,5 @@ main(int argc,
             std::cout << FieldTuple(fields, row).to_string() << std::endl;
         }
     }
+    springtail_shutdown();
 }

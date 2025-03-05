@@ -1,11 +1,10 @@
 #include <filesystem>
-#include <iostream>
 #include <cstdio>
 #include <memory>
 
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/json.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
@@ -77,10 +76,20 @@ namespace {
                 GTEST_SKIP() << "Postgres replica config problem, skipping test";
             }
 
-            springtail_init();
-            RedisMgr::get_instance();
-            // start XidMgr needed by PgDDLMgr
-            _services.init();
+            auto service_runners = test::get_services(true, false, true);
+            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+            runners.emplace();
+            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
+
+            // Add PgDDLMgrRunner
+            std::string username{"springtail"};
+            std::string password{"springtail"};
+            std::string socket_hostname{"/var/run/postgresql"};
+            runners->emplace_back(new PgDDLMgrRunner(username, password, socket_hostname));
+
+            springtail_init_test(runners);
+
+            _fdw_id_str = Properties::get_fdw_id();
 
             // set schemas to public in config
             RedisClientPtr redis_config_client;
@@ -91,11 +100,6 @@ namespace {
             std::string key = std::to_string(Properties::get_instance()->get_db_instance_id()) + ":db_config";
             redis_config_client->hset(key, _db_id_str, nlohmann::to_string(db_config));
 
-            // create and start PgDDLMgr
-            std::string username{"springtail"};
-            std::string password{"springtail"};
-            std::string socket_hostname{"/var/run/postgresql"};
-            PgDDLMgr::get_instance()->init(_fdw_id_str, username, password, socket_hostname);
             _pg_ddl_mgr_thread = std::thread(&PgDDLMgr::run, PgDDLMgr::get_instance());
 
             // set up connection to the database
@@ -113,10 +117,8 @@ namespace {
             if (_pg_ddl_mgr_thread.has_value()) {
                 _pg_ddl_mgr_thread.value().join();
             }
-            PgDDLMgr::shutdown();
-            _services.shutdown();
-            RedisMgr::shutdown();
-            Properties::shutdown();
+
+            springtail_shutdown();
         }
     protected:
         static void _create_replica_connection() {
@@ -147,7 +149,6 @@ namespace {
         }
 
         static inline std::optional<std::thread> _pg_ddl_mgr_thread;
-        static inline test::Services _services{true, false, false};
         static inline std::string _db_id_str{"1"};
         static inline std::string _fdw_id_str{"1"};
         static inline LibPqConnectionPtr _conn;
