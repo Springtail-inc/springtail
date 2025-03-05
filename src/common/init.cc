@@ -103,7 +103,6 @@ void springtail_init_daemon(const std::optional<std::vector<std::unique_ptr<Serv
     service_runners.emplace_back(std::make_unique<TracingRunner>(log_filename));
     service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesCacheRunner>());
-    service_runners.emplace_back(std::make_unique<TermSignalRunner>());
 
     if (runners.has_value()) {
         std::vector<std::unique_ptr<ServiceRunner>> *non_const_runners = const_cast<std::vector<std::unique_ptr<ServiceRunner>> *>(&runners.value());
@@ -154,18 +153,22 @@ springtail_shutdown()
 void
 springtail_daemon_run()
 {
+    std::vector<int> signals{SIGINT, SIGTERM, SIGQUIT, SIGUSR1, SIGUSR2};
+
+    // set signal handlers
+    for (int sig : signals) {
+        std::signal(sig, handle_sigint);
+    }
+
+    // wait for shutdown signal
     while (!shutdown_flag) {
         shutdown_flag.wait(false);
     }
-}
 
-bool
-TermSignalRunner::start()
-{
-    for (int sig : _signals) {
-        std::signal(sig, handle_sigint);
+    // restore signal handlers to default
+    for (int sig : signals) {
+        std::signal(sig, SIG_DFL);
     }
-    return true;
 }
 
 };  // namespace springtail::init

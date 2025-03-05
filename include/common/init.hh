@@ -128,24 +128,6 @@ private:
     const std::optional<std::string> &_name;
 };
 
-// Termination signals handling init
-class TermSignalRunner : public ServiceRunner {
-public:
-    TermSignalRunner() : ServiceRunner("TermSignal") {}
-
-    bool start() override;
-
-    void stop() override
-    {
-        for (int sig : _signals) {
-            std::signal(sig, SIG_DFL);
-        }
-    }
-
-private:
-    const std::vector<int> _signals{SIGINT, SIGTERM, SIGQUIT, SIGUSR1, SIGUSR2};
-};
-
 // RedisMgr init
 class RedisMgrRunner : public ServiceRunner {
 public:

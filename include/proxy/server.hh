@@ -161,4 +161,26 @@ namespace springtail::pg_proxy {
     };
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
 
+    class ProxyRunner : public ServiceRunner {
+    public:
+        ProxyRunner(bool force_shadow, bool force_primary) :
+            ServiceRunner("ProxyServer"),
+            _force_shadow(force_shadow),
+            _force_primary(force_primary) {}
+
+        bool start() override;
+
+        void stop() override {
+            ProxyServer *server = ProxyServer::get_instance();
+            server->notify_shutdown();
+            _proxy_thread.join();
+            ProxyServer::shutdown();
+        }
+    private:
+        std::thread _proxy_thread;
+        bool _force_shadow{false};
+        bool _force_primary{false};
+    };
+
+
 } // namespace springtail::pg_proxy

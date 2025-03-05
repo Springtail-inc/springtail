@@ -17,10 +17,6 @@ namespace springtail::pg_log_mgr {
         std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
         redis_cache->remove_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
 
-        // stop committer thread
-        _committer->shutdown();
-        _committer_thread.join();
-
         // shut down all log managers
         std::unique_lock lock(_mutex);
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Shutting down {} log mgrs", _log_mgrs.size());
@@ -29,6 +25,10 @@ namespace springtail::pg_log_mgr {
             lm.second->join();
         }
         lock.unlock();
+
+        // stop committer thread
+        _committer->shutdown();
+        _committer_thread.join();
     }
 
     PgLogCoordinator::PgLogCoordinator()
@@ -78,6 +78,10 @@ namespace springtail::pg_log_mgr {
             SPDLOG_ERROR("Error when reading pg_log_mgr config");
         }
 
+        // Start the committer thread
+        _committer = std::make_shared<springtail::committer::Committer>(1, _committer_queue);
+        _committer_thread = std::thread(&springtail::committer::Committer::run, _committer);
+
         // get instance id
         _db_instance_id = Properties::get_db_instance_id();
 
@@ -89,10 +93,6 @@ namespace springtail::pg_log_mgr {
             uint64_t db_id = db.first;
             _add_database(db_id);
         }
-
-        // Start the committer thread
-        _committer = std::make_shared<springtail::committer::Committer>(1, _committer_queue);
-        _committer_thread = std::thread(&springtail::committer::Committer::run, _committer);
     }
 
     void

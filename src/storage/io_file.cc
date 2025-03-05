@@ -180,7 +180,6 @@ namespace springtail {
         // set ownership (user r/w; group r; other read)
         mode_t owner = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
 
-        SPDLOG_INFO("Opening file: {}", path);
         _fd = ::open(path.c_str(), fmode, owner);
         if (_fd == -1) {
             SPDLOG_ERROR("Error opening file: path={}, errno={}", path.c_str(), errno);
