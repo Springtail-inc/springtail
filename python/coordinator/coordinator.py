@@ -28,27 +28,221 @@ from production import Production
 from xid_mgr import XidMgrClient
 from sys_tbl_mgr import SysTblMgrClient
 
+from otel_logger import init_logging
 
-def check_properties(props: Properties) -> None:
-    """
-    Check the properties; check paths exist.
-    Arguments:
-        props -- the properties object
-    """
-    mount_path = props.get_mount_path()
-    log_path = props.get_log_path()
+class Coordinator:
+    """The Coordinator class to manage the components of the system."""
 
-    # check mount path exists
-    if not mount_path or not os.path.exists(mount_path):
-        raise ValueError(f"Invalid mount path: {mount_path}")
+    def __init__(self,
+                 props: Properties,
+                 debug: bool,
+                 is_production: bool,
+                 install_path: str,
+                 service_name: str):
+        """
+        Initialize the Coordinator.
+        Arguments:
+            props -- the properties object
+            debug -- the debug flag
+            is_production -- the production flag
+            install_path -- the installation path
+            service_name -- the name of the service
+        """
+        self.props = props
+        self.__check_properties(props)
 
-    # check log path exists
-    if not log_path or not os.path.exists(log_path):
-        raise ValueError(f"Invalid log path: {log_path}")
+        # Configure logging
+        init_logging(props.get_otel_config(), props.get_log_path(), debug)
+        self.logger = logging.getLogger("coordinator")
 
-    # check log path is writable
-    if not ((os.stat(log_path).st_mode & 0o777) & 0o002):
-        raise ValueError(f"Log path is not writable: {log_path}")
+        # Get the service type
+        self.service_name = service_name
+        if not self.service_name:
+            self.service_name = os.environ.get('SERVICE_NAME')
+            if not self.service_name:
+                self.logger.error("Service name not provided")
+                raise ValueError("Service name not provided")
+
+        # Get the installation path and setup bin dir
+        self.install_path = install_path
+        self.bin_dir = os.path.join(self.install_path, 'bin/system')
+        if not os.path.exists(self.bin_dir):
+            self.logger.error(f"Invalid binary directory: {self.bin_dir}")
+            raise ValueError(f"Invalid binary directory: {self.bin_dir}")
+
+        # Check the properties for production
+        self.production = None
+        if is_production:
+            self.logger.debug("Checking properties for production")
+            self.production = Production(self.install_path)
+
+    def startup(self):
+        """
+        Start the coordinator.
+
+        Blocks while running.
+        """
+        state = self.props.get_coordinator_state()
+        self.logger.info(f"Coordinator state: {state}")
+
+        if self.production:
+            # Send SNS message
+            self.production.send_sns('startup')
+
+            # Install binaries
+            try:
+                if state == CoordinatorState.STARTUP:
+                    self.logger.debug("Installing binaries")
+                    self.production.install_binaries()
+            except Exception as e:
+                raise ValueError("Failed to install binaries: " + str(e))
+
+        # Create scheduler
+        self.logger.debug("Starting scheduler")
+        self.scheduler = Scheduler(self.props, self.service_name, self.production)
+
+        # Create component factory
+        self.logger.debug(f"Creating component factory with bin_dir={self.bin_dir}")
+        factory = ComponentFactory(self.bin_dir, props.get_pid_path())
+
+        # Register components
+        self.logger.info(f"Starting {self.service_name} service")
+
+        if self.service_name == "ingestion":
+            self.scheduler.register_component(factory.create_xid_mgr_daemon(), 1)
+            self.scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 2)
+            self.scheduler.register_component(factory.create_log_mgr_daemon(), 3)
+
+        elif self.service_name == "fdw":
+            try:
+                if self.production:
+                    self.production.install_pgfdw()
+            except Exception as e:
+                raise ValueError("Failed to install postgres_fdw: " + str(e))
+
+            # startup postgres if not running
+            postgres = factory.create_postgres()
+            if not postgres.is_running():
+                postgres.start()
+
+            # create the ddl user
+            ddl_password = self.__gen_random_string(16)
+            postgres.create_user('ddl_user', ddl_password, True, True)
+
+            # wait for ingestion to be ready
+            self.__wait_for_ingestion(self.props)
+
+            # For testing uncomment lines below since they are needed for ddl daemon
+            # but in production they should be running elsewhere
+            # scheduler.register_component(factory.create_xid_mgr_daemon(), 1)
+            # scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 2)
+            self.scheduler.register_component(postgres, 3)
+            self.scheduler.register_component(factory.create_ddl_daemon('ddl_user', ddl_password), 4)
+
+        elif self.service_name == "proxy":
+            self.scheduler.register_component(factory.create_proxy(), 1)
+
+        else:
+            self.logger.error(f"Invalid service type: {self.service_name}")
+            if self.production:
+                self.production.send_sns('shutdown')
+            raise ValueError(f"Invalid service type: {self.service_name}; must be one of: ingestion, fdw, proxy")
+
+        # Start all components
+        if not self.scheduler.start_all():
+            self.logger.error("Failed to start all components")
+            if self.production:
+                self.production.send_sns('shutdown')
+            raise ValueError("Failed to start all components")
+
+        self.logger.info("All components started successfully")
+
+        # Monitor for timeouts (this could be in a separate thread)
+        # this will exit on a SIGINT or SIGTERM
+        self.logger.debug("Scheduler entering monitor loop")
+        self.scheduler.monitor_timeouts()
+
+        # shutdown all components
+        self.logger.info("Shutting down all components")
+        self.scheduler.shutdown_all()
+
+        if self.production:
+            self.production.send_sns('shutdown')
+
+    def shutdown(self, signum: int):
+        """
+        Shutdown the coordinator.
+        """
+        if self.scheduler:
+            self.logger.info(f"Received signal {signum}, shutting down...")
+            self.scheduler.shutdown()
+
+    def __check_properties(self, props: Properties) -> None:
+        """
+        Check the properties; check paths exist.
+        Arguments:
+            props -- the properties object
+        """
+        mount_path = props.get_mount_path()
+        log_path = props.get_log_path()
+
+        # check mount path exists
+        if not mount_path or not os.path.exists(mount_path):
+            raise ValueError(f"Invalid mount path: {mount_path}")
+
+        # check log path exists
+        if not log_path or not os.path.exists(log_path):
+            raise ValueError(f"Invalid log path: {log_path}")
+
+        # check log path is writable
+        if not ((os.stat(log_path).st_mode & 0o777) & 0o002):
+            raise ValueError(f"Log path is not writable: {log_path}")
+
+
+    def __gen_random_string(self, length: int) -> str:
+        """
+        Generate a random string of the specified length.
+        Arguments:
+            length -- the length of the string
+        Returns:
+            a random string of the specified length
+        """
+        return ''.join(SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(length))
+
+    def __wait_for_ingestion(self, props: Properties) -> None:
+        """
+        Wait for the ingestion service to be ready.
+        """
+        host = None
+        while True:
+            host = props.get_hostname('ingestion')
+            if host is not None:
+                break
+            time.sleep(1)
+
+        system_config = props.get_system_config()
+        xid_port = system_config['xid_mgr']['rpc_config']['server_port']
+        sys_tbl_port = system_config['sys_tbl_mgr']['rpc_config']['server_port']
+
+        waiting = True
+        while waiting:
+            try:
+                with XidMgrClient(host, xid_port) as client:
+                    client.ping()
+                    self.logger.info("XidManager is ready")
+                    waiting = False
+            except Exception as e:
+                continue
+
+        waiting = True
+        while waiting:
+            try:
+                with SysTblMgrClient(host, sys_tbl_port) as client:
+                    client.ping()
+                    self.logger.info("SysTblManager is ready")
+                    waiting = False
+            except Exception as e:
+                continue
 
 
 def parse_arguments():
@@ -64,17 +258,6 @@ def parse_arguments():
     # Parse the arguments and return them
     args = parser.parse_args()
     return args
-
-
-def gen_random_string(length: int) -> str:
-    """
-    Generate a random string of the specified length.
-    Arguments:
-        length -- the length of the string
-    Returns:
-        a random string of the specified length
-    """
-    return ''.join(SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(length))
 
 
 def setup_props(yaml_config: dict) -> Properties:
@@ -99,45 +282,7 @@ def setup_props(yaml_config: dict) -> Properties:
     if not props:
         raise ValueError("Failed to load properties")
 
-    check_properties(props)
-
     return props
-
-
-def wait_for_ingestion(props: Properties) -> None:
-    """
-    Wait for the ingestion service to be ready.
-    """
-    host = None
-    while True:
-        host = props.get_hostname('ingestion')
-        if host is not None:
-            break
-        time.sleep(1)
-
-    system_config = props.get_system_config()
-    xid_port = system_config['xid_mgr']['rpc_config']['server_port']
-    sys_tbl_port = system_config['sys_tbl_mgr']['rpc_config']['server_port']
-
-    waiting = True
-    while waiting:
-        try:
-            with XidMgrClient(host, xid_port) as client:
-                client.ping()
-                logger.info("XidManager is ready")
-                waiting = False
-        except Exception as e:
-            continue
-
-    waiting = True
-    while waiting:
-        try:
-            with SysTblMgrClient(host, sys_tbl_port) as client:
-                client.ping()
-                logger.info("SysTblManager is ready")
-                waiting = False
-        except Exception as e:
-            continue
 
 
 if __name__ == "__main__":
@@ -155,131 +300,14 @@ if __name__ == "__main__":
     # Load properties from the config file
     props = setup_props(yaml_config)
 
-    # Configure logging
-    log_path = props.get_log_path()
-
-    handlers = []
-    # Add a file handler to the logger for stdout and file output
-    if args.debug:
-        handlers.append(logging.StreamHandler(sys.stdout))
-    handlers.append(logging.FileHandler(os.path.join(log_path, 'coordinator.log')))
-
-    logging.basicConfig(format='%(asctime)s.%(msecs)03d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
-                        datefmt='%Y-%m-%d:%H:%M:%S',
-                        level=logging.DEBUG if args.debug else logging.INFO,
-                        handlers=handlers)
-
-    logger = logging.getLogger("Coordinator")
-
-    # Get the service type
-    service_name = args.service
-    if not service_name:
-        service_name = os.environ.get('SERVICE_NAME')
-        if not service_name:
-            raise ValueError("Service type not provided")
-
-    # get install path
-    install_path = yaml_config.get('install_dir')
-
-    # Check the properties for production
-    is_production = False
-    production = None
-
-    if yaml_config.get('production'):
-        logger.debug("Checking properties for production")
-        is_production = True
-        production = Production(install_path)
-        production.send_sns('startup')
-
-        state = props.get_coordinator_state()
-        logger.info(f"Coordinator state: {state}")
-
-        # Install binaries
-        try:
-            if state == CoordinatorState.STARTUP:
-                logger.debug("Installing binaries")
-                production.install_binaries()
-        except Exception as e:
-            raise ValueError("Failed to install binaries: " + str(e))
-
-    # Create scheduler
-    logger.debug("Starting scheduler")
-    scheduler = Scheduler(props, service_name, production)
+    coordinator = Coordinator(props, args.debug, yaml_config.get('is_production'), yaml_config.get('install_dir'), args.service)
 
     # Set up signal handlers
     def signal_handler(signum, frame):
-        if scheduler:
-            logger.info(f"Received signal {signum}, shutting down...")
-            scheduler.shutdown()
+        coordinator.shutdown(signum)
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # Create component factory
-    bin_dir = os.path.join(yaml_config.get('install_dir'), 'bin/system')
-    if not os.path.exists(bin_dir):
-        raise ValueError(f"Invalid binary directory: {bin_dir}")
+    coordinator.startup()
 
-    logger.debug(f"Creating component factory with bin_dir={bin_dir}")
-    factory = ComponentFactory(bin_dir, props.get_pid_path())
-
-    # Register components
-    logger.debug(f"Starting {service_name} service")
-
-    if service_name == "ingestion":
-        scheduler.register_component(factory.create_xid_mgr_daemon(), 1)
-        scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 2)
-        scheduler.register_component(factory.create_log_mgr_daemon(), 3)
-
-    elif service_name == "fdw":
-        try:
-            if production:
-                production.install_pgfdw()
-        except Exception as e:
-            raise ValueError("Failed to install postgres_fdw: " + str(e))
-
-        # startup postgres if not running
-        postgres = factory.create_postgres()
-        if not postgres.is_running():
-            postgres.start()
-
-        # create the ddl user
-        ddl_password = gen_random_string(16)
-        postgres.create_user('ddl_user', ddl_password, True, True)
-
-        # wait for ingestion to be ready
-        wait_for_ingestion(props)
-
-        # For testing uncomment lines below since they are needed for ddl daemon
-        # but in production they should be running elsewhere
-        # scheduler.register_component(factory.create_xid_mgr_daemon(), 1)
-        # scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 2)
-        scheduler.register_component(postgres, 3)
-        scheduler.register_component(factory.create_ddl_daemon('ddl_user', ddl_password), 4)
-
-    elif service_name == "proxy":
-        scheduler.register_component(factory.create_proxy(), 1)
-
-    else:
-        raise ValueError(f"Invalid service type: {service_name}; must be one of: ingestion, fdw, proxy")
-
-    # Start all components
-    if not scheduler.start_all():
-        logger.error("Failed to start all components")
-        if production:
-            production.send_sns('shutdown')
-        raise ValueError("Failed to start all components")
-
-    logger.info("All components started successfully")
-
-    # Monitor for timeouts (this could be in a separate thread)
-    # this will exit on a SIGINT or SIGTERM
-    logger.debug("Scheduler entering monitor loop")
-    scheduler.monitor_timeouts()
-
-    # shutdown all components
-    logger.debug("Shutting down all components")
-    scheduler.shutdown_all()
-
-    if production:
-        production.send_sns('shutdown')

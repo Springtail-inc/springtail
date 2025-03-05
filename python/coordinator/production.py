@@ -65,6 +65,8 @@ class Production:
         self.sns_attributes : Dict[str, Any] = self._extract_attributes()
         self.install_path: str = install_path
 
+        self.logger = logging.getLogger("coordinator")
+
         logging.getLogger('boto3').setLevel(logging.CRITICAL)
         logging.getLogger('botocore').setLevel(logging.CRITICAL)
         logging.getLogger('nose').setLevel(logging.CRITICAL)
@@ -91,7 +93,6 @@ class Production:
             str: path to the downloaded file, None if failed
         """
         s3 = boto3.client('s3')
-        logger = logging.getLogger("S3")
 
         try:
             self.send_sns('download_start')
@@ -104,13 +105,13 @@ class Production:
             )
 
             if 'Contents' not in response or not response['Contents']:
-                logger.warning(f"No objects found in {bucket}/{prefix}")
+                self.logger.warning(f"No objects found in {bucket}/{prefix}")
                 return None
 
             files = [obj['Key'] for obj in response['Contents']]
 
-            logger.debug(f"Found {len(response['Contents'])} objects in {prefix}")
-            logger.debug(f"Objects: {files}")
+            self.logger.debug(f"Found {len(response['Contents'])} objects in {prefix}")
+            self.logger.debug(f"Objects: {files}")
 
             # Sort by the YYYYMMDD portion of filename
             latest_file = sorted(
@@ -119,7 +120,7 @@ class Production:
                 reverse=True
             )[0]
 
-            logger.debug(f"Latest springtail file: {latest_file}")
+            self.logger.debug(f"Latest springtail file: {latest_file}")
 
             # download the file
             filename = os.path.join(local_path, os.path.basename(latest_file))
@@ -131,13 +132,13 @@ class Production:
 
         except ClientError as e:
             error_code = e.response['Error']['Code']
-            logging.error(f"Failed to get latest springtail file: {error_code}")
+            self.logger.error(f"Failed to get latest springtail file: {error_code}")
             print(f"Failed to get latest springtail file: {error_code}")
             self.send_sns('download_failed')
             sys.exit(1)
             return None
         except Exception as e:
-            logging.error(f"Failed to get latest springtail file: {str(e)}")
+            self.logger.error(f"Failed to get latest springtail file: {str(e)}")
             print(f"Failed todd get latest springtail file: {str(e)}")
             self.send_sns('download_failed')
             sys.exit(1)
@@ -164,7 +165,6 @@ class Production:
             bool: True if message was sent successfully, False otherwise
         """
         sns = boto3.client('sns')
-        logger = logging.getLogger("SNS")
 
         try:
             if attributes:
@@ -181,10 +181,10 @@ class Production:
 
         except ClientError as e:
             error_code = e.response['Error']['Code']
-            logger.error(f"Failed to send sns message: {error_code}")
+            self.logger.error(f"Failed to send sns message: {error_code}")
             return False
         except Exception as e:
-            logger.error(f"Failed to send sns message: {str(e)}")
+            self.logger.error(f"Failed to send sns message: {str(e)}")
             return False
 
 
@@ -200,7 +200,7 @@ class Production:
         if not s3_bucket:
             raise ValueError("S3_BUCKET environment variable not set")
 
-        logging.info(f"Downloading springtail binaries from {s3_bucket}/{S3_BIN_FOLDER} to {S3_DOWNLOAD_PATH}")
+        self.logger.info(f"Downloading springtail binaries from {s3_bucket}/{S3_BIN_FOLDER} to {S3_DOWNLOAD_PATH}")
 
         springtail_tgz = self.__download_s3_binaries(s3_bucket, S3_BIN_FOLDER, S3_DOWNLOAD_PATH)
 
@@ -215,11 +215,11 @@ class Production:
             # Install the binaries
             run_command('sudo', ['tar', 'xzf', springtail_tgz, '-C', self.install_path])
 
-            logging.info(f"Springtail binaries installed to {self.install_path}")
+            self.logger.info(f"Springtail binaries installed to {self.install_path}")
             self.send_sns('install_complete', version=os.path.basename(springtail_tgz))
 
         except Exception as e:
-            logging.error(f"Failed to install springtail binaries: {str(e)}")
+            self.logger.error(f"Failed to install springtail binaries: {str(e)}")
             self.send_sns('install_failed', version=os.path.basename(springtail_tgz))
             raise e
 
@@ -241,7 +241,7 @@ class Production:
         run_command('sudo', ['cp', str(os.path.join(sp_sharedir, 'springtail_fdw.control')), share_dir])
 
         # copy the shared library to the lib directory
-        logging.info(f"Copying shared library to the lib directory: {lib_dir}")
+        self.logger.info(f"Copying shared library to the lib directory: {lib_dir}")
         sp_libdir = os.path.join(self.install_path, 'lib')
         lib_dir = os.path.join(lib_dir.strip(), 'springtail_fdw.so')
         run_command('sudo', ['cp', os.path.join(sp_libdir, 'libspringtail_pg_fdw.so'), lib_dir])
@@ -266,7 +266,7 @@ class Production:
             run_command('sudo', ['cp', temp_file.name, env_file])
 
         # restart postgres
-        logging.info("Restarting postgres")
+        self.logger.info("Restarting postgres")
         run_command('sudo', ['service', 'postgresql', 'restart'])
         time.sleep(5)
 
@@ -300,7 +300,8 @@ class Production:
         self,
         type: str,
         component: str = "",
-        version: str = ""
+        version: str = "",
+        attrs: dict = {}
     ) -> None:
         """
         Send a message to the SNS topic.
@@ -318,6 +319,11 @@ class Production:
         attributes['epoch_ms'] = timestamp_ms
         attributes['timestamp'] = timestamp
         attributes['source'] = 'coordinator'
+
+        for k, v in attrs.items():
+            attributes[k] = v
+
+        msg = ""
 
         if type == 'startup':
             subject = f"Instance startup: {srn}, {service_name} @{timestamp}"
@@ -338,10 +344,15 @@ class Production:
         elif type == 'install_failed':
             subject = f"New version install failed: {srn}, {service_name} @{timestamp}"
             attributes['version'] = version
+        elif type == 'db_state_change':
+            subject = f"Database state change: {srn}, {service_name} @{timestamp}"
+            msg = f"\nState change: {attrs['old_state']} -> {attrs['new_state']}"
         else:
-            logging.error(f"Unknown SNS message type: {type}")
+            self.logger.error(f"Unknown SNS message type: {type}")
             return
 
-        message = f"{subject}\n\n{json.dumps(attributes)}"
+        message = f"{subject}{msg}\n\n{json.dumps(attributes)}"
+
+        self.logger.info(f"SNS message: {subject}")
 
         self.__send_sns_notification(self.topic_arn, subject, message, attributes)
