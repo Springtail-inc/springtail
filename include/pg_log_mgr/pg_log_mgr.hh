@@ -16,6 +16,7 @@
 
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_copy_table.hh>
+#include <pg_repl/table_sync_request.hh>
 
 #include <pg_log_mgr/pg_log_queue.hh>
 #include <pg_log_mgr/pg_log_writer.hh>
@@ -208,7 +209,7 @@ namespace springtail::pg_log_mgr {
         void _notify_xact_start_sync();
 
         //// Table copy
-        RedisQueue<std::string> _redis_sync_queue; ///< redis queue for table sync
+        RedisQueue<TableSyncRequest> _redis_sync_queue; ///< redis queue for table sync
         std::thread _table_copy_thread;            ///< table copy thread
 
         /** Do the table copies; return the results */

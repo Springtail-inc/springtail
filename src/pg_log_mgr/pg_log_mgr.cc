@@ -232,26 +232,22 @@ namespace springtail::pg_log_mgr {
 
             // block on redis table sync queue w/timeout for shutdown
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Waiting for table sync queue");
-            StringPtr table_id_ptr = _redis_sync_queue.pop(REDIS_WORKER_ID, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
-            if (table_id_ptr == nullptr) {
+            auto request = _redis_sync_queue.pop(REDIS_WORKER_ID, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+            if (request == nullptr) {
                 continue; // timeout, check for shutdown
             }
 
-            // populate the tables to copy; check for more work
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Table sync queue: {}", table_id_ptr->c_str());
-            table_ids.insert(strtol(table_id_ptr->c_str(), nullptr, 10));
-            while (_redis_sync_queue.size() > 0) {
-                table_id_ptr = _redis_sync_queue.pop(REDIS_WORKER_ID, 1);
-                if (table_id_ptr == nullptr) {
-                    break;
-                }
-                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Table sync queue: {}", table_id_ptr->c_str());
-                table_ids.insert(strtol(table_id_ptr->c_str(), nullptr, 10));
-            }
+            do {
+                // populate the tables to copy; check for more work
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Table sync queue: {}@{}:{}", request->table_id(),
+                                    request->xid().xid, request->xid().lsn);
+                table_ids.insert(request->table_id());
+                SyncTracker::get_instance()->mark_inflight(_db_id, request->table_id(), request->xid()); // shift from resyncing to inflight
 
-            if (table_ids.empty()) {
-                continue;
-            }
+                request = _redis_sync_queue.try_pop(REDIS_WORKER_ID);
+            } while (request != nullptr);
+
+            CHECK(!table_ids.empty());
 
             auto token_commit_worker = logging::set_context_variables({{"db_id", std::to_string(_db_id)}});
             // copy tables
@@ -267,7 +263,9 @@ namespace springtail::pg_log_mgr {
     PgLogMgr::_do_table_copies(std::optional<std::set<uint32_t>> table_ids)
     {
         // set state to sync stall, make sure we are in the running or startup sync state first
-        _internal_state.wait_and_set({STATE_RUNNING, STATE_STARTUP_SYNC}, STATE_SYNC_STALL);
+        // XXX blocked here if we get a second table sync while one is in-flight
+        _internal_state.wait_and_set({STATE_RUNNING, STATE_STARTUP_SYNC, STATE_REPLAYING},
+                                     STATE_SYNC_STALL);
 
         // notify xact handler to rollover log
         _notify_xact_start_sync();
