@@ -2,7 +2,7 @@
 
 #include <common/json.hh>
 #include <common/properties.hh>
-#include <common/grpc_server.hh>
+#include <grpc/grpc_server.hh>
 #include <nlohmann/json.hpp>
 #include <proto/write_cache.grpc.pb.h>
 #include <write_cache/extent_mapper.hh>

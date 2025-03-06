@@ -1,6 +1,6 @@
 #include <iostream>
 
-#include <common/grpc_server.hh>
+#include <grpc/grpc_server.hh>
 #include <xid_mgr/xid_mgr_server.hh>
 #include <xid_mgr/xid_mgr_service.hh>
 

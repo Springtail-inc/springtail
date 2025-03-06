@@ -4,7 +4,7 @@
 #include <limits>
 
 #include <common/constants.hh>
-#include <common/grpc_server.hh>
+#include <grpc/grpc_server.hh>
 #include <sys_tbl_mgr/exception.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/service.hh>
