@@ -155,15 +155,12 @@ TEST(ShmTest, BasicEviction) {
         std::ostringstream os;
         os << i << "." << i;
         auto b = c.insert(i, i+1, 100+i, os.str());
+        ASSERT_TRUE(b);
         if (i) {
             //keep accessing the first element
             auto r = c.find(0, 1, 100);
-            if (!r.has_value()) {
-                ASSERT_TRUE(r.has_value());
-            }
             ASSERT_TRUE(r.has_value());
         }
-        ASSERT_TRUE(b);
     }
 
     ASSERT_GT(c.size(), 100);
@@ -189,4 +186,33 @@ TEST(ShmTest, BasicEviction) {
         ASSERT_TRUE(r.has_value());
         ASSERT_EQ(os.str(), r.value());
     }
+
+    // do the same for the same db/tid
+    for (uint64_t i = 0; i != 10000; ++i) {
+        std::ostringstream os;
+        os << i;
+        auto b = c.insert(10000, 20000, 100+i, os.str());
+        ASSERT_TRUE(b);
+        if (i) {
+            //keep accessing the first element
+            auto r = c.find(10000, 20000, 100);
+            ASSERT_TRUE(r.has_value());
+        }
+    }
+
+    ASSERT_GT(c.size(), 100);
+    ASSERT_LT(c.size(), 10000);
+
+    // check the last 100 elements
+    for (uint64_t i = 10000-1; i != 9900; --i) {
+        std::ostringstream os;
+        os << i;
+        auto r = c.find(10000, 20000, 100+i);
+        ASSERT_TRUE(r.has_value());
+        ASSERT_EQ(os.str(), r.value());
+    }
+
+    // the first element must be present
+    r = c.find(10000, 20000, 100);
+    ASSERT_TRUE(r.has_value());
 }
