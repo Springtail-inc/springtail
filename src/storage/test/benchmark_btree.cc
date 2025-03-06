@@ -2,7 +2,7 @@
 
 #include <fmt/format.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/environment.hh>
 #include <common/threaded_test.hh>
 
@@ -147,7 +147,8 @@ BENCHMARK(BM_BTreeInsert)
 int main(int argc, char **argv) {
     benchmark::Initialize(&argc, argv);
     auto logging = LOG_NONE;
-    springtail_init(std::nullopt, std::nullopt, logging);
+    springtail_init(std::nullopt, false, std::nullopt, logging);
     benchmark::RunSpecifiedBenchmarks();
+    springtail_shutdown();
     return 0;
 }

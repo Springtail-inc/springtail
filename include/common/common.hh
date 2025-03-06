@@ -6,7 +6,6 @@
 #include <csignal>
 #include <cstdio>
 #include <deque>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -15,25 +14,6 @@
 #include <common/exception.hh>
 
 namespace springtail {
-    /**
-     * @brief Initialize the springtail system
-     * @param log_filename log filename override
-     * @param daemon_pid if set, daemonize the process and store the pid in the provided file
-     * @param logging_mask logging mask override
-     */
-    void springtail_init(const std::optional<std::string> &log_filename = std::nullopt,
-                         const std::optional<std::string> &daemon_pid = std::nullopt,
-                         const std::optional<uint32_t> &logging_mask = std::nullopt);
-
-    /**
-     * @brief Initialize the springtail system
-     * @param log_filename log filename override
-     * @param logging_mask logging mask override
-     */
-    void springtail_init(const std::string &log_filename,
-                         uint32_t logging_mask);
-
-
     /**
      * @brief Get integral value from enum
      * @tparam E enum type
@@ -89,8 +69,8 @@ namespace springtail {
          * @param outvec output vector of strings
          */
         static inline void
-        split_string(const std::string &delimiter,
-                     const std::string &string_value,
+        split_string(std::string_view delimiter,
+                     std::string_view string_value,
                      std::vector<std::string> &outvec)
         {
             size_t start_pos = 0, end_pos = 0;

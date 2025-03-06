@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 
@@ -12,7 +12,7 @@ namespace {
     class RedisPubSub_Test : public testing::TestWithParam<bool> {
     protected:
         static void SetUpTestSuite() {
-            springtail_init();
+            springtail_init_test();
 
             // See if redis is enabled
             try {
@@ -23,7 +23,7 @@ namespace {
             }
         }
         static void TearDownTestSuite() {
-            RedisMgr::get_instance()->shutdown();
+            springtail_shutdown();
         }
     protected:
         std::mutex _data_mutex;

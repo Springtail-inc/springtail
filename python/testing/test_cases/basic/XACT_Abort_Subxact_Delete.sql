@@ -1,4 +1,4 @@
-##test
+## test
 -- setup
 CREATE TABLE IF NOT EXISTS transaction_test_delete (
     id SERIAL PRIMARY KEY,
@@ -24,9 +24,11 @@ ROLLBACK TO SAVEPOINT sp3;
 DELETE FROM transaction_test_delete WHERE id = 3;
 
 COMMIT;
-##verify
+
+## verify
 -- verify
 SELECT * FROM transaction_test_delete ORDER BY id;
-##cleanup
+
+## cleanup
 -- cleanup
 DROP TABLE IF EXISTS transaction_test_delete;

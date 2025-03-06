@@ -2,7 +2,7 @@
 
 #include <fmt/format.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 
 #include <storage/field.hh>
 #include <storage/extent.hh>
@@ -117,7 +117,12 @@ int main(int argc, char **argv)
 
     std::cout << "searching for: " << val << " op: " << direction << std::endl;
 
-    springtail_init(std::nullopt, std::nullopt, 0);
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<SchemaMgrRunner>());
+    runners->emplace_back(std::make_unique<TableMgrRunner>());
+
+    springtail_init(runners, false, std::nullopt, 0);
 
     // convert operator to enum
     QualOpName op;
@@ -140,6 +145,8 @@ int main(int argc, char **argv)
 
     uint64_t db_id = 1;
     search(db_id, val, op);
+
+    springtail_shutdown();
 
     return 0;
 }

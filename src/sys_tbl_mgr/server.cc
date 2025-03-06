@@ -32,6 +32,7 @@ void
 Server::_internal_shutdown()
 {
     _grpc_server_manager.shutdown();
+    Service::shutdown();
 }
 
 }  // namespace springtail::sys_tbl_mgr

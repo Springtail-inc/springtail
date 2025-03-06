@@ -291,10 +291,12 @@ namespace springtail
          * @brief Start streaming
          *
          * @param LSN start at specified LSN, or latest if 0 (INVALID_LST)
+         * @param do_init flag to initialize settings
          * @throws PgStreamingError if connection is already streaming
          * @throws PgQueryError if replication command failed
+         * @throws PgReplicationSlotError if replication slot is lost (fatal error)
          */
-        void start_streaming(LSN_t LSN);
+        void start_streaming(LSN_t LSN, bool do_init);
 
         /**
          * @brief Stop streaming; close streaming connection
@@ -322,13 +324,11 @@ namespace springtail
 
         /**
          * @brief Create the replication slot
-         * @param export_snapshot export the snapshot
-         * @param temporary temporary slot; per session
+         * @return LSN of the slot
          * @throws PgStreamingError if streaming already started
          * @throws PgQueryError on query error
          */
-        void create_replication_slot(bool export_snapshot,
-                                     bool temporary);
+        LSN_t create_replication_slot();
 
         /**
          * @brief Drop the replication slot from the server

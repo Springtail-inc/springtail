@@ -25,6 +25,7 @@ target_include_directories(springtail_write_cache
 target_link_libraries(springtail_write_cache
     PUBLIC
     springtail_common
+    springtail_grpc
     proto_write_cache
     PRIVATE
     nlohmann_json::nlohmann_json

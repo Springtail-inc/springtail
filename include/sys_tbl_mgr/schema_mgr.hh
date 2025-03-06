@@ -4,6 +4,8 @@
 
 #include <common/constants.hh>
 #include <common/singleton.hh>
+#include <common/service_register.hh>
+
 #include <storage/schema.hh>
 #include <storage/xid.hh>
 
@@ -92,6 +94,24 @@ namespace springtail {
 
         /** Helper to convert schema column to map */
         std::map<uint32_t, SchemaColumn> _convert_columns(const std::vector<SchemaColumn> &columns);
+    };
+
+    class SchemaMgrRunner : public ServiceRunner {
+    public:
+        SchemaMgrRunner() : ServiceRunner("SchemaMgr") {}
+
+        ~SchemaMgrRunner() override = default;
+
+        bool start() override
+        {
+            SchemaMgr::get_instance();
+            return true;
+        }
+
+        void stop() override
+        {
+            SchemaMgr::shutdown();
+        }
     };
 
 }

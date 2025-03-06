@@ -75,6 +75,7 @@ namespace springtail {
                       const std::optional<std::string> &log_name = std::nullopt,
                       bool is_daemon = false);
 
+    void shutdown_logging();
 
     namespace logging {
         /** Internal call to get a logger based on log id */

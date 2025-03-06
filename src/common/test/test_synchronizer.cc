@@ -51,7 +51,7 @@ TEST_F(StateSynchronizerTest, WaitForStateMultiple) {
         sync.set(TestState::RUNNING);
     });
 
-    sync.wait_for_state({TestState::RUNNING});
+    sync.wait_for_state(TestState::RUNNING);
     EXPECT_EQ(sync.get(), TestState::RUNNING);
 
     t.join();

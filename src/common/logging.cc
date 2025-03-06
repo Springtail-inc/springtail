@@ -114,6 +114,8 @@ public:
         }
     }
 
+    static SpdlogSink spdlog_sink;
+
     void init_logging(const std::optional<uint32_t> &module_mask_opt,
                       const std::optional<std::string> &log_name,
                       bool is_daemon)
@@ -160,14 +162,14 @@ public:
             if (log_name_path.is_absolute()) {
                 log_path = log_name_path;
             } else {
-                log_path = log_path.parent_path() / log_name_path;
+                log_path = log_path / log_name_path;
             }
             log_path_str = log_path.string();
 
         } else {
             std::filesystem::path log_path{log_path_str};
             if (!log_path.has_extension()) {
-                log_path = log_path.parent_path() / "springtail.log";
+                log_path = log_path / "springtail.log";
                 log_path_str = log_path.string();
             }
         }
@@ -235,7 +237,14 @@ public:
         spdlog::set_default_logger(logger);
         spdlog::flush_every(std::chrono::seconds(3));
 
-        static SpdlogSink spdlog_sink;
         absl::AddLogSink(&spdlog_sink);
+    }
+
+    void shutdown_logging()
+    {
+        absl::FlushLogSinks();
+        absl::RemoveLogSink(&spdlog_sink);
+
+        spdlog::shutdown();
     }
 } // namespace springtail

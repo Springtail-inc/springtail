@@ -8,6 +8,7 @@
 #include <pg_repl/pg_msg_stream.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_types.hh>
+#include <pg_repl/table_sync_request.hh>
 #include <storage/xid.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/schema_mgr.hh>
@@ -40,6 +41,12 @@ namespace springtail::pg_log_mgr {
 
         // start the message processing thread
         _msg_thread = std::thread(&PgLogReader::_msg_worker, this);
+    }
+
+    PgLogReader::~PgLogReader()
+    {
+        _msg_queue.shutdown(true);
+        _msg_thread.join();
     }
 
     void
@@ -193,7 +200,7 @@ namespace springtail::pg_log_mgr {
             entry.extent = std::make_shared<Extent>(ExtentType{}, 0, entry.schema->row_size());
             entry.start_lsn = _lsn;
         }
-        
+
         // add the mutation to the batch
         auto &&row = entry.extent->append();
         if constexpr (T == PgMsgEnum::INSERT || T == PgMsgEnum::UPDATE) {
@@ -415,13 +422,14 @@ namespace springtail::pg_log_mgr {
                 nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
                 if (action.get<std::string>() == "resync") {
                     // mark the table as syncing to ensure we properly skip messages
-                    bool is_first = SyncTracker::get_instance()->mark_resync(_db, table_msg.oid);
+                    bool is_first = SyncTracker::get_instance()->mark_resync(_db, table_msg.oid, xidlsn);
 
                     // notify the PgLogParser to resync the table
                     auto key = fmt::format(redis::QUEUE_SYNC_TABLES,
                                            Properties::get_db_instance_id(), _db);
-                    RedisQueue<std::string> table_sync_queue(key);
-                    table_sync_queue.push(std::to_string(table_msg.oid));
+                    RedisQueue<TableSyncRequest> table_sync_queue(key);
+                    TableSyncRequest request(table_msg.oid, xidlsn);
+                    table_sync_queue.push(request);
 
                     // notify the Committer to stop committing XIDs
                     if (is_first) {
