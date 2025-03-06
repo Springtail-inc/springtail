@@ -95,7 +95,7 @@ private:
 
     struct Message
     {
-        Message(const String::allocator_type& al) 
+        explicit Message(const String::allocator_type& al) 
             :xid{0},
             msg{al}
         {}
