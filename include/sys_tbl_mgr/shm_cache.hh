@@ -79,8 +79,8 @@ private:
     /**
      * This will verify that the cache has free space as defined by
      * FREE_MEM_LIMIT and FREE_MEM_WATERMARK parameters.
-    // if the free memory size goes below the limit, we start evictions
-    // until we reach the watermark
+     * if the free memory size goes below the limit, we start evictions
+     * until we reach the watermark
      */
     void check_free_space_locked();
 
@@ -96,10 +96,9 @@ private:
     struct Message
     {
         explicit Message(const String::allocator_type& al) 
-            :xid{0},
-            msg{al}
+            :msg{al}
         {}
-        Xid xid;
+        Xid xid = 0;
         String msg;
     };
 
@@ -108,9 +107,7 @@ private:
         DbId db;
         TabId tid;
         Xid xid;
-        bool operator==(const LruKey& rhs) const {
-            return db == rhs.db && tid == rhs.tid && xid == rhs.xid;
-        }
+        bool operator==(const LruKey& rhs) const = default;
     };
     struct LruHashFunc
     {

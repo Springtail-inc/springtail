@@ -25,7 +25,7 @@ ShmCache::ShmCache(std::string name, size_t size)
 
 ShmCache::ShmCache(std::string name)
     :_name{std::move(name)},
-    _created{true},
+    _created{false},
     _mutex{ipc::open_only, (_name + std::string(".mutex")).c_str()},
     _shm{ipc::open_only, _name.c_str()},
     _messages_alloc{_shm.get_segment_manager()},
@@ -184,7 +184,7 @@ ShmCache::check_free_space_locked()
     }
 
     while (true) {
-        auto free_size = _shm.get_free_memory();
+        free_size = _shm.get_free_memory();
         if (static_cast<double>(free_size) > static_cast<double>(_shm.get_size())*FREE_MEM_WATERMARK) {
             break;
         }
