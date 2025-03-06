@@ -464,6 +464,13 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
                      ExtentSchemaPtr schema,
                      bool for_gc = false);
 
+        ~MutableTable() {
+            // if we have a dirty, empty page, then evict it
+            if (_empty_page) {
+                _empty_page->evict();
+            }
+        }
+
         /**
          * Returns the file of the raw data associated with the table.
          */

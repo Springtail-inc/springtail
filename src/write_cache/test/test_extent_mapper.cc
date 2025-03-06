@@ -1,7 +1,6 @@
-#include <chrono>
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <write_cache/extent_mapper.hh>
 
 using namespace springtail;
@@ -14,7 +13,7 @@ namespace {
     class ExtentMapper_Test : public testing::Test {
     protected:
         void SetUp() override {
-            springtail_init();
+            springtail_init_test();
             _extent_mapper = ExtentMapper::get_instance(1);
 
             _gc1_xid = 1;
@@ -24,7 +23,7 @@ namespace {
         }
 
         void TearDown() override {
-
+            springtail_shutdown();
         }
 
         ExtentMapper *_extent_mapper;

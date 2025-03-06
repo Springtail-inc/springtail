@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
@@ -24,8 +24,13 @@ namespace {
         std::filesystem::path _base_dir;
 
         static void SetUpTestSuite() {
-            springtail_init();
-            _services.init();
+            auto service_runners = test::get_services(true, true, true);
+            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+            runners.emplace();
+            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
+            runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
+
+            springtail_init_test(runners);
 
             // create the public namespace
             auto client = sys_tbl_mgr::Client::get_instance();
@@ -42,10 +47,8 @@ namespace {
         }
 
         static void TearDownTestSuite() {
-            _services.shutdown();
+            springtail_shutdown();
         }
-
-        static test::Services _services;
 
         void SetUp() override {
             nlohmann::json db_config = Properties::get_db_config(db_id);
@@ -65,8 +68,6 @@ namespace {
 
         uint64_t db_id = 1;
     };
-
-    test::Services PgCopyTable_Test::_services{true, true, true};
 
     TEST_F(PgCopyTable_Test, CopyTable)
     {

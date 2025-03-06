@@ -18,6 +18,10 @@
 #include <boost/core/demangle.hpp>
 #include <common/json.hh>
 #include <common/logging.hh>
+#include <common/service_register.hh>
+#include <fmt/format.h>
+#include <grpcpp/grpcpp.h>
+#include <grpcpp/security/credentials.h>
 #include <nlohmann/json.hpp>
 
 namespace springtail {
@@ -154,4 +158,20 @@ std::shared_ptr<grpc::Channel> create_channel(std::string_view service,
                                               const nlohmann::json& rpc_json);
 
 }  // namespace grpc_client
+template <typename T>
+class GrpcClientRunner : public ServiceRunner {
+public:
+    GrpcClientRunner() : ServiceRunner(boost::core::demangle(typeid(T).name())) {}
+
+    bool start() override
+    {
+        T::get_instance();
+        return true;
+    }
+
+    void stop() override
+    {
+        T::shutdown();
+    }
+};
 }  // namespace springtail

@@ -2,7 +2,7 @@
 #include <sys_tbl_mgr/system_tables.hh>
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/environment.hh>
 #include <common/object_cache.hh>
 #include <common/threaded_test.hh>
@@ -46,8 +46,13 @@ namespace {
             _base_dir = std::filesystem::temp_directory_path() / "test_table";
             std::filesystem::remove_all(_base_dir);
 
-            springtail_init();
-            _services.init();
+            auto service_runners = test::get_services(true, true, false);
+            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+            runners.emplace();
+            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
+            runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
+
+            springtail_init_test(runners);
 
             auto client = sys_tbl_mgr::Client::get_instance();
 
@@ -65,12 +70,9 @@ namespace {
         }
 
         static void TearDownTestSuite() {
-            _services.shutdown();
+            springtail_shutdown();
             std::filesystem::remove_all(_base_dir);
         }
-
-        static test::Services _services;
-
 
         //// Individual test setup / teardown
 
@@ -137,7 +139,7 @@ namespace {
                 if (v.index_id == constant::INDEX_PRIMARY) {
                     continue;
                 }
-                
+
                 Index idx;
                 idx.id = v.index_id;
                 idx.table_id = table_id;
@@ -243,7 +245,6 @@ namespace {
         typedef std::shared_ptr<Request> RequestPtr;
     };
 
-    test::Services Table_Test::_services{true, true, false};
     uint64_t Table_Test::_db_id = 1;
     std::filesystem::path Table_Test::_base_dir;
 
@@ -929,7 +930,7 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-    
+
         // this will create two indexes on the first and second columns
         metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT}, {2, constant::UNKNOWN_EXTENT} };
 

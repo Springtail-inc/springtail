@@ -4,8 +4,10 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/json.hh>
+
+#include <test/services.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
 #include <xid_mgr/xid_mgr_server.hh>
@@ -19,25 +21,13 @@ namespace {
     class XidMgr_Test : public testing::Test {
     protected:
         void SetUp() override {
-            springtail_init();
+            auto service_runners = test::get_services(true, false, false);
+            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+            runners.emplace();
+            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
+            runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
 
-            nlohmann::json json = Properties::get(Properties::XID_MGR_CONFIG);
-
-            std::string base_path_str;
-            Json::get_to<std::string>(json, "base_path", base_path_str);
-            std::filesystem::path base_path = Properties::make_absolute_path(base_path_str);
-
-            // clear xid directory
-            std::filesystem::remove_all(base_path);
-
-            xid_mgr::XidMgrServer *server = xid_mgr::XidMgrServer::get_instance();
-
-            SPDLOG_INFO("Starting server");
-
-            // startup server
-            server->startup();
-
-            sleep(1);
+            springtail_init_test(runners);
         }
 
         void TearDown() override {
@@ -45,11 +35,9 @@ namespace {
             for (auto &t : _threads) {
                 t.join();
             }
-            // shutdown client
-            XidMgrClient::shutdown();
             // shutdown server
             SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Shutting down server");
-            xid_mgr::XidMgrServer::shutdown();
+            springtail_shutdown();
         }
 
         static void run_clients(int thread_id, int iterations)

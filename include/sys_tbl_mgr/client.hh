@@ -4,6 +4,7 @@
 #include <string>
 
 #include <common/singleton.hh>
+#include <grpc/grpc_client.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <proto/sys_tbl_mgr.pb.h>
 #include <storage/xid.hh>

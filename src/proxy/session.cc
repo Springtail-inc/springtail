@@ -1,9 +1,9 @@
-#include <memory>
 #include <cassert>
 #include <atomic>
 
 #include <common/logging.hh>
 
+#include <proxy/database.hh>
 #include <proxy/session.hh>
 #include <proxy/server.hh>
 #include <proxy/connection.hh>

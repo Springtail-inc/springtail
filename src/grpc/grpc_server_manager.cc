@@ -1,4 +1,4 @@
-#include "common/grpc_server_manager.hh"
+#include <grpc/grpc_server_manager.hh>
 
 #include <filesystem>
 #include <fstream>

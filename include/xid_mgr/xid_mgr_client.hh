@@ -5,6 +5,7 @@
 #include <common/singleton.hh>
 #include <grpcpp/grpcpp.h>
 #include <proto/xid_manager.grpc.pb.h>
+#include <grpc/grpc_client.hh>
 
 namespace springtail {
 

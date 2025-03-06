@@ -1,9 +1,7 @@
 #pragma once
 
-#include <functional>
 #include <memory>
 #include <string>
-#include <map>
 #include <set>
 #include <shared_mutex>
 #include <mutex>
@@ -11,6 +9,7 @@
 #include <condition_variable>
 
 #include <common/logging.hh>
+#include <common/service_register.hh>
 #include <common/singleton.hh>
 
 #include <proxy/connection.hh>
@@ -182,6 +181,12 @@ namespace springtail::pg_proxy {
     class UserMgr final : public SingletonWithThread<UserMgr> {
     public:
         /**
+         * @brief Sleep interval for user manager thread
+         *
+         */
+        static constexpr uint32_t USER_MGR_SLEEP_INTERVAL_SECS = 5;
+
+        /**
          * @brief Initialize UserMgr object
          * @param sleep_interval - UserMgr thread sleep interval in seconds
          */
@@ -276,4 +281,28 @@ namespace springtail::pg_proxy {
         void _internal_run() override;
 
     };
+
+    class UserMgrRunner : public ServiceRunner {
+    public:
+        explicit UserMgrRunner(uint32_t sleep_interval) :
+            ServiceRunner("UserMgr"),
+            _sleep_interval(sleep_interval) {}
+
+        ~UserMgrRunner() override = default;
+
+        bool start() override
+        {
+            UserMgr::get_instance()->init(_sleep_interval);
+            return true;
+        }
+
+        void stop() override
+        {
+            UserMgr::get_instance()->stop_thread();
+            UserMgr::shutdown();
+        }
+    private:
+        uint32_t _sleep_interval;
+    };
+
 } // namespace springtail::pg_proxy

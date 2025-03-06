@@ -1,5 +1,6 @@
 #include <boost/thread.hpp>
 
+#include <common/service_register.hh>
 #include <common/singleton.hh>
 #include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
@@ -142,5 +143,24 @@ namespace springtail::pg_log_mgr {
             TABLE_SYNC_MSG log entry for the table yet. */
         std::map<uint64_t, std::set<uint64_t>> _resync_map;
     };
+
+    class SyncTrackerRunner : public ServiceRunner {
+    public:
+        SyncTrackerRunner() : ServiceRunner("SyncTracker") {}
+
+        ~SyncTrackerRunner() override = default;
+
+        bool start() override
+        {
+            SyncTracker::get_instance();
+            return true;
+        }
+
+        void stop() override
+        {
+            SyncTracker::shutdown();
+        }
+    };
+
 }
 

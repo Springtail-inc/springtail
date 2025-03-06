@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/environment.hh>
 #include <common/threaded_test.hh>
 
@@ -39,7 +39,7 @@ namespace {
                                                 sizes.data_cache_size, sizes.page_cache_size, sizes.btree_cache_size, sizes.max_extent_per_page);
             ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
 
-            springtail_init(std::nullopt, std::nullopt, LOG_ALL ^ LOG_STORAGE);
+            springtail_init_test(std::nullopt, LOG_ALL ^ LOG_STORAGE);
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({
@@ -69,6 +69,7 @@ namespace {
         void TearDown() override {
             // remove any files created during the run
             std::filesystem::remove_all(_base_dir);
+            springtail_shutdown();
         }
 
         ExtentSchemaPtr _schema;
@@ -530,7 +531,7 @@ namespace {
         for (auto &&r : reader) {
             auto value_tuple = std::make_shared<ValueTuple>(_gen_tuple(r, 0));
             auto request = std::make_shared<Request>(btree1, Request::Type::INSERT, value_tuple);
-                
+
             tester.add_request(request);
         }
 
@@ -555,7 +556,7 @@ namespace {
         for (auto &&r : reader2) {
             auto value_tuple = std::make_shared<ValueTuple>(_gen_tuple(r, 0));
             auto request = std::make_shared<Request>(btree2, Request::Type::REMOVE, value_tuple);
-                
+
             tester.add_request(request);
         }
 

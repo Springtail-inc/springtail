@@ -10,6 +10,12 @@
 #include <opentelemetry/sdk/trace/batch_span_processor.h>
 #include <opentelemetry/sdk/trace/multi_span_processor.h>
 #include <opentelemetry/sdk/trace/simple_processor.h>
+#include <opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_factory.h>
+#include <opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_options.h>
+#include <opentelemetry/sdk/metrics/meter_context_factory.h>
+#include <opentelemetry/sdk/metrics/meter_provider_factory.h>
+#include <opentelemetry/sdk/trace/tracer_provider.h>
+#include <opentelemetry/trace/provider.h>
 
 #include <common/json.hh>
 #include <common/properties.hh>
@@ -26,25 +32,11 @@
 
 namespace springtail::tracing {
 
-static opentelemetry::context::Context _context;
-
-/**
- * @brief Map of counter names to their corresponding counters
- */
-static std::map<std::string_view, opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Counter<uint64_t>>> counters;
-
-/**
- * @brief Map of histogram names to their corresponding histograms
- */
-static std::map<std::string_view, opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Histogram<double>>> histograms;
-
-static std::shared_ptr<opentelemetry::sdk::metrics::MeterProvider> meter_provider;
-
-static opentelemetry::sdk::resource::Resource
-create_default_otel_resource(std::string_view component_name)
+::opentelemetry::sdk::resource::Resource
+TracingAndMetrics::_create_default_otel_resource(std::string_view component_name)
 {
     auto json = Properties::get(Properties::ORG_CONFIG);
-    opentelemetry::sdk::resource::ResourceAttributes resource_attributes;
+    ::opentelemetry::sdk::resource::ResourceAttributes resource_attributes;
     auto organization_id = Json::get<std::string>(json, "organization_id");
     if (organization_id) {
         resource_attributes["springtail.organization_id"] = *organization_id;
@@ -60,25 +52,25 @@ create_default_otel_resource(std::string_view component_name)
     if (!component_name.empty()) {
         resource_attributes[opentelemetry::semconv::service::kServiceName] = std::string(component_name);
     }
-    return opentelemetry::sdk::resource::Resource::Create(resource_attributes);
+    return ::opentelemetry::sdk::resource::Resource::Create(resource_attributes);
 }
 
 /**
  * @brief Register the metrics
  */
-void _register_metrics(){
+void TracingAndMetrics::_register_metrics() {
     // register the counters
     _register_counters();
 
     // register the histograms
-    _register_histograms(); 
+    _register_histograms();
 }
 
 /**
  * @brief Register the counters
  */
-void _register_counters(){
-    for (const auto &counter : metrics::_counter_metrics) {  
+void TracingAndMetrics::_register_counters() {
+    for (const auto &counter : metrics::_counter_metrics) {
         _register_counter(counter.first, counter.second, "calls");
     }
 }
@@ -86,14 +78,14 @@ void _register_counters(){
 /**
  * @brief Register the histograms
  */
-void _register_histograms(){
+void TracingAndMetrics::_register_histograms() {
     for (const auto &histogram : metrics::_histogram_metrics) {
         _register_histogram(histogram.first, histogram.second, "ms");
     }
 }
 
-static std::shared_ptr<opentelemetry::sdk::metrics::MeterProvider>
-init_metrics(const opentelemetry::sdk::resource::Resource& resource)
+void
+TracingAndMetrics::_init_metrics(const ::opentelemetry::sdk::resource::Resource& resource)
 {
     // check if we should send to an otlp server
     auto json = Properties::get(Properties::OTEL_CONFIG);
@@ -105,7 +97,7 @@ init_metrics(const opentelemetry::sdk::resource::Resource& resource)
         options.url = fmt::format("http://{}:{}/v1/metrics", *host, *port);
         SPDLOG_INFO("Enabling OTel metrics over HTTP: {}", options.url);
     }
-    opentelemetry::sdk::metrics::PeriodicExportingMetricReaderOptions reader_options;
+    ::opentelemetry::sdk::metrics::PeriodicExportingMetricReaderOptions reader_options;
     auto export_interval_millis = Json::get<int>(json, "metrics_export_interval_millis");
     if (export_interval_millis) {
         reader_options.export_interval_millis = std::chrono::milliseconds(*export_interval_millis);
@@ -124,21 +116,19 @@ init_metrics(const opentelemetry::sdk::resource::Resource& resource)
 
     auto base_meter_provider =
         opentelemetry::sdk::metrics::MeterProviderFactory::Create(std::move(context));
-    meter_provider = std::shared_ptr<opentelemetry::sdk::metrics::MeterProvider>(
-        static_cast<opentelemetry::sdk::metrics::MeterProvider*>(base_meter_provider.release()));
+    _meter_provider = std::unique_ptr<::opentelemetry::sdk::metrics::MeterProvider>(
+        static_cast<::opentelemetry::sdk::metrics::MeterProvider*>(base_meter_provider.release()));
 
     // Set as the global meter provider
-    opentelemetry::metrics::Provider::SetMeterProvider(
-        std::dynamic_pointer_cast<opentelemetry::metrics::MeterProvider>(meter_provider));
+    ::opentelemetry::metrics::Provider::SetMeterProvider(
+        std::dynamic_pointer_cast<::opentelemetry::metrics::MeterProvider>(_meter_provider));
 
     // register the metrics
     _register_metrics();
-
-    return meter_provider;
 }
 
-static void
-init_tracing(const opentelemetry::sdk::resource::Resource& resource)
+void
+TracingAndMetrics::_init_tracing(const opentelemetry::sdk::resource::Resource& resource)
 {
     auto multi_processor = std::make_unique<opentelemetry::sdk::trace::MultiSpanProcessor>(
         std::vector<std::unique_ptr<opentelemetry::sdk::trace::SpanProcessor>>{});
@@ -177,7 +167,7 @@ init_tracing(const opentelemetry::sdk::resource::Resource& resource)
 }
 
 void
-init_tracing_and_metrics(std::string_view component_name)
+TracingAndMetrics::init(std::string_view component_name)
 {
     // check the otel properties
     auto json = Properties::get(Properties::OTEL_CONFIG);
@@ -185,19 +175,9 @@ init_tracing_and_metrics(std::string_view component_name)
     bool enabled = Json::get_or<bool>(json, "enabled", true);
 
     if (enabled) {
-        auto resource = create_default_otel_resource(component_name);
-        auto meter_provider = init_metrics(resource);
-        init_tracing(resource);
-
-        // Initialize the OpenTelemetry gRPC plugin with the global meter provider
-        auto status = grpc::OpenTelemetryPluginBuilder()
-            .SetMeterProvider(meter_provider)
-            .BuildAndRegisterGlobal();
-        if (!status.ok()) {
-            SPDLOG_WARN("Failed to initialize OpenTelemetry gRPC plugin: {}", status.ToString());
-        } else {
-            SPDLOG_INFO("Initialized OpenTelemetry gRPC plugin");
-        }
+        auto resource = _create_default_otel_resource(component_name);
+        _init_metrics(resource);
+        _init_tracing(resource);
     } else {
         // use the Noop provider to drop all collected metrics
         SPDLOG_INFO("Disabling OTel via NoopTracer/MeterProvider");
@@ -211,17 +191,17 @@ init_tracing_and_metrics(std::string_view component_name)
 }
 
 void
-shutdown_tracing_and_metrics()
+TracingAndMetrics::_internal_shutdown()
 {
     opentelemetry::trace::Provider::SetTracerProvider({});
-    if (meter_provider) {
-        meter_provider->Shutdown();
+    if (_meter_provider) {
+        _meter_provider->Shutdown();
     }
     opentelemetry::metrics::Provider::SetMeterProvider({});
 }
 
 opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer>
-tracer(const std::string_view& name)
+TracingAndMetrics::tracer(const std::string_view& name)
 {
     auto provider = opentelemetry::trace::Provider::GetTracerProvider();
     return provider->GetTracer(name.data());
@@ -239,7 +219,7 @@ _set_default_attributes(const std::unordered_map<std::string, std::string>& inpu
     auto db_instance_id = Properties::get_db_instance_id();
     auto organization_id = Properties::get_organization_id();
     auto account_id = Properties::get_account_id();
-    
+
     attributes["organization_id"] = organization_id;
     attributes["account_id"] = account_id;
     attributes["db_instance_id"] = std::to_string(db_instance_id);
@@ -248,7 +228,7 @@ _set_default_attributes(const std::unordered_map<std::string, std::string>& inpu
 }
 
 std::unordered_map<std::string, std::string>
-get_db_id_xid_map(uint64_t db_id, uint64_t xid)
+TracingAndMetrics::get_db_id_xid_map(uint64_t db_id, uint64_t xid)
 {
     return std::unordered_map<std::string, std::string>{
         {"db_id", std::to_string(db_id)},
@@ -262,9 +242,9 @@ get_db_id_xid_map(uint64_t db_id, uint64_t xid)
  * @param attributes The attributes to record
  */
 void
-increment_counter(std::string_view name, const std::unordered_map<std::string, std::string>& attributes)
+TracingAndMetrics::increment_counter(std::string_view name, const std::unordered_map<std::string, std::string>& attributes)
 {
-    auto counter = counters[name];
+    auto counter = _counters[name];
     if(counter){
         counter->Add(1, _set_default_attributes(attributes), _context);
     } else {
@@ -279,9 +259,9 @@ increment_counter(std::string_view name, const std::unordered_map<std::string, s
  * @param attributes The attributes to record
  */
 void
-record_histogram(std::string_view name, double value, const std::unordered_map<std::string, std::string>& attributes)
+TracingAndMetrics::record_histogram(std::string_view name, double value, const std::unordered_map<std::string, std::string>& attributes)
 {
-    auto histogram = histograms[name];
+    auto histogram = _histograms[name];
     if(histogram){
         histogram->Record(value, _set_default_attributes(attributes), _context);
     } else {
@@ -289,41 +269,23 @@ record_histogram(std::string_view name, double value, const std::unordered_map<s
     }
 }
 
-/**
- * @brief Create a uint64 counter with the given name, description, and unit
- * @param name The name of the counter
- * @param description The description of the counter
- * @param unit The unit of the counter
- */
 opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Counter<uint64_t>>
-_create_uint64_counter(const std::string name, const std::string description, const std::string unit)
+TracingAndMetrics::_create_uint64_counter(const std::string name, const std::string description, const std::string unit)
 {
     auto meter = opentelemetry::metrics::Provider::GetMeterProvider()->GetMeter(name);
     return meter->CreateUInt64Counter(name, description, unit);
 }
 
-/**
- * @brief Create a double histogram with the given name, description, and unit
- * @param name The name of the histogram
- * @param description The description of the histogram
- * @param unit The unit of the histogram
- */
 opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Histogram<double>>
-_create_double_histogram(const std::string name, const std::string description, const std::string unit)
+TracingAndMetrics::_create_double_histogram(const std::string name, const std::string description, const std::string unit)
 {
     auto meter = opentelemetry::metrics::Provider::GetMeterProvider()->GetMeter(name);
     return meter->CreateDoubleHistogram(name, description, unit);
 }
 
-/**
- * @brief Register a counter with the given name, description, and unit
- * @param name The name of the counter
- * @param description The description of the counter
- * @param unit The unit of the counter
- */
-void _register_counter(std::string_view name, std::string_view description, std::string_view unit)
+void TracingAndMetrics::_register_counter(std::string_view name, std::string_view description, std::string_view unit)
 {
-    counters[name] = _create_uint64_counter(std::string(name), std::string(description), std::string(unit));
+    _counters[name] = _create_uint64_counter(std::string(name), std::string(description), std::string(unit));
 }
 
 /**
@@ -332,9 +294,9 @@ void _register_counter(std::string_view name, std::string_view description, std:
  * @param description The description of the histogram
  * @param unit The unit of the histogram
  */
-void _register_histogram(std::string_view name, std::string_view description, std::string_view unit)
+void TracingAndMetrics::_register_histogram(std::string_view name, std::string_view description, std::string_view unit)
 {
-    histograms[name] = _create_double_histogram(std::string(name), std::string(description), std::string(unit));
+    _histograms[name] = _create_double_histogram(std::string(name), std::string(description), std::string(unit));
 }
 
 }  // namespace springtail::tracing
