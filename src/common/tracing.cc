@@ -94,7 +94,8 @@ TracingAndMetrics::_init_metrics(const ::opentelemetry::sdk::resource::Resource&
 
     opentelemetry::exporter::otlp::OtlpHttpMetricExporterOptions options;
     if (host && port) {
-        options.url = fmt::format("http://{}:{}/v1/metrics", *host, *port);
+        // host ex: http://otel_collector, port ex: 4318
+        options.url = fmt::format("{}:{}/v1/metrics", *host, *port);
         SPDLOG_INFO("Enabling OTel metrics over HTTP: {}", options.url);
     }
     ::opentelemetry::sdk::metrics::PeriodicExportingMetricReaderOptions reader_options;
@@ -147,7 +148,8 @@ TracingAndMetrics::_init_tracing(const opentelemetry::sdk::resource::Resource& r
     auto port = Json::get<int>(json, "port");
     if (host && port) {
         opentelemetry::exporter::otlp::OtlpHttpExporterOptions options;
-        options.url = fmt::format("http://{}:{}/v1/traces", *host, *port);
+        // host ex: http://otel_collector, port ex: 4318
+        options.url = fmt::format("{}:{}/v1/traces", *host, *port);
 
         std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> otlp_exporter =
             std::make_unique<opentelemetry::exporter::otlp::OtlpHttpExporter>(options);
