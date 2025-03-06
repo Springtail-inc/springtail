@@ -52,6 +52,13 @@ namespace xid_mgr {
     private:
         xid_mgr::XidMgrServer& _srv;
 
+        /**
+         * Notifier is a subscription notifier. Each Notifier instance 
+         * represents a single subscription or server-side
+         * stream of push notifications to one client. 
+         * Mainly it impelments async GRPC callbacks 
+         * to manage the streaming process.
+         */
         struct Notifier : grpc::ServerWriteReactor<proto::XidPushResponse>
         {
             GrpcXidMgrService& _service;
@@ -61,6 +68,10 @@ namespace xid_mgr {
             {}
             ~Notifier() = default;
 
+            
+            /**
+             * This will push the message to the client.
+             */
             void notify(const proto::XidPushResponse& msg);
             void finish();
 
@@ -72,6 +83,7 @@ namespace xid_mgr {
 
             std::mutex _m;
             bool _writing = false;
+            // we only notify the last xid
             std::optional<proto::XidPushResponse> _last_msg;
             bool _finish = false;
         };
@@ -83,6 +95,12 @@ namespace xid_mgr {
 
         void _push_notifications(const proto::XidPushResponse& xid);
 
+        /**
+         * When the user calls CommitXid, we pass the xid to
+         * NotificationThread and return immediately.
+         * The thread will iterate subscritions represented by
+         * Notifier objects and notify the subscribers.
+         */
         struct NotificationThread
         {
             GrpcXidMgrService& _service;
@@ -91,7 +109,10 @@ namespace xid_mgr {
                 _service{s},
                 _t{[this](std::stop_token st) { task(st); }} 
             {}
+
             void notify(const proto::XidPushResponse& xid);
+
+        private:
             void task(std::stop_token st);
 
             std::mutex _m;

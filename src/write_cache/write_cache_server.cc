@@ -28,6 +28,7 @@ void
 WriteCacheServer::_internal_shutdown()
 {
     _grpc_server_manager.shutdown();
+    WriteCacheService::shutdown();
 }
 
 }  // namespace springtail

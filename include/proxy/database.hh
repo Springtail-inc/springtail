@@ -13,6 +13,7 @@
 #include <fmt/core.h>
 
 #include <common/logging.hh>
+#include <common/service_register.hh>
 #include <common/singleton.hh>
 
 #include <redis/db_state_change.hh>
@@ -687,5 +688,22 @@ namespace springtail::pg_proxy {
         void _remove_replicated_database(uint64_t db_id);
     };
 
+    class DatabaseMgrRunner : public ServiceRunner {
+    public:
+        DatabaseMgrRunner() : ServiceRunner("DatabaseMgr") {}
+
+        ~DatabaseMgrRunner() override = default;
+
+        bool start() override
+        {
+            DatabaseMgr::get_instance()->init();
+            return true;
+        }
+
+        void stop() override
+        {
+            DatabaseMgr::shutdown();
+        }
+    };
 
 } // namespace springtail:pg_proxy

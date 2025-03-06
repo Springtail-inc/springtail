@@ -1,9 +1,8 @@
 #include <common/common.hh>
 #include <common/logging.hh>
-#include <boost/interprocess/shared_memory_object.hpp>
-#include <boost/interprocess/allocators/allocator.hpp>
 #include <boost/program_options.hpp>
 #include <iostream>
+#include <common/init.hh>
 
 using namespace springtail;
 
@@ -42,8 +41,13 @@ int main(int argc, char *argv[])
     if (vm.count("daemonize")) {
         pidfile = "pg_shm_cache.pid";
     }
-    springtail::springtail_init("pg_shm_cache", pidfile, LOG_ALL);
 
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    springtail_init_daemon(runners, "pg_xid_subscriber", pidfile);
+
+    springtail_daemon_run();
+
+    springtail_shutdown();
     // register the SIGINT handler; do this before starting the main thread
     std::signal(SIGINT, handle_sigint);
 

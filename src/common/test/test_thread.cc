@@ -1,10 +1,9 @@
-#include <iostream>
 #include <memory>
 #include <mutex>
 
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/thread_pool.hh>
 
 using namespace springtail;
@@ -20,8 +19,15 @@ namespace {
         }
 
     protected:
+        static void SetUpTestSuite() {
+            springtail_init_test();
+        }
+
+        static void TearDownTestSuite() {
+            springtail_shutdown();
+        }
+
         void SetUp() override {
-            springtail_init();
             pool = std::make_shared<ThreadPool<TestRequest>>(2);
         }
 

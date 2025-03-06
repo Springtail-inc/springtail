@@ -3,9 +3,8 @@
  */
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <sys_tbl_mgr/schema_cache.hh>
-#include <test/services.hh>
 
 using namespace springtail;
 
@@ -16,16 +15,12 @@ namespace {
     class SchemaCache_Test : public testing::Test {
     public:
         static void SetUpTestSuite() {
-            springtail_init();
-
-            _services.init();
+            springtail_init_test();
         }
 
         static void TearDownTestSuite() {
-            _services.shutdown();
+            springtail_shutdown();
         }
-
-        static test::Services _services;
 
     protected:
         using Key = std::tuple<uint64_t, uint64_t, XidLsn>;
@@ -86,9 +81,6 @@ namespace {
 
         std::map<Key, SchemaMetadataPtr> _schema_map; // a dummy test set
     };
-
-    test::Services SchemaCache_Test::_services(false, false, false);
-
 
     // Tests single-threaded behaviors of access schema get()
     TEST_F(SchemaCache_Test, BasicTable) {

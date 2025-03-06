@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include <common/grpc_client.hh>
+#include <grpc/grpc_client.hh>
 #include <common/singleton.hh>
 #include <common/timestamp.hh>
 #include <google/protobuf/empty.pb.h>

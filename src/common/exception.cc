@@ -23,11 +23,11 @@ namespace {
 }
 
 namespace springtail {
-    void
-    init_exception()
-    {
-        // register the signal handlers for backtraces
-        std::vector<int> signals{
+    ExceptionRunner::ExceptionRunner() : ServiceRunner("Exception"),
+        _signals({
+        #if defined(__APPLE__)
+            SIGEMT, // emulation instruction executed
+        #endif
             SIGABRT, // Abort signal from abort(3)
             SIGBUS,  // Bus error (bad memory access)
             SIGFPE,  // Floating point exception
@@ -38,14 +38,19 @@ namespace springtail {
             SIGSYS,  // Bad argument to routine (SVr4)
             SIGTRAP, // Trace/breakpoint trap
             SIGXCPU, // CPU time limit exceeded (4.2BSD)
-            SIGXFSZ, // File size limit exceeded (4.2BSD)
-#if defined(__APPLE__)
-            SIGEMT, // emulation instruction executed
-#endif
-        };
+            SIGXFSZ // File size limit exceeded (4.2BSD)
+        }) {}
 
-        for (int s : signals) {
+    bool ExceptionRunner::start() {
+        for (int s : _signals) {
             std::signal(s, backtrace_handler);
+        }
+        return true;
+    }
+
+    void ExceptionRunner::stop() {
+        for (int s : _signals) {
+            std::signal(s, SIG_DFL);
         }
     }
 

@@ -1,5 +1,5 @@
 #include <proto/xid_manager.grpc.pb.h>
-#include <common/grpc_client.hh>
+#include <grpc/grpc_client.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 
 namespace springtail {

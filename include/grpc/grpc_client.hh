@@ -7,6 +7,7 @@
 #include <boost/core/demangle.hpp>
 #include <common/json.hh>
 #include <common/logging.hh>
+#include <common/service_register.hh>
 #include <fmt/format.h>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/security/credentials.h>
@@ -149,6 +150,23 @@ private:
 
 protected:
     std::string _type_name;
+};
+
+template <typename T>
+class GrpcClientRunner : public ServiceRunner {
+public:
+    GrpcClientRunner() : ServiceRunner(boost::core::demangle(typeid(T).name())) {}
+
+    bool start() override
+    {
+        T::get_instance();
+        return true;
+    }
+
+    void stop() override
+    {
+        T::shutdown();
+    }
 };
 
 }  // namespace springtail

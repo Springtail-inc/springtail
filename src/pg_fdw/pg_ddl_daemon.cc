@@ -3,23 +3,13 @@
 #include <boost/program_options.hpp>
 
 // springtail includes
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/properties.hh>
 
 #include <pg_log_mgr/pg_log_coordinator.hh>
 
 using namespace springtail;
-
-namespace {
-    void
-    handle_sigint(int signal)
-    {
-        pg_fdw::PgDDLMgr *ddl_mgr = pg_fdw::PgDDLMgr::get_instance();
-        if (ddl_mgr != nullptr) {
-            ddl_mgr->notify_shutdown();
-        }
-    }
-}
+using namespace springtail::pg_fdw;
 
 int main(int argc, char *argv[])
 {
@@ -57,13 +47,6 @@ int main(int argc, char *argv[])
     if (vm.count("daemonize")) {
         pidfile = "pg_ddl_mgr.pid";
     }
-    springtail::springtail_init("pg_ddl_mgr", pidfile, LOG_ALL);
-
-    // register the SIGINT handler; do this before starting the main thread
-    std::signal(SIGINT, handle_sigint);
-
-    // start the ddl main thread
-    std::string fdw_id = Properties::get_fdw_id();
 
     // check if the socket path is valid
     if (!socket_host_str.empty()) {
@@ -86,17 +69,17 @@ int main(int argc, char *argv[])
         }
     }
 
-    SPDLOG_DEBUG("Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}",
-                 fdw_id, username, password, socket_hostname.value_or(""));
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
+    runners->emplace_back(std::make_unique<SchemaMgrRunner>());
+    runners->emplace_back(std::make_unique<TableMgrRunner>());
+    runners->emplace_back(std::make_unique<PgDDLMgrRunner>(username, password, socket_hostname));
 
-    // get the DDL Mgr instance
-    pg_fdw::PgDDLMgr *ddl_mgr = pg_fdw::PgDDLMgr::get_instance();
-    ddl_mgr->init(fdw_id, username, password, socket_hostname);
+    springtail::springtail_init_daemon(runners, "pg_ddl_mgr", pidfile, LOG_ALL);
+    springtail_daemon_run();
 
-    ddl_mgr->run();
-
-    // wait for shutdown; wait for main thread to join
-    ddl_mgr->shutdown();
+    springtail::springtail_shutdown();
 
     return 0;
 }

@@ -11,7 +11,7 @@
 namespace springtail::pg_proxy {
 
     /** SELECT query for fetching users from primary for authentication */
-    static constexpr char USER_SELECT[] = "select username, password, databases from public.springtail_get_user_access()";
+    static constexpr char USER_SELECT[] = "select username, password, databases from __pg_springtail_triggers.springtail_get_user_access();";
 
     static const std::vector<std::string> AUTH_TYPE_TO_STR = {
         "TRUST",

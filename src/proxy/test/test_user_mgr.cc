@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <pg_repl/libpq_connection.hh>
 #include <proxy/database.hh>
 #include <proxy/user_mgr.hh>
@@ -23,12 +23,11 @@ namespace {
     protected:
         static void SetUpTestSuite()
         {
-            springtail_init();
-
-            pg_proxy::DatabaseMgr::get_instance()->init();
-            pg_proxy::UserMgr *user_mgr = pg_proxy::UserMgr::get_instance();
-            ASSERT_NE(user_mgr, nullptr);
-            user_mgr->init(_sleep_interval);
+            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+            runners.emplace();
+            runners->emplace_back(std::make_unique<pg_proxy::DatabaseMgrRunner>());
+            runners->emplace_back(std::make_unique<pg_proxy::UserMgrRunner>(_sleep_interval));
+            springtail_init_test(runners);
 
             std::string host, user, password;
             int port;
@@ -39,10 +38,8 @@ namespace {
 
         static void TearDownTestSuite()
         {
-            pg_proxy::UserMgr::get_instance()->stop_thread();
-            pg_proxy::UserMgr::shutdown();
-            pg_proxy::DatabaseMgr::shutdown();
             _db_conn.disconnect();
+            springtail_shutdown();
         }
 
         void SetUp() override
