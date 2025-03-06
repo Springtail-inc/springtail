@@ -1,14 +1,15 @@
-#include <iostream>
 #include <absl/log/check.h>
 #include <bits/ranges_algo.h>
+#include <iostream>
 #include <sys_tbl_mgr/shm_cache.hh>
 
 using namespace springtail::sys_tbl_mgr;
 
 ShmCache::ShmCache(std::string name, size_t size)
     :_name{std::move(name)},
-    _mutex{ipc::open_or_create, (_name + std::string(".mutex")).c_str()},
-    _shm{ipc::open_or_create, _name.c_str(), size},
+    _created{true},
+    _mutex{ipc::create_only, (_name + std::string(".mutex")).c_str()},
+    _shm{ipc::create_only, _name.c_str(), size},
     _messages_alloc{_shm.get_segment_manager()},
     _string_alloc{_shm.get_segment_manager()}
 {
@@ -22,9 +23,27 @@ ShmCache::ShmCache(std::string name, size_t size)
             Lru::allocator_type(_shm.get_segment_manager()));
 }
 
+ShmCache::ShmCache(std::string name)
+    :_name{std::move(name)},
+    _created{true},
+    _mutex{ipc::open_only, (_name + std::string(".mutex")).c_str()},
+    _shm{ipc::open_only, _name.c_str()},
+    _messages_alloc{_shm.get_segment_manager()},
+    _string_alloc{_shm.get_segment_manager()}
+{
+    CHECK(_shm.check_sanity());
+
+    _cache = _shm.find_or_construct<Cache>("cache")(
+            Cache::allocator_type(_shm.get_segment_manager()));
+    _lru = _shm.find_or_construct<Lru>("lru")(
+            Lru::allocator_type(_shm.get_segment_manager()));
+}
+
 ShmCache::~ShmCache() 
 {
-    remove(_name);
+    if (_created) {
+        remove(_name);
+    }
 }
 
 void 
@@ -33,8 +52,21 @@ ShmCache::remove(const std::string& name)
     ipc::shared_memory_object::remove(name.c_str());
     ipc::named_sharable_mutex::remove((name + std::string(".mutex")).c_str());
 }
+    
 
-void 
+size_t
+ShmCache::size() const
+{
+    ipc::scoped_lock<ipc::named_sharable_mutex> lock(_mutex,
+            std::chrono::system_clock::now() + std::chrono::seconds(5)
+            );
+
+    CHECK(lock.owns());
+
+    return _lru->size();
+}
+
+bool 
 ShmCache::insert(DbId db, TabId tid, Xid xid, const std::string& msg)
 {
     Key k{db, tid};
@@ -52,7 +84,7 @@ ShmCache::insert(DbId db, TabId tid, Xid xid, const std::string& msg)
 
     auto it = _cache->find(k);
     if (it != _cache->end() && std::ranges::binary_search(it->second, item, cmp)) {
-        return;
+        return false;
     }
 
     check_free_space_locked();
@@ -97,6 +129,7 @@ ShmCache::insert(DbId db, TabId tid, Xid xid, const std::string& msg)
             evict_locked();
         }
     }
+    return true;
 }
 
 std::optional<std::string>
@@ -124,8 +157,23 @@ ShmCache::find(DbId db, TabId tid, Xid xid)
         return {};
     }
 
-    LruKey lk{db, tid, xid};
-    _lru->push_front(lk);
+    auto key = _lru->back();
+    auto key1 = _lru->front();
+
+    // this will move the element to the LRU front
+    // preserving the insertion sequence.
+    {
+        LruKey lk{db, tid, xid};
+        auto it_lru = _lru->get<1>().find(lk);
+        CHECK(it_lru != _lru->get<1>().end());
+
+        auto& seq_idx = _lru->get<0>();
+
+        seq_idx.relocate(seq_idx.begin(), _lru->project<0>(it_lru));
+    }
+
+    key = _lru->back();
+    key1 = _lru->front();
 
     return std::string(itt->msg.c_str(), itt->msg.size());
 }

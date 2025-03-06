@@ -32,13 +32,31 @@ using Xid = uint64_t;
 class ShmCache
 {
 public:
+    /*
+     * Create a new cache with the given name. If a cache with
+     * the name already exists, it will throw.
+     */
+
     ShmCache(std::string name, size_t size);
+    /*
+     * Open a cache with the give name. If the cache hasn't been created,
+     * it will throw.
+     */
+    explicit ShmCache(std::string name);
+
     ~ShmCache();
+
+    /**
+     * Returns number of elements in the cache.
+     */
+    size_t size() const;
 
     /** 
      * Cache the string.
+     * @return true if the element has been actually inserted 
+     *         and false if it was alredy in the cache.
      */
-    void insert(DbId db, TabId tid, Xid xid, const std::string& msg);
+    bool insert(DbId db, TabId tid, Xid xid, const std::string& msg);
 
     /** 
      * Get the cached string if present based on a key.
@@ -119,8 +137,8 @@ private:
     using Cache = ipc::map<Key, Messages, std::less<Key>, Alloc<std::pair<const Key, Messages>>>;
 
     std::string _name;
-    bool _reset;
-    ipc::named_sharable_mutex _mutex;
+    bool _created;
+    mutable ipc::named_sharable_mutex _mutex;
     ipc::managed_shared_memory _shm;
     Messages::allocator_type _messages_alloc;
     String::allocator_type _string_alloc;
