@@ -94,6 +94,8 @@ namespace {
 
             springtail_init_test(runners);
 
+            _fdw_id_str = Properties::get_fdw_id();
+
             // set schemas to public in config
             RedisClientPtr redis_config_client;
             int redis_db_id;
