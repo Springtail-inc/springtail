@@ -116,9 +116,6 @@ namespace {
 
             springtail_init_test(runners);
 
-            // _fdw_id_str = Properties::get_fdw_id();
-            // _set_database_xid(10);
-
             // set schemas to public in config
             RedisClientPtr redis_config_client;
             int redis_db_id;
@@ -161,13 +158,6 @@ namespace {
 
             _conn->connect(hostname, db_prefix + db_name, username, password, port, false);
         }
-
-        /*
-        static void _set_database_xid(uint64_t xid) {
-            RedisDDL ddl;
-            ddl.update_schema_xid(_fdw_id_str, std::stoul(_db_id_str), xid);
-        }
-            */
 
         void SetUp() override {
             _redis_client_data = RedisMgr::get_instance()->get_client();
