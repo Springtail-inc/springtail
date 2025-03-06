@@ -287,8 +287,9 @@ namespace springtail
     {
         while (!_shutdown) {
             int r = _stream_connection->read(buffer, length, async);
-            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Read {} bytes from connection (errno={})", r, errno);
-            if (r == -1 && (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR)) {
+            auto err_no = errno;
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Read {} bytes from connection (errno={})", r, err_no);
+            if (r == -1 && (err_no == EWOULDBLOCK || err_no == EAGAIN || err_no == EINTR)) {
                 r = wait_for_data();
                 if (r >= 0) {
                     // either data is now available or it isn't
@@ -298,12 +299,12 @@ namespace springtail
             }
 
             if (r < 0) {
-                if (errno == ECONNRESET) {
+                if (err_no == ECONNRESET) {
                     SPDLOG_ERROR("Error recv got ECONNRESET\n");
                     throw PgNotConnectedError();
                 }
 
-                SPDLOG_ERROR("Error recv return < 0; errno={}\n", errno);
+                SPDLOG_ERROR("Error recv return < 0; errno={}\n", err_no);
                 throw PgIOError();
             }
 
