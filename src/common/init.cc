@@ -6,12 +6,12 @@ using namespace springtail;
 
 namespace {
 
-    std::atomic<bool> shutdown_flag = false;
+    static std::atomic_flag shutdown_flag = false;
 
     void
     handle_sigint(int signal)
     {
-        shutdown_flag = true;
+        shutdown_flag.test_and_set();
         shutdown_flag.notify_one();
     }
 }  // namespace
@@ -161,7 +161,7 @@ springtail_daemon_run()
     }
 
     // wait for shutdown signal
-    while (!shutdown_flag) {
+    while (!shutdown_flag.test()) {
         shutdown_flag.wait(false);
     }
 
