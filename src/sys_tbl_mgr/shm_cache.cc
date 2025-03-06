@@ -50,14 +50,14 @@ void
 ShmCache::remove(const std::string& name)
 {
     ipc::shared_memory_object::remove(name.c_str());
-    ipc::named_sharable_mutex::remove((name + std::string(".mutex")).c_str());
+    ipc::named_mutex::remove((name + std::string(".mutex")).c_str());
 }
     
 
 size_t
 ShmCache::size() const
 {
-    ipc::scoped_lock<ipc::named_sharable_mutex> lock(_mutex,
+    ipc::scoped_lock<ipc::named_mutex> lock(_mutex,
             std::chrono::system_clock::now() + std::chrono::seconds(5)
             );
 
@@ -76,7 +76,7 @@ ShmCache::insert(DbId db, TabId tid, Xid xid, const std::string& msg)
 
     auto cmp = [](const auto& a, const auto& b) {return a.xid < b.xid;};
 
-    ipc::scoped_lock<ipc::named_sharable_mutex> lock(_mutex,
+    ipc::scoped_lock<ipc::named_mutex> lock(_mutex,
             std::chrono::system_clock::now() + std::chrono::seconds(5)
             );
 
@@ -87,18 +87,21 @@ ShmCache::insert(DbId db, TabId tid, Xid xid, const std::string& msg)
         return false;
     }
 
+    bool key_exists = it != _cache->end();
+
     check_free_space_locked();
-
-    if (it == _cache->end()) {
-        it = (*_cache).emplace(k, Messages(_messages_alloc)).first;
-    }
-
-    CHECK(it != _cache->end());
-
-    item.msg = msg.c_str();
 
     while (true) {
         try {
+            if (!key_exists) {
+                it = (*_cache).emplace(k, Messages(_messages_alloc)).first;
+                key_exists = true;
+            }
+
+            CHECK(it != _cache->end());
+
+            item.msg = msg.c_str();
+
             if (!it->second.empty() && (--it->second.end())->xid < xid) {
                 it->second.push_back(item);
             } else {
@@ -111,11 +114,12 @@ ShmCache::insert(DbId db, TabId tid, Xid xid, const std::string& msg)
         } catch (const boost::interprocess::bad_alloc&) {
 
             // restore invariants
-            auto itt = std::ranges::lower_bound(it->second, item,
-                    [](const auto& a, const auto& b) { return a.xid < b.xid; } );
-
-            if (itt != it->second.end()) {
-                it->second.erase(itt);
+            if (key_exists) {
+                auto itt = std::ranges::lower_bound(it->second, item,
+                        [](const auto& a, const auto& b) { return a.xid < b.xid; } );
+                if (itt != it->second.end()) {
+                    it->second.erase(itt);
+                }
             }
 
             auto it_lru = _lru->get<1>().find(LruKey{db, tid, xid});
@@ -135,14 +139,13 @@ ShmCache::insert(DbId db, TabId tid, Xid xid, const std::string& msg)
 std::optional<std::string>
 ShmCache::find(DbId db, TabId tid, Xid xid)
 {
-    ipc::sharable_lock<ipc::named_sharable_mutex> lock(_mutex,
+    ipc::scoped_lock<ipc::named_mutex> lock(_mutex,
             std::chrono::system_clock::now() + std::chrono::seconds(5)
             );
     auto it = _cache->find({db, tid});
     if (it == _cache->end()) {
         return {};
     }
-
 
     Message item(_string_alloc);
     item.xid = xid;
@@ -157,9 +160,6 @@ ShmCache::find(DbId db, TabId tid, Xid xid)
         return {};
     }
 
-    auto key = _lru->back();
-    auto key1 = _lru->front();
-
     // this will move the element to the LRU front
     // preserving the insertion sequence.
     {
@@ -172,9 +172,6 @@ ShmCache::find(DbId db, TabId tid, Xid xid)
         seq_idx.relocate(seq_idx.begin(), _lru->project<0>(it_lru));
     }
 
-    key = _lru->back();
-    key1 = _lru->front();
-
     return std::string(itt->msg.c_str(), itt->msg.size());
 }
 
@@ -182,13 +179,13 @@ void
 ShmCache::check_free_space_locked()
 {
     auto free_size = _shm.get_free_memory();
-    if (static_cast<double>(free_size) > static_cast<double>(_shm.get_size())*FREE_SIZE_LIMIT) {
+    if (static_cast<double>(free_size) > static_cast<double>(_shm.get_size())*FREE_MEM_LIMIT) {
         return;
     }
 
     while (true) {
         auto free_size = _shm.get_free_memory();
-        if (static_cast<double>(free_size) > static_cast<double>(_shm.get_size())*FREE_SIZE_WATERMARK) {
+        if (static_cast<double>(free_size) > static_cast<double>(_shm.get_size())*FREE_MEM_WATERMARK) {
             break;
         }
 

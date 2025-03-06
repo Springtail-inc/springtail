@@ -1,7 +1,6 @@
 #include <optional>
 #include <boost/interprocess/managed_shared_memory.hpp>
-#include <boost/interprocess/sync/named_sharable_mutex.hpp>
-#include <boost/interprocess/sync/sharable_lock.hpp>
+#include <boost/interprocess/sync/named_mutex.hpp>
 #include <boost/interprocess/sync/scoped_lock.hpp>
 #include <boost/interprocess/allocators/allocator.hpp>
 #include <boost/interprocess/containers/map.hpp>
@@ -72,16 +71,16 @@ public:
     static void remove(const std::string& name);
 
 private:
-    // if free size goes below the limit, we start evictions
+    // if free memory size goes below the limit, we start evictions
     // until we reach the watermark
-    constexpr static double FREE_SIZE_LIMIT = 0.5; // 50%
-    constexpr static double FREE_SIZE_WATERMARK = 0.7; // 70%
+    constexpr static double FREE_MEM_LIMIT = 0.3; // 30%
+    constexpr static double FREE_MEM_WATERMARK = 0.5; // 50%
 
     /**
      * This will verify that the cache has free space as defined by
-     * FREE_SIZE_LIMIT and FREE_SIZE_WATERMARK parameters.
-     * If free size goes below the limit, we start evictions
-     * until we reach the watermark
+     * FREE_MEM_LIMIT and FREE_MEM_WATERMARK parameters.
+    // if the free memory size goes below the limit, we start evictions
+    // until we reach the watermark
      */
     void check_free_space_locked();
 
@@ -138,7 +137,7 @@ private:
 
     std::string _name;
     bool _created;
-    mutable ipc::named_sharable_mutex _mutex;
+    mutable ipc::named_mutex _mutex;
     ipc::managed_shared_memory _shm;
     Messages::allocator_type _messages_alloc;
     String::allocator_type _string_alloc;
