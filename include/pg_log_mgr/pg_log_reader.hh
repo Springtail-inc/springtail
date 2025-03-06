@@ -49,12 +49,13 @@ namespace springtail::pg_log_mgr {
                     const std::filesystem::path &xact_log_path,
                     CommitterQueuePtr committer_queue);
 
+        ~PgLogReader();
         /**
          * @brief Queues a message to be processed by the log reader.
          * @param msg The PgMsg object to process.
          */
         void enqueue_msg(PgMsgPtr msg);
-        
+
         /**
          * @brief Process next set of messages from log file
          * @param path file path

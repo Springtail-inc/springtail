@@ -67,7 +67,9 @@ PgLogRecovery::_skip_committed()
 
     // Open the xact log
     PgXactLogReader xact_reader(_xact_path);
-    CHECK_EQ(xact_reader.begin(), true);
+    if (!xact_reader.begin()) {
+        return true;
+    }
 
     // note: once we are garbage collecting old log files, we'll need a way to ensure that the
     //       two log positions are aligned with eachother

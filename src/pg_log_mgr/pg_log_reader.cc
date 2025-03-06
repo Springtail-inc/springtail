@@ -42,6 +42,12 @@ namespace springtail::pg_log_mgr {
         _msg_thread = std::thread(&PgLogReader::_msg_worker, this);
     }
 
+    PgLogReader::~PgLogReader()
+    {
+        _msg_queue.shutdown(true);
+        _msg_thread.join();
+    }
+
     void
     PgLogReader::Batch::commit(uint64_t xid, PostgresTimestamp commit_ts)
     {
@@ -193,7 +199,7 @@ namespace springtail::pg_log_mgr {
             entry.extent = std::make_shared<Extent>(ExtentType{}, 0, entry.schema->row_size());
             entry.start_lsn = _lsn;
         }
-        
+
         // add the mutation to the batch
         auto &&row = entry.extent->append();
         if constexpr (T == PgMsgEnum::INSERT || T == PgMsgEnum::UPDATE) {

@@ -4,102 +4,13 @@
 
 // springtail includes
 #include <common/init.hh>
-#include <common/logging.hh>
-#include <common/properties.hh>
-#include <common/json.hh>
 
+#include <proxy/database.hh>
 #include <proxy/server.hh>
+#include <proxy/user_mgr.hh>
 
 using namespace springtail;
 using namespace springtail::pg_proxy;
-
-static void
-handle_sigint(int signal)
-{
-    ProxyServer *server = ProxyServer::get_instance();
-    server->notify_shutdown();
-}
-
-class ProxyRunner : public ServiceRunner {
-    public:
-        ProxyRunner(bool force_shadow, bool force_primary) :
-            ServiceRunner("ProxyServer"),
-            _force_shadow(force_shadow),
-            _force_primary(force_primary) {}
-
-        bool start() override {
-            nlohmann::json json = Properties::get(Properties::PROXY_CONFIG);
-            int num_threads = Json::get_or<int>(json, "threads", 4);
-            int port = Json::get_or<int>(json, "port", 8888);
-
-            int log_level = Json::get_or<int>(json, "log_level", 1);
-
-            // setup ssl config
-            bool enable_ssl = Json::get_or<bool>(json, "enable_ssl", false);
-            std::filesystem::path certificate = Json::get_or<std::filesystem::path>(json, "cert", "");
-            std::filesystem::path key = Json::get_or<std::filesystem::path>(json, "key", "");
-            if (enable_ssl &&
-                (!std::filesystem::exists(certificate) || !std::filesystem::exists(key))) {
-                throw Error("Certificate/key file does not exist and ssl is enabled");
-            }
-
-            if (!enable_ssl) {
-                SPDLOG_INFO("SSL Disabled");
-            }
-
-            // setup the mode
-            LoggerPtr logger = nullptr;
-            std::filesystem::path log = Json::get_or<std::filesystem::path>(json, "shadow_log_path", "");
-            if (!log.empty()) {
-                std::fstream log_file;
-                try {
-                    // create and truncate the file
-                    log_file.open(log, std::ios::out | std::ios::trunc | std::ios::binary);
-                    log_file.close();
-                } catch (const std::ios_base::failure &e) {
-                    throw Error(fmt::format("Error creating shadow log file {}: {}", log, e.what()));
-                }
-
-                SPDLOG_INFO("Logging initialized to: {}", log.string());
-                logger = std::make_shared<Logger>(log, 1024*1024*100, 5);
-            } else {
-                SPDLOG_INFO("Shadow logging disabled: log={}", log.string());
-            }
-
-            ProxyServer::MODE server_mode = ProxyServer::MODE::NORMAL;
-            std::string mode = Json::get_or<std::string>(json, "mode", "normal");
-
-            // overrides from command line (for debugging)
-            if (_force_primary) {
-                mode = "primary";
-            } else if (_force_shadow) {
-                mode = "shadow";
-            }
-
-            if (mode == "shadow") {
-                server_mode = ProxyServer::MODE::SHADOW;
-                CHECK_NE(logger, nullptr);
-            } else if (mode == "normal") {
-                server_mode = ProxyServer::MODE::NORMAL;
-            } else if (mode == "primary") {
-                server_mode = ProxyServer::MODE::PRIMARY;
-            } else {
-                throw Error("Invalid mode specified");
-            }
-
-            ProxyServer *server = ProxyServer::get_instance();
-            server->init(port, num_threads, certificate, key, server_mode, enable_ssl, logger);
-            server->set_log_level(log_level);
-            return true;
-        }
-
-        void stop() override {
-            ProxyServer::shutdown();
-        }
-    private:
-        bool _force_shadow{false};
-        bool _force_primary{false};
-    };
 
 int main(int argc, char* argv[])
 {
@@ -138,11 +49,13 @@ int main(int argc, char* argv[])
 
     std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
     runners.emplace();
+    runners->emplace_back(std::make_unique<DatabaseMgrRunner>());
+    runners->emplace_back(std::make_unique<UserMgrRunner>(UserMgr::USER_MGR_SLEEP_INTERVAL_SECS));
     runners->emplace_back(std::make_unique<ProxyRunner>(force_shadow, force_primary));
 
-    springtail_init_daemon(handle_sigint, runners, "proxy", pidfile, LOG_PROXY);
+    springtail_init_daemon(runners, "proxy", pidfile, LOG_PROXY);
 
-    ProxyServer::get_instance()->run();
+    springtail_daemon_run();
 
     springtail_shutdown();
 }

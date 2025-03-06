@@ -11,7 +11,7 @@ namespace {
     public:
         static void SetUpTestSuite() {
             std::vector<std::unique_ptr<ServiceRunner>> runners;
-            runners.emplace_back(new ExceptionRunner());
+            runners.emplace_back(std::make_unique<ExceptionRunner>());
 
             springtail_init_custom(runners);
         }

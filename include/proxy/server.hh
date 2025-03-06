@@ -13,13 +13,10 @@
 #include <common/thread_pool.hh>
 #include <common/singleton.hh>
 
-#include <proxy/session.hh>
 #include <proxy/connection.hh>
 #include <proxy/session.hh>
-#include <proxy/user_mgr.hh>
 
 #include <proxy/buffer_pool.hh>
-#include <proxy/database.hh>
 #include <proxy/logger.hh>
 
 namespace springtail::pg_proxy {
@@ -27,8 +24,6 @@ namespace springtail::pg_proxy {
     class ProxyServer : public Singleton<ProxyServer> {
         friend class Singleton<ProxyServer>;
     public:
-        static constexpr uint32_t USER_MGR_SLEEP_INTERVAL_SECS = 5;
-
         enum MODE : int8_t {
             NORMAL=0,   ///< normal mode, read-write splitting
             PRIMARY=1,  ///< primary mode, all traffic to primary
@@ -165,5 +160,27 @@ namespace springtail::pg_proxy {
         void _wake_event_loop();
     };
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
+
+    class ProxyRunner : public ServiceRunner {
+    public:
+        ProxyRunner(bool force_shadow, bool force_primary) :
+            ServiceRunner("ProxyServer"),
+            _force_shadow(force_shadow),
+            _force_primary(force_primary) {}
+
+        bool start() override;
+
+        void stop() override {
+            ProxyServer *server = ProxyServer::get_instance();
+            server->notify_shutdown();
+            _proxy_thread.join();
+            ProxyServer::shutdown();
+        }
+    private:
+        std::thread _proxy_thread;
+        bool _force_shadow{false};
+        bool _force_primary{false};
+    };
+
 
 } // namespace springtail::pg_proxy
