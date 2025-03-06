@@ -70,27 +70,6 @@ namespace {
             return false;
         }
 
-        class SetXidRunner : public ServiceRunner {
-        public:
-            SetXidRunner(uint64_t xid, std::string &db_id_str, std::string &fdw_id_str) :
-                ServiceRunner("SetXidRunner"),
-                _xid(xid),
-                _db_id_str(db_id_str),
-                _fdw_id_str(fdw_id_str) {}
-
-            bool start() override {
-                _fdw_id_str = Properties::get_fdw_id();
-                RedisDDL ddl;
-                ddl.update_schema_xid(_fdw_id_str, std::stoul(_db_id_str), _xid);
-                return true;
-            }
-
-        private:
-            uint64_t _xid;
-            std::string &_db_id_str;
-            std::string &_fdw_id_str;
-        };
-
     public:
         static void SetUpTestSuite() {
             if (!_check_pg_config()) {
@@ -100,9 +79,8 @@ namespace {
 
             std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
             runners.emplace();
-            runners->emplace_back(std::make_unique<SetXidRunner>(10, _db_id_str, _fdw_id_str));
 
-            auto service_runners = test::get_services(true, false, true);
+            auto service_runners = test::get_services(true, true, true);
             std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
             runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
             runners->emplace_back(std::make_unique<SchemaMgrRunner>());
