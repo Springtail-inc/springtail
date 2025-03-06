@@ -72,12 +72,11 @@ int main(int argc, char* argv[])
 
     if (create_slot) {
         SPDLOG_INFO("Creating replication slot: name={}\n", slot_name);
-        pg_conn.create_replication_slot(false,  // export
-                                        false); // temporary
+        pg_conn.create_replication_slot();
     }
 
     // start steaming
-    pg_conn.start_streaming(lsn);
+    pg_conn.start_streaming(lsn, true);
 
     // open output file
     PgMsgStreamWriter writer(outfile);

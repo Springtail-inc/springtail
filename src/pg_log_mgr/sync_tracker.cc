@@ -4,17 +4,51 @@ namespace springtail::pg_log_mgr {
 
     bool
     SyncTracker::mark_resync(uint64_t db_id,
-                             uint64_t table_id)
+                             uint64_t table_id,
+                             const XidLsn &xid)
     {
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "db {} table {}", db_id, table_id);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "db {} table {} xid {}:{}",
+                            db_id, table_id, xid.xid, xid.lsn);
         boost::unique_lock lock(_mutex);
 
-        bool first_table = _resync_map[db_id].empty() && !_sync_map.contains(db_id);
+        bool first_table = (_resync_map[db_id].empty() &&
+                            !_inflight_map.contains(db_id) &&
+                            !_sync_map.contains(db_id));
 
-        // add the table to the resync map; will get removed when add_sync() is called
-        _resync_map[db_id].insert(table_id);
+        // add the table to the resync map; will get removed when mark_inflight() is called
+        _resync_map[db_id][table_id].insert(xid);
 
         return first_table;
+    }
+
+    void
+    SyncTracker::mark_inflight(uint64_t db_id,
+                               uint64_t table_id,
+                               const XidLsn &xid)
+    {
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "db {} table {} xid {}:{}",
+                            db_id, table_id, xid.xid, xid.lsn);
+        boost::unique_lock lock(_mutex);
+
+        // find the db map
+        auto db_i = _resync_map.find(db_id);
+        CHECK(db_i != _resync_map.end());
+        if (db_i != _resync_map.end()) {
+            auto table_i = db_i->second.find(table_id);
+            CHECK(table_i != db_i->second.end());
+
+            // clear from the resync map
+            table_i->second.erase(xid);
+            if (table_i->second.empty()) {
+                db_i->second.erase(table_i);
+                if (db_i->second.empty()) {
+                    _resync_map.erase(db_i);
+                }
+            }
+        }
+
+        // add to the in-flight map; will get removed when add_sync() is called
+        _inflight_map[db_id].insert(table_id);
     }
 
     bool
@@ -23,16 +57,16 @@ namespace springtail::pg_log_mgr {
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "db {} xid {}", sync_msg.db_id, sync_msg.target_xid);
         boost::unique_lock lock(_mutex);
 
-        // clear the resync map for the provided tables in the db
-        auto resync_i = _resync_map.find(sync_msg.db_id);
-        if (resync_i != _resync_map.end()) {
+        // clear the inflight map for the provided tables in the db
+        auto inflight_i = _inflight_map.find(sync_msg.db_id);
+        if (inflight_i != _inflight_map.end()) {
             for (int32_t table_id : sync_msg.tids) {
-                resync_i->second.erase(table_id); // remove the table from the resync map
+                inflight_i->second.erase(table_id); // remove the table from the resync map
             }
 
             // remove the db from the map if the table set is empty
-            if (resync_i->second.empty()) {
-                _resync_map.erase(resync_i);
+            if (inflight_i->second.empty()) {
+                _inflight_map.erase(inflight_i);
             }
         }
 
@@ -41,7 +75,9 @@ namespace springtail::pg_log_mgr {
 
         // check if this is the first table(s) to be added for syncing
         // note: we also check the resync map since adding a resync also forces commits to stop
-        bool first_table = ((db_i == _sync_map.end()) && (resync_i == _resync_map.end()));
+        bool first_table = ((db_i == _sync_map.end()) &&
+                            (inflight_i == _inflight_map.end()) &&
+                            (_resync_map.find(sync_msg.db_id) == _resync_map.end()));
 
         // make a record of the table mapping(s)
         auto record = std::make_shared<XidRecord>(sync_msg);
@@ -116,7 +152,13 @@ namespace springtail::pg_log_mgr {
         uint64_t xid = _target_xid_map[db_id];
 
         auto type = committer::XidReady::Type::TABLE_SYNC_SWAP;
-        if (db_i->second.empty()) {
+        if (db_i->second.empty() &&
+            _inflight_map.find(db_id) == _inflight_map.end() &&
+            _resync_map.find(db_id) == _resync_map.end()) {
+            // there should be no in-flight copies or resync requests in order to commit
+            // note: we had to add the check to the resync map to ensure that a second resync seen
+            //       between the original resync request and the sync completion was also processed
+            //       before the commit
             type = committer::XidReady::Type::TABLE_SYNC_COMMIT;
             _sync_map.erase(db_i);
             _target_xid_map.erase(db_id);
@@ -162,6 +204,14 @@ namespace springtail::pg_log_mgr {
         auto resync_i = _resync_map.find(db_id);
         if (resync_i != _resync_map.end()) {
             if (resync_i->second.contains(table_id)) {
+                return true; // if the table is present, skip
+            }
+        }
+
+        // then check the inflight map
+        auto inflight_i = _inflight_map.find(db_id);
+        if (inflight_i != _inflight_map.end()) {
+            if (inflight_i->second.contains(table_id)) {
                 return true; // if the table is present, skip
             }
         }

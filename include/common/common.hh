@@ -69,8 +69,8 @@ namespace springtail {
          * @param outvec output vector of strings
          */
         static inline void
-        split_string(const std::string &delimiter,
-                     const std::string &string_value,
+        split_string(std::string_view delimiter,
+                     std::string_view string_value,
                      std::vector<std::string> &outvec)
         {
             size_t start_pos = 0, end_pos = 0;

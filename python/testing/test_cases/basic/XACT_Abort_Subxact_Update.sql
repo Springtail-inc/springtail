@@ -1,4 +1,4 @@
--- setup
+## test
 CREATE TABLE IF NOT EXISTS transaction_test_update (
     id SERIAL PRIMARY KEY,
     value TEXT
@@ -24,8 +24,8 @@ UPDATE transaction_test_update SET value = 'updated_value3' WHERE id = 3;
 
 COMMIT;
 
--- verify
+## verify
 SELECT * FROM transaction_test_update ORDER BY id;
 
--- cleanup
+## cleanup
 DROP TABLE IF EXISTS transaction_test_update;

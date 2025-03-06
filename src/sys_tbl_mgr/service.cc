@@ -875,6 +875,7 @@ Service::Finalize(grpc::ServerContext* context,
     // XXX we currently don't store the metadata, but re-read it from the roots file each time
     std::map<uint64_t, TableMetadata> md_map;
     for (const auto& entry : _write[request->db_id()]) {
+        SPDLOG_INFO("Finalize table {}@{}", entry.first, request->xid());
         md_map[entry.first] = entry.second->finalize();
     }
     if (md_map.empty()) {
