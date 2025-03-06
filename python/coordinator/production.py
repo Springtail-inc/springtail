@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import tempfile
+import json
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from botocore.exceptions import ClientError
@@ -50,291 +51,308 @@ SNS_ENV_VARS = [
     'FDW_ID'
 ]
 
-# Cache the SNS topic ARN
-TOPIC_ARN = None
-
-# Cache the SNS attributes
-SNS_ATTRIBUTES = None
-
-def __download_s3_binaries (
-    bucket: str,
-    folder: str,
-    local_path: str,
-    prefix: str = 'springtail-'
-) -> Optional[str]:
+class Production:
     """
-    Get the latest springtail binaries file from S3 based on filename timestamp.
-
-    Args:
-        bucket: S3 bucket name
-        folder: Folder prefix in bucket (no leading/trailing slash needed)
-        local_path: Local path to download the file
-        prefix: Prefix to filter files by (default: 'springtail_')
-
-    Returns:
-        str: path to the downloaded file, None if failed
+    Production class to install and manage the production environment.
     """
-    s3 = boto3.client('s3')
-    logger = logging.getLogger("S3")
 
-    try:
-        send_sns('download_start')
+    def __init__(self, install_path: str):
+        """Initialize the production environment."""
+        arn = os.environ.get('SNS_TOPIC_ARN')
+        if not arn:
+            raise ValueError("SNS_TOPIC_ARN environment variable not set")
+        self.topic_arn : str = arn
+        self.sns_attributes : Dict[str, Any] = self._extract_attributes()
+        self.install_path: str = install_path
 
-        # List objects with the given prefix
-        prefix = f"{folder}/{prefix}" if folder else "{prefix}"
-        response = s3.list_objects_v2(
-            Bucket=bucket,
-            Prefix=prefix
-        )
+        self.logger = logging.getLogger("coordinator")
 
-        if 'Contents' not in response or not response['Contents']:
-            logger.warning(f"No objects found in {bucket}/{prefix}")
+        logging.getLogger('boto3').setLevel(logging.CRITICAL)
+        logging.getLogger('botocore').setLevel(logging.CRITICAL)
+        logging.getLogger('nose').setLevel(logging.CRITICAL)
+        logging.getLogger('s3transfer').setLevel(logging.CRITICAL)
+        logging.getLogger('urllib3').setLevel(logging.CRITICAL)
+
+    def _download_s3_binaries(
+        self,
+        bucket: str,
+        folder: str,
+        local_path: str,
+        prefix: str = 'springtail-'
+    ) -> Optional[str]:
+        """
+        Get the latest springtail binaries file from S3 based on filename timestamp.
+
+        Args:
+            bucket: S3 bucket name
+            folder: Folder prefix in bucket (no leading/trailing slash needed)
+            local_path: Local path to download the file
+            prefix: Prefix to filter files by (default: 'springtail_')
+
+        Returns:
+            str: path to the downloaded file, None if failed
+        """
+        s3 = boto3.client('s3')
+
+        try:
+            self.send_sns('download_start')
+
+            # List objects with the given prefix
+            prefix = f"{folder}/{prefix}" if folder else "{prefix}"
+            response = s3.list_objects_v2(
+                Bucket=bucket,
+                Prefix=prefix
+            )
+
+            if 'Contents' not in response or not response['Contents']:
+                self.logger.warning(f"No objects found in {bucket}/{prefix}")
+                return None
+
+            files = [obj['Key'] for obj in response['Contents']]
+
+            self.logger.debug(f"Found {len(response['Contents'])} objects in {prefix}")
+            self.logger.debug(f"Objects: {files}")
+
+            # Sort by the YYYYMMDD portion of filename
+            latest_file = sorted(
+                files,
+                key=lambda x: x.split(prefix)[1].split('.')[0],
+                reverse=True
+            )[0]
+
+            self.logger.debug(f"Latest springtail file: {latest_file}")
+
+            # download the file
+            filename = os.path.join(local_path, os.path.basename(latest_file))
+            s3.download_file(bucket, latest_file, filename)
+
+            self.send_sns('download_complete', version=latest_file)
+
+            return filename
+
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            self.logger.error(f"Failed to get latest springtail file: {error_code}")
+            print(f"Failed to get latest springtail file: {error_code}")
+            self.send_sns('download_failed')
+            sys.exit(1)
+            return None
+        except Exception as e:
+            self.logger.error(f"Failed to get latest springtail file: {str(e)}")
+            print(f"Failed todd get latest springtail file: {str(e)}")
+            self.send_sns('download_failed')
+            sys.exit(1)
             return None
 
-        files = [obj['Key'] for obj in response['Contents']]
 
-        logger.debug(f"Found {len(response['Contents'])} objects in {prefix}")
-        logger.debug(f"Objects: {files}")
+    def _send_sns_notification(
+        self,
+        topic_arn: str,
+        subject: str,
+        message: str,
+        attributes: Optional[Dict[str, Any]] = {}
+    ) -> bool:
+        """
+        Send a notification to an SNS topic.
 
-        # Sort by the YYYYMMDD portion of filename
-        latest_file = sorted(
-            files,
-            key=lambda x: x.split(prefix)[1].split('.')[0],
-            reverse=True
-        )[0]
+        Args:
+            topic_arn: The ARN of the SNS topic
+            message: The message to send
+            subject: Optional subject line (useful for email subscriptions)
+            attributes: Optional message attributes
 
-        logger.debug(f"Latest springtail file: {latest_file}")
+        Returns:
+            bool: True if message was sent successfully, False otherwise
+        """
+        sns = boto3.client('sns')
 
-        # download the file
-        filename = os.path.join(local_path, os.path.basename(latest_file))
-        s3.download_file(bucket, latest_file, filename)
+        try:
+            if attributes:
+                message_attributes = {
+                    k: {'DataType': 'String', 'StringValue': str(v)}
+                    for k, v in attributes.items()
+                }
+            else:
+                message_attributes = {}
 
-        send_sns('download_complete', version=latest_file)
+            sns.publish(TopicArn=topic_arn, Message=message, Subject=subject, MessageAttributes=message_attributes)
 
-        return filename
+            return True
 
-    except ClientError as e:
-        error_code = e.response['Error']['Code']
-        logging.error(f"Failed to get latest springtail file: {error_code}")
-        print(f"Failed to get latest springtail file: {error_code}")
-        send_sns('download_failed')
-        sys.exit(1)
-        return None
-    except Exception as e:
-        logging.error(f"Failed to get latest springtail file: {str(e)}")
-        print(f"Failed todd get latest springtail file: {str(e)}")
-        send_sns('download_failed')
-        sys.exit(1)
-        return None
-
-
-def __send_sns_notification(
-    topic_arn: str,
-    subject: str,
-    message: str,
-    attributes: Optional[Dict[str, Any]] = {}
-) -> bool:
-    """
-    Send a notification to an SNS topic.
-
-    Args:
-        topic_arn: The ARN of the SNS topic
-        message: The message to send
-        subject: Optional subject line (useful for email subscriptions)
-        attributes: Optional message attributes
-
-    Returns:
-        bool: True if message was sent successfully, False otherwise
-    """
-    sns = boto3.client('sns')
-    logger = logging.getLogger("SNS")
-
-    try:
-
-        if attributes:
-            message_attributes = {
-                k: {'DataType': 'String', 'StringValue': str(v)}
-                for k, v in attributes.items()
-            }
-        else:
-            message_attributes = {}
-
-        sns.publish(TopicArn=topic_arn, Message=message, Subject=subject, MessageAttributes=message_attributes)
-
-        return True
-
-    except ClientError as e:
-        error_code = e.response['Error']['Code']
-        logger.error(f"Failed to send sns message: {error_code}")
-        return False
-    except Exception as e:
-        logger.error(f"Failed to send sns message: {str(e)}")
-        return False
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            self.logger.error(f"Failed to send sns message: {error_code}")
+            return False
+        except Exception as e:
+            self.logger.error(f"Failed to send sns message: {str(e)}")
+            return False
 
 
-def install_binaries(install_path : str) -> None:
-    """
-    Install the springtail binaries on the local system.
-    Current s3 bucket: s3://data-share.springtail.internal/packages/
-    """
-    global S3_DOWNLOAD_PATH, S3_BIN_FOLDER
+    def install_binaries(self) -> None:
+        """
+        Install the springtail binaries on the local system.
+        Current s3 bucket: s3://data-share.springtail.internal/packages/
+        """
+        global S3_DOWNLOAD_PATH, S3_BIN_FOLDER
 
-    # Download the springtail binaries
-    s3_bucket = os.environ.get('S3_BUCKET',"data-share.springtail.internal")
-    if not s3_bucket:
-        raise ValueError("S3_BUCKET environment variable not set")
+        # Download the springtail binaries
+        s3_bucket = os.environ.get('S3_BUCKET',"data-share.springtail.internal")
+        if not s3_bucket:
+            raise ValueError("S3_BUCKET environment variable not set")
 
-    logging.info(f"Downloading springtail binaries from {s3_bucket}/{S3_BIN_FOLDER} to {S3_DOWNLOAD_PATH}")
+        self.logger.info(f"Downloading springtail binaries from {s3_bucket}/{S3_BIN_FOLDER} to {S3_DOWNLOAD_PATH}")
 
-    springtail_tgz = __download_s3_binaries(s3_bucket, S3_BIN_FOLDER, S3_DOWNLOAD_PATH)
+        springtail_tgz = self._download_s3_binaries(s3_bucket, S3_BIN_FOLDER, S3_DOWNLOAD_PATH)
 
-    if not springtail_tgz:
-        raise ValueError("Failed to download springtail binaries")
+        if not springtail_tgz:
+            raise ValueError("Failed to download springtail binaries")
 
-    try:
-        # Create the install directory if it doesn't exist
-        if not os.path.exists(install_path):
-            makedir(install_path)
+        try:
+            # Create the install directory if it doesn't exist
+            if not os.path.exists(self.install_path):
+                makedir(self.install_path)
 
-        # Install the binaries
-        run_command('sudo', ['tar', 'xzf', springtail_tgz, '-C', install_path])
+            # Install the binaries
+            run_command('sudo', ['tar', 'xzf', springtail_tgz, '-C', self.install_path])
 
-        logging.info(f"Springtail binaries installed to {install_path}")
-        send_sns('install_complete', version=os.path.basename(springtail_tgz))
+            self.logger.info(f"Springtail binaries installed to {self.install_path}")
+            self.send_sns('install_complete', version=os.path.basename(springtail_tgz))
 
-    except Exception as e:
-        logging.error(f"Failed to install springtail binaries: {str(e)}")
-        send_sns('install_failed', version=os.path.basename(springtail_tgz))
-        raise e
+        except Exception as e:
+            self.logger.error(f"Failed to install springtail binaries: {str(e)}")
+            self.send_sns('install_failed', version=os.path.basename(springtail_tgz))
+            raise e
 
+    def install_pgfdw(self) -> None:
+        """
+        Install the postgres libraries on the local system for the FDW.
+        Should be done prior to starting the ddl mgr.
+        """
+        # Get the share and lib directories
+        share_dir = run_command('pg_config', ['--sharedir'])
+        lib_dir = run_command('pg_config', ['--pkglibdir'])
 
-def install_pgfdw(install_path : str) -> None:
-    """
-    Install the postgres libraries on the local system for the FDW.
-    Should be done prior to starting the ddl mgr.
-    """
-    # Get the share and lib directories
-    share_dir = run_command('pg_config', ['--sharedir'])
-    lib_dir = run_command('pg_config', ['--pkglibdir'])
+        # copy the extension files to the share directory
+        logging.info(f"Copying extension files to the share directory: {share_dir}")
+        sp_sharedir = os.path.join(self.install_path, 'share')
+        share_dir = os.path.join(share_dir.strip(), 'extension')
 
-    # copy the extension files to the share directory
-    logging.info(f"Copying extension files to the share directory: {share_dir}")
-    sp_sharedir = os.path.join(install_path, 'share')
-    share_dir = os.path.join(share_dir.strip(), 'extension')
+        run_command('sudo', ['cp', str(os.path.join(sp_sharedir, 'springtail_fdw--1.0.sql')), share_dir])
+        run_command('sudo', ['cp', str(os.path.join(sp_sharedir, 'springtail_fdw.control')), share_dir])
 
-    run_command('sudo', ['cp', str(os.path.join(sp_sharedir, 'springtail_fdw--1.0.sql')), share_dir])
-    run_command('sudo', ['cp', str(os.path.join(sp_sharedir, 'springtail_fdw.control')), share_dir])
+        # copy the shared library to the lib directory
+        self.logger.info(f"Copying shared library to the lib directory: {lib_dir}")
+        sp_libdir = os.path.join(self.install_path, 'lib')
+        lib_dir = os.path.join(lib_dir.strip(), 'springtail_fdw.so')
+        run_command('sudo', ['cp', os.path.join(sp_libdir, 'libspringtail_pg_fdw.so'), lib_dir])
 
-    # copy the shared library to the lib directory
-    logging.info(f"Copying shared library to the lib directory: {lib_dir}")
-    sp_libdir = os.path.join(install_path, 'lib')
-    lib_dir = os.path.join(lib_dir.strip(), 'springtail_fdw.so')
-    run_command('sudo', ['cp', os.path.join(sp_libdir, 'libspringtail_pg_fdw.so'), lib_dir])
+        # Update the postgres configuration file
+        # version string is like: 'PostgreSQL 16.4 (Ubuntu 16.4-0ubuntu0.24.04.2)'
+        logging.info("Updating postgres environment file")
+        version_str = run_command('pg_config', ['--version']).strip()
+        version = version_str.split(' ')[1].split('.')[0]
+        env_file = f'/etc/postgresql/{version}/main/environment'
 
-    # Update the postgres configuration file
-    # version string is like: 'PostgreSQL 16.4 (Ubuntu 16.4-0ubuntu0.24.04.2)'
-    logging.info("Updating postgres environment file")
-    version_str = run_command('pg_config', ['--version']).strip()
-    version = version_str.split(' ')[1].split('.')[0]
-    env_file = f'/etc/postgresql/{version}/main/environment'
+        # Write the environment variables to a temporary file
+        with tempfile.NamedTemporaryFile(delete=True, mode='w') as temp_file:
+            # Write data to the temporary file
+            for var in ENV_VARS:
+                value = os.environ.get(var)
+                if value:
+                    temp_file.write(f"{var} = '{value}'\n")
+            temp_file.flush()
 
-    # Write the environment variables to a temporary file
-    with tempfile.NamedTemporaryFile(delete=True, mode='w') as temp_file:
-        # Write data to the temporary file
-        for var in ENV_VARS:
+            # Copy the contents of the temporary file to the environment file
+            run_command('sudo', ['cp', temp_file.name, env_file])
+
+        # restart postgres
+        self.logger.info("Restarting postgres")
+        run_command('sudo', ['service', 'postgresql', 'restart'])
+        time.sleep(5)
+
+    def _extract_attributes(self) -> Dict[str, Any]:
+        """
+        Extract attributes from environment variables.
+        """
+        global SNS_ENV_VARS
+
+        attributes = {}
+
+        # extract attributes from environment variables
+        for var in SNS_ENV_VARS:
             value = os.environ.get(var)
             if value:
-                temp_file.write(f"{var} = '{value}'\n")
-        temp_file.flush()
+                attributes[var] = value
 
-        # Copy the contents of the temporary file to the environment file
-        run_command('sudo', ['cp', temp_file.name, env_file])
+        # get aws instance id
+        token = run_command('curl', ['-s', 'http://169.254.169.254/latest/api/token', '-X', 'PUT', '-H', 'X-aws-ec2-metadata-token-ttl-seconds: 21600'])
+        instance_id = run_command('curl', ['-s', 'http://169.254.169.254/latest/meta-data/instance-id', '-H', f'X-aws-ec2-metadata-token: {token}'])
 
-    # restart postgres
-    logging.info("Restarting postgres")
-    run_command('sudo', ['service', 'postgresql', 'restart'])
-    time.sleep(5)
+        attributes['AWS_INSTANCE_ID'] = instance_id
 
-def _extract_attributes() -> Dict[str, Any]:
-    """
-    Extract attributes from environment variables.
-    """
-    global SNS_ENV_VARS
+        # generate SRN: format: srn:1:1:aws:dbi/82
+        srn = f"srn:{attributes['ORGANIZATION_ID']}:{attributes['ACCOUNT_ID']}:aws:dbi/{attributes['DATABASE_INSTANCE_ID']}"
+        attributes['SRN'] = srn
 
-    attributes = {}
+        return {k.lower(): v for k, v in attributes.items()}
 
-    # extract attributes from environment variables
-    for var in SNS_ENV_VARS:
-        value = os.environ.get(var)
-        if value:
-            attributes[var] = value
+    def send_sns(
+        self,
+        type: str,
+        component: str = "",
+        version: str = "",
+        attrs: dict = {}
+    ) -> None:
+        """
+        Send a message to the SNS topic.
+        """
 
-    # get aws instance id
-    token = run_command('curl', ['-s', 'http://169.254.169.254/latest/api/token', '-X', 'PUT', '-H', 'X-aws-ec2-metadata-token-ttl-seconds: 21600'])
-    instance_id = run_command('curl', ['-s', 'http://169.254.169.254/latest/meta-data/instance-id', '-H', f'X-aws-ec2-metadata-token: {token}'])
+        srn = self.sns_attributes['srn']
+        service_name = self.sns_attributes['service_name']
 
-    attributes['AWS_INSTANCE_ID'] = instance_id
+        now = datetime.now(timezone.utc)
+        timestamp_ms = int(now.timestamp() * 1000)
+        timestamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # generate SRN
-    srn = f"{attributes['ORGANIZATION_ID']}:{attributes['ACCOUNT_ID']}:aws:dbi:{attributes['DATABASE_INSTANCE_ID']}"
-    attributes['SRN'] = srn
+        # copy the attributes and add the timestamp
+        attributes = dict(self.sns_attributes)
+        attributes['epoch_ms'] = timestamp_ms
+        attributes['timestamp'] = timestamp
+        attributes['source'] = 'coordinator'
 
-    return {k.lower(): v for k, v in attributes.items()}
+        for k, v in attrs.items():
+            attributes[k] = v
 
+        msg = ""
 
-def send_sns(
-    type: str,
-    component: Optional[str] = None,
-    version: Optional[str] = None
-) -> None:
-    """
-    Send a message to the SNS topic.
-    """
-
-    global TOPIC_ARN, SNS_ATTRIBUTES
-    if not TOPIC_ARN:
-        TOPIC_ARN = os.environ.get('SNS_TOPIC_ARN')
-        if not TOPIC_ARN:
+        if type == 'startup':
+            subject = f"Instance startup: {srn}, {service_name} @{timestamp}"
+        elif type == 'shutdown':
+            subject = f"Instance shutdown: {srn}, {service_name} @{timestamp}"
+        elif type == 'failure':
+            subject = f"Failure detected: {srn}, {service_name}, {component} @{timestamp}"
+        elif type == 'download_start':
+            subject = f"New version downloading: {srn}, {service_name} @{timestamp}"
+        elif type == 'download_complete':
+            subject = f"New version downloaded: {srn}, {service_name} @{timestamp}"
+            attributes['version'] = version
+        elif type == 'download_failed':
+            subject = f"New version download failed: {srn}, {service_name} @{timestamp}"
+        elif type == 'install_complete':
+            subject = f"New version installed: {srn}, {service_name} @{timestamp}"
+            attributes['version'] = version
+        elif type == 'install_failed':
+            subject = f"New version install failed: {srn}, {service_name} @{timestamp}"
+            attributes['version'] = version
+        elif type == 'db_state_change':
+            subject = f"Database state change: {srn}, {service_name} @{timestamp}"
+            msg = f"\nState change: {attrs['old_state']} -> {attrs['new_state']}"
+        else:
+            self.logger.error(f"Unknown SNS message type: {type}")
             return
 
-    if not SNS_ATTRIBUTES:
-        SNS_ATTRIBUTES = _extract_attributes()
+        message = f"{subject}{msg}\n\n{json.dumps(attributes)}"
 
-    srn = SNS_ATTRIBUTES['srn']
-    service_name = SNS_ATTRIBUTES['service_name']
+        self.logger.info(f"SNS message: {subject}")
 
-    now = datetime.now(timezone.utc)
-    timestamp_ms = int(now.timestamp() * 1000)
-    timestamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    # copy the attributes and add the timestamp
-    attributes = dict(SNS_ATTRIBUTES)
-    attributes['epoch_ms'] = timestamp_ms
-    attributes['timestamp'] = timestamp
-
-    if type == 'startup':
-        subject = f"Instance startup: {srn}, {service_name} @{timestamp}"
-    elif type == 'shutdown':
-        subject = f"Instance shutdown: {srn}, {service_name} @{timestamp}"
-    elif type == 'failure':
-        subject = f"Failure detected: {srn}, {service_name}, {component} @{timestamp}"
-    elif type == 'download_start':
-        subject = f"New version downloading: {srn}, {service_name} @{timestamp}"
-    elif type == 'download_complete':
-        subject = f"New version downloaded: {srn}, {service_name} @{timestamp}"
-        attributes['version'] = version
-    elif type == 'download_failed':
-        subject = f"New version download failed: {srn}, {service_name} @{timestamp}"
-    elif type == 'install_complete':
-        subject = f"New version installed: {srn}, {service_name} @{timestamp}"
-        attributes['version'] = version
-    elif type == 'install_failed':
-        subject = f"New version install failed: {srn}, {service_name} @{timestamp}"
-        attributes['version'] = version
-    else:
-        logging.error(f"Unknown SNS message type: {type}")
-        return
-
-    message = f"{subject}\n\n{attributes}"
-
-    __send_sns_notification(TOPIC_ARN, subject, message, attributes)
+        self._send_sns_notification(self.topic_arn, subject, message, attributes)

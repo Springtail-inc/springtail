@@ -4,6 +4,7 @@ import sys
 import os
 import time
 import logging
+from typing import Optional
 from common import parse_bool
 
 class Properties:
@@ -13,7 +14,7 @@ class Properties:
 
         if load_redis:
             try:
-                self.__load_redis(config_file)
+                self._load_redis(config_file)
             except KeyError as e:
                 raise Exception(f'JSON key error while loading redis, missing key: {e}')
 
@@ -177,6 +178,14 @@ class Properties:
 
         return config
 
+    def get_otel_config(self) -> dict:
+        """Return the OpenTelemetry configuration."""
+        system_config = self.get_system_config()
+        if 'otel' not in system_config:
+            raise Exception('otel not found in system settings')
+        otel = system_config['otel']
+        return otel
+
     def get_mount_path(self) -> str:
         """Return the mount point for the file system."""
         return os.environ.get('MOUNT_POINT')
@@ -199,7 +208,7 @@ class Properties:
         # see common/redis_types.hh PUBSUB_LIVENESS_NOTIFY
         return self.db_instance_id + ':pubsub:liveness_notify'
 
-    def __load_redis(self, config_file=None) -> None:
+    def _load_redis(self, config_file=None) -> None:
         """Load redis based on a system.json file.
         :param config_file: the system.json file to load, if None
         then use SPRINGTAIL_PROPERTIES_FILE
@@ -273,7 +282,7 @@ class Properties:
             self.redis.hset(fdw_key, fdw_id, fdw_json_str)
             self.redis.sadd(fdw_key + '_ids', fdw_id)
 
-    def wait_for_state(self, state, id, timeout=600) -> None:
+    def wait_for_state(self, state : str, id : int, error_state : str = "", timeout : int = 600) -> None:
         """Wait for the database state to reach the desired state.
         :param state: the state to wait for
         :param id: the database id to check
@@ -282,8 +291,11 @@ class Properties:
         key = self.db_instance_id + ':instance_state'
         start = time.time()
         while True:
-            if self.redis.hget(key, str(id)) == state:
+            current_state = self.redis.hget(key, str(id))
+            if current_state == state:
                 return
+            if error_state != "" and current_state == error_state:
+                raise Exception(f"Database {id} entered error state {error_state}")
             time.sleep(1)
             if time.time() - start > timeout:
                 break
@@ -329,6 +341,11 @@ class Properties:
         """Return the hostname for the given type."""
         key = self.db_instance_id + ':instance_config'
         return self.redis.hget(key, f'hostname:{type}')
+
+    def get_db_states(self) -> dict:
+        """Return a dictionary of database states."""
+        key = self.db_instance_id + ':instance_state'
+        return self.redis.hgetall(key)
 
     def set_db_state(self, dbname : str, state :str) -> None:
         """Set the state of a database, use cautiously."""

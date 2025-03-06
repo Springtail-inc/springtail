@@ -14,12 +14,21 @@ namespace springtail::pg_log_mgr {
     public:
         /**
          * Marks that the LogParser has issued a resync request for the given table so that
-         * mutations can be ignored.  This record is replaced by a full XidRecord when
-         * add_sync() is called from the TABLE_SYNC_MSG message coming through the log.
+         * mutations can be ignored.  Once picked up by the copy thread, it is moved to the inflight
+         * map.
          *
          * @return true if this is the first table from this sync-set
          */
-        bool mark_resync(uint64_t db_id, uint64_t table_id);
+        bool mark_resync(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+
+        /**
+         * Marks that the coppy thread has started the COPY request for this table.  This record is
+         * replaced by a full XidRecord when add_sync() is called from the TABLE_SYNC_MSG message
+         * coming through the log.
+         *
+         * @return true if this is the first table from this sync-set
+         */
+        void mark_inflight(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
         /**
          * Add the metadata for a given table sync into the tracker.
@@ -139,9 +148,13 @@ namespace springtail::pg_log_mgr {
         /** db -> target XID of sync. */
         std::map<uint64_t, uint64_t> _target_xid_map;
 
-        /** db-> table indicating that a resync was issued but we haven't seen the
-            TABLE_SYNC_MSG log entry for the table yet. */
-        std::map<uint64_t, std::set<uint64_t>> _resync_map;
+        /** db-> table indicating that a resync was issued but it hasn't been picked up by the copy
+            thread yet. */
+        std::map<uint64_t, std::map<uint64_t, std::set<XidLsn>>> _resync_map;
+
+        /** db-> table indicating that a copy for the table is in-flight but hasn't completed,
+            meaning we haven't seen the TABLE_SYNC_MSG log entry for the table yet. */
+        std::map<uint64_t, std::set<uint64_t>> _inflight_map;
     };
 
     class SyncTrackerRunner : public ServiceRunner {
