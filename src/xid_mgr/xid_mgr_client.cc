@@ -3,7 +3,7 @@
 
 #include <common/common.hh>
 #include <common/exception.hh>
-#include <common/grpc_client.hh>
+#include <grpc/grpc_client.hh>
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/object_cache.hh>

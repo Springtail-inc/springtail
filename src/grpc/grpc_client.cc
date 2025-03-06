@@ -1,7 +1,7 @@
 #include <filesystem>
 #include <fstream>
 
-#include <common/grpc_client.hh>
+#include <grpc/grpc_client.hh>
 
 namespace springtail::grpc_client {
 

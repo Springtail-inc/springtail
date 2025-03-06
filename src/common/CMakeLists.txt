@@ -11,8 +11,6 @@ set(COMMON_LIB_SOURCES
   init.cc
   dns_resolver.cc
   exception.cc
-  grpc_client.cc
-  grpc_server_manager.cc
   logging.cc
   properties.cc
   redis.cc
@@ -43,7 +41,7 @@ target_link_libraries(springtail_common
         opentelemetry-cpp::otlp_http_exporter
         opentelemetry-cpp::otlp_http_metric_exporter
         opentelemetry-cpp::otlp_http_log_record_exporter
-        gRPC::grpcpp_otel_plugin
+        
 )
 
 add_executable(test_thread test/test_thread.cc)
