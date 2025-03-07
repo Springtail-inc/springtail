@@ -11,14 +11,7 @@ namespace {
     protected:
         static void SetUpTestSuite()
         {
-            std::vector<std::unique_ptr<ServiceRunner>> service_runners;
-            service_runners.emplace_back(std::make_unique<DefaultLoggingRunner>());
-            service_runners.emplace_back(std::make_unique<ExceptionRunner>());
-            service_runners.emplace_back(std::make_unique<PropertiesRunner>(true));
-            service_runners.emplace_back(std::make_unique<LoggingRunner>(std::nullopt, std::nullopt, std::nullopt));
-            service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
-
-            springtail_init_custom(service_runners);
+            springtail_init_test();
         }
 
         static void TearDownTestSuite()
@@ -123,7 +116,6 @@ namespace {
         std::string value_string = nlohmann::to_string(system_settings_value);
         uint32_t counter_value = _notification_counter;
         _test_client->hset(key_value, "system_settings", value_string);
-        SPDLOG_INFO("Changed value of {}/system_settings to {}", key_value, value_string);
 
         // Wait for notification
         wait_for_increment(counter_value, 1);
@@ -134,7 +126,6 @@ namespace {
         value_string = nlohmann::to_string(system_settings_value);
         counter_value = _notification_counter;
         _test_client->hset(key_value, "system_settings", value_string);
-        SPDLOG_INFO("Changed value of {}/system_settings to {}", key_value, value_string);
 
         // wait for notification
         wait_for_increment(counter_value, 1);
