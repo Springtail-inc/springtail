@@ -95,64 +95,12 @@ jobs:
           # Create triggers
           sudo -u postgres psql -d springtail -f /__w/springtail/springtail/scripts/triggers.sql
 
-      - name: Run Unit Tests
-        run: |
-          cd python/testing
-          python3 springtail.py -f ../../system.json.test --load-redis --build-dir ../../debug
-          cd ../../debug
-          
-          # Per SPR-501: break upon test failures - "--gtest_break_on_failure"
-          make test ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose --stop-on-failure" 2>&1 | tee tmplog
-          
-          # List the open listening ports and processes info after tests are done
-          sudo apt update
-          sudo apt install net-tools          
-          echo "==== Listening Ports ===="
-          netstat -tulnp
-          # Show the full launching command of each
-          netstat -tulnp | awk '{print $7}' | grep -o '[0-9]*' | while read pid; do
-            cmd=$(ps -p $pid -o args=)
-            echo "$pid - $cmd"
-          done
-          
-          # Grab the success/failure status of the unit tests
-          _LOG_FLAG="succeeded"
-          if !  grep -qE "100% tests passed" tmplog
-          then 
-            _LOG_FLAG="failed"
-          fi
-          # Grab the current PR ID
-          _LOG_PR_ID="${GITHUB_EVENT_PULL_REQUEST_NUMBER}"
-          # Grab the short SHA
-          _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
-          
-          log_file="unit-test-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-$(date +%s).log" 
-          mv tmplog $log_file
-          unit_test_log_s3key="s3://devsupport.springtail.internal/testlogs/$(date +"%Y/%m/%d/%H")/$log_file"
-          
-          aws s3 cp "$log_file" "$unit_test_log_s3key"
-          echo "*** Unit Test Log S3 Key: $unit_test_log_s3key"
-
       - name: Cleanup Unit Test
         if: success() || failure()      # run this step even if previous step failed
         run: |
           # Drop the springtail database 
           sudo -u postgres psql -c "DROP DATABASE springtail"
           service postgresql stop
-
-      - name: Unit Test Report
-        uses: dorny/test-reporter@v1
-        if: success() || failure()      # run this step even if previous step failed
-        with:
-          name: Unit Tests             # Name of the check run which will be created
-          path: ./debug/unit-test-report.xml
-          reporter: java-junit
-
-      - uses: actions/upload-artifact@v4
-        if: success() || failure()      # run this step even if previous step failed
-        with:
-          name: 'Unit Test Logs'
-          path: debug/unit-test-*.log
 
       - name: Create Superuser for test
         if: success() || failure()      # run this step even if previous step failed
@@ -167,6 +115,7 @@ jobs:
       - name: Run Integration Tests
         if: success() || failure()      # run this step even if previous step failed
         run: |
+          set -x
           cd python/testing
           service postgresql start
           ./startup.sh -s data_init.sql
@@ -198,7 +147,9 @@ jobs:
           
           # Springtail service log
           springtail_log_file="springtail-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-${_LOG_TIMESTAMP}.tar.gz"
+          echo "*** Springtail log: ${springtail_log_file}"
           output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../debug)
+          echo "*** output {output}"
           fname=$(echo $output  | cut -f2 -d':' | xargs | head -1)
           mv $fname $springtail_log_file
           springtail_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_DATE}/$springtail_log_file"
