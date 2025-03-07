@@ -23,7 +23,7 @@ on:
 jobs:
   test:
     name: test
-    runs-on: warp-ubuntu-latest-arm64-4x-spot
+    runs-on: warp-ubuntu-latest-arm64-8x-spot
     timeout-minutes: 30
     container:
       image: ${{ inputs.builder_image_version_tag }}
@@ -82,7 +82,6 @@ jobs:
       - name: Build
         run: |
           ln -s /home/dev/external external
-          ./clean.sh
           ./debug.sh -j ${NUM_PROCS}
 
       - name: Prepare DB for Unit Tests

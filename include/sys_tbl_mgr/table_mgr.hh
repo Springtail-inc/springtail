@@ -95,4 +95,23 @@ namespace springtail {
         boost::shared_mutex _mutex; ///< Protects access to the table manager.
         std::filesystem::path _table_base; ///< The base directory for individual table directories.
     };
+
+    class TableMgrRunner : public ServiceRunner {
+    public:
+        TableMgrRunner() : ServiceRunner("TableMgr") {}
+
+        ~TableMgrRunner() override = default;
+
+        bool start() override
+        {
+            TableMgr::get_instance();
+            return true;
+        }
+
+        void stop() override
+        {
+            TableMgr::shutdown();
+        }
+    };
+
 }

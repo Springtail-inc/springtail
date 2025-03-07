@@ -47,6 +47,7 @@ void XidMgrServer::startup() {
 
 void XidMgrServer::_internal_shutdown() {
     _grpc_server_manager.shutdown();
+    GrpcXidMgrService::shutdown();
     std::unique_lock lock(_mutex);
     // iterate over partitions and shutdown
     for (auto& partition : _partitions) {

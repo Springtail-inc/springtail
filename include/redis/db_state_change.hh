@@ -14,6 +14,7 @@ namespace springtail {
         static constexpr char const * const REDIS_STATE_RUNNING = "running";
         static constexpr char const * const REDIS_STATE_SYNCING = "synchronizing";
         static constexpr char const * const REDIS_STATE_STOPPED = "stopped";
+        static constexpr char const * const REDIS_STATE_FAILED = "failed";
 
         /** Database action names that are used in redis */
         static constexpr char const * const REDIS_ACTION_ADD    = "db_add";

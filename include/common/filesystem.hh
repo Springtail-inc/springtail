@@ -1,7 +1,6 @@
 #pragma once
 
 #include <filesystem>
-#include <iostream>
 #include <optional>
 
 #include <fmt/format.h>
@@ -86,6 +85,10 @@ namespace springtail {
             }
 
             // Return the path to the earliest modified file, or an empty path if no files were found
+            if (earliest_file.empty()) {
+                return std::nullopt;
+            }
+
             return earliest_file;
         }
 
@@ -140,7 +143,7 @@ namespace springtail {
                 if (std::filesystem::is_regular_file(entry) &&
                     entry.path().filename().string().find(prefix) == 0 &&
                     entry.path().filename().string().find(suffix) != std::string::npos) {
-                    
+
                     // Extract the timestamp from the file name
                     auto timestamp = _extract_timestamp_from_file(entry.path(), prefix, suffix);
 
@@ -169,7 +172,7 @@ namespace springtail {
             size_t suffix_length = suffix.length();
 
             // Ensure the file name has the correct prefix and suffix
-            if (file.substr(0, prefix_length) == prefix && 
+            if (file.substr(0, prefix_length) == prefix &&
                 file.substr(file.length() - suffix_length) == suffix) {
                 std::string timestamp_str = file.substr(prefix_length, file.length() - prefix_length - suffix_length);
                 return std::stoll(timestamp_str); // Convert to long long for timestamp

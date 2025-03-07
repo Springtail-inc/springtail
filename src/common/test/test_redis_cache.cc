@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/redis_cache.hh>
 
 using namespace springtail;
@@ -11,13 +11,12 @@ namespace {
     protected:
         static void SetUpTestSuite()
         {
-            springtail_init();
+            springtail_init_test();
         }
 
         static void TearDownTestSuite()
         {
-            RedisMgr::shutdown();
-            Properties::shutdown();
+            springtail_shutdown();
         }
         void SetUp() override
         {

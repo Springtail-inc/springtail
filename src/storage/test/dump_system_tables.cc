@@ -1,8 +1,9 @@
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/constants.hh>
 
 #include <storage/field.hh>
 #include <sys_tbl_mgr/system_tables.hh>
+#include <sys_tbl_mgr/schema_mgr.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 
 using namespace springtail;
@@ -16,8 +17,13 @@ main(int argc,
         return 1;
     }
 
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<SchemaMgrRunner>());
+    runners->emplace_back(std::make_unique<TableMgrRunner>());
+
     // no logging
-    springtail_init(std::nullopt, std::nullopt, LOG_NONE);
+    springtail_init(runners, false, std::nullopt, LOG_NONE);
 
     // takes the database ID from the first argument
     uint64_t db_id = std::stoull(argv[1]);
@@ -28,7 +34,9 @@ main(int argc,
                            sys_tbl::TableRoots::ID,
                            sys_tbl::Indexes::ID,
                            sys_tbl::Schemas::ID,
-                           sys_tbl::TableStats::ID }) {
+                           sys_tbl::TableStats::ID,
+                           sys_tbl::IndexNames::ID,
+                           sys_tbl::NamespaceNames::ID }) {
         auto table = TableMgr::get_instance()->get_table(db_id,
                                                          table_id,
                                                          constant::LATEST_XID);
@@ -45,4 +53,5 @@ main(int argc,
             std::cout << FieldTuple(fields, row).to_string() << std::endl;
         }
     }
+    springtail_shutdown();
 }

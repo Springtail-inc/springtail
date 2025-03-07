@@ -295,7 +295,7 @@ class TestCase:
             current_xid = springtail.current_xid(self._props, db_id)
             target_xid = current_xid - command['count']
             logging.debug(f'Force recovery from {current_xid} to {target_xid}')
-            
+
             # restart Springtail at the target XID
             springtail.restart(self._props, self._build_dir, start_xid=target_xid)
             return None
@@ -314,7 +314,7 @@ class TestCase:
             elif command['type'] == 'sync':
                 # insert a row to the sync_control table
                 self._sync_step += 1
-                self._execute_sql(cursor, f"BEGIN; INSERT INTO sync_control (sync, test) VALUES ({self._sync_step}, '{self._name}'); COMMIT;", False)
+                self._execute_sql(cursor, f"BEGIN; SET statement_timeout = 5000; INSERT INTO sync_control (sync, test) VALUES ({self._sync_step}, '{self._name}'); COMMIT;", False)
 
                 # Wait for sync row to appear in replica
                 try:

@@ -94,12 +94,7 @@ namespace springtail::pg_fdw {
 
         // fetch config for fdw (host, port, user, password)
         nlohmann::json fdw_config;
-        try {
-            fdw_config = Properties::get_fdw_config(fdw_id);
-        } catch (const Error &error) {
-            SPDLOG_ERROR("Error fetching fdw config: {}", error.what());
-            return;
-        }
+        fdw_config = Properties::get_fdw_config(fdw_id);
 
         // get the connection information from the FDW config
         // override hostname if passed in, used for unix domain socket connections
@@ -245,7 +240,7 @@ namespace springtail::pg_fdw {
     void
     PgDDLMgr::run()
     {
-        // init redis ddl client after springtail_init()
+        // init redis ddl client
         RedisDDL redis_ddl;
 
         // move any pending DDLs to the active queue

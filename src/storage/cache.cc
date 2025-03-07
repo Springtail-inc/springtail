@@ -205,6 +205,21 @@ namespace springtail {
     }
 
     void
+    StorageCache::PageCache::evict(PagePtr page)
+    {
+        boost::unique_lock lock(_mutex);
+        SPDLOG_DEBUG_MODULE(LOG_CACHE, "EVICT file {} eid {} s_xid {} e_xid {}",
+                            page->_file, page->_extent_id, page->_start_xid, page->_end_xid);
+
+        // page must be an unwritten dirty page
+        CHECK_EQ(page->_extent_id, constant::UNKNOWN_EXTENT);
+        CHECK(page->_is_dirty);
+
+        // release the space back to the cache
+        --_size;
+    }
+
+    void
     StorageCache::PageCache::flush_file(const std::filesystem::path &file)
     {
         boost::unique_lock lock(_mutex);

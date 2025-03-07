@@ -219,4 +219,40 @@ namespace springtail::pg_fdw {
         _remove_replicated_database(uint64_t db_id);
 
     };
+
+    class PgDDLMgrRunner : public ServiceRunner {
+    public:
+        PgDDLMgrRunner(const std::string &username,
+                       const std::string &password,
+                       const std::optional<std::string> &hostname) :
+            ServiceRunner("PgDDLMgr"),
+            _username(username),
+            _password(password),
+            _hostname(hostname) {}
+
+        bool start() override
+        {
+            // start the ddl main thread
+            std::string fdw_id = Properties::get_fdw_id();
+
+            SPDLOG_DEBUG("Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}",
+                        fdw_id, _username, _password, _hostname.value_or(""));
+            PgDDLMgr::get_instance()->init(fdw_id, _username, _password, _hostname);
+            _pg_ddl_mgr_thread = std::thread(&PgDDLMgr::run, PgDDLMgr::get_instance());
+            return true;
+        }
+
+        void stop() override
+        {
+            PgDDLMgr::get_instance()->notify_shutdown();
+            _pg_ddl_mgr_thread.join();
+            PgDDLMgr::shutdown();
+        }
+
+    private:
+        std::thread _pg_ddl_mgr_thread;
+        std::string _username;                     ///< username
+        std::string _password;                     ///< password
+        std::optional<std::string> _hostname;      ///< hostname
+    };
 }

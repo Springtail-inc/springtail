@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <common/common.hh>
+#include <common/init.hh>
 
 #include <common/multi_queue_thread_manager.hh>
 
@@ -10,10 +10,13 @@ namespace {
     class MultiQueueThreadManager_Test : public testing::Test {
     public:
         static void SetUpTestSuite() {
-            init_exception();
+            std::vector<std::unique_ptr<ServiceRunner>> runners;
+            runners.emplace_back(std::make_unique<ExceptionRunner>());
+
+            springtail_init_custom(runners);
         }
         static void TearDownTestSuite() {
-            // placeholder, left empty for now
+            springtail_shutdown();
         }
     protected:
         void SetUp() override {

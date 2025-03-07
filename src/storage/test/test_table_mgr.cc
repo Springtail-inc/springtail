@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/json.hh>
 #include <common/object_cache.hh>
 #include <common/properties.hh>
@@ -19,25 +19,17 @@ namespace {
      * Framework for Table and MutableTable testing.
      */
     class TableMgr_Test : public testing::Test {
-        void SetUp() override {
-            struct Initializer
-            {
-                test::Services _s;
+    public:
+        static void SetUpTestSuite() {
+            auto service_runners = test::get_services(true, true, false);
+            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+            runners.emplace();
+            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
 
-                Initializer() : _s{true, true, false}
-                {
-                    springtail_init();
-                    _s.init();
-                }
-                Initializer(const Initializer&) = delete;
-                Initializer& operator=(const Initializer&) = delete;
-                ~Initializer()
-                {
-                    _s.shutdown();
-                }
-
-            };
-            static Initializer init;
+            springtail_init_test(runners);
+        }
+        static void TearDownTestSuite() {
+            springtail_shutdown();
         }
     };
 

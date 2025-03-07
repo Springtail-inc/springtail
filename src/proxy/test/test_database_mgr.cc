@@ -1,7 +1,9 @@
+#include <memory>
+
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/json.hh>
 #include <common/redis.hh>
 #include <proxy/database.hh>
@@ -15,9 +17,10 @@ namespace {
     protected:
         static void SetUpTestSuite()
         {
-            springtail_init();
-
-            DatabaseMgr::get_instance()->init();
+            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+            runners.emplace();
+            runners->emplace_back(std::make_unique<DatabaseMgrRunner>());
+            springtail_init_test(runners);
 
             _data_client = RedisMgr::get_instance()->get_client();
 
@@ -27,8 +30,7 @@ namespace {
         }
         static void TearDownTestSuite()
         {
-            DatabaseMgr::shutdown();
-            RedisMgr::shutdown();
+            springtail_shutdown();
         }
         static inline RedisClientPtr _config_client;
         static inline RedisClientPtr _data_client;

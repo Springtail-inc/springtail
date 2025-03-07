@@ -4,8 +4,9 @@
 #include <filesystem>
 #include <vector>
 
+#include <common/service_register.hh>
 #include <common/singleton.hh>
-#include <common/grpc_server_manager.hh>
+#include <grpc/grpc_server_manager.hh>
 #include <xid_mgr/xid_partition.hh>
 
 namespace springtail::xid_mgr {
@@ -69,6 +70,31 @@ private:
     void _load_partitions();
 
     void _internal_shutdown() override;
+};
+
+class XidMgrRunner : public ServiceRunner {
+public:
+    XidMgrRunner(bool commit_starting_xid, uint64_t db_id, uint64_t starting_xid) :
+        ServiceRunner("XidMgr"),
+        _commit_starting_xid(commit_starting_xid),
+        _db_id(db_id), _starting_xid(starting_xid) {}
+
+    bool start() override {
+        if (_commit_starting_xid) {
+            xid_mgr::XidMgrServer::get_instance()->commit_xid(_db_id, _starting_xid, false);
+        }
+        xid_mgr::XidMgrServer::get_instance()->startup();
+        return true;
+    }
+
+    void stop() override {
+        xid_mgr::XidMgrServer::shutdown();
+    }
+
+private:
+    bool _commit_starting_xid;
+    uint64_t _db_id;
+    uint64_t _starting_xid;
 };
 
 }  // namespace springtail::xid_mgr
