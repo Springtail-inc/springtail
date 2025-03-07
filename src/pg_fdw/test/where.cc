@@ -119,9 +119,9 @@ int main(int argc, char **argv)
 
     std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
     runners.emplace();
+    runners->emplace_back(std::make_unique<IOMgrRunner>());
     runners->emplace_back(std::make_unique<SchemaMgrRunner>());
     runners->emplace_back(std::make_unique<TableMgrRunner>());
-    runners->emplace_back(std::make_unique<IOMgrRunner>());
 
     springtail_init(runners, false, std::nullopt, 0);
 

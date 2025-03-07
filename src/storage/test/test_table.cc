@@ -46,12 +46,13 @@ namespace {
             _base_dir = std::filesystem::temp_directory_path() / "test_table";
             std::filesystem::remove_all(_base_dir);
 
-            auto service_runners = test::get_services(true, true, false);
             std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
             runners.emplace();
-            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
             runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
             runners->emplace_back(std::make_unique<IOMgrRunner>());
+
+            auto service_runners = test::get_services(true, true, false);
+            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
 
             springtail_init_test(runners);
 
