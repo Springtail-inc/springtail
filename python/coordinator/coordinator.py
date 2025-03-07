@@ -63,18 +63,22 @@ class Coordinator:
                 self.logger.error("Service name not provided")
                 raise ValueError("Service name not provided")
 
-        # Get the installation path and setup bin dir
-        self.install_path = install_path
-        self.bin_dir = os.path.join(self.install_path, 'bin/system')
-        if not os.path.exists(self.bin_dir):
-            self.logger.error(f"Invalid binary directory: {self.bin_dir}")
-            raise ValueError(f"Invalid binary directory: {self.bin_dir}")
+        # Check the service name
+        if not self.service_name in ['ingestion', 'fdw', 'proxy']:
+            self.logger.error(f"Invalid service name: {self.service_name}")
+            raise ValueError(f"Invalid service name: {self.service_name}")
+
+        # Check the install path
+        if not install_path or not os.path.exists(install_path):
+            self.logger.error(f"Invalid install path: {install_path}")
+            raise ValueError(f"Invalid install path: {install_path}")
 
         # Check the properties for production
         self.production = None
         if is_production:
             self.logger.debug("Checking properties for production")
             self.production = Production(self.install_path)
+
 
     def startup(self):
         """
@@ -97,6 +101,13 @@ class Coordinator:
             except Exception as e:
                 raise ValueError("Failed to install binaries: " + str(e))
 
+        # Get the installation path and setup bin dir
+        self.install_path = self.install_path
+        self.bin_dir = os.path.join(self.install_path, 'bin/system')
+        if not os.path.exists(self.bin_dir):
+            self.logger.error(f"Invalid binary directory: {self.bin_dir}")
+            raise ValueError(f"Invalid binary directory: {self.bin_dir}")
+
         # Create scheduler
         self.logger.debug("Starting scheduler")
         self.scheduler = Scheduler(self.props, self.service_name, self.production)
@@ -108,45 +119,46 @@ class Coordinator:
         # Register components
         self.logger.info(f"Starting {self.service_name} service")
 
-        if self.service_name == "ingestion":
-            self.scheduler.register_component(factory.create_xid_mgr_daemon(), 1)
-            self.scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 2)
-            self.scheduler.register_component(factory.create_log_mgr_daemon(), 3)
+        match self.service_name:
+            case "ingestion":
+                self.scheduler.register_component(factory.create_xid_mgr_daemon(), 1)
+                self.scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 2)
+                self.scheduler.register_component(factory.create_log_mgr_daemon(), 3)
 
-        elif self.service_name == "fdw":
-            try:
+            case "fdw":
+                try:
+                    if self.production:
+                        self.production.install_pgfdw()
+                except Exception as e:
+                    raise ValueError("Failed to install postgres_fdw: " + str(e))
+
+                # startup postgres if not running
+                postgres = factory.create_postgres()
+                if not postgres.is_running():
+                    postgres.start()
+
+                # create the ddl user
+                ddl_password = self._gen_random_string(16)
+                postgres.create_user('ddl_user', ddl_password, True, True)
+
+                # wait for ingestion to be ready
+                self._wait_for_ingestion(self.props)
+
+                # For testing uncomment lines below since they are needed for ddl daemon
+                # but in production they should be running elsewhere
+                # scheduler.register_component(factory.create_xid_mgr_daemon(), 1)
+                # scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 2)
+                self.scheduler.register_component(postgres, 3)
+                self.scheduler.register_component(factory.create_ddl_daemon('ddl_user', ddl_password), 4)
+
+            case "proxy":
+                self.scheduler.register_component(factory.create_proxy(), 1)
+
+            case _:
+                self.logger.error(f"Invalid service type: {self.service_name}")
                 if self.production:
-                    self.production.install_pgfdw()
-            except Exception as e:
-                raise ValueError("Failed to install postgres_fdw: " + str(e))
-
-            # startup postgres if not running
-            postgres = factory.create_postgres()
-            if not postgres.is_running():
-                postgres.start()
-
-            # create the ddl user
-            ddl_password = self._gen_random_string(16)
-            postgres.create_user('ddl_user', ddl_password, True, True)
-
-            # wait for ingestion to be ready
-            self._wait_for_ingestion(self.props)
-
-            # For testing uncomment lines below since they are needed for ddl daemon
-            # but in production they should be running elsewhere
-            # scheduler.register_component(factory.create_xid_mgr_daemon(), 1)
-            # scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 2)
-            self.scheduler.register_component(postgres, 3)
-            self.scheduler.register_component(factory.create_ddl_daemon('ddl_user', ddl_password), 4)
-
-        elif self.service_name == "proxy":
-            self.scheduler.register_component(factory.create_proxy(), 1)
-
-        else:
-            self.logger.error(f"Invalid service type: {self.service_name}")
-            if self.production:
-                self.production.send_sns('shutdown')
-            raise ValueError(f"Invalid service type: {self.service_name}; must be one of: ingestion, fdw, proxy")
+                    self.production.send_sns('shutdown')
+                raise ValueError(f"Invalid service type: {self.service_name}; must be one of: ingestion, fdw, proxy")
 
         # Start all components
         if not self.scheduler.start_all():
