@@ -16,7 +16,7 @@ namespace {
             service_runners.emplace_back(std::make_unique<ExceptionRunner>());
             service_runners.emplace_back(std::make_unique<PropertiesRunner>(true));
             service_runners.emplace_back(std::make_unique<LoggingRunner>(std::nullopt, std::nullopt, std::nullopt));
-            // service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
+            service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
 
             springtail_init_custom(service_runners);
         }
