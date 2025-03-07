@@ -1,6 +1,5 @@
 #include <absl/log/check.h>
 #include <bits/ranges_algo.h>
-#include <iostream>
 #include <sys_tbl_mgr/shm_cache.hh>
 
 using namespace springtail::sys_tbl_mgr;
@@ -50,14 +49,14 @@ void
 ShmCache::remove(const std::string& name)
 {
     ipc::shared_memory_object::remove(name.c_str());
-    ipc::named_mutex::remove((name + std::string(".mutex")).c_str());
+    Mutex::remove((name + std::string(".mutex")).c_str());
 }
     
 
 size_t
 ShmCache::size() const
 {
-    ipc::scoped_lock<ipc::named_mutex> lock(_mutex,
+    ipc::sharable_lock<Mutex> lock(_mutex,
             std::chrono::system_clock::now() + std::chrono::seconds(5)
             );
 
@@ -76,7 +75,7 @@ ShmCache::insert(DbId db, TabId tid, Xid xid, const std::string& msg)
 
     auto cmp = [](const auto& a, const auto& b) {return a.xid < b.xid;};
 
-    ipc::scoped_lock<ipc::named_mutex> lock(_mutex,
+    ipc::scoped_lock<Mutex> lock(_mutex,
             std::chrono::system_clock::now() + std::chrono::seconds(5)
             );
 
@@ -139,31 +138,57 @@ ShmCache::insert(DbId db, TabId tid, Xid xid, const std::string& msg)
 std::optional<std::string>
 ShmCache::find(DbId db, TabId tid, Xid xid)
 {
-    ipc::scoped_lock<ipc::named_mutex> lock(_mutex,
-            std::chrono::system_clock::now() + std::chrono::seconds(5)
-            );
-    auto it = _cache->find({db, tid});
-    if (it == _cache->end()) {
-        return {};
+    std::string ret;
+    LruKey lk{db, tid, xid};
+
+    { //read-only portion
+        ipc::sharable_lock<Mutex> lock(_mutex,
+                std::chrono::system_clock::now() + std::chrono::seconds(5)
+                );
+        CHECK(lock.owns());
+
+        auto it = _cache->find({db, tid});
+        if (it == _cache->end()) {
+            return {};
+        }
+
+        Message item(_string_alloc);
+        item.xid = xid;
+
+        auto itt = std::ranges::lower_bound(it->second, item,
+                [](const auto& a, const auto& b) { return a.xid < b.xid; } );
+        if (itt == it->second.end()) {
+            return {};
+        }
+
+        if (itt->xid != xid) {
+            return {};
+        }
+        ret = std::string(itt->msg.c_str(), itt->msg.size());
+
+        //check if the item is near the top of LRU
+        size_t top_cnt = static_cast<double>(_lru->size())*0.1; //in the top 10%
+        //Note: if the number of items in LRU "too small" (<10 elements) then
+        //top_cnt=0 and we'll move to the top. It should be fine actually.
+        
+        auto& seq_idx = _lru->get<0>();
+        size_t i = 0;
+        for (auto it=seq_idx.begin(); i != top_cnt && it != seq_idx.end(); ++it, ++i)
+        {
+            if (*it == lk) {
+                return ret;
+            }
+        }
     }
-
-    Message item(_string_alloc);
-    item.xid = xid;
-
-    auto itt = std::ranges::lower_bound(it->second, item,
-            [](const auto& a, const auto& b) { return a.xid < b.xid; } );
-    if (itt == it->second.end()) {
-        return {};
-    }
-
-    if (itt->xid != xid) {
-        return {};
-    }
-
+    
     // this will move the element to the LRU front
     // preserving the insertion sequence.
     {
-        LruKey lk{db, tid, xid};
+        ipc::scoped_lock<Mutex> lock(_mutex,
+                std::chrono::system_clock::now() + std::chrono::seconds(5)
+                );
+        CHECK(lock.owns());
+
         auto it_lru = _lru->get<1>().find(lk);
         CHECK(it_lru != _lru->get<1>().end());
 
@@ -172,7 +197,7 @@ ShmCache::find(DbId db, TabId tid, Xid xid)
         seq_idx.relocate(seq_idx.begin(), _lru->project<0>(it_lru));
     }
 
-    return std::string(itt->msg.c_str(), itt->msg.size());
+    return ret;
 }
 
 void

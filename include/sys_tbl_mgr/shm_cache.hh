@@ -1,7 +1,8 @@
 #include <optional>
 #include <boost/interprocess/managed_shared_memory.hpp>
-#include <boost/interprocess/sync/named_mutex.hpp>
+#include <boost/interprocess/sync/named_sharable_mutex.hpp>
 #include <boost/interprocess/sync/scoped_lock.hpp>
+#include <boost/interprocess/sync/sharable_lock.hpp>
 #include <boost/interprocess/allocators/allocator.hpp>
 #include <boost/interprocess/containers/map.hpp>
 #include <boost/interprocess/containers/vector.hpp>
@@ -131,10 +132,12 @@ private:
     //ordered by Message::xid
     using Messages = ipc::vector<Message, Alloc<Message>>;
     using Cache = ipc::map<Key, Messages, std::less<Key>, Alloc<std::pair<const Key, Messages>>>;
+    using Mutex = ipc::named_sharable_mutex;
+    
 
     std::string _name;
     bool _created;
-    mutable ipc::named_mutex _mutex;
+    mutable Mutex _mutex;
     ipc::managed_shared_memory _shm;
     Messages::allocator_type _messages_alloc;
     String::allocator_type _string_alloc;
