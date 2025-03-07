@@ -12,9 +12,8 @@ class ComponentFactory:
     LOG_MGR_ID = "1"
     XID_MGR_ID = "2"
     DDL_ID = "3"
-    GC_ID = "4"
-    SYS_TBL_MGR_ID = "5"
-    PROXY_ID = "6"
+    SYS_TBL_MGR_ID = "4"
+    PROXY_ID = "5"
     POSTGRES = "10"
 
     def __init__(self, install_dir : str, pid_dir : str):
@@ -30,16 +29,6 @@ class ComponentFactory:
             args=["--daemon"],
             path=self.install_dir,
             pid_path=os.path.join(self.pid_dir, 'pg_log_mgr.pid')
-        )
-
-    def create_gc_daemon(self) -> Component:
-        """Create a new garbage collector component."""
-        return Component(
-            name="gc_daemon",
-            id=self.GC_ID,
-            args=["--daemon"],
-            path=self.install_dir,
-            pid_path=os.path.join(self.pid_dir, 'gc.pid')
         )
 
     def create_xid_mgr_daemon(self) -> Component:

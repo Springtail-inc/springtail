@@ -73,7 +73,6 @@ namespace springtail::pg_log_mgr {
     }
 
 
-    // XXX make sure GC is shutdown -- assume it for now
     void
     PgLogMgr::startup()
     {
@@ -96,6 +95,9 @@ namespace springtail::pg_log_mgr {
             // we were in copy tables state, reset to initialize to restart copy tables
             state = redis::db_state_change::REDIS_STATE_INITIALIZE;
             Properties::set_db_state(_db_id, state);
+        } else if (state == redis::db_state_change::REDIS_STATE_FAILED) {
+            SPDLOG_ERROR("Database in failed state, cannot start up, db_id={}", _db_id);
+            return;
         }
 
         // add redis cache callback for watching database state changes
@@ -143,7 +145,7 @@ namespace springtail::pg_log_mgr {
         }
 
         // system is ready to start streaming
-        _start_streaming(lsn);
+        _start_streaming(lsn, do_init);
     }
 
     void
@@ -226,30 +228,26 @@ namespace springtail::pg_log_mgr {
         }
 
         while (!_shutdown) {
-            std::vector<uint32_t> table_ids;
+            std::set<uint32_t> table_ids;
 
             // block on redis table sync queue w/timeout for shutdown
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Waiting for table sync queue");
-            StringPtr table_id_ptr = _redis_sync_queue.pop(REDIS_WORKER_ID, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
-            if (table_id_ptr == nullptr) {
+            auto request = _redis_sync_queue.pop(REDIS_WORKER_ID, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+            if (request == nullptr) {
                 continue; // timeout, check for shutdown
             }
 
-            // populate the tables to copy; check for more work
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Table sync queue: {}", table_id_ptr->c_str());
-            table_ids.push_back(strtol(table_id_ptr->c_str(), nullptr, 10));
-            while (_redis_sync_queue.size() > 0) {
-                table_id_ptr = _redis_sync_queue.pop(REDIS_WORKER_ID, 1);
-                if (table_id_ptr == nullptr) {
-                    break;
-                }
-                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Table sync queue: {}", table_id_ptr->c_str());
-                table_ids.push_back(strtol(table_id_ptr->c_str(), nullptr, 10));
-            }
+            do {
+                // populate the tables to copy; check for more work
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Table sync queue: {}@{}:{}", request->table_id(),
+                                    request->xid().xid, request->xid().lsn);
+                table_ids.insert(request->table_id());
+                SyncTracker::get_instance()->mark_inflight(_db_id, request->table_id(), request->xid()); // shift from resyncing to inflight
 
-            if (table_ids.size() == 0) {
-                continue;
-            }
+                request = _redis_sync_queue.try_pop(REDIS_WORKER_ID);
+            } while (request != nullptr);
+
+            CHECK(!table_ids.empty());
 
             auto token_commit_worker = logging::set_context_variables({{"db_id", std::to_string(_db_id)}});
             // copy tables
@@ -262,10 +260,12 @@ namespace springtail::pg_log_mgr {
     }
 
     void
-    PgLogMgr::_do_table_copies(std::optional<std::vector<uint32_t>> table_ids)
+    PgLogMgr::_do_table_copies(std::optional<std::set<uint32_t>> table_ids)
     {
         // set state to sync stall, make sure we are in the running or startup sync state first
-        _internal_state.wait_and_set({STATE_RUNNING, STATE_STARTUP_SYNC}, STATE_SYNC_STALL);
+        // XXX blocked here if we get a second table sync while one is in-flight
+        _internal_state.wait_and_set({STATE_RUNNING, STATE_STARTUP_SYNC, STATE_REPLAYING},
+                                     STATE_SYNC_STALL);
 
         // notify xact handler to rollover log
         _notify_xact_start_sync();
@@ -347,28 +347,49 @@ namespace springtail::pg_log_mgr {
     }
 
     void
-    PgLogMgr::_start_streaming(uint64_t lsn)
+    PgLogMgr::_start_streaming(uint64_t lsn, bool do_init)
     {
-        _pg_conn.connect();
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Connecting to postgres server: {}\n", _host);
+        try {
+            _pg_conn.connect();
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Connecting to postgres server: {}\n", _host);
 
-        // create slot if need be
-        bool create_slot = !_pg_conn.check_slot_exists();
+            // create slot if need be
+            bool create_slot = !_pg_conn.check_slot_exists();
 
-        if (create_slot) {
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Creating replication slot: {}\n", _slot_name);
-            _pg_conn.create_replication_slot(false,  // export
-                                             false); // temporary
+            if (create_slot) {
+                if (do_init) {
+                    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Creating replication slot: {}\n", _slot_name);
+                    lsn = _pg_conn.create_replication_slot();
+                } else {
+                    SPDLOG_ERROR("Replication slot does not exist: db_id={}, slot={}", _db_id, _slot_name);
+                    // shutdown
+                    Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
+                    return;
+                }
+            }
+
+            // get the protocol version
+            _proto_version = _pg_conn.get_protocol_version();
+
+            // start steaming
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Starting streaming: lsn={}", lsn);
+            _pg_conn.start_streaming(lsn, do_init);
+        } catch (const PgConnectionError &e) {
+            // this may be recoverable if we can reconnect, but not handled right now
+            SPDLOG_ERROR("Connection error starting streaming in db_id={}: {}, setting state to failed",
+                         _db_id, e.what());
+            // shutdown
+            Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
+            return;
+        } catch (const PgUnrecoverableError &e) {
+            SPDLOG_ERROR("Unrecoverable Error starting streaming in db_id={}: {}, setting state to failed",
+                         _db_id, e.what());
+            // shutdown
+            Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
+            return;
         }
 
-        // get the protocol version
-        _proto_version = _pg_conn.get_protocol_version();
-
-        // start steaming
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Starting streaming: lsn={}", lsn);
-        _pg_conn.start_streaming(lsn);
-
-        // create the WAL writer thread
+        // create the worker threads
         _writer_thread = std::thread(&PgLogMgr::_log_writer_thread, this);
     }
 

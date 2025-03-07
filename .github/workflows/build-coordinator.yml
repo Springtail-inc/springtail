@@ -41,7 +41,7 @@ jobs:
       - name: Build
         run: |
           git config --global --add safe.directory /__w/springtail/springtail
-          ./debug.sh -j "${{ vars.NUM_PROCS }}"
+          ./debug.sh -j 4
 
       - name: Pack Coordinator
         run: |
