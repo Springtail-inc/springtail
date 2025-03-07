@@ -1,8 +1,6 @@
 #pragma once
 
-#include <mutex>
-#include <memory>
-
+#include <common/singleton.hh>
 #include <common/redis.hh>
 
 namespace springtail {
@@ -11,7 +9,8 @@ namespace springtail {
      * for daemons to register provide liveness information
      * that is stored in redis and used by the coordinator
      */
-    class Coordinator {
+    class Coordinator : public Singleton<Coordinator> {
+        friend class Singleton<Coordinator>;
     public:
         /** Daemon type */
         enum DaemonType : uint8_t {
@@ -24,15 +23,6 @@ namespace springtail {
             PROXY=7,
             FDW=8
         };
-
-        /**
-         * @brief Get the instance object
-         * @return CoordinatorClient*
-         */
-        static Coordinator* get_instance() {
-            std::call_once(_init_flag, &Coordinator::_init);
-            return _instance;
-        }
 
         /**
          * @brief Register a thread with the coordinator
@@ -82,21 +72,7 @@ namespace springtail {
         /** Private destructor */
         ~Coordinator() = default;
 
-        /** Delete constructor */
-        Coordinator(const Coordinator&) = delete;
-        Coordinator& operator=(const Coordinator&) = delete;
-        Coordinator(Coordinator&&) = delete;
-        Coordinator& operator=(Coordinator&&) = delete;
-
         uint64_t _db_instance_id;             // db instance id
-
-        static Coordinator* _instance;  // singleton instance
-        static std::once_flag _init_flag;     // once init flag
-
-        /**
-         * @brief Initialize the singleton instance
-         */
-        static void _init();
 
         /**
          * @brief Internally set liveness status for daemon

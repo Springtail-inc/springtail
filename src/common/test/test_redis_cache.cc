@@ -11,13 +11,21 @@ namespace {
     protected:
         static void SetUpTestSuite()
         {
-            springtail_init_test();
+            std::vector<std::unique_ptr<ServiceRunner>> service_runners;
+            service_runners.emplace_back(std::make_unique<DefaultLoggingRunner>());
+            service_runners.emplace_back(std::make_unique<ExceptionRunner>());
+            service_runners.emplace_back(std::make_unique<PropertiesRunner>(true));
+            service_runners.emplace_back(std::make_unique<LoggingRunner>(std::nullopt, std::nullopt, std::nullopt));
+            // service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
+
+            springtail_init_custom(service_runners);
         }
 
         static void TearDownTestSuite()
         {
             springtail_shutdown();
         }
+
         void SetUp() override
         {
             _cache = std::make_shared<RedisCache>(true);
@@ -37,6 +45,7 @@ namespace {
             _test_client.reset();
             _cache.reset();
         }
+
         std::shared_ptr<RedisCache> _cache = nullptr;
         RedisClientPtr _test_client;
         int _db_id;
@@ -114,6 +123,7 @@ namespace {
         std::string value_string = nlohmann::to_string(system_settings_value);
         uint32_t counter_value = _notification_counter;
         _test_client->hset(key_value, "system_settings", value_string);
+        SPDLOG_INFO("Changed value of {}/system_settings to {}", key_value, value_string);
 
         // Wait for notification
         wait_for_increment(counter_value, 1);
@@ -124,6 +134,7 @@ namespace {
         value_string = nlohmann::to_string(system_settings_value);
         counter_value = _notification_counter;
         _test_client->hset(key_value, "system_settings", value_string);
+        SPDLOG_INFO("Changed value of {}/system_settings to {}", key_value, value_string);
 
         // wait for notification
         wait_for_increment(counter_value, 1);
