@@ -102,8 +102,8 @@
     },
     "org": {
         "NOTE": "this section is for testing only, in production env vars are used",
-        "organization_id": "abc-de-fgh",
-        "account_id": "123-45-678",
+        "organization_id": "9876",
+	"account_id": "123",
         "db_instance_id": 1234,
         "fdw_id": "1",
         "replication_user_password": "springtail",

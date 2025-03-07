@@ -16,6 +16,7 @@
 
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_copy_table.hh>
+#include <pg_repl/table_sync_request.hh>
 
 #include <pg_log_mgr/pg_log_queue.hh>
 #include <pg_log_mgr/pg_log_writer.hh>
@@ -176,7 +177,7 @@ namespace springtail::pg_log_mgr {
         void _startup_running();
 
         /** Setup streaming and startup threads */
-        void _start_streaming(uint64_t lsn = INVALID_LSN);
+        void _start_streaming(uint64_t lsn = INVALID_LSN, bool do_init = false);
 
         ///// Stage 1 of pipeline, writing replication log to disk
         std::thread _writer_thread;           ///< log writer thread
@@ -208,11 +209,11 @@ namespace springtail::pg_log_mgr {
         void _notify_xact_start_sync();
 
         //// Table copy
-        RedisQueue<std::string> _redis_sync_queue; ///< redis queue for table sync
+        RedisQueue<TableSyncRequest> _redis_sync_queue; ///< redis queue for table sync
         std::thread _table_copy_thread;            ///< table copy thread
 
         /** Do the table copies; return the results */
-        void _do_table_copies(std::optional<std::vector<uint32_t>> table_ids = std::nullopt);
+        void _do_table_copies(std::optional<std::set<uint32_t>> table_ids = std::nullopt);
 
         /** Copy table thread; waits on table sync queue */
         void _copy_thread();
