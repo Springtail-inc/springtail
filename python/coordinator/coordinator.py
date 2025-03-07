@@ -177,7 +177,7 @@ class Coordinator:
 
         # shutdown all components
         self.logger.info("Shutting down all components")
-        self.scheduler.shutdown_all()
+        self.scheduler.shutdown()
 
         if self.production:
             self.production.send_sns('shutdown')

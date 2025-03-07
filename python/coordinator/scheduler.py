@@ -293,17 +293,15 @@ class Scheduler:
         # This will clear any existing timeouts from Redis
         self._init_timeouts()
 
-        while True:
+        while not self.shutdown_event.is_set():
             try:
+                self.logger.debug("Sheduler monitoring timeouts")
+
                 # get the coordinator state
                 self._check_coordinator_state()
 
                 # track database state changes
                 self._track_db_state_changes()
-
-                # check if shutdown event is set, if so, break
-                if self.shutdown_event.is_set():
-                    break
 
                 # check for pubsub messages, timeouts, or component failures
                 if (
