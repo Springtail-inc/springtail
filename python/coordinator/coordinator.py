@@ -73,6 +73,8 @@ class Coordinator:
             self.logger.error(f"Invalid install path: {install_path}")
             raise ValueError(f"Invalid install path: {install_path}")
 
+        self.install_path = install_path
+
         # Check the properties for production
         self.production = None
         if is_production:
@@ -102,7 +104,6 @@ class Coordinator:
                 raise ValueError("Failed to install binaries: " + str(e))
 
         # Get the installation path and setup bin dir
-        self.install_path = self.install_path
         self.bin_dir = os.path.join(self.install_path, 'bin/system')
         if not os.path.exists(self.bin_dir):
             self.logger.error(f"Invalid binary directory: {self.bin_dir}")
