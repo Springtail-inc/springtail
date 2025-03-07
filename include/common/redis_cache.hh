@@ -6,6 +6,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <sw/redis++/redis++.h>
+
 #include <common/common.hh>
 #include <common/prefix_tree.hh>
 #include <common/redis.hh>
@@ -249,6 +251,7 @@ namespace springtail {
         std::string _subscribe_pattern;         ///< subscriber pattern
         std::thread _subscriber_thread;         ///< subscriber thread
         std::thread::id _id;                    ///< subscriber thread id
+        std::atomic<bool>  _init_finished{false};   ///< finished initialization flag
 
         using SubscriberPtr = std::shared_ptr<sw::redis::Subscriber>;
         RedisClientPtr _client;                 ///< redis client to read from and write to redis
@@ -317,6 +320,16 @@ namespace springtail {
          * @param msg - notification message
          */
         void _process_notification(const std::string &pattern, const std::string &channel, const std::string &msg);
+
+        /**
+         * @brief Process meta notifications. This function allows to syncronize the start of consume
+         *          thread and the main thread by receiving server acknowledgment of channel subscription.
+         *
+         * @param type - subscriber message type
+         * @param channel - subscriber channel
+         * @param num - some id
+         */
+        void _process_meta(sw::redis::Subscriber::MsgType type, sw::redis::OptionalString channel, long long num);
 
         /**
          * @brief Process diff for the given top-level path

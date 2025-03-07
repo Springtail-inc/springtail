@@ -9,16 +9,9 @@
 
 namespace springtail {
 
-    Coordinator *Coordinator::_instance = nullptr;
-    std::once_flag Coordinator::_init_flag;
-
     Coordinator::Coordinator()
     {
         _db_instance_id = Properties::get_db_instance_id();
-    }
-
-    void Coordinator::_init() {
-        _instance = new Coordinator();
     }
 
     void

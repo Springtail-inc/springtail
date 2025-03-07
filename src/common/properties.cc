@@ -166,7 +166,7 @@ namespace springtail {
         RedisClientPtr redis_client = _create_redis_client();
 
         // Clear the Redis data and config databases
-        redis_client->flushdb();
+        redis_client->flushall();
 
         // set db instance id
         uint64_t db_instance_id = system_json["org"]["db_instance_id"].get<uint64_t>();
