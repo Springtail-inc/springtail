@@ -190,11 +190,10 @@ ShmCache::find(DbId db, TabId tid, Xid xid)
         CHECK(lock.owns());
 
         auto it_lru = _lru->get<1>().find(lk);
-        CHECK(it_lru != _lru->get<1>().end());
-
-        auto& seq_idx = _lru->get<0>();
-
-        seq_idx.relocate(seq_idx.begin(), _lru->project<0>(it_lru));
+        if (it_lru != _lru->get<1>().end()) {
+            auto& seq_idx = _lru->get<0>();
+            seq_idx.relocate(seq_idx.begin(), _lru->project<0>(it_lru));
+        }
     }
 
     return ret;
