@@ -10,6 +10,7 @@
 #include <grpcpp/grpcpp.h>
 #include <nlohmann/json.hpp>
 #include <proto/xid_manager.grpc.pb.h>
+#include <memory>
 
 #include <xid_mgr/xid_mgr_service.hh>
 
@@ -38,7 +39,9 @@ XidMgrServer::XidMgrServer() {
     _grpc_server_manager.init(rpc_json);
     // iterate over all files in the base path creating partitions
     _load_partitions();
-    _grpc_server_manager.addService(GrpcXidMgrService::get_instance());
+
+    _service = std::make_unique<GrpcXidMgrService>(*this);
+    _grpc_server_manager.addService(_service.get());
 }
 
 void XidMgrServer::startup() {
@@ -46,8 +49,8 @@ void XidMgrServer::startup() {
 }
 
 void XidMgrServer::_internal_shutdown() {
+    _service->shutdown();
     _grpc_server_manager.shutdown();
-    GrpcXidMgrService::shutdown();
     std::unique_lock lock(_mutex);
     // iterate over partitions and shutdown
     for (auto& partition : _partitions) {
