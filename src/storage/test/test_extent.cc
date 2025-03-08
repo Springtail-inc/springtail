@@ -14,7 +14,11 @@ namespace {
     public:
         static void SetUpTestSuite() {
             // Init springtail
-            springtail_init_test();
+            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+            runners.emplace();
+            runners->emplace_back(std::make_unique<IOMgrRunner>());
+
+            springtail_init_test(runners);
         }
 
         static void TearDownTestSuite() {

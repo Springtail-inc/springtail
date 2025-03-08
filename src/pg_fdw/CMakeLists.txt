@@ -180,8 +180,6 @@ target_link_libraries(test_pg_ddl_mgr
     PRIVATE GTest::gtest_main)
 add_dsymutil_command(test_pg_ddl_mgr)
 
-gtest_discover_tests(test_pg_ddl_mgr)
-
 # dependencies for copying fdw files to postgres shared directory
 add_dependencies(copy_fdw_files springtail_pg_fdw)
 add_dependencies(test_pg_ddl_mgr copy_fdw_files)

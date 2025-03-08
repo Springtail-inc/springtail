@@ -124,6 +124,7 @@ namespace springtail::pg_fdw {
             runners.emplace();
             runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
             runners->emplace_back(std::make_unique<GrpcClientRunner<sys_tbl_mgr::Client>>());
+            runners->emplace_back(std::make_unique<IOMgrRunner>());
             runners->emplace_back(std::make_unique<SchemaMgrRunner>());
             runners->emplace_back(std::make_unique<TableMgrRunner>());
 

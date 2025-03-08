@@ -41,6 +41,7 @@ int main(int argc, char *argv[])
 
     std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
     runners.emplace();
+    runners->emplace_back(std::make_unique<IOMgrRunner>());
     runners->emplace_back(std::make_unique<WriteCacheRunner>());
     runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
     runners->emplace_back(std::make_unique<GrpcClientRunner<sys_tbl_mgr::Client>>());
