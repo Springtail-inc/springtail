@@ -62,6 +62,7 @@ GrpcServerManager::startup()
     SPDLOG_INFO("Setting gRPC server max threads to {}", _worker_thread_count);
     rq.SetMaxThreads(_worker_thread_count);
     builder.SetResourceQuota(rq);
+    builder.AddChannelArgument(GRPC_ARG_ALLOW_REUSEPORT, 0);
 
     if (_ssl) {
         grpc::SslServerCredentialsOptions::PemKeyCertPair key_cert_pair = {_server_key,

@@ -88,18 +88,18 @@ def init_logging(otel_config: dict, log_path: str, debug: bool = False, logger_n
     console_handler.setLevel(logging.DEBUG)  # Show debug logs in console
     console_format = logging.Formatter('%(asctime)s.%(msecs)03d %(levelname)-5s [%(filename)s:%(lineno)d] %(message)s')
     console_handler.setFormatter(console_format)
+    logger.addHandler(console_handler)
 
     # **Handler 2: OTLP (INFO and above)**
-    if 'enabled' in otel_config and otel_config['enabled']:
+    if 'enabled' in otel_config and otel_config['enabled'] and 'host' in otel_config and 'port' in otel_config:
         otel_handler = init_otel_logging(f"{otel_config.get('host', 'localhost')}:{otel_config.get('port', '4317')}")
         otel_handler.setLevel(logging.INFO)  # Send only INFO and above to OTEL
         logger.addHandler(otel_handler)
 
+    # **Handler 3: File Logging (DEBUG and above)**
     file_handler = logging.FileHandler(os.path.join(log_path, 'coordinator.log'))
+    file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(console_format)
-
-    # Attach handlers to the logger
-    logger.addHandler(console_handler)  # Debug logs go to the console
     logger.addHandler(file_handler)
 
 if __name__ == "__main__":

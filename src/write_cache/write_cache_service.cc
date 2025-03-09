@@ -5,7 +5,6 @@
 #include <grpc/grpc_server.hh>
 #include <nlohmann/json.hpp>
 #include <proto/write_cache.grpc.pb.h>
-#include <write_cache/extent_mapper.hh>
 #include <write_cache/write_cache_index.hh>
 #include <write_cache/write_cache_server.hh>
 #include <write_cache/write_cache_table_set.hh>

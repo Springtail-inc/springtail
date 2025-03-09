@@ -11,7 +11,6 @@ set(WRITE_CACHE_SOURCES
     write_cache_index.cc
     write_cache_table_set.cc
     write_cache_index_node.cc
-    extent_mapper.cc
 )
 
 # add the library target
@@ -43,14 +42,6 @@ target_link_libraries(test_wc_index
 )
 add_dsymutil_command(test_wc_index)
 
-add_executable(test_extent_mapper test/test_extent_mapper.cc)
-target_include_directories(test_extent_mapper PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_extent_mapper
-  PUBLIC springtail_write_cache
-  PRIVATE GTest::gtest_main
-)
-add_dsymutil_command(test_extent_mapper)
 
 # hook tests into gtest framework
-gtest_discover_tests(test_extent_mapper)
 gtest_discover_tests(test_wc_index)

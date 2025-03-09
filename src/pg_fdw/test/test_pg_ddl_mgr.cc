@@ -10,6 +10,7 @@
 #include <common/redis_types.hh>
 #include <pg_fdw/pg_ddl_mgr.hh>
 #include <test/services.hh>
+#include <xid_mgr/xid_mgr_client.hh>
 
 using namespace springtail;
 using namespace springtail::pg_fdw;
@@ -76,10 +77,14 @@ namespace {
                 GTEST_SKIP() << "Postgres replica config problem, skipping test";
             }
 
-            auto service_runners = test::get_services(true, false, true);
             std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
             runners.emplace();
+
+            auto service_runners = test::get_services(true, true, true);
             std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
+            runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
+            runners->emplace_back(std::make_unique<SchemaMgrRunner>());
+            runners->emplace_back(std::make_unique<TableMgrRunner>());
 
             // Add PgDDLMgrRunner
             std::string username{"springtail"};

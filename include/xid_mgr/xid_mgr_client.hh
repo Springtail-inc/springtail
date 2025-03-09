@@ -41,6 +41,14 @@ public:
      */
     uint64_t get_committed_xid(uint64_t db_id, uint64_t schema_xid);
 
+
+    /**
+     * @brief This returns the GRPC channel.
+     */
+    std::shared_ptr<grpc::Channel> get_channel() const {
+        return _channel;
+    }
+
 private:
     XidMgrClient();
     ~XidMgrClient() override = default;

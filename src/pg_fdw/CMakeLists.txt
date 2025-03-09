@@ -2,6 +2,7 @@ enable_language(C)
 
 find_package(PostgreSQL REQUIRED)
 find_package(Boost COMPONENTS program_options REQUIRED)
+find_package(Boost COMPONENTS interprocess REQUIRED)
 
 include(FdwTestSetup)
 
@@ -62,6 +63,7 @@ target_link_libraries(pg_ddl_daemon
     PRIVATE Boost::program_options
 )
 add_dsymutil_command(pg_ddl_daemon)
+
 
 # Extract transitive dependencies of libraryC
 get_target_property(POSTGRES_DEP_LIBS PostgreSQL::PostgreSQL INTERFACE_LINK_LIBRARIES)
@@ -158,8 +160,6 @@ target_link_libraries(test_pg_ddl_mgr
     PRIVATE springtail_test
     PRIVATE GTest::gtest_main)
 add_dsymutil_command(test_pg_ddl_mgr)
-
-gtest_discover_tests(test_pg_ddl_mgr)
 
 # dependencies for copying fdw files to postgres shared directory
 add_dependencies(copy_fdw_files springtail_pg_fdw)
