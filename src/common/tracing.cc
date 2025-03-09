@@ -10,10 +10,6 @@
 #include <opentelemetry/sdk/trace/batch_span_processor.h>
 #include <opentelemetry/sdk/trace/multi_span_processor.h>
 #include <opentelemetry/sdk/trace/simple_processor.h>
-#include <opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_factory.h>
-#include <opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_options.h>
-#include <opentelemetry/sdk/metrics/meter_context_factory.h>
-#include <opentelemetry/sdk/metrics/meter_provider_factory.h>
 #include <opentelemetry/sdk/trace/tracer_provider.h>
 #include <opentelemetry/trace/provider.h>
 
@@ -21,13 +17,13 @@
 #include <common/properties.hh>
 #include <common/tracing.hh>
 #include <grpcpp/ext/otel_plugin.h>
-#include "opentelemetry/exporters/otlp/otlp_http_metric_exporter_factory.h"
-#include "opentelemetry/exporters/otlp/otlp_http_metric_exporter_options.h"
-#include "opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_factory.h"
-#include "opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_options.h"
-#include "opentelemetry/sdk/metrics/meter_context.h"
-#include "opentelemetry/sdk/metrics/meter_context_factory.h"
-#include "opentelemetry/sdk/metrics/meter_provider_factory.h"
+#include <opentelemetry/exporters/otlp/otlp_http_metric_exporter_factory.h>
+#include <opentelemetry/exporters/otlp/otlp_http_metric_exporter_options.h>
+#include <opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_factory.h>
+#include <opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_options.h>
+#include <opentelemetry/sdk/metrics/meter_context.h>
+#include <opentelemetry/sdk/metrics/meter_context_factory.h>
+#include <opentelemetry/sdk/metrics/meter_provider_factory.h>
 #include <opentelemetry/semconv/service_attributes.h>
 
 namespace springtail::tracing {

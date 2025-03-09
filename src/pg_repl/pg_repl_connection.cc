@@ -316,6 +316,8 @@ namespace springtail
     {
         while (!_shutdown) {
             int r = _stream_connection->read(buffer, length, async);
+            // Extract the errno into a separate variable to ensure the the SPDLOG_DEBUG_MODULE below this
+            // doesn't overwrite the err code
             auto err_no = errno;
             SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Read {} bytes from connection (errno={})", r, err_no);
             if (r == -1 && (err_no == EWOULDBLOCK || err_no == EAGAIN || err_no == EINTR)) {
