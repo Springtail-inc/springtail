@@ -313,7 +313,7 @@ if __name__ == "__main__":
     # Load properties from the config file
     props = setup_props(yaml_config)
 
-    coordinator = Coordinator(props, args.debug, yaml_config.get('is_production'), yaml_config.get('install_dir'), args.service)
+    coordinator = Coordinator(props, args.debug, yaml_config.get('production'), yaml_config.get('install_dir'), args.service)
 
     # Set up signal handlers
     def signal_handler(signum, frame):

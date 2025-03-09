@@ -6,6 +6,7 @@
         "boost-container-hash",
         "boost-uuid",
         "boost-thread",
+        "boost-interprocess",
         "fmt",
         "cpptrace",
         "xxhash",

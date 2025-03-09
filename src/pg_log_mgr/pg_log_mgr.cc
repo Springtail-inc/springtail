@@ -342,6 +342,7 @@ namespace springtail::pg_log_mgr {
 
         // process stalled messages; set state to replaying
         _internal_state.set(STATE_REPLAYING);
+        _internal_state.wait_for_state(STATE_RUNNING);
 
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Table copy done; state=replaying");
     }
@@ -509,6 +510,7 @@ namespace springtail::pg_log_mgr {
                 _internal_state.set(STATE_SYNCING);
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Waiting for sync to complete");
                 _internal_state.wait_for_state({ STATE_REPLAYING, STATE_RUNNING });
+                _internal_state.set(STATE_RUNNING);
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Sync to complete");
                 continue;
             }

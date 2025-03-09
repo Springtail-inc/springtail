@@ -1,13 +1,7 @@
-#include <string>
 #include <memory>
-#include <vector>
-#include <functional>
 #include <filesystem>
-#include <variant>
 #include <cstdio>
-#include <thread>
 #include <mutex>
-#include <condition_variable>
 
 #include <fmt/core.h>
 
@@ -22,15 +16,12 @@
 
 namespace springtail {
 
-    /* static member initialization must happen outside of class */
-    IOMgr* IOMgr::_instance {nullptr};
-    std::mutex IOMgr::_instance_mutex;
-
-
-    IOMgr::IOMgr(int num_threads, int max_filehandles)
-        : _thread_pool(num_threads),
-          _file_cache(max_filehandles, _evict_callback)
+    void
+    IOMgr::init(int num_threads, int max_filehandles)
     {
+        _thread_pool = std::make_shared<ThreadPool<IORequest>>(num_threads);
+        _file_cache = std::make_shared<LruObjectCache<std::filesystem::path, IOFile>>(max_filehandles, _evict_callback);
+
         for (int i = 0; i < num_threads; i++) {
             std::shared_ptr<Compressor> c = std::make_shared<Lz4Compressor>();
             _compressors.push(c);
@@ -39,30 +30,10 @@ namespace springtail {
         }
     };
 
-
-    IOMgr *
-    IOMgr::get_instance()
-    {
-        std::scoped_lock<std::mutex> lock(_instance_mutex);
-
-        if (_instance == nullptr) {
-            _instance = new IOMgr(NUM_THREADS, MAX_FILE_OBJECTS);
-        }
-
-        return _instance;
-    }
-
     void
-    IOMgr::shutdown()
+    IOMgr::_internal_shutdown()
     {
-        std::scoped_lock<std::mutex> lock(_instance_mutex);
-
-        _thread_pool.shutdown();
-
-        if (_instance != nullptr) {
-            delete _instance;
-            _instance = nullptr;
-        }
+        _thread_pool->shutdown();
     }
 
     std::shared_ptr<Compressor>
@@ -125,14 +96,14 @@ namespace springtail {
         // lock cache
         std::scoped_lock<std::mutex> lock(_cache_mutex);
 
-        std::shared_ptr<IOFile> file = _file_cache.get(path);
+        std::shared_ptr<IOFile> file = _file_cache->get(path);
         if (file == nullptr) {
             // allocate a file object and insert into cache
             // while mutex is held
             file = std::make_shared<IOFile>(path, is_compressed);
 
             // this may trigger an eviction and eviction callback
-            _file_cache.insert(path, file);
+            _file_cache->insert(path, file);
         }
 
         // mark file object as in use

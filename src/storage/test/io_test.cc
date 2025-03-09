@@ -145,7 +145,11 @@ class IOTest : public ::testing::Test {
 public:
     static void SetUpTestSuite() {
         // Init springtail
-        springtail::springtail_init_test();
+        std::optional<std::vector<std::unique_ptr<springtail::ServiceRunner>>> runners;
+        runners.emplace();
+        runners->emplace_back(std::make_unique<springtail::IOMgrRunner>());
+
+        springtail::springtail_init_test(runners);
     }
 
     static void TearDownTestSuite() {

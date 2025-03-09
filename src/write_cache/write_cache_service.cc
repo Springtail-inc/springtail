@@ -4,7 +4,6 @@
 #include <common/properties.hh>
 #include <nlohmann/json.hpp>
 #include <proto/write_cache.grpc.pb.h>
-#include <write_cache/extent_mapper.hh>
 #include <write_cache/write_cache_index.hh>
 #include <write_cache/write_cache_server.hh>
 #include <write_cache/write_cache_table_set.hh>
@@ -84,69 +83,6 @@ grpc::Status WriteCacheService::ListTables(grpc::ServerContext* context,
     }
 
     response->set_cursor(cursor);
-    return grpc::Status::OK;
-}
-
-grpc::Status WriteCacheService::SetLookup(grpc::ServerContext* context,
-                             const proto::SetLookupRequest* request,
-                             google::protobuf::Empty* response)
-{
-    ExtentMapper* mapper = ExtentMapper::get_instance(request->db_id());
-    mapper->set_lookup(request->table_id(), request->target_xid(), request->extent_id());
-
-    return grpc::Status::OK;
-}
-
-grpc::Status WriteCacheService::ForwardMap(grpc::ServerContext* context,
-                              const proto::ForwardMapRequest* request,
-                              proto::ExtentMapResponse* response)
-{
-    ExtentMapper* mapper = ExtentMapper::get_instance(request->db_id());
-    auto&& result =
-        mapper->forward_map(request->table_id(), request->target_xid(), request->extent_id());
-
-    for (const auto& eid : result) {
-        response->add_extent_ids(eid);
-    }
-
-    return grpc::Status::OK;
-}
-
-grpc::Status WriteCacheService::ReverseMap(grpc::ServerContext* context,
-                              const proto::ReverseMapRequest* request,
-                              proto::ExtentMapResponse* response)
-{
-    ExtentMapper* mapper = ExtentMapper::get_instance(request->db_id());
-    auto&& result = mapper->reverse_map(request->table_id(), request->access_xid(),
-                                        request->target_xid(), request->extent_id());
-
-    for (const auto& eid : result) {
-        response->add_extent_ids(eid);
-    }
-
-    return grpc::Status::OK;
-}
-
-grpc::Status WriteCacheService::ExpireMap(grpc::ServerContext* context,
-                             const proto::ExpireMapRequest* request,
-                             google::protobuf::Empty* response)
-{
-    ExtentMapper* mapper = ExtentMapper::get_instance(request->db_id());
-    mapper->expire(request->table_id(), request->commit_xid());
-
-    return grpc::Status::OK;
-}
-
-grpc::Status WriteCacheService::AddMapping(grpc::ServerContext* context,
-                              const proto::AddMappingRequest* request,
-                              google::protobuf::Empty* response)
-{
-    ExtentMapper* mapper = ExtentMapper::get_instance(request->db_id());
-
-    std::vector<uint64_t> new_eids(request->new_eids().begin(), request->new_eids().end());
-
-    mapper->add_mapping(request->table_id(), request->target_xid(), request->old_eid(), new_eids);
-
     return grpc::Status::OK;
 }
 

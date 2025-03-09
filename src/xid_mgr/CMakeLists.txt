@@ -9,6 +9,7 @@ set(XID_MGR_SOURCES
     xid_mgr_server.cc
     xid_mgr_service.cc
     xid_partition.cc
+    xid_mgr_subscriber.cc
 )
 
 # add the library target
