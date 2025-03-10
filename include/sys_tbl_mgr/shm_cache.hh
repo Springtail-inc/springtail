@@ -20,7 +20,7 @@ namespace ipc = boost::interprocess;
 namespace bmi = boost::multi_index;
 
 using DbId = uint64_t;
-using TabId = uint64_t;
+using TableId = uint64_t;
 using Xid = uint64_t;
 
 
@@ -35,12 +35,15 @@ public:
     /*
      * Create a new cache with the given name. If a cache with
      * the name already exists, it will throw.
+     * @param name The global cache name.
+     * @param size The cache size in bytes.
      */
 
     ShmCache(std::string name, size_t size);
     /*
      * Open a cache with the give name. If the cache hasn't been created,
      * it will throw.
+     * @param name The global cache name.
      */
     explicit ShmCache(std::string name);
 
@@ -52,16 +55,24 @@ public:
     size_t size() const;
 
     /** 
-     * Cache the string.
+     * Cache the string message.
+     * @param db The DB ID.
+     * @param tid The table ID.
+     * @param xid The XID.
+     * @param msg The message to cache. Usually it's a serialized proto message.
      * @return true if the element has been actually inserted 
-     *         and false if it was alredy in the cache.
+     *         and false if it was already in the cache.
      */
-    bool insert(DbId db, TabId tid, Xid xid, const std::string& msg);
+    bool insert(DbId db, TableId tid, Xid xid, const std::string& msg);
 
     /** 
      * Get the cached string if present based on a key.
+     * @param db The DB ID.
+     * @param tid The table ID.
+     * @param xid The XID.
+     * @return The cached string.
      */
-    std::optional<std::string> find(DbId db, TabId tid, Xid xid);
+    std::optional<std::string> find(DbId db, TableId tid, Xid xid);
 
     /**
      * This will mark the system resources associated with the cache 
@@ -92,7 +103,7 @@ private:
 
     using String =  ipc::basic_string<char, std::char_traits<char>, Alloc<char>>;
 
-    using Key = std::pair<DbId, TabId>;
+    using Key = std::pair<DbId, TableId>;
 
     struct Message
     {
@@ -106,7 +117,7 @@ private:
     struct LruKey
     {
         DbId db;
-        TabId tid;
+        TableId tid;
         Xid xid;
         bool operator==(const LruKey& rhs) const = default;
     };
@@ -114,7 +125,7 @@ private:
     {
         size_t operator()(const LruKey& k) const
         {
-            using Tuple = std::tuple<DbId, TabId, Xid>;
+            using Tuple = std::tuple<DbId, TableId, Xid>;
             Tuple t{k.db, k.tid, k.xid};
             return boost::hash<Tuple>{}(t);
         }
@@ -123,7 +134,7 @@ private:
     using Lru = bmi::multi_index_container<
         LruKey,
         bmi::indexed_by<
-            bmi::sequenced<> , // this will keep the insertion order
+            bmi::sequenced<>, // this will keep the insertion order
             bmi::hashed_unique<bmi::identity<LruKey>, LruHashFunc> //no duplicates
         >, 
         Alloc<LruKey> >;
@@ -141,6 +152,10 @@ private:
     ipc::managed_shared_memory _shm;
     Messages::allocator_type _messages_alloc;
     String::allocator_type _string_alloc;
+
+    // _cache and _lru are named objects in the shared memory.
+    // They are allocated or opened by the ipc allocators.
+    // The objects are deleted when the shared memory is deleted.
     Cache* _cache;
     Lru* _lru;
 };

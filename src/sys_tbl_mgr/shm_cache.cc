@@ -18,8 +18,10 @@ ShmCache::ShmCache(std::string name, size_t size)
 
     _cache = _shm.find_or_construct<Cache>("cache")(
             Cache::allocator_type(_shm.get_segment_manager()));
+    CHECK(_cache);
     _lru = _shm.find_or_construct<Lru>("lru")(
             Lru::allocator_type(_shm.get_segment_manager()));
+    CHECK(_lru);
 }
 
 ShmCache::ShmCache(std::string name)
@@ -34,8 +36,10 @@ ShmCache::ShmCache(std::string name)
 
     _cache = _shm.find_or_construct<Cache>("cache")(
             Cache::allocator_type(_shm.get_segment_manager()));
+    CHECK(_cache);
     _lru = _shm.find_or_construct<Lru>("lru")(
             Lru::allocator_type(_shm.get_segment_manager()));
+    CHECK(_lru);
 }
 
 ShmCache::~ShmCache() 
@@ -66,7 +70,7 @@ ShmCache::size() const
 }
 
 bool 
-ShmCache::insert(DbId db, TabId tid, Xid xid, const std::string& msg)
+ShmCache::insert(DbId db, TableId tid, Xid xid, const std::string& msg)
 {
     Key k{db, tid};
 
@@ -136,7 +140,7 @@ ShmCache::insert(DbId db, TabId tid, Xid xid, const std::string& msg)
 }
 
 std::optional<std::string>
-ShmCache::find(DbId db, TabId tid, Xid xid)
+ShmCache::find(DbId db, TableId tid, Xid xid)
 {
     std::string ret;
     LruKey lk{db, tid, xid};
