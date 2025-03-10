@@ -396,6 +396,25 @@ namespace springtail::pg_log_mgr {
     }
 
     void
+    PgLogReader::Batch::_mark_table_resync(uint64_t table_oid, const XidLsn &xidlsn)
+    {
+        // mark the table as syncing to ensure we properly skip messages
+        bool is_first = SyncTracker::get_instance()->mark_resync(_db, table_oid, xidlsn);
+
+        // notify the PgLogParser to resync the table
+        auto key = fmt::format(redis::QUEUE_SYNC_TABLES,
+                                Properties::get_db_instance_id(), _db);
+        RedisQueue<TableSyncRequest> table_sync_queue(key);
+        TableSyncRequest request(table_oid, xidlsn);
+        table_sync_queue.push(request);
+
+        // notify the Committer to stop committing XIDs
+        if (is_first) {
+            _committer_queue->push(std::make_shared<committer::XidReady>(_db));
+        }
+    }
+
+    void
     PgLogReader::Batch::_apply_schema_change(PgMsgPtr change,
                                              const XidLsn &xidlsn)
     {
@@ -408,6 +427,14 @@ namespace springtail::pg_log_mgr {
                 auto &table_msg = std::get<PgMsgTable>(change->msg);
                 std::string &&ddl_stmt = client->create_table(_db, xidlsn, table_msg);
                 redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+
+                if (_check_if_table_is_invalid_in_redis(-1, table_msg.oid)){
+                    SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Altering invalid table to valid, with tid {}", table_msg.oid);
+                    // The table is no longer invalid, remove the redis entry for the table
+                    _clear_invalid_table_in_redis(-1, table_msg.oid);
+                    // Trigger a resync to ensure the data is pulled for the table
+                    _mark_table_resync(table_msg.oid, xidlsn);
+                }
                 break;
             }
         case PgMsgEnum::ALTER_TABLE:
@@ -421,20 +448,7 @@ namespace springtail::pg_log_mgr {
                 // check for re-sync
                 nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
                 if (action.get<std::string>() == "resync") {
-                    // mark the table as syncing to ensure we properly skip messages
-                    bool is_first = SyncTracker::get_instance()->mark_resync(_db, table_msg.oid, xidlsn);
-
-                    // notify the PgLogParser to resync the table
-                    auto key = fmt::format(redis::QUEUE_SYNC_TABLES,
-                                           Properties::get_db_instance_id(), _db);
-                    RedisQueue<TableSyncRequest> table_sync_queue(key);
-                    TableSyncRequest request(table_msg.oid, xidlsn);
-                    table_sync_queue.push(request);
-
-                    // notify the Committer to stop committing XIDs
-                    if (is_first) {
-                        _committer_queue->push(std::make_shared<committer::XidReady>(_db));
-                    }
+                    _mark_table_resync(table_msg.oid, xidlsn);
                 } else if (action.get<std::string>() != "no_change") {
                     redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 }
@@ -591,6 +605,12 @@ namespace springtail::pg_log_mgr {
             {
                 auto &insert = std::get<PgMsgInsert>(msg->msg);
                 int32_t pg_xid = (msg->is_streaming) ? insert.xid : _current_xact->xid;
+
+                if (_check_if_table_is_invalid_in_redis(-1, insert.rel_id)){
+                    SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Prevent DML for invalid table with tid {}", insert.rel_id);
+                    break;
+                }
+
                 _current_batch->add_mutation<PgMsgEnum::INSERT>(this->get_current_xid(), pg_xid,
                                                                 insert.rel_id, insert.new_tuple);
                 break;

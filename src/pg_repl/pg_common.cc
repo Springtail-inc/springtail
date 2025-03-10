@@ -50,7 +50,7 @@ namespace springtail
     }
 
     void
-    populate_invalid_tables_in_redis(uint64_t db_id, uint64_t table_oid, const nlohmann::json& table_info)
+    _populate_invalid_tables_in_redis(uint64_t db_id, uint64_t table_oid, const nlohmann::json& table_info)
     {
         auto &&key = fmt::format(redis::HASH_INVALID_TABLES, Properties::get_db_instance_id(), db_id);
         auto redis = RedisMgr::get_instance()->get_client();
@@ -60,7 +60,7 @@ namespace springtail
     }
 
     bool
-    check_if_table_is_invalid_in_redis(uint64_t db_id, uint64_t table_oid)
+    _check_if_table_is_invalid_in_redis(uint64_t db_id, uint64_t table_oid)
     {
         auto &&key = fmt::format(redis::HASH_INVALID_TABLES, Properties::get_db_instance_id(), db_id);
         auto redis = RedisMgr::get_instance()->get_client();
@@ -73,7 +73,7 @@ namespace springtail
         return false;
     }
 
-    void clear_invalid_table_in_redis(uint64_t db_id,
+    void _clear_invalid_table_in_redis(uint64_t db_id,
                                       uint64_t table_oid)
     {
         auto &&key = fmt::format(redis::HASH_INVALID_TABLES, Properties::get_db_instance_id(), db_id);

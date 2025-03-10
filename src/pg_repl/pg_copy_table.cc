@@ -819,7 +819,7 @@ namespace springtail
                 };
 
                 // Store in Redis
-                populate_invalid_tables_in_redis(db_id, table_oid, table_info);
+                _populate_invalid_tables_in_redis(db_id, table_oid, table_info);
 
                 continue;
             }

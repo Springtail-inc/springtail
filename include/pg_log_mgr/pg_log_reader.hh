@@ -200,6 +200,14 @@ namespace springtail::pg_log_mgr {
              */
             void _apply_schema_change(PgMsgPtr change, const XidLsn &xidlsn);
 
+            /**
+             * @brief Helper method to mark the table for resync. Internally calls sync_tracker->mark_resync
+             *
+             * @param table_oid Table OID
+             * @param xidlsn XID LSN
+             */
+            void _mark_table_resync(uint64_t table_oid, const XidLsn &xidlsn);
+
             //// MEMBER VARIABLES
             std::map<int32_t, TxnEntryPtr> _txns; ///< Map of pgxid to txn details.
 

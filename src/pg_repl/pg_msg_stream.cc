@@ -861,7 +861,7 @@ namespace springtail {
                 {"columns", invalid_columns}
             };
 
-            populate_invalid_tables_in_redis(-1, table_oid, table_info);
+            _populate_invalid_tables_in_redis(-1, table_oid, table_info);
 
             return false;
         }
@@ -1023,16 +1023,29 @@ namespace springtail {
         // same data as in create table, call that to do the decode and
         // then just switch the type so we know it is an alter table
         PgMsgPtr msg = _decode_create_table(message, buffer, len);
+
+        // Extract oid from JSON to ensure handling null cases
+        std::string data_str(buffer, len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+        auto table_oid = json["oid"].get<uint64_t>();
+
         if (msg == nullptr) {
+            if (_check_if_table_is_invalid_in_redis(-1, table_oid)) {
+                SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Dropping invalid table during alter, with tid {}", table_oid);
+                // Table is present in the cache, but this is an alter and the nullptr
+                // from the create means that there are invalid columns present.
+                // So we need to drop the table from the FDW
+                msg = _decode_drop_table(message, buffer, len);
+                return msg;
+            }
             return msg;
         }
 
-        const auto& table_msg = std::get<PgMsgTable>(msg->msg);
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Altering invalid table, with tid {}", table_msg.oid);
         // Table was previously invalid, but is valid now. So instead of doing an alter, we need to create the table
         // in the FDW, Also we need to clear the Redis key to make the table valid.
-        if (check_if_table_is_invalid_in_redis(-1, table_msg.oid)){
-            clear_invalid_table_in_redis(-1, table_msg.oid);
+        if (_check_if_table_is_invalid_in_redis(-1, table_oid)){
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Altering invalid table to valid, with tid {}", table_oid);
+            // Send the msg type as PgMsgEnum::CREATE_TABLE instead of alter
             return msg;
         }
 
@@ -1046,6 +1059,8 @@ namespace springtail {
         PgMsgDropTable drop_table_msg;
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Decoded drop table: json: {}", json.dump());
 
         // check object type, could be an index, default value or something other
         // than a table; if so we skip decoding
@@ -1062,7 +1077,12 @@ namespace springtail {
 
         json["oid"].get_to(drop_table_msg.oid);
         json["schema"].get_to(drop_table_msg.namespace_name);
-        json["name"].get_to(drop_table_msg.table);
+        if ( json.contains("name") ){
+            json["name"].get_to(drop_table_msg.table);
+        } else if (json.contains("table")) {
+            // From create/alter table flow
+            json["table"].get_to(drop_table_msg.table);
+        }
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_TABLE);
         msg->msg.emplace<PgMsgDropTable>(drop_table_msg);
