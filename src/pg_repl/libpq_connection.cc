@@ -1060,7 +1060,7 @@ namespace springtail {
         /* See pqsecure_raw_write() in fe-secure.c */
         int         sock = PQsocket(conn);
         int         flags = MSG_NOSIGNAL;
-        int         result_errno;
+        int         result_errno = 0;
 
         ssize_t n = send(sock, ptr, len, flags);
 
