@@ -311,12 +311,12 @@ namespace springtail {
         static std::string _escape_identifier(const char *str);
 
         /** helper functions for reading and writing */
-        static ssize_t _secure_read(PGconn *conn, void *ptr, size_t len);
-        static ssize_t _secure_write(PGconn *conn, const void *ptr, size_t len);
-        static ssize_t _ssl_read(PGconn *conn, void *ptr, size_t len);
-        static ssize_t _non_ssl_read(PGconn *conn, void *ptr, size_t len);
-        static ssize_t _ssl_write(PGconn *conn, const void *ptr, size_t len);
-        static ssize_t _non_ssl_write(PGconn *conn, const void *ptr, size_t len);
+        static ssize_t _secure_read(PGconn *conn, char *ptr, size_t len);
+        static ssize_t _secure_write(PGconn *conn, const char *ptr, size_t len);
+        static ssize_t _ssl_read(PGconn *conn, char *ptr, size_t len);
+        static ssize_t _non_ssl_read(PGconn *conn, char *ptr, size_t len);
+        static ssize_t _ssl_write(PGconn *conn, const char *ptr, size_t len);
+        static ssize_t _non_ssl_write(PGconn *conn, const char *ptr, size_t len);
 
     };
     using LibPqConnectionPtr = std::shared_ptr<LibPqConnection>;

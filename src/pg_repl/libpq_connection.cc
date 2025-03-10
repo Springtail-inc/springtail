@@ -849,7 +849,7 @@ namespace springtail {
 
     ssize_t
     LibPqConnection::_secure_write(PGconn *conn,
-                                   const void *ptr,
+                                   const char *ptr,
                                    size_t len)
     {
         if (PQsslInUse(conn)) {
@@ -861,7 +861,7 @@ namespace springtail {
 
     ssize_t
     LibPqConnection::_secure_read(PGconn *conn,
-                                  void *ptr,
+                                  char *ptr,
                                   size_t len)
     {
         if (PQsslInUse(conn)) {
@@ -873,7 +873,7 @@ namespace springtail {
 
     ssize_t
     LibPqConnection::_non_ssl_read(PGconn *conn,
-                                   void *ptr,
+                                   char *ptr,
                                    size_t len)
     {
         /* See pqsecure_raw_read() in fe-secure.c */
@@ -910,7 +910,7 @@ namespace springtail {
 
     ssize_t
     LibPqConnection::_ssl_read(PGconn *conn,
-                               void *ptr,
+                               char *ptr,
                                size_t len)
     {
         SSL *ssl = reinterpret_cast<SSL*>(PQgetssl(conn));
@@ -977,7 +977,7 @@ namespace springtail {
 
     ssize_t
     LibPqConnection::_ssl_write(PGconn *conn,
-                                const void *ptr,
+                                const char *ptr,
                                 size_t len)
     {
         SSL *ssl = reinterpret_cast<SSL*>(PQgetssl(conn));
@@ -1054,7 +1054,7 @@ namespace springtail {
 
     ssize_t
     LibPqConnection::_non_ssl_write(PGconn *conn,
-                                    const void *ptr,
+                                    const char *ptr,
                                     size_t len)
     {
         /* See pqsecure_raw_write() in fe-secure.c */
