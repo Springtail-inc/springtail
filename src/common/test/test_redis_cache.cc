@@ -18,6 +18,7 @@ namespace {
         {
             springtail_shutdown();
         }
+
         void SetUp() override
         {
             _cache = std::make_shared<RedisCache>(true);
@@ -37,6 +38,7 @@ namespace {
             _test_client.reset();
             _cache.reset();
         }
+
         std::shared_ptr<RedisCache> _cache = nullptr;
         RedisClientPtr _test_client;
         int _db_id;

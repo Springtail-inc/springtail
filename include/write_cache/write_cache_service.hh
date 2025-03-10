@@ -34,26 +34,6 @@ public:
                             const proto::ListTablesRequest* request,
                             proto::ListTablesResponse* response) override;
 
-    grpc::Status SetLookup(grpc::ServerContext* context,
-                           const proto::SetLookupRequest* request,
-                           google::protobuf::Empty* response) override;
-
-    grpc::Status ForwardMap(grpc::ServerContext* context,
-                            const proto::ForwardMapRequest* request,
-                            proto::ExtentMapResponse* response) override;
-
-    grpc::Status ReverseMap(grpc::ServerContext* context,
-                            const proto::ReverseMapRequest* request,
-                            proto::ExtentMapResponse* response) override;
-
-    grpc::Status ExpireMap(grpc::ServerContext* context,
-                           const proto::ExpireMapRequest* request,
-                           google::protobuf::Empty* response) override;
-
-    grpc::Status AddMapping(grpc::ServerContext* context,
-                            const proto::AddMappingRequest* request,
-                            google::protobuf::Empty* response) override;
-
 private:
     WriteCacheService() = default;
     ~WriteCacheService() override = default;

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <filesystem>
 
+#include <common/init.hh>
 #include <pg_log_mgr/pg_xact_log_reader.hh>
 #include <pg_log_mgr/pg_xact_log_writer.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
@@ -11,6 +12,18 @@ using namespace springtail::pg_log_mgr;
 namespace {
     class XactLogRW_Test : public testing::Test {
     protected:
+        static void SetUpTestSuite() {
+            std::vector<std::unique_ptr<ServiceRunner>> service_runners;
+            service_runners.emplace_back(std::make_unique<ExceptionRunner>());
+            service_runners.emplace_back(std::make_unique<IOMgrRunner>());
+
+            springtail_init_custom(service_runners);
+        }
+
+        static void TearDownTestSuite() {
+            springtail_shutdown();
+        }
+
         void SetUp() override {
             // remove the directory
             std::filesystem::remove_all("/tmp/test_xlog");
@@ -45,7 +58,7 @@ namespace {
         ASSERT_EQ(reader.get_xid(), 11);
     }
 
-    TEST(XactTestMsg, test_msg)
+    TEST_F(XactLogRW_Test, XactTestMsg)
     {
         PgXactMsg msg("/tmp/test_xlog/test_1.log", "/tmp/test_xlog/test_2.log", 1, 1, 100, 1000, 5, 1, {10, 20});
 
