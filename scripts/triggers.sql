@@ -78,13 +78,19 @@ BEGIN
                 'is_pkey', coalesce((pga.attnum=any(pgi.indkey))::boolean, false),
                 'position', ordinal_position,
                 'pkey_pos', array_position(pgi.indkey, pga.attnum),
-                'is_generated', (is_generated <> 'NEVER')
+                'is_generated', (pga.attgenerated = 's')::boolean,
+                'type_name', t.typname,
+                'collation', col.collname,
+                'is_user_defined_type', (t.typnamespace = 'pg_catalog'::regnamespace)::boolean,
+                'is_non_standard_collation', coalesce((col.collname NOT IN ('C', 'en_US.UTF-8', 'default'))::boolean, false)
             ) AS json_col
             FROM pg_attribute pga
             JOIN information_schema.columns
             ON column_name=pga.attname
             LEFT OUTER JOIN pg_index pgi
             ON pga.attrelid=pgi.indrelid AND pgi.indisprimary
+            LEFT JOIN pg_type t ON pga.atttypid = t.oid 
+            LEFT JOIN pg_collation col ON pga.attcollation = col.oid AND pga.attcollation <> 0
             WHERE pga.attrelid=obj.objid
               AND quote_literal(table_schema) = quote_literal(obj.schema_name)
               AND quote_literal(table_name) = quote_literal(table_relname)
@@ -105,7 +111,7 @@ BEGIN
         -- command_tag is CREATE TABLE or ALTER TABLE
         PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
 
-        --- RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objid, table_replident;
+        RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objid, table_replident;
 
         SELECT true WHERE json_columns::jsonb @> '[{"is_pkey": true}]'::jsonb INTO has_pkey;
 

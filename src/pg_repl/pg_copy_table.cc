@@ -117,7 +117,7 @@ namespace springtail
         "AND nspname != 'information_schema' "
         "ORDER BY pg_class.oid";
 
-    static constexpr char EXCLUSION_ITEMS_QUERY[] =
+    static constexpr char INVALID_TABLES_QUERY[] =
         "SELECT "
         "    n.nspname AS schema_name, "
         "    c.relname AS table_name, "
@@ -170,7 +170,7 @@ namespace springtail
 
     static constexpr char TABLE_SCHEMA_PAIR_QUERY[] =
         "SELECT "
-        "    v.table_name, "        
+        "    v.table_name, "
         "    v.schema_name, "
         "    c.oid as table_oid, "
         "    n.oid as schema_oid "
@@ -269,7 +269,7 @@ namespace springtail
             }
 
             columns.push_back(index_column);
-            
+
             Index index_obj;
             index_obj.id = index_id;
             index_obj.name = index_name;
@@ -279,7 +279,7 @@ namespace springtail
             index_obj.columns = std::move(columns);
             // set the index state to ready since its part of the initial table copy
             index_obj.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
-            
+
             secondary_indexes[index_name] = std::move(index_obj);
         }
 
@@ -287,7 +287,7 @@ namespace springtail
             _schema.secondary_keys.push_back(index.second);
             SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Adding to secondary keys {} {}", index.second.id, index.second.name);
         }
-        
+
         _connection.clear();
     }
 
@@ -731,13 +731,13 @@ namespace springtail
     }
 
     void
-    PgCopyTable::_populate_excluded_items()
+    PgCopyTable::_populate_invalid_tables()
     {
         // do the tables query
-        _connection.exec(EXCLUSION_ITEMS_QUERY);
+        _connection.exec(INVALID_TABLES_QUERY);
 
         if (_connection.ntuples() == 0) {
-            SPDLOG_ERROR("No tables found in database");
+            SPDLOG_ERROR("No invalid tables found in database");
             _connection.clear();
             return;
         }
@@ -747,7 +747,7 @@ namespace springtail
         // iterate through the results and organize by schema and table
         for (int i = 0; i < _connection.ntuples(); i++) {
             std::string schema_name = _connection.get_string(i, 0);
-            std::string table_name = _connection.get_string(i, 1); 
+            std::string table_name = _connection.get_string(i, 1);
             std::string column_name = _connection.get_string(i, 2);
             std::string type_name = _connection.get_string(i, 3);
             std::string generation_expression = _connection.get_string_optional(i, 4).value_or("");
@@ -776,14 +776,14 @@ namespace springtail
             // Add column information
             result[schema_name][table_name]["columns"].push_back({
                 {"name", column_name},
-                {"type", type_name},
+                {"type_name", type_name},
                 {"generation_expression", generation_expression},
                 {"collation", collation}
             });
         }
 
         _connection.clear();
-        _excluded_items = result;
+        _invalid_tables = result;
     }
 
     void
@@ -807,22 +807,20 @@ namespace springtail
             uint32_t table_oid = _connection.get_int32(i, 2);
             uint32_t schema_oid = _connection.get_int32(i, 3);
 
-            if (_excluded_items.contains(schema_name) && 
-                _excluded_items[schema_name].contains(table_name)) {
+            if (_invalid_tables.contains(schema_name) &&
+                _invalid_tables[schema_name].contains(table_name)) {
                 SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Skipping table: {}.{}", schema_name, table_name);
-                
+
                 // Create JSON object for the skipped table
                 nlohmann::json table_info = {
                     {"schema", schema_name},
                     {"table", table_name},
-                    {"columns", _excluded_items[schema_name][table_name]["columns"]}
+                    {"columns", _invalid_tables[schema_name][table_name]["columns"]}
                 };
 
                 // Store in Redis
-                auto &&key = fmt::format(redis::HASH_EXCLUDED_ITEMS, Properties::get_db_instance_id(), db_id);
-                auto redis = RedisMgr::get_instance()->get_client();
-                auto field_key = fmt::format("{}", table_oid);
-                redis->hset(key, field_key, table_info.dump());
+                populate_invalid_tables_in_redis(db_id, table_oid, table_info);
+
                 continue;
             }
 
@@ -1058,7 +1056,7 @@ namespace springtail
 
     void
     PgCopyTable::create_namespaces(uint64_t db_id, uint64_t xid)
-    {   
+    {
         PgCopyTable copy_table;
 
         // connect to the database
@@ -1074,7 +1072,7 @@ namespace springtail
         // create the namespaces
         for (const auto &namespace_info : namespaces) {
             SPDLOG_DEBUG("Creating namespace: {}", namespace_info.second);
-            
+
             proto::NamespaceRequest ns_req;
             ns_req.set_db_id(db_id);
             ns_req.set_namespace_id(namespace_info.first);
@@ -1104,7 +1102,7 @@ namespace springtail
         copy_table.connect(db_id);
 
         // populate the excluded items
-        copy_table._populate_excluded_items();
+        copy_table._populate_invalid_tables();
 
         // fetch the table oids
         std::set<TableMetadata> table_oids;

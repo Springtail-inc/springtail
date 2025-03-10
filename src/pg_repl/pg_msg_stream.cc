@@ -835,6 +835,40 @@ namespace springtail {
         return msg;
     }
 
+    bool
+    PgMsgStreamReader::_validate_ddl_msg_invalid_columns(std::string namespace_name, uint64_t table_oid,
+                                                         const std::vector<PgMsgSchemaColumn> &columns)
+    {
+        auto invalid_columns = nlohmann::json::array();
+        // Validate if the table has an invalid column
+        for (const auto& column : columns) {
+            if ( column.is_generated || column.is_non_standard_collation || !column.is_user_defined_type ){
+                invalid_columns.push_back({
+                    {"name", column.column_name},
+                    {"type_name", column.type_name},
+                    {"collation", column.collation}
+                });
+                SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "VALIDATE_DDL: Invalid column: name={}, tid={}", column.column_name, table_oid);
+            }
+        }
+
+        if ( invalid_columns.size() > 0 ){
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "VALIDATE_DDL: Invalid column(s) present in table: {}", table_oid);
+
+            nlohmann::json table_info = {
+                {"schema", namespace_name},
+                {"table", table_oid},
+                {"columns", invalid_columns}
+            };
+
+            populate_invalid_tables_in_redis(-1, table_oid, table_info);
+
+            return false;
+        }
+
+        return true;
+    }
+
     void
     PgMsgStreamReader::_decode_schema_columns(const nlohmann::json &column_json,
                                               std::vector<PgMsgSchemaColumn> &columns)
@@ -850,6 +884,14 @@ namespace springtail {
             json["is_nullable"].get_to(column.is_nullable);
             json["is_pkey"].get_to(column.is_pkey);
             json["is_generated"].get_to(column.is_generated);
+            if (!json["type_name"].is_null()) {
+                column.type_name = json["type_name"].get<std::string>();
+            }
+            if (!json["collation"].is_null()) {
+                column.collation = json["collation"].get<std::string>();
+            }
+            json["is_non_standard_collation"].get_to(column.is_non_standard_collation);
+            json["is_user_defined_type"].get_to(column.is_user_defined_type);
 
             if (!json["pkey_pos"].is_null()) {
                 json["pkey_pos"].get_to(column.pk_position);
@@ -963,6 +1005,12 @@ namespace springtail {
 
         SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Decoded create table: json: {}", json.dump());
 
+        // Validate the columns to see if there are any invalid columns present as part of the
+        // create table statement. If present, prevent the message from being processed.
+        if (!_validate_ddl_msg_invalid_columns(table_msg.namespace_name, table_msg.oid, table_msg.columns)){
+            return nullptr;
+        }
+
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_TABLE);
         msg->msg.emplace<PgMsgTable>(table_msg);
 
@@ -976,6 +1024,15 @@ namespace springtail {
         // then just switch the type so we know it is an alter table
         PgMsgPtr msg = _decode_create_table(message, buffer, len);
         if (msg == nullptr) {
+            return msg;
+        }
+
+        const auto& table_msg = std::get<PgMsgTable>(msg->msg);
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Altering invalid table, with tid {}", table_msg.oid);
+        // Table was previously invalid, but is valid now. So instead of doing an alter, we need to create the table
+        // in the FDW, Also we need to clear the Redis key to make the table valid.
+        if (check_if_table_is_invalid_in_redis(-1, table_msg.oid)){
+            clear_invalid_table_in_redis(-1, table_msg.oid);
             return msg;
         }
 

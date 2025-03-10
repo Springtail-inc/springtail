@@ -5,9 +5,9 @@ extern "C" {
     #include <catalog/pg_type.h>
 }
 
-namespace springtail 
+namespace springtail
 {
-    SchemaType 
+    SchemaType
     convert_pg_type(int32_t pg_type)
     {
         switch (pg_type) {
@@ -49,4 +49,37 @@ namespace springtail
         }
     }
 
+    void
+    populate_invalid_tables_in_redis(uint64_t db_id, uint64_t table_oid, const nlohmann::json& table_info)
+    {
+        auto &&key = fmt::format(redis::HASH_INVALID_TABLES, Properties::get_db_instance_id(), db_id);
+        auto redis = RedisMgr::get_instance()->get_client();
+        auto field_key = fmt::format("{}", table_oid);
+
+        redis->hset(key, field_key, table_info.dump());
+    }
+
+    bool
+    check_if_table_is_invalid_in_redis(uint64_t db_id, uint64_t table_oid)
+    {
+        auto &&key = fmt::format(redis::HASH_INVALID_TABLES, Properties::get_db_instance_id(), db_id);
+        auto redis = RedisMgr::get_instance()->get_client();
+        auto field_key = fmt::format("{}", table_oid);
+
+        auto table_info = redis->hget(key, field_key);
+        if (table_info.has_value()) {
+            return true;
+        }
+        return false;
+    }
+
+    void clear_invalid_table_in_redis(uint64_t db_id,
+                                      uint64_t table_oid)
+    {
+        auto &&key = fmt::format(redis::HASH_INVALID_TABLES, Properties::get_db_instance_id(), db_id);
+        auto redis = RedisMgr::get_instance()->get_client();
+        auto field_key = fmt::format("{}", table_oid);
+
+        redis->hdel(key, field_key);
+    }
 }

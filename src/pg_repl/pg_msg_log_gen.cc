@@ -93,7 +93,11 @@ namespace springtail {
             col["is_pkey"] = c.is_pkey;
             col["position"] = c.position;
             col["pkey_pos"] = c.pk_position;
-            col["is_generated"] = false;
+            col["is_generated"] = c.is_generated;
+            col["type_name"] = c.type_name;
+            col["collation"] = c.collation;
+            col["is_non_standard_collation"] = c.is_non_standard_collation;
+            col["is_user_defined_type"] = c.is_user_defined_type;
             columns_json.push_back(col);
 
             assert(c.pg_type == BOOLOID ||

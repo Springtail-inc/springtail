@@ -165,6 +165,10 @@ namespace springtail
         bool is_nullable;
         bool is_pkey;        // is primary key
         bool is_generated;  // is this a generated column
+        bool is_non_standard_collation;
+        bool is_user_defined_type;
+        std::string type_name;
+        std::string collation;
     };
 
     /** Create table/alter table message decoded */

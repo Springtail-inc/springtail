@@ -194,6 +194,7 @@ namespace springtail {
         void _decode_schema_columns(const nlohmann::json &json, std::vector<PgMsgSchemaColumn> &columns);
         void _decode_tuple(PgMsgTupleData &tuple);
         void _decode_string(std::string &ostring);
+        bool _validate_ddl_msg_invalid_columns(std::string namespace_name, uint64_t table_oid, const std::vector<PgMsgSchemaColumn> &columns);
 
         // v1 messages
         void _skip_begin();
