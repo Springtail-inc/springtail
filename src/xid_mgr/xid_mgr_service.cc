@@ -16,20 +16,17 @@ void GrpcXidMgrService::shutdown()
     }
 }
 
+// XXX Spans removed. Need to add them back once we figure out CallbackServerContext and ServerContext in sysTblMgr
 grpc::ServerUnaryReactor*
 GrpcXidMgrService::Ping(grpc::CallbackServerContext* context,
                         const google::protobuf::Empty* request,
                         google::protobuf::Empty* response)
 {
-    ServerSpan span(context, "XidMgrService", "Ping");
-
     auto* reactor = context->DefaultReactor();
     try {
         std::cout << "Got ping\n";
-        span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
         reactor->Finish(grpc::Status::OK);
     } catch (const std::exception& e) {
-        span.span()->SetStatus(opentelemetry::trace::StatusCode::kError, e.what());
         reactor->Finish(grpc::Status(grpc::StatusCode::INTERNAL, e.what()));
     }
     return reactor;
@@ -40,7 +37,6 @@ GrpcXidMgrService::CommitXid(grpc::CallbackServerContext* context,
                              const proto::CommitXidRequest* request,
                              google::protobuf::Empty* response)
 {
-    ServerSpan span(context, "XidMgrService", "CommitXid");
     auto* reactor = context->DefaultReactor();
 
     try {
@@ -54,10 +50,8 @@ GrpcXidMgrService::CommitXid(grpc::CallbackServerContext* context,
                 _notification_thread->notify(msg);
             }
         }
-        span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
         reactor->Finish(grpc::Status::OK);
     } catch (const std::exception& e) {
-        span.span()->SetStatus(opentelemetry::trace::StatusCode::kError, e.what());
         reactor->Finish(grpc::Status(grpc::StatusCode::INTERNAL, e.what()));
     }
     return reactor;
@@ -68,14 +62,11 @@ GrpcXidMgrService::RecordDdlChange(grpc::CallbackServerContext* context,
                                    const proto::RecordDdlChangeRequest* request,
                                    google::protobuf::Empty* response)
 {
-    ServerSpan span(context, "XidMgrService", "RecordDdlChange");
     auto* reactor = context->DefaultReactor();
     try {
         _srv.record_ddl_change(request->db_id(), request->xid());
-        span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
         reactor->Finish(grpc::Status::OK);
     } catch (const std::exception& e) {
-        span.span()->SetStatus(opentelemetry::trace::StatusCode::kError, e.what());
         reactor->Finish(grpc::Status(grpc::StatusCode::INTERNAL, e.what()));
     }
     return reactor;
@@ -86,17 +77,14 @@ GrpcXidMgrService::GetCommittedXid(grpc::CallbackServerContext* context,
                                    const proto::GetCommittedXidRequest* request,
                                    proto::GetCommittedXidResponse* response)
 {
-    ServerSpan span(context, "XidMgrService", "GetCommittedXid");
     auto* reactor = context->DefaultReactor();
 
     try {
         uint64_t xid = _srv.get_committed_xid(request->db_id(), request->schema_xid());
         response->set_xid(xid);
-        span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
         reactor->Finish(grpc::Status::OK);
 
     } catch (const std::exception& e) {
-        span.span()->SetStatus(opentelemetry::trace::StatusCode::kError, e.what());
         reactor->Finish(grpc::Status(grpc::StatusCode::INTERNAL, e.what()));
     }
     return reactor;
