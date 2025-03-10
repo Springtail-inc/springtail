@@ -23,8 +23,8 @@ namespace xid_mgr {
     class GrpcXidMgrService final : public proto::XidManager::CallbackService
     {
     public:
-        explicit GrpcXidMgrService(xid_mgr::XidMgrServer& s) : _srv{s}
-        {}
+        explicit GrpcXidMgrService(xid_mgr::XidMgrServer& s);
+
         ~GrpcXidMgrService() = default;
 
         void shutdown();
