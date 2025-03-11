@@ -7,6 +7,11 @@
 
 namespace springtail {
 
+GrpcXidMgrService::GrpcXidMgrService(xid_mgr::XidMgrServer& s) : _srv{s}
+{
+    _notification_thread = std::make_unique<NotificationThread>(*this);
+}
+
 void GrpcXidMgrService::shutdown()
 {
     _notification_thread.reset();
@@ -44,15 +49,10 @@ GrpcXidMgrService::CommitXid(grpc::CallbackServerContext* context,
 
     try {
         _srv.commit_xid(request->db_id(), request->xid(), request->has_schema_changes());
-        {
-            std::scoped_lock<std::mutex> l(_m);
-            if (!_push_notifiers.empty()) {
-                proto::XidPushResponse msg;
-                msg.set_db_id(request->db_id());
-                msg.set_xid(request->xid());
-                _notification_thread->notify(msg);
-            }
-        }
+        proto::XidPushResponse msg;
+        msg.set_db_id(request->db_id());
+        msg.set_xid(request->xid());
+        _notification_thread->notify(msg);
         span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
         reactor->Finish(grpc::Status::OK);
     } catch (const std::exception& e) {
