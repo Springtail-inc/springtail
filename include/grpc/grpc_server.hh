@@ -12,9 +12,10 @@
 
 namespace springtail {
 
+template<typename T>
 class GrpcServerCarrier : public opentelemetry::context::propagation::TextMapCarrier {
 public:
-    explicit GrpcServerCarrier(grpc::ServerContext* context) : context_(context) {}
+    explicit GrpcServerCarrier(T* context) : context_(context) {}
     GrpcServerCarrier() = default;
 
     opentelemetry::nostd::string_view Get(
@@ -33,13 +34,14 @@ public:
         // Not required for server
     }
 
-    grpc::ServerContext* context_ = nullptr;
+    T* context_ = nullptr;
 };
 
 // RAII wrapper for OpenTelemetry spans in gRPC server methods
+template<typename T>
 class ServerSpan {
 public:
-    ServerSpan(grpc::ServerContext* context,
+    ServerSpan(T* context,
                const std::string& service_name,
                const std::string& method_name)
     {
