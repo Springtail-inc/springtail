@@ -23,7 +23,7 @@ on:
 jobs:
   test:
     name: test
-    runs-on: warp-ubuntu-latest-arm64-8x-spot
+    runs-on: warp-ubuntu-latest-arm64-4x
     timeout-minutes: 30
     container:
       image: ${{ inputs.builder_image_version_tag }}
@@ -126,9 +126,10 @@ jobs:
           # Grab the short SHA
           _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
           
-          log_file="unit-test-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-$(date +%s).log" 
+          _TIMESTAMP=$(date +"%Y-%m-%d-%H-%M-%S")
+          log_file="unit-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log" 
           mv tmplog $log_file
-          unit_test_log_s3key="s3://devsupport.springtail.internal/testlogs/$(date +"%Y/%m/%d/%H")/$log_file"
+          unit_test_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_PR_ID}/$log_file"
           
           aws s3 cp "$log_file" "$unit_test_log_s3key"
           echo "*** Unit Test Log S3 Key: $unit_test_log_s3key"
@@ -179,32 +180,33 @@ jobs:
           then 
             _LOG_FLAG="failed"
           fi
-          # Timestamp
-          _LOG_TIMESTAMP=$(date +%s)
-          _LOG_DATE=$(date +"%Y/%m/%d/%H")
-          
           # Grab the current PR ID
           _LOG_PR_ID="${GITHUB_EVENT_PULL_REQUEST_NUMBER}"
           # Grab the short SHA
           _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
           
-          log_file="integration-test-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-${_LOG_TIMESTAMP}.log" 
+          _TIMESTAMP=$(date +"%Y-%m-%d-%H-%M-%S")
+          log_file="integration-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log" 
           mv tmplog $log_file
           
           # Integration test log
-          integration_test_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_DATE}/$log_file"
+          integration_test_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_PR_ID}/$log_file"
           aws s3 cp "$log_file" "$integration_test_log_s3key"
           echo "*** Integration Test Log S3 Key: $integration_test_log_s3key"
-          
-          # Springtail service log
-          springtail_log_file="springtail-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-${_LOG_TIMESTAMP}.tar.gz"
-          output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../debug)
-          fname=$(echo $output  | cut -f2 -d':' | xargs | head -1)
-          mv $fname $springtail_log_file
-          springtail_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_DATE}/$springtail_log_file"
-          aws s3 cp "$springtail_log_file" "$springtail_log_s3key"
-          echo "*** Springtail Log S3 Key: $springtail_log_s3key"
 
+          # Only upload Springtail logs if the _LOG_FLAG is 'failed'
+          if [ "$_LOG_FLAG" == "failed" ]; then
+            # Springtail service log
+            echo "Integration test failed, uploading Springtail logs..."
+            springtail_log_file="springtail-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.tar.gz"
+            output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../debug)
+            fname=$(echo $output  | cut -f2 -d':' | xargs | head -1)
+            mv $fname $springtail_log_file
+            springtail_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_PR_ID}/${springtail_log_file}"
+            aws s3 cp "$springtail_log_file" "$springtail_log_s3key"
+            echo "*** Springtail Log S3 Key: $springtail_log_s3key"
+          fi
+          
       - name: Integration Test Report
         uses: dorny/test-reporter@v1
         if: success() || failure()                         # run this step even if previous step failed
