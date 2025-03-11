@@ -204,6 +204,9 @@ namespace springtail
 
         _copy_state = NEW_MSG;
         _started_streaming = true;
+
+        // close the connection; we don't need it anymore
+        _connection->disconnect();
     }
 
 
@@ -261,10 +264,12 @@ namespace springtail
         if (_started_streaming) {
             // check to see if we should fetch latest LSN to sync back
             int64_t now = get_pgtime_in_millis();
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Now: {}, Last received time: {}, now - last received time: {}", now, _last_received_time, now - _last_received_time);
             if ((now - _last_received_time) > IDLE_SLOT_TIMEOUT_MSEC) {
                 // see if we've been idle for longer (received no data)
                 // than IDLE_SLOT_TIMEOUT_MSEC; if so we force an update
                 // based on the current LSN
+                SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Forcing LSN update due to idle slot");
                 _fast_forward_stream();
             }
 
@@ -624,8 +629,6 @@ namespace springtail
             _server_latest_lsn = wal_end;
         }
 
-        _last_received_time = send_time;
-
         if (response_requested) {
             _send_standby_status_msg();
         }
@@ -673,7 +676,11 @@ namespace springtail
         // execute query: SELECT pg_current_wal_lsn()
         const char *cmd = CURRENT_LSN_SQL;
 
-        // execute query
+        // check connection and execute query
+        if (!_connection->is_connected()) {
+            _connection->connect(_db_host, _db_name, _db_user, _db_pass, _db_port, false);
+        }
+
         _connection->exec(cmd);
 
         // process results; sanity checks first
@@ -686,10 +693,18 @@ namespace springtail
         // result in form: XXX/XXX; convert to LSN_t
         char *str = _connection->get_value(0, 0);
         LSN_t lsn = pg_msg::str_to_LSN(str);
+
+        // disconnect from db
         _connection->clear();
+        _connection->disconnect();
+
+        // update last received time
+        _last_received_time = get_pgtime_in_millis();
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Primary LSN={}, Last flushed LSN={}, MsgEnd LSN={}", lsn, _last_flushed_lsn, _message_end_lsn);
 
         // check that LSN is ahead of where we are
-        if (lsn < _message_end_lsn) {
+        if (lsn == _last_flushed_lsn || lsn < _message_end_lsn) {
             // nothing to do, we'll get there
             return;
         }
@@ -702,6 +717,7 @@ namespace springtail
 
         // fast forward stream
         _last_flushed_lsn = lsn;
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Fast forwarding stream to LSN: {}", lsn);
 
         _send_standby_status_msg();
     }

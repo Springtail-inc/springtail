@@ -133,11 +133,11 @@ namespace springtail
         LSN_t _server_latest_lsn = INVALID_LSN;
 
         /** last time copy data received */
-        int64_t _last_received_time;
+        int64_t _last_received_time{0};
         /** last time status was sent */
-        int64_t _last_status_time;
+        int64_t _last_status_time{0};
         /** last time data was flushed */
-        std::atomic<int64_t> _last_flushed_time;
+        std::atomic<int64_t> _last_flushed_time{0};
 
         /**
          * @brief Send standby status feedback message to server
