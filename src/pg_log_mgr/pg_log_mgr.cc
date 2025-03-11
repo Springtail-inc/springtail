@@ -523,11 +523,8 @@ namespace springtail::pg_log_mgr {
     {
         std::filesystem::path file = fs::create_log_file(_repl_log_path, LOG_PREFIX_REPL, LOG_SUFFIX);
         auto file_timestamp = fs::extract_timestamp_from_file(file, LOG_PREFIX_REPL, LOG_SUFFIX);
-        if (file_timestamp.has_value()) {
-            _logger_file_timestamp.store(file_timestamp.value());
-        } else {
-            SPDLOG_ERROR("Filename {} has no timestamp in the name", file.string());
-        }
+        DCHECK(file_timestamp.has_value());
+        _logger_file_timestamp.store(file_timestamp.value());
 
         return std::make_shared<PgLogWriter>(file,
             [this](LSN_t lsn) { _pg_conn.set_last_flushed_LSN(lsn); });
