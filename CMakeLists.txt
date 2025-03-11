@@ -1,7 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
 
-set(ENV{VCPKG_OVERLAY_PORTS} "${PROJECT_SOURCE_DIR}/vcpkg-ports")
-
 ## Need to set top level include for conan, must be before project
 # disable for now
 # set(CMAKE_PROJECT_TOP_LEVEL_INCLUDES "./cmake/conan_provider.cmake")
@@ -11,6 +9,8 @@ project(Springtail
   VERSION 0.1
   DESCRIPTION "Springtail source code"
   LANGUAGES CXX)
+
+set(ENV{VCPKG_OVERLAY_PORTS} "${PROJECT_SOURCE_DIR}/vcpkg-ports")
 
 ## add ctest framework
 include(CTest)
