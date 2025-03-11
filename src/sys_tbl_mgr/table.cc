@@ -811,7 +811,7 @@ get_table_dir(const std::filesystem::path &base,
         }
 
         // flush the dirty data pages of the table to disk
-        StorageCache::get_instance()->flush(_data_file);
+        auto end_offset = StorageCache::get_instance()->flush(_data_file);
 
         // now flush the indexes, capturing the roots
         TableMetadata metadata;
@@ -821,8 +821,13 @@ get_table_dir(const std::filesystem::path &base,
         for (auto secondary : _secondary_indexes) {
             metadata.roots.emplace_back(secondary.first, secondary.second.first->finalize());
         }
+
         metadata.stats = _stats;
         metadata.snapshot_xid = _snapshot_xid;
+
+        // Store file end offset for xid
+        // to be used later to catch-up index if needed
+        metadata.roots.push_back({constant::INDEX_FILE_END_OFFSET, end_offset});
 
         // store the roots into a look-aside root file
         // XXX maybe we only need to do this for system tables?  or even just the table_roots table?

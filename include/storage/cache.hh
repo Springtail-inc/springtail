@@ -1117,7 +1117,7 @@ namespace springtail {
              * Flushes all of the pages associated with a file that have a registered flush
              * callback.
              */
-            void flush_file(const std::filesystem::path &file);
+            uint64_t flush_file(const std::filesystem::path &file);
 
             /**
              * Drops all of the dirty pages associated with a file without flushing them to disk.
@@ -1220,7 +1220,7 @@ namespace springtail {
          * to have valid extent IDs and returns a future that can be used to wait for the sync to
          * disk to complete.
          */
-        void flush(const std::filesystem::path &file);
+        uint64_t flush(const std::filesystem::path &file);
 
         /**
          * Drop all of the dirty pages associated with a given file without writing them.  Used to
