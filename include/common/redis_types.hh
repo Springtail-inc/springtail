@@ -137,5 +137,5 @@ namespace springtail::redis {
      * args: <db_instance_id>
      * key: <table_oid>, value: <json>
      */
-    static constexpr char HASH_INVALID_TABLES[] = "{}:hash:invalid_tables:{}";
+    static constexpr char HASH_INVALID_TABLES[] = "{}:hash:invalid_tables";
 }

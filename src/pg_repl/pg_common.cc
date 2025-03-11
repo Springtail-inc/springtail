@@ -50,36 +50,32 @@ namespace springtail
     }
 
     void
-    _populate_invalid_tables_in_redis(uint64_t db_id, uint64_t table_oid, const nlohmann::json& table_info)
+    _populate_invalid_tables_in_redis(uint64_t table_oid, const nlohmann::json& table_info)
     {
-        auto &&key = fmt::format(redis::HASH_INVALID_TABLES, Properties::get_db_instance_id(), db_id);
         auto redis = RedisMgr::get_instance()->get_client();
         auto field_key = fmt::format("{}", table_oid);
 
-        redis->hset(key, field_key, table_info.dump());
+        redis->hset(redis::HASH_INVALID_TABLES, field_key, table_info.dump());
     }
 
     bool
-    _check_if_table_is_invalid_in_redis(uint64_t db_id, uint64_t table_oid)
+    _check_if_table_is_invalid_in_redis(uint64_t table_oid)
     {
-        auto &&key = fmt::format(redis::HASH_INVALID_TABLES, Properties::get_db_instance_id(), db_id);
         auto redis = RedisMgr::get_instance()->get_client();
         auto field_key = fmt::format("{}", table_oid);
 
-        auto table_info = redis->hget(key, field_key);
+        auto table_info = redis->hget(redis::HASH_INVALID_TABLES, field_key);
         if (table_info.has_value()) {
             return true;
         }
         return false;
     }
 
-    void _clear_invalid_table_in_redis(uint64_t db_id,
-                                      uint64_t table_oid)
+    void _clear_invalid_table_in_redis(uint64_t table_oid)
     {
-        auto &&key = fmt::format(redis::HASH_INVALID_TABLES, Properties::get_db_instance_id(), db_id);
         auto redis = RedisMgr::get_instance()->get_client();
         auto field_key = fmt::format("{}", table_oid);
 
-        redis->hdel(key, field_key);
+        redis->hdel(redis::HASH_INVALID_TABLES, field_key);
     }
 }

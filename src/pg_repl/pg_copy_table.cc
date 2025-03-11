@@ -788,8 +788,7 @@ namespace springtail
 
     void
     PgCopyTable::_get_table_oids(const std::string &query,
-                                 std::set<TableMetadata> &table_oids,
-                                 uint64_t db_id)
+                                 std::set<TableMetadata> &table_oids)
     {
         // do the tables query
         _connection.exec(query);
@@ -819,7 +818,7 @@ namespace springtail
                 };
 
                 // Store in Redis
-                _populate_invalid_tables_in_redis(db_id, table_oid, table_info);
+                _populate_invalid_tables_in_redis(table_oid, table_info);
 
                 continue;
             }
@@ -832,8 +831,7 @@ namespace springtail
 
     void
     PgCopyTable::_get_table_oids(const nlohmann::json &include_json,
-                                 std::set<TableMetadata> &table_oids,
-                                 uint64_t db_id)
+                                 std::set<TableMetadata> &table_oids)
     {
         // get schemas array from json into vector of strings
 
@@ -843,7 +841,7 @@ namespace springtail
             if (!schemas.empty()) {
                 if (schemas[0] == "*") {
                     // all tables in db
-                    _get_table_oids(std::string(TABLES_QUERY), table_oids, db_id);
+                    _get_table_oids(std::string(TABLES_QUERY), table_oids);
                     return;
                 }
 
@@ -855,7 +853,7 @@ namespace springtail
 
                 _get_table_oids(fmt::format(TABLES_SCHEMA_QUERY,
                                 common::join_string(",", schema_names.begin(), schema_names.end())),
-                                table_oids, db_id);
+                                table_oids);
             }
         }
 
@@ -872,7 +870,7 @@ namespace springtail
 
             if (!pairs.empty()) {
                 // issue query by joining all the schema, table pairs
-                _get_table_oids(fmt::format(TABLE_SCHEMA_PAIR_QUERY, common::join_string(",", pairs.begin(), pairs.end())), table_oids, db_id);
+                _get_table_oids(fmt::format(TABLE_SCHEMA_PAIR_QUERY, common::join_string(",", pairs.begin(), pairs.end())), table_oids);
             }
         }
     }
@@ -1112,21 +1110,21 @@ namespace springtail
             // by schema name, need to escape the schema name
             // escape the schema name
             std::string schema = "'" + copy_table._connection.escape_string(schema_name.value()) + "'";
-            copy_table._get_table_oids(fmt::format(TABLES_SCHEMA_QUERY, schema), table_oids, db_id);
+            copy_table._get_table_oids(fmt::format(TABLES_SCHEMA_QUERY, schema), table_oids);
         } else if (table_tids.has_value()) {
             // by table oids
             std::string tids = common::join_string(",", table_tids.value().begin(), table_tids.value().end());
-            copy_table._get_table_oids(fmt::format(TABLE_QUERY, tids), table_oids, db_id);
+            copy_table._get_table_oids(fmt::format(TABLE_QUERY, tids), table_oids);
         } else if (schema_table.has_value()) {
             // by schema, table pair
             std::string schema = copy_table._connection.escape_string(schema_table.value().first);
             std::string table = copy_table._connection.escape_string(schema_table.value().second);
-            copy_table._get_table_oids(fmt::format(TABLE_OID_QUERY, table, schema), table_oids, db_id);
+            copy_table._get_table_oids(fmt::format(TABLE_OID_QUERY, table, schema), table_oids);
         } else if (include_json.has_value()) {
-            copy_table._get_table_oids(include_json.value(), table_oids, db_id);
+            copy_table._get_table_oids(include_json.value(), table_oids);
         } else {
             // all tables in db
-            copy_table._get_table_oids(std::string(TABLES_QUERY), table_oids, db_id);
+            copy_table._get_table_oids(std::string(TABLES_QUERY), table_oids);
         }
 
         // close this connection
