@@ -417,7 +417,8 @@ def gen_dump_tarball(props : Properties, build_dir : str) -> str:
         for log in glob.glob(logs):
             shutil.copy(log, tmp_logs_dir)
 
-        run_command(os.path.join(build_dir, 'src/storage/dump_system_tables'), ['1'])
+        shutil.copy(os.path.join(mount_path, 'system.json'), tmp_logs_dir)
+        run_command(os.path.join(build_dir, 'src/storage/dump_system_tables'), ['1'], os.path.join(tmp_logs_dir, 'system_table.dump'));
 
         # create the tarball
         run_command('tar', ['-czf', tarball, '-C', tmp_dir, 'logs'])
