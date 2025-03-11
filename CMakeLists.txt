@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-set(ENV{VCPKG_OVERLAY_PORTS} "/home/dev/springtail/vcpkg-ports")
+set(ENV{VCPKG_OVERLAY_PORTS} "${PROJECT_SOURCE_DIR}/vcpkg-ports")
 
 ## Need to set top level include for conan, must be before project
 # disable for now
