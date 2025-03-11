@@ -68,9 +68,12 @@ void
 PgXactLogWriter::rotate(uint64_t timestamp)
 {
     std::unique_lock<std::shared_mutex> lock(_file_mutex);
-    auto handle = IOMgr::get_instance()->open(_file, IOMgr::IO_MODE::APPEND, true);
-    auto response = handle->sync();
-    DCHECK(response->is_success());
+    std::error_code ec;
+    if (std::filesystem::exists(_file, ec)) {
+        auto handle = IOMgr::get_instance()->open(_file, IOMgr::IO_MODE::APPEND, true);
+        auto response = handle->sync();
+        DCHECK(response->is_success());
+    }
     _file = fs::create_log_file_with_timestamp(_file.parent_path(), PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX, timestamp);
     SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "_file = ", _file.c_str());
 }
