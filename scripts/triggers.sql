@@ -89,7 +89,7 @@ BEGIN
             ON column_name=pga.attname
             LEFT OUTER JOIN pg_index pgi
             ON pga.attrelid=pgi.indrelid AND pgi.indisprimary
-            LEFT JOIN pg_type t ON pga.atttypid = t.oid 
+            LEFT JOIN pg_type t ON pga.atttypid = t.oid
             LEFT JOIN pg_collation col ON pga.attcollation = col.oid AND pga.attcollation <> 0
             WHERE pga.attrelid=obj.objid
               AND quote_literal(table_schema) = quote_literal(obj.schema_name)
@@ -111,7 +111,7 @@ BEGIN
         -- command_tag is CREATE TABLE or ALTER TABLE
         PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
 
-        RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objid, table_replident;
+        -- RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objid, table_replident;
 
         SELECT true WHERE json_columns::jsonb @> '[{"is_pkey": true}]'::jsonb INTO has_pkey;
 
