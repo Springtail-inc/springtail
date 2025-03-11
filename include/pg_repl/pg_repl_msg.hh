@@ -2,7 +2,6 @@
 
 #include <optional>
 #include <variant>
-#include <set>
 
 #include <pg_repl/pg_types.hh>
 #include <nlohmann/json.hpp>

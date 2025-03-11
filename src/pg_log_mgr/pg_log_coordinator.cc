@@ -1,5 +1,6 @@
 #include <fmt/format.h>
 
+#include <common/coordinator.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
 
@@ -29,6 +30,8 @@ namespace springtail::pg_log_mgr {
         // stop committer thread
         _committer->shutdown();
         _committer_thread.join();
+
+        Coordinator::shutdown();
     }
 
     PgLogCoordinator::PgLogCoordinator()

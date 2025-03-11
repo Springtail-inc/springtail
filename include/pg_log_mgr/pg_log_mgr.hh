@@ -187,9 +187,6 @@ namespace springtail::pg_log_mgr {
         /** Process data from replication stream in loop, queue path, offsets */
         void _log_writer_thread();
 
-        /** callback from log writer class to update lsn from fsync thread*/
-        void _lsn_callback(LSN_t lsn);
-
         ///// Stage 2 of pipeline, reading replication log and updating the write cache
         std::thread _reader_thread;         ///< log reader thread
         CommitterQueuePtr _committer_queue; ///< queue between reader and committer
@@ -200,10 +197,9 @@ namespace springtail::pg_log_mgr {
 
         ///// Stage 3 of pipeline, mapping pg xids to xids; notify GC
         std::filesystem::path _xact_log_path;      ///< xact log base path
-        std::filesystem::path _xact_sync_log_file; ///< xact table copy log base path
-        PgXactLogWriterPtr _xact_logger = nullptr; ///< xact log writer
 
         LSN_t _last_pushed_lsn = INVALID_LSN;      ///< last pushed lsn to redis queue for GC
+        std::atomic<uint64_t> _logger_file_timestamp;
 
         /** notify xact handler to start sync */
         void _notify_xact_start_sync();

@@ -37,7 +37,7 @@ namespace springtail {
                 }
 
                 // Extract the timestamp from the file name
-                auto current_timestamp = _extract_timestamp_from_file(entry.path(), prefix, suffix);
+                auto current_timestamp = extract_timestamp_from_file(entry.path(), prefix, suffix);
                 if (current_timestamp && (!latest_timestamp || *current_timestamp > *latest_timestamp)) {
                     latest_file = entry.path();
                     latest_timestamp = current_timestamp;
@@ -77,7 +77,7 @@ namespace springtail {
                 }
 
                 // Extract the timestamp from the file name
-                auto current_timestamp = _extract_timestamp_from_file(entry.path(), prefix, suffix);
+                auto current_timestamp = extract_timestamp_from_file(entry.path(), prefix, suffix);
                 if (current_timestamp && (!earliest_timestamp || *current_timestamp < *earliest_timestamp)) {
                     earliest_file = entry.path();
                     earliest_timestamp = current_timestamp;
@@ -109,6 +109,15 @@ namespace springtail {
             return dir / fmt::format("{}{}{}", prefix, timestamp.count(), suffix);
         }
 
+        static std::filesystem::path
+        create_log_file_with_timestamp(const std::filesystem::path &dir,
+                                       std::string_view prefix,
+                                       std::string_view suffix,
+                                       uint64_t timestamp)
+        {
+            return dir / fmt::format("{}{}{}", prefix, timestamp, suffix);
+        }
+
         /**
          * @brief Given a log file path, finds the next log file in sequence.  Assumes that the log
          *        files are in a directory together and that the files have been constructed using
@@ -128,7 +137,7 @@ namespace springtail {
             std::string current_file = path.filename().string();
 
             // Extract the timestamp from the current log file using the helper function
-            auto current_timestamp = _extract_timestamp_from_file(path, prefix, suffix);
+            auto current_timestamp = extract_timestamp_from_file(path, prefix, suffix);
             if (!current_timestamp) {
                 return std::nullopt; // Return empty if the current file format is incorrect
             }
@@ -145,7 +154,7 @@ namespace springtail {
                     entry.path().filename().string().find(suffix) != std::string::npos) {
 
                     // Extract the timestamp from the file name
-                    auto timestamp = _extract_timestamp_from_file(entry.path(), prefix, suffix);
+                    auto timestamp = extract_timestamp_from_file(entry.path(), prefix, suffix);
 
                     // Check if this timestamp is greater than the current timestamp
                     if (timestamp && *timestamp > *current_timestamp) {
@@ -161,9 +170,8 @@ namespace springtail {
             return next_log_file; // Return the path to the next log file, or empty if none found
         }
 
-    private:
         static std::optional<uint64_t>
-        _extract_timestamp_from_file(const std::filesystem::path& path,
+        extract_timestamp_from_file(const std::filesystem::path& path,
                                      std::string_view prefix,
                                      std::string_view suffix)
         {
@@ -175,7 +183,7 @@ namespace springtail {
             if (file.substr(0, prefix_length) == prefix &&
                 file.substr(file.length() - suffix_length) == suffix) {
                 std::string timestamp_str = file.substr(prefix_length, file.length() - prefix_length - suffix_length);
-                return std::stoll(timestamp_str); // Convert to long long for timestamp
+                return std::stoull(timestamp_str); // Convert to long long for timestamp
             }
             return std::nullopt; // Return nullopt if the format is incorrect
         }

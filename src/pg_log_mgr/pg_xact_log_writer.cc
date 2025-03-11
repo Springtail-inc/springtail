@@ -1,12 +1,9 @@
 #include <absl/log/check.h>
-#include <errno.h>
 #include <fcntl.h>
-#include <stdio.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <chrono>
-#include <iostream>
 #include <vector>
 
 #include <common/common.hh>
@@ -68,18 +65,19 @@ PgXactLogWriter::close()
 }
 
 void
+PgXactLogWriter::rotate(uint64_t timestamp)
+{
+    std::unique_lock<std::shared_mutex> lock(_file_mutex);
+    _file = fs::create_log_file_with_timestamp(_file.parent_path(), PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX, timestamp);
+    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "_file = ", _file.c_str());
+}
+
+void
 PgXactLogWriter::_flush_extent(ExtentPtr extent)
 {
+    std::shared_lock<std::shared_mutex> lock(_file_mutex);
     auto handle = IOMgr::get_instance()->open(_file, IOMgr::IO_MODE::APPEND, true);
     auto response = extent->async_flush(handle);
-
-    // wait for the async flush to complete
-    uint64_t filesize = response.get()->next_offset;
-
-    // rotate if the filesize has crossed a given threshold
-    if (filesize > PG_XLOG_MAX_FILE_SIZE) {
-        _file = fs::create_log_file(_file.parent_path(), PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX);
-    }
 }
 
 void

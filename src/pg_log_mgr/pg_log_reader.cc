@@ -517,13 +517,19 @@ namespace springtail::pg_log_mgr {
 
     void
     PgLogReader::process_log(const std::filesystem::path &path,
+                             uint64_t timestamp,
                              uint64_t start_offset,
                              int num_messages)
     {
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Process log path = {}, timestamp = {}, start offset = {}, num_messages = {}\n",
+                path.string(), timestamp, start_offset, num_messages);
         // init stream reader
         _reader.set_file(path, start_offset);
+        if (start_offset == 0) {
+            _xact_log_writer.rotate(timestamp);
+        }
 
-        std::vector<char> filter = {
+        static std::vector<char> filter = {
             pg_msg::MSG_BEGIN,
             pg_msg::MSG_COMMIT,
             pg_msg::MSG_STREAM_START,
@@ -553,7 +559,7 @@ namespace springtail::pg_log_mgr {
                 }
 
                 // process the message
-                this->enqueue_msg(msg);
+                enqueue_msg(msg);
             }
 
             if (num_messages > 0) {
@@ -591,7 +597,7 @@ namespace springtail::pg_log_mgr {
             {
                 auto &insert = std::get<PgMsgInsert>(msg->msg);
                 int32_t pg_xid = (msg->is_streaming) ? insert.xid : _current_xact->xid;
-                _current_batch->add_mutation<PgMsgEnum::INSERT>(this->get_current_xid(), pg_xid,
+                _current_batch->add_mutation<PgMsgEnum::INSERT>(get_current_xid(), pg_xid,
                                                                 insert.rel_id, insert.new_tuple);
                 break;
             }
@@ -599,7 +605,7 @@ namespace springtail::pg_log_mgr {
             {
                 auto &remove = std::get<PgMsgDelete>(msg->msg);
                 int32_t pg_xid = (msg->is_streaming) ? remove.xid : _current_xact->xid;
-                _current_batch->add_mutation<PgMsgEnum::DELETE>(this->get_current_xid(), pg_xid,
+                _current_batch->add_mutation<PgMsgEnum::DELETE>(get_current_xid(), pg_xid,
                                                                 remove.rel_id, remove.tuple);
                 break;
             }
@@ -608,12 +614,12 @@ namespace springtail::pg_log_mgr {
                 auto &update = std::get<PgMsgUpdate>(msg->msg);
                 int32_t pg_xid = (msg->is_streaming) ? update.xid : _current_xact->xid;
                 if (update.old_type == 0) {
-                    _current_batch->add_mutation<PgMsgEnum::UPDATE>(this->get_current_xid(), pg_xid,
+                    _current_batch->add_mutation<PgMsgEnum::UPDATE>(get_current_xid(), pg_xid,
                                                                     update.rel_id, update.new_tuple);
                 } else {
-                    _current_batch->add_mutation<PgMsgEnum::DELETE>(this->get_current_xid(), pg_xid,
+                    _current_batch->add_mutation<PgMsgEnum::DELETE>(get_current_xid(), pg_xid,
                                                                     update.rel_id, update.old_tuple);
-                    _current_batch->add_mutation<PgMsgEnum::INSERT>(this->get_current_xid(), pg_xid,
+                    _current_batch->add_mutation<PgMsgEnum::INSERT>(get_current_xid(), pg_xid,
                                                                     update.rel_id, update.new_tuple);
                 }
                 break;
@@ -622,7 +628,7 @@ namespace springtail::pg_log_mgr {
 
         case PgMsgEnum::TRUNCATE:
             {
-                _current_batch->truncate(this->get_current_xid(),
+                _current_batch->truncate(get_current_xid(),
                                          std::get<PgMsgTruncate>(msg->msg));
                 break;
             }
@@ -730,7 +736,7 @@ namespace springtail::pg_log_mgr {
         CHECK_EQ(xact->type, PgTransaction::TYPE_COMMIT);
 
         // assign a Springtail XID to this transaction
-        uint64_t xid = this->get_next_xid();
+        uint64_t xid = get_next_xid();
 
         // If the assigned XID is <= the most recently committed XID, then we need to skip this
         // transaction.  This can occur in the unlikely case that we are performing a log recovery
@@ -817,7 +823,7 @@ namespace springtail::pg_log_mgr {
         CHECK_EQ(xact->type, PgTransaction::TYPE_COMMIT);
 
         // assign the transaction a Springtail XID
-        uint64_t xid = this->get_next_xid();
+        uint64_t xid = get_next_xid();
 
         // If the assigned XID is <= the most recently committed XID, then we need to skip this
         // transaction.  This can occur in the unlikely case that we are performing a log recovery

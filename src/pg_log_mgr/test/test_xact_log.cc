@@ -2,6 +2,7 @@
 #include <filesystem>
 
 #include <common/init.hh>
+#include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_xact_log_reader.hh>
 #include <pg_log_mgr/pg_xact_log_writer.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
@@ -35,20 +36,51 @@ namespace {
             // remove the directory
             //std::filesystem::remove_all("/tmp/test_xlog/");
         }
+
+        static uint64_t get_log_timestamp(PgXactLogWriter &writer) {
+            // Get the current time from the system clock
+            auto now = std::chrono::system_clock::now();
+
+            // Convert the current time to time since epoch
+            auto duration = now.time_since_epoch();
+
+            // Convert duration to milliseconds
+            return std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
+        }
+
+        static void wait_for_file(const std::filesystem::path &dir, uint64_t timestamp, size_t size) {
+            auto file = fs::create_log_file_with_timestamp(dir, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX, timestamp);
+            while (!std::filesystem::exists(file)) {
+                usleep(500);
+            }
+            std::error_code ec;
+            while (true) {
+                uintmax_t file_size = std::filesystem::file_size(file, ec);
+                if (ec.value() == 0 && file_size >= size) {
+                    break;
+                }
+                usleep(500);
+            }
+        }
     };
 
     TEST_F(XactLogRW_Test, XactLogWriter) {
         std::filesystem::path p = "/tmp/test_xlog";
         PgXactLogWriter writer(p);
+        uint64_t timestamp = get_log_timestamp(writer);
+
+        writer.rotate(timestamp);
 
         writer.log(1, 10);
         writer.log(2, 11);
 
         writer.close();
 
+        wait_for_file(p, timestamp, 73);
+
         // read the log file and verify
         PgXactLogReader reader(p);
-        reader.begin();
+        ASSERT_EQ(reader.begin(), true);
 
         ASSERT_EQ(reader.get_pg_xid(), 1);
         ASSERT_EQ(reader.get_xid(), 10);

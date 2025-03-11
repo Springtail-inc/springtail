@@ -1,5 +1,4 @@
 #include <unistd.h>
-#include <errno.h>
 #include <vector>
 
 #include <absl/log/check.h>
@@ -47,7 +46,7 @@ PgXactLogReader::next()
         if (_load_next_extent()) {
             return true;
         }
-            
+
         // If no more extents, try next file
         if (!_open_next_file()) {
             return false;
@@ -82,7 +81,7 @@ PgXactLogReader::_load_next_extent()
     if (response->data.empty()) {
         return false;
     }
-        
+
     // Create the extent from the response data
     _current_extent = std::make_shared<Extent>(response->data);
 
@@ -94,7 +93,7 @@ PgXactLogReader::_load_next_extent()
     return true;
 }
 
-bool 
+bool
 PgXactLogReader::_open_next_file()
 {
     if (!_current_file) {
@@ -114,24 +113,24 @@ PgXactLogReader::_open_next_file()
     // Open the file and read the first extent
     _current_handle = IOMgr::get_instance()->open(*_current_file, IOMgr::IO_MODE::READ, true);
     _current_offset = 0;
-        
+
     // Load the first extent
     if (!_load_next_extent()) {
         return false;
     }
-        
+
     return true;
 }
 
 // Field accessors
-uint32_t 
-PgXactLogReader::get_pg_xid() const 
+uint32_t
+PgXactLogReader::get_pg_xid() const
 {
     return _pg_xid_f->get_uint32(*_current_row);
 }
 
-uint64_t 
-PgXactLogReader::get_xid() const 
+uint64_t
+PgXactLogReader::get_xid() const
 {
     return _xid_f->get_uint64(*_current_row);
 }

@@ -59,10 +59,12 @@ namespace springtail::pg_log_mgr {
         /**
          * @brief Process next set of messages from log file
          * @param path file path
+         * @param timestamp log file timestamp
          * @param start_offset starting file offset
          * @param num_messages number of messages to process (-1 read until end of file)
          */
         void process_log(const std::filesystem::path &path,
+                         uint64_t timestamp,
                          uint64_t start_offset,
                          int num_messages);
 
