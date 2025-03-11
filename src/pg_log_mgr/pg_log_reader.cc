@@ -521,8 +521,6 @@ namespace springtail::pg_log_mgr {
                              uint64_t start_offset,
                              int num_messages)
     {
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Process log path = {}, timestamp = {}, start offset = {}, num_messages = {}\n",
-                path.string(), timestamp, start_offset, num_messages);
         // init stream reader
         _reader.set_file(path, start_offset);
         if (start_offset == 0) {
