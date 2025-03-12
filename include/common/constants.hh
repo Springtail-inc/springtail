@@ -30,9 +30,6 @@ namespace springtail::constant {
     /** An index ID that represents the primary index. */
     static constexpr uint32_t INDEX_PRIMARY = 0;
 
-    /** An index ID that represents the file end offset row in roots. */
-    static constexpr uint64_t INDEX_FILE_END_OFFSET = std::numeric_limits<uint64_t>::max();
-
     /** The name of the child pointer field in a BTree branch extent. */
     static const std::string BTREE_CHILD_FIELD = "__springtail_child";
 
