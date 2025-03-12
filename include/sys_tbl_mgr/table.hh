@@ -21,10 +21,13 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
 } // namespace table_helpers
 
     /**
-     * Structure to hold table statistics.  Currently only holds the row count of the table.
+     * Structure to hold table statistics,
+     * currently holds the row count of the table
+     * and end offset of data file at the end of XID disk flush
      */
     struct TableStats {
         uint64_t row_count = 0;
+        uint64_t end_offset = 0;
     };
 
     /**

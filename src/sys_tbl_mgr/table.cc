@@ -827,7 +827,7 @@ get_table_dir(const std::filesystem::path &base,
 
         // Store file end offset for xid
         // to be used later to catch-up index if needed
-        metadata.roots.push_back({constant::INDEX_FILE_END_OFFSET, end_offset});
+        metadata.stats.end_offset = end_offset;
 
         // store the roots into a look-aside root file
         // XXX maybe we only need to do this for system tables?  or even just the table_roots table?

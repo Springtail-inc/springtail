@@ -1297,7 +1297,9 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
 
     // retrieve the stats from the row
     auto row_count_f = stats_t->extent_schema()->get_field("row_count");
+    auto end_offset_f = stats_t->extent_schema()->get_field("end_offset");
     roots_info->mutable_stats()->set_row_count(row_count_f->get_uint64(*srow_i));
+    roots_info->mutable_stats()->set_end_offset(end_offset_f->get_uint64(*srow_i));
 
     return roots_info;
 }
@@ -1328,7 +1330,7 @@ Service::_set_roots_info(uint64_t db_id,
     // update the table_stats
     auto table_stats_t = _get_mutable_system_table(db_id, sys_tbl::TableStats::ID);
     auto tuple =
-        sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats().row_count());
+        sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats().row_count(), roots_info->stats().end_offset());
     table_stats_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
 
     SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Updated stats {}@{}:{} - {}", table_id, xid.xid, xid.lsn,

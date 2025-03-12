@@ -579,6 +579,7 @@ namespace springtail
 
         auto* stats = roots_req->mutable_stats();
         stats->set_row_count(metadata.stats.row_count);
+        stats->set_end_offset(metadata.stats.end_offset);
         roots_req->set_snapshot_xid(metadata.snapshot_xid);
 
         // store the serialized protobuf operation into redis for the GC-2

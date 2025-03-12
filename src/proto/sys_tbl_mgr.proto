@@ -53,6 +53,7 @@ message NamespaceRequest {
 
 message TableStats {
   int64 row_count = 1;
+  int64 end_offset = 2;
 }
 
 message RootInfo {
