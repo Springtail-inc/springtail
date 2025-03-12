@@ -23,7 +23,7 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
     /**
      * Structure to hold table statistics,
      * currently holds the row count of the table
-     * and end offset of data file at the end of XID disk flush
+     * and end offset of table data file post XID disk flush
      */
     struct TableStats {
         uint64_t row_count = 0;
