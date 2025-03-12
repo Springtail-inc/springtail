@@ -2,6 +2,7 @@
 
 #include <common/json.hh>
 #include <common/properties.hh>
+#include <grpc/grpc_server.hh>
 #include <nlohmann/json.hpp>
 #include <proto/write_cache.grpc.pb.h>
 #include <write_cache/write_cache_index.hh>
@@ -14,7 +15,9 @@ grpc::Status WriteCacheService::Ping(grpc::ServerContext* context,
                     const google::protobuf::Empty* request,
                     google::protobuf::Empty* response)
 {
+    ServerSpan span(context, "WriteCacheService", "Ping");
     std::cout << "Got ping\n";
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
 }
 
@@ -22,6 +25,7 @@ grpc::Status WriteCacheService::GetExtents(grpc::ServerContext* context,
                             const proto::GetExtentsRequest* request,
                             proto::GetExtentsResponse* response)
 {
+    ServerSpan span(context, "WriteCacheService", "GetExtents");
     WriteCacheServer* server = WriteCacheServer::get_instance();
     WriteCacheIndexPtr index = server->get_index(request->db_id());
 
@@ -41,6 +45,7 @@ grpc::Status WriteCacheService::GetExtents(grpc::ServerContext* context,
     response->set_table_id(request->table_id());
     response->set_commit_ts(commit_ts.micros());
 
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
 }
 
@@ -48,11 +53,13 @@ grpc::Status WriteCacheService::EvictTable(grpc::ServerContext* context,
                               const proto::EvictTableRequest* request,
                               google::protobuf::Empty* response)
 {
+    ServerSpan span(context, "WriteCacheService", "EvictTable");
     WriteCacheServer* server = WriteCacheServer::get_instance();
     WriteCacheIndexPtr index = server->get_index(request->db_id());
 
     index->evict_table(request->table_id(), request->xid());
 
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
 }
 
@@ -60,11 +67,13 @@ grpc::Status WriteCacheService::EvictXid(grpc::ServerContext* context,
                             const proto::EvictXidRequest* request,
                             google::protobuf::Empty* response)
 {
+    ServerSpan span(context, "WriteCacheService", "EvictXid");
     WriteCacheServer* server = WriteCacheServer::get_instance();
     WriteCacheIndexPtr index = server->get_index(request->db_id());
 
     index->evict_xid(request->xid());
 
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
 }
 
@@ -72,6 +81,7 @@ grpc::Status WriteCacheService::ListTables(grpc::ServerContext* context,
                               const proto::ListTablesRequest* request,
                               proto::ListTablesResponse* response)
 {
+    ServerSpan span(context, "WriteCacheService", "ListTables");
     WriteCacheServer* server = WriteCacheServer::get_instance();
     WriteCacheIndexPtr index = server->get_index(request->db_id());
 
@@ -83,6 +93,7 @@ grpc::Status WriteCacheService::ListTables(grpc::ServerContext* context,
     }
 
     response->set_cursor(cursor);
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
 }
 

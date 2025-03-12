@@ -25,21 +25,22 @@ add_library(springtail_common ${COMMON_LIB_SOURCES})
 target_include_directories(springtail_common PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(springtail_common
   PUBLIC absl::check
-         cpptrace::cpptrace
-         spdlog::spdlog
-         fmt::fmt
-         redis++::redis++
-	 nlohmann_json::nlohmann_json
-         c-ares::cares
-         opentelemetry-cpp::api
-         opentelemetry-cpp::sdk
-         opentelemetry-cpp::trace
-         opentelemetry-cpp::metrics
-         opentelemetry-cpp::ostream_span_exporter
-         opentelemetry-cpp::otlp_grpc_client
-         opentelemetry-cpp::otlp_grpc_exporter
-         opentelemetry-cpp::otlp_grpc_metrics_exporter
-         opentelemetry-cpp::otlp_grpc_log_record_exporter
+        cpptrace::cpptrace
+        spdlog::spdlog
+        fmt::fmt
+        redis++::redis++
+        nlohmann_json::nlohmann_json
+        c-ares::cares
+        opentelemetry-cpp::api
+        opentelemetry-cpp::sdk
+        opentelemetry-cpp::trace
+        opentelemetry-cpp::metrics
+        opentelemetry-cpp::logs
+        opentelemetry-cpp::ostream_span_exporter
+        opentelemetry-cpp::otlp_http_client
+        opentelemetry-cpp::otlp_http_exporter
+        opentelemetry-cpp::otlp_http_metric_exporter
+        opentelemetry-cpp::otlp_http_log_record_exporter
 )
 
 add_executable(test_thread test/test_thread.cc)

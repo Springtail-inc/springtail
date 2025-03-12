@@ -10,6 +10,8 @@ project(Springtail
   DESCRIPTION "Springtail source code"
   LANGUAGES CXX)
 
+set(ENV{VCPKG_OVERLAY_PORTS} "${PROJECT_SOURCE_DIR}/vcpkg-ports")
+
 ## add ctest framework
 include(CTest)
 

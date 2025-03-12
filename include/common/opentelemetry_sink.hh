@@ -13,8 +13,9 @@
 #include <opentelemetry/sdk/common/global_log_handler.h>
 #include <opentelemetry/version.h>
 #include <opentelemetry/common/key_value_iterable_view.h>
-#include <opentelemetry/exporters/otlp/otlp_grpc_exporter.h>
-#include <opentelemetry/exporters/otlp/otlp_grpc_log_record_exporter.h>
+#include <opentelemetry/exporters/otlp/otlp_http_client.h>
+#include <opentelemetry/exporters/otlp/otlp_http_log_record_exporter.h>
+#include <opentelemetry/exporters/otlp/otlp_http_log_record_exporter_options.h>
 #include <opentelemetry/sdk/logs/logger_provider.h>
 #include <opentelemetry/sdk/logs/processor.h>
 #include <opentelemetry/sdk/logs/simple_log_record_processor.h>
@@ -28,12 +29,12 @@ public:
     OpenTelemetrySink(const std::string& logger_name, const std::string& endpoint) 
     {
         // Configure the OTLP exporter
-        opentelemetry::exporter::otlp::OtlpGrpcLogRecordExporterOptions options;
-        options.endpoint = endpoint;
+        opentelemetry::exporter::otlp::OtlpHttpLogRecordExporterOptions options;
+        options.url = endpoint;
 
         // Create the OTLP log exporter
         auto exporter = std::unique_ptr<opentelemetry::sdk::logs::LogRecordExporter>(
-            new opentelemetry::exporter::otlp::OtlpGrpcLogRecordExporter(options));
+            new opentelemetry::exporter::otlp::OtlpHttpLogRecordExporter(options));
 
         // Create a processor with the exporter
         auto processor = std::unique_ptr<opentelemetry::sdk::logs::LogRecordProcessor>(
