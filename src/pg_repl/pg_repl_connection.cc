@@ -202,6 +202,9 @@ namespace springtail
         // skip over rest of result message
         _skip_message();
 
+        // set last received time to now, starts timer for idle delay
+        _last_received_time = get_pgtime_in_millis();
+
         _copy_state = NEW_MSG;
         _started_streaming = true;
 

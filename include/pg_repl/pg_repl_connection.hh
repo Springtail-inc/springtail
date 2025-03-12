@@ -132,7 +132,8 @@ namespace springtail
         /** server's latest lsn (from wal_end or keep alive) */
         LSN_t _server_latest_lsn = INVALID_LSN;
 
-        /** last time copy data received */
+        /** last time copy data received
+         * determines when to fast forward stream based on idle time */
         int64_t _last_received_time{0};
         /** last time status was sent */
         int64_t _last_status_time{0};

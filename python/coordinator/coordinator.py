@@ -6,6 +6,7 @@ import argparse
 import string
 import signal
 import time
+import threading
 from typing import Optional
 from random import SystemRandom
 
@@ -50,6 +51,7 @@ class Coordinator:
         """
         self.props = props
         self._check_properties(props)
+        self.shutdown_event = threading.Event()
 
         # Configure logging
         init_logging(props.get_otel_config(), props.get_log_path(), debug)
@@ -142,13 +144,16 @@ class Coordinator:
                 ddl_password = self._gen_random_string(16)
                 postgres.create_user('ddl_user', ddl_password, True, True)
 
+                # in test startup ingestion services
+                if not self.production:
+                    self.xid_mgr_component = factory.create_xid_mgr_daemon()
+                    self.sys_tlb_mgr_component = factory.create_sys_tbl_mgr_daemon()
+                    self.xid_mgr_component.start()
+                    self.sys_tlb_mgr_component.start()
+
                 # wait for ingestion to be ready
                 self._wait_for_ingestion(self.props)
 
-                # For testing uncomment lines below since they are needed for ddl daemon
-                # but in production they should be running elsewhere
-                # scheduler.register_component(factory.create_xid_mgr_daemon(), 1)
-                # scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 2)
                 self.scheduler.register_component(postgres, 3)
                 self.scheduler.register_component(factory.create_ddl_daemon('ddl_user', ddl_password), 4)
 
@@ -186,9 +191,20 @@ class Coordinator:
         """
         Shutdown the coordinator.
         """
+        # set shutdown flag
+        self.shutdown_event.set()
+
+        # shutdown scheduler
         if self.scheduler:
             self.logger.info(f"Received signal {signum}, shutting down...")
             self.scheduler.shutdown()
+
+        # if not in production, shutdown the xid_mgr and sys_tbl_mgr
+        if not self.production and self.service_name == 'fdw':
+            if self.xid_mgr_component:
+                self.xid_mgr_component.shutdown()
+            if self.sys_tlb_mgr_component:
+                self.sys_tlb_mgr_component.shutdown()
 
     def _check_properties(self, props: Properties) -> None:
         """
@@ -226,6 +242,7 @@ class Coordinator:
         """
         Wait for the ingestion service to be ready.
         """
+        self.logger.debug("Waiting for ingestion service to be ready")
         host = None
         while True:
             host = props.get_hostname('ingestion')
@@ -238,7 +255,7 @@ class Coordinator:
         sys_tbl_port = system_config['sys_tbl_mgr']['rpc_config']['server_port']
 
         waiting = True
-        while waiting:
+        while waiting and not self.shutdown_event.is_set():
             try:
                 with XidMgrClient(host, xid_port) as client:
                     client.ping()
@@ -248,7 +265,7 @@ class Coordinator:
                 continue
 
         waiting = True
-        while waiting:
+        while waiting and not self.shutdown_event.is_set():
             try:
                 with SysTblMgrClient(host, sys_tbl_port) as client:
                     client.ping()
@@ -256,7 +273,7 @@ class Coordinator:
                     waiting = False
             except Exception as e:
                 continue
-
+        self.logger.info("Ingestion service is ready")
 
 def parse_arguments():
     """Parse the command line arguments."""

@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <common/init.hh>
+#include <common/environment.hh>
+
 #include <pg_repl/libpq_connection.hh>
 #include <proxy/database.hh>
 #include <proxy/user_mgr.hh>
@@ -23,6 +25,10 @@ namespace {
     protected:
         static void SetUpTestSuite()
         {
+            // make sure we are using the pg_shadow table for proxy user mgr
+            std::string overrides = "proxy.use_pg_shadow=true";
+            ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
+
             std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
             runners.emplace();
             runners->emplace_back(std::make_unique<pg_proxy::DatabaseMgrRunner>());

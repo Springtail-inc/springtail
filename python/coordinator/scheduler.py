@@ -76,6 +76,9 @@ class Scheduler:
         Returns:
             True if all components started successfully
         """
+        # Clear timeout tracking
+        self.timeouts.clear()
+
         # Sort components by startup order
         sorted_components = sorted(
             self.components.values(),
@@ -184,6 +187,7 @@ class Scheduler:
         # Check for timeout messages in Redis
         data = self.redis.hgetall(self.liveness_hash)
         if not data:
+            self.logger.debug(f"No timeout data for hash: {self.liveness_hash}")
             return False
 
         # Go through and merge time values for the same id, taking minimum

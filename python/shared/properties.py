@@ -1,11 +1,14 @@
 import json
-import redis
 import sys
 import os
 import time
 import logging
+from redis import Redis
 from typing import Optional
 from common import parse_bool
+from aws import AwsHelper
+
+DB_USERS_SECRET = "sk/%s/%s/aws/dbi/%s/primary_db_password"
 
 class Properties:
     def __init__(self, config_file=None, load_redis=False) -> None:
@@ -47,8 +50,11 @@ class Properties:
                 self.redis_ssl = system_json['redis']['ssl'] if 'ssl' in system_json['redis'] else False
                 self.db_instance_id = str(system_json['org']['db_instance_id'])
                 self.fdw_id = system_json['org']['fdw_id']
-                self.replication_user_password = system_json['org']['replication_user_password']
                 self.fdw_user_password = system_json['org']['fdw_user_password']
+
+                # for test env, replication user and password are set in system.json
+                self.replication_user = system_json['org']['replication_user']
+                self.replication_password = system_json['org']['replication_password']
 
                 # not in config file, but will be set in production env
                 self.instance_key = None
@@ -70,7 +76,6 @@ class Properties:
                     'MOUNT_POINT': system_json['fs']['mount_point'],
                     'LUSTRE_MOUNT_NAME': system_json['fs']['mount_name'],
                     'LUSTRE_DNS_NAME': system_json['fs']['dns_name'],
-                    'REPLICATION_USER_PASSWORD': self.replication_user_password,
                     'FDW_USER_PASSWORD': self.fdw_user_password
                 }
 
@@ -83,24 +88,43 @@ class Properties:
         else:
             # otherwise, read in redis settings from environment
             self.redis_host = os.environ.get('REDIS_HOST', 'localhost')
-            self.redis_port = os.environ.get('REDIS_PORT', 6379)
+            self.redis_port = int(os.environ.get('REDIS_PORT', 6379))
             self.redis_user = os.environ.get('REDIS_USER', 'default')
             self.redis_ssl = parse_bool(os.environ.get('REDIS_SSL', '0'))
             self.redis_password = os.environ.get('REDIS_PASSWORD', None)
-            self.redis_data_db = os.environ.get('REDIS_USER_DATABASE_ID', 1)
-            self.redis_config_db = os.environ.get('REDIS_CONFIG_DATABASE_ID', 0)
+            self.redis_data_db = int(os.environ.get('REDIS_USER_DATABASE_ID', 1))
+            self.redis_config_db = int(os.environ.get('REDIS_CONFIG_DATABASE_ID', 0))
             self.redis_ssl = parse_bool(os.environ.get('REDIS_SSL', 'false'))
             self.db_instance_id = os.environ.get('DATABASE_INSTANCE_ID', None)
-            self.replication_user_password = os.environ.get('REPLICATION_USER_PASSWORD', None)
             self.fdw_user_password = os.environ.get('FDW_USER_PASSWORD', None)
             self.fdw_id = os.environ.get('FDW_ID', None)
+            self.org_id = os.environ.get('ORGANIZATION_ID', None)
+            self.account_id = os.environ.get('ACCOUNT_ID', None)
 
             # not in config file, but will be set in production env
             self.instance_key = os.environ.get('INSTANCE_KEY', None)
             self.service_name = os.environ.get('SERVICE_NAME', None)
 
-        self.redis = redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db, ssl=self.redis_ssl,
-                                       username=self.redis_user, password=self.redis_password, encoding="utf-8", decode_responses=True)
+            # fetch replication user from aws secrets manager
+            self.aws = AwsHelper()
+            (self.replication_user, self.replication_user_password) = self._get_replication_user_from_aws()
+
+        self.redis = Redis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db, ssl=self.redis_ssl,
+                           username=self.redis_user, password=self.redis_password, encoding="utf-8", decode_responses=True)
+
+    def _get_replication_user_from_aws(self) -> tuple[str, str]:
+        """Get the replication user and password from AWS Secrets Manager."""
+        secret = DB_USERS_SECRET.format(self.org_id, self.account_id, self.db_instance_id)
+
+        secret_data = self.aws.get_secret(secret)
+        if secret_data is None:
+            raise Exception(f"Failed to get secret {secret}")
+
+        for user in secret_data:
+            if user['role'] == 'replication':
+                return user['username'], user['password']
+
+        raise Exception("Replication user not found in AWS secrets.")
 
     def get_db_configs(self) -> list[dict]:
         """Return a json array of database instance id:name pairs.
@@ -135,7 +159,8 @@ class Properties:
             return self.cache['db_instance_config']
 
         config = json.loads(self.redis.hget(key, 'primary_db'))
-        config['password'] = self.replication_user_password
+        config['password'] = self.replication_password
+        config['replication_user'] = self.replication_user
         self.cache[key] = config
 
         return config
@@ -224,8 +249,9 @@ class Properties:
         self.init(config_file)
 
         # connect to the Redis config server
-        self.redis_data = redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_data_db,
-            username=self.redis_user, password=self.redis_password, encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
+        self.redis_data = Redis(host=self.redis_host, port=self.redis_port, db=self.redis_data_db,
+                                username=self.redis_user, password=self.redis_password,
+                                encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
 
         # load the system settings into Redis
         with open(config_file) as f:
@@ -325,17 +351,17 @@ class Properties:
 
         return log_path
 
-    def get_data_redis(self) -> redis.StrictRedis:
+    def get_data_redis(self) -> Redis:
         """Return the data redis object."""
-        return redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_data_db,
-                                 username=self.redis_user, password=self.redis_password,
-                                 encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
+        return Redis(host=self.redis_host, port=self.redis_port, db=self.redis_data_db,
+                     username=self.redis_user, password=self.redis_password,
+                     encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
 
-    def get_config_redis(self) -> redis.StrictRedis:
+    def get_config_redis(self) -> Redis:
         """Return the config redis object."""
-        return redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db,
-                                 username=self.redis_user, password=self.redis_password,
-                                 encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
+        return Redis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db,
+                     username=self.redis_user, password=self.redis_password,
+                     encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
 
     def get_hostname(self, type : str) -> str:
         """Return the hostname for the given type."""
@@ -428,7 +454,8 @@ def main():
     print(f"liveness_notification_pubsub: {props.get_liveness_notification_pubsub()}")
     print(f"pid_path: {props.get_pid_path()}")
     print(f"log_path: {props.get_log_path()}")
-    print(f"hostname: {props.get_hostname('ingestion')}")
+    print(f"ingest_host: {props.get_hostname('ingestion')}")
+    print(f"proxy_host: {props.get_hostname('proxy')}")
     print(f"coordinator_state: {props.get_coordinator_state()}")
 
 if __name__ == "__main__":

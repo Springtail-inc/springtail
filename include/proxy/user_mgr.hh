@@ -190,10 +190,7 @@ namespace springtail::pg_proxy {
          * @brief Initialize UserMgr object
          * @param sleep_interval - UserMgr thread sleep interval in seconds
          */
-        void init(const uint32_t sleep_interval) {
-            _sleep_interval = sleep_interval;
-            start_thread();
-        }
+        void init(const uint32_t sleep_interval);
 
         void stop_thread() override {
             SingletonWithThread<UserMgr>::stop_thread();
@@ -260,6 +257,8 @@ namespace springtail::pg_proxy {
         std::mutex _sleep_mutex;                ///< mutex for sleep
         std::condition_variable _sleep_cv;      ///< condition variable for sleep
 
+        bool _use_pg_shadow = false;            ///< use pg_shadow table for user updates
+
         /**
          * @brief Add new user to the user map
          * @param username users name
@@ -275,8 +274,25 @@ namespace springtail::pg_proxy {
         }
 
         /**
+         * @brief Modify the users in the user map based on a new set of users
+         * @param users list of users <username, password, databases>
+         */
+        void _modify_users(std::vector<std::tuple<std::string,
+                                                  std::string,
+                                                  std::set<std::string>>> &users);
+
+        /**
+         * @brief Query users from pg_shadow table; if _use_pg_shadow is true
+         */
+        void _pg_shadow_query_thread();
+
+        /**
+         * @brief Query AWS secrets for user updates; if _use_pg_shadow is false
+         */
+        void _aws_secrets_query_thread();
+
+        /**
          * @brief Function executed by UserMgr thread
-         *
          */
         void _internal_run() override;
 
