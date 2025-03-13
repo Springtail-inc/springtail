@@ -115,8 +115,9 @@ jobs:
           _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
           
           _TIMESTAMP=$(date +"%Y-%m-%d-%H-%M-%S")
-          log_file="unit-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log" 
-          mv tmplog $log_file
+          log_file="unit-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log.tar.gz" 
+          tar zcvf $log_file tmplog
+          rm tmplog
           unit_test_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_PR_ID}/$log_file"
           
           aws s3 cp "$log_file" "$unit_test_log_s3key"
@@ -175,7 +176,8 @@ jobs:
           
           _TIMESTAMP=$(date +"%Y-%m-%d-%H-%M-%S")
           log_file="integration-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log" 
-          mv tmplog $log_file
+          tar zcvf $log_file tmplog
+          rm tmplog
           
           # Integration test log
           integration_test_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_PR_ID}/$log_file"
