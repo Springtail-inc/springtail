@@ -1,18 +1,30 @@
-#include <opentelemetry/exporters/otlp/otlp_grpc_exporter.h>
-#include <opentelemetry/exporters/otlp/otlp_grpc_metric_exporter_factory.h>
-#include <opentelemetry/exporters/otlp/otlp_grpc_metric_exporter_options.h>
+#include <memory>
+
+#include <opentelemetry/common/key_value_iterable_view.h>
+#include <opentelemetry/exporters/otlp/otlp_http_exporter.h>
+#include <opentelemetry/exporters/otlp/otlp_http_metric_exporter.h>
+#include <opentelemetry/metrics/provider.h>
+#include <opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader.h>
+#include <opentelemetry/sdk/metrics/meter_provider.h>
+#include <opentelemetry/sdk/resource/resource.h>
+#include <opentelemetry/sdk/trace/batch_span_processor.h>
 #include <opentelemetry/sdk/trace/multi_span_processor.h>
 #include <opentelemetry/sdk/trace/simple_processor.h>
-#include <opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_factory.h>
-#include <opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_options.h>
-#include <opentelemetry/sdk/metrics/meter_context_factory.h>
-#include <opentelemetry/sdk/metrics/meter_provider_factory.h>
 #include <opentelemetry/sdk/trace/tracer_provider.h>
 #include <opentelemetry/trace/provider.h>
 
 #include <common/json.hh>
 #include <common/properties.hh>
 #include <common/tracing.hh>
+#include <grpcpp/ext/otel_plugin.h>
+#include <opentelemetry/exporters/otlp/otlp_http_metric_exporter_factory.h>
+#include <opentelemetry/exporters/otlp/otlp_http_metric_exporter_options.h>
+#include <opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_factory.h>
+#include <opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_options.h>
+#include <opentelemetry/sdk/metrics/meter_context.h>
+#include <opentelemetry/sdk/metrics/meter_context_factory.h>
+#include <opentelemetry/sdk/metrics/meter_provider_factory.h>
+#include <opentelemetry/semconv/service_attributes.h>
 
 namespace springtail::tracing {
 
@@ -34,7 +46,7 @@ TracingAndMetrics::_create_default_otel_resource(std::string_view component_name
         resource_attributes["springtail.db_instance_id"] = std::to_string(*db_instance_id);
     }
     if (!component_name.empty()) {
-        resource_attributes["service.name"] = std::string(component_name);
+        resource_attributes[opentelemetry::semconv::service::kServiceName] = std::string(component_name);
     }
     return ::opentelemetry::sdk::resource::Resource::Create(resource_attributes);
 }
@@ -76,10 +88,11 @@ TracingAndMetrics::_init_metrics(const ::opentelemetry::sdk::resource::Resource&
     auto host = Json::get<std::string>(json, "metrics_host");
     auto port = Json::get<int>(json, "metrics_port");
 
-    ::opentelemetry::exporter::otlp::OtlpGrpcMetricExporterOptions options;
+    opentelemetry::exporter::otlp::OtlpHttpMetricExporterOptions options;
     if (host && port) {
-        options.endpoint = fmt::format("http://{}:{}", *host, *port);
-        SPDLOG_INFO("Enabling OTel metrics over gRPC");
+        // host ex: http://otel_collector, port ex: 4318
+        options.url = fmt::format("{}:{}/v1/metrics", *host, *port);
+        SPDLOG_INFO("Enabling OTel metrics over HTTP: {}", options.url);
     }
     ::opentelemetry::sdk::metrics::PeriodicExportingMetricReaderOptions reader_options;
     auto export_interval_millis = Json::get<int>(json, "metrics_export_interval_millis");
@@ -91,7 +104,7 @@ TracingAndMetrics::_init_metrics(const ::opentelemetry::sdk::resource::Resource&
         reader_options.export_timeout_millis = std::chrono::milliseconds(*export_timeout_millis);
     }
 
-    auto exporter = opentelemetry::exporter::otlp::OtlpGrpcMetricExporterFactory::Create(options);
+    auto exporter = opentelemetry::exporter::otlp::OtlpHttpMetricExporterFactory::Create(options);
     auto reader = opentelemetry::sdk::metrics::PeriodicExportingMetricReaderFactory::Create(
         std::move(exporter), reader_options);
 
@@ -130,23 +143,24 @@ TracingAndMetrics::_init_tracing(const opentelemetry::sdk::resource::Resource& r
     auto host = Json::get<std::string>(json, "host");
     auto port = Json::get<int>(json, "port");
     if (host && port) {
-        opentelemetry::exporter::otlp::OtlpGrpcExporterOptions options;
-        options.endpoint = fmt::format("http://{}:{}", *host, *port);
+        opentelemetry::exporter::otlp::OtlpHttpExporterOptions options;
+        // host ex: http://otel_collector, port ex: 4318
+        options.url = fmt::format("{}:{}/v1/traces", *host, *port);
 
         std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> otlp_exporter =
-            std::make_unique<opentelemetry::exporter::otlp::OtlpGrpcExporter>(options);
+            std::make_unique<opentelemetry::exporter::otlp::OtlpHttpExporter>(options);
         std::unique_ptr<opentelemetry::sdk::trace::SpanProcessor> otlp_processor =
             std::make_unique<opentelemetry::sdk::trace::SimpleSpanProcessor>(
                 std::move(otlp_exporter));
 
-        SPDLOG_INFO("Enabling OTel over gRPC");
+        SPDLOG_INFO("Enabling OTel over HTTP: {}", options.url);
         multi_processor->AddProcessor(std::move(otlp_processor));
     }
 
     std::unique_ptr<opentelemetry::sdk::trace::SpanProcessor> processor =
         std::move(multi_processor);
     std::shared_ptr<opentelemetry::trace::TracerProvider> provider =
-        std::make_shared<opentelemetry::sdk::trace::TracerProvider>(std::move(processor));
+        std::make_shared<opentelemetry::sdk::trace::TracerProvider>(std::move(processor), resource);
     opentelemetry::trace::Provider::SetTracerProvider(provider);
 }
 

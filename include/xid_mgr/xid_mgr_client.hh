@@ -9,7 +9,7 @@
 
 namespace springtail {
 
-class XidMgrClient : public Singleton<XidMgrClient>, public GrpcClient<XidMgrClient> {
+class XidMgrClient : public Singleton<XidMgrClient> {
     friend class Singleton<XidMgrClient>;
 
 public:

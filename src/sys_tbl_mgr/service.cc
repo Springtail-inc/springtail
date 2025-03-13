@@ -4,6 +4,7 @@
 #include <limits>
 
 #include <common/constants.hh>
+#include <grpc/grpc_server.hh>
 #include <sys_tbl_mgr/exception.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/service.hh>
@@ -18,6 +19,7 @@ Service::Ping(grpc::ServerContext* context,
               const google::protobuf::Empty* request,
               google::protobuf::Empty* response)
 {
+    ServerSpan span(context, "SysTblMgrService", "Ping");
     return grpc::Status::OK;
 }
 
@@ -26,6 +28,8 @@ Service::CreateIndex(grpc::ServerContext* context,
                      const proto::IndexRequest* request,
                      proto::DDLStatement* response)
 {
+    ServerSpan span(context, "SysTblMgrService", "CreateIndex");
+
     SPDLOG_INFO("got CreateIndex(): db {}, table {}, index {}, xid {}:{}", request->db_id(),
                 request->index().table_id(), request->index().id(), request->xid(), request->lsn());
 
@@ -38,9 +42,11 @@ Service::CreateIndex(grpc::ServerContext* context,
 
         // serialize the JSON and return
         response->set_statement(nlohmann::to_string(ddl));
+        span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
         return grpc::Status::OK;
     } catch (const std::exception& e) {
         SPDLOG_ERROR("CreateIndex() failed: {}", e.what());
+        span.span()->SetStatus(opentelemetry::trace::StatusCode::kError, e.what());
         return grpc::Status(grpc::StatusCode::INTERNAL, e.what());
     }
 }
@@ -142,14 +148,19 @@ Service::SetIndexState(grpc::ServerContext* context,
                        const proto::SetIndexStateRequest* request,
                        google::protobuf::Empty* response)
 {
+    ServerSpan span(context, "SysTblMgrService", "SetIndexState");
+
     SPDLOG_INFO("got SetIndexState()");
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
     if (_set_index_state(*request)) {
+        span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
         return grpc::Status::OK;
     } else {
+        span.span()->SetStatus(opentelemetry::trace::StatusCode::kError,
+                               "Failed to set index state");
         return grpc::Status(grpc::StatusCode::INTERNAL, "Failed to set index state");
     }
 }
@@ -159,12 +170,15 @@ Service::GetIndexInfo(grpc::ServerContext* context,
                       const proto::GetIndexInfoRequest* request,
                       proto::IndexInfo* response)
 {
+    ServerSpan span(context, "SysTblMgrService", "GetIndexInfo");
+
     SPDLOG_INFO("got GetIndexInfo()");
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_read_mutex);
 
     *response = _get_index_info(*request);
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
 }
 
@@ -382,7 +396,7 @@ Service::_drop_index(const XidLsn& xid,
 
     // update columns with the state XID
     _write_index(xid, db_id, index_info.table_id(), index_id, keys);
-    
+
     {
         boost::unique_lock lock(_mutex);
         index_info.set_state(static_cast<int8_t>(sys_tbl::IndexNames::State::DELETED));
@@ -395,6 +409,8 @@ Service::CreateTable(grpc::ServerContext* context,
                      const proto::TableRequest* request,
                      proto::DDLStatement* response)
 {
+    ServerSpan span(context, "SysTblMgrService", "CreateTable");
+
     SPDLOG_INFO("got CreateTable() -- db {} table {} xid {} lsn {}", request->db_id(),
                 request->table().id(), request->xid(), request->lsn());
 
@@ -406,6 +422,7 @@ Service::CreateTable(grpc::ServerContext* context,
 
     // serialize the JSON and return
     response->set_statement(nlohmann::to_string(ddl));
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
 }
 
@@ -479,6 +496,8 @@ Service::AlterTable(grpc::ServerContext* context,
                     const proto::TableRequest* request,
                     proto::DDLStatement* response)
 {
+    ServerSpan span(context, "SysTblMgrService", "AlterTable");
+
     SPDLOG_INFO("got AlterTable()");
 
     // retrieve the id of the namespace
@@ -560,7 +579,8 @@ Service::AlterTable(grpc::ServerContext* context,
                            request->table().name(), request->table().namespace_name(), xid);
     }
 
-  response->set_statement(nlohmann::to_string(ddl));
+    response->set_statement(nlohmann::to_string(ddl));
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
 }
 
@@ -569,6 +589,8 @@ Service::DropTable(grpc::ServerContext* context,
                    const proto::DropTableRequest* request,
                    proto::DDLStatement* response)
 {
+    ServerSpan span(context, "SysTblMgrService", "DropTable");
+
     SPDLOG_INFO("got DropTable() {}@{}:{}", request->table_id(), request->xid(), request->lsn());
 
     // hold a shared lock to prevent a concurrent finalize()
@@ -579,6 +601,7 @@ Service::DropTable(grpc::ServerContext* context,
 
     // serialize the ddl JSON and return
     response->set_statement(nlohmann::to_string(ddl));
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
 }
 
@@ -642,6 +665,8 @@ Service::CreateNamespace(grpc::ServerContext* context,
                          const proto::NamespaceRequest* request,
                          proto::DDLStatement* response)
 {
+    ServerSpan span(context, "SysTblMgrService", "CreateNamespace");
+
     SPDLOG_INFO("got CreateNamespace() -- db {} namespace_id {} name {} xid {} lsn {}",
                 request->db_id(), request->namespace_id(), request->name(), request->xid(),
                 request->lsn());
@@ -657,6 +682,7 @@ Service::CreateNamespace(grpc::ServerContext* context,
 
     // serialize the JSON and return
     response->set_statement(nlohmann::to_string(ddl));
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
 }
 
@@ -665,6 +691,8 @@ Service::AlterNamespace(grpc::ServerContext* context,
                         const proto::NamespaceRequest* request,
                         proto::DDLStatement* response)
 {
+    ServerSpan span(context, "SysTblMgrService", "AlterNamespace");
+
     SPDLOG_INFO("got AlterNamespace() -- db {} namespace_id {} name {} xid {} lsn {}",
                 request->db_id(), request->namespace_id(), request->name(), request->xid(),
                 request->lsn());
@@ -685,6 +713,7 @@ Service::AlterNamespace(grpc::ServerContext* context,
 
     // serialize the JSON and return
     response->set_statement(nlohmann::to_string(ddl));
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
 }
 
@@ -693,6 +722,8 @@ Service::DropNamespace(grpc::ServerContext* context,
                        const proto::NamespaceRequest* request,
                        proto::DDLStatement* response)
 {
+    ServerSpan span(context, "SysTblMgrService", "DropNamespace");
+
     SPDLOG_INFO("got DropNamespace() -- db {} namespace_id {} xid {} lsn {}", request->db_id(),
                 request->namespace_id(), request->xid(), request->lsn());
 
@@ -708,6 +739,7 @@ Service::DropNamespace(grpc::ServerContext* context,
 
     // serialize the JSON and return
     response->set_statement(nlohmann::to_string(ddl));
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
 }
 
@@ -751,6 +783,8 @@ Service::UpdateRoots(grpc::ServerContext* context,
                      const proto::UpdateRootsRequest* request,
                      google::protobuf::Empty* response)
 {
+    ServerSpan span(context, "SysTblMgrService", "UpdateRoots");
+
     SPDLOG_INFO("got UpdateRoots()");
 
     // hold a shared lock to prevent a concurrent finalize()
@@ -758,6 +792,7 @@ Service::UpdateRoots(grpc::ServerContext* context,
 
     // update the metadata and return
     _update_roots(*request);
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
 }
 
@@ -823,6 +858,8 @@ Service::Finalize(grpc::ServerContext* context,
                   const proto::FinalizeRequest* request,
                   google::protobuf::Empty* response)
 {
+    ServerSpan span(context, "SysTblMgrService", "Finalize");
+
     SPDLOG_INFO("got Finalize()");
 
     // block all mutations
@@ -845,6 +882,7 @@ Service::Finalize(grpc::ServerContext* context,
         SPDLOG_INFO("Nothing to finalize: {}@{} >= {}", request->db_id(), request->xid(),
                     write_xid);
         // NOTE TO REVIEWER: is OK right here?
+        span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk, "Nothing to finalize");
         return grpc::Status::OK;
     }
 
@@ -863,6 +901,7 @@ Service::Finalize(grpc::ServerContext* context,
     _clear_roots_info(request->db_id());
     _clear_schema_info(request->db_id());
 
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
 }
 
@@ -871,6 +910,8 @@ Service::GetRoots(grpc::ServerContext* context,
                   const proto::GetRootsRequest* request,
                   proto::GetRootsResponse* response)
 {
+    ServerSpan span(context, "SysTblMgrService", "GetRoots");
+
     SPDLOG_INFO("got GetRoots()");
 
     boost::shared_lock lock(_read_mutex);
@@ -881,6 +922,7 @@ Service::GetRoots(grpc::ServerContext* context,
     auto table_info = _get_table_info(request->db_id(), request->table_id(), xid);
     if (table_info == nullptr) {
         // We just return an empty response if the table doesn't exist
+        span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk, "Table does not exist");
         return grpc::Status::OK;
     }
 
@@ -888,15 +930,17 @@ Service::GetRoots(grpc::ServerContext* context,
     auto info = _get_roots_info(request->db_id(), request->table_id(), xid);
 
     *response = *info;
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
 }
-
 
 grpc::Status
 Service::GetSchema(grpc::ServerContext* context,
                    const proto::GetSchemaRequest* request,
                    proto::GetSchemaResponse* response)
 {
+    ServerSpan span(context, "SysTblMgrService", "GetSchema");
+
     SPDLOG_INFO("got GetSchema()");
 
     boost::shared_lock lock(_read_mutex);
@@ -909,6 +953,7 @@ Service::GetSchema(grpc::ServerContext* context,
                         info->access_lsn_end());
 
     *response = *info;
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
 }
 
@@ -917,6 +962,8 @@ Service::GetTargetSchema(grpc::ServerContext* context,
                          const proto::GetTargetSchemaRequest* request,
                          proto::GetSchemaResponse* response)
 {
+    ServerSpan span(context, "SysTblMgrService", "GetTargetSchema");
+
     SPDLOG_INFO("got GetTargetSchema() -- {}, {}", request->access_xid(), request->target_xid());
 
     boost::shared_lock lock(_read_mutex);
@@ -927,6 +974,7 @@ Service::GetTargetSchema(grpc::ServerContext* context,
     auto info = _get_schema_info(request->db_id(), request->table_id(), access_xid, target_xid);
 
     *response = *info;
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
 }
 
@@ -935,6 +983,8 @@ Service::Exists(grpc::ServerContext* context,
                 const proto::ExistsRequest* request,
                 google::protobuf::Empty* response)
 {
+    ServerSpan span(context, "SysTblMgrService", "Exists");
+
     SPDLOG_INFO("got Exists()");
 
     boost::shared_lock lock(_read_mutex);
@@ -942,8 +992,10 @@ Service::Exists(grpc::ServerContext* context,
     XidLsn xid(request->xid(), request->lsn());
     auto info = _get_table_info(request->db_id(), request->table_id(), xid);
     if (info == nullptr) {
+        span.span()->SetStatus(opentelemetry::trace::StatusCode::kError, "Table not found");
         return grpc::Status(grpc::StatusCode::NOT_FOUND, "Table not found");
     }
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
 }
 
@@ -952,6 +1004,8 @@ Service::SwapSyncTable(grpc::ServerContext* context,
                        const proto::SwapSyncTableRequest* request,
                        proto::DDLStatement* response)
 {
+    ServerSpan span(context, "SysTblMgrService", "SwapSyncTable");
+
     SPDLOG_INFO("got SwapSyncTable()");
     const auto& namespace_req = request->namespace_req();
     const auto& create_req = request->create_req();
@@ -1028,6 +1082,7 @@ Service::SwapSyncTable(grpc::ServerContext* context,
     // 7. serialize the ddl json and return
     SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Response: {}", nlohmann::to_string(ddls));
     response->set_statement(nlohmann::to_string(ddls));
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
 }
 

@@ -18,3 +18,4 @@ system.json.test
 .cache
 **/core
 python/**/__pycache__
+.aws
