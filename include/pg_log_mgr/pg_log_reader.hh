@@ -18,6 +18,7 @@
 #include <redis/redis_containers.hh>
 #include <redis/redis_ddl.hh>
 
+#include <pg_log_mgr/timestamps_and_xids.hh>
 #include <pg_log_mgr/xid_ready.hh>
 
 #include <storage/extent.hh>
@@ -223,180 +224,6 @@ namespace springtail::pg_log_mgr {
         };
         using BatchPtr = std::shared_ptr<Batch>;
 
-        /**
-         * @brief This class keeps track of Postgres and Springtail XIDs and of
-         *      the log file timestamps that this transactions initially show up.
-         *
-         */
-        class TimestampsAndXids {
-        public:
-            /**
-             * @brief Default constructor
-             *
-             */
-            TimestampsAndXids() = default;
-
-            /**
-             * @brief Default destructor
-             *
-             */
-            ~TimestampsAndXids() = default;
-
-            /**
-             * @brief This function add Postgres Xid and associated timestamp id
-             *
-             * @param pg_xid - Postgres Xid
-             * @param ts     - timestamp id
-             */
-            void
-            add_pg_xid(int32_t pg_xid, uint64_t ts)
-            {
-                std::unique_lock<std::shared_mutex> lock(_mt);
-
-                // verify that Postgress XID is not somehow already inserted
-                DCHECK(!_pg_xid_to_ts.contains(pg_xid));
-
-                // insert into pg_xid -> ts map
-                _pg_xid_to_ts.emplace(pg_xid, ts);
-
-                // increment count in ts -> pg_xid count map
-                if (!_ts_to_pg_xid_count.contains(ts)) {
-                    _ts_to_pg_xid_count.emplace(ts, 0);
-                }
-                _ts_to_pg_xid_count[ts]++;
-            }
-
-            /**
-             * @brief This function removes Postgres Xid
-             *
-             * @param pg_xid - Postgres Xid
-             */
-            void
-            remove_pg_xid(int32_t pg_xid)
-            {
-                std::unique_lock<std::shared_mutex> lock(_mt);
-
-                // verify that Postgress XID is known
-                DCHECK(_pg_xid_to_ts.contains(pg_xid));
-
-                // Get Postgress XID timestamp
-                uint64_t ts = _pg_xid_to_ts[pg_xid];
-
-                // Erase Postgress XID from pg_xid -> ts map
-                _pg_xid_to_ts.erase(pg_xid);
-
-                // verify that ts exists in ts -> pg_xid count map
-                DCHECK(_ts_to_pg_xid_count.contains(ts));
-
-                // decrement count in ts -> pg_xid count map
-                _ts_to_pg_xid_count[ts]--;
-                if (_ts_to_pg_xid_count[ts] == 0) {
-                    _ts_to_pg_xid_count.erase(ts);
-                }
-            }
-
-            /**
-             * @brief This function adds Xid for the give Postgres Xid.
-             *
-             * @param pg_xid - Postgres Xid
-             * @param xid    - Springtail Xid
-             */
-            void
-            add_xid(int32_t pg_xid, uint64_t xid)
-            {
-                std::unique_lock<std::shared_mutex> lock(_mt);
-
-                // verify that Postgress XID is known
-                DCHECK(_pg_xid_to_ts.contains(pg_xid));
-
-                // Get Postgress XID timestamp
-                uint64_t ts = _pg_xid_to_ts[pg_xid];
-
-                // Erase Postgress XID from pg_xid -> ts map
-                _pg_xid_to_ts.erase(pg_xid);
-
-                // verify that ts exists in ts -> pg_xid count map
-                DCHECK(_ts_to_pg_xid_count.contains(ts));
-
-                // decrement count in ts -> pg_xid count map
-                _ts_to_pg_xid_count[ts]--;
-                DCHECK(_ts_to_pg_xid_count[ts] >= 0);
-                if (_ts_to_pg_xid_count[ts] == 0) {
-                    _ts_to_pg_xid_count.erase(ts);
-                }
-
-                // verify that Springtail XID is not somehow already inserted
-                DCHECK(!_xid_to_ts.contains(xid));
-
-                // insert into xid -> ts map
-                _xid_to_ts.emplace(xid, ts);
-
-                // increment count in ts -> xid count map
-                if (!_ts_to_xid_count.contains(ts)) {
-                    _ts_to_xid_count.emplace(ts, 0);
-                }
-                _ts_to_xid_count[ts]++;
-            }
-
-            /**
-             * @brief This function removes Xid
-             *
-             * @param xid - Springtail Xid
-             */
-            void
-            remove_xid(uint64_t xid)
-            {
-                std::unique_lock<std::shared_mutex> lock(_mt);
-
-                // verify that XID is known
-                DCHECK(_xid_to_ts.contains(xid));
-
-                // Get XID timestamp
-                uint64_t ts = _xid_to_ts[xid];
-
-                // Erase XID from xid -> ts map
-                _xid_to_ts.erase(xid);
-
-                // verify that ts exists in ts -> xid count map
-                DCHECK(_ts_to_xid_count.contains(ts));
-
-                // decrement count in ts -> pg_xid count map
-                _ts_to_xid_count[ts]--;
-                DCHECK(_ts_to_xid_count[ts] >= 0);
-                if (_ts_to_xid_count[ts] == 0) {
-                    _ts_to_xid_count.erase(ts);
-                }
-            }
-
-            /**
-             * @brief Get the min timestamp id recorded for Porstgress and Springtail Xids
-             *
-             * @return uint64_t - timestamp id
-             */
-            uint64_t
-            get_min_timestamp()
-            {
-                std::shared_lock<std::shared_mutex> lock(_mt);
-                uint64_t pg_xid_ts = UINT64_MAX;
-                uint64_t xid_ts = UINT64_MAX;
-                if (auto it = _ts_to_pg_xid_count.begin(); it != _ts_to_pg_xid_count.end()) {
-                    pg_xid_ts = it->first;
-                }
-                if (auto it = _ts_to_xid_count.begin(); it != _ts_to_xid_count.end()) {
-                    xid_ts = it->first;
-                }
-                uint64_t min_ts = std::min(pg_xid_ts, xid_ts);
-                return (min_ts == UINT64_MAX)? 0 : min_ts;
-            }
-
-        private:
-            std::map<int32_t, uint64_t> _pg_xid_to_ts;          ///< map Postgres Xid to timestamp id
-            std::map<uint64_t, uint32_t> _ts_to_pg_xid_count;   ///< map to keep the number of times that timestamp ids are used for Postgres Xid
-            std::map<uint64_t, uint64_t> _xid_to_ts;            ///< map Springtail Xid to timestamp id
-            std::map<uint64_t, uint32_t> _ts_to_xid_count;      ///< map to keep the number of times that timestamp ids are used for Springtail Xid
-            std::shared_mutex _mt;                              ///< mutext for access to this class data structures
-        } ;
-
         uint64_t _pg_log_timestamp{0};      ///< Timestamp id of the current Postgres log
         uint64_t _db_id; ///< The database ID
         uint64_t _committed_xid; ///< The most recently committed XID at startup
@@ -420,7 +247,7 @@ namespace springtail::pg_log_mgr {
         std::map<int32_t, BatchPtr> _batch_map;
         BatchPtr _current_batch; ///< The batch matching the current pg xid
 
-        TimestampsAndXids _xid_ts_tracker;      ///< Timestamps and Xids tracker object
+        TimestampsAndXidsPtr _xid_ts_tracker;      ///< Timestamps and Xids tracker object
 
         /** Function for cleaning up old log files. */
         void _remove_old_log_files();

@@ -284,7 +284,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 _redis_ddl.commit_index_ddl(db_id, xid);
             }
 
-            result->perform_cb(xid);
+            result->notify_tracker(xid);
 
             SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "XID completed: {}@{}", db_id, xid);
         }

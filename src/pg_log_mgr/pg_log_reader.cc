@@ -31,6 +31,7 @@ namespace springtail::pg_log_mgr {
           _msg_queue(queue_size),
           _xact_log_writer(xact_log_path)
     {
+        _xid_ts_tracker = std::make_shared<TimestampsAndXids>();
         // retrieve the most recently committed XID at startup
         _committed_xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
 
@@ -572,7 +573,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::_remove_old_log_files()
     {
-        uint64_t min_timestamp = _xid_ts_tracker.get_min_timestamp();
+        uint64_t min_timestamp = _xid_ts_tracker->get_min_timestamp();
         fs::cleanup_files_from_dir(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX, min_timestamp);
         fs::cleanup_files_from_dir(_xact_log_path, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX, min_timestamp);
     }
@@ -734,7 +735,7 @@ namespace springtail::pg_log_mgr {
         // prepare a batch for processing
         _current_batch = std::make_shared<Batch>(_db_id, begin_msg.xid, _committer_queue);
         _batch_map.try_emplace(begin_msg.xid, _current_batch);
-        _xid_ts_tracker.add_pg_xid(_current_xact->xid, _pg_log_timestamp);
+        _xid_ts_tracker->add_pg_xid(_current_xact->xid, _pg_log_timestamp);
     }
 
     void
@@ -762,11 +763,11 @@ namespace springtail::pg_log_mgr {
         if (xid <= _committed_xid) {
             // we abort this batch since it was already processed
             _current_batch->abort(postgres_timestamp);
-            _xid_ts_tracker.remove_pg_xid(_current_xact->xid);
+            _xid_ts_tracker->remove_pg_xid(_current_xact->xid);
         } else {
             // update the write cache and system tables as needed
             _current_batch->commit(xid, postgres_timestamp);
-            _xid_ts_tracker.add_xid(_current_xact->xid, xid);
+            _xid_ts_tracker->add_xid(_current_xact->xid, xid);
         }
 
         // clear the current batch
@@ -791,9 +792,7 @@ namespace springtail::pg_log_mgr {
             // message the Committer
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Issue XID to committer on {} @ {}", _db_id, xid);
             _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::XactMsg(xid),
-                                    [this](uint64_t xid) {
-                                        _xid_ts_tracker.remove_xid(xid);
-                                    }));
+                                    _xid_ts_tracker));
         }
 
         // clear the current xact
@@ -821,7 +820,7 @@ namespace springtail::pg_log_mgr {
         // prepare a batch for processing
         _current_batch = std::make_shared<Batch>(_db_id, start_msg.xid, _committer_queue);
         _batch_map.try_emplace(start_msg.xid, _current_batch);
-        _xid_ts_tracker.add_pg_xid(xact->xid, _pg_log_timestamp);
+        _xid_ts_tracker->add_pg_xid(xact->xid, _pg_log_timestamp);
     }
 
     void
@@ -854,11 +853,11 @@ namespace springtail::pg_log_mgr {
         if (xid <= _committed_xid) {
             // we abort this batch since it was already processed
             _current_batch->abort(PostgresTimestamp(commit_msg.commit_ts));
-            _xid_ts_tracker.remove_pg_xid(commit_msg.xid);
+            _xid_ts_tracker->remove_pg_xid(commit_msg.xid);
         } else {
             // update the write cache and system tables as needed
             _current_batch->commit(xid, PostgresTimestamp(commit_msg.commit_ts));
-            _xid_ts_tracker.add_xid(commit_msg.xid, xid);
+            _xid_ts_tracker->add_xid(commit_msg.xid, xid);
         }
 
         // free the batch
@@ -874,9 +873,7 @@ namespace springtail::pg_log_mgr {
         if (xid > _committed_xid) {
             // message the Committer
             _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::XactMsg(xid),
-                                    [this](uint64_t xid) {
-                                        _xid_ts_tracker.remove_xid(xid);
-                                    }));
+                                    _xid_ts_tracker));
         }
 
         // remove the xact from the active map
@@ -905,7 +902,7 @@ namespace springtail::pg_log_mgr {
             // abort the txn
             _current_batch->abort(PostgresTimestamp(abort_msg.abort_ts));
             _batch_map.erase(abort_msg.xid);
-            _xid_ts_tracker.remove_pg_xid(abort_msg.xid);
+            _xid_ts_tracker->remove_pg_xid(abort_msg.xid);
         } else {
             // abort the subtxn
             _current_batch->abort_subtxn(abort_msg.sub_xid, PostgresTimestamp(abort_msg.abort_ts));
