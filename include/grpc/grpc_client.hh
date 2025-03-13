@@ -1,5 +1,16 @@
 #pragma once
 
+#include <fmt/format.h>
+#include <grpcpp/grpcpp.h>
+#include <grpcpp/security/credentials.h>
+#include <opentelemetry/context/propagation/global_propagator.h>
+#include <opentelemetry/context/propagation/text_map_propagator.h>
+#include <opentelemetry/context/runtime_context.h>
+#include <opentelemetry/semconv/incubating/rpc_attributes.h>
+#include <opentelemetry/semconv/network_attributes.h>
+#include <opentelemetry/trace/provider.h>
+#include <opentelemetry/trace/span.h>
+
 #include <chrono>
 #include <string_view>
 #include <thread>
@@ -29,129 +40,124 @@ struct StatusOr {
 // Special case for void return type
 using StatusOnly = StatusOr<bool>;
 
-template <typename T>
-class GrpcClient {
-protected:
-    GrpcClient() { _type_name = boost::core::demangle(typeid(T).name()); }
+namespace grpc_client {
 
-    virtual ~GrpcClient() = default;
+class GrpcClientCarrier : public opentelemetry::context::propagation::TextMapCarrier {
+public:
+    explicit GrpcClientCarrier(grpc::ClientContext* context) : context_(context) {}
 
-    // Helper to check if status should be retried
-    bool should_retry(const grpc::Status& status) const
+    opentelemetry::nostd::string_view Get(
+        opentelemetry::nostd::string_view /* key */) const noexcept override
     {
-        return status.error_code() == grpc::StatusCode::RESOURCE_EXHAUSTED ||
-               status.error_code() == grpc::StatusCode::UNAVAILABLE;
+        return "";
     }
 
-    // Template method for retrying RPC calls with exception handling
-    template <typename Func>
-    void retry_rpc(Func&& func, std::string_view operation)
+    void Set(opentelemetry::nostd::string_view key,
+             opentelemetry::nostd::string_view value) noexcept override
     {
-        auto status = retry_rpc_status(std::forward<Func>(func), operation);
-        if (!status.ok()) {
-            throw Error(fmt::format("{} failed: {}", operation, status.error_message()));
-        }
-    }
-
-    // Template method for retrying RPC calls
-    // Returns grpc::Status
-    template <typename Func>
-    auto retry_rpc_status(Func&& func, std::string_view operation)
-    {
-        using namespace std::chrono;
-
-        int attempts = 0;
-        milliseconds backoff(100);             // Start with 100ms
-        const milliseconds max_backoff(5000);  // Max 5 seconds
-        const int max_attempts = 50;
-
-        while (true) {
-            auto status = func();
-
-            if (status.ok()) {
-                return status;
-            }
-
-            attempts++;
-            if (!should_retry(status) || attempts >= max_attempts) {
-                SPDLOG_WARN("{}: {} failed after {} attempts: {}", _type_name, operation, attempts,
-                            status.error_message());
-                return status;
-            }
-
-            SPDLOG_WARN("{}: {} attempt {} failed, retrying in {}ms: {}", _type_name, operation,
-                        attempts, backoff.count(), status.error_message());
-
-            std::this_thread::sleep_for(backoff);
-            backoff = std::min(backoff * 2, max_backoff);
-        }
-    }
-
-    std::shared_ptr<grpc::Channel> create_channel(const std::string& server_hostname,
-                                                  const nlohmann::json& rpc_json)
-    {
-        bool ssl = Json::get_or<bool>(rpc_json, "ssl", false);
-
-        grpc::ChannelArguments args;
-        std::shared_ptr<grpc::ChannelCredentials> creds;
-        if (ssl) {
-            std::string cert_file_path;
-            Json::get_to<std::string>(rpc_json, "client_cert", cert_file_path);
-            if (cert_file_path.empty() || !std::filesystem::exists(cert_file_path)) {
-                SPDLOG_ERROR("{}: Invalid configuration for certificate file {}", _type_name,
-                             cert_file_path);
-                throw Error("Certificate file path is misconfigured");
-            }
-
-            std::string key_file_path;
-            Json::get_to<std::string>(rpc_json, "client_key", key_file_path);
-            if (key_file_path.empty() || !std::filesystem::exists(key_file_path)) {
-                SPDLOG_ERROR("{}: Invalid configuration for key file {}", _type_name,
-                             key_file_path);
-                throw Error("Key file path is misconfigured");
-            }
-
-            std::string trusted_file_path;
-            Json::get_to<std::string>(rpc_json, "client_trusted", trusted_file_path);
-            if (trusted_file_path.empty() || !std::filesystem::exists(trusted_file_path)) {
-                SPDLOG_ERROR("{}: Invalid configuration for trusted certificates file {}",
-                             _type_name, trusted_file_path);
-                throw Error("Trusted certificates file path is misconfigured");
-            }
-
-            grpc::SslCredentialsOptions ssl_opts;
-            ssl_opts.pem_root_certs = read_file_contents(trusted_file_path);
-            ssl_opts.pem_private_key = read_file_contents(key_file_path);
-            ssl_opts.pem_cert_chain = read_file_contents(cert_file_path);
-
-            creds = grpc::SslCredentials(ssl_opts);
-            args.SetSslTargetNameOverride("springtail_server");  // This must match CN in the server cert
-        } else {
-            creds = grpc::InsecureChannelCredentials();
-        }
-
-        int port;
-        Json::get_to<int>(rpc_json, "server_port", port);
-        std::string server_addr = server_hostname + ":" + std::to_string(port);
-
-        SPDLOG_DEBUG("{}: Creating channel to {} with SSL: {}", _type_name, server_addr, ssl);
-        return grpc::CreateCustomChannel(server_addr, creds, args);
+        context_->AddMetadata(std::string(key), std::string(value));
     }
 
 private:
-    std::string read_file_contents(const std::string& path)
-    {
-        std::ifstream file(path);
-        if (!file.is_open()) {
-            throw Error("Failed to open file: " + path);
-        }
-        return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
-    }
-
-protected:
-    std::string _type_name;
+    grpc::ClientContext* context_;
 };
 
+inline bool
+should_retry(const grpc::Status& status)
+{
+    return status.error_code() == grpc::StatusCode::RESOURCE_EXHAUSTED ||
+           status.error_code() == grpc::StatusCode::UNAVAILABLE;
+}
+
+// Template method for retrying RPC calls
+template <typename Func>
+grpc::Status
+retry_rpc_status(std::string_view service, std::string_view operation, Func&& func)
+{
+    using namespace std::chrono;
+    namespace trace = opentelemetry::trace;
+    namespace context = opentelemetry::context;
+    namespace semconv = opentelemetry::semconv;
+
+    int attempts = 0;
+    milliseconds backoff(100);             // Start with 100ms
+    const milliseconds max_backoff(5000);  // Max 5 seconds
+    const int max_attempts = 50;
+
+    while (true) {
+        grpc::ClientContext context;
+
+        // Create span for this RPC attempt
+        trace::StartSpanOptions options;
+        options.kind = trace::SpanKind::kClient;
+
+        auto tracer = trace::Provider::GetTracerProvider()->GetTracer("grpc");
+        auto span = tracer->StartSpan(fmt::format("{}/{}", service, operation),
+                                      {
+                                          {semconv::rpc::kRpcSystem, "grpc"},
+                                          {semconv::rpc::kRpcService, std::string(service)},
+                                          {semconv::rpc::kRpcMethod, std::string(operation)},
+                                      },
+                                      options);
+
+        // Inject context into gRPC metadata
+        auto scope = tracer->WithActiveSpan(span);
+        auto current_ctx = context::RuntimeContext::GetCurrent();
+        GrpcClientCarrier carrier(&context);
+        auto propagator = context::propagation::GlobalTextMapPropagator::GetGlobalPropagator();
+        propagator->Inject(carrier, current_ctx);
+
+        // Make the RPC call
+        auto status = func(&context);
+
+        if (status.ok()) {
+            span->SetStatus(trace::StatusCode::kOk);
+            span->SetAttribute(semconv::rpc::kRpcGrpcStatusCode,
+                               static_cast<int32_t>(status.error_code()));
+            span->End();
+            return status;
+        }
+
+        span->SetAttribute(semconv::rpc::kRpcGrpcStatusCode,
+                           static_cast<int32_t>(status.error_code()));
+
+        attempts++;
+        if (!should_retry(status) || attempts >= max_attempts) {
+            SPDLOG_WARN("{}: {} failed after {} attempts: {}", service, operation, attempts,
+                        status.error_message());
+            span->SetStatus(trace::StatusCode::kError, status.error_message());
+            span->End();
+            return status;
+        }
+
+        SPDLOG_WARN("{}: {} attempt {} failed, retrying in {}ms: {}", service, operation, attempts,
+                    backoff.count(), status.error_message());
+
+        span->SetStatus(trace::StatusCode::kError, fmt::format("Attempt {} failed, retrying: {}",
+                                                               attempts, status.error_message()));
+        span->End();
+
+        std::this_thread::sleep_for(backoff);
+        backoff = std::min(backoff * 2, max_backoff);
+    }
+}
+
+// Template method for retrying RPC calls with exception handling
+template <typename Func>
+void
+retry_rpc(std::string_view service, std::string_view operation, Func&& func)
+{
+    auto status = retry_rpc_status(service, operation, std::forward<Func>(func));
+    if (!status.ok()) {
+        throw Error(fmt::format("{} failed: {}", operation, status.error_message()));
+    }
+}
+
+std::shared_ptr<grpc::Channel> create_channel(std::string_view service,
+                                              const std::string& server_hostname,
+                                              const nlohmann::json& rpc_json);
+
+}  // namespace grpc_client
 template <typename T>
 class GrpcClientRunner : public ServiceRunner {
 public:
@@ -168,5 +174,4 @@ public:
         T::shutdown();
     }
 };
-
 }  // namespace springtail

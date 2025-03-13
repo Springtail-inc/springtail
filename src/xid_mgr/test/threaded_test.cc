@@ -53,6 +53,7 @@ namespace {
 
             void on_push(uint64_t db_id, uint64_t xid)
             {
+                std::unique_lock<std::mutex> l(_m);
                 ++_push_cnt;
                 ASSERT_GT(xid, 0);
                 _last_xid = xid;
