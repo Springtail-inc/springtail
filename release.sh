@@ -30,7 +30,8 @@ fi
 
 cmake -B release -S . \
       -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-      -DNDEBUG=1
+      -DNDEBUG=1 \
+      -DVCPKG_INSTALL_OPTIONS="--allow-unsupported"
 
 cd release
 if command -v nproc >/dev/null 2>&1; then

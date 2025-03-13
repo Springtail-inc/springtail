@@ -198,5 +198,45 @@ void die(int postgres_signal_arg) {}
 
 void proc_exit(int code) {}
 
-bool PostmasterIsAliveInternal(void) { return true; }
+bool PostmasterIsAliveInternal(void) {
+    return true;
+}
+
+void *palloc(Size size)
+{
+    return malloc(size);
+}
+
+char *pnstrdup(const char *in, Size len)
+{
+    return strndup(in, len);
+}
+
+char *pstrdup(const char *in)
+{
+    return strdup(in);
+}
+
+void initStringInfo(StringInfo str)
+{
+    str->data = (char *) malloc(1024);
+    str->maxlen = 1024;
+    str->data[0] = '\0';
+    str->len = 0;
+    str->cursor = 0;
+}
+
+void appendBinaryStringInfoNT(StringInfo str,
+                              const void *data,
+                              int datalen)
+{
+    if (str->len + datalen >= str->maxlen) {
+        str->maxlen = str->len + datalen + 1024;
+        str->data = (char *) realloc(str->data, str->maxlen);
+    }
+
+    memcpy(str->data + str->len, data, datalen);
+    str->len += datalen;
+    str->data[str->len] = '\0';
+}
 

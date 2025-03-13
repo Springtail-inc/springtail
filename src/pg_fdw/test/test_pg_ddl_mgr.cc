@@ -128,7 +128,7 @@ namespace {
             std::string hostname;
             std::string username;
             std::string password;
-            int port;
+            int port = 0;
             std::string db_prefix = fdw_config.at("db_prefix").get<std::string>();
 
             Json::get_to<std::string>(fdw_config, "host", hostname);

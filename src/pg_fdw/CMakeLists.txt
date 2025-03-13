@@ -28,6 +28,7 @@ target_include_directories(springtail_pg_fdw
 if(${LINUX})
     target_link_options(springtail_pg_fdw
         PRIVATE -Wl,--unresolved-symbols=ignore-all
+        PRIVATE -Wl,-rpath,/home/dev/springtail/shared-lib
     )
     target_link_options(regress
         PRIVATE -Wl,--unresolved-symbols=ignore-all

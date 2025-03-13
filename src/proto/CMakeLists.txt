@@ -22,6 +22,7 @@ find_program(GRPC_PYTHON_PLUGIN grpc_python_plugin
 
 message(STATUS "Found protoc: ${PROTOC}")
 message(STATUS "Found grpc_cpp_plugin: ${GRPC_CPP_PLUGIN}")
+message(STATUS "Found grpc_python_plugin: ${GRPC_PYTHON_PLUGIN}")
 
 # Get all .proto files in the directory
 file(GLOB PROTO_FILES "*.proto")

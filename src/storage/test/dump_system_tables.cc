@@ -2,6 +2,7 @@
 #include <common/constants.hh>
 
 #include <storage/field.hh>
+#include <storage/io_mgr.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/schema_mgr.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
@@ -19,6 +20,7 @@ main(int argc,
 
     std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
     runners.emplace();
+    runners->emplace_back(std::make_unique<IOMgrRunner>());
     runners->emplace_back(std::make_unique<SchemaMgrRunner>());
     runners->emplace_back(std::make_unique<TableMgrRunner>());
 

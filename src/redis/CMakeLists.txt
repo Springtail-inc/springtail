@@ -10,7 +10,7 @@ target_link_libraries(springtail_redis
     PUBLIC springtail_common
            spdlog::spdlog
            fmt::fmt
-           redis++::redis++_static
+           redis++::redis++
            nlohmann_json::nlohmann_json
 )
 

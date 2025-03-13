@@ -27,7 +27,10 @@ if [ ! -d debug ]; then
         mkdir -p debug
     fi
 fi
-cmake -B debug -S . -D'CMAKE_BUILD_TYPE=Debug'
+
+cmake -B debug -S . \
+	-D'CMAKE_BUILD_TYPE=Debug' \
+	-DVCPKG_INSTALL_OPTIONS="--allow-unsupported"
 
 # build the code
 cd debug

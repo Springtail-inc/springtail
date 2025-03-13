@@ -1,6 +1,7 @@
 #include <iostream>
 #include <mutex>
 
+#include <grpc/grpc_server.hh>
 #include <xid_mgr/xid_mgr_server.hh>
 #include <xid_mgr/xid_mgr_service.hh>
 
@@ -25,11 +26,14 @@ GrpcXidMgrService::Ping(grpc::CallbackServerContext* context,
                         const google::protobuf::Empty* request,
                         google::protobuf::Empty* response)
 {
+    ServerSpan span(context, "XidMgrService", "Ping");
     auto* reactor = context->DefaultReactor();
     try {
         std::cout << "Got ping\n";
+        span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
         reactor->Finish(grpc::Status::OK);
     } catch (const std::exception& e) {
+        span.span()->SetStatus(opentelemetry::trace::StatusCode::kError, e.what());
         reactor->Finish(grpc::Status(grpc::StatusCode::INTERNAL, e.what()));
     }
     return reactor;
@@ -40,15 +44,19 @@ GrpcXidMgrService::CommitXid(grpc::CallbackServerContext* context,
                              const proto::CommitXidRequest* request,
                              google::protobuf::Empty* response)
 {
+    ServerSpan span(context, "XidMgrService", "CommitXid");
     auto* reactor = context->DefaultReactor();
+
     try {
         _srv.commit_xid(request->db_id(), request->xid(), request->has_schema_changes());
         proto::XidPushResponse msg;
         msg.set_db_id(request->db_id());
         msg.set_xid(request->xid());
         _notification_thread->notify(msg);
+        span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
         reactor->Finish(grpc::Status::OK);
     } catch (const std::exception& e) {
+        span.span()->SetStatus(opentelemetry::trace::StatusCode::kError, e.what());
         reactor->Finish(grpc::Status(grpc::StatusCode::INTERNAL, e.what()));
     }
     return reactor;
@@ -59,11 +67,14 @@ GrpcXidMgrService::RecordDdlChange(grpc::CallbackServerContext* context,
                                    const proto::RecordDdlChangeRequest* request,
                                    google::protobuf::Empty* response)
 {
+    ServerSpan span(context, "XidMgrService", "RecordDdlChange");
     auto* reactor = context->DefaultReactor();
     try {
         _srv.record_ddl_change(request->db_id(), request->xid());
+        span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
         reactor->Finish(grpc::Status::OK);
     } catch (const std::exception& e) {
+        span.span()->SetStatus(opentelemetry::trace::StatusCode::kError, e.what());
         reactor->Finish(grpc::Status(grpc::StatusCode::INTERNAL, e.what()));
     }
     return reactor;
@@ -74,19 +85,24 @@ GrpcXidMgrService::GetCommittedXid(grpc::CallbackServerContext* context,
                                    const proto::GetCommittedXidRequest* request,
                                    proto::GetCommittedXidResponse* response)
 {
+    ServerSpan span(context, "XidMgrService", "GetCommittedXid");
     auto* reactor = context->DefaultReactor();
+
     try {
         uint64_t xid = _srv.get_committed_xid(request->db_id(), request->schema_xid());
         response->set_xid(xid);
+        span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
         reactor->Finish(grpc::Status::OK);
+
     } catch (const std::exception& e) {
+        span.span()->SetStatus(opentelemetry::trace::StatusCode::kError, e.what());
         reactor->Finish(grpc::Status(grpc::StatusCode::INTERNAL, e.what()));
     }
     return reactor;
 }
 
-grpc::ServerWriteReactor<proto::XidPushResponse>* 
-GrpcXidMgrService::Subscribe( 
+grpc::ServerWriteReactor<proto::XidPushResponse>*
+GrpcXidMgrService::Subscribe(
         grpc::CallbackServerContext* context,
         const proto::SubscribeRequest* request)
 {
@@ -120,7 +136,7 @@ GrpcXidMgrService::_unsubscribe(Notifier* key)
     }
 }
 
-void 
+void
 GrpcXidMgrService::_push_notifications(const proto::XidPushResponse& xid)
 {
     std::scoped_lock<std::mutex> l(_m);
@@ -129,7 +145,7 @@ GrpcXidMgrService::_push_notifications(const proto::XidPushResponse& xid)
     }
 }
 
-void 
+void
 GrpcXidMgrService::Notifier::notify(const proto::XidPushResponse& msg)
 {
     std::scoped_lock<std::mutex> l(_m);
@@ -147,8 +163,8 @@ void GrpcXidMgrService::Notifier::finish()
     Finish(grpc::Status(grpc::StatusCode::CANCELLED, "Server shutdown"));
 }
 
-void 
-GrpcXidMgrService::Notifier::OnWriteDone(bool ok) 
+void
+GrpcXidMgrService::Notifier::OnWriteDone(bool ok)
 {
     if (!ok) {
         Finish(grpc::Status(grpc::StatusCode::UNKNOWN, "OnWriteDone failed"));
@@ -164,11 +180,11 @@ GrpcXidMgrService::Notifier::OnWriteDone(bool ok)
     }
 };
 
-void 
-GrpcXidMgrService::Notifier::OnDone() 
+void
+GrpcXidMgrService::Notifier::OnDone()
 {
-    // NOTE: this is the  last call to 
-    // the Notifier instance. GRPC recommends 
+    // NOTE: this is the  last call to
+    // the Notifier instance. GRPC recommends
     // to delete itself here. oh well...
     //
     // if finish is set it means that the service
@@ -180,14 +196,14 @@ GrpcXidMgrService::Notifier::OnDone()
     delete this; //NOSONAR reason: The object lifetime is controlled by GRPC
 }
 
-void 
+void
 GrpcXidMgrService::Notifier::OnCancel()
-{ 
+{
     SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "OnCancel");
     // Will OnDone still be called if OnCancel is called? Yes.
 }
 
-void 
+void
 GrpcXidMgrService::NotificationThread::notify(const proto::XidPushResponse& msg)
 {
     {
@@ -197,7 +213,7 @@ GrpcXidMgrService::NotificationThread::notify(const proto::XidPushResponse& msg)
     _cv.notify_one();
 }
 
-void 
+void
 GrpcXidMgrService::NotificationThread::task(std::stop_token st)
 {
     while(!st.stop_requested()) {
