@@ -8,25 +8,13 @@
 #include <sys_tbl_mgr/client.hh>
 
 namespace springtail::pg_fdw {
-    /*
-    class PgXidSubscriberMgr final : public Singleton<PgXidSubscriberMgr>
-    {
-        friend class Singleton<PgXidSubscriberMgr>;
-    public:
-
-    };
-    */
 
     struct PgXidSubscriberMgr
     {
         using DbId = uint64_t;
         using TableId = uint64_t;
 
-        explicit PgXidSubscriberMgr(size_t cache_size) :
-            _cache_size{cache_size}
-        {
-            _t = std::make_unique<std::jthread>([this](std::stop_token st) { task(st); });
-        }
+        explicit PgXidSubscriberMgr(size_t cache_size);
         ~PgXidSubscriberMgr();
 
     private:

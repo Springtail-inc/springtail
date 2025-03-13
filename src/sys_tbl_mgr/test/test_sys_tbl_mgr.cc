@@ -42,6 +42,7 @@ namespace {
 
             // create the public namespace
             auto client = sys_tbl_mgr::Client::get_instance();
+            client->ping();
 
             // create the public namespace in the sys_tbl_mgr
             PgMsgNamespace ns_msg;

@@ -9,6 +9,13 @@
 using namespace springtail;
 using namespace springtail::pg_fdw;
 
+PgXidSubscriberMgr::PgXidSubscriberMgr(size_t cache_size) :
+    _cache_size{cache_size}
+{
+    SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "PgXidSubscriberMgr creating");
+    _t = std::make_unique<std::jthread>([this](std::stop_token st) { task(st); });
+}
+
 PgXidSubscriberMgr::~PgXidSubscriberMgr()
 {
     SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "PgXidSubscriberMgr deleted");
@@ -77,7 +84,9 @@ PgXidSubscriberMgr::task(std::stop_token st)
         auto p = subscriber.release();
         p->cancel();
     }
+    SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "PgXidSubscriberMgr thread stopping");
     workers.clear();
+    _client->use_roots_cache({});
     _cache.reset();
 }
 

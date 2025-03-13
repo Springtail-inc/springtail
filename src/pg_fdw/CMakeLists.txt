@@ -139,6 +139,24 @@ target_link_libraries(test_where
 add_dsymutil_command(test_where)
 gtest_discover_tests(test_where)
 
+add_executable(test_xid_subscriber test/test_xid_subscriber.cc test/mock_pg.c pg_xid_subscriber_mgr.cc)
+target_include_directories(test_xid_subscriber
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+    PRIVATE ${PostgreSQL_INCLUDE_DIRS}
+)
+target_link_libraries(test_xid_subscriber
+    PRIVATE springtail_pg
+    PRIVATE springtail_common
+    PRIVATE springtail_test
+    PRIVATE springtail_sys_tbl_mgr
+    PRIVATE ${START_GROUP}
+        ${POSTGRES_DEP_LIBS}
+    ${END_GROUP}
+    PRIVATE GTest::gtest_main
+)
+add_dsymutil_command(test_xid_subscriber)
+gtest_discover_tests(test_xid_subscriber)
+
 # install ddl daemon to install directory
 install(TARGETS
     pg_ddl_daemon
