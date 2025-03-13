@@ -95,7 +95,7 @@ void springtail_init_daemon(const std::optional<std::vector<std::unique_ptr<Serv
     std::vector<std::unique_ptr<ServiceRunner>> service_runners;
     service_runners.emplace_back(std::make_unique<DefaultLoggingRunner>());
     service_runners.emplace_back(std::make_unique<ExceptionRunner>());
-    service_runners.emplace_back(std::make_unique<PropertiesRunner>(false));
+    service_runners.emplace_back(std::make_unique<PropertiesRunner>(true));
     if (daemon_pid.has_value()) {
         service_runners.emplace_back(std::make_unique<DaemonRunner>(daemon_pid.value()));
     }

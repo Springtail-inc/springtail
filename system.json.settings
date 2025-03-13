@@ -71,7 +71,8 @@
             "client_key" : "/home/dev/springtail/ca_certs/client_key.pem",
             "client_trusted" : "/home/dev/springtail/ca_certs/ca_cert.pem"
         },
-        "cache_size": 4096
+        "cache_size": 4096,
+        "roots_shm_cache_size": 10485760
     },
     "storage": {
         "table_dir": "table",
@@ -140,6 +141,6 @@
         }
     },
     "otel": {
-	"enabled": true
+        "enabled": true
     }
 }

@@ -18,6 +18,7 @@
 
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/system_tables.hh>
+#include <sys_tbl_mgr/shm_cache.hh>
 
 #include <test/services.hh>
 
@@ -435,6 +436,9 @@ namespace {
         uint64_t tid = 100001;
         uint64_t index_id = 5003;
 
+        auto cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS, 100*1024);
+        _client->use_roots_cache(cache);
+
         // create table
         PgMsgTable &&msg = _create_table(tid, "x");
 
@@ -480,6 +484,7 @@ namespace {
         _drop_table(tid, "y");
         _finalize();
 
+
         // verify the data at each step
 
         // XID 0
@@ -491,6 +496,11 @@ namespace {
         ASSERT_EQ(metadata->roots.size(), 1);
         ASSERT_EQ(metadata->roots[0].index_id, 0);
         ASSERT_EQ(metadata->stats.row_count, 15);
+
+        ASSERT_EQ(cache->size(), 1);
+        auto cached_msg = cache->find(_db, tid, check_xid); 
+        ASSERT_TRUE(cached_msg);
+
 
         schema_meta = _client->get_schema(_db, tid, {check_xid, constant::MAX_LSN});
         ASSERT_EQ(schema_meta->columns.size(), 2);
@@ -505,6 +515,10 @@ namespace {
         ASSERT_EQ(metadata->roots.size(), 1);
         ASSERT_EQ(metadata->roots[0].extent_id, 100);
         ASSERT_EQ(metadata->stats.row_count, 30);
+
+        ASSERT_EQ(cache->size(), 2);
+        cached_msg = cache->find(_db, tid, check_xid); 
+        ASSERT_TRUE(cached_msg);
 
         schema_meta = _client->get_schema(_db, tid, {check_xid, constant::MAX_LSN});
         ASSERT_EQ(schema_meta->columns.size(), 2);

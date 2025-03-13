@@ -377,21 +377,44 @@ Client::finalize(uint64_t db_id, uint64_t xid)
         "Finalize");
 }
 
+void Client::use_roots_cache(std::shared_ptr<ShmCache> c)
+{
+    _roots_cache.store(std::move(c));
+}
+
 TableMetadataPtr
 Client::get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
 {
-    proto::GetRootsRequest request;
-    request.set_db_id(db_id);
-    request.set_table_id(table_id);
-    request.set_xid(xid);
-
     proto::GetRootsResponse response;
-    retry_rpc(
-        [&]() -> grpc::Status {
-            grpc::ClientContext context;
-            return _stub->GetRoots(&context, request, &response);
-        },
-        "GetRoots");
+    bool found = false;
+
+    auto cache = _roots_cache.load();
+    if (cache) {
+        auto msg = cache->find(db_id, table_id, xid);
+        if (msg) {
+            found = response.ParseFromString(msg.value());
+            CHECK(found);
+        }
+    } 
+
+    if (!found) {
+        proto::GetRootsRequest request;
+        request.set_db_id(db_id);
+        request.set_table_id(table_id);
+        request.set_xid(xid);
+
+        retry_rpc(
+            [&]() -> grpc::Status {
+                grpc::ClientContext context;
+                return _stub->GetRoots(&context, request, &response);
+            },
+            "GetRoots");
+
+        if (cache) {
+            std::string msg = response.SerializeAsString();
+            cache->insert(db_id, table_id, xid, msg);
+        }
+    }
 
     auto metadata = std::make_shared<TableMetadata>();
     for (const auto &root : response.roots()) {

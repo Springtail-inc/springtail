@@ -123,6 +123,7 @@ class Coordinator:
         match self.service_name:
             case "ingestion":
                 self.scheduler.register_component(factory.create_xid_mgr_daemon(), 1)
+                self.scheduler.register_component(factory.create_xid_subscriber_daemon(), 1)
                 self.scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 2)
                 self.scheduler.register_component(factory.create_log_mgr_daemon(), 3)
 
