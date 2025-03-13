@@ -163,12 +163,8 @@ def cleanup_db_instance(props : Properties) -> None:
     # Connect to the database
     conn = connect_db_instance(props, db_name)
 
-    # Execute the cleanup SQL statements
-    execute_sql(conn, "DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_drops;")
-    execute_sql(conn, "DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_ddl;")
-    execute_sql(conn, "DROP FUNCTION IF EXISTS springtail_add_replica_identity_full;")
-    execute_sql(conn, "DROP FUNCTION IF EXISTS springtail_event_trigger_for_drops;")
-    execute_sql(conn, "DROP FUNCTION IF EXISTS springtail_event_trigger_for_ddl;")
+    # Cleanup trigger functions
+    execute_sql(conn, "DROP SCHEMA IF EXISTS __pg_springtail_triggers CASCADE;")
 
     slot_exists = execute_sql_select(conn, "SELECT 1 FROM pg_replication_slots WHERE slot_name = %s;", slot_name)
     if slot_exists:
