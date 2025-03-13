@@ -57,8 +57,8 @@ target_link_libraries(springtail_pg
 )
 
 target_link_libraries(pg_wal_dump
-    PRIVATE springtail_pg
-    PRIVATE PostgreSQL::PostgreSQL
+    PUBLIC springtail_pg
+    #PRIVATE PostgreSQL::PostgreSQL
     PRIVATE Boost::program_options
     PRIVATE nlohmann_json::nlohmann_json
     PUBLIC springtail_common
