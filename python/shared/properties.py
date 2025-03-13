@@ -54,7 +54,7 @@ class Properties:
 
                 # for test env, replication user and password are set in system.json
                 self.replication_user = system_json['org']['replication_user']
-                self.replication_password = system_json['org']['replication_password']
+                self.replication_user_password = system_json['org']['replication_user_password']
 
                 # not in config file, but will be set in production env
                 self.instance_key = None
@@ -159,7 +159,7 @@ class Properties:
             return self.cache['db_instance_config']
 
         config = json.loads(self.redis.hget(key, 'primary_db'))
-        config['password'] = self.replication_password
+        config['password'] = self.replication_user_password
         config['replication_user'] = self.replication_user
         self.cache[key] = config
 
