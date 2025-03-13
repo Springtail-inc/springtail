@@ -42,22 +42,10 @@ jobs:
       GITHUB_LATEST_SHA: ${{ github.event.pull_request.head.sha }}
       NUM_PROCS: ${{ inputs.num_procs }}
     steps:
-      - name: Clean up
-        run: |
-          rm -f /opt/springtail/pids/*
-          rm -f /__w/springtail/springtail/*.{log,gz,xml}
-
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           clean: true
-
-      - name: install-aws-cli-action
-        uses: unfor19/install-aws-cli-action@v1
-        with:
-          version: 2                         # default
-          verbose: false                     # default
-          arch: arm64
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -69,6 +57,8 @@ jobs:
       - name: Prepare Tests
         run: |
           git config --global --add safe.directory /__w/springtail/springtail
+          # Turns off the OTEL in the system.json.settings
+          jq '.otel.enabled = false' system.json.settings > tmp.json && mv tmp.json system.json.settings
           cp system.json.settings system.json.test
           mkdir -p /opt/springtail/pids
           service redis-server start
@@ -105,8 +95,6 @@ jobs:
           make test ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose --stop-on-failure" 2>&1 | tee tmplog
           
           # List the open listening ports and processes info after tests are done
-          sudo apt update
-          sudo apt install net-tools          
           echo "==== Listening Ports ===="
           netstat -tulnp
           # Show the full launching command of each
