@@ -330,7 +330,7 @@ class SysTblMgrClient:
             xid: Transaction ID
             table_id: Table ID
             roots: List of dictionaries representing roots. Each dict should have keys: 'index_id' and 'extent_id'
-            stats: Dictionary with key 'row_count'
+            stats: Dictionary with key 'row_count' and 'end_offset'
             snapshot_xid: Snapshot transaction ID
         Returns:
             Empty message
@@ -338,7 +338,8 @@ class SysTblMgrClient:
         root_objs = [sys_tbl_mgr_pb2.RootInfo(index_id=root['index_id'],
                                             extent_id=root['extent_id'])
                     for root in roots]
-        stats_obj = sys_tbl_mgr_pb2.TableStats(row_count=stats['row_count'])
+        stats_obj = sys_tbl_mgr_pb2.TableStats(row_count=stats['row_count'],
+                                               end_offset=stats['end_offset'])
         request = sys_tbl_mgr_pb2.UpdateRootsRequest(db_id=db_id, xid=xid,
                                                     table_id=table_id,
                                                     roots=root_objs,
