@@ -46,6 +46,7 @@ namespace springtail::pg_log_mgr {
          * @param queue queue to enqueue parsed xactions for xid logger and GC
          */
         PgLogReader(uint64_t db_id, uint32_t queue_size,
+                    const std::filesystem::path &repl_log_path,
                     const std::filesystem::path &xact_log_path,
                     CommitterQueuePtr committer_queue);
 
@@ -218,9 +219,138 @@ namespace springtail::pg_log_mgr {
         };
         using BatchPtr = std::shared_ptr<Batch>;
 
+        class TimestampsAndXids {
+        public:
+            /**
+             * @brief Default constructor
+             *
+             */
+            TimestampsAndXids() = default;
+
+            /**
+             * @brief Default destructor
+             *
+             */
+            ~TimestampsAndXids() = default;
+
+            /**
+             * @brief This function add Postgres Xid and associated timestamp id
+             *
+             * @param pg_xid - Postgres Xid
+             * @param ts     - timestamp id
+             */
+            void
+            add_pg_xid(int32_t pg_xid, uint64_t ts)
+            {
+                std::unique_lock<std::shared_mutex> lock(_mt);
+                DCHECK(!_pg_xid_to_ts.contains(pg_xid));
+                _pg_xid_to_ts.insert(std::make_pair(pg_xid, ts));
+                if (!_ts_to_pg_xid_count.contains(ts)) {
+                    _ts_to_pg_xid_count.insert(std::make_pair(ts, 0));
+                }
+                _ts_to_pg_xid_count[ts]++;
+            }
+
+            /**
+             * @brief This function removes Postgres Xid
+             *
+             * @param pg_xid - Postgres Xid
+             */
+            void
+            remove_pg_xid(int32_t pg_xid)
+            {
+                std::unique_lock<std::shared_mutex> lock(_mt);
+                DCHECK(_pg_xid_to_ts.contains(pg_xid));
+                uint64_t ts = _pg_xid_to_ts[pg_xid];
+                _pg_xid_to_ts.erase(pg_xid);
+                DCHECK(_ts_to_pg_xid_count.contains(ts));
+                _ts_to_pg_xid_count[ts]--;
+                if (_ts_to_pg_xid_count[ts] == 0) {
+                    _ts_to_pg_xid_count.erase(ts);
+                }
+            }
+
+            /**
+             * @brief This function adds Xid for the give Postgres Xid.
+             *
+             * @param pg_xid - Postgres Xid
+             * @param xid    - Springtail Xid
+             */
+            void
+            add_xid(int32_t pg_xid, uint64_t xid)
+            {
+                std::unique_lock<std::shared_mutex> lock(_mt);
+                DCHECK(_pg_xid_to_ts.contains(pg_xid));
+                uint64_t ts = _pg_xid_to_ts[pg_xid];
+                _pg_xid_to_ts.erase(pg_xid);
+                DCHECK(_ts_to_pg_xid_count.contains(ts));
+                _ts_to_pg_xid_count[ts]--;
+                DCHECK(_ts_to_pg_xid_count[ts] >= 0);
+                if (_ts_to_pg_xid_count[ts] == 0) {
+                    _ts_to_pg_xid_count.erase(ts);
+                }
+                DCHECK(!_xid_to_ts.contains(xid));
+                _xid_to_ts.insert(std::make_pair(xid, ts));
+                if (!_ts_to_xid_count.contains(ts)) {
+                    _ts_to_xid_count.insert(std::make_pair(ts, 0));
+                }
+                _ts_to_xid_count[ts]++;
+            }
+
+            /**
+             * @brief This function removes Xid
+             *
+             * @param xid - Springtail Xid
+             */
+            void
+            remove_xid(uint64_t xid)
+            {
+                std::unique_lock<std::shared_mutex> lock(_mt);
+                DCHECK(_xid_to_ts.contains(xid));
+                uint64_t ts = _xid_to_ts[xid];
+                _xid_to_ts.erase(xid);
+                DCHECK(_ts_to_xid_count.contains(ts));
+                _ts_to_xid_count[ts]--;
+                if (_ts_to_xid_count[ts] == 0) {
+                    _ts_to_xid_count.erase(ts);
+                }
+            }
+
+            /**
+             * @brief Get the min timestamp id recorded for Porstgress and Springtail Xids
+             *
+             * @return uint64_t - timestamp id
+             */
+            uint64_t
+            get_min_timestamp()
+            {
+                std::shared_lock<std::shared_mutex> lock(_mt);
+                uint64_t pg_xid_ts = uint64_t(-1);
+                uint64_t xid_ts = uint64_t(-1);
+                if (auto it = _ts_to_pg_xid_count.begin(); it != _ts_to_pg_xid_count.end()) {
+                    pg_xid_ts = it->first;
+                }
+                if (auto it = _ts_to_xid_count.begin(); it != _ts_to_xid_count.end()) {
+                    xid_ts = it->first;
+                }
+                uint64_t min_ts = std::min(pg_xid_ts, xid_ts);
+                return (min_ts == uint64_t(-1))? 0 : min_ts;
+            }
+
+        private:
+            std::map<int32_t, uint64_t> _pg_xid_to_ts;          ///< map Postgres Xid to timestamp id
+            std::map<uint64_t, uint32_t> _ts_to_pg_xid_count;   ///< map to keep the number of times that timestamp ids are used for Postgres Xid
+            std::map<uint64_t, uint64_t> _xid_to_ts;            ///< map Springtail Xid to timestamp id
+            std::map<uint64_t, uint32_t> _ts_to_xid_count;      ///< map to keep the number of times that timestamp ids are used for Springtail Xid
+            std::shared_mutex _mt;                              ///< mutext for access to this class data structures
+        } ;
+
+        uint64_t _pg_log_timestamp{0};      ///< Timestamp id of the current Postgres log
         uint64_t _db_id; ///< The database ID
         uint64_t _committed_xid; ///< The most recently committed XID at startup
         std::filesystem::path _current_path; ///< current log file path
+        std::filesystem::path _repl_log_path;   ///< Path for Postgres logs storage directory
+        std::filesystem::path _xact_log_path;   ///< Path for Springtail logs storage directory
         PgMsgStreamReader _reader;           ///< msg stream reader for log file
         CommitterQueuePtr _committer_queue;  ///< shared queue for committer
         PgTransactionPtr _current_xact;      ///< current transaction
@@ -237,6 +367,11 @@ namespace springtail::pg_log_mgr {
             top-most pgxid and never a subtxn, which are handled within the batch. */
         std::map<int32_t, BatchPtr> _batch_map;
         BatchPtr _current_batch; ///< The batch matching the current pg xid
+
+        TimestampsAndXids _xid_ts_tracker;      ///< Timestamps and Xids tracker object
+
+        /** Function for cleaning up old log files. */
+        void _remove_old_log_files();
 
         /** Worker function that processes the messages from the internal queue. */
         void _msg_worker();

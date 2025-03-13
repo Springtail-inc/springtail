@@ -83,7 +83,6 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             if (itr == _completed_xids.end()) {
                 completed_xid = _xid_mgr->get_committed_xid(db_id, 0);
                 _completed_xids[db_id] = completed_xid;
-                _committed_xids[db_id] = completed_xid;
             } else {
                 completed_xid = itr->second;
             }
@@ -285,6 +284,8 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 _redis_ddl.commit_index_ddl(db_id, xid);
             }
 
+            result->perform_cb(xid);
+
             SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "XID completed: {}@{}", db_id, xid);
         }
 
@@ -352,7 +353,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         coordinator->unregister_threads(daemon_type, cleanup_threads);
     }
 
-    void 
+    void
     Committer::_invalidate_systbl_cache(uint64_t db, const nlohmann::json &completed_ddls)
     {
         auto client = sys_tbl_mgr::Client::get_instance();
@@ -367,7 +368,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         }
     }
 
-    void 
+    void
     Committer::_create_indexer()
     {
         // use the same worker count for Indexer
@@ -567,7 +568,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         auto op_f = wc_schema->get_field("__springtail_op");
         auto wc_fields = wc_schema->get_fields(columns);
         auto wc_key_fields = wc_schema->get_fields(schema->get_sort_keys());
-                
+
         // XXX We know that these operations are sorted in key + LSN order, so we should be
         //     able to perform a more efficient merge using hints.  For a large extent we
         //     could parallelize the mutations.  The one exception is a table truncation,

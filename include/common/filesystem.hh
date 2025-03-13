@@ -13,7 +13,7 @@ namespace springtail {
          * @param directory directory to search
          * @param prefix file name prefix (removed to find number)
          * @param suffix file name suffix (removed to find number)
-         * @return std::filesystem::path path to the latest modified file
+         * @return std::optional<std::filesystem::path> path to the latest modified file
          */
         static std::optional<std::filesystem::path>
         find_latest_modified_file(const std::filesystem::path& directory,
@@ -44,7 +44,11 @@ namespace springtail {
                 }
             }
 
-            // Return the path to the latest modified file, or an empty path if no files were found
+            // Return the path to the latest modified file, or nullopt if no files were found
+            if (latest_file.empty()) {
+                return std::nullopt;
+            }
+
             return latest_file;
         }
 
@@ -53,7 +57,7 @@ namespace springtail {
          * @param directory directory to search
          * @param prefix file name prefix (removed to find number)
          * @param suffix file name suffix (removed to find number)
-         * @return std::filesystem::path path to the earliest modified file
+         * @return std::optional<std::filesystem::path> path to the earliest modified file
          */
         static std::optional<std::filesystem::path>
         find_earliest_modified_file(const std::filesystem::path& directory,
@@ -84,7 +88,7 @@ namespace springtail {
                 }
             }
 
-            // Return the path to the earliest modified file, or an empty path if no files were found
+            // Return the path to the earliest modified file, or nullopt if no files were found
             if (earliest_file.empty()) {
                 return std::nullopt;
             }
@@ -170,6 +174,14 @@ namespace springtail {
             return next_log_file; // Return the path to the next log file, or empty if none found
         }
 
+        /**
+         * @brief This function extracts timestamp id from the file nae
+         *
+         * @param path      - full file path
+         * @param prefix    - file prefix
+         * @param suffix    - file suffix
+         * @return std::optional<uint64_t> - returns timestamp id if it is found in the file name
+         */
         static std::optional<uint64_t>
         extract_timestamp_from_file(const std::filesystem::path& path,
                                      std::string_view prefix,
@@ -186,6 +198,36 @@ namespace springtail {
                 return std::stoull(timestamp_str); // Convert to long long for timestamp
             }
             return std::nullopt; // Return nullopt if the format is incorrect
+        }
+
+        /**
+         * @brief This function removes the all the files from directory with the timestamp id
+         *          less than given timestamp limit
+         *
+         * @param dir       - directory path
+         * @param prefix    - file prefix
+         * @param suffix    - file suffix
+         * @param timestamp_limit   - timestamp id limit
+         */
+        static void
+        cleanup_files_from_dir(const std::filesystem::path& dir,
+                               std::string_view prefix,
+                               std::string_view suffix,
+                               uint64_t timestamp_limit)
+        {
+            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                // Check if it's a regular file and matches the prefix and suffix
+                if (std::filesystem::is_regular_file(entry) &&
+                    entry.path().filename().string().find(prefix) == 0 &&
+                    entry.path().filename().string().find(suffix) != std::string::npos) {
+
+                    // Extract the timestamp from the file name
+                    auto timestamp = extract_timestamp_from_file(entry.path(), prefix, suffix);
+                    if (timestamp.has_value() && timestamp.value() < timestamp_limit) {
+                        std::filesystem::remove(entry.path());
+                    }
+                }
+            }
         }
     };
 } // namespace springtail

@@ -111,10 +111,11 @@ namespace springtail::committer {
         { }
 
         /** Constructor for messages that are XACT_MSG. */
-        XidReady(uint64_t db_id, XactMsg &&msg)
+        XidReady(uint64_t db_id, XactMsg &&msg, std::function<void (uint64_t)> cb = nullptr)
             : _type(Type::XACT_MSG),
               _db_id(db_id),
-              _msg(msg)
+              _msg(msg),
+              _cb(cb)
         { }
 
         /** Constructor for parsing an XidReady out of a redis value. */
@@ -192,10 +193,18 @@ namespace springtail::committer {
             return std::get<SwapMsg>(*_msg);
         }
 
+        /** A function for performing callback with the given xid. */
+        void perform_cb(uint64_t xid) {
+            if (_cb != nullptr) {
+                _cb(xid);
+            }
+        }
+
     private:
         Type _type; ///< The message type.
         uint64_t _db_id; ///< The database ID.
         std::optional<std::variant<XactMsg, SwapMsg>> _msg; ///< The underlying message data.
+        std::function<void (uint64_t)> _cb;     ///< Callback for XactMsg to notify that it is done processing this transaction
     };
 
 }

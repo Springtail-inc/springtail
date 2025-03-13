@@ -267,6 +267,7 @@ namespace springtail
          PgMsgCopySync
         > msg;                 ///< message data
 
+        uint64_t pg_log_timestamp;  ///< timestamp id of the current Postgres log file
         PgMsgEnum msg_type;    ///< type defining union member
         int proto_version;     ///< which protocol version
         bool is_streaming;     ///< is this a streaming message

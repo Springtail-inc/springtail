@@ -20,6 +20,8 @@ PgLogRecovery::repair_logs()
     if (latest_log) {
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Found latest log file: {}", *latest_log);
         lsn = PgMsgStreamReader::scan_log(*latest_log, true);
+    } else {
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Did not find any files in directory: {}", _repl_path.string());
     }
 
     return lsn;
