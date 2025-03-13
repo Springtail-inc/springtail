@@ -23,7 +23,7 @@
         "openssl",
         "c-ares",
         { "name": "aws-sdk-cpp",
-          "features": ["secretsmanager"] }
+          "features": ["secretsmanager"] },
         { "name": "grpc", "features": ["codegen", "otel"] },
         { "name": "opentelemetry-cpp", "features": ["otlp-http", "prometheus"] }
     ],
