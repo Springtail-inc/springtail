@@ -373,6 +373,7 @@ Client::get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
         metadata->roots.push_back({root.index_id(), root.extent_id()});
     }
     metadata->stats.row_count = response.stats().row_count();
+    metadata->stats.end_offset = response.stats().end_offset();
     metadata->snapshot_xid = response.snapshot_xid();
 
     return metadata;
