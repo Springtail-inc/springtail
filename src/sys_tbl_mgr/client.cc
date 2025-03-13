@@ -33,7 +33,7 @@ Client::Client()
         throw Error("Sys tbl mgr RPC settings not found");
     }
 
-    auto channel = create_channel(server, rpc_json);
+    auto channel = grpc_client::create_channel("SysTblMgr", server, rpc_json);
     _stub = proto::SysTblMgr::NewStub(channel);
     _schema_cache = std::make_shared<SchemaCache>(cache_size);
 }
@@ -44,12 +44,10 @@ Client::ping()
     google::protobuf::Empty request;
     google::protobuf::Empty response;
 
-    retry_rpc(
-        [&]() -> grpc::Status {
-            grpc::ClientContext context;
-            return _stub->Ping(&context, request, &response);
-        },
-        "Ping");
+    grpc_client::retry_rpc("SysTblMgr", "Ping",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->Ping(context, request, &response);
+                           });
 }
 
 template <typename Req>
@@ -117,12 +115,10 @@ Client::create_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
     auto request = _gen_table_request(db_id, xid, msg);
     proto::DDLStatement response;
 
-    retry_rpc(
-        [&]() -> grpc::Status {
-            grpc::ClientContext context;
-            return _stub->CreateTable(&context, request, &response);
-        },
-        "CreateTable");
+    grpc_client::retry_rpc("SysTblMgr", "CreateTable",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->CreateTable(context, request, &response);
+                           });
 
     if (response.statement().empty()) {
         throw SysTblMgrError();
@@ -137,12 +133,10 @@ Client::alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
     auto request = _gen_table_request(db_id, xid, msg);
     proto::DDLStatement response;
 
-    retry_rpc(
-        [&]() -> grpc::Status {
-            grpc::ClientContext context;
-            return _stub->AlterTable(&context, request, &response);
-        },
-        "AlterTable");
+    grpc_client::retry_rpc("SysTblMgr", "AlterTable",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->AlterTable(context, request, &response);
+                           });
 
     if (response.statement().empty()) {
         throw SysTblMgrError();
@@ -164,12 +158,10 @@ Client::drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg)
     request.set_name(msg.table);
 
     proto::DDLStatement response;
-    retry_rpc(
-        [&]() -> grpc::Status {
-            grpc::ClientContext context;
-            return _stub->DropTable(&context, request, &response);
-        },
-        "DropTable");
+    grpc_client::retry_rpc("SysTblMgr", "DropTable",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->DropTable(context, request, &response);
+                           });
 
     if (response.statement().empty()) {
         throw SysTblMgrError();
@@ -200,12 +192,10 @@ Client::alter_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace 
     request.set_name(msg.name);
 
     proto::DDLStatement response;
-    retry_rpc(
-        [&]() -> grpc::Status {
-            grpc::ClientContext context;
-            return _stub->AlterNamespace(&context, request, &response);
-        },
-        "AlterNamespace");
+    grpc_client::retry_rpc("SysTblMgr", "AlterNamespace",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->AlterNamespace(context, request, &response);
+                           });
 
     if (response.statement().empty()) {
         throw SysTblMgrError("No DDL statement");
@@ -222,12 +212,10 @@ Client::drop_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &
     request.set_name(msg.name);
 
     proto::DDLStatement response;
-    retry_rpc(
-        [&]() -> grpc::Status {
-            grpc::ClientContext context;
-            return _stub->DropNamespace(&context, request, &response);
-        },
-        "DropNamespace");
+    grpc_client::retry_rpc("SysTblMgr", "DropNamespace",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->DropNamespace(context, request, &response);
+                           });
 
     if (response.statement().empty()) {
         throw SysTblMgrError("No DDL statement");
@@ -246,12 +234,10 @@ Client::create_index(uint64_t db_id,
     index->set_state(static_cast<int32_t>(state));
 
     proto::DDLStatement response;
-    retry_rpc(
-        [&]() -> grpc::Status {
-            grpc::ClientContext context;
-            return _stub->CreateIndex(&context, request, &response);
-        },
-        "CreateIndex");
+    grpc_client::retry_rpc("SysTblMgr", "CreateIndex",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->CreateIndex(context, request, &response);
+                           });
 
     if (response.statement().empty()) {
         throw SysTblMgrError("No DDL statement");
@@ -277,12 +263,10 @@ Client::set_index_state(uint64_t db_id,
     request.set_state(static_cast<int32_t>(state));
 
     google::protobuf::Empty response;
-    retry_rpc(
-        [&]() -> grpc::Status {
-            grpc::ClientContext context;
-            return _stub->SetIndexState(&context, request, &response);
-        },
-        "SetIndexState");
+    grpc_client::retry_rpc("SysTblMgr", "SetIndexState",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->SetIndexState(context, request, &response);
+                           });
 
     // Automatically invalidate the schema cache from the provided XID
     invalidate_table(db_id, table_id, xid);
@@ -302,12 +286,10 @@ Client::get_index_info(uint64_t db_id,
     }
 
     proto::IndexInfo response;
-    retry_rpc(
-        [&]() -> grpc::Status {
-            grpc::ClientContext context;
-            return _stub->GetIndexInfo(&context, request, &response);
-        },
-        "GetIndexInfo");
+    grpc_client::retry_rpc("SysTblMgr", "GetIndexInfo",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->GetIndexInfo(context, request, &response);
+                           });
 
     return response;
 }
@@ -321,12 +303,10 @@ Client::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
     request.set_namespace_name(msg.namespace_name);
 
     proto::DDLStatement response;
-    retry_rpc(
-        [&]() -> grpc::Status {
-            grpc::ClientContext context;
-            return _stub->DropIndex(&context, request, &response);
-        },
-        "DropIndex");
+    grpc_client::retry_rpc("SysTblMgr", "DropIndex",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->DropIndex(context, request, &response);
+                           });
 
     // Automatically invalidate the schema cache from the provided XID
     _schema_cache->invalidate_by_index(db_id, msg.oid, xid);
@@ -354,12 +334,10 @@ Client::update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const Tabl
     request.set_snapshot_xid(metadata.snapshot_xid);
 
     google::protobuf::Empty response;
-    retry_rpc(
-        [&]() -> grpc::Status {
-            grpc::ClientContext context;
-            return _stub->UpdateRoots(&context, request, &response);
-        },
-        "UpdateRoots");
+    grpc_client::retry_rpc("SysTblMgr", "UpdateRoots",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->UpdateRoots(context, request, &response);
+                           });
 }
 
 void
@@ -370,12 +348,10 @@ Client::finalize(uint64_t db_id, uint64_t xid)
     request.set_xid(xid);
 
     google::protobuf::Empty response;
-    retry_rpc(
-        [&]() -> grpc::Status {
-            grpc::ClientContext context;
-            return _stub->Finalize(&context, request, &response);
-        },
-        "Finalize");
+    grpc_client::retry_rpc("SysTblMgr", "Finalize",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->Finalize(context, request, &response);
+                           });
 }
 
 TableMetadataPtr
@@ -387,12 +363,10 @@ Client::get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
     request.set_xid(xid);
 
     proto::GetRootsResponse response;
-    retry_rpc(
-        [&]() -> grpc::Status {
-            grpc::ClientContext context;
-            return _stub->GetRoots(&context, request, &response);
-        },
-        "GetRoots");
+    grpc_client::retry_rpc("SysTblMgr", "GetRoots",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->GetRoots(context, request, &response);
+                           });
 
     auto metadata = std::make_shared<TableMetadata>();
     for (const auto &root : response.roots()) {
@@ -480,12 +454,10 @@ Client::get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
         request.set_lsn(xid.lsn);
 
         proto::GetSchemaResponse response;
-        retry_rpc(
-            [&]() -> grpc::Status {
-                grpc::ClientContext context;
-                return _stub->GetSchema(&context, request, &response);
-            },
-            "GetSchema");
+        grpc_client::retry_rpc("SysTblMgr", "GetSchema",
+                               [this, &request, &response](grpc::ClientContext *context) {
+                                   return _stub->GetSchema(context, request, &response);
+                               });
 
         return _pack_metadata(response);
     };
@@ -509,12 +481,10 @@ Client::get_target_schema(uint64_t db_id,
     request.set_target_lsn(target_xid.lsn);
 
     proto::GetSchemaResponse response;
-    retry_rpc(
-        [&]() -> grpc::Status {
-            grpc::ClientContext context;
-            return _stub->GetTargetSchema(&context, request, &response);
-        },
-        "GetTargetSchema");
+    grpc_client::retry_rpc("SysTblMgr", "GetTargetSchema",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->GetTargetSchema(context, request, &response);
+                           });
 
     return _pack_metadata(response);
 }
@@ -527,12 +497,10 @@ Client::exists(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
     request.set_table_id(table_id);
     google::protobuf::Empty response;
 
-    auto status = retry_rpc_status(
-        [&]() {
-            grpc::ClientContext context;
-            return _stub->Exists(&context, request, &response);
-        },
-        "Exists");
+    auto status = grpc_client::retry_rpc_status(
+        "SysTblMgr", "Exists", [this, &request, &response](grpc::ClientContext *context) {
+            return _stub->Exists(context, request, &response);
+        });
 
     if (status.error_code() == grpc::StatusCode::NOT_FOUND) {
         return false;
@@ -546,12 +514,10 @@ std::string
 Client::create_namespace(const proto::NamespaceRequest &request)
 {
     proto::DDLStatement response;
-    retry_rpc(
-        [&]() -> grpc::Status {
-            grpc::ClientContext context;
-            return _stub->CreateNamespace(&context, request, &response);
-        },
-        "CreateNamespace");
+    grpc_client::retry_rpc("SysTblMgr", "CreateNamespace",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->CreateNamespace(context, request, &response);
+                           });
 
     if (response.statement().empty()) {
         throw SysTblMgrError("No DDL statement");
@@ -574,12 +540,10 @@ Client::swap_sync_table(const proto::NamespaceRequest &namespace_req,
     *request.mutable_roots_req() = roots_req;
 
     proto::DDLStatement response;
-    retry_rpc(
-        [&]() -> grpc::Status {
-            grpc::ClientContext context;
-            return _stub->SwapSyncTable(&context, request, &response);
-        },
-        "SwapSyncTable");
+    grpc_client::retry_rpc("SysTblMgr", "SwapSyncTable",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->SwapSyncTable(context, request, &response);
+                           });
 
     if (response.statement().empty()) {
         throw SysTblMgrError();

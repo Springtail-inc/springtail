@@ -14,7 +14,7 @@
 
 namespace springtail {
 
-class WriteCacheClient : public Singleton<WriteCacheClient>, public GrpcClient<WriteCacheClient> {
+class WriteCacheClient : public Singleton<WriteCacheClient> {
     friend class Singleton<WriteCacheClient>;
 
 public:

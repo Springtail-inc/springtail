@@ -1,3 +1,4 @@
+import glob
 import os
 import sys
 import shutil
@@ -217,6 +218,23 @@ def install_fdw(build_dir : str) -> None:
         # create the debug symbols
         print(f"Creating debug symbols for the shared library: {lib_dir}")
         run_command('dsymutil', [lib_dir])
+
+    # copy the dependent springtail libraries to the lib directory
+    shlib_dir = '/usr/lib/springtail'
+    print(f"Copying dependent libraries to the shared lib directory: {shlib_dir}")
+
+    run_command('sudo', ['mkdir', '-p', shlib_dir])
+    run_command('sudo', ['cp', '-a'] + glob.glob(os.path.join(parent_dir, 'shared-lib', '*')) + [shlib_dir])
+
+    # install the environment file
+    # XXX we should consider calling 'SHOW config_file;' from within
+    #     psql to get the correct directory location
+    env_file = os.path.join(parent_dir, 'src', 'pg_fdw', 'environment')
+    print(f"Installing environment file: {env_file}")
+    if is_linux():
+        run_command('sudo', ['cp', env_file, '/etc/postgresql/16/main/'])
+    else:
+        run_command('sudo', ['cp', env_file, '/opt/homebrew/var/postgresql@16/'])
 
     # start postgres
     print("Starting postgres...")
