@@ -175,7 +175,7 @@ jobs:
           _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
           
           _TIMESTAMP=$(date +"%Y-%m-%d-%H-%M-%S")
-          log_file="integration-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log" 
+          log_file="integration-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log.tar.gz" 
           tar zcvf $log_file tmplog
           rm tmplog
           
