@@ -76,7 +76,8 @@ class Properties:
                     'MOUNT_POINT': system_json['fs']['mount_point'],
                     'LUSTRE_MOUNT_NAME': system_json['fs']['mount_name'],
                     'LUSTRE_DNS_NAME': system_json['fs']['dns_name'],
-                    'FDW_USER_PASSWORD': self.fdw_user_password
+                    'FDW_USER_PASSWORD': self.fdw_user_password,
+                    'REPLICATION_USER_PASSWORD': self.replication_user_password
                 }
 
                 for (key, value) in env_vars.items():
