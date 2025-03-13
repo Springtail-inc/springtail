@@ -97,7 +97,7 @@ bool read_client_final_message(ScramState *scram_state, const uint8_t *raw_input
 			       char **proof_p);
 
 char *build_server_first_message(ScramState *scram_state,
-				 const char *username, const char *stored_secret);
+				 const char *username, const char *stored_secret, PasswordType type);
 
 char *build_server_final_message(ScramState *scram_state);
 

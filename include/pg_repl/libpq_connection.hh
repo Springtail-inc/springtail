@@ -176,7 +176,7 @@ namespace springtail {
          * @brief escape a string; a literal not for identifiers
          *
          * @param str string to escape
-         * @return string with escaped characters
+         * @return string with escaped characters; does NOT include ''
          */
         std::string escape_string(const std::string &str);
 

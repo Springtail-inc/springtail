@@ -141,6 +141,6 @@
         }
     },
     "otel": {
-	"enabled": true
+	    "enabled": true
     }
 }
