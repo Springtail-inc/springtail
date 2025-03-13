@@ -5,6 +5,7 @@ import sys
 import time
 import tempfile
 import json
+import glob
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from botocore.exceptions import ClientError
@@ -24,6 +25,8 @@ from aws import AwsHelper
 
 S3_BIN_FOLDER = 'packages'
 S3_DOWNLOAD_PATH = '/tmp/'
+
+SHARED_LIB_DIR = '/usr/lib/springtail'
 
 # NOTE: this should match the environment variables in common/environment.hh
 ENV_VARS = [
@@ -110,6 +113,11 @@ class Production:
 
             # Install the binaries
             run_command('sudo', ['tar', 'xzf', springtail_tgz, '-C', self.install_path])
+
+            shlib_dir = SHARED_LIB_DIR
+
+            run_command('sudo', ['mkdir', '-p', shlib_dir])
+            run_command('sudo', ['cp', '-a'] + glob.glob(os.path.join(self.install_path, 'shared-lib', '*')) + [shlib_dir])
 
             self.logger.info(f"Springtail binaries installed to {self.install_path}")
             self.send_sns('install_complete', version=os.path.basename(springtail_tgz))
