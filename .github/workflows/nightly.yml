@@ -246,7 +246,7 @@ jobs:
         if: success()
         run: |
           ./package.sh
-          aws s3 cp "releases/$(ls -t releases/*.tgz | head -n1)" s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/
+          aws s3 cp "$(ls -t releases/*.tgz | head -n1)" s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/
 
       - name: Notify Slack on success
         if: success()
@@ -281,6 +281,8 @@ jobs:
                 }
               ]
             }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
       - name: Notify Slack on failure
         if: failure()
@@ -315,3 +317,5 @@ jobs:
                 }
               ]
             }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

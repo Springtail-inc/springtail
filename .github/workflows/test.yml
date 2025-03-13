@@ -195,7 +195,7 @@ jobs:
           echo "*** Integration Test Log S3 Key: $integration_test_log_s3key"
 
           # Only upload Springtail logs if the _LOG_FLAG is 'failed'
-          if [ "$_LOG_FLAG" == "failed" ]; then
+          if [ "$_LOG_FLAG" = "failed" ]; then
             # Springtail service log
             echo "Integration test failed, uploading Springtail logs..."
             springtail_log_file="springtail-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.tar.gz"
