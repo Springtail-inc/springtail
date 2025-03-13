@@ -177,6 +177,9 @@ class TestSet:
         logging.debug('Perform the global cleanup()')
         self._config.cleanup()
 
+        # stop the proxy
+        springtail.stop_proxy(self._props)
+
         return not test_failed
 
 

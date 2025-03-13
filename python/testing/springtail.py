@@ -68,7 +68,7 @@ PROXY_DAEMONS = [
     ('proxy', 'src/proxy/proxy')
 ]
 
-ALL_DAEMONS = CORE_DAEMONS + FDW_DAEMONS + PROXY_DAEMONS
+ALL_DAEMONS = CORE_DAEMONS + FDW_DAEMONS
 
 ALL_DAEMONS_NAMES = [name[0] for name in ALL_DAEMONS]
 
@@ -127,6 +127,20 @@ def connect_fdw_instance(props : Properties, db_name : str ='postgres') -> psyco
 
     return conn
 
+def connect_proxy(props : Properties, db_name : str ='postgres') -> psycopg2.extensions.connection:
+    """Connect to the database instance and return connection."""
+    # Get the database instance configuration
+    proxy_config = props.get_proxy_config()
+    db_instance_config = props.get_db_instance_config()
+    db_host = props.get_hostname('proxy')
+    db_port = proxy_config['port']
+    db_user = db_instance_config['replication_user']
+    db_password = db_instance_config['password']
+
+    # Connect to the database
+    conn = connect_db(db_name, db_user, db_password, db_host, db_port)
+
+    return conn
 
 def cleanup_db_instance(props : Properties) -> None:
     """Cleanup the database instance.
@@ -315,12 +329,17 @@ def start_fdw_daemons(props : Properties,
     start_daemons(build_dir, daemons)
 
 
-def start_proxy(props : Properties, build_dir : str) -> None:
+def start_proxy(props : Properties, build_dir : str, restart: bool = False) -> None:
     """Start the proxy."""
     # Start the proxy
     print("Starting proxy...")
-    start_daemons(build_dir, PROXY_DAEMONS)
+    start_daemons(build_dir, PROXY_DAEMONS, restart)
 
+def stop_proxy(props : Properties) -> None:
+    """Stop the proxy."""
+    # Stop the proxy
+    print("Stopping proxy...")
+    stop_daemons(props.get_pid_path(), PROXY_DAEMONS)
 
 def wait_for_running(props : Properties) -> None:
     """Wait for the system to be in a running state."""
@@ -499,6 +518,9 @@ def restart(props: Properties,
     start_fdw_daemons(props, build_dir)
     fixup_log_perms(props)
 
+    # start the proxy
+    start_proxy(props, build_dir, True)
+
     print("\nSpringtail system restarted successfully.")
 
 
@@ -576,6 +598,9 @@ def start(config_file: str,
     print("\nStarting FDW daemons...")
     start_fdw_daemons(props, build_dir, config_file)
     fixup_log_perms(props)
+
+    # start the proxy
+    start_proxy(props, build_dir)
 
     print("\nSpringtail system started successfully.")
 
@@ -794,7 +819,7 @@ if __name__ == "__main__":
             sys.exit(0)
 
         if args.start:
-            start(args.config_file, args.build_dir, args.sql_file, 
+            start(args.config_file, args.build_dir, args.sql_file,
                   do_cleanup=not args.no_cleanup, do_init=not args.no_cleanup, start_xid=args.start_xid)
 
     except Exception as e:
