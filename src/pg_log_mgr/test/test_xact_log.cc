@@ -47,21 +47,6 @@ namespace {
             // Convert duration to milliseconds
             return std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
         }
-
-        static void wait_for_file(const std::filesystem::path &dir, uint64_t timestamp, size_t size) {
-            auto file = fs::create_log_file_with_timestamp(dir, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX, timestamp);
-            while (!std::filesystem::exists(file)) {
-                usleep(500);
-            }
-            std::error_code ec;
-            while (true) {
-                uintmax_t file_size = std::filesystem::file_size(file, ec);
-                if (ec.value() == 0 && file_size >= size) {
-                    break;
-                }
-                usleep(500);
-            }
-        }
     };
 
     TEST_F(XactLogRW_Test, XactLogWriter) {
@@ -75,8 +60,6 @@ namespace {
         writer.log(2, 11);
 
         writer.close();
-
-        wait_for_file(p, timestamp, 73);
 
         // read the log file and verify
         PgXactLogReader reader(p);

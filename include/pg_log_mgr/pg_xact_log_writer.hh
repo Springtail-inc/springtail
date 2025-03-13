@@ -57,6 +57,8 @@ private:
 
     /** fsync thread */
     void _fsync_worker();
+
+    void _flush_current_extent();
 };
 
 using PgXactLogWriterPtr = std::shared_ptr<PgXactLogWriter>;

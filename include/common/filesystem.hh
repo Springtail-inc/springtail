@@ -201,7 +201,7 @@ namespace springtail {
         }
 
         /**
-         * @brief This function removes the all the files from directory with the timestamp id
+         * @brief This function removes all the files from directory with the timestamp id
          *          less than given timestamp limit
          *
          * @param dir       - directory path
