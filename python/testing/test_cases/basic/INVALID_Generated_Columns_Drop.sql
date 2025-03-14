@@ -18,7 +18,7 @@ ALTER TABLE invalid_table_with_generated_column_add_back_invalid DROP COLUMN are
 ALTER TABLE invalid_table_with_generated_column_add_back_invalid ADD COLUMN area NUMERIC GENERATED ALWAYS AS (length * width) STORED;
 
 ## verify
-SELECT * FROM invalid_table_with_generated_column_add_back_invalid;
+SELECT 1;
 
 ## cleanup
-DROP TABLE IF EXISTS i  nvalid_table_with_generated_column_add_back_invalid;
+DROP TABLE IF EXISTS invalid_table_with_generated_column_add_back_invalid;

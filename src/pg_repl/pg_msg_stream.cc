@@ -835,26 +835,6 @@ namespace springtail {
         return msg;
     }
 
-    nlohmann::json
-    PgMsgStreamReader::_validate_ddl_and_get_invalid_columns(std::string namespace_name, uint64_t table_oid,
-                                                         const std::vector<PgMsgSchemaColumn> &columns)
-    {
-        auto invalid_columns = nlohmann::json::array();
-        // Validate if the table has an invalid column
-        for (const auto& column : columns) {
-            if ( column.is_generated || column.is_non_standard_collation || !column.is_user_defined_type ){
-                invalid_columns.push_back({
-                    {"name", column.column_name},
-                    {"type_name", column.type_name},
-                    {"collation", column.collation}
-                });
-                SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "VALIDATE_DDL: Invalid column: name={}, tid={}", column.column_name, table_oid);
-            }
-        }
-
-        return invalid_columns;
-    }
-
     void
     PgMsgStreamReader::_decode_schema_columns(const nlohmann::json &column_json,
                                               std::vector<PgMsgSchemaColumn> &columns)
@@ -1184,55 +1164,9 @@ namespace springtail {
         _read_buffer(buffer.data(), data_len);
 
         if (msg.prefix_str == pg_msg::MSG_PREFIX_CREATE_TABLE) {
-            PgMsgPtr create_table_msg = _decode_create_table(msg, buffer.data(), data_len);
-
-            const auto& table_msg = std::get<PgMsgTable>(create_table_msg->msg);
-            // Validate the columns to see if there are any invalid columns present as part of the
-            // create table statement. If present, prevent the message from being processed.
-            auto invalid_columns = _validate_ddl_and_get_invalid_columns(table_msg.namespace_name, table_msg.oid, table_msg.columns);
-            if ( invalid_columns.size() > 0 ){
-                nlohmann::json table_info = {
-                    {"schema", table_msg.namespace_name},
-                    {"table", table_msg.oid},
-                    {"columns", invalid_columns}
-                };
-
-                populate_invalid_tables_in_redis(table_msg.oid, table_info);
-
-                return nullptr;
-            }
-            return create_table_msg;
+            return _decode_create_table(msg, buffer.data(), data_len);
         } else if (msg.prefix_str == pg_msg::MSG_PREFIX_ALTER_TABLE) {
-            PgMsgPtr alter_table_msg = _decode_alter_table(msg, buffer.data(), data_len);
-
-            const auto& table_msg = std::get<PgMsgTable>(alter_table_msg->msg);
-
-            // Validate the columns to see if there are any invalid columns present as part of the
-            // alter table statement. If present, prevent the message from being processed.
-            auto invalid_columns = _validate_ddl_and_get_invalid_columns(table_msg.namespace_name, table_msg.oid, table_msg.columns);
-
-            // If there are invalid columns as part of ALTER TABLE script
-            // Populate the invalid fields in the cache and drop the table as part of _apply_schema_change
-
-            // If there are no invalid columns, check if the table is previously invalid. If yes, then switch the alter to a create
-            if ( invalid_columns.size() > 0 ){
-                // There are invalid columns present as part of the alter
-                nlohmann::json table_info = {
-                    {"schema", table_msg.namespace_name},
-                    {"table", table_msg.oid},
-                    {"columns", invalid_columns}
-                };
-
-                populate_invalid_tables_in_redis(table_msg.oid, table_info);
-            } else {
-                // Table is valid, but check if the table is previously invalid. Then switch the type to a CREATE instead of an alter
-                if (check_if_table_is_invalid_in_redis(table_msg.oid)){
-                    alter_table_msg->msg_type = PgMsgEnum::CREATE_TABLE;
-                    return alter_table_msg;
-                }
-            }
-
-            return alter_table_msg;
+            return _decode_alter_table(msg, buffer.data(), data_len);
         } else if (msg.prefix_str == pg_msg::MSG_PREFIX_DROP_TABLE) {
             return _decode_drop_table(msg, buffer.data(), data_len);
         } else if (msg.prefix_str == pg_msg::MSG_PREFIX_CREATE_NAMESPACE) {

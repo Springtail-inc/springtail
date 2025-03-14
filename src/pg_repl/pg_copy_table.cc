@@ -818,7 +818,7 @@ namespace springtail
                 };
 
                 // Store in Redis
-                populate_invalid_tables_in_redis(table_oid, table_info);
+                TableValidator::populate_invalid_tables_in_redis(table_oid, table_info);
 
                 continue;
             }

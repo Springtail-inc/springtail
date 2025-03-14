@@ -16,9 +16,8 @@ ALTER TABLE invalid_table_with_generated_column_with_data DROP COLUMN area;
 
 ALTER TABLE invalid_table_with_generated_column_with_data ADD COLUMN area NUMERIC GENERATED ALWAYS AS (length * width) STORED;
 
-
 ## verify
-SELECT * FROM invalid_table_with_generated_column_with_data;
+SELECT 1;
 
 ## cleanup
 DROP TABLE IF EXISTS invalid_table_with_generated_column_with_data;

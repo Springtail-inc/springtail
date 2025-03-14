@@ -414,6 +414,26 @@ namespace springtail::pg_log_mgr {
         }
     }
 
+    nlohmann::json
+    PgLogReader::Batch::_validate_ddl_and_get_invalid_columns(std::string namespace_name, uint64_t table_oid,
+                                                         const std::vector<PgMsgSchemaColumn> &columns)
+    {
+        auto invalid_columns = nlohmann::json::array();
+        // Validate if the table has an invalid column
+        for (const auto& column : columns) {
+            if ( column.is_generated || column.is_non_standard_collation || !column.is_user_defined_type ){
+                invalid_columns.push_back({
+                    {"name", column.column_name},
+                    {"type_name", column.type_name},
+                    {"collation", column.collation}
+                });
+                SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "VALIDATE_DDL: Invalid column: name={}, tid={}", column.column_name, table_oid);
+            }
+        }
+
+        return invalid_columns;
+    }
+
     void
     PgLogReader::Batch::_apply_schema_change(PgMsgPtr change,
                                              const XidLsn &xidlsn)
@@ -425,13 +445,27 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::CREATE_TABLE:
             {
                 auto &table_msg = std::get<PgMsgTable>(change->msg);
+
+                auto invalid_columns = _validate_ddl_and_get_invalid_columns(
+                    table_msg.namespace_name, table_msg.oid, table_msg.columns);
+                if ( invalid_columns.size() > 0 ){
+                    nlohmann::json table_info = {
+                        {"schema", table_msg.namespace_name},
+                        {"table", table_msg.oid},
+                        {"columns", invalid_columns}
+                    };
+
+                    TableValidator::populate_invalid_tables_in_redis(table_msg.oid, table_info);
+                    break;
+                }
+
                 std::string &&ddl_stmt = client->create_table(_db, xidlsn, table_msg);
                 redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
 
-                if (check_if_table_is_invalid_in_redis(table_msg.oid)){
+                if (TableValidator::check_if_table_is_invalid_in_redis(table_msg.oid)){
                     SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Altering invalid table to valid with tid {}", table_msg.oid);
                     // The table is no longer invalid, remove the redis entry for the table
-                    clear_invalid_table_in_redis(table_msg.oid);
+                    TableValidator::clear_invalid_table_in_redis(table_msg.oid);
                     // Trigger a resync to ensure the data is pulled for the table
                     _mark_table_resync(table_msg.oid, xidlsn);
                 }
@@ -443,7 +477,19 @@ namespace springtail::pg_log_mgr {
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "ALTER TABLE: xid={}, pg_xid={}, tid={}",
                                     xidlsn.xid, table_msg.xid, table_msg.oid);
 
-                if (check_if_table_is_invalid_in_redis(table_msg.oid)){
+                auto invalid_columns = _validate_ddl_and_get_invalid_columns(
+                    table_msg.namespace_name, table_msg.oid, table_msg.columns);
+                if ( invalid_columns.size() > 0 ){
+                    // There are invalid columns present as part of the alter
+                    nlohmann::json table_info = {
+                        {"schema", table_msg.namespace_name},
+                        {"table", table_msg.oid},
+                        {"columns", invalid_columns}
+                    };
+
+                    TableValidator::populate_invalid_tables_in_redis(table_msg.oid, table_info);
+
+                    // Drop the table in FDW
                     SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Dropping invalid table as part of alter: xid={}, pg_xid={}, tid={}",
                                     xidlsn.xid, table_msg.xid, table_msg.oid);
                     PgMsgDropTable drop_table_msg;
@@ -456,6 +502,18 @@ namespace springtail::pg_log_mgr {
                     std::string &&ddl_stmt = client->drop_table(_db, xidlsn, drop_table_msg);
                     redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                     break;
+                } else {
+                    // Table is valid, but check if the table is previously invalid.
+                    // If the table was invalid before then switch the type to a CREATE instead of an ALTER
+                    if (TableValidator::check_if_table_is_invalid_in_redis(table_msg.oid)){
+                        std::string &&ddl_stmt = client->create_table(_db, xidlsn, table_msg);
+                        redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                        // The table is no longer invalid, remove the redis entry for the table
+                        TableValidator::clear_invalid_table_in_redis(table_msg.oid);
+
+                        // XXX Should there be a resync here?
+                        break;
+                    }
                 }
 
                 std::string &&ddl_stmt = client->alter_table(_db, xidlsn, table_msg);
@@ -621,7 +679,7 @@ namespace springtail::pg_log_mgr {
                 auto &insert = std::get<PgMsgInsert>(msg->msg);
                 int32_t pg_xid = (msg->is_streaming) ? insert.xid : _current_xact->xid;
 
-                if (check_if_table_is_invalid_in_redis(insert.rel_id)){
+                if (TableValidator::check_if_table_is_invalid_in_redis(insert.rel_id)){
                     SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Prevent DML for invalid table with tid {}", insert.rel_id);
                     break;
                 }
@@ -635,7 +693,7 @@ namespace springtail::pg_log_mgr {
                 auto &remove = std::get<PgMsgDelete>(msg->msg);
                 int32_t pg_xid = (msg->is_streaming) ? remove.xid : _current_xact->xid;
 
-                if (check_if_table_is_invalid_in_redis(remove.rel_id)){
+                if (TableValidator::check_if_table_is_invalid_in_redis(remove.rel_id)){
                     SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Prevent DML for invalid table with tid {}", remove.rel_id);
                     break;
                 }
@@ -649,7 +707,7 @@ namespace springtail::pg_log_mgr {
                 auto &update = std::get<PgMsgUpdate>(msg->msg);
                 int32_t pg_xid = (msg->is_streaming) ? update.xid : _current_xact->xid;
 
-                if (check_if_table_is_invalid_in_redis(update.rel_id)){
+                if (TableValidator::check_if_table_is_invalid_in_redis(update.rel_id)){
                     SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Prevent DML for invalid table with tid {}", update.rel_id);
                     break;
                 }

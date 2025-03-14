@@ -134,6 +134,18 @@ namespace springtail::pg_log_mgr {
              */
             void schema_change(int32_t tid, int32_t pg_xid, PgMsgPtr msg);
 
+            /**
+            * @brief Validate the DDL operation and get the list of invalid columns
+            *
+            * @param namespace_name Namespace name
+            * @param table_oid OID of the table
+            * @param columns Vector of original columns as part of the DDL
+            * @return JSON object containing the list of invalid columns with meta information
+            */
+            static nlohmann::json _validate_ddl_and_get_invalid_columns(std::string namespace_name,
+                                                                    uint64_t table_oid,
+                                                                    const std::vector<PgMsgSchemaColumn> &columns);
+
         private:
             //// INTERNAL STRUCTURES
             using ChangeEntry = std::pair<PgMsgPtr, uint64_t>;
