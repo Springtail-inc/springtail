@@ -257,10 +257,9 @@ jobs:
         if: success()
         uses: slackapi/slack-github-action@v2.0.0
         with:
+          webhook: ${{ env.SLACK_WEBHOOK_URL }}
           webhook-type: incoming-webhook
           payload: |
-            # The payload should carry as much information about the 's3://' paths of assets as possible
-            # To this `nightly-builds` channel,
             {
               "channel": "${{ env.SLACK_CHANNEL}}",
               "text": ":tada: :tada: Nightly Build & Test Success",
@@ -291,10 +290,9 @@ jobs:
         if: failure()
         uses: slackapi/slack-github-action@v2.0.0
         with:
+          webhook: ${{ env.SLACK_WEBHOOK_URL }}
           webhook-type: incoming-webhook
           payload: |
-            # The payload should carry as much information about the 's3://' paths of assets as possible
-            # To this `nightly-builds` channel,
             {
               "channel": "${{ env.SLACK_CHANNEL }}",
               "text": ":crying_cat_face: Nightly Build & Test Failed ",
