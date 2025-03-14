@@ -8,7 +8,6 @@
 #include <common/properties.hh>
 #include <common/threaded_test.hh>
 
-
 #include <sys_tbl_mgr/client.hh>
 #include "sys_tbl_mgr/shm_cache.hh"
 #include <test/services.hh>
@@ -73,6 +72,7 @@ namespace {
         // this the same cache created by PgXidSubscriber
         std::unique_ptr<sys_tbl_mgr::ShmCache> cache;
 
+        // wait for PgXidSubscriberMgr to create the cache
         for (size_t i = 0; i != 100; ++i) {
             try {
                 cache = std::make_unique<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS);
@@ -86,7 +86,6 @@ namespace {
 
 
         ++_xid.xid;
-
         PgMsgTable create_msg;
         create_msg.oid = tid;
         create_msg.namespace_name = "public";
@@ -106,6 +105,7 @@ namespace {
 
         // wait for the new xid to be cached by the push
         // notification to PgXidsubscriber
+        // Note: we make no direct calls to get_roots()
         for (size_t i = 0; i != 100; ++i) {
             auto r = cache->find(db, tid, _xid.xid);
             if (r) {

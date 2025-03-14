@@ -12,7 +12,7 @@ using namespace springtail::pg_fdw;
 PgXidSubscriberMgr::PgXidSubscriberMgr(size_t cache_size) :
     _cache_size{cache_size}
 {
-    SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "PgXidSubscriberMgr creating");
+    SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "PgXidSubscriberMgr creating {}", _cache_size);
     _t = std::make_unique<std::jthread>([this](std::stop_token st) { task(st); });
 }
 
@@ -130,6 +130,11 @@ PgXidSubscriberRunner::start()
 
     uint64_t roots_cache_size = 0;
     if (Json::get_to<uint64_t>(json, "roots_shm_cache_size", roots_cache_size)) {
+    }
+
+    if (!roots_cache_size) {
+        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Bad cache size");
+        return false;
     }
 
     _mgr = std::make_unique<PgXidSubscriberMgr>(roots_cache_size);

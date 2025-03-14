@@ -1,6 +1,5 @@
 #include <absl/log/check.h>
 #include <bits/ranges_algo.h>
-#include <chrono>
 #include <sys_tbl_mgr/shm_cache.hh>
 #include <common/logging.hh>
 
@@ -14,7 +13,7 @@ ShmCache::ShmCache(std::string name, size_t size)
     _messages_alloc{_shm.get_segment_manager()},
     _string_alloc{_shm.get_segment_manager()}
 {
-    SPDLOG_DEBUG_MODULE(LOG_CACHE, "============== ShmCache open: {} - {}", _name, size);
+    SPDLOG_DEBUG_MODULE(LOG_CACHE, "ShmCache open: {} - {}", _name, size);
     auto free_size = _shm.get_free_memory();
     CHECK(free_size <=  size);
     _init();
@@ -28,13 +27,13 @@ ShmCache::ShmCache(std::string name)
     _messages_alloc{_shm.get_segment_manager()},
     _string_alloc{_shm.get_segment_manager()}
 {
-    SPDLOG_DEBUG_MODULE(LOG_CACHE, "=================== ShmCache open: {}", _name);
+    SPDLOG_DEBUG_MODULE(LOG_CACHE, "ShmCache open: {}", _name);
     _init();
 }
 
 ShmCache::~ShmCache() 
 {
-    SPDLOG_DEBUG_MODULE(LOG_CACHE, "================ ShmCache deleted: {} - {}", _name, _created);
+    SPDLOG_DEBUG_MODULE(LOG_CACHE, "ShmCache deleted: {} - {}", _name, _created);
     if (_created) {
         remove(_name);
     }
