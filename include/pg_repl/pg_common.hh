@@ -40,7 +40,7 @@ namespace springtail
      * @param table_oid The table oid which has the invalid columns
      * @param table_info JSON field containing meta info about the invalid columns
      */
-    void _populate_invalid_tables_in_redis(uint64_t table_oid,
+    void populate_invalid_tables_in_redis(uint64_t table_oid,
                                            const nlohmann::json &table_info);
 
     /**
@@ -49,12 +49,12 @@ namespace springtail
      * @param table_oid The table oid which has the invalid columns
      * @return true/false based on whether the table is invalid
      */
-    bool _check_if_table_is_invalid_in_redis(uint64_t table_oid);
+    bool check_if_table_is_invalid_in_redis(uint64_t table_oid);
 
     /**
      * @brief Clears the table in Redis, making it valid again
      *
      * @param table_oid The table oid which has the invalid columns
      */
-    void _clear_invalid_table_in_redis(uint64_t table_oid);
+    void clear_invalid_table_in_redis(uint64_t table_oid);
 }

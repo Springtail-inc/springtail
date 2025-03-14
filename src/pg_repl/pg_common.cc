@@ -50,7 +50,7 @@ namespace springtail
     }
 
     void
-    _populate_invalid_tables_in_redis(uint64_t table_oid, const nlohmann::json& table_info)
+    populate_invalid_tables_in_redis(uint64_t table_oid, const nlohmann::json& table_info)
     {
         auto redis = RedisMgr::get_instance()->get_client();
         auto field_key = fmt::format("{}", table_oid);
@@ -59,7 +59,7 @@ namespace springtail
     }
 
     bool
-    _check_if_table_is_invalid_in_redis(uint64_t table_oid)
+    check_if_table_is_invalid_in_redis(uint64_t table_oid)
     {
         auto redis = RedisMgr::get_instance()->get_client();
         auto field_key = fmt::format("{}", table_oid);
@@ -71,7 +71,7 @@ namespace springtail
         return false;
     }
 
-    void _clear_invalid_table_in_redis(uint64_t table_oid)
+    void clear_invalid_table_in_redis(uint64_t table_oid)
     {
         auto redis = RedisMgr::get_instance()->get_client();
         auto field_key = fmt::format("{}", table_oid);

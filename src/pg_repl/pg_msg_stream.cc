@@ -1197,7 +1197,7 @@ namespace springtail {
                     {"columns", invalid_columns}
                 };
 
-                _populate_invalid_tables_in_redis(table_msg.oid, table_info);
+                populate_invalid_tables_in_redis(table_msg.oid, table_info);
 
                 return nullptr;
             }
@@ -1223,10 +1223,10 @@ namespace springtail {
                     {"columns", invalid_columns}
                 };
 
-                _populate_invalid_tables_in_redis(table_msg.oid, table_info);
+                populate_invalid_tables_in_redis(table_msg.oid, table_info);
             } else {
                 // Table is valid, but check if the table is previously invalid. Then switch the type to a CREATE instead of an alter
-                if (_check_if_table_is_invalid_in_redis(table_msg.oid)){
+                if (check_if_table_is_invalid_in_redis(table_msg.oid)){
                     alter_table_msg->msg_type = PgMsgEnum::CREATE_TABLE;
                     return alter_table_msg;
                 }
