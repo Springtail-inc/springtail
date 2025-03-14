@@ -162,9 +162,11 @@ namespace springtail::pg_fdw {
             } catch (const boost::interprocess::bad_alloc&) {
                 // the cache hasn't been created
                 // this could happen if xid_mgr_subscriber isn't running
-                // 
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state unable to create a roots cache: db_id: {}, tid: {}, pg_xid: {}",
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state unable to open the roots cache: db_id: {}, tid: {}, pg_xid: {}",
                         db_id, tid, pg_xid);
+            } catch (const std::exception& e) {
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state exception:{} ", e.what());
+                throw;
             }
         };
 
@@ -182,20 +184,16 @@ namespace springtail::pg_fdw {
             rd_lock.unlock();
             try_create_cache();
             rd_lock.lock();
+        } else {
+            if (!_roots_cache->is_alive()) {
+                rd_lock.unlock();
+                try_create_cache();
+                rd_lock.lock();
+            }
         }
 
         if (_roots_cache) {
             cached_xid = _roots_cache->get_committed_xid(db_id);
-            if (!cached_xid) {
-                // try to re-open the IPC cache
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state reopen the roots cache: db_id: {}, tid: {}, pg_xid: {}",
-                        db_id, tid, pg_xid);
-                rd_lock.unlock();
-                try_create_cache();
-                rd_lock.lock();
-
-                cached_xid = _roots_cache->get_committed_xid(db_id);
-            }
         }
 
         auto it = _xid_map.find(pg_xid);
@@ -203,7 +201,7 @@ namespace springtail::pg_fdw {
             rd_lock.unlock();
             // don't hold lock through get call, can only have one operation
             // for this transaction in flight at once
-            if (!cached_xid) {
+            if (!cached_xid || cached_xid.value() != schema_xid) {
                 xid = XidMgrClient::get_instance()->get_committed_xid(db_id, schema_xid);
             } else {
                 xid = cached_xid.value();

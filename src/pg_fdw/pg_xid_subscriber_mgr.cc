@@ -42,6 +42,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
         // and return immediately.  A worker calls get_roots() that will 
         // attempt to populate the cache.
         SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XID push notification {} - {}", db, xid);
+        _cache->update_committed_xid(db, xid);
         _enqueue_populate_job(db, xid);
     };
     auto on_disconnect = [&connected]() { 
@@ -110,10 +111,12 @@ PgXidSubscriberMgr::_populate_worker(std::stop_token st)
         if (!_cv.wait(g, st, [this]{ return !_populate_queue.empty(); })) {
             break;
         }
+        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Iron ===== 00000000 Bad cache size");
         auto item = _populate_queue.front();
         _populate_queue.pop();
         auto table_ids = _cache->get_db_tables(item.first);
         for (auto v: table_ids) {
+            SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Iron ===== Bad cache size");
             // the client will cache data in _cache
             _client->get_roots(item.first, v, item.second);
             if (st.stop_requested()) {

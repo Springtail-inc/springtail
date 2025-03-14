@@ -114,6 +114,8 @@ public:
      */
     std::optional<Xid> get_committed_xid(DbId db);
 
+    bool is_alive();
+
 
     /**
      * Return all tables that are tracked by the cache.
@@ -142,7 +144,7 @@ private:
     template <typename T>
     using Alloc = ipc::allocator<T, ipc::managed_shared_memory::segment_manager>;
 
-    using String =  ipc::basic_string<char, std::char_traits<char>, Alloc<char>>;
+    using String =  ipc::vector<char, Alloc<char>>;
 
     using Key = std::pair<DbId, TableId>;
 

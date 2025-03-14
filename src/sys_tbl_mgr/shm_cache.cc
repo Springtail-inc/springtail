@@ -8,11 +8,14 @@ using namespace springtail::sys_tbl_mgr;
 ShmCache::ShmCache(std::string name, size_t size)
     :_name{std::move(name)},
     _created{true},
-    _mutex{ipc::create_only, (_name + std::string(".mutex")).c_str()},
-    _shm{ipc::create_only, _name.c_str(), size},
+    _mutex{ipc::create_only, (_name + std::string(".mutex")).c_str(),
+        []{ipc::permissions  p; p.set_unrestricted(); return p;}() },
+    _shm{ipc::create_only, _name.c_str(), size, 0,
+        []{ipc::permissions  p; p.set_unrestricted(); return p;}() },
     _messages_alloc{_shm.get_segment_manager()},
     _string_alloc{_shm.get_segment_manager()}
 {
+
     SPDLOG_DEBUG_MODULE(LOG_CACHE, "ShmCache open: {} - {}", _name, size);
     auto free_size = _shm.get_free_memory();
     CHECK(free_size <=  size);
@@ -71,6 +74,7 @@ ShmCache::remove(const std::string& name)
 void 
 ShmCache::update_committed_xid(DbId db, Xid xid) 
 {
+    SPDLOG_DEBUG_MODULE(LOG_CACHE, "Iron ShmCache update xid: {} - {}", db, xid);
     ipc::scoped_lock<Mutex> lock(_mutex,
             std::chrono::system_clock::now() + std::chrono::seconds(5)
             );
@@ -91,6 +95,19 @@ ShmCache::keep_alive()
     *_xid_commit_time = std::chrono::high_resolution_clock::now();
 }
 
+bool 
+ShmCache::is_alive()
+{
+    ipc::sharable_lock<Mutex> lock(_mutex,
+            std::chrono::system_clock::now() + std::chrono::seconds(5)
+            );
+    CHECK(lock.owns());
+    if ( (std::chrono::high_resolution_clock::now() -  *_xid_commit_time) > XID_KEEP_ALIVE_PERIOD) {
+        return false;
+    }
+    return true;
+}
+
 std::optional<Xid> 
 ShmCache::get_committed_xid(DbId db)
 {
@@ -103,7 +120,7 @@ ShmCache::get_committed_xid(DbId db)
         return {};
     }
 
-    if ( (std::chrono::high_resolution_clock::now() -  *_xid_commit_time) < XID_KEEP_ALIVE_PERIOD) {
+    if ( (std::chrono::high_resolution_clock::now() -  *_xid_commit_time) > XID_KEEP_ALIVE_PERIOD) {
         return {};
     }
 
@@ -184,7 +201,7 @@ ShmCache::insert(DbId db, TableId tid, Xid xid, const std::string& msg)
 
             CHECK(it != _cache->end());
 
-            item.msg = msg.c_str();
+            item.msg.insert(item.msg.end(), msg.data(), msg.data() + msg.size());
 
             if (!it->second.empty() && (--it->second.end())->xid < xid) {
                 it->second.push_back(item);
@@ -249,7 +266,7 @@ ShmCache::find(DbId db, TableId tid, Xid xid)
         if (itt->xid != xid) {
             return {};
         }
-        ret = std::string(itt->msg.c_str(), itt->msg.size());
+        ret = std::string(itt->msg.data(), itt->msg.size());
 
         //check if the item is near the top of LRU
         size_t top_cnt = static_cast<double>(_lru->size())*0.1; //in the top 10%
