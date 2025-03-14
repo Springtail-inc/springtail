@@ -18,7 +18,7 @@
 #include <redis/redis_containers.hh>
 #include <redis/redis_ddl.hh>
 
-#include <pg_log_mgr/timestamps_and_xids.hh>
+#include <pg_log_mgr/wal_progress_tracker.hh>
 #include <pg_log_mgr/xid_ready.hh>
 
 #include <storage/extent.hh>
@@ -247,7 +247,7 @@ namespace springtail::pg_log_mgr {
         std::map<int32_t, BatchPtr> _batch_map;
         BatchPtr _current_batch; ///< The batch matching the current pg xid
 
-        TimestampsAndXidsPtr _xid_ts_tracker;      ///< Timestamps and Xids tracker object
+        WalProgressTrackerPtr _xid_ts_tracker;      ///< Timestamps and Xids tracker object
 
         /** Function for cleaning up old log files. */
         void _remove_old_log_files();

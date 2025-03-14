@@ -13,19 +13,19 @@ namespace springtail::pg_log_mgr {
     *      the log file timestamps that this transactions initially show up.
     *
     */
-    class TimestampsAndXids {
+    class WalProgressTracker {
     public:
         /**
-            * @brief Default constructor
-            *
-            */
-        TimestampsAndXids() = default;
+         * @brief Default constructor
+         *
+         */
+        WalProgressTracker() = default;
 
         /**
-            * @brief Default destructor
-            *
-            */
-        ~TimestampsAndXids() = default;
+         * @brief Default destructor
+         *
+         */
+        ~WalProgressTracker() = default;
 
         /**
             * @brief This function add Postgres Xid and associated timestamp id
@@ -181,6 +181,6 @@ namespace springtail::pg_log_mgr {
         std::map<uint64_t, uint32_t> _ts_to_xid_count;      ///< map to keep the number of times that timestamp ids are used for Springtail Xid
         std::shared_mutex _mt;                              ///< mutext for access to this class data structures
     } ;
-    using TimestampsAndXidsPtr = std::shared_ptr<TimestampsAndXids>;
+    using WalProgressTrackerPtr = std::shared_ptr<WalProgressTracker>;
 
 }

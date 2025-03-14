@@ -3,7 +3,7 @@
 #include <common/common.hh>
 #include <fmt/ranges.h>
 
-#include <pg_log_mgr/timestamps_and_xids.hh>
+#include <pg_log_mgr/wal_progress_tracker.hh>
 
 namespace springtail::committer {
 
@@ -113,7 +113,7 @@ namespace springtail::committer {
         { }
 
         /** Constructor for messages that are XACT_MSG. */
-        XidReady(uint64_t db_id, XactMsg &&msg, pg_log_mgr::TimestampsAndXidsPtr xid_tracker = nullptr)
+        XidReady(uint64_t db_id, XactMsg &&msg, pg_log_mgr::WalProgressTrackerPtr xid_tracker = nullptr)
             : _type(Type::XACT_MSG),
               _db_id(db_id),
               _msg(msg),
@@ -197,16 +197,15 @@ namespace springtail::committer {
 
         /** A function to notify tracker about xid. */
         void notify_tracker(uint64_t xid) {
-            if (_xid_tracker != nullptr) {
-                _xid_tracker->remove_xid(xid);
-            }
+            CHECK(_xid_tracker);
+            _xid_tracker->remove_xid(xid);
         }
 
     private:
         Type _type; ///< The message type.
         uint64_t _db_id; ///< The database ID.
         std::optional<std::variant<XactMsg, SwapMsg>> _msg; ///< The underlying message data.
-        pg_log_mgr::TimestampsAndXidsPtr _xid_tracker;
+        pg_log_mgr::WalProgressTrackerPtr _xid_tracker;
     };
 
 }

@@ -79,7 +79,7 @@ PgXactLogWriter::rotate(uint64_t timestamp)
         DCHECK(response->is_success());
     }
     _file = fs::create_log_file_with_timestamp(_file.parent_path(), PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX, timestamp);
-    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "_file = ", _file.c_str());
+    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Rolled over to the new file: _file = ", _file.c_str());
 }
 
 void
@@ -95,11 +95,9 @@ PgXactLogWriter::_flush_current_extent()
     // note: we aren't going through the StorageCache here
     auto sync_extent = _extent;
     _extent = std::make_shared<Extent>(ExtentType(), 0, _schema->row_size());
-    lock.unlock();
 
     // flush the data to disk
     _flush_extent(sync_extent);
-
 }
 
 void

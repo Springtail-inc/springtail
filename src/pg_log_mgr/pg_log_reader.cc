@@ -31,7 +31,7 @@ namespace springtail::pg_log_mgr {
           _msg_queue(queue_size),
           _xact_log_writer(xact_log_path)
     {
-        _xid_ts_tracker = std::make_shared<TimestampsAndXids>();
+        _xid_ts_tracker = std::make_shared<WalProgressTracker>();
         // retrieve the most recently committed XID at startup
         _committed_xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
 
