@@ -44,7 +44,6 @@ jobs:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       SLACK_CHANNEL: C08H8TE1V4G
 
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -249,7 +248,10 @@ jobs:
         if: success()
         run: |
           ./package.sh
-          aws s3 cp "$(ls -t releases/*.tgz | head -n1)" s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/
+          cd releases
+          PKG_NAME=$(ls -t *.tgz | head -n1)
+          aws s3 cp $PKG_NAME s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/
+          echo "PACKAGE_NAME=s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/${PKG_NAME}" >> $GITHUB_ENV
 
       - name: Notify Slack on success
         if: success()
@@ -260,7 +262,7 @@ jobs:
             # The payload should carry as much information about the 's3://' paths of assets as possible
             # To this `nightly-builds` channel,
             {
-              "channel": "${{ env.SLACK_CHANNEL}},
+              "channel": "${{ env.SLACK_CHANNEL}}",
               "text": ":tada: :tada: Nightly Build & Test Success",
               "attachments": [
                 {
@@ -273,12 +275,12 @@ jobs:
                     },
                     {
                       "title": "Build Artifacts",
-                      "value": "s3://${{ env.DATA_SHARE_BUCKET_NAME }}/${{ env.PACKAGES_S3_PREFIX }}/",
+                      "value": "${{ env.PACKAGE_NAME }}",
                       "short": false
                     },
                     {
                       "title": "Logs",
-                      "value": "s3://${{ env.DEVSUPPORT_BUCKET_NAME }}/${{ env.TEST_LOGS_S3_PREFIX }}/${{ env.CURRENT_DATE }}/",
+                      "value": "s3://${{ env.DEVSUPPORT_BUCKET_NAME }}/${{ env.TEST_LOGS_S3_PREFIX }}/${{ env.CURRENT_DATE }}/"
                     }
                   ]
                 }
@@ -294,7 +296,7 @@ jobs:
             # The payload should carry as much information about the 's3://' paths of assets as possible
             # To this `nightly-builds` channel,
             {
-              "channel": "${{ env.SLACK_CHANNEL }},
+              "channel": "${{ env.SLACK_CHANNEL }}",
               "text": ":crying_cat_face: Nightly Build & Test Failed ",
               "attachments": [
                 {
@@ -306,13 +308,8 @@ jobs:
                       "short": true
                     },
                     {
-                      "title": "Build Artifacts (if any)",
-                      "value": "s3://${{ env.DATA_SHARE_BUCKET_NAME }}/${{ env.PACKAGES_S3_PREFIX }}/",
-                      "short": false
-                    },
-                    {
                       "title": "Logs",
-                      "value": "s3://${{ env.DEVSUPPORT_BUCKET_NAME }}/${{ env.TEST_LOGS_S3_PREFIX }}/${{ env.CURRENT_DATE }}/",
+                      "value": "s3://${{ env.DEVSUPPORT_BUCKET_NAME }}/${{ env.TEST_LOGS_S3_PREFIX }}/${{ env.CURRENT_DATE }}/"
                     }
                   ]
                 }
