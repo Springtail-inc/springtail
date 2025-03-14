@@ -9,6 +9,7 @@
 #include <nlohmann/json.hpp>
 
 #include <common/init.hh>
+#include <common/environment.hh>
 #include <common/json.hh>
 
 #include <test/services.hh>
@@ -30,7 +31,7 @@ namespace {
     protected:
         struct Subscriber
         {
-            Subscriber() 
+            Subscriber()
             {
                 XidMgrClient *client = XidMgrClient::get_instance();
                 client->ping();
@@ -69,7 +70,7 @@ namespace {
 
             std::unique_ptr<XidMgrSubscriber> _s;
             uint64_t _push_cnt = 0;
-            
+
             std::mutex _m;
             std::condition_variable _cv_done;
 
@@ -79,6 +80,9 @@ namespace {
         };
 
         void SetUp() override {
+            std::string overrides = "otel.enabled=false";
+            ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
+
             auto service_runners = test::get_services(true, false, false);
             std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
             runners.emplace();

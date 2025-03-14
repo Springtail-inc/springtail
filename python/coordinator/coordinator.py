@@ -19,6 +19,7 @@ sys.path.append(os.path.join(project_root, 'grpc'))
 
 # import the Properties class
 from properties import Properties
+from sysutils import stop_daemons
 
 # import the ComponentFactory class and the Scheduler class
 from component_factory import ComponentFactory
@@ -30,6 +31,8 @@ from xid_mgr import XidMgrClient
 from sys_tbl_mgr import SysTblMgrClient
 
 from otel_logger import init_logging
+
+ALL_DAEMONS = ['xid_mgr_daemon', 'sys_tbl_mgr_daemon', 'pg_log_mgr_daemon', 'pg_ddl_daemon', 'proxy']
 
 class Coordinator:
     """The Coordinator class to manage the components of the system."""
@@ -52,6 +55,7 @@ class Coordinator:
         self.props = props
         self._check_properties(props)
         self.shutdown_event = threading.Event()
+        self.scheduler = None
 
         # Configure logging
         init_logging(props.get_otel_config(), props.get_log_path(), debug)
@@ -110,6 +114,12 @@ class Coordinator:
         if not os.path.exists(self.bin_dir):
             self.logger.error(f"Invalid binary directory: {self.bin_dir}")
             raise ValueError(f"Invalid binary directory: {self.bin_dir}")
+
+        if self.shutdown_event.is_set():
+            return
+
+        # Make sure everything is stopped
+        stop_daemons(self.props.get_pid_path(), ALL_DAEMONS)
 
         # Create scheduler
         self.logger.debug("Starting scheduler")
@@ -205,6 +215,9 @@ class Coordinator:
                 self.xid_mgr_component.shutdown()
             if self.sys_tlb_mgr_component:
                 self.sys_tlb_mgr_component.shutdown()
+
+        # make sure everything is shutdown
+        stop_daemons(self.props.get_pid_path(), ALL_DAEMONS)
 
     def _check_properties(self, props: Properties) -> None:
         """

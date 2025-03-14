@@ -299,7 +299,7 @@ class Scheduler:
 
         while not self.shutdown_event.is_set():
             try:
-                self.logger.debug("Sheduler monitoring timeouts")
+                self.logger.debug("Scheduler monitoring timeouts")
 
                 # get the coordinator state
                 self._check_coordinator_state()

@@ -52,9 +52,6 @@ target_link_libraries(threaded_test
 )
 add_dsymutil_command(threaded_test)
 
-# hook tests into gtest framework
-gtest_discover_tests(threaded_test)
-
 add_executable(xid_client test/xid_client.cc)
 target_include_directories(xid_client PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
 target_link_libraries(xid_client
@@ -71,6 +68,28 @@ target_link_libraries(xid_dump
     PRIVATE Boost::program_options
 )
 add_dsymutil_command(xid_dump)
+
+add_executable(test_ssl test/test_ssl.cc)
+target_include_directories(test_ssl
+    PUBLIC
+    ${CMAKE_BINARY_DIR}/src # for generated protobuf files
+    PRIVATE
+    ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH}
+)
+target_link_libraries(test_ssl
+    PUBLIC
+    springtail_common
+    springtail_test
+    springtail_xid_mgr
+    PRIVATE
+    Boost::program_options
+    GTest::gtest_main
+)
+add_dsymutil_command(test_ssl)
+
+# gtests
+gtest_discover_tests(threaded_test)
+gtest_discover_tests(test_ssl)
 
 # install daemon to install directory
 install(TARGETS xid_mgr_daemon RUNTIME DESTINATION bin/system)

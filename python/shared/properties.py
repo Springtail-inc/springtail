@@ -8,7 +8,7 @@ from typing import Optional
 from common import parse_bool
 from aws import AwsHelper
 
-DB_USERS_SECRET = "sk/%s/%s/aws/dbi/%s/primary_db_password"
+DB_USERS_SECRET = "sk/{}/{}/aws/dbi/{}/primary_db_password"
 
 class Properties:
     def __init__(self, config_file=None, load_redis=False) -> None:

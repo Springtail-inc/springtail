@@ -12,6 +12,8 @@ class AwsHelper:
 
     def __init__(self, logger: Optional[logging.Logger] = None):
         self.logger = logger if logger else logging.getLogger(__name__)
+        self.s3 = boto3.client('s3')
+        self.sns = boto3.client('sns')
 
 
     def get_instance_id(self) -> Optional[str]:
@@ -43,12 +45,10 @@ class AwsHelper:
         Returns:
             str: path to the downloaded file, None if failed
         """
-        s3 = boto3.client('s3')
-
         try:
             # List objects with the given prefix
             prefix = f"{folder}/{prefix}" if folder else "{prefix}"
-            response = s3.list_objects_v2(
+            response = self.s3.list_objects_v2(
                 Bucket=bucket,
                 Prefix=prefix
             )
@@ -76,7 +76,7 @@ class AwsHelper:
 
             # download the file
             filename = os.path.join(local_path, os.path.basename(latest_file))
-            s3.download_file(bucket, latest_file, filename)
+            self.s3.download_file(bucket, latest_file, filename)
 
             return filename
 
@@ -110,8 +110,6 @@ class AwsHelper:
         Returns:
             bool: True if message was sent successfully, False otherwise
         """
-        sns = boto3.client('sns')
-
         try:
             if attributes:
                 message_attributes = {
@@ -121,7 +119,7 @@ class AwsHelper:
             else:
                 message_attributes = {}
 
-            sns.publish(TopicArn=topic_arn, Message=message, Subject=subject, MessageAttributes=message_attributes)
+            self.sns.publish(TopicArn=topic_arn, Message=message, Subject=subject, MessageAttributes=message_attributes)
 
             return True
 

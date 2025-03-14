@@ -1,14 +1,11 @@
-import boto3
 import logging
 import os
 import sys
 import time
 import tempfile
 import json
-import glob
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
-from botocore.exceptions import ClientError
 
 # Get the parent directory of the current script (i.e., the project root directory)
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -26,7 +23,7 @@ from aws import AwsHelper
 S3_BIN_FOLDER = 'packages'
 S3_DOWNLOAD_PATH = '/tmp/'
 
-SHARED_LIB_DIR = '/usr/lib/springtail'
+SPRINGTAIL_LIB_DIR = 'shared-lib' # relative to the install path
 
 # NOTE: this should match the environment variables in common/environment.hh
 ENV_VARS = [
@@ -43,7 +40,8 @@ ENV_VARS = [
     'MOUNT_POINT',
     'FDW_ID',
     'REPLICATION_USER_PASSWORD',
-    'FDW_USER_PASSWORD'
+    'FDW_USER_PASSWORD',
+    'LD_LIBRARY_PATH'
 ]
 
 SNS_ENV_VARS = [
@@ -68,11 +66,12 @@ class Production:
             raise ValueError("SNS_TOPIC_ARN environment variable not set")
 
         self.topic_arn : str = arn
-        self.sns_attributes : Dict[str, Any] = self._extract_attributes()
         self.install_path: str = install_path
 
         self.logger = logging.getLogger("coordinator")
         self.aws = AwsHelper(self.logger)
+
+        self.sns_attributes : Dict[str, Any] = self._extract_attributes()
 
         logging.getLogger('boto3').setLevel(logging.CRITICAL)
         logging.getLogger('botocore').setLevel(logging.CRITICAL)
@@ -111,13 +110,14 @@ class Production:
             if not os.path.exists(self.install_path):
                 makedir(self.install_path)
 
-            # Install the binaries
+            # set LD_LIBRARY_PATH
+            os.environ['LD_LIBRARY_PATH'] = os.path.join(self.install_path, SPRINGTAIL_LIB_DIR)
+
+            # Install the binaries and shared libraries
             run_command('sudo', ['tar', 'xzf', springtail_tgz, '-C', self.install_path])
 
-            shlib_dir = SHARED_LIB_DIR
-
-            run_command('sudo', ['mkdir', '-p', shlib_dir])
-            run_command('sudo', ['cp', '-a'] + glob.glob(os.path.join(self.install_path, 'shared-lib', '*')) + [shlib_dir])
+            # Make sure shared-lib is readable by all
+            run_command('sudo', ['chmod', '-R', '755', os.path.join(self.install_path, SPRINGTAIL_LIB_DIR)])
 
             self.logger.info(f"Springtail binaries installed to {self.install_path}")
             self.send_sns('install_complete', version=os.path.basename(springtail_tgz))
@@ -259,7 +259,7 @@ class Production:
 
         self.aws.send_sns_notification(self.topic_arn, subject, message, attributes)
 
-    def get_replication_user(self) -> Optional[Dict[str, str]]
+    def get_replication_user(self) -> Optional[Dict[str, str]] :
         """Retrieve replication user creds from AWS Secrets Manager."""
 
         # construct the secret name

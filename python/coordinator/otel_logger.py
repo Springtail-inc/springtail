@@ -6,7 +6,7 @@ from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler, LogData
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
-from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.util.types import Attributes
 from opentelemetry.sdk.trace.export import (
@@ -92,7 +92,7 @@ def init_logging(otel_config: dict, log_path: str, debug: bool = False, logger_n
 
     # **Handler 2: OTLP (INFO and above)**
     if 'enabled' in otel_config and otel_config['enabled'] and 'host' in otel_config and 'port' in otel_config:
-        otel_handler = init_otel_logging(f"{otel_config.get('host', 'localhost')}:{otel_config.get('port', '4317')}")
+        otel_handler = init_otel_logging(f"{otel_config.get('host', 'localhost')}:{otel_config.get('port', '4318')}")
         otel_handler.setLevel(logging.INFO)  # Send only INFO and above to OTEL
         logger.addHandler(otel_handler)
 
@@ -103,7 +103,7 @@ def init_logging(otel_config: dict, log_path: str, debug: bool = False, logger_n
     logger.addHandler(file_handler)
 
 if __name__ == "__main__":
-    init_logging({'enabled': True, 'host': 'localhost', 'port': '4317'}, '/tmp', True)
+    init_logging({'enabled': True, 'host': 'localhost', 'port': '4318'}, '/tmp', True)
     logger = logging.getLogger("coordinator")
     logger.info("This is an info message", extra={'db_id': 11})
     logger.debug("This is a debug message")
