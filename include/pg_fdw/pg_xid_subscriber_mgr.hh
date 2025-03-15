@@ -48,13 +48,4 @@ namespace springtail::pg_fdw {
     private:
         std::unique_ptr<PgXidSubscriberMgr> _mgr;
     };
-
-    /*
-    class PgXidSubscriberMgr final : public Singleton<PgXidSubscriberMgr>
-    {
-        friend class Singleton<PgXidSubscriberMgr>;
-    public:
-
-    };
-    */
 }
