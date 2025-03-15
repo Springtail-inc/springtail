@@ -9,11 +9,11 @@
 #include <nlohmann/json.hpp>
 
 #include <common/common.hh>
-
 #include <pg_repl/libpq_connection.hh>
-
+#include <proto/pg_copy_table.pb.h>
 #include <storage/field.hh>
 #include <storage/xid.hh>
+
 
 namespace springtail
 {
@@ -28,7 +28,7 @@ namespace springtail
         uint32_t xmax_epoch;
         uint32_t pg_xid;
         uint32_t pg_epoch;
-        std::vector<int32_t> tids;   ///< table ids
+        std::vector<std::pair<int32_t, std::shared_ptr<proto::CopyTableInfo>>> tids;   ///< table ids and associated rpc info
         std::vector<uint32_t> xips;  ///< transactions in progress: xmin <= X < xmax
         std::string pg_xids;         ///< pg_current_snapshot(); xmin:xmax:xids
 
@@ -38,9 +38,9 @@ namespace springtail
          * @brief Add table to result
          * @param tid table id
          */
-        void add_table(int32_t tid)
+        void add_table(int32_t tid, std::shared_ptr<proto::CopyTableInfo> copy_info)
         {
-            tids.push_back(tid);
+            tids.push_back({tid, copy_info});
         }
 
         /**
@@ -242,12 +242,12 @@ namespace springtail
         /**
          * @brief Copy table from remote system
          */
-        void _copy_table(uint64_t db_id,
-                         springtail::XidLsn &xid,
-                         const std::string &table_name,
-                         const std::string &schema_name,
-                         uint64_t table_oid,
-                         uint64_t schema_oid);
+        std::shared_ptr<proto::CopyTableInfo> _copy_table(uint64_t db_id,
+                                                          springtail::XidLsn &xid,
+                                                          const std::string &table_name,
+                                                          const std::string &schema_name,
+                                                          uint64_t table_oid,
+                                                          uint64_t schema_oid);
 
         /**
          * @brief End the copy, commit the transaction
