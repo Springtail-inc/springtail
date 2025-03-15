@@ -10,7 +10,7 @@ ShmCache::ShmCache(std::string name, size_t size)
     _created{true},
     _mutex{ipc::create_only, (_name + std::string(".mutex")).c_str(),
         []{ipc::permissions  p; p.set_unrestricted(); return p;}() },
-    _shm{ipc::create_only, _name.c_str(), size, 0,
+    _shm{ipc::create_only, _name.c_str(), size, nullptr,
         []{ipc::permissions  p; p.set_unrestricted(); return p;}() },
     _messages_alloc{_shm.get_segment_manager()},
     _string_alloc{_shm.get_segment_manager()}
