@@ -49,7 +49,7 @@ class Component:
         self.state : ComponentState = ComponentState.STOPPED
         self.process: Optional[psutil.Process] = None
         self.pid: Optional[int] = None
-        self.logger = logging.getLogger("coordinator")
+        self.logger = logging.getLogger('springtail')
 
         if not os.path.exists(self.path):
             raise ValueError(f"Component path not found: {self.path}")

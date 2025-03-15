@@ -10,8 +10,8 @@ from common import run_command
 
 class AwsHelper:
 
-    def __init__(self, logger: Optional[logging.Logger] = None):
-        self.logger = logger if logger else logging.getLogger(__name__)
+    def __init__(self):
+        self.logger = logging.getLogger('springtail')
         self.s3 = boto3.client('s3')
         self.sns = boto3.client('sns')
 

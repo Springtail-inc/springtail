@@ -53,7 +53,7 @@ class Scheduler:
         self.liveness_hash = props.get_liveness_hash()
         self.liveness_pubsub = props.get_liveness_notification_pubsub()
         self.components: Dict[str, Component] = {}
-        self.logger = logging.getLogger("coordinator")
+        self.logger = logging.getLogger('springtail')
         self.timeouts = {}
         self.allowed_timeout = allowed_timeout_secs * 1000
         self.db_states = {}

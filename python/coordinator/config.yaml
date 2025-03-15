@@ -7,3 +7,6 @@ production: False
 # for production
 #install_dir: '/opt/springtail'
 #production: True
+# log rotation size in bytes 100MB; 0 disables log rotation
+log_rotation_size: 104857600
+log_rotation_count: 10

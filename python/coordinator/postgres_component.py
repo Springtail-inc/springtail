@@ -21,7 +21,7 @@ class PostgresComponent(Component):
                  name: str = "postgres") :
         """Initialize a new PostgresComponent"""
         super().__init__(name, id, path, pid_path)
-        self.logger = logging.getLogger('coordinator')
+        self.logger = logging.getLogger('springtail')
 
     def start(self) -> bool:
         """

@@ -57,10 +57,7 @@ class Coordinator:
         self._check_properties(props)
         self.shutdown_event = threading.Event()
         self.scheduler = None
-
-        # Configure logging
-        init_logging(props.get_otel_config(), props.get_log_path(), debug)
-        self.logger = logging.getLogger("coordinator")
+        self.logger = logging.getLogger('springtail')
 
         # Get the service type
         self.service_name = service_name
@@ -168,6 +165,9 @@ class Coordinator:
                 # wait for ingestion to be ready
                 self._wait_for_ingestion(self.props)
 
+                if self.shutdown_event.is_set():
+                    return
+
                 self.scheduler.register_component(postgres, 3)
                 self.scheduler.register_component(factory.create_ddl_daemon('ddl_user', ddl_password), 4)
 
@@ -271,14 +271,14 @@ class Coordinator:
             time.sleep(1)
 
         system_config = props.get_system_config()
-        xid_port = system_config['xid_mgr']['rpc_config']['server_port']
-        sys_tbl_port = system_config['sys_tbl_mgr']['rpc_config']['server_port']
+        xid_config = system_config['xid_mgr']['rpc_config']
+        sys_tbl_config = system_config['sys_tbl_mgr']['rpc_config']
 
         waiting = True
         while waiting and not self.shutdown_event.is_set():
             try:
-                self.logger.debug(f"Connecting to XidManager at {host}:{xid_port}")
-                with XidMgrClient(host, xid_port) as client:
+                self.logger.debug(f"Connecting to XidManager at {host}:{xid_config['server_port']}")
+                with XidMgrClient(host, xid_config) as client:
                     client.ping()
                     self.logger.info("XidManager is ready")
                     waiting = False
@@ -288,8 +288,8 @@ class Coordinator:
         waiting = True
         while waiting and not self.shutdown_event.is_set():
             try:
-                self.logger.debug(f"Connecting to SysTblManager at {host}:{sys_tbl_port}")
-                with SysTblMgrClient(host, sys_tbl_port) as client:
+                self.logger.debug(f"Connecting to SysTblManager at {host}:{sys_tbl_config['server_port']}")
+                with SysTblMgrClient(host, sys_tbl_config) as client:
                     client.ping()
                     self.logger.info("SysTblManager is ready")
                     waiting = False
@@ -352,7 +352,20 @@ if __name__ == "__main__":
     # Load properties from the config file
     props = setup_props(yaml_config)
 
-    coordinator = Coordinator(props, args.debug, yaml_config.get('production'), yaml_config.get('install_dir'), args.service)
+    # Configure logging
+    log_rotation_size = 0
+    log_rotation_count = 10
+    if 'log_rotation_size' in yaml_config:
+        log_rotation_size = yaml_config['log_rotation_size']
+        log_rotation_count = yaml_config['log_rotation_count']
+
+    init_logging(props.get_otel_config(), props.get_log_path(), debug=args.debug,
+                log_rotation_size=log_rotation_size, log_rotation_count=log_rotation_count)
+
+    logger = logging.getLogger('springtail')
+
+    coordinator = Coordinator(props, args.debug, yaml_config.get('production'),
+                              yaml_config.get('install_dir'), args.service)
 
     # Set up signal handlers
     def signal_handler(signum, frame):
@@ -365,8 +378,8 @@ if __name__ == "__main__":
         coordinator.startup()
     except Exception as e:
         error_details = traceback.format_exc()
-        coordinator.logger.error(f"An error occurred during startup: {e}")
-        coordinator.logger.error(f"Error details: {error_details}")
+        logger.error(f"An error occurred during startup: {e}")
+        logger.error(f"Error details: {error_details}")
         coordinator.shutdown(0)
 
 

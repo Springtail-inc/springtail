@@ -68,8 +68,8 @@ class Production:
         self.topic_arn : str = arn
         self.install_path: str = install_path
 
-        self.logger = logging.getLogger("coordinator")
-        self.aws = AwsHelper(self.logger)
+        self.logger = logging.getLogger('springtail')
+        self.aws = AwsHelper()
 
         self.sns_attributes : Dict[str, Any] = self._extract_attributes()
 
@@ -137,7 +137,7 @@ class Production:
         lib_dir = run_command('pg_config', ['--pkglibdir'])
 
         # copy the extension files to the share directory
-        logging.info(f"Copying extension files to the share directory: {share_dir}")
+        self.logger.info(f"Copying extension files to the share directory: {share_dir}")
         sp_sharedir = os.path.join(self.install_path, 'share')
         share_dir = os.path.join(share_dir.strip(), 'extension')
 
@@ -152,10 +152,13 @@ class Production:
 
         # Update the postgres configuration file
         # version string is like: 'PostgreSQL 16.4 (Ubuntu 16.4-0ubuntu0.24.04.2)'
-        logging.info("Updating postgres environment file")
+        self.logger.info("Updating postgres environment file")
         version_str = run_command('pg_config', ['--version']).strip()
         version = version_str.split(' ')[1].split('.')[0]
         env_file = f'/etc/postgresql/{version}/main/environment'
+
+        self.logger.info("Setting up pg_hba.conf")
+        run_command('sudo', ['sed', '-i', "s/\\bpeer\\b/scram-sha-256/g", f'/etc/postgresql/{version}/main/pg_hba.conf'])
 
         # Write the environment variables to a temporary file
         with tempfile.NamedTemporaryFile(delete=True, mode='w') as temp_file:

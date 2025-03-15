@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+from logging.handlers import RotatingFileHandler
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
@@ -72,7 +73,14 @@ def init_otel_logging(endpoint: str):
 
     return handler
 
-def init_logging(otel_config: dict, log_path: str, debug: bool = False, logger_name: str = "coordinator"):
+def init_logging(
+        otel_config: dict,
+        log_path: str,
+        debug: bool = False,
+        logger_name: str = 'springtail',
+        log_rotation_size : int = 0,
+        log_rotation_count : int = 10
+    ) -> None:
     """
     Initialize logging for the coordinator.
     """
@@ -97,14 +105,17 @@ def init_logging(otel_config: dict, log_path: str, debug: bool = False, logger_n
         logger.addHandler(otel_handler)
 
     # **Handler 3: File Logging (DEBUG and above)**
-    file_handler = logging.FileHandler(os.path.join(log_path, 'coordinator.log'))
+    if log_rotation_size > 0:
+        file_handler = RotatingFileHandler(os.path.join(log_path, 'coordinator.log'), maxBytes=log_rotation_size, backupCount=log_rotation_count)
+    else:
+        file_handler = logging.FileHandler(os.path.join(log_path, 'coordinator.log'))
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(console_format)
     logger.addHandler(file_handler)
 
 if __name__ == "__main__":
     init_logging({'enabled': True, 'host': 'localhost', 'port': '4318'}, '/tmp', True)
-    logger = logging.getLogger("coordinator")
+    logger = logging.getLogger('springtail')
     logger.info("This is an info message", extra={'db_id': 11})
     logger.debug("This is a debug message")
     logger.error("This is an error message")
