@@ -74,7 +74,6 @@ ShmCache::remove(const std::string& name)
 void 
 ShmCache::update_committed_xid(DbId db, Xid xid) 
 {
-    SPDLOG_DEBUG_MODULE(LOG_CACHE, "Iron ShmCache update xid: {} - {}", db, xid);
     ipc::scoped_lock<Mutex> lock(_mutex,
             std::chrono::system_clock::now() + std::chrono::seconds(5)
             );

@@ -527,6 +527,10 @@ namespace {
         ASSERT_EQ(schema_meta->columns[1].name, "col2");
         ASSERT_EQ(schema_meta->indexes.size(), 2);
 
+        // remove the cache now
+        _client->use_roots_cache({});
+        cache.reset();
+
         // XID 3
         ++check_xid;
 

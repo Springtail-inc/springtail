@@ -7,12 +7,12 @@ import yaml
 class BenchCase:
     """Class to run a single benchmark case"""
 
-    def __init__(self, name: str, filename: str, config_file: str, build_dir: str):
+    def __init__(self, props: springtail.Properties, name: str, filename: str, config_file: str, build_dir: str):
         self.filename = filename
         self.name = filename
         self.config_file = config_file
         self.build_dir = build_dir
-        self.props = springtail.Properties(config_file, True)
+        self.props = props 
 
         # Get database names
         db_configs = self.props.get_db_configs()

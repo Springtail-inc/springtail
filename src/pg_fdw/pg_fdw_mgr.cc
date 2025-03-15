@@ -154,11 +154,11 @@ namespace springtail::pg_fdw {
         }
 
 
-        auto try_create_cache = [&]() {
+        auto try_create_cache = [&]() -> std::shared_ptr<sys_tbl_mgr::ShmCache> {
             std::unique_lock<std::shared_mutex> lock(_mutex);
             try {
-                _roots_cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS);
-                sys_tbl_mgr::Client::get_instance()->use_roots_cache(_roots_cache);
+                auto cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS);
+                return cache; 
             } catch (const boost::interprocess::bad_alloc&) {
                 // the cache hasn't been created
                 // this could happen if xid_mgr_subscriber isn't running
@@ -168,6 +168,7 @@ namespace springtail::pg_fdw {
                 SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state exception:{} ", e.what());
                 throw;
             }
+            return {};
         };
 
 
@@ -182,12 +183,27 @@ namespace springtail::pg_fdw {
 
         if (!_roots_cache) {
             rd_lock.unlock();
-            try_create_cache();
+            _roots_cache = try_create_cache();
+            sys_tbl_mgr::Client::get_instance()->use_roots_cache(_roots_cache);
             rd_lock.lock();
         } else {
             if (!_roots_cache->is_alive()) {
+
                 rd_lock.unlock();
-                try_create_cache();
+
+                auto cache = try_create_cache();
+                if (cache) {
+                    // start using the new cache
+                    sys_tbl_mgr::Client::get_instance()->use_roots_cache(_roots_cache);
+                } else {
+                    // If (!cache) continue with the existing cache anyway.
+                    // It'll still work as a cache but without 
+                    // the advantages of push notifications.
+                    // If xid_subscriber comes online, we'll try to 
+                    // open the new (live) IPC cache the next time we come here.
+                    SPDLOG_WARN("The IPC roots cache is dead.");
+                }
+
                 rd_lock.lock();
             }
         }
