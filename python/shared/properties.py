@@ -440,6 +440,9 @@ class Properties:
         self.redis.hset(key, field_key, state)
 
 def main():
+    # init logging for console output
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
     # call the get functions and print the results
     props = Properties()
     print(f"db_configs: {props.get_db_configs()}")

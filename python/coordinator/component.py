@@ -49,7 +49,7 @@ class Component:
         self.state : ComponentState = ComponentState.STOPPED
         self.process: Optional[psutil.Process] = None
         self.pid: Optional[int] = None
-        self.logger = logging.getLogger(f"Component-{self.name}")
+        self.logger = logging.getLogger("coordinator")
 
         if not os.path.exists(self.path):
             raise ValueError(f"Component path not found: {self.path}")
@@ -65,7 +65,7 @@ class Component:
             self.process = None
             self.state = ComponentState.STOPPED
 
-        self.logger.info(f"Initialized component {self.name}: state={self.state}")
+        self.logger.info(f"Initialized component {self.name}: state={self.state}, pid={self.pid}")
 
     def _check_running(self, pid : Optional[int]) -> Optional[int]:
         """

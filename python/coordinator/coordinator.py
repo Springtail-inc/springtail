@@ -7,6 +7,7 @@ import string
 import signal
 import time
 import threading
+import traceback
 from typing import Optional
 from random import SystemRandom
 
@@ -148,7 +149,9 @@ class Coordinator:
                 # startup postgres if not running
                 postgres = factory.create_postgres()
                 if not postgres.is_running():
-                    postgres.start()
+                    if not postgres.start():
+                        self.logger.error("Failed to start Postgres")
+                        raise ValueError("Failed to start Postgres")
 
                 # create the ddl user
                 ddl_password = self._gen_random_string(16)
@@ -158,8 +161,9 @@ class Coordinator:
                 if not self.production:
                     self.xid_mgr_component = factory.create_xid_mgr_daemon()
                     self.sys_tlb_mgr_component = factory.create_sys_tbl_mgr_daemon()
-                    self.xid_mgr_component.start()
-                    self.sys_tlb_mgr_component.start()
+                    if not self.xid_mgr_component.start() or not self.sys_tlb_mgr_component.start():
+                        self.logger.error("Failed to start xid_mgr_component or sys_tbl_mgr_component")
+                        raise ValueError("Failed to start components")
 
                 # wait for ingestion to be ready
                 self._wait_for_ingestion(self.props)
@@ -194,8 +198,6 @@ class Coordinator:
         self.logger.info("Shutting down all components")
         self.scheduler.shutdown()
 
-        if self.production:
-            self.production.send_sns('shutdown')
 
     def shutdown(self, signum: int):
         """
@@ -218,6 +220,10 @@ class Coordinator:
 
         # make sure everything is shutdown
         stop_daemons(self.props.get_pid_path(), ALL_DAEMONS)
+
+        if self.production:
+            self.production.send_sns('shutdown')
+
 
     def _check_properties(self, props: Properties) -> None:
         """
@@ -260,6 +266,7 @@ class Coordinator:
         while True:
             host = props.get_hostname('ingestion')
             if host is not None:
+                self.logger.debug(f"Found ingestion host: {host}")
                 break
             time.sleep(1)
 
@@ -270,6 +277,7 @@ class Coordinator:
         waiting = True
         while waiting and not self.shutdown_event.is_set():
             try:
+                self.logger.debug(f"Connecting to XidManager at {host}:{xid_port}")
                 with XidMgrClient(host, xid_port) as client:
                     client.ping()
                     self.logger.info("XidManager is ready")
@@ -280,6 +288,7 @@ class Coordinator:
         waiting = True
         while waiting and not self.shutdown_event.is_set():
             try:
+                self.logger.debug(f"Connecting to SysTblManager at {host}:{sys_tbl_port}")
                 with SysTblMgrClient(host, sys_tbl_port) as client:
                     client.ping()
                     self.logger.info("SysTblManager is ready")
@@ -352,5 +361,12 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    coordinator.startup()
+    try:
+        coordinator.startup()
+    except Exception as e:
+        error_details = traceback.format_exc()
+        coordinator.logger.error(f"An error occurred during startup: {e}")
+        coordinator.logger.error(f"Error details: {error_details}")
+        coordinator.shutdown(0)
+
 

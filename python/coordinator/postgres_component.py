@@ -2,6 +2,8 @@ import os
 import signal
 import psutil
 import time
+import logging
+from typing import Dict, List, Optional
 from component import Component, ComponentState
 
 from common import (
@@ -19,6 +21,7 @@ class PostgresComponent(Component):
                  name: str = "postgres") :
         """Initialize a new PostgresComponent"""
         super().__init__(name, id, path, pid_path)
+        self.logger = logging.getLogger('coordinator')
 
     def start(self) -> bool:
         """
@@ -40,7 +43,7 @@ class PostgresComponent(Component):
                     return True
             time.sleep(0.5)
 
-        return True
+        return False
 
     def kill(self) -> bool:
         """
@@ -65,7 +68,7 @@ class PostgresComponent(Component):
 
         return False
 
-    def shutdown(self, sig: int = None) -> bool:
+    def shutdown(self, sig: Optional[int] = None) -> bool:
         """
         Shutdown the Postgres process
         Returns:

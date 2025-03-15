@@ -141,6 +141,8 @@ class AwsHelper:
         client = boto3.client("secretsmanager")
 
         try:
+            self.logger.debug(f"Retrieving secret: {secret_name}")
+
             # Fetch the secret value
             response = client.get_secret_value(SecretId=secret_name)
 
