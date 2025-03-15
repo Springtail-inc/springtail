@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <filesystem>
 #include <thread>
@@ -63,6 +64,9 @@ namespace springtail::pg_log_mgr {
 
         static constexpr int QUEUE_SIZE = 256;
 
+        /** minimum size for log rollover */
+        static constexpr int LOG_ROLLOVER_SIZE_BYTES = 128 * 1024 * 1024;
+
         /**
          * @brief Construct a new Pg Log Mgr object
          * @param db_id db id
@@ -82,6 +86,7 @@ namespace springtail::pg_log_mgr {
                  const std::string &host, const std::string &db_name,
                  const std::string &user_name, const std::string &password,
                  const std::string &pub_name, const std::string &slot_name,
+                 uint64_t log_size_rollover_threshold,
                  int port,
                  std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue);
 
@@ -134,9 +139,6 @@ namespace springtail::pg_log_mgr {
         PgLogWriterPtr _create_repl_logger();
 
     private:
-        /** minimum size for log rollover */
-        static constexpr int LOG_ROLLOVER_SIZE_BYTES = 128 * 1024 * 1024;
-
         static constexpr int MAX_REDIS_BATCH_SIZE = 300;
 
         /** internal state */
@@ -160,6 +162,7 @@ namespace springtail::pg_log_mgr {
         std::string _password;
         std::string _pub_name;
         std::string _slot_name;
+        uint64_t _log_size_rollover_threshold;
         int _port;
 
         /** Internal state synchronizer */
