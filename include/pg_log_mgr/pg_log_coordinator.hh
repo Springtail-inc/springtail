@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <mutex>
 
@@ -35,6 +36,7 @@ namespace springtail::pg_log_mgr {
         std::string _user_name;                    ///< user name for connecting to database
         std::string _password;                     ///< password for connecting to database
         uint64_t _db_instance_id;                  ///< database instance id
+        uint64_t _log_size_rollover_threshold;     ///< log size rollover threshold
         int _port;                                 ///< port for connecting to database
 
         std::shared_ptr<ConcurrentQueue<committer::XidReady>> _committer_queue;

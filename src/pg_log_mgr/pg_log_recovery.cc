@@ -202,6 +202,7 @@ PgLogRecovery::_replay_active()
 
     uint64_t start_offset = min_i->second.offset;
     _repl_log = min_i->second.file;
+    uint64_t timestamp = fs::extract_timestamp_from_file(_repl_log.value(), PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX).value();
     _repl_reader.set_file(*_repl_log, start_offset);
 
     // replay repl log entries for the active set... skip everything else until we get to the end of
@@ -266,6 +267,7 @@ PgLogRecovery::_replay_active()
             // if we aren't skipping the message, process it
             if (!skip) {
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Process msg {}", static_cast<int>(msg->msg_type));
+                msg->pg_log_timestamp = timestamp;
                 _pg_log_reader->enqueue_msg(msg);
             }
         }
@@ -276,6 +278,7 @@ PgLogRecovery::_replay_active()
                 fs::get_next_log_file(*_repl_log, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
             if (_repl_log) {
                 _repl_reader.set_file(*_repl_log);
+                timestamp = fs::extract_timestamp_from_file(_repl_log.value(), PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX).value();
             } else {
                 return false;
             }
@@ -297,12 +300,14 @@ PgLogRecovery::_replay_uncommitted()
     };
 
     SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replay remaining uncommitted messages");
+    uint64_t timestamp = fs::extract_timestamp_from_file(_repl_log.value(), PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX).value();
 
     while (_repl_log) {
         bool eob, eos;
         auto msg = _repl_reader.read_message(filter, eos, eob);
         if (msg != nullptr) {
             // queue the message for processing
+            msg->pg_log_timestamp = timestamp;
             _pg_log_reader->enqueue_msg(msg);
         }
 
@@ -312,6 +317,7 @@ PgLogRecovery::_replay_uncommitted()
                 fs::get_next_log_file(*_repl_log, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
             if (_repl_log) {
                 _repl_reader.set_file(*_repl_log);
+                timestamp = fs::extract_timestamp_from_file(_repl_log.value(), PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX).value();
             }
         }
     }

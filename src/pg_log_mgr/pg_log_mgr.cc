@@ -29,11 +29,13 @@ namespace springtail::pg_log_mgr {
                        const std::string &host, const std::string &db_name,
                        const std::string &user_name, const std::string &password,
                        const std::string &pub_name, const std::string &slot_name,
+                       uint64_t log_size_rollover_threshold,
                        int port,
                        std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue)
     : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
       _host(host), _db_name(db_name), _user_name(user_name),
-      _password(password), _pub_name(pub_name), _slot_name(slot_name), _port(port),
+      _password(password), _pub_name(pub_name), _slot_name(slot_name),
+      _log_size_rollover_threshold(log_size_rollover_threshold), _port(port),
       _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
       _repl_log_path(repl_log_path),
       _committer_queue(committer_queue),
@@ -457,7 +459,7 @@ namespace springtail::pg_log_mgr {
             start_offset = end_offset;
 
             // check to see if we should rollover log
-            if (end_offset > LOG_ROLLOVER_SIZE_BYTES) {
+            if (end_offset > _log_size_rollover_threshold) {
                 logger->close();
                 logger = _create_repl_logger();
                 start_offset = 0;

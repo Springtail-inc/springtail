@@ -28,11 +28,11 @@ namespace springtail::pg_log_mgr {
         ~WalProgressTracker() = default;
 
         /**
-            * @brief This function add Postgres Xid and associated timestamp id
-            *
-            * @param pg_xid - Postgres Xid
-            * @param ts     - timestamp id
-            */
+         * @brief This function add Postgres Xid and associated timestamp id
+         *
+         * @param pg_xid - Postgres Xid
+         * @param ts     - timestamp id
+         */
         void
         add_pg_xid(int32_t pg_xid, uint64_t ts)
         {
@@ -52,17 +52,19 @@ namespace springtail::pg_log_mgr {
         }
 
         /**
-            * @brief This function removes Postgres Xid
-            *
-            * @param pg_xid - Postgres Xid
-            */
+         * @brief This function removes Postgres Xid
+         *
+         * @param pg_xid - Postgres Xid
+         */
         void
         remove_pg_xid(int32_t pg_xid)
         {
             std::unique_lock<std::shared_mutex> lock(_mt);
 
             // verify that Postgress XID is known
-            DCHECK(_pg_xid_to_ts.contains(pg_xid));
+            if(!_pg_xid_to_ts.contains(pg_xid)) {
+                return;
+            }
 
             // Get Postgress XID timestamp
             uint64_t ts = _pg_xid_to_ts[pg_xid];
@@ -81,18 +83,20 @@ namespace springtail::pg_log_mgr {
         }
 
         /**
-            * @brief This function adds Xid for the give Postgres Xid.
-            *
-            * @param pg_xid - Postgres Xid
-            * @param xid    - Springtail Xid
-            */
+         * @brief This function adds Xid for the give Postgres Xid.
+         *
+         * @param pg_xid - Postgres Xid
+         * @param xid    - Springtail Xid
+         */
         void
         add_xid(int32_t pg_xid, uint64_t xid)
         {
             std::unique_lock<std::shared_mutex> lock(_mt);
 
             // verify that Postgress XID is known
-            DCHECK(_pg_xid_to_ts.contains(pg_xid));
+            if(!_pg_xid_to_ts.contains(pg_xid)) {
+                return;
+            }
 
             // Get Postgress XID timestamp
             uint64_t ts = _pg_xid_to_ts[pg_xid];
@@ -124,17 +128,19 @@ namespace springtail::pg_log_mgr {
         }
 
         /**
-            * @brief This function removes Xid
-            *
-            * @param xid - Springtail Xid
-            */
+         * @brief This function removes Xid
+         *
+         * @param xid - Springtail Xid
+         */
         void
         remove_xid(uint64_t xid)
         {
             std::unique_lock<std::shared_mutex> lock(_mt);
 
             // verify that XID is known
-            DCHECK(_xid_to_ts.contains(xid));
+            if(!_xid_to_ts.contains(xid)) {
+                return;
+            }
 
             // Get XID timestamp
             uint64_t ts = _xid_to_ts[xid];
@@ -154,10 +160,10 @@ namespace springtail::pg_log_mgr {
         }
 
         /**
-            * @brief Get the min timestamp id recorded for Porstgress and Springtail Xids
-            *
-            * @return uint64_t - timestamp id
-            */
+         * @brief Get the min timestamp id recorded for Porstgress and Springtail Xids
+         *
+         * @return uint64_t - timestamp id
+         */
         uint64_t
         get_min_timestamp()
         {
