@@ -688,11 +688,11 @@ namespace springtail::pg_log_mgr {
                                     uint64_t xid)
     {
         // check if we need to perform a table swap / commit before proceeding
-        auto &&xid_msg = SyncTracker::get_instance()->check_commit(db_id, pg_xid);
-        if (xid_msg) {
+        auto xid_msg = SyncTracker::get_instance()->check_commit(db_id, pg_xid);
+        if (xid_msg != nullptr) {
             // synchronously issue the swap/commit at the GC-2 prior to processing this xid
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Issue TABLE_SYNC_COMMIT on {} @ {}", db_id, xid);
-            _committer_queue->push(std::make_shared<committer::XidReady>(xid_msg.value()));
+            _committer_queue->push(xid_msg);
 
             // once the swap/commit is complete, we can clear the entry from the sync
             // tracker and continue processing
