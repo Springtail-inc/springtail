@@ -13,7 +13,7 @@
 
 #include <common/common.hh>
 #include <common/redis.hh>
-
+#include <proto/pg_copy_table.pb.h>
 #include <redis/redis_containers.hh>
 
 namespace springtail::pg_log_mgr {
@@ -51,35 +51,6 @@ namespace springtail::pg_log_mgr {
               begin_offset(begin_offset), commit_offset(commit_offset),
               xact_lsn(xact_lsn), xid(xid), db_id(db_id), pg_xid(pg_xid),
               aborted_xids(aborted_xids) {}
-
-            XactMsg(const std::vector<std::string> &split)
-            {
-                // serialized order: xid, pg_xid, xact_lsn, begin_path, begin_offset, commit_path, commit_offset
-                int idx = 0;
-                db_id = std::stoull(split[idx++]); // db_id
-                xid = std::stoull(split[idx++]); // xid
-                pg_xid = std::stoul(split[idx++]); // pg_xid
-                xact_lsn = std::stoull(split[idx++]); // lsn
-                begin_path = std::filesystem::path(split[idx++]); // begin path
-                begin_offset = std::stoull(split[idx++]); // begin offset
-                commit_path = std::filesystem::path(split[idx++]); // commit path
-                commit_offset = std::stoull(split[idx++]); // commit offset
-                int aborted_xids_size = std::stoi(split[idx++]); // aborted xids size
-
-                for (int i = 0; i < aborted_xids_size; i++) { // aborted xids
-                    aborted_xids.insert(std::stoul(split[idx++], nullptr, 16));
-                }
-            }
-
-            explicit operator std::string() const
-            {
-                std::string xid_str = fmt::format("{}:", aborted_xids.size());
-                for (auto xid : aborted_xids) {
-                    xid_str += fmt::format("{:X}:", xid);
-                }
-                return fmt::format("{}:{}:{}:{}:{}:{}:{}:{}:{}", db_id, xid, pg_xid, xact_lsn, begin_path.c_str(),
-                                   begin_offset, commit_path.c_str(), commit_offset, xid_str);
-            }
         };
 
         /** Table sync message -- from copy table */
@@ -91,7 +62,7 @@ namespace springtail::pg_log_mgr {
             uint32_t xmax;                 ///< xmax; one past highest completed xid
             uint32_t xmin_epoch;
             uint32_t xmax_epoch;
-            std::vector<int32_t> tids;    ///< table ids
+            std::vector<std::pair<int32_t, std::shared_ptr<proto::CopyTableInfo>>> tids;    ///< table ids and rpc info
             std::vector<uint32_t> xips;
 
             TableSyncMsg(uint64_t db_id, PgCopyResultPtr copy_result)
@@ -101,49 +72,6 @@ namespace springtail::pg_log_mgr {
                   xmin_epoch(copy_result->xmin_epoch), xmax_epoch(copy_result->xmax_epoch),
                   tids(copy_result->tids), xips(copy_result->xips)
             {}
-
-            TableSyncMsg(const std::vector<std::string> &split)
-            {
-                // serialized order: db_id, target_xid, xmin xid, xmax xid, xmin epoch, xmax epoch, tids, xips
-                int idx = 0;
-                db_id = std::stoull(split[idx++]); // db_id
-                target_xid = std::stoull(split[idx++]); // target_xid
-                pg_xid = std::stoul(split[idx++]); // pg_xid
-                xmin = std::stoul(split[idx++]); // xmin
-                xmax = std::stoul(split[idx++]); // xmax
-                xmin_epoch = std::stoul(split[idx++]); // xmin epoch
-                xmax_epoch = std::stoul(split[idx++]); // xmax epoch
-
-                std::string tids = split[idx++];
-                std::string xips = split[idx++];
-
-                // decode tids vector
-                if (!tids.empty()) {
-                    std::vector<std::string> tids_split;
-                    common::split_string(",", tids, tids_split);
-                    for (const auto &tid : tids_split) {
-                        this->tids.push_back(std::stoi(tid));
-                    }
-                }
-
-                // decode xips vector
-                if (!xips.empty()) {
-                    std::vector<std::string> xips_split;
-                    common::split_string(",", xips, xips_split);
-                    for (const auto &xip : xips_split) {
-                        this->xips.push_back(std::stoul(xip));
-                    }
-                }
-            }
-
-            /** Serialize table sync message to string */
-            explicit operator std::string() const
-            {
-                return fmt::format("{}:{}:{}:{}:{}:{}:{}:{}:{}",
-                    db_id, target_xid, pg_xid, xmin, xmax, xmin_epoch, xmax_epoch,
-                    common::join_string(",", tids.begin(), tids.end()),
-                    common::join_string(",", xips.begin(), xips.end()));
-            }
         };
 
         struct TableSyncEndMsg {
@@ -152,16 +80,6 @@ namespace springtail::pg_log_mgr {
             TableSyncEndMsg(uint64_t db_id)
                 : db_id(db_id)
             {}
-
-            TableSyncEndMsg(const std::string &string_value)
-            {
-                db_id = std::stoull(string_value);
-            }
-
-            explicit operator std::string() const
-            {
-                return fmt::format("{}", db_id);
-            }
         };
 
         /**
@@ -199,58 +117,6 @@ namespace springtail::pg_log_mgr {
             : type(TABLE_SYNC_END_MSG),
               msg(TableSyncEndMsg(db_id))
         {}
-
-        /**
-         * @brief Deserialization constructor
-         * @param string_value
-         */
-        explicit PgXactMsg(const std::string &string_value)
-            : msg(0) // msg needs to be initialized
-        {
-            std::vector<std::string> split;
-            common::split_string(":", string_value, split);
-
-            std::string type_str = split.back();
-            split.pop_back();
-
-            type = (type_str == "X") ? XACT_MSG : TABLE_SYNC_MSG;
-
-            if (type_str == "X") {
-                assert(split.size() >= 8);
-                type = XACT_MSG;
-                msg = XactMsg(split);
-            } else if (type_str == "T") {
-                assert(split.size() >= 8);
-                type = TABLE_SYNC_MSG;
-                msg = TableSyncMsg(split);
-            } else if (type_str == "E") {
-                assert(split.size() == 1);
-                type = TABLE_SYNC_END_MSG;
-                msg = TableSyncEndMsg(split[0]);
-            } else {
-                assert(false);
-            }
-        }
-
-        /**
-         * @brief Serialize data to string
-         * @return std::string
-         */
-        explicit operator std::string() const
-        {
-            if (type == XACT_MSG) {
-                const auto &xact_msg = std::get<XactMsg>(msg);
-                return static_cast<std::string>(xact_msg) + ":X";
-            } else if (type == TABLE_SYNC_MSG) {
-                const auto &table_sync_msg = std::get<TableSyncMsg>(msg);
-                return static_cast<std::string>(table_sync_msg) + ":T";
-            } else if (type == TABLE_SYNC_END_MSG) {
-                const auto &table_sync_end_msg = std::get<TableSyncEndMsg>(msg);
-                return static_cast<std::string>(table_sync_end_msg) + ":E";
-            } else {
-                CHECK(false);
-            }
-        }
 
         Type type;  ///< message type
         std::variant<XactMsg, TableSyncMsg, TableSyncEndMsg, int> msg;  ///< message data

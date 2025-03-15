@@ -446,7 +446,7 @@ namespace springtail
         _connection.free_copy_buffer();
     }
 
-    void
+    std::shared_ptr<proto::CopyTableInfo>
     PgCopyTable::_copy_table(uint64_t db_id,
                              springtail::XidLsn &xid,
                              const std::string &table_name,
@@ -460,11 +460,10 @@ namespace springtail
         // get secondary indexes XXX not fully supported yet
         _get_secondary_indexes();
 
-        // Create a single protobuf message containing all operations
-        proto::CopyTableInfo copy_info;
+        auto copy_info = std::make_shared<proto::CopyTableInfo>();
 
         // Set namespace request
-        auto* ns_req = copy_info.mutable_namespace_req();
+        auto* ns_req = copy_info->mutable_namespace_req();
         ns_req->set_db_id(db_id);
         ns_req->set_namespace_id(_schema.schema_oid);
         ns_req->set_name(_schema.schema_name);
@@ -472,7 +471,7 @@ namespace springtail
         ns_req->set_lsn(1);
 
         // Set table request
-        auto* table_req = copy_info.mutable_table_req();
+        auto* table_req = copy_info->mutable_table_req();
         table_req->set_db_id(db_id);
         table_req->set_xid(xid.xid);
         table_req->set_lsn(1);
@@ -500,7 +499,7 @@ namespace springtail
 
         // Add index requests
         for (const auto &index : _schema.secondary_keys) {
-            auto* index_req = copy_info.add_index_reqs();
+            auto* index_req = copy_info->add_index_reqs();
             index_req->set_db_id(db_id);
             index_req->set_xid(xid.xid);
             index_req->set_lsn(constant::MAX_LSN-1);
@@ -566,7 +565,7 @@ namespace springtail
         auto &&metadata = table->finalize();
 
         // Set roots request
-        auto* roots_req = copy_info.mutable_roots_req();
+        auto* roots_req = copy_info->mutable_roots_req();
         roots_req->set_db_id(db_id);
         roots_req->set_xid(xid.xid);
         roots_req->set_table_id(table_oid);
@@ -581,10 +580,7 @@ namespace springtail
         stats->set_row_count(metadata.stats.row_count);
         roots_req->set_snapshot_xid(metadata.snapshot_xid);
 
-        // store the serialized protobuf operation into redis for the GC-2
-        auto &&key = fmt::format(redis::HASH_SYNC_TABLE_OPS, Properties::get_db_instance_id(), db_id);
-        auto redis = RedisMgr::get_instance()->get_client();
-        redis->hset(key, fmt::format("{}", table_oid), copy_info.SerializeAsString());
+        return copy_info;
     }
 
     int32_t PgCopyTable::_verify_copy_header(const std::string_view &header)
@@ -956,15 +952,15 @@ namespace springtail
 
             try {
                 // copy the table
-                copy_table._copy_table(db_id,
-                                       xid,
-                                       request->table_name,
-                                       request->schema_name,
-                                       request->table_oid,
-                                       request->schema_oid);
+                auto info = copy_table._copy_table(db_id,
+                                                   xid,
+                                                   request->table_name,
+                                                   request->schema_name,
+                                                   request->table_oid,
+                                                   request->schema_oid);
 
                 // add the table oid to the result
-                result->add_table(request->table_oid);
+                result->add_table(request->table_oid, info);
 
             } catch (PgTableNotFoundError &e) {
                 SPDLOG_ERROR("Table not found: {}.{}", request->schema_name, request->table_name);

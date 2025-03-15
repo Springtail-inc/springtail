@@ -84,51 +84,38 @@ namespace {
         ASSERT_EQ(res.size(), 1);
         ASSERT_EQ(res[0]->tids.size(), 1);
 
-        uint32_t oid = res[0]->tids[0];
+        uint32_t oid = res[0]->tids[0].first;
         xid = res[0]->target_xid;
 
         // apply the system table changes
         auto client = sys_tbl_mgr::Client::get_instance();
 
-        auto redis = RedisMgr::get_instance()->get_client();
-        std::string key = fmt::format(redis::HASH_SYNC_TABLE_OPS,
-                                      Properties::get_db_instance_id(), db_id);
-        std::vector<std::string> hkeys;
-        redis->hkeys(key, std::back_inserter(hkeys));
-
-        for (const std::string &hkey : hkeys) {
-            auto &&value = redis->hget(key, hkey);
-            proto::CopyTableInfo copy_info;
-            if (!copy_info.ParseFromString(*value)) {
-                throw Error("Failed to parse CopyTableInfo from string");
-            }
+        for (auto &entry : res[0]->tids) {
+            auto copy_info = entry.second;
 
             // perform the table swap
             // note: we wait to perform this operation in the GC-2 to ensure that all system
             //       table mutations up to this XID have already been applied, otherwise we
             //       could potentially get a stray column added before the swap XID showing
             //       up in the schema since it wouldn't get deleted by the DROP TABLE
-            auto* namespace_req = copy_info.mutable_namespace_req();
+            auto* namespace_req = copy_info->mutable_namespace_req();
             namespace_req->set_xid(xid);
             namespace_req->set_lsn(constant::MAX_LSN - 2);
 
-            auto* create_req = copy_info.mutable_table_req();
+            auto* create_req = copy_info->mutable_table_req();
             create_req->set_xid(xid);
             create_req->set_lsn(constant::MAX_LSN - 1);
 
-            auto *indexes = copy_info.mutable_index_reqs();
+            auto *indexes = copy_info->mutable_index_reqs();
             std::vector<proto::IndexRequest> index_reqs;
             for (auto &index : *indexes) {
                 index_reqs.push_back(index);
             }
-            auto *roots_req = copy_info.mutable_roots_req();
+            auto *roots_req = copy_info->mutable_roots_req();
             roots_req->set_xid(xid);
 
             // Perform the table swap using the updated copy_info
             client->swap_sync_table(*namespace_req, *create_req, index_reqs, *roots_req);
-
-            // clear the table entry from the hash
-            redis->hdel(key, hkey);
         }
 
         // finalize the system metadata
