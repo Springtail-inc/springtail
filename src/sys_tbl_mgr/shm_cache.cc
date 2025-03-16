@@ -155,11 +155,8 @@ ShmCache::get_db_tables(DbId db)
 
     auto& seq_idx = _lru->get<0>();
     for (auto const& v: seq_idx) {
-        if (v.db == db ) {
-
-            if (std::ranges::find(r, v.tid) == r.end()) {
-                r.push_back(v.tid);
-            }
+        if (v.db == db && std::ranges::find(r, v.tid) == r.end()) {
+            r.push_back(v.tid);
         }
     }
 

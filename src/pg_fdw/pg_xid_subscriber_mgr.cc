@@ -56,7 +56,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
     // sys table data when the next xid is committed
     std::vector<std::jthread> workers;
     for (auto i = 0; i != _worker_count; ++i) {
-        workers.emplace_back([this](std::stop_token st) { _populate_worker(st); });
+        workers.emplace_back([this](std::stop_token wst) { _populate_worker(wst); });
     }
 
     // keep alive
@@ -111,12 +111,12 @@ PgXidSubscriberMgr::_populate_worker(std::stop_token st)
         if (!_cv.wait(g, st, [this]{ return !_populate_queue.empty(); })) {
             break;
         }
-        auto item = _populate_queue.front();
+        auto [db, tid] = _populate_queue.front();
         _populate_queue.pop();
-        auto table_ids = _cache->get_db_tables(item.first);
+        auto table_ids = _cache->get_db_tables(db);
         for (auto v: table_ids) {
             // the client will cache data in _cache
-            _client->get_roots(item.first, v, item.second);
+            _client->get_roots(db, v, tid);
             if (st.stop_requested()) {
                 break;
             }
@@ -130,8 +130,7 @@ PgXidSubscriberRunner::start()
     nlohmann::json json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
 
     uint64_t roots_cache_size = 0;
-    if (Json::get_to<uint64_t>(json, "roots_shm_cache_size", roots_cache_size)) {
-    }
+    Json::get_to<uint64_t>(json, "roots_shm_cache_size", roots_cache_size);
 
     if (!roots_cache_size) {
         SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Bad cache size");

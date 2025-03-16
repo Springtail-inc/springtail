@@ -37,7 +37,6 @@ int main(int argc, char *argv[])
     std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
     runners.emplace();
     runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
-//    runners->emplace_back(std::make_unique<TableMgrRunner>());
     runners->emplace_back(std::make_unique<PgXidSubscriberRunner>());
 
     springtail::springtail_init_daemon(runners, "pg_xid_subscriber", pidfile);
