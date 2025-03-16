@@ -157,8 +157,9 @@ class Production:
         version = version_str.split(' ')[1].split('.')[0]
         env_file = f'/etc/postgresql/{version}/main/environment'
 
+        # Update the localhost socket connection to use scram-sha-256
         self.logger.info("Setting up pg_hba.conf")
-        run_command('sudo', ['sed', '-i', "s/\\bpeer\\b/scram-sha-256/g", f'/etc/postgresql/{version}/main/pg_hba.conf'])
+        run_command('sudo', ['sed', '-i', 's/^local[[:space:]]\\+all[[:space:]]\\+all[[:space:]]\\+\\(md5\\|peer\\)/local   all   all   scram-sha-256/', f'/etc/postgresql/{version}/main/pg_hba.conf'])
 
         # Write the environment variables to a temporary file
         with tempfile.NamedTemporaryFile(delete=True, mode='w') as temp_file:
