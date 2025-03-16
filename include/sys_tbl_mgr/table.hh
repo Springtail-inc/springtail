@@ -338,6 +338,10 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
          */
         std::vector<std::string> get_column_names(const std::vector<uint32_t>& col_position);
 
+        /** This will convert column positions to column names based on the passed table schema
+         */
+        std::vector<std::string> get_column_names(ExtentSchemaPtr schema, const std::vector<uint32_t>& col_position);
+
         /**
          * Returns an iterator to the first row that is greater than or equal to the provided search
          * key.  Search key must match the primary index order.
@@ -387,6 +391,13 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
          * @return A pointer to the requested page.
          */
         StorageCache::SafePagePtr read_page(uint64_t extent_id) const;
+
+        /**
+         * Reads an extent from the disk and returns it.
+         * @param extent_id The extent ID to read.
+         * @return A pointer to the requested page.
+         */
+        StorageCache::SafePagePtr read_page_from_disk(uint64_t extent_id) const;
 
         /**
          * @brief Get table stats
@@ -590,6 +601,14 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
         /** This will convert column positions to column names based on the table schema
          */
         std::vector<std::string> get_column_names(const std::vector<uint32_t>& col_position);
+
+        /**
+         * @brief Get table stats
+         * @return TableStats
+         */
+        TableStats get_stats() const {
+            return _stats;
+        }
 
     private:
         /**

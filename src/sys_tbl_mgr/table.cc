@@ -176,6 +176,12 @@ get_table_dir(const std::filesystem::path &base,
         return _get_column_names(_schema, col_position);
     }
 
+    std::vector<std::string> 
+    Table::get_column_names(ExtentSchemaPtr schema, const std::vector<uint32_t>& col_position)
+    {
+        return _get_column_names(schema, col_position);
+    }
+
     bool
     Table::has_primary()
     {
@@ -391,6 +397,23 @@ get_table_dir(const std::filesystem::path &base,
                 return end(index_id);
             }
             return Iterator(this, btree, i, index_schema);
+        }
+    }
+
+    StorageCache::SafePagePtr
+    Table::read_page_from_disk(uint64_t extent_id) const
+    {
+        // XXX: When an extent is asked from the page,
+        // and if the extent's XID is different than the XID passed
+        // update page cache XID with extent's XID. This can avoid
+        // direct IO access from here
+        auto data_file_handle = IOMgr::get_instance()->open(_table_dir / constant::DATA_FILE, IOMgr::IO_MODE::READ, true);
+        auto response = data_file_handle->read(extent_id);
+        if (response->data.empty()) {
+            return StorageCache::get_instance()->get(_table_dir / constant::DATA_FILE, constant::UNKNOWN_EXTENT, _xid);
+        } else {
+            auto extent = std::make_shared<Extent>(response->data);
+            return StorageCache::get_instance()->get(_table_dir / constant::DATA_FILE, extent_id, extent->header().xid);
         }
     }
 

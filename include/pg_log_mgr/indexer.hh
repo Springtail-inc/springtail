@@ -58,21 +58,42 @@ namespace springtail::committer {
          */
         void wait_for_completion(uint64_t db_id);
 
+        /**
+         * @brief Processes the first pending xid's entries for the given db_id.
+         * 
+         * Iterates through the first xid's entries, calling recon() for each.
+         * Cleans up empty entries from the map.
+         * 
+         * @param db_id The database ID to process.
+         */
+        void process_first_pending_reconciliation(uint64_t db_id);
+
+        /**
+         * @brief Processes the first pending xid's entries for the first available db_id in the map.
+         */
+        void process_first_pending_reconciliation();
+
     private:
         void task(std::stop_token st);
-
 
         // Key is used to identify work items.
         using Key = std::pair<uint64_t, // DB id
             uint64_t // index ID
                 >;
 
-        MutableBTreePtr _build(std::stop_token st, const Key& key, const IndexParams& idx);
+        struct IndexState {
+            MutableBTreePtr _root;
+            Key _key;
+            IndexParams _idx;
+            uint64_t _tid;
+        };
+
+        IndexState _build(std::stop_token st, const Key& key, const IndexParams& idx);
 
         void _drop(std::stop_token st, const Key& key, const IndexParams& idx);
 
         bool _was_dropped(const Key& key);
-        void _commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx);
+        void _commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx, uint64_t end_xid);
 
         // this is to notify when an index modifiction is completed 
         std::condition_variable _cv_done;
@@ -87,5 +108,31 @@ namespace springtail::committer {
         std::vector<std::jthread> _workers;
 
         RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
+        
+        // reconciliation Index
+
+        std::map<uint64_t, std::map<uint64_t, std::list<IndexState>>> _pending_idx_reconciliation_map;
+
+        /**
+         * @brief Adds an IndexState to the pending reconciliation map.
+         * 
+         * This method ensures the correct db_id and xid mapping before inserting the IndexState.
+         * 
+         * @param idxState The IndexState to be added.
+         */
+        void _add_to_pending_reconciliation(IndexState&& idxState);
+
+        /**
+         * This will reconcile the index by catching
+         * all the table XIDs that happened post build initialization
+         * @param idxState Index state
+         */
+        void _reconcile_index(IndexState& idxState);
+
+        /*
+         * Pick the XIDs for the given db_id and reconcile indexes 
+         * belonging to the the XIDs
+         */
+        void _process_first_pending_reconciliation(decltype(_pending_idx_reconciliation_map)::iterator db_it);
     };
 }

@@ -124,8 +124,10 @@ namespace springtail::committer {
                 params = _work_set[key];
             }
             if (!params._ddl.is_null()) {
-                auto root = _build(st, key, params);
-                _commit_build(root, key, params);
+                auto idxState = _build(st, key, params);
+                //auto root = idxState._root;
+                _add_to_pending_reconciliation(std::move(idxState));
+                //_commit_build(root, key, params);
             } else {
                 _drop(st, key, params);
             }
@@ -200,7 +202,7 @@ namespace springtail::committer {
         SPDLOG_INFO("Index dropped: {}:{}", db_id, index_id);
     }
 
-    MutableBTreePtr
+    Indexer::IndexState
     Indexer::_build(std::stop_token st, const Key& key, const IndexParams& idx)
     {
         constexpr int DROP_CHECK_PERIOD = 1000;
@@ -221,16 +223,12 @@ namespace springtail::committer {
             idx_cols.push_back(col["position"]);
         }
 
-        MutableBTreePtr root;
         std::shared_ptr<std::vector<FieldPtr>> key_fields;
-        {
-            auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, idx._xid, idx._xid);
-            root = table->index(index_id);
-            CHECK(root);
-            // create an index root
-            root->truncate();
-            key_fields = table->schema()->get_fields(table->get_column_names(idx_cols));
-        }
+
+        auto mutable_table = TableMgr::get_instance()->get_mutable_table(db_id, tid, idx._xid, idx._xid);
+        MutableBTreePtr root = mutable_table->create_index_root(index_id, idx_cols);
+        root->init_empty();
+        key_fields = mutable_table->schema()->get_fields(mutable_table->get_column_names(idx_cols));
 
         // additional fields in the root schema to keep extent and row ids
         auto value_fields = std::make_shared<FieldArray>(2);
@@ -238,15 +236,16 @@ namespace springtail::committer {
         uint64_t current_extent_id = 0;
         uint32_t current_row_id = 0;
 
+        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Indexing build in progress: {}:{}", db_id, index_id);
         auto table = TableMgr::get_instance()->get_table(db_id, tid, idx._xid);
         for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
             if (st.stop_requested()) {
                 root->truncate();
-                return {};
+                return {NULL, key, idx, tid};
             }
             // check if the index was dropped
             if (row_cnt % DROP_CHECK_PERIOD == 0 && _was_dropped(key)) {
-                return root;
+                return {root, key, idx, tid};
             }
             auto extent_id = row_i.extent_id();
 
@@ -268,8 +267,10 @@ namespace springtail::committer {
             ++current_row_id;
             ++row_cnt;
         }
+        // To mimic index building
+        //std::this_thread::sleep_for(std::chrono::seconds(20));
         SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Index build finished: {}:{}, rows={}", db_id, index_id, row_cnt);
-        return root;
+        return {root, key, idx, tid};
     }
 
     bool
@@ -285,7 +286,7 @@ namespace springtail::committer {
     }
 
     void
-    Indexer::_commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx)
+    Indexer::_commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx, uint64_t end_xid)
     {
         if (!root) {
             // The build was cancelled as due to a shutdown.
@@ -296,7 +297,7 @@ namespace springtail::committer {
 
         auto [db_id, index_id] = key;
         auto tid = idx._ddl["table_id"];
-        XidLsn xid{idx._xid};
+        XidLsn xid{end_xid};
 
         IndexParams work_item;
 
@@ -311,14 +312,15 @@ namespace springtail::committer {
         auto client = sys_tbl_mgr::Client::get_instance();
         if (!work_item._ddl.is_null()) {
             auto extent_id = root->finalize();
-            auto meta = client->get_roots(db_id, tid, idx._xid);
+            auto meta = client->get_roots(db_id, tid, end_xid);
             meta->roots.emplace_back(key.second, extent_id);
-            client->update_roots(db_id, tid, idx._xid, *meta);
+            client->update_roots(db_id, tid, end_xid, *meta);
+            client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::READY);
         } else {
             // the index was deleted while we were building it
             root->truncate();
             // TODO: figure out out how to change the index state here to DELETED with the same XID
-            assert(work_item._xid > idx._xid);
+            assert(work_item._xid > end_xid);
             XidLsn xid{work_item._xid};
             client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
         }
@@ -326,5 +328,146 @@ namespace springtail::committer {
         // TODO: revisit it when we support asynchronous index builds
         // so that the lock and _cv_done are not required while
         // root->finalize() and sys table updates.
+    }
+
+    // Index reconciliation flows
+    void
+    Indexer::_add_to_pending_reconciliation(IndexState&& idxState)
+    {
+        _pending_idx_reconciliation_map
+            .try_emplace(idxState._idx._db_id)   // Ensure db_id entry exists
+            .first->second
+            .try_emplace(idxState._idx._xid)     // Ensure xid entry exists
+            .first->second.push_back(std::move(idxState)); // Add IndexState to the list
+    }
+
+    /**
+     * @brief Processes the first pending xid's entries for the given db_id.
+     * 
+     * Iterates through the first xid's entries, calling recon() for each.
+     * Cleans up empty entries from the map.
+     * 
+     * @param db_id The database ID to process.
+     */
+    void 
+    Indexer::process_first_pending_reconciliation(uint64_t db_id) {
+      auto db_it = _pending_idx_reconciliation_map.find(db_id);
+      if (db_it == _pending_idx_reconciliation_map.end()) {
+        return; // No pending entries for this db_id
+      }
+      _process_first_pending_reconciliation(db_it);
+    }
+
+    /**
+     * @brief Processes the first pending xid's entries for the first available db_id in the map.
+     * 
+     * If no entries are found, the method simply returns.
+     */
+    void 
+    Indexer::process_first_pending_reconciliation() {
+      if (_pending_idx_reconciliation_map.empty()) {
+        return; // Map is empty
+      }
+      auto db_it = _pending_idx_reconciliation_map.begin();
+      _process_first_pending_reconciliation(db_it);
+    }
+
+    void 
+    Indexer::_process_first_pending_reconciliation(decltype(_pending_idx_reconciliation_map)::iterator db_it) {
+      auto& xid_map = db_it->second;
+      if (xid_map.empty()) {
+        _pending_idx_reconciliation_map.erase(db_it); // Clean up empty db_id entry
+        return;
+      }
+
+      // Get iterator to the first xid entry
+      auto xid_it = xid_map.begin();
+      auto& idx_list = xid_it->second;
+
+      // Process each entry in the list
+      for (auto& idxState : idx_list) {
+        _reconcile_index(idxState);
+      }
+
+      // Clean up if entries are empty
+      xid_map.erase(xid_it); // Remove processed xid entry
+      if (xid_map.empty()) {
+        _pending_idx_reconciliation_map.erase(db_it); // Remove empty db_id entry
+      }
+    }
+
+    void
+    Indexer::_reconcile_index(IndexState& idxState)
+    {
+        auto [db_id, index_id] = idxState._key;
+        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Index reconciliation in progress: {}:{}", db_id, index_id);
+
+        // index column positions
+        std::vector<uint32_t> idx_cols;
+        for (auto const& col : idxState._idx._ddl["columns"]) {
+            idx_cols.push_back(col["position"]);
+        }
+
+        // Get the next_extent from disk using the stats last offset
+        auto table = TableMgr::get_instance()->get_table(db_id, idxState._tid, idxState._idx._xid);
+        auto next_eid = table->get_stats().end_offset;
+        auto next_page = table->read_page_from_disk(next_eid);
+        auto end_xid = idxState._idx._xid;
+
+        while (!next_page->empty()) {
+          end_xid = next_page->header().xid;
+          // Get the previous_extent_id from next_extent header
+          // and fetch the extent from disk using the extent_id
+          auto prev_eid = next_page->header().prev_offset;
+
+          // Retrieve the page for previous_extent_id 
+          // and invalidate index for the rows in the page
+          if (prev_eid != constant::UNKNOWN_EXTENT) {
+            auto prev_page = table->read_page_from_disk(prev_eid);
+
+            // Fetch the schema at prev_page
+            auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idxState._tid, {prev_page->header().xid, constant::MAX_LSN});
+
+            FieldArrayPtr value_fields = std::make_shared<FieldArray>(2);
+            value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(prev_eid);
+
+            // go through each row and pass the relevant key to each of the secondary indexes for removal
+            uint32_t row_id = 0;
+            for (auto &row : *prev_page) {
+              value_fields->at(1) = std::make_shared<ConstTypeField<uint32_t>>(row_id);
+
+              auto key_fields = prev_schema->get_fields(table->get_column_names(prev_schema, idx_cols));
+              auto &&skey = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
+              idxState._root->remove(skey);
+
+              ++row_id;
+            }
+          }
+
+          // Populate index for the rows in the next page
+          // Fetch the schema at next_page
+          auto next_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idxState._tid, {next_page->header().xid, constant::MAX_LSN});
+          uint32_t row_id = 0;
+          FieldArrayPtr value_fields = std::make_shared<FieldArray>(2);
+          value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(next_eid);
+          for (auto &row : *next_page) {
+            (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
+
+            auto keys = table->get_column_names(next_schema, idx_cols);
+            auto key_fields = next_schema->get_fields(keys);
+            auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
+            // note: uncomment if you need to debug the entries being populated into the secondary indexes
+            // SPDLOG_DEBUG_MODULE(LOG_BTREE, "Secondary populate {}", svalue->to_string());
+            idxState._root->insert(svalue);
+            ++row_id;
+          }
+
+          table = TableMgr::get_instance()->get_table(db_id, idxState._tid, next_page->header().xid);
+          next_eid = table->get_stats().end_offset;
+          next_page = table->read_page_from_disk(next_eid);
+        }
+        // Commit the index
+        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Initiating Index commit: {}:{}", db_id, index_id);
+        _commit_build(idxState._root, idxState._key, idxState._idx, end_xid);
     }
 }  // namespace springtail::gc
