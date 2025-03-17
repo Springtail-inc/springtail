@@ -351,11 +351,11 @@ namespace springtail::committer {
      */
     void 
     Indexer::process_first_pending_reconciliation(uint64_t db_id) {
-      auto db_it = _pending_idx_reconciliation_map.find(db_id);
-      if (db_it == _pending_idx_reconciliation_map.end()) {
-        return; // No pending entries for this db_id
-      }
-      _process_first_pending_reconciliation(db_it);
+        auto db_it = _pending_idx_reconciliation_map.find(db_id);
+        if (db_it == _pending_idx_reconciliation_map.end()) {
+            return; // No pending entries for this db_id
+        }
+        _process_first_pending_reconciliation(db_it);
     }
 
     /**
@@ -365,35 +365,35 @@ namespace springtail::committer {
      */
     void 
     Indexer::process_first_pending_reconciliation() {
-      if (_pending_idx_reconciliation_map.empty()) {
-        return; // Map is empty
-      }
-      auto db_it = _pending_idx_reconciliation_map.begin();
-      _process_first_pending_reconciliation(db_it);
+        if (_pending_idx_reconciliation_map.empty()) {
+            return; // Map is empty
+        }
+        auto db_it = _pending_idx_reconciliation_map.begin();
+        _process_first_pending_reconciliation(db_it);
     }
 
     void 
     Indexer::_process_first_pending_reconciliation(decltype(_pending_idx_reconciliation_map)::iterator db_it) {
-      auto& xid_map = db_it->second;
-      if (xid_map.empty()) {
-        _pending_idx_reconciliation_map.erase(db_it); // Clean up empty db_id entry
-        return;
-      }
+        auto& xid_map = db_it->second;
+        if (xid_map.empty()) {
+            _pending_idx_reconciliation_map.erase(db_it); // Clean up empty db_id entry
+            return;
+        }
 
-      // Get iterator to the first xid entry
-      auto xid_it = xid_map.begin();
-      auto& idx_list = xid_it->second;
+        // Get iterator to the first xid entry
+        auto xid_it = xid_map.begin();
+        auto& idx_list = xid_it->second;
 
-      // Process each entry in the list
-      for (auto& idxState : idx_list) {
-        _reconcile_index(idxState);
-      }
+        // Process each entry in the list
+        for (auto& idxState : idx_list) {
+            _reconcile_index(idxState);
+        }
 
-      // Clean up if entries are empty
-      xid_map.erase(xid_it); // Remove processed xid entry
-      if (xid_map.empty()) {
-        _pending_idx_reconciliation_map.erase(db_it); // Remove empty db_id entry
-      }
+        // Clean up if entries are empty
+        xid_map.erase(xid_it); // Remove processed xid entry
+        if (xid_map.empty()) {
+            _pending_idx_reconciliation_map.erase(db_it); // Remove empty db_id entry
+        }
     }
 
     void
@@ -415,56 +415,56 @@ namespace springtail::committer {
         auto end_xid = idxState._idx._xid;
 
         while (!next_page->empty()) {
-          end_xid = next_page->header().xid;
-          // Get the previous_extent_id from next_extent header
-          // and fetch the extent from disk using the extent_id
-          auto prev_eid = next_page->header().prev_offset;
+            end_xid = next_page->header().xid;
+            // Get the previous_extent_id from next_extent header
+            // and fetch the extent from disk using the extent_id
+            auto prev_eid = next_page->header().prev_offset;
 
-          // Retrieve the page for previous_extent_id 
-          // and invalidate index for the rows in the page
-          if (prev_eid != constant::UNKNOWN_EXTENT) {
-            auto prev_page = table->read_page_from_disk(prev_eid);
+            // Retrieve the page for previous_extent_id 
+            // and invalidate index for the rows in the page
+            if (prev_eid != constant::UNKNOWN_EXTENT) {
+                auto prev_page = table->read_page_from_disk(prev_eid);
 
-            // Fetch the schema at prev_page
-            auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idxState._tid, {prev_page->header().xid, constant::MAX_LSN});
+                // Fetch the schema at prev_page
+                auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idxState._tid, {prev_page->header().xid, constant::MAX_LSN});
 
-            FieldArrayPtr value_fields = std::make_shared<FieldArray>(2);
-            value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(prev_eid);
+                FieldArrayPtr value_fields = std::make_shared<FieldArray>(2);
+                value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(prev_eid);
 
-            // go through each row and pass the relevant key to each of the secondary indexes for removal
-            uint32_t row_id = 0;
-            for (auto &row : *prev_page) {
-              value_fields->at(1) = std::make_shared<ConstTypeField<uint32_t>>(row_id);
+                // go through each row and pass the relevant key to each of the secondary indexes for removal
+                uint32_t row_id = 0;
+                for (auto &row : *prev_page) {
+                    value_fields->at(1) = std::make_shared<ConstTypeField<uint32_t>>(row_id);
 
-              auto key_fields = prev_schema->get_fields(table->get_column_names(prev_schema, idx_cols));
-              auto &&skey = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
-              idxState._root->remove(skey);
+                    auto key_fields = prev_schema->get_fields(table->get_column_names(prev_schema, idx_cols));
+                    auto &&skey = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
+                    idxState._root->remove(skey);
 
-              ++row_id;
+                    ++row_id;
+                }
             }
-          }
 
-          // Populate index for the rows in the next page
-          // Fetch the schema at next_page
-          auto next_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idxState._tid, {next_page->header().xid, constant::MAX_LSN});
-          uint32_t row_id = 0;
-          FieldArrayPtr value_fields = std::make_shared<FieldArray>(2);
-          value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(next_eid);
-          for (auto &row : *next_page) {
-            (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
+            // Populate index for the rows in the next page
+            // Fetch the schema at next_page
+            auto next_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idxState._tid, {next_page->header().xid, constant::MAX_LSN});
+            uint32_t row_id = 0;
+            FieldArrayPtr value_fields = std::make_shared<FieldArray>(2);
+            value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(next_eid);
+            for (auto &row : *next_page) {
+                (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
 
-            auto keys = table->get_column_names(next_schema, idx_cols);
-            auto key_fields = next_schema->get_fields(keys);
-            auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
-            // note: uncomment if you need to debug the entries being populated into the secondary indexes
-            // SPDLOG_DEBUG_MODULE(LOG_BTREE, "Secondary populate {}", svalue->to_string());
-            idxState._root->insert(svalue);
-            ++row_id;
-          }
+                auto keys = table->get_column_names(next_schema, idx_cols);
+                auto key_fields = next_schema->get_fields(keys);
+                auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
+                // note: uncomment if you need to debug the entries being populated into the secondary indexes
+                // SPDLOG_DEBUG_MODULE(LOG_BTREE, "Secondary populate {}", svalue->to_string());
+                idxState._root->insert(svalue);
+                ++row_id;
+            }
 
-          table = TableMgr::get_instance()->get_table(db_id, idxState._tid, next_page->header().xid);
-          next_eid = table->get_stats().end_offset;
-          next_page = table->read_page_from_disk(next_eid);
+            table = TableMgr::get_instance()->get_table(db_id, idxState._tid, next_page->header().xid);
+            next_eid = table->get_stats().end_offset;
+            next_page = table->read_page_from_disk(next_eid);
         }
         // Commit the index
         SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Initiating Index commit: {}:{}", db_id, index_id);
