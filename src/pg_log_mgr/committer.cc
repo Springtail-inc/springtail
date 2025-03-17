@@ -98,10 +98,6 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
                 nlohmann::json ddls;
 
-                auto redis = RedisMgr::get_instance()->get_client();
-                std::string key = fmt::format(redis::HASH_SYNC_TABLE_OPS,
-                                              Properties::get_db_instance_id(), db_id);
-
                 // note: Need to check the completed XID against the most recent committed XID.  If
                 //       it is ahead, then we commit at the completed XID.  If it is the same then
                 //       we commit at the provided XID.
@@ -115,28 +111,25 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 auto client = sys_tbl_mgr::Client::get_instance();
 
                 // go through the hash of sys tbl operations
-                for (auto table_id : result->swap().tids()) {
-                    auto ops_str = redis->hget(key, fmt::format("{}", table_id));
-                    SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "table_id {}, ops: {} bytes", table_id,
-                                        ops_str->size());
-                    proto::CopyTableInfo copy_info;
-                    if (!copy_info.ParseFromString(*ops_str)) {
-                        throw Error("Failed to parse CopyTableInfo from string");
-                    }
+                for (auto &entry : result->swap().tids()) {
+                    auto table_id = entry.first;
+                    auto copy_info = entry.second;
+
+                    SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "table_id {}", table_id);
 
                     // perform the table swap
                     // note: we wait to perform this operation in the GC-2 to ensure that all system
                     //       table mutations up to this XID have already been applied, otherwise we
                     //       could potentially get a stray column added before the swap XID showing
                     //       up in the schema since it wouldn't get deleted by the DROP TABLE
-                    auto *namespace_req = copy_info.mutable_namespace_req();
+                    auto *namespace_req = copy_info->mutable_namespace_req();
                     namespace_req->set_xid(completed_xid);
                     namespace_req->set_lsn(constant::MAX_LSN - 2);
-                    auto *create = copy_info.mutable_table_req();
+                    auto *create = copy_info->mutable_table_req();
                     create->set_xid(completed_xid);
                     create->set_lsn(constant::MAX_LSN - 1);
 
-                    auto *indexes = copy_info.mutable_index_reqs();
+                    auto *indexes = copy_info->mutable_index_reqs();
                     std::vector<proto::IndexRequest> indexes_vec;
                     for (auto &index : *indexes) {
                         index.set_xid(completed_xid);
@@ -144,7 +137,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                         indexes_vec.push_back(index);
                     }
 
-                    auto *roots = copy_info.mutable_roots_req();
+                    auto *roots = copy_info->mutable_roots_req();
                     roots->set_xid(completed_xid);
 
                     // note: this will also invalidate the table's client cache entry
@@ -154,9 +147,6 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     // store the ddl mutations for the FDWs
                     ddls = nlohmann::json::parse(ddl_str);
                     assert(ddls.is_array());
-
-                    // clear the hash entry for the table
-                    redis->hdel(key, fmt::format("{}", table_id));
                 }
 
                 SPDLOG_INFO("Swapped synced tables: {}@{}", db_id, completed_xid);

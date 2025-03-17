@@ -60,8 +60,8 @@ namespace springtail::pg_log_mgr {
         // clear the inflight map for the provided tables in the db
         auto inflight_i = _inflight_map.find(sync_msg.db_id);
         if (inflight_i != _inflight_map.end()) {
-            for (int32_t table_id : sync_msg.tids) {
-                inflight_i->second.erase(table_id); // remove the table from the resync map
+            for (auto &entry : sync_msg.tids) {
+                inflight_i->second.erase(entry.first); // remove the table from the resync map
             }
 
             // remove the db from the map if the table set is empty
@@ -87,8 +87,8 @@ namespace springtail::pg_log_mgr {
         auto &table_map = _table_map[sync_msg.db_id];
 
         // check if we already have a record of a previous sync for this table
-        for (auto &tid : record->tids()) {
-            auto table_i = table_map.find(tid);
+        for (const auto &entry : record->tids()) {
+            auto table_i = table_map.find(entry.first);
             if (table_i == table_map.end()) {
                 continue;
             }
@@ -101,8 +101,8 @@ namespace springtail::pg_log_mgr {
         db_map[sync_msg.pg_xid] = record;
 
         // also keep a map to the record for each table being copied
-        for (int32_t table_id : sync_msg.tids) {
-            table_map[table_id] = record; // add the record to the sync map
+        for (auto &entry : sync_msg.tids) {
+            table_map[entry.first] = record; // add the record to the sync map
         }
 
         // record the target XID of the sync
@@ -111,7 +111,7 @@ namespace springtail::pg_log_mgr {
         return first_table;
     }
 
-    std::optional<committer::XidReady>
+    std::shared_ptr<committer::XidReady>
     SyncTracker::check_commit(uint64_t db_id,
                               uint32_t pg_xid)
     {
@@ -165,13 +165,13 @@ namespace springtail::pg_log_mgr {
         }
 
         // construct an XidReady record from the XidRecord objects
-        std::vector<uint64_t> tids;
+        std::vector<TablePair> tids;
         for (auto record : completed) {
             tids.insert(tids.end(), record->tids().begin(), record->tids().end());
         }
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Found {} tables", tids.size());
 
-        return committer::XidReady(type, db_id, committer::XidReady::SwapMsg(xid, std::move(tids)));
+        return std::make_shared<committer::XidReady>(type, db_id, committer::XidReady::SwapMsg(xid, std::move(tids)));
     }
 
     void
@@ -186,8 +186,8 @@ namespace springtail::pg_log_mgr {
         assert(db_i != _table_map.end());
 
         // remove all of the tables referenced in the commit message
-        for (auto table_id : commit_msg.swap().tids()) {
-            db_i->second.erase(table_id);
+        for (const auto &entry : commit_msg.swap().tids()) {
+            db_i->second.erase(entry.first);
         }
     }
 

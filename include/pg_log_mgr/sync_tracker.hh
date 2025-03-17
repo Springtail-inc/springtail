@@ -4,6 +4,7 @@
 #include <common/singleton.hh>
 #include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
+#include <proto/pg_copy_table.pb.h>
 
 namespace springtail::pg_log_mgr {
     /**
@@ -43,7 +44,7 @@ namespace springtail::pg_log_mgr {
          * @param pg_xid The pg_xid of the current transaction.
          * @return An optional XidReady containing the swap/commit details if available.
          */
-        std::optional<committer::XidReady> check_commit(uint64_t db_id, uint32_t pg_xid);
+        std::shared_ptr<committer::XidReady> check_commit(uint64_t db_id, uint32_t pg_xid);
 
         /**
          * Clears any tables that were part of the swap/commit.
@@ -68,6 +69,8 @@ namespace springtail::pg_log_mgr {
         bool should_skip(uint64_t db_id, uint64_t table_id, uint32_t pg_xid) const;
 
     private:
+        using TablePair = std::pair<int32_t, std::shared_ptr<proto::CopyTableInfo>>;
+
         /**
          * Internal class representing the XID metadata for an individual table sync.
          */
@@ -117,7 +120,7 @@ namespace springtail::pg_log_mgr {
             /**
              * Retrieve the list of tables that were part of this sync.
              */
-            const std::vector<int32_t> &tids() const {
+            const std::vector<TablePair> &tids() const {
                 return _tids;
             }
 
@@ -132,7 +135,7 @@ namespace springtail::pg_log_mgr {
             uint32_t _pg_xid; ///< The PG xid at which the sync occurred
             uint32_t _xmax; ///< The XMAX at postgres for the sync transaction
             std::set<uint32_t> _inflight; ///< The in-flight PG xids for the sync txn
-            std::vector<int32_t> _tids; ///< The table ids being synced
+            std::vector<TablePair> _tids; ///< The table ids being synced and their associated RPC data
         };
 
     private:

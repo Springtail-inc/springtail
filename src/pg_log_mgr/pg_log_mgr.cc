@@ -318,11 +318,9 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_process_copy_results(const std::vector<PgCopyResultPtr> &res)
     {
-        RedisClientPtr redis = RedisMgr::get_instance()->get_client();
-
         assert(_internal_state.is(STATE_SYNCING));
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Pushing copy results to redis");
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Pushing copy results to sync tracker");
 
         for (const auto &r : res) {
             // skip the result if it contains no tables
