@@ -142,7 +142,7 @@ jobs:
         if: success() || failure()      # run this step even if previous step failed
         with:
           name: 'Unit Test Logs'
-          path: debug/unit-test-*.log
+          path: debug/unit-test-*.log.tar.gz
 
       - name: Create Superuser for test
         if: success() || failure()      # run this step even if previous step failed
@@ -209,7 +209,7 @@ jobs:
         if: success() || failure()      # run this step even if previous step failed
         with:
           name: 'Integration Test Logs'
-          path: ./python/testing/integration-test-*.log
+          path: ./python/testing/integration-test-*.log.tar.gz
 
       - uses: actions/upload-artifact@v4
         if: success() || failure()      # run this step even if previous step failed
