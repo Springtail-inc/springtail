@@ -241,7 +241,7 @@ namespace springtail::committer {
         for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
             if (st.stop_requested()) {
                 root->truncate();
-                return {NULL, key, idx, tid};
+                return {nullptr, key, idx, tid};
             }
             // check if the index was dropped
             if (row_cnt % DROP_CHECK_PERIOD == 0 && _was_dropped(key)) {
