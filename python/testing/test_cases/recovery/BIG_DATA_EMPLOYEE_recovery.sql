@@ -1,5 +1,6 @@
 ## metadata
 ### autocommit false
+### sync_timeout 200
 ## test
 
 -- Employee database

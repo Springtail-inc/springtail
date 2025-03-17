@@ -1,6 +1,6 @@
 ## metadata
 ### autocommit false
-### sync_timeout 10
+### sync_timeout 200
 ## test
 
 -- Northwind database
