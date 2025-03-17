@@ -288,6 +288,7 @@ namespace springtail {
         }
 
         if (!load_redis || file == nullptr) {
+            SPDLOG_INFO("Loading properties from environment/redis");
             // read the base config from the environment
             _read_environment();
 
