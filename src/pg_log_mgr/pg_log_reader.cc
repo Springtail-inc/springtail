@@ -414,26 +414,6 @@ namespace springtail::pg_log_mgr {
         }
     }
 
-    nlohmann::json
-    PgLogReader::Batch::_validate_ddl_and_get_invalid_columns(std::string namespace_name, uint64_t table_oid,
-                                                         const std::vector<PgMsgSchemaColumn> &columns)
-    {
-        auto invalid_columns = nlohmann::json::array();
-        // Validate if the table has an invalid column
-        for (const auto& column : columns) {
-            if ( column.is_generated || column.is_non_standard_collation || !column.is_user_defined_type ){
-                invalid_columns.push_back({
-                    {"name", column.column_name},
-                    {"type_name", column.type_name},
-                    {"collation", column.collation}
-                });
-                SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "VALIDATE_DDL: Invalid column: name={}, tid={}", column.column_name, table_oid);
-            }
-        }
-
-        return invalid_columns;
-    }
-
     void
     PgLogReader::Batch::_apply_schema_change(PgMsgPtr change,
                                              const XidLsn &xidlsn)
@@ -499,6 +479,7 @@ namespace springtail::pg_log_mgr {
                     drop_table_msg.table = table_msg.table;
                     drop_table_msg.namespace_name = table_msg.namespace_name;
 
+                    // Drop the system table
                     std::string &&ddl_stmt = client->drop_table(_db, xidlsn, drop_table_msg);
                     redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                     break;
@@ -506,12 +487,14 @@ namespace springtail::pg_log_mgr {
                     // Table is valid, but check if the table is previously invalid.
                     // If the table was invalid before then switch the type to a CREATE instead of an ALTER
                     if (TableValidator::check_if_table_is_invalid_in_redis(table_msg.oid)){
+                        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Recreating invalid table as part of ALTER: xid={}, pg_xid={}, tid={}",
+                                    xidlsn.xid, table_msg.xid, table_msg.oid);
                         std::string &&ddl_stmt = client->create_table(_db, xidlsn, table_msg);
                         redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                         // The table is no longer invalid, remove the redis entry for the table
                         TableValidator::clear_invalid_table_in_redis(table_msg.oid);
 
-                        // XXX Should there be a resync here?
+                        _mark_table_resync(table_msg.oid, xidlsn);
                         break;
                     }
                 }
@@ -579,6 +562,26 @@ namespace springtail::pg_log_mgr {
             SPDLOG_ERROR("Message type {} not handled", static_cast<uint8_t>(change->msg_type));
             throw Error();
         }
+    }
+
+    nlohmann::json
+    PgLogReader::_validate_ddl_and_get_invalid_columns(std::string namespace_name, uint64_t table_oid,
+                                          const std::vector<PgMsgSchemaColumn> &columns)
+    {
+        auto invalid_columns = nlohmann::json::array();
+        // Validate if the table has an invalid column
+        for (const auto& column : columns) {
+            if ( column.is_generated || column.is_non_standard_collation || !column.is_user_defined_type ){
+                invalid_columns.push_back({
+                    {"name", column.column_name},
+                    {"type_name", column.type_name},
+                    {"collation", column.collation}
+                });
+                SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "VALIDATE_DDL: Invalid column: name={}, tid={}", column.column_name, table_oid);
+            }
+        }
+
+        return invalid_columns;
     }
 
     void
