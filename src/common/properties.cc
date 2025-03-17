@@ -456,6 +456,8 @@ namespace springtail {
             throw RedisNotFoundError("Error missing db_instance_id in redis");
         }
 
+        SPDLOG_DEBUG("Primary DB Config: {}", primary_db_config.dump());
+
         // in production, moving away from replication_user creds in redis/env
         if (!primary_db_config.contains("replication_user")) {
             // pull from aws secrets mgr, this updates _json[ORG_CONFIG]
