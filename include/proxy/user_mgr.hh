@@ -45,7 +45,7 @@ namespace springtail::pg_proxy {
         std::string password;
         uint32_t    salt;
 
-        UserLogin(PasswordType type=TEXT)
+        explicit UserLogin(PasswordType type=TEXT)
             : type(type)
         {
             memset(&scram_state, 0, sizeof(scram_state));
