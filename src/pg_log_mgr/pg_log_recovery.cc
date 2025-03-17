@@ -161,11 +161,12 @@ PgLogRecovery::_process_msg(PgMsgPtr msg,
                 auto &commit_msg = std::get<PgMsgStreamCommit>(msg->msg);
                 pgxid = commit_msg.xid;
             }
-            CHECK_EQ(pgxid, xact_reader.get_pg_xid());
 
             bool done = false;
             CHECK_LE(xact_reader.get_xid(), _committed_xid);
-            _active_map.erase(pgxid);
+            if (pgxid != 0) {
+                _active_map.erase(pgxid);
+            }
 
             if (xact_reader.get_xid() == _committed_xid) {
                 _final_committed = {log_number, _repl_reader.block_end_offset(), *_repl_log};

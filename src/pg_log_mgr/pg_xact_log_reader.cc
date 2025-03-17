@@ -65,6 +65,7 @@ PgXactLogReader::begin()
         return false;
     }
 
+    std::cout << "Current file: " << _current_file->string() << std::endl;
     // Open the file and load first extent
     if (!_open_next_file()) {
         return false;
@@ -108,6 +109,7 @@ PgXactLogReader::_open_next_file()
             _current_handle = nullptr;
             return false;
         }
+        std::cout << "Current file: " << _current_file->string() << std::endl;
     }
 
     // Open the file and read the first extent
