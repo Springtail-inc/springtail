@@ -35,8 +35,19 @@ class Component:
                  path: str,
                  pid_path: str,
                  args: List[str] = [],
+                 force_shutdown: bool = True,
                  shutdown_signal: ShutdownSignal = ShutdownSignal.SIGTERM):
-        """Initialize a new component"""
+        """Initialize a new component
+
+        Args:
+            name: The name of the component
+            id: The ID of the component
+            path: The path to the component binary
+            pid_path: The path to the PID file
+            args: Additional arguments to pass to the component
+            force_shutdown: Forcefully shutdown the component on startup if running
+            shutdown_signal: The signal to send to the component on shutdown
+        """
         self.name = name
         self.id = id
         self.path = os.path.join(path, name)
@@ -60,6 +71,10 @@ class Component:
             self.pid = pid
             self.process = psutil.Process(self.pid)
             self.state = ComponentState.RUNNING
+
+            if force_shutdown:
+                self.logger.info(f"Found running component {self.name}: state={self.state}, pid={self.pid}; shutting it down for startup")
+                self.shutdown()
         else:
             self.pid = None
             self.process = None

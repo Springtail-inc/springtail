@@ -20,6 +20,17 @@ namespace {
             std::string overrides = "xid_mgr.rpc_config.ssl=true";
             ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
 
+            // get xid_mgr properties check for cert files
+            nlohmann::json json = Properties::get(Properties::XID_MGR_CONFIG);
+            if (json.empty() || !json.contains("rpc_config") || !json["rpc_config"].contains("server_cert")) {
+                throw std::runtime_error("Missing XID Mgr SSL config");
+            }
+
+            std::string ssl_file = json["rpc_config"]["server_cert"];
+            if (ssl_file.empty() || !std::filesystem::exists(ssl_file)) {
+                throw std::runtime_error("Missing SSL cert file");
+            }
+
             auto service_runners = test::get_services(true, false, false);
             std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
             runners.emplace();
@@ -33,7 +44,7 @@ namespace {
         }
     };
 
-    TEST_F(XidMgr_Test, Ping) {
+    TEST_F(XidMgr_Test, SSLPing) {
         XidMgrClient *client = XidMgrClient::get_instance();
         ASSERT_NO_THROW(client->ping());
     }

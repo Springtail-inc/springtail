@@ -101,7 +101,7 @@ namespace springtail::pg_fdw {
     PgFdwMgr*
     PgFdwMgr::_init()
     {
-        elog(NOTICE, "Initializing PgFdwMgr");
+        elog(INFO, "Initializing PgFdwMgr");
         _instance = new PgFdwMgr();
         return _instance;
     }
@@ -114,7 +114,7 @@ namespace springtail::pg_fdw {
         if (config_file != nullptr) {
             // set env variables based on redis config
             // we don't reload redis config here, just set the env variables
-            elog(NOTICE, "Setting properties from file: %s", config_file);
+            elog(INFO, "Setting properties from file: %s", config_file);
             Properties::set_env_from_file(config_file);
             ::unsetenv("SPRINGTAIL_PROPERTIES_FILE");
         }
