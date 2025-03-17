@@ -135,7 +135,7 @@ namespace {
         ASSERT_EQ(_subscriber->_db_id, 1);
 
         _subscriber->cancel();
-        ASSERT_GE(_subscriber->_push_cnt, THREADS);
+        ASSERT_GE(_subscriber->_push_cnt, 200);
     }
 } // namespace
 

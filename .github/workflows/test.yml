@@ -42,22 +42,10 @@ jobs:
       GITHUB_LATEST_SHA: ${{ github.event.pull_request.head.sha }}
       NUM_PROCS: ${{ inputs.num_procs }}
     steps:
-      - name: Clean up
-        run: |
-          rm -f /opt/springtail/pids/*
-          rm -f /__w/springtail/springtail/*.{log,gz,xml}
-
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           clean: true
-
-      - name: install-aws-cli-action
-        uses: unfor19/install-aws-cli-action@v1
-        with:
-          version: 2                         # default
-          verbose: false                     # default
-          arch: arm64
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -69,6 +57,8 @@ jobs:
       - name: Prepare Tests
         run: |
           git config --global --add safe.directory /__w/springtail/springtail
+          # Turns off the OTEL in the system.json.settings
+          jq '.otel.enabled = false' system.json.settings > tmp.json && mv tmp.json system.json.settings
           cp system.json.settings system.json.test
           mkdir -p /opt/springtail/pids
           service redis-server start
@@ -105,8 +95,6 @@ jobs:
           make test ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose --stop-on-failure" 2>&1 | tee tmplog
           
           # List the open listening ports and processes info after tests are done
-          sudo apt update
-          sudo apt install net-tools          
           echo "==== Listening Ports ===="
           netstat -tulnp
           # Show the full launching command of each
@@ -127,8 +115,9 @@ jobs:
           _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
           
           _TIMESTAMP=$(date +"%Y-%m-%d-%H-%M-%S")
-          log_file="unit-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log" 
-          mv tmplog $log_file
+          log_file="unit-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log.tar.gz" 
+          tar zcvf $log_file tmplog
+          rm tmplog
           unit_test_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_PR_ID}/$log_file"
           
           aws s3 cp "$log_file" "$unit_test_log_s3key"
@@ -186,8 +175,9 @@ jobs:
           _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
           
           _TIMESTAMP=$(date +"%Y-%m-%d-%H-%M-%S")
-          log_file="integration-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log" 
-          mv tmplog $log_file
+          log_file="integration-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log.tar.gz" 
+          tar zcvf $log_file tmplog
+          rm tmplog
           
           # Integration test log
           integration_test_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_PR_ID}/$log_file"
@@ -195,7 +185,7 @@ jobs:
           echo "*** Integration Test Log S3 Key: $integration_test_log_s3key"
 
           # Only upload Springtail logs if the _LOG_FLAG is 'failed'
-          if [ "$_LOG_FLAG" == "failed" ]; then
+          if [ "$_LOG_FLAG" = "failed" ]; then
             # Springtail service log
             echo "Integration test failed, uploading Springtail logs..."
             springtail_log_file="springtail-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.tar.gz"
