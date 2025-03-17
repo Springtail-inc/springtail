@@ -59,6 +59,8 @@ jobs:
           git config --global --add safe.directory /__w/springtail/springtail
           # Turns off the OTEL in the system.json.settings
           jq '.otel.enabled = false' system.json.settings > tmp.json && mv tmp.json system.json.settings
+          # Replace the correct `springtail` code directory
+          sed -i -e 's|/home/dev/springtail|/__w/springtail/springtail|g' system.json.settings
           cp system.json.settings system.json.test
           mkdir -p /opt/springtail/pids
           service redis-server start
