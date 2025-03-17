@@ -23,7 +23,7 @@ on:
 jobs:
   test:
     name: test
-    runs-on: image-builder
+    runs-on: warp-ubuntu-latest-arm64-4x
     timeout-minutes: 30
     container:
       image: ${{ inputs.builder_image_version_tag }}
@@ -91,8 +91,6 @@ jobs:
           python3 springtail.py -f ../../system.json.test --load-redis --build-dir ../../debug
           cd ../../debug
           
-          sleep 3600000
-
           # Per SPR-501: break upon test failures - "--gtest_break_on_failure"
           make test ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose --stop-on-failure" 2>&1 | tee tmplog
           

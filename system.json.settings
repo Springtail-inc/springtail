@@ -115,7 +115,8 @@
         "1234": {
             "primary_db": {
                 "host": "localhost",
-                "port": 5432
+                "port": 5432,
+                "replication_user": "springtail"
             },
             "database_ids": ["1"],
             "hostname:ingestion": "localhost",
