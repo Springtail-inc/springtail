@@ -50,6 +50,8 @@ jobs:
           # Overwrite the stc/coordinator/config.yaml file with the following content
           echo "install_dir: '/opt/springtail'" > stc/coordinator/config.yaml
           echo "production: True" >> stc/coordinator/config.yaml
+          echo "log_rotation_size: 104857600" >> stc/coordinator/config.yaml
+          echo "log_rotation_count: 10" >> stc/coordinator/config.yaml
           tar -czf stc.tar.gz stc
 
       - name: Upload Coordinator
