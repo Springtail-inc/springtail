@@ -844,7 +844,7 @@ namespace springtail {
             PgMsgSchemaColumn column;
             nlohmann::json json = el.value();
 
-            json["name"].get_to(column.column_name);
+            json["name"].get_to(column.name);
             json["position"].get_to(column.position);
             json["pg_type"].get_to(column.pg_type);
             json["is_nullable"].get_to(column.is_nullable);

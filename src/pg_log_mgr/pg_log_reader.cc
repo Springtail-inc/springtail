@@ -285,7 +285,7 @@ namespace springtail::pg_log_mgr {
             std::vector<SchemaColumn> columns;
             for (auto column : table.columns) {
                 columns.emplace_back(SchemaColumn{
-                        column.column_name,
+                        column.name,
                         column.position,
                         static_cast<SchemaType>(column.type),
                         column.pg_type,
@@ -426,7 +426,7 @@ namespace springtail::pg_log_mgr {
             {
                 auto &table_msg = std::get<PgMsgTable>(change->msg);
 
-                auto invalid_columns = _validate_ddl_and_get_invalid_columns(
+                auto invalid_columns = TableValidator::_validate_ddl_and_get_invalid_columns<PgMsgSchemaColumn>(
                     table_msg.namespace_name, table_msg.oid, table_msg.columns);
                 if ( invalid_columns.size() > 0 ){
                     nlohmann::json table_info = {
@@ -457,7 +457,7 @@ namespace springtail::pg_log_mgr {
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "ALTER TABLE: xid={}, pg_xid={}, tid={}",
                                     xidlsn.xid, table_msg.xid, table_msg.oid);
 
-                auto invalid_columns = _validate_ddl_and_get_invalid_columns(
+                auto invalid_columns = TableValidator::_validate_ddl_and_get_invalid_columns<PgMsgSchemaColumn>(
                     table_msg.namespace_name, table_msg.oid, table_msg.columns);
                 if ( invalid_columns.size() > 0 ){
                     // There are invalid columns present as part of the alter
@@ -489,8 +489,6 @@ namespace springtail::pg_log_mgr {
                     if (TableValidator::check_if_table_is_invalid_in_redis(table_msg.oid)){
                         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Recreating invalid table as part of ALTER: xid={}, pg_xid={}, tid={}",
                                     xidlsn.xid, table_msg.xid, table_msg.oid);
-                        std::string &&ddl_stmt = client->create_table(_db, xidlsn, table_msg);
-                        redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                         // The table is no longer invalid, remove the redis entry for the table
                         TableValidator::clear_invalid_table_in_redis(table_msg.oid);
 
@@ -562,26 +560,6 @@ namespace springtail::pg_log_mgr {
             SPDLOG_ERROR("Message type {} not handled", static_cast<uint8_t>(change->msg_type));
             throw Error();
         }
-    }
-
-    nlohmann::json
-    PgLogReader::_validate_ddl_and_get_invalid_columns(std::string namespace_name, uint64_t table_oid,
-                                          const std::vector<PgMsgSchemaColumn> &columns)
-    {
-        auto invalid_columns = nlohmann::json::array();
-        // Validate if the table has an invalid column
-        for (const auto& column : columns) {
-            if ( column.is_generated || column.is_non_standard_collation || !column.is_user_defined_type ){
-                invalid_columns.push_back({
-                    {"name", column.column_name},
-                    {"type_name", column.type_name},
-                    {"collation", column.collation}
-                });
-                SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "VALIDATE_DDL: Invalid column: name={}, tid={}", column.column_name, table_oid);
-            }
-        }
-
-        return invalid_columns;
     }
 
     void
@@ -797,15 +775,13 @@ namespace springtail::pg_log_mgr {
     {
         // check if we need to perform a table swap / commit before proceeding
         auto xid_msg = SyncTracker::get_instance()->check_commit(db_id, pg_xid);
-        if (xid_msg != nullptr) {
-            // synchronously issue the swap/commit at the GC-2 prior to processing this xid
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Issue TABLE_SYNC_COMMIT on {} @ {}", db_id, xid);
-            _committer_queue->push(xid_msg);
+        // synchronously issue the swap/commit at the GC-2 prior to processing this xid
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Issue TABLE_SYNC_COMMIT on {} @ {}", db_id, xid);
+        _committer_queue->push(xid_msg);
 
-            // once the swap/commit is complete, we can clear the entry from the sync
-            // tracker and continue processing
-            SyncTracker::get_instance()->clear_tables(db_id, *xid_msg);
-        }
+        // once the swap/commit is complete, we can clear the entry from the sync
+        // tracker and continue processing
+        SyncTracker::get_instance()->clear_tables(db_id, *xid_msg);
     }
 
     void

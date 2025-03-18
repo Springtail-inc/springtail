@@ -67,6 +67,9 @@ namespace springtail
     static constexpr char SCHEMA_QUERY[] =
         "SELECT column_name, ordinal_position, is_nullable::boolean, "
         "       column_default, atttypid, "
+        "       bool_or(pga.attgenerated = 's') AS is_generated, "
+        "       (t.typnamespace = 'pg_catalog'::regnamespace)::boolean AS is_user_defined_type, "
+        "       coalesce((col.collname NOT IN ('C', 'en_US.UTF-8', 'default'))::boolean, false) AS is_non_standard_collation,"
         "       coalesce((pga.attnum=any(pgi.indkey))::boolean, false) as is_pkey, "
         "       array_position(pgi.indkey, pga.attnum) "
         "FROM pg_catalog.pg_attribute pga "
@@ -74,6 +77,8 @@ namespace springtail
         "ON column_name=pga.attname "
         "LEFT OUTER JOIN pg_catalog.pg_index pgi "
         "ON pga.attrelid=pgi.indrelid AND pgi.indisprimary "
+        "LEFT JOIN pg_collation col ON pga.attcollation = col.oid AND pga.attcollation <> 0 "
+        "LEFT JOIN pg_type t ON pga.atttypid = t.oid "
         "WHERE pga.attrelid={} "
         "AND table_schema='{}' "
         "AND table_name='{}' "
@@ -350,10 +355,19 @@ namespace springtail
                 column.type = convert_pg_type(column.pg_type);
 
                 // is primary key
-                bool is_pkey = _connection.get_boolean(i, 5);
+                column.is_generated = _connection.get_boolean(i, 5);
+
+                // is non standard collation
+                column.is_non_standard_collation = _connection.get_boolean(i, 6);
+
+                // is user defined type
+                column.is_user_defined_type = _connection.get_boolean(i, 7);
+
+                // is primary key
+                bool is_pkey = _connection.get_boolean(i, 8);
 
                 // set the primary key position if available
-                auto pkey_pos = _connection.get_int32_optional(i, 6);
+                auto pkey_pos = _connection.get_int32_optional(i, 9);
                 if (pkey_pos) {
                     CHECK(is_pkey);
                     column.pkey_position = (*pkey_pos);
@@ -456,6 +470,19 @@ namespace springtail
     {
         // set the schema
         _set_schema(table_name, schema_name, table_oid, schema_oid);
+
+        auto invalid_columns = TableValidator::_validate_ddl_and_get_invalid_columns<SchemaColumn>(
+                schema_name, table_oid, _schema.columns);
+        if ( invalid_columns.size() > 0 ){
+            nlohmann::json table_info = {
+                {"schema", schema_name},
+                {"table", table_oid},
+                {"columns", invalid_columns}
+            };
+
+            TableValidator::populate_invalid_tables_in_redis(table_oid, table_info);
+            return nullptr;
+        }
 
         // get secondary indexes XXX not fully supported yet
         _get_secondary_indexes();

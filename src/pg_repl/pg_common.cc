@@ -65,10 +65,8 @@ namespace springtail
         auto field_key = fmt::format("{}", table_oid);
 
         auto table_info = redis->hget(redis::HASH_INVALID_TABLES, field_key);
-        if (table_info.has_value()) {
-            return true;
-        }
-        return false;
+
+        return table_info.has_value();
     }
 
     void
