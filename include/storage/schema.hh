@@ -151,7 +151,7 @@ namespace springtail {
          * This will convert column positions to column names based on the table schema
          */
         std::vector<std::string>
-        get_column_names(const std::vector<uint32_t>& col_position)
+        get_column_names(const std::vector<uint32_t>& col_position) const
         {
             std::vector<std::string> col_names;
             auto co = column_order(); // calls either ExtentSchema or VirtualSchema depending on object
