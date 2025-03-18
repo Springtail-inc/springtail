@@ -1,10 +1,11 @@
-#include <common/constants.hh>
+#include <algorithm>
 #include <stdlib.h>
 #include <shared_mutex>
 
 #include <fmt/core.h>
 #include <nlohmann/json.hpp>
 
+#include <common/constants.hh>
 #include <common/init.hh>
 #include <pg_repl/pg_common.hh>
 #include <common/exception.hh>
@@ -1064,13 +1065,20 @@ namespace springtail::pg_fdw {
                 current_table = std::get<1>(it->second);
             }
 
+            std::string column_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row));
             bool exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(row);
             if (!exists) {
+                auto it = std::find_if(columns.begin(), columns.end(),
+                [&column_name](const std::tuple<std::string, std::string, bool> &column) {
+                        return std::get<0>(column) == column_name;
+                    });
+                if (it != columns.end()) {
+                    columns.erase(it);
+                }
                 continue;
             }
 
             // add column if it exists
-            std::string column_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row));
             int32_t pg_type(fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(row));
             bool nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(row);
 
