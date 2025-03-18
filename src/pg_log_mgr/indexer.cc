@@ -416,17 +416,15 @@ namespace springtail::committer {
             end_xid = next_page->header().xid;
             // Get the previous_extent_id from next_extent header
             // and fetch the extent from disk using the extent_id
-            auto prev_eid = next_page->header().prev_offset;
-
             // Retrieve the page for previous_extent_id 
             // and invalidate index for the rows in the page
-            if (prev_eid != constant::UNKNOWN_EXTENT) {
+            if (auto prev_eid = next_page->header().prev_offset; prev_eid != constant::UNKNOWN_EXTENT) {
                 auto prev_page = table->read_page_from_disk(prev_eid);
 
                 // Fetch the schema at prev_page
                 auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idxState._tid, {prev_page->header().xid, constant::MAX_LSN});
 
-                FieldArrayPtr value_fields = std::make_shared<FieldArray>(2);
+                auto value_fields = std::make_shared<FieldArray>(2);
                 value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(prev_eid);
 
                 // go through each row and pass the relevant key to each of the secondary indexes for removal
@@ -446,7 +444,7 @@ namespace springtail::committer {
             // Fetch the schema at next_page
             auto next_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idxState._tid, {next_page->header().xid, constant::MAX_LSN});
             uint32_t row_id = 0;
-            FieldArrayPtr value_fields = std::make_shared<FieldArray>(2);
+            auto value_fields = std::make_shared<FieldArray>(2);
             value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(next_eid);
             for (auto &row : *next_page) {
                 (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
