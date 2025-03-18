@@ -567,7 +567,7 @@ namespace springtail::pg_proxy {
             SPDLOG_INFO("SSL Disabled");
         }
 
-        // setup the mode
+        // setup the log path
         LoggerPtr logger = nullptr;
         std::filesystem::path log = Json::get_or<std::filesystem::path>(json, "shadow_log_path", "");
         if (!log.empty()) {
@@ -596,6 +596,7 @@ namespace springtail::pg_proxy {
             mode = "shadow";
         }
 
+        // setup the mode
         if (mode == "shadow") {
             server_mode = ProxyServer::MODE::SHADOW;
             CHECK_NE(logger, nullptr);

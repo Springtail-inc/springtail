@@ -1,12 +1,13 @@
 import os
 import sys
 import logging
+from logging.handlers import RotatingFileHandler
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler, LogData
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
-from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.util.types import Attributes
 from opentelemetry.sdk.trace.export import (
@@ -72,7 +73,14 @@ def init_otel_logging(endpoint: str):
 
     return handler
 
-def init_logging(otel_config: dict, log_path: str, debug: bool = False, logger_name: str = "coordinator"):
+def init_logging(
+        otel_config: dict,
+        log_path: str,
+        debug: bool = False,
+        logger_name: str = 'springtail',
+        log_rotation_size : int = 0,
+        log_rotation_count : int = 10
+    ) -> None:
     """
     Initialize logging for the coordinator.
     """
@@ -92,19 +100,22 @@ def init_logging(otel_config: dict, log_path: str, debug: bool = False, logger_n
 
     # **Handler 2: OTLP (INFO and above)**
     if 'enabled' in otel_config and otel_config['enabled'] and 'host' in otel_config and 'port' in otel_config:
-        otel_handler = init_otel_logging(f"{otel_config.get('host', 'localhost')}:{otel_config.get('port', '4317')}")
+        otel_handler = init_otel_logging(f"{otel_config.get('host', 'localhost')}:{otel_config.get('port', '4318')}")
         otel_handler.setLevel(logging.INFO)  # Send only INFO and above to OTEL
         logger.addHandler(otel_handler)
 
     # **Handler 3: File Logging (DEBUG and above)**
-    file_handler = logging.FileHandler(os.path.join(log_path, 'coordinator.log'))
+    if log_rotation_size > 0:
+        file_handler = RotatingFileHandler(os.path.join(log_path, 'coordinator.log'), maxBytes=log_rotation_size, backupCount=log_rotation_count)
+    else:
+        file_handler = logging.FileHandler(os.path.join(log_path, 'coordinator.log'))
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(console_format)
     logger.addHandler(file_handler)
 
 if __name__ == "__main__":
-    init_logging({'enabled': True, 'host': 'localhost', 'port': '4317'}, '/tmp', True)
-    logger = logging.getLogger("coordinator")
+    init_logging({'enabled': True, 'host': 'localhost', 'port': '4318'}, '/tmp', True)
+    logger = logging.getLogger('springtail')
     logger.info("This is an info message", extra={'db_id': 11})
     logger.debug("This is a debug message")
     logger.error("This is an error message")

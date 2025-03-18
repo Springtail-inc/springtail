@@ -12,17 +12,20 @@
 #include <common/service_register.hh>
 #include <common/singleton.hh>
 
+#include <pg_repl/libpq_connection.hh>
+
 #include <proxy/connection.hh>
 #include <proxy/auth/scram.hh>
 #include <proxy/auth/scram-common.h>
 
 namespace springtail::pg_proxy {
 
-    /** Auth type, if this changes, change string mapping in user_mgr.cc */
-    enum AuthType : int8_t {
-        TRUST=0,
-        MD5=1,
-        SCRAM=2
+    /** Password type, if this changes, change string mapping in user_mgr.cc */
+    enum PasswordType : int8_t {
+        INVALID=0,
+        TEXT=1,
+        MD5=2,
+        SCRAM=3,
     };
 
     /**
@@ -30,7 +33,7 @@ namespace springtail::pg_proxy {
      * Used by a session during authentication
      */
     struct UserLogin {
-        AuthType type;
+        PasswordType type;
 
         /** Scram state, freed in destructor */
         ScramState scram_state;
@@ -42,11 +45,13 @@ namespace springtail::pg_proxy {
         std::string password;
         uint32_t    salt;
 
-        UserLogin(AuthType type=TRUST)
+        explicit UserLogin(PasswordType type=TEXT)
             : type(type)
-        {}
+        {
+            memset(&scram_state, 0, sizeof(scram_state));
+        }
 
-        UserLogin(AuthType type, const std::string &password, uint32_t salt=0)
+        UserLogin(PasswordType type, const std::string &password, uint32_t salt=0)
             : type(type),
               password(password),
               salt(salt)
@@ -59,7 +64,7 @@ namespace springtail::pg_proxy {
 
         ~UserLogin() {
             // release the scram state pointers.  The keys are copied into the User object
-            if (type == SCRAM) {
+            if (type == SCRAM || type == TEXT) {
                 SPDLOG_DEBUG_MODULE(LOG_PROXY, "Freeing scram state: {:p}", (void *)&scram_state);
                 free_scram_state(&scram_state);
             }
@@ -75,22 +80,23 @@ namespace springtail::pg_proxy {
     class User {
     public:
         /**
-         * @brief Construct a new User object; trust authentication, no password
-         * @param username users name
-         * @param database database name
+         * @brief Construct a new User object; primarily for testing or comparison
+         * @param username  users name
          */
-        User(const std::string &username)
+        explicit User(const std::string &username)
             : _username(username),
-              _auth_type(TRUST)
+              _password_type(INVALID)
         {}
 
         /**
          * @brief Construct a new User object; md5 or scram authentication
          * @param username  users name
          * @param password  password (md5<bytes> or SCRAM-SHA-256$<iterations>:<salt>$<storedkey>:)
+         * @param type      password type
          */
         User(const std::string &username,
-             const std::string &password);
+             const std::string &password,
+             PasswordType type);
 
         /**
          * @brief Get the user login object containing creds of user
@@ -114,9 +120,16 @@ namespace springtail::pg_proxy {
         /** get username */
         const std::string &username() const { return _username; }
 
+        /** get password */
         const std::string &password() const {
             std::shared_lock lock(_user_mutex);
             return _password;
+        }
+
+        /** get password type */
+        PasswordType password_type() const {
+            std::shared_lock lock(_user_mutex);
+            return _password_type;
         }
 
         /**
@@ -155,7 +168,8 @@ namespace springtail::pg_proxy {
          * @brief Change user password
          * @param password - password
          */
-        void set_password(const std::string &password);
+        void set_password(const std::string &password, PasswordType type);
+
     private:
         struct ScramKeys {
             uint8_t client_key[SCRAM_KEY_LEN];
@@ -168,10 +182,10 @@ namespace springtail::pg_proxy {
         std::shared_ptr<ScramKeys> _scram_keys;         ///< user scram keys
         std::set<std::string> _connected_databases;     ///< connected databases
 
-        std::string _username;                          ///< username
-        std::string _password;                          ///< password
-        uint32_t    _salt;                              ///< salt
-        AuthType    _auth_type;                         ///< authentication type
+        std::string  _username;                          ///< username
+        std::string  _password;                          ///< password
+        uint32_t     _salt;                              ///< salt
+        PasswordType _password_type;                     ///< type of stored password
     };
     using UserPtr = std::shared_ptr<User>;
 
@@ -190,10 +204,7 @@ namespace springtail::pg_proxy {
          * @brief Initialize UserMgr object
          * @param sleep_interval - UserMgr thread sleep interval in seconds
          */
-        void init(const uint32_t sleep_interval) {
-            _sleep_interval = sleep_interval;
-            start_thread();
-        }
+        void init(const uint32_t sleep_interval);
 
         void stop_thread() override {
             SingletonWithThread<UserMgr>::stop_thread();
@@ -260,25 +271,54 @@ namespace springtail::pg_proxy {
         std::mutex _sleep_mutex;                ///< mutex for sleep
         std::condition_variable _sleep_cv;      ///< condition variable for sleep
 
+        bool _use_pg_shadow = false;            ///< use pg_shadow table for user updates
+
         /**
          * @brief Add new user to the user map
          * @param username users name
          * @param password password
+         * @param type password type type of password, either TEXT, MD5, or SCRAM
          * @param databases list databases accessible to this user
          */
         void _add_user(const std::string &username,
                       const std::string &password,
+                      PasswordType type,
                       const std::set<std::string> &databases) {
-            UserPtr user = std::make_shared<User>(username, password);
+            UserPtr user = std::make_shared<User>(username, password, type);
             user->set_databases(databases);
             _users.insert(user);
         }
 
         /**
+         * @brief Modify the users in the user map based on a new set of users
+         * @param users list of users <username, password, databases>
+         */
+        void _modify_users(std::vector<std::tuple<std::string,  // username
+                                                  std::string,  // password
+                                                  PasswordType, // password type
+                                                  std::set<std::string>> // databases
+                                       > &users);
+
+        /**
+         * @brief Query users from pg_shadow table; if _use_pg_shadow is true
+         */
+        void _pg_shadow_query_thread();
+
+        /**
+         * @brief Query AWS secrets for user updates; if _use_pg_shadow is false
+         */
+        void _aws_secrets_query_thread();
+
+        /**
          * @brief Function executed by UserMgr thread
-         *
          */
         void _internal_run() override;
+
+        /**
+         * @brief Connect to primary database
+         * @param conn - connection object
+         */
+        void _connect_primary_db(LibPqConnection &conn);
 
     };
 
