@@ -243,9 +243,8 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             if (!index_ddls.is_null()) {
                 _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
 
-                // build the indexes, stalling the pipeline
+                // build the indexes, allowing them to happen in the background
                 _indexer->process_ddls(db_id, xid, index_ddls);
-                //_indexer->wait_for_completion(db_id);
             }
 
             if (!completed_ddls.is_null()) {
@@ -277,7 +276,6 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             if (!index_ddls.is_null()) {
                 _redis_ddl.commit_index_ddl(db_id, xid);
             }
-
 
             SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "XID completed: {}@{}", db_id, xid);
         }

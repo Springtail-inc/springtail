@@ -124,10 +124,7 @@ namespace springtail::committer {
                 params = _work_set[key];
             }
             if (!params._ddl.is_null()) {
-                auto&& idxState = _build(st, key, params);
-                //auto root = idxState._root;
-                _add_to_pending_reconciliation(std::move(idxState));
-                //_commit_build(root, key, params);
+                _add_to_pending_reconciliation(_build(st, key, params));
             } else {
                 _drop(st, key, params);
             }
@@ -267,8 +264,6 @@ namespace springtail::committer {
             ++current_row_id;
             ++row_cnt;
         }
-        // To mimic index building
-        //std::this_thread::sleep_for(std::chrono::seconds(20));
         SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Index build finished: {}:{}, rows={}", db_id, index_id, row_cnt);
         return {root, key, idx, tid};
     }
@@ -456,8 +451,6 @@ namespace springtail::committer {
                 auto keys = table->get_column_names(next_schema, idx_cols);
                 auto key_fields = next_schema->get_fields(keys);
                 auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
-                // note: uncomment if you need to debug the entries being populated into the secondary indexes
-                // SPDLOG_DEBUG_MODULE(LOG_BTREE, "Secondary populate {}", svalue->to_string());
                 idxState._root->insert(svalue);
                 ++row_id;
             }
