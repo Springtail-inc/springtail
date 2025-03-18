@@ -4,10 +4,11 @@ import os
 import time
 import logging
 from redis import Redis
-from typing import Optional
+from typing import Optional, Dict
 from common import parse_bool
 from aws import AwsHelper
 
+# AWS secret manager secret name for database users
 DB_USERS_SECRET = "sk/{}/{}/aws/dbi/{}/primary_db_password"
 
 class Properties:
@@ -461,6 +462,29 @@ def main():
     print(f"ingest_host: {props.get_hostname('ingestion')}")
     print(f"proxy_host: {props.get_hostname('proxy')}")
     print(f"coordinator_state: {props.get_coordinator_state()}")
+
+    env_vars = [
+        'ORGANIZATION_ID',
+        'ACCOUNT_ID',
+        'FDW_ID',
+        'DATABASE_INSTANCE_ID',
+        'REDIS_HOSTNAME',
+        'REDIS_PORT',
+        'REDIS_USER',
+        'REDIS_PASSWORD',
+        'REDIS_USER_DATABASE_ID',
+        'REDIS_CONFIG_DATABASE_ID',
+        'REDIS_SSL',
+        'MOUNT_POINT',
+        'LUSTRE_MOUNT_NAME',
+        'LUSTRE_DNS_NAME',
+        'FDW_USER_PASSWORD',
+        'REPLICATION_USER_PASSWORD'
+    ]
+
+    print("\nEnvironment Variables:")
+    for var in env_vars:
+        print(f"{var} = '{os.environ.get(var)}'")
 
 if __name__ == "__main__":
     main()

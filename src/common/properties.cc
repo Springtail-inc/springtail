@@ -31,6 +31,11 @@ namespace springtail {
             const char *json_obj_name = std::get<2>(variable);
             const char *json_key_name = std::get<3>(variable);
 
+            std::string env_var_name = std::get<0>(variable);
+            std::string env_var_value = env_var == nullptr ? "null" : env_var;
+
+            SPDLOG_INFO("Reading environment variable: {}={}", env_var_name, env_var_value);
+
             if (env_var != nullptr) {
                 switch (type) {
                     case environment::STR:
@@ -57,6 +62,7 @@ namespace springtail {
     {
         // verify we have the redis config
         if (_json.contains(REDIS_CONFIG) == false) {
+            SPDLOG_ERROR("Error creating redis client, config not found");
             throw Error("Error missing redis config in environment\nTry setting SPRINGTAIL_PROPERTIES_FILE to settings.json");
         }
 
@@ -69,7 +75,8 @@ namespace springtail {
             redis_config["config_db"].is_null() ||
             redis_config.contains("db") == false ||
             redis_config["db"].is_null()) {
-            throw Error("Error missing redis config in environment\nTry setting SPRINGTAIL_PROPERTIES_FILE to settings.json");            throw Error("Error missing redis config in environment");
+                SPDLOG_ERROR("Error creating redis, config: {}", _json[REDIS_CONFIG].dump());
+                throw Error("Error missing redis config in environment\nTry setting SPRINGTAIL_PROPERTIES_FILE to settings.json");            throw Error("Error missing redis config in environment");
         }
 
         // extract redis config from json

@@ -32,6 +32,8 @@ ENV_VARS = [
     'REDIS_USER_DATABASE_ID',
     'REDIS_CONFIG_DATABASE_ID',
     'REDIS_PORT',
+    'REDIS_HOSTNAME',
+    'REDIS_SSL',
     'ORGANIZATION_ID',
     'ACCOUNT_ID',
     'DATABASE_INSTANCE_ID',
@@ -167,6 +169,7 @@ class Production:
             for var in ENV_VARS:
                 value = os.environ.get(var)
                 if value:
+                    value = value.replace("'", "''")
                     temp_file.write(f"{var} = '{value}'\n")
             temp_file.flush()
 
