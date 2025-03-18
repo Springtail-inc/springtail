@@ -373,7 +373,7 @@ namespace springtail::committer {
     }
 
     void 
-    Indexer::_process_first_pending_reconciliation(decltype(_pending_idx_reconciliation_map)::iterator db_it) {
+    Indexer::_process_first_pending_reconciliation(PendingReconMap::iterator db_it) {
         auto& xid_map = db_it->second;
         if (xid_map.empty()) {
             _pending_idx_reconciliation_map.erase(db_it); // Clean up empty db_id entry

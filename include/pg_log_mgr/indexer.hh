@@ -111,7 +111,8 @@ namespace springtail::committer {
         
         // reconciliation Index
 
-        std::map<uint64_t, std::map<uint64_t, std::list<IndexState>>> _pending_idx_reconciliation_map;
+        using PendingReconMap = std::map<uint64_t, std::map<uint64_t, std::list<IndexState>>>;
+        PendingReconMap _pending_idx_reconciliation_map;
 
         /**
          * @brief Adds an IndexState to the pending reconciliation map.
