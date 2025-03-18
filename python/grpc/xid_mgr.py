@@ -2,6 +2,8 @@ import sys
 import os
 import grpc
 import time
+import argparse
+import logging
 from typing import Optional
 
 # Add the directory containing the generated gRPC files to the Python path
@@ -13,21 +15,22 @@ from google.protobuf import empty_pb2
 class XidMgrClient:
     def __init__(self,
                  host: str,
-                 port: int,
-                 ca_cert_path: Optional[str] = "",
-                 ca_client_key_path: Optional[str] = "",
-                 ca_client_cert_path: Optional[str] = ""):
+                 rpc_config: dict) -> None:
         """Initialize XidManager client with server connection details.
 
         Args:
             host: The hostname of the XidManager server
-            port: The port number of the XidManager server
-            ca_cert_path: The path to the CA certificate file
-            ca_client_key_path: The path to the client key file
-            ca_client_cert_path: The path to the client certificate file
+            rpc_config: Configuration dictionary with server connection details
         """
+        self.logger = logging.getLogger('springtail')
 
-        if ca_cert_path and ca_client_key_path and ca_client_cert_path:
+        port: int = rpc_config['server_port']
+
+        if 'ssl' in rpc_config and rpc_config['ssl']:
+            ca_cert_path: str = rpc_config['client_trusted']
+            ca_client_key_path: str = rpc_config['client_key']
+            ca_client_cert_path: str = rpc_config['client_cert']
+
             with open(ca_cert_path, 'rb') as ca_cert_file, \
                  open(ca_client_key_path, 'rb') as ca_client_key_file, \
                  open(ca_client_cert_path, 'rb') as ca_client_cert_file:
@@ -45,8 +48,10 @@ class XidMgrClient:
             # Override the target name to match the server certificate's CN
             channel_options = (("grpc.ssl_target_name_override", "springtail_server"),)
 
+            self.logger.debug(f"Connecting to {host}:{port} with SSL")
             self.channel = grpc.secure_channel(f"{host}:{port}", creds, options=channel_options)
         else:
+            self.logger.debug(f"Connecting to {host}:{port} without SSL")
             self.channel = grpc.insecure_channel(f"{host}:{port}")
 
         self.stub = xid_manager_pb2_grpc.XidManagerStub(self.channel)
@@ -128,13 +133,30 @@ class XidMgrClient:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
-if __name__ == "__main__":
-    # Example usage
-    client_cert = "/home/dev/springtail/ca_certs/client_cert.pem"
-    client_key = "/home/dev/springtail/ca_certs/client_key.pem"
-    root_cert = "/home/dev/springtail/ca_certs/ca_cert.pem"
+def parse_arguments():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description="Xid Manager Client")
+    parser.add_argument('--host', type=str, default='localhost', help='Host of the service')
+    parser.add_argument('--port', type=int, default=55052, help='Port of the service')
+    parser.add_argument('--cert-path', type=str, required=False, help='Path to client certificates/key')
 
-    with XidMgrClient('localhost', 5052, root_cert, client_key, client_cert) as client:
+    args = parser.parse_args()
+    return args
+
+if __name__ == "__main__":
+    args = parse_arguments()
+
+    rpc_config = {
+        'server_port': args.port,
+    }
+
+    if args.cert_path:
+        rpc_config['ssl'] = True
+        rpc_config['client_trusted'] = os.path.join(args.cert_path, 'ca_cert.pem')
+        rpc_config['client_key'] = os.path.join(args.cert_path, 'client_key.pem')
+        rpc_config['client_cert'] = os.path.join(args.cert_path, 'client_cert.pem')
+
+    with XidMgrClient(args.host, rpc_config) as client:
         client.ping()
         print("Ping successful")
         xid = client.get_committed_xid(1)

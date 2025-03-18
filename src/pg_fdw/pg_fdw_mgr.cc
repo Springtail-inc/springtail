@@ -6,7 +6,6 @@
 #include <nlohmann/json.hpp>
 
 #include <common/init.hh>
-#include <pg_repl/pg_common.hh>
 #include <common/exception.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
@@ -15,6 +14,8 @@
 #include <common/redis_types.hh>
 
 #include <redis/redis_ddl.hh>
+
+#include <pg_repl/pg_common.hh>
 
 #include <pg_fdw/exception.hh>
 #include <pg_fdw/pg_fdw_mgr.hh>
@@ -101,7 +102,7 @@ namespace springtail::pg_fdw {
     PgFdwMgr*
     PgFdwMgr::_init()
     {
-        elog(NOTICE, "Initializing PgFdwMgr");
+        elog(INFO, "Initializing PgFdwMgr");
         _instance = new PgFdwMgr();
         return _instance;
     }
@@ -111,10 +112,10 @@ namespace springtail::pg_fdw {
     void
     PgFdwMgr::fdw_init(const char *config_file, bool init)
     {
-        if (config_file != nullptr) {
+        if (config_file != nullptr && strlen(config_file) > 0) {
             // set env variables based on redis config
             // we don't reload redis config here, just set the env variables
-            elog(NOTICE, "Setting properties from file: %s", config_file);
+            elog(INFO, "Setting properties from file: %s", config_file);
             Properties::set_env_from_file(config_file);
             ::unsetenv("SPRINGTAIL_PROPERTIES_FILE");
         }

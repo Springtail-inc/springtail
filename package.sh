@@ -4,4 +4,5 @@ if [ ! -e './install' ]; then
 	return 1
 fi
 mkdir -p releases
-tar cvfz releases/"springtail-$(date +%Y%m%d).tgz" -C ./install/ .
+CWD=`pwd`
+tar cpvfz releases/"springtail-$(date +%Y%m%d).tgz" -C ./install/ . -C $CWD shared-lib/

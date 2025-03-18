@@ -141,13 +141,20 @@ _PG_init(void)
         "Path to the FDW configuration file",
         NULL,
         &fdw_config_file_path,
-        "/tmp/system.json",
+        NULL,
         PGC_SUSET,
         0,
         NULL,
         NULL,
         NULL
     );
+
+    // Ensure the configuration is loaded
+    if (!fdw_config_file_path || strlen(fdw_config_file_path) == 0) {
+        fdw_config_file_path = GetConfigOptionByName("springtail_fdw.config_file_path", NULL, false);
+    }
+
+    elog(INFO, "FDW configuration file path: %s", fdw_config_file_path);
 
     // Initialize the FDW; springtail_init()
     fdw_init(fdw_config_file_path);

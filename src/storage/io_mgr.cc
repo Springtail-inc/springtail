@@ -33,6 +33,7 @@ namespace springtail {
     void
     IOMgr::_internal_shutdown()
     {
+        _file_cache->clear(true);
         _thread_pool->shutdown();
     }
 
