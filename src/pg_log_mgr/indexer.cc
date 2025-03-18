@@ -329,6 +329,7 @@ namespace springtail::committer {
     void
     Indexer::_add_to_pending_reconciliation(IndexState&& idxState)
     {
+        std::scoped_lock lock(_pending_recon_map_mtx);
         _pending_idx_reconciliation_map
             .try_emplace(idxState._idx._db_id)   // Ensure db_id entry exists
             .first->second
@@ -346,6 +347,7 @@ namespace springtail::committer {
      */
     void 
     Indexer::process_first_pending_reconciliation(uint64_t db_id) {
+        std::scoped_lock lock(_pending_recon_map_mtx);
         auto db_it = _pending_idx_reconciliation_map.find(db_id);
         if (db_it == _pending_idx_reconciliation_map.end()) {
             return; // No pending entries for this db_id
@@ -360,6 +362,7 @@ namespace springtail::committer {
      */
     void 
     Indexer::process_first_pending_reconciliation() {
+        std::scoped_lock lock(_pending_recon_map_mtx);
         if (_pending_idx_reconciliation_map.empty()) {
             return; // Map is empty
         }
