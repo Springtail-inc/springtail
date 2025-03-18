@@ -14,6 +14,7 @@
 
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_msg_stream.hh>
+#include <pg_repl/pg_copy_table.hh>
 
 #include <redis/redis_containers.hh>
 #include <redis/redis_ddl.hh>
@@ -270,18 +271,6 @@ namespace springtail::pg_log_mgr {
 
         /** Check if we need to perform a table swap / commit and notify the Committer if so. */
         void _check_sync_commit(uint64_t db_id, int32_t pg_xid, uint64_t xid);
-
-        /**
-        * @brief Validate the DDL operation and get the list of invalid columns
-        *
-        * @param namespace_name Namespace name
-        * @param table_oid OID of the table
-        * @param columns Vector of original columns as part of the DDL
-        * @return JSON object containing the list of invalid columns with meta information
-        */
-        static nlohmann::json _validate_ddl_and_get_invalid_columns(std::string namespace_name,
-                                                                uint64_t table_oid,
-                                                                const std::vector<PgMsgSchemaColumn> &columns);
 
         std::shared_ptr<opentelemetry::metrics::Histogram<double>> _postgres_log_reader_latencies;
         opentelemetry::context::Context _context;

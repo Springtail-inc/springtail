@@ -59,5 +59,36 @@ namespace springtail
         * @param table_oid The table oid which has the invalid columns
         */
         static void clear_invalid_table_in_redis(uint64_t table_oid);
+
+        /**
+        * @brief Validate the DDL operation and get the list of invalid columns
+        *
+        * @param namespace_name Namespace name
+        * @param table_oid OID of the table
+        * @param columns Vector of original columns as part of the DDL
+        * @return JSON object containing the list of invalid columns with meta information
+        */
+        template <typename E>
+        static nlohmann::json
+        _validate_ddl_and_get_invalid_columns(const std::string &namespace_name,
+                                              uint64_t table_oid,
+                                              std::vector<E> columns)
+        {
+            auto invalid_columns = nlohmann::json::array();
+
+            // Validate if the table has an invalid column
+            for (const auto& column : columns) {
+                if ( column.is_generated || column.is_non_standard_collation || !column.is_user_defined_type ){
+                    invalid_columns.push_back({
+                        {"name", column.name},
+                        {"type_name", column.type_name},
+                        {"collation", column.collation}
+                    });
+                    SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "VALIDATE_DDL: Invalid column: name={}, tid={}", column.name, table_oid);
+                }
+            }
+
+            return invalid_columns;
+        }
     };
 }

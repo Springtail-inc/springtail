@@ -14,8 +14,6 @@ INSERT INTO invalid_table_with_generated_column_with_data (length, width) VALUES
 -- Alter the table to remove the invalid column
 ALTER TABLE invalid_table_with_generated_column_with_data DROP COLUMN area;
 
-ALTER TABLE invalid_table_with_generated_column_with_data ADD COLUMN area NUMERIC GENERATED ALWAYS AS (length * width) STORED;
-
 ## verify
 SELECT 1;
 

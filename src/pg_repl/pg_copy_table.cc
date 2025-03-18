@@ -67,7 +67,7 @@ namespace springtail
     static constexpr char SCHEMA_QUERY[] =
         "SELECT column_name, ordinal_position, is_nullable::boolean, "
         "       column_default, atttypid, "
-        "       bool_or(pga.attgenerated = 's') AS is_generated, "
+        "       pga.attgenerated = 's' AS is_generated, "
         "       (t.typnamespace = 'pg_catalog'::regnamespace)::boolean AS is_user_defined_type, "
         "       coalesce((col.collname NOT IN ('C', 'en_US.UTF-8', 'default'))::boolean, false) AS is_non_standard_collation,"
         "       coalesce((pga.attnum=any(pgi.indkey))::boolean, false) as is_pkey, "
@@ -313,7 +313,7 @@ namespace springtail
             throw PgTableNotFoundError();
         }
 
-        if (_connection.nfields() != 7) {
+        if (_connection.nfields() != 10) {
             SPDLOG_ERROR("Error: unexpected data from schema query or table not found");
             SPDLOG_ERROR("fields: {}, tuples: {}", _connection.nfields(), _connection.ntuples());
             _connection.clear();
@@ -357,11 +357,11 @@ namespace springtail
                 // is primary key
                 column.is_generated = _connection.get_boolean(i, 5);
 
-                // is non standard collation
-                column.is_non_standard_collation = _connection.get_boolean(i, 6);
-
                 // is user defined type
-                column.is_user_defined_type = _connection.get_boolean(i, 7);
+                column.is_user_defined_type = _connection.get_boolean(i, 6);
+
+                // is non standard collation
+                column.is_non_standard_collation = _connection.get_boolean(i, 7);
 
                 // is primary key
                 bool is_pkey = _connection.get_boolean(i, 8);
@@ -374,9 +374,9 @@ namespace springtail
                 }
 
                 SPDLOG_DEBUG_MODULE(LOG_PG_REPL,
-                                    "Column: {} type={} position={} nullable={} default_value={} pkey={}",
+                                    "Column: {} type={} position={} nullable={} default_value={} pkey={} is_generated={} is_non_standard_collation={} is_user_defined_type={}",
                                     column.name, column.pg_type, column.position, column.nullable,
-                                    column.default_value.value_or("NULL"), column.pkey_position);
+                                    column.default_value.value_or("NULL"), column.pkey_position, column.is_generated, column.is_non_standard_collation, column.is_user_defined_type);
 
                 _schema.columns[i] = std::move(column);
             }
@@ -471,9 +471,11 @@ namespace springtail
         // set the schema
         _set_schema(table_name, schema_name, table_oid, schema_oid);
 
+        // validate the columns to see if there are invalid columns
         auto invalid_columns = TableValidator::_validate_ddl_and_get_invalid_columns<SchemaColumn>(
                 schema_name, table_oid, _schema.columns);
         if ( invalid_columns.size() > 0 ){
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Invalid columns found as part of _copy_table for table_oid {}", table_oid);
             nlohmann::json table_info = {
                 {"schema", schema_name},
                 {"table", table_oid},
