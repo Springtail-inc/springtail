@@ -334,14 +334,6 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
 
         bool empty() const;
 
-        /** This will convert column positions to column names based on the table schema
-         */
-        std::vector<std::string> get_column_names(const std::vector<uint32_t>& col_position);
-
-        /** This will convert column positions to column names based on the passed table schema
-         */
-        std::vector<std::string> get_column_names(ExtentSchemaPtr schema, const std::vector<uint32_t>& col_position);
-
         /**
          * Returns an iterator to the first row that is greater than or equal to the provided search
          * key.  Search key must match the primary index order.
@@ -597,10 +589,6 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
             }
             return _secondary_indexes.at(idx).first;
         }
-
-        /** This will convert column positions to column names based on the table schema
-         */
-        std::vector<std::string> get_column_names(const std::vector<uint32_t>& col_position);
 
         /**
          * @brief Get table stats

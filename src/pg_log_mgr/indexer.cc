@@ -225,7 +225,7 @@ namespace springtail::committer {
         auto mutable_table = TableMgr::get_instance()->get_mutable_table(db_id, tid, idx._xid, idx._xid);
         MutableBTreePtr root = mutable_table->create_index_root(index_id, idx_cols);
         root->init_empty();
-        key_fields = mutable_table->schema()->get_fields(mutable_table->get_column_names(idx_cols));
+        key_fields = mutable_table->schema()->get_fields(mutable_table->schema()->get_column_names(idx_cols));
 
         // additional fields in the root schema to keep extent and row ids
         auto value_fields = std::make_shared<FieldArray>(2);
@@ -434,7 +434,7 @@ namespace springtail::committer {
                 for (auto &row : *prev_page) {
                     value_fields->at(1) = std::make_shared<ConstTypeField<uint32_t>>(row_id);
 
-                    auto key_fields = prev_schema->get_fields(table->get_column_names(prev_schema, idx_cols));
+                    auto key_fields = prev_schema->get_fields(prev_schema->get_column_names(idx_cols));
                     auto &&skey = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
                     idxState._root->remove(skey);
 
@@ -451,7 +451,7 @@ namespace springtail::committer {
             for (auto &row : *next_page) {
                 (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
 
-                auto keys = table->get_column_names(next_schema, idx_cols);
+                auto &&keys = next_schema->get_column_names(idx_cols);
                 auto key_fields = next_schema->get_fields(keys);
                 auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
                 idxState._root->insert(svalue);

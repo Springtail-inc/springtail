@@ -30,25 +30,12 @@ get_table_dir(const std::filesystem::path &base,
             { "index_id", 2, SchemaType::UINT64, 20, false },
         };
 
-        std::vector<std::string> 
-        _get_column_names(ExtentSchemaPtr schema, const std::vector<uint32_t>& col_position)
-        {
-            std::vector<std::string> col_names;
-            auto column_order = schema->column_order();
-            for (auto position: col_position) {
-                // the index positions start with one
-                assert(position <= column_order.size());
-                col_names.emplace_back(std::move(column_order[position-1]));
-            }
-            return col_names;
-        }
-
         std::shared_ptr<ExtentSchema> 
         _create_index_schema(ExtentSchemaPtr schema, const std::vector<uint32_t>& index_columns)
         {
 
             // get the column names in the order they appear in the index
-            std::vector<std::string> col_names = _get_column_names(schema, index_columns);
+            auto &&col_names = schema->get_column_names(index_columns);
 
             SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
             SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, 0, false);
@@ -168,18 +155,6 @@ get_table_dir(const std::filesystem::path &base,
                 _secondary_indexes[idx.id] = {btree, idx_cols};
             }
         }
-    }
-
-    std::vector<std::string> 
-    Table::get_column_names(const std::vector<uint32_t>& col_position)
-    {
-        return _get_column_names(_schema, col_position);
-    }
-
-    std::vector<std::string> 
-    Table::get_column_names(ExtentSchemaPtr schema, const std::vector<uint32_t>& col_position)
-    {
-        return _get_column_names(schema, col_position);
     }
 
     bool
@@ -752,7 +727,7 @@ get_table_dir(const std::filesystem::path &base,
 
             for (auto const& [index_id, idx]: _secondary_indexes) {
                 auto &secondary = idx.first;
-                auto keys = get_column_names(idx.second);
+                auto &&keys = _schema->get_column_names(idx.second);
                 auto key_fields = _schema->get_fields(keys);
                 auto &&skey = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
                 secondary->remove(skey);
@@ -808,7 +783,7 @@ get_table_dir(const std::filesystem::path &base,
 
                 for (auto const& [index_id, idx]: _secondary_indexes) {
                     auto &secondary = idx.first;
-                    auto keys = get_column_names(idx.second);
+                    auto &&keys = _schema->get_column_names(idx.second);
                     auto key_fields = _schema->get_fields(keys);
                     auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
                     // note: uncomment if you need to debug the entries being populated into the secondary indexes
@@ -877,17 +852,11 @@ get_table_dir(const std::filesystem::path &base,
         return metadata;
     }
 
-    std::vector<std::string> 
-    MutableTable::get_column_names(const std::vector<uint32_t>& col_position)
-    {
-        return _get_column_names(_schema, col_position);
-    }
-
     MutableBTreePtr 
     MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns)
     {
         // get the column names in the order they appear in the index
-        std::vector<std::string> col_names = _get_column_names(_schema, index_columns);
+        auto &&col_names = _schema->get_column_names(index_columns);
 
         SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
         SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, 0, false);
