@@ -488,7 +488,7 @@ class TestCase:
         # construct a connection for each transaction in the test
         for txn in self._txns:
             logging.debug(f'Connecting to database for txn "{txn}"')
-            self._connections[txn] = springtail.connect_proxy(self._props, self._primary_name)
+            self._connections[txn] = springtail.connect_instance(self._props, self._primary_name)
             self._connections[txn].autocommit = self._metadata['autocommit']
 
         # connect to the replica database -- used to perform any 'sync' directives
@@ -587,7 +587,7 @@ class TestCase:
             self._fdw.close()
         for connection in self._connections:
             self._connections[connection].close()
-            self._connections[connection] = springtail.connect_proxy(self._props, self._primary_name)
+            self._connections[connection] = springtail.connect_instance(self._props, self._primary_name)
 
         # run the cleanup commands
         if len(self._sections['cleanup']) > 0:
