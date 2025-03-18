@@ -81,12 +81,7 @@ namespace springtail::committer {
             uint64_t // index ID
                 >;
 
-        struct IndexState {
-            MutableBTreePtr _root;
-            Key _key;
-            IndexParams _idx;
-            uint64_t _tid;
-        };
+        struct IndexState;
 
         IndexState _build(std::stop_token st, const Key& key, const IndexParams& idx);
 
@@ -110,7 +105,27 @@ namespace springtail::committer {
         RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         
         // reconciliation Index
-
+        /**
+         * @brief Represents the state of an index after the initial build.
+         * 
+         * This structure holds information about the index's root, key, and metadata.
+         * After the initial index build, instances of this struct are added to the 
+         * pending reconciliation map for further processing.
+         * - `key` contains `dbid` and `tableid`.
+         * - `idx` contains `dbid`, `indexid`, and `ddl`.
+         */
+        struct IndexState {
+            MutableBTreePtr _root;
+            Key _key;
+            IndexParams _idx;
+            uint64_t _tid;
+        };
+        /**
+         * @brief Tracks pending index reconciliation tasks by db_id and xid.
+         *
+         * Maps a database ID to a map of transaction IDs (XIDs), each holding
+         * a list of `IndexState` entries pending reconciliation.
+         */
         using PendingReconMap = std::map<uint64_t, std::map<uint64_t, std::list<IndexState>>>;
         PendingReconMap _pending_idx_reconciliation_map;
 

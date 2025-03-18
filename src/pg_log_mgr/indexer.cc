@@ -124,7 +124,7 @@ namespace springtail::committer {
                 params = _work_set[key];
             }
             if (!params._ddl.is_null()) {
-                auto idxState = _build(st, key, params);
+                auto&& idxState = _build(st, key, params);
                 //auto root = idxState._root;
                 _add_to_pending_reconciliation(std::move(idxState));
                 //_commit_build(root, key, params);
