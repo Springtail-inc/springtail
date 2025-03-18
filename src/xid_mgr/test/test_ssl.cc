@@ -23,12 +23,14 @@ namespace {
             // get xid_mgr properties check for cert files
             nlohmann::json json = Properties::get(Properties::XID_MGR_CONFIG);
             if (json.empty() || !json.contains("rpc_config") || !json["rpc_config"].contains("server_cert")) {
-                throw std::runtime_error("Missing XID Mgr SSL config");
+                GTEST_SKIP() << "Missing XidMgr rpc config";
+                return;
             }
 
             std::string ssl_file = json["rpc_config"]["server_cert"];
             if (ssl_file.empty() || !std::filesystem::exists(ssl_file)) {
-                throw std::runtime_error("Missing SSL cert file");
+                GTEST_SKIP() << "Missing XidMgr SSL cert file";
+                return;
             }
 
             auto service_runners = test::get_services(true, false, false);
