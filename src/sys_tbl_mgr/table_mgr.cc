@@ -110,9 +110,6 @@ namespace springtail {
         std::vector<Index> secondary_indexes(filtered.begin(), filtered.end());
 
         SPDLOG_DEBUG_MODULE(LOG_BTREE, "Get mutable table: table {}, access_xid {}", table_id, access_xid);
-        for (auto &root : tbl_meta->roots) {
-            SPDLOG_DEBUG_MODULE(LOG_BTREE, "Get mutable table: index {}, root {}", root.index_id, root.extent_id);
-        }
 
         return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid,
                                               _table_base, schema->get_sort_keys(), secondary_indexes,
