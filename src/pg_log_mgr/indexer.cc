@@ -416,46 +416,20 @@ namespace springtail::committer {
             end_xid = next_page->header().xid;
             // Get the previous_extent_id from next_extent header
             // and fetch the extent from disk using the extent_id
-            // Retrieve the page for previous_extent_id 
-            // and invalidate index for the rows in the page
             if (auto prev_eid = next_page->header().prev_offset; prev_eid != constant::UNKNOWN_EXTENT) {
+                // Retrieve the page for previous_extent_id
                 auto prev_page = table->read_page_from_disk(prev_eid);
 
-                // Fetch the schema at prev_page
-                auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idxState._tid, {prev_page->header().xid, constant::MAX_LSN});
-
-                auto value_fields = std::make_shared<FieldArray>(2);
-                value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(prev_eid);
-
-                // go through each row and pass the relevant key to each of the secondary indexes for removal
-                uint32_t row_id = 0;
-                for (auto &row : *prev_page) {
-                    value_fields->at(1) = std::make_shared<ConstTypeField<uint32_t>>(row_id);
-
-                    auto key_fields = prev_schema->get_fields(prev_schema->get_column_names(idx_cols));
-                    auto &&skey = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
-                    idxState._root->remove(skey);
-
-                    ++row_id;
-                }
+                // and invalidate index for the rows in the page
+                indexer_helpers::invalidate_index_for_page(db_id, index_id, idxState._tid, prev_eid,
+                        prev_page, idxState._root, XidLsn(prev_page->header().xid), idx_cols);
             }
 
             // Populate index for the rows in the next page
-            // Fetch the schema at next_page
-            auto next_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idxState._tid, {next_page->header().xid, constant::MAX_LSN});
-            uint32_t row_id = 0;
-            auto value_fields = std::make_shared<FieldArray>(2);
-            value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(next_eid);
-            for (auto &row : *next_page) {
-                (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
+            indexer_helpers::populate_index_for_page(db_id, index_id, idxState._tid, next_eid,
+                    next_page, idxState._root, XidLsn(next_page->header().xid), idx_cols);
 
-                auto &&keys = next_schema->get_column_names(idx_cols);
-                auto key_fields = next_schema->get_fields(keys);
-                auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
-                idxState._root->insert(svalue);
-                ++row_id;
-            }
-
+            // Get the next page using end offset of that XID
             table = TableMgr::get_instance()->get_table(db_id, idxState._tid, next_page->header().xid);
             next_eid = table->get_stats().end_offset;
             next_page = table->read_page_from_disk(next_eid);

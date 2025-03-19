@@ -20,6 +20,20 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
 
 } // namespace table_helpers
 
+namespace indexer_helpers {
+    /*
+     * Invalidate index for the rows present in the passed page
+     */
+    void invalidate_index_for_page(uint64_t db_id, uint64_t index_id, uint64_t table_id, uint64_t extent_id,
+            StorageCache::SafePagePtr &page, const MutableBTreePtr &root, XidLsn &&xid_lsn, const std::vector<uint32_t> &idx_cols);
+
+    /*
+     * Populate index for the rows present in the passed page
+     */
+    void populate_index_for_page(uint64_t db_id, uint64_t index_id, uint64_t table_id, uint64_t extent_id,
+            StorageCache::SafePagePtr &page, const MutableBTreePtr &root, XidLsn &&xid_lsn, const std::vector<uint32_t> &idx_cols);
+} // namespace indexer_helpers
+
     /**
      * Structure to hold table statistics,
      * currently holds the row count of the table

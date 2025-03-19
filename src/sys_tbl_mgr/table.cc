@@ -24,6 +24,51 @@ get_table_dir(const std::filesystem::path &base,
 
 } // namespace table_helpers
 
+namespace indexer_helpers {
+    void invalidate_index_for_page(uint64_t db_id, uint64_t index_id, uint64_t table_id, uint64_t extent_id,
+            StorageCache::SafePagePtr &page, const MutableBTreePtr &root, XidLsn &&xid_lsn, const std::vector<uint32_t> &idx_cols)
+    {
+        // Fetch the schema at the page
+        auto&& schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id, xid_lsn);
+
+        auto value_fields = std::make_shared<FieldArray>(2);
+        value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
+
+        // go through each row and pass the relevant key to each of the secondary indexes for removal
+        uint32_t row_id = 0;
+        for (auto &row : *page) {
+            value_fields->at(1) = std::make_shared<ConstTypeField<uint32_t>>(row_id);
+
+            auto key_fields = schema->get_fields(schema->get_column_names(idx_cols));
+            auto &&skey = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
+            root->remove(skey);
+            ++row_id;
+        }
+        SPDLOG_DEBUG_MODULE(LOG_BTREE, "Invalidated {} secondary rows", row_id);
+
+    }
+
+    void populate_index_for_page(uint64_t db_id, uint64_t index_id, uint64_t table_id, uint64_t extent_id,
+            StorageCache::SafePagePtr &page, const MutableBTreePtr &root, XidLsn &&xid_lsn, const std::vector<uint32_t> &idx_cols)
+    {
+        auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id, xid_lsn);
+        uint32_t row_id = 0;
+        auto value_fields = std::make_shared<FieldArray>(2);
+        value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
+        for (auto &row : *page) {
+            (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
+
+            auto &&keys = schema->get_column_names(idx_cols);
+            auto key_fields = schema->get_fields(keys);
+            auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
+            root->insert(svalue);
+            ++row_id;
+        }
+        SPDLOG_DEBUG_MODULE(LOG_BTREE, "Populated {} secondary rows", row_id);
+
+    }
+} // namespace indexer_helpers
+
     namespace {
         const static std::vector<SchemaColumn> ROOTS_SCHEMA = {
             { "root", 1, SchemaType::UINT64, 20, true },
@@ -717,22 +762,9 @@ get_table_dir(const std::filesystem::path &base,
 
         // INVALIDATE SECONDARY INDEXES
 
-        FieldArrayPtr value_fields = std::make_shared<FieldArray>(2);
-        value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(orig_page->key().second);
-
-        // go through each row and pass the relevant key to each of the secondary indexes for removal
-        uint32_t row_id = 0;
-        for (auto &&row : *orig_page) {
-            value_fields->at(1) = std::make_shared<ConstTypeField<uint32_t>>(row_id);
-
-            for (auto const& [index_id, idx]: _secondary_indexes) {
-                auto &secondary = idx.first;
-                auto &&keys = _schema->get_column_names(idx.second);
-                auto key_fields = _schema->get_fields(keys);
-                auto &&skey = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
-                secondary->remove(skey);
-            }
-            ++row_id;
+        for (auto const& [index_id, idx]: _secondary_indexes) {
+            indexer_helpers::invalidate_index_for_page(_db_id, index_id, _id, orig_page->key().second,
+                    orig_page, idx.first, XidLsn(_access_xid), idx.second);
         }
     }
 
@@ -775,25 +807,10 @@ get_table_dir(const std::filesystem::path &base,
 
             // POPULATE SECONDARY INDEXES
 
-            // go through each row and pass the relevant key to each of the secondary indexes for insertion
-            value_fields->resize(2);
-            uint32_t row_id = 0;
-            for (auto &row : *new_page) {
-                (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
-
-                for (auto const& [index_id, idx]: _secondary_indexes) {
-                    auto &secondary = idx.first;
-                    auto &&keys = _schema->get_column_names(idx.second);
-                    auto key_fields = _schema->get_fields(keys);
-                    auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
-                    // note: uncomment if you need to debug the entries being populated into the secondary indexes
-                    // SPDLOG_DEBUG_MODULE(LOG_BTREE, "Secondary populate {}", svalue->to_string());
-                    secondary->insert(svalue);
-                }
-                ++row_id;
+            for (auto const& [index_id, idx]: _secondary_indexes) {
+                indexer_helpers::populate_index_for_page(_db_id, index_id, _id, extent_id,
+                        new_page, idx.first, XidLsn(_target_xid), idx.second);
             }
-
-            SPDLOG_DEBUG_MODULE(LOG_BTREE, "Populated {} secondary rows", row_id);
         }
     }
 
