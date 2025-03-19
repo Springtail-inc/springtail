@@ -455,9 +455,7 @@ def current_xid(props: Properties, db_id: int) -> int:
 
     hostname = props.get_hostname('ingestion')
     client = XidMgrClient(hostname, rpc_config)
-    ret = client.get_committed_xid(db_id)
-    print("ret = ", ret)
-    return ret
+    return client.get_committed_xid(db_id)
 
 
 def restart(props: Properties,
