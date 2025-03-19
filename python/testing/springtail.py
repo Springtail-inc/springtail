@@ -187,12 +187,8 @@ def cleanup_db_instance(props : Properties) -> None:
     # Connect to the database
     conn = connect_db_instance(props, db_name)
 
-    # Execute the cleanup SQL statements
-    execute_sql(conn, "DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_drops;")
-    execute_sql(conn, "DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_ddl;")
-    execute_sql(conn, "DROP FUNCTION IF EXISTS springtail_add_replica_identity_full;")
-    execute_sql(conn, "DROP FUNCTION IF EXISTS springtail_event_trigger_for_drops;")
-    execute_sql(conn, "DROP FUNCTION IF EXISTS springtail_event_trigger_for_ddl;")
+    # Cleanup trigger functions
+    execute_sql(conn, "DROP SCHEMA IF EXISTS __pg_springtail_triggers CASCADE;")
 
     slot_exists = execute_sql_select(conn, "SELECT 1 FROM pg_replication_slots WHERE slot_name = %s;", slot_name)
     if slot_exists:
@@ -443,9 +439,7 @@ def gen_dump_tarball(props : Properties, build_dir : str) -> str:
     # get paths
     mount_path = props.get_mount_path()
     log_path = props.get_log_path()
-
     fixup_log_perms(props)
-
     # create a temp directory
     with tempfile.TemporaryDirectory() as tmp_dir:
         # generate a tarball of the log files
@@ -463,7 +457,7 @@ def gen_dump_tarball(props : Properties, build_dir : str) -> str:
         for log in glob.glob(logs):
             shutil.copy(log, tmp_logs_dir)
 
-        shutil.copy(os.path.join(mount_path, 'system.json'), tmp_logs_dir)
+        # dump the system tables
         run_command(os.path.join(build_dir, 'src/storage/dump_system_tables'), ['1'], os.path.join(tmp_logs_dir, 'system_table.dump'));
 
         # create the tarball
