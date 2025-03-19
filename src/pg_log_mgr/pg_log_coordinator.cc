@@ -75,7 +75,8 @@ namespace springtail::pg_log_mgr {
         nlohmann::json log_mgr_config = Properties::get(Properties::LOG_MGR_CONFIG);
         auto optional_repl_log = Json::get<std::string>(log_mgr_config, "replication_log_path");
         auto optional_trans_log = Json::get<std::string>(log_mgr_config, "transaction_log_path");
-        auto log_size_rollover_threshold = Json::get<uint64_t>(log_mgr_config, "log_size_rollover_threshold");
+        _log_size_rollover_threshold = Json::get_or<uint64_t>(log_mgr_config, "log_size_rollover_threshold", PgLogMgr::LOG_ROLLOVER_SIZE_BYTES);
+
         if (optional_repl_log.has_value() && optional_trans_log.has_value()) {
             _repl_log = optional_repl_log.value();
             _trans_log = optional_trans_log.value();
@@ -83,11 +84,6 @@ namespace springtail::pg_log_mgr {
             SPDLOG_ERROR("Error when reading pg_log_mgr config");
         }
 
-        if (log_size_rollover_threshold.has_value()) {
-            _log_size_rollover_threshold = log_size_rollover_threshold.value();
-        } else {
-            _log_size_rollover_threshold = PgLogMgr::LOG_ROLLOVER_SIZE_BYTES;
-        }
         // Start the committer thread
         _committer = std::make_shared<springtail::committer::Committer>(1, _committer_queue);
         _committer_thread = std::thread(&springtail::committer::Committer::run, _committer);
