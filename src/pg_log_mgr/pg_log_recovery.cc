@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <common/filesystem.hh>
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_log_recovery.hh>
@@ -64,6 +65,11 @@ PgLogRecovery::_skip_committed()
     }
 
     SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Start with file {}", *_repl_log);
+
+    if (fs::timestamp_file_exists(_repl_log.value(), PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_PREFIX_REPL_STREAMING, PgLogMgr::LOG_SUFFIX)) {
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Set streaming for file {}", _repl_log.value().string());
+        _repl_reader.set_streaming();
+    }
 
     _repl_reader.set_file(*_repl_log);
 

@@ -51,6 +51,7 @@ namespace springtail::pg_log_mgr {
 
         /** replication and transaction log prefixes and suffix */
         static constexpr char const * const LOG_PREFIX_REPL = "pg_log_repl_";
+        static constexpr char const * const LOG_PREFIX_REPL_STREAMING = "pg_log_streaming_";
         static constexpr char const * const LOG_PREFIX_XACT = "pg_log_xact_";
         static constexpr char const * const LOG_SUFFIX = ".log";
 

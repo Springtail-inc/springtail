@@ -4,6 +4,12 @@
 ## test
 
 -- Employee database
+
+-- file system.json.testing should be modified for testing this script
+-- "log_mgr/log_size_rollover_threshold" should be set to 128kB (131072)
+-- this is necessary to trigger rollovers
+-- unfortunately this has to be done manually at the moment
+
 BEGIN;
 CREATE TABLE IF NOT EXISTS regions (
 	region_id SERIAL PRIMARY KEY,

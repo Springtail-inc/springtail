@@ -1,5 +1,6 @@
 #pragma once
 
+#include <fstream>
 #include <filesystem>
 #include <optional>
 
@@ -113,6 +114,14 @@ namespace springtail {
             return dir / fmt::format("{}{}{}", prefix, timestamp.count(), suffix);
         }
 
+        /**
+         * @brief Creates a new log file name with the specified timestamp
+         * @param dir The directory in which to create the log file.
+         * @param prefix The prefix of the log file name.
+         * @param suffix The suffix of the log file name (should contain '.').
+         * @param timestamp The timestamp to use in the file name
+         * @return std::filesystem::path Path to a new log file.
+         */
         static std::filesystem::path
         create_log_file_with_timestamp(const std::filesystem::path &dir,
                                        std::string_view prefix,
@@ -120,6 +129,48 @@ namespace springtail {
                                        uint64_t timestamp)
         {
             return dir / fmt::format("{}{}{}", prefix, timestamp, suffix);
+        }
+
+        /**
+         * @brief Creates an empty file with prefix, suffix, and timestamp
+         * @param dir The directory in which to create rhe empty file.
+         * @param prefix The prefix of the empty file name.
+         * @param suffix The suffix of the the file name (should contain '.').
+         * @param timestamp The timestamp to use in the file name
+         */
+        static void
+        create_empty_file_with_timestamp(const std::filesystem::path &dir,
+                                         std::string_view prefix,
+                                         std::string_view suffix,
+                                         uint64_t timestamp)
+        {
+            std::filesystem::path file_path = dir / fmt::format("{}{}{}", prefix, timestamp, suffix);
+            std::ofstream output(file_path);
+        }
+
+        /**
+         * @brief Verifies that an empty file exists
+         * @param path The directory in which the files are located
+         * @param prefix The prefix of the log file.
+         * @param ts_prefix The prefix of the empty file.
+         * @param suffix The suffix of both files.
+         * @return true File exists
+         * @return false File does not exists
+         */
+        static bool
+        timestamp_file_exists(
+                    const std::filesystem::path &path,
+                    std::string_view prefix,
+                    std::string_view ts_prefix,
+                    std::string_view suffix)
+        {
+            auto timestamp = extract_timestamp_from_file(path.filename(), prefix, suffix);
+            if (!timestamp.has_value()) {
+                return false;
+            }
+
+            std::filesystem::path file_path = path.parent_path() / fmt::format("{}{}{}", ts_prefix, timestamp.value(), suffix);
+            return std::filesystem::exists(file_path);
         }
 
         /**

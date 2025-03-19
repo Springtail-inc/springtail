@@ -3,12 +3,19 @@
 ### sync_timeout 2000
 ## test
 
--- Northwind database
+-- alter session for streaming
 
--- file system.json.testing should be modified for testing this script
--- "log_mgr/log_size_rollover_threshold" should be set to 128kB (131072)
--- this is necessary to trigger rollovers
--- unfortunately this has to be done manually at the moment
+-- ALTER SYSTEM SET logical_decoding_work_mem = '64kB';
+-- SELECT pg_reload_conf();
+
+-- the statements above do not work for some reason
+-- to test this scenario properly we need to modify /etc/postgresql/16/main/postgresql.conf
+-- at this point it can only be done manually
+
+-- in addition in file system.json.testing "log_mgr/log_size_rollover_threshold" should be set to 128kB (131072)
+-- this is necessary to trigger rollovers and this also has to be done manually at the moment
+
+-- Northwind database
 
 BEGIN;
 CREATE TABLE IF NOT EXISTS categories (
@@ -158,9 +165,7 @@ INSERT INTO categories VALUES (5, 'Grains/Cereals', 'Breads, crackers, pasta, an
 INSERT INTO categories VALUES (6, 'Meat/Poultry', 'Prepared meats', '\x');
 INSERT INTO categories VALUES (7, 'Produce', 'Dried fruit and bean curd', '\x');
 INSERT INTO categories VALUES (8, 'Seafood', 'Seaweed and fish', '\x');
-COMMIT;
 
-BEGIN;
 INSERT INTO customers VALUES ('ALFKI', 'Alfreds Futterkiste', 'Maria Anders', 'Sales Representative', 'Obere Str. 57', 'Berlin', NULL, '12209', 'Germany', '030-0074321', '030-0076545');
 INSERT INTO customers VALUES ('ANATR', 'Ana Trujillo Emparedados y helados', 'Ana Trujillo', 'Owner', 'Avda. de la Constitución 2222', 'México D.F.', NULL, '05021', 'Mexico', '(5) 555-4729', '(5) 555-3745');
 INSERT INTO customers VALUES ('ANTON', 'Antonio Moreno Taquería', 'Antonio Moreno', 'Owner', 'Mataderos  2312', 'México D.F.', NULL, '05023', 'Mexico', '(5) 555-3932', NULL);
@@ -264,9 +269,7 @@ INSERT INTO employees VALUES (6, 'Suyama', 'Michael', 'Sales Representative', 'M
 INSERT INTO employees VALUES (7, 'King', 'Robert', 'Sales Representative', 'Mr.', '1960-05-29', '1994-01-02', 'Edgeham Hollow\nWinchester Way', 'London', NULL, 'RG1 9SP', 'UK', '(71) 555-5598', '465', '\x', 'Robert King served in the Peace Corps and traveled extensively before completing his degree in English at the University of Michigan in 1992, the year he joined the company.  After completing a course entitled Selling in Europe, he was transferred to the London office in March 1993.', 5, 'http://accweb/emmployees/davolio.bmp');
 INSERT INTO employees VALUES (8, 'Callahan', 'Laura', 'Inside Sales Coordinator', 'Ms.', '1958-01-09', '1994-03-05', '4726 - 11th Ave. N.E.', 'Seattle', 'WA', '98105', 'USA', '(206) 555-1189', '2344', '\x', 'Laura received a BA in psychology from the University of Washington.  She has also completed a course in business French.  She reads and writes French.', 2, 'http://accweb/emmployees/davolio.bmp');
 INSERT INTO employees VALUES (9, 'Dodsworth', 'Anne', 'Sales Representative', 'Ms.', '1966-01-27', '1994-11-15', '7 Houndstooth Rd.', 'London', NULL, 'WG2 7LT', 'UK', '(71) 555-4444', '452', '\x', 'Anne has a BA degree in English from St. Lawrence College.  She is fluent in French and German.', 5, 'http://accweb/emmployees/davolio.bmp');
-COMMIT;
 
-BEGIN;
 INSERT INTO employee_territories VALUES (1, '06897');
 INSERT INTO employee_territories VALUES (1, '19713');
 INSERT INTO employee_territories VALUES (2, '01581');
@@ -316,9 +319,7 @@ INSERT INTO employee_territories VALUES (9, '48084');
 INSERT INTO employee_territories VALUES (9, '48304');
 INSERT INTO employee_territories VALUES (9, '55113');
 INSERT INTO employee_territories VALUES (9, '55439');
-COMMIT;
 
-BEGIN;
 INSERT INTO order_details VALUES (10248, 11, 14, 12, 0);
 INSERT INTO order_details VALUES (10248, 42, 9.80000019, 10, 0);
 INSERT INTO order_details VALUES (10248, 72, 34.7999992, 5, 0);
@@ -3387,25 +3388,19 @@ INSERT INTO products VALUES (74, 'Longlife Tofu', 4, 7, '5 kg pkg.', 10, 4, 20, 
 INSERT INTO products VALUES (75, 'Rhönbräu Klosterbier', 12, 1, '24 - 0.5 l bottles', 7.75, 125, 0, 25, 0);
 INSERT INTO products VALUES (76, 'Lakkalikööri', 23, 1, '500 ml', 18, 57, 0, 20, 0);
 INSERT INTO products VALUES (77, 'Original Frankfurter grüne Soße', 12, 2, '12 boxes', 13, 32, 0, 15, 0);
-COMMIT;
 
-BEGIN;
 INSERT INTO region VALUES (1, 'Eastern');
 INSERT INTO region VALUES (2, 'Western');
 INSERT INTO region VALUES (3, 'Northern');
 INSERT INTO region VALUES (4, 'Southern');
-COMMIT;
 
-BEGIN;
 INSERT INTO shippers VALUES (1, 'Speedy Express', '(503) 555-9831');
 INSERT INTO shippers VALUES (2, 'United Package', '(503) 555-3199');
 INSERT INTO shippers VALUES (3, 'Federal Shipping', '(503) 555-9931');
 INSERT INTO shippers VALUES (4, 'Alliance Shippers', '1-800-222-0451');
 INSERT INTO shippers VALUES (5, 'UPS', '1-800-782-7892');
 INSERT INTO shippers VALUES (6, 'DHL', '1-800-225-5345');
-COMMIT;
 
-BEGIN;
 INSERT INTO suppliers VALUES (1, 'Exotic Liquids', 'Charlotte Cooper', 'Purchasing Manager', '49 Gilbert St.', 'London', NULL, 'EC1 4SD', 'UK', '(171) 555-2222', NULL, NULL);
 INSERT INTO suppliers VALUES (2, 'New Orleans Cajun Delights', 'Shelley Burke', 'Order Administrator', 'P.O. Box 78934', 'New Orleans', 'LA', '70117', 'USA', '(100) 555-4822', NULL, '#CAJUN.HTM#');
 INSERT INTO suppliers VALUES (3, 'Grandma Kelly''s Homestead', 'Regina Murphy', 'Sales Representative', '707 Oxford Rd.', 'Ann Arbor', 'MI', '48104', 'USA', '(313) 555-5735', '(313) 555-3349', NULL);
@@ -3435,9 +3430,7 @@ INSERT INTO suppliers VALUES (26, 'Pasta Buttini s.r.l.', 'Giovanni Giudici', 'O
 INSERT INTO suppliers VALUES (27, 'Escargots Nouveaux', 'Marie Delamare', 'Sales Manager', '22, rue H. Voiron', 'Montceau', NULL, '71300', 'France', '85.57.00.07', NULL, NULL);
 INSERT INTO suppliers VALUES (28, 'Gai pâturage', 'Eliane Noz', 'Sales Representative', 'Bat. B 3, rue des Alpes', 'Annecy', NULL, '74000', 'France', '38.76.98.06', '38.76.98.58', NULL);
 INSERT INTO suppliers VALUES (29, 'Forêts d''érables', 'Chantal Goulet', 'Accounting Manager', '148 rue Chasseur', 'Ste-Hyacinthe', 'Québec', 'J2S 7S8', 'Canada', '(514) 555-2955', '(514) 555-2921', NULL);
-COMMIT;
 
-BEGIN;
 INSERT INTO territories VALUES ('01581', 'Westboro', 1);
 INSERT INTO territories VALUES ('01730', 'Bedford', 1);
 INSERT INTO territories VALUES ('01833', 'Georgetow', 1);
@@ -3491,9 +3484,7 @@ INSERT INTO territories VALUES ('95060', 'Santa Cruz', 2);
 INSERT INTO territories VALUES ('98004', 'Bellevue', 2);
 INSERT INTO territories VALUES ('98052', 'Redmond', 2);
 INSERT INTO territories VALUES ('98104', 'Seattle', 2);
-COMMIT;
 
-BEGIN;
 INSERT INTO us_states VALUES (1, 'Alabama', 'AL', 'south');
 INSERT INTO us_states VALUES (2, 'Alaska', 'AK', 'north');
 INSERT INTO us_states VALUES (3, 'Arizona', 'AZ', 'west');
@@ -3631,7 +3622,7 @@ ALTER TABLE ONLY employees
 COMMIT;
 
 ### sync
-### force_recovery 3
+### force_recovery 16
 
 ## verify
 SELECT * FROM customer_customer_demo;

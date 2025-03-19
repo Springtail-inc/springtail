@@ -575,6 +575,7 @@ namespace springtail::pg_log_mgr {
     {
         uint64_t min_timestamp = _xid_ts_tracker->get_min_timestamp();
         fs::cleanup_files_from_dir(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX, min_timestamp);
+        fs::cleanup_files_from_dir(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL_STREAMING, PgLogMgr::LOG_SUFFIX, min_timestamp);
         fs::cleanup_files_from_dir(_xact_log_path, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX, min_timestamp);
     }
 
@@ -585,6 +586,9 @@ namespace springtail::pg_log_mgr {
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Logs rollover to the new log timestamp id: {}", msg->pg_log_timestamp);
             _pg_log_timestamp = msg->pg_log_timestamp;
             _xact_log_writer.rotate(msg->pg_log_timestamp);
+            if (_current_batch != nullptr && _current_xact == nullptr) {
+                fs::create_empty_file_with_timestamp(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL_STREAMING, PgLogMgr::LOG_SUFFIX, msg->pg_log_timestamp);
+            }
             _remove_old_log_files();
         }
         // handle the message
