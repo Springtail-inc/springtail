@@ -201,18 +201,13 @@ ClientAuthorization::_send_auth_req(uint64_t seq_id)
     BufferPtr buffer = BufferPool::get_instance()->get(128);
 
     switch (_login->type) {
-        case TRUST:
-            PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] User {} authenticated with trust", _id,
-                        _user->username());
-            _state = READY;
-            return;  // did send above so we return here
-
         case MD5:
             PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] User {} authenticating with md5", _id,
                         _user->username());
             _encode_auth_md5(buffer);
             break;
 
+        case TEXT:
         case SCRAM:
             PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] User {} authenticating with scram", _id,
                         _user->username());
@@ -343,9 +338,21 @@ ClientAuthorization::_handle_scram_auth(const std::string_view data, uint64_t se
         throw ProxyAuthError();
     }
 
-    // note: some code inside of here could be optimized based on how the password is stored
+    ::PasswordType type;  // see scram.hh
+    switch (_login->type) {
+        case SCRAM:
+            type = PASSWORD_TYPE_SCRAM_SHA_256;
+            break;
+        case TEXT:
+            type = PASSWORD_TYPE_PLAINTEXT;
+            break;
+        default:
+            SPDLOG_ERROR("Invalid password type for SCRAM authentication");
+            throw ProxyAuthError();
+    }
+
     if (!build_server_first_message(&_login->scram_state, _user->username().c_str(),
-                                    _login->password.c_str())) {
+                                    _login->password.c_str(), type)) {
         SPDLOG_ERROR("Failed to build server first message");
         throw ProxyAuthError();
     }
@@ -898,8 +905,24 @@ ServerAuthorization::_handle_auth_scram_continue(BufferPtr buffer, uint64_t seq_
     }
 
     PgUser user;
-    user.scram_ClientKey = _login->scram_state.ClientKey;
-    user.has_scram_keys = true;
+    // get right key/password for the user for scram
+    if (_login->type == SCRAM) {
+        user.scram_ClientKey = _login->scram_state.ClientKey;
+        user.has_scram_keys = true;
+    }  else if (_login->type == TEXT) {
+        user.has_scram_keys = false;
+
+        if (_login->password.size() >= sizeof(user.passwd)) {
+            SPDLOG_ERROR("Password too long for SCRAM");
+            throw ProxyAuthError();
+        }
+        // size check done above, don't remove it...
+        strncpy(user.passwd, _login->password.c_str(), std::min(_login->password.size(), sizeof(user.passwd)-1));
+
+    } else {
+        SPDLOG_ERROR("Invalid password type for SCRAM");
+        throw ProxyAuthError();
+    }
 
     char *client_final_message = build_client_final_message(
         &_login->scram_state, &user, _login->scram_state.server_nonce, _login->scram_state.salt,
@@ -945,7 +968,7 @@ ServerAuthorization::_handle_auth_scram_complete(BufferPtr buffer)
 
     PgUser user;
     user.scram_ClientKey = _login->scram_state.ClientKey;
-    user.scram_ServerKey = _login->scram_state.ServerKey;  // XXX need to get this from somewhere
+    user.scram_ServerKey = _login->scram_state.ServerKey;
     user.has_scram_keys = true;
 
     // last step, verify the server signature

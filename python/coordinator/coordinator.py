@@ -6,6 +6,8 @@ import argparse
 import string
 import signal
 import time
+import threading
+import traceback
 from typing import Optional
 from random import SystemRandom
 
@@ -18,6 +20,7 @@ sys.path.append(os.path.join(project_root, 'grpc'))
 
 # import the Properties class
 from properties import Properties
+from sysutils import stop_daemons
 
 # import the ComponentFactory class and the Scheduler class
 from component_factory import ComponentFactory
@@ -29,6 +32,8 @@ from xid_mgr import XidMgrClient
 from sys_tbl_mgr import SysTblMgrClient
 
 from otel_logger import init_logging
+
+ALL_DAEMONS = ['xid_mgr_daemon', 'sys_tbl_mgr_daemon', 'pg_log_mgr_daemon', 'pg_ddl_daemon', 'proxy']
 
 class Coordinator:
     """The Coordinator class to manage the components of the system."""
@@ -50,10 +55,9 @@ class Coordinator:
         """
         self.props = props
         self._check_properties(props)
-
-        # Configure logging
-        init_logging(props.get_otel_config(), props.get_log_path(), debug)
-        self.logger = logging.getLogger("coordinator")
+        self.shutdown_event = threading.Event()
+        self.scheduler = None
+        self.logger = logging.getLogger('springtail')
 
         # Get the service type
         self.service_name = service_name
@@ -109,6 +113,12 @@ class Coordinator:
             self.logger.error(f"Invalid binary directory: {self.bin_dir}")
             raise ValueError(f"Invalid binary directory: {self.bin_dir}")
 
+        if self.shutdown_event.is_set():
+            return
+
+        # Make sure everything is stopped
+        stop_daemons(self.props.get_pid_path(), ALL_DAEMONS)
+
         # Create scheduler
         self.logger.debug("Starting scheduler")
         self.scheduler = Scheduler(self.props, self.service_name, self.production)
@@ -136,19 +146,28 @@ class Coordinator:
                 # startup postgres if not running
                 postgres = factory.create_postgres()
                 if not postgres.is_running():
-                    postgres.start()
+                    if not postgres.start():
+                        self.logger.error("Failed to start Postgres")
+                        raise ValueError("Failed to start Postgres")
 
                 # create the ddl user
                 ddl_password = self._gen_random_string(16)
                 postgres.create_user('ddl_user', ddl_password, True, True)
 
+                # in test startup ingestion services
+                if not self.production:
+                    self.xid_mgr_component = factory.create_xid_mgr_daemon()
+                    self.sys_tlb_mgr_component = factory.create_sys_tbl_mgr_daemon()
+                    if not self.xid_mgr_component.start() or not self.sys_tlb_mgr_component.start():
+                        self.logger.error("Failed to start xid_mgr_component or sys_tbl_mgr_component")
+                        raise ValueError("Failed to start components")
+
                 # wait for ingestion to be ready
                 self._wait_for_ingestion(self.props)
 
-                # For testing uncomment lines below since they are needed for ddl daemon
-                # but in production they should be running elsewhere
-                # scheduler.register_component(factory.create_xid_mgr_daemon(), 1)
-                # scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 2)
+                if self.shutdown_event.is_set():
+                    return
+
                 self.scheduler.register_component(postgres, 3)
                 self.scheduler.register_component(factory.create_ddl_daemon('ddl_user', ddl_password), 4)
 
@@ -179,16 +198,32 @@ class Coordinator:
         self.logger.info("Shutting down all components")
         self.scheduler.shutdown()
 
-        if self.production:
-            self.production.send_sns('shutdown')
 
     def shutdown(self, signum: int):
         """
         Shutdown the coordinator.
         """
+        # set shutdown flag
+        self.shutdown_event.set()
+
+        # shutdown scheduler
         if self.scheduler:
             self.logger.info(f"Received signal {signum}, shutting down...")
             self.scheduler.shutdown()
+
+        # if not in production, shutdown the xid_mgr and sys_tbl_mgr
+        if not self.production and self.service_name == 'fdw':
+            if self.xid_mgr_component:
+                self.xid_mgr_component.shutdown()
+            if self.sys_tlb_mgr_component:
+                self.sys_tlb_mgr_component.shutdown()
+
+        # make sure everything is shutdown
+        stop_daemons(self.props.get_pid_path(), ALL_DAEMONS)
+
+        if self.production:
+            self.production.send_sns('shutdown')
+
 
     def _check_properties(self, props: Properties) -> None:
         """
@@ -226,21 +261,24 @@ class Coordinator:
         """
         Wait for the ingestion service to be ready.
         """
+        self.logger.debug("Waiting for ingestion service to be ready")
         host = None
         while True:
             host = props.get_hostname('ingestion')
             if host is not None:
+                self.logger.debug(f"Found ingestion host: {host}")
                 break
             time.sleep(1)
 
         system_config = props.get_system_config()
-        xid_port = system_config['xid_mgr']['rpc_config']['server_port']
-        sys_tbl_port = system_config['sys_tbl_mgr']['rpc_config']['server_port']
+        xid_config = system_config['xid_mgr']['rpc_config']
+        sys_tbl_config = system_config['sys_tbl_mgr']['rpc_config']
 
         waiting = True
-        while waiting:
+        while waiting and not self.shutdown_event.is_set():
             try:
-                with XidMgrClient(host, xid_port) as client:
+                self.logger.debug(f"Connecting to XidManager at {host}:{xid_config['server_port']}")
+                with XidMgrClient(host, xid_config) as client:
                     client.ping()
                     self.logger.info("XidManager is ready")
                     waiting = False
@@ -248,15 +286,16 @@ class Coordinator:
                 continue
 
         waiting = True
-        while waiting:
+        while waiting and not self.shutdown_event.is_set():
             try:
-                with SysTblMgrClient(host, sys_tbl_port) as client:
+                self.logger.debug(f"Connecting to SysTblManager at {host}:{sys_tbl_config['server_port']}")
+                with SysTblMgrClient(host, sys_tbl_config) as client:
                     client.ping()
                     self.logger.info("SysTblManager is ready")
                     waiting = False
             except Exception as e:
                 continue
-
+        self.logger.info("Ingestion service is ready")
 
 def parse_arguments():
     """Parse the command line arguments."""
@@ -313,7 +352,20 @@ if __name__ == "__main__":
     # Load properties from the config file
     props = setup_props(yaml_config)
 
-    coordinator = Coordinator(props, args.debug, yaml_config.get('production'), yaml_config.get('install_dir'), args.service)
+    # Configure logging
+    log_rotation_size = 0
+    log_rotation_count = 10
+    if 'log_rotation_size' in yaml_config:
+        log_rotation_size = yaml_config['log_rotation_size']
+        log_rotation_count = yaml_config['log_rotation_count']
+
+    init_logging(props.get_otel_config(), props.get_log_path(), debug=args.debug,
+                log_rotation_size=log_rotation_size, log_rotation_count=log_rotation_count)
+
+    logger = logging.getLogger('springtail')
+
+    coordinator = Coordinator(props, args.debug, yaml_config.get('production'),
+                              yaml_config.get('install_dir'), args.service)
 
     # Set up signal handlers
     def signal_handler(signum, frame):
@@ -322,5 +374,12 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    coordinator.startup()
+    try:
+        coordinator.startup()
+    except Exception as e:
+        error_details = traceback.format_exc()
+        logger.error(f"An error occurred during startup: {e}")
+        logger.error(f"Error details: {error_details}")
+        coordinator.shutdown(0)
+
 

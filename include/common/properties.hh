@@ -8,6 +8,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <common/aws.hh>
 #include <common/redis_cache.hh>
 #include <common/singleton.hh>
 
@@ -69,7 +70,6 @@ namespace springtail {
 
         /**
          * @brief Function for separate redis cache initialization
-         *
          */
         void init_cache() { _cache = std::make_shared<RedisCache>(true); }
 
@@ -189,11 +189,12 @@ namespace springtail {
     private:
         /** json containing parsed settings file */
         nlohmann::json _json;
-        /**
-         * @brief RedisCache object
-         *
-         */
+
+        /** RedisCache object */
         std::shared_ptr<RedisCache> _cache;
+
+        /** AWS for secrets mgr */
+        std::shared_ptr<AwsHelper> _aws_helper;
 
         /**
          * @brief Construct a new Properties object
@@ -222,6 +223,11 @@ namespace springtail {
          * @param config_file path to config file
          */
         void _load_redis(const std::string &config_file);
+
+        /**
+         * @brief Set the replication user variables from AWS secrets manager
+         */
+        void _set_replication_user_from_aws();
 
         /**
          * @brief Internal get database instance id

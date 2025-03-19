@@ -133,9 +133,10 @@ namespace springtail::pg_fdw {
          * @brief Helper to get schemas from db config
          * @param db_id db id
          * @param db_name db name
+         * @param xid transaction id
          * @return set of schemas
          */
-        std::set<std::string> _get_schemas(uint64_t db_id, const std::string &db_name);
+        std::set<std::string> _get_schemas(uint64_t db_id, const std::string &db_name, uint64_t xid);
 
         /**
          * @brief Helper to diff oid type set with keys from _type_map
