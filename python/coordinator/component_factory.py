@@ -56,7 +56,7 @@ class ComponentFactory:
         return Component(
             name="pg_ddl_daemon",
             id=self.DDL_ID,
-            args=["--daemon", "--username", user, "--password", password],
+            args=["--daemon", "-u", user, "-p", password, "-s", "/var/run/postgresql"],
             path=self.install_dir,
             pid_path=os.path.join(self.pid_dir, 'pg_ddl_mgr.pid')
         )

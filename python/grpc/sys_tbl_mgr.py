@@ -14,22 +14,21 @@ class SysTblMgrClient:
     """Client for the SysTblMgr gRPC service"""
 
     def __init__(self,
-                 host : str,
-                 port: int,
-                 ca_cert_path: Optional[str] = "",
-                 ca_client_key_path: Optional[str] = "",
-                 ca_client_cert_path: Optional[str] = ""):
+        host : str,
+        rpc_config : dict) -> None:
         """Initialize SysTableMgr client with server connection details.
 
         Args:
             host: The hostname of the SysTblManager server
-            port: The port number of the SysTblManager server
-            ca_cert_path: The path to the CA certificate file
-            ca_client_key_path: The path to the client key file
-            ca_client_cert_path: The path to the client certificate file
+            rpc_config: Configuration dictionary with server connection details
         """
+        port: int = rpc_config['server_port']
 
-        if ca_cert_path and ca_client_key_path and ca_client_cert_path:
+        if 'ssl' in rpc_config and rpc_config['ssl']:
+            ca_cert_path: str = rpc_config['client_trusted']
+            ca_client_key_path: str = rpc_config['client_key']
+            ca_client_cert_path: str = rpc_config['client_cert']
+
             with open(ca_cert_path, 'rb') as ca_cert_file, \
                  open(ca_client_key_path, 'rb') as ca_client_key_file, \
                  open(ca_client_cert_path, 'rb') as ca_client_cert_file:

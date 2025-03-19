@@ -53,7 +53,7 @@ class Scheduler:
         self.liveness_hash = props.get_liveness_hash()
         self.liveness_pubsub = props.get_liveness_notification_pubsub()
         self.components: Dict[str, Component] = {}
-        self.logger = logging.getLogger("coordinator")
+        self.logger = logging.getLogger('springtail')
         self.timeouts = {}
         self.allowed_timeout = allowed_timeout_secs * 1000
         self.db_states = {}
@@ -76,6 +76,9 @@ class Scheduler:
         Returns:
             True if all components started successfully
         """
+        # Clear timeout tracking
+        self.timeouts.clear()
+
         # Sort components by startup order
         sorted_components = sorted(
             self.components.values(),
@@ -184,6 +187,7 @@ class Scheduler:
         # Check for timeout messages in Redis
         data = self.redis.hgetall(self.liveness_hash)
         if not data:
+            self.logger.debug(f"No timeout data for hash: {self.liveness_hash}")
             return False
 
         # Go through and merge time values for the same id, taking minimum
@@ -295,7 +299,7 @@ class Scheduler:
 
         while not self.shutdown_event.is_set():
             try:
-                self.logger.debug("Sheduler monitoring timeouts")
+                self.logger.debug("Scheduler monitoring timeouts")
 
                 # get the coordinator state
                 self._check_coordinator_state()

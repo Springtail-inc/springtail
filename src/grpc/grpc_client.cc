@@ -23,6 +23,8 @@ create_channel(std::string_view service,
                const nlohmann::json& rpc_json)
 {
     bool ssl = Json::get_or<bool>(rpc_json, "ssl", false);
+
+    grpc::ChannelArguments args;
     std::shared_ptr<grpc::ChannelCredentials> creds;
     if (ssl) {
         std::string cert_file_path;
@@ -54,10 +56,11 @@ create_channel(std::string_view service,
         ssl_opts.pem_cert_chain = read_file_contents(cert_file_path);
 
         creds = grpc::SslCredentials(ssl_opts);
+        args.SetSslTargetNameOverride("springtail_server");  // This must match CN in the server cert
     } else {
         creds = grpc::InsecureChannelCredentials();
     }
-    grpc::ChannelArguments args;
+
     int port = 0;
     Json::get_to<int>(rpc_json, "server_port", port);
     std::string server_addr = server_hostname + ":" + std::to_string(port);

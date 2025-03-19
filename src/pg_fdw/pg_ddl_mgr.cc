@@ -131,7 +131,7 @@ namespace springtail::pg_fdw {
     }
 
     std::set<std::string>
-    PgDDLMgr::_get_schemas(uint64_t db_id, const std::string &db_name)
+    PgDDLMgr::_get_schemas(uint64_t db_id, const std::string &db_name, uint64_t xid)
     {
         // get the db config and parse out the included schemas
         auto db_config = Properties::get_db_config(db_id);
@@ -166,7 +166,7 @@ namespace springtail::pg_fdw {
 
         // otherwise all schemas, need to query the primary
         // use libpq to connect to the database
-        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, 0);
+        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, xid);
         auto fields = table->extent_schema()->get_fields();
 
         for (auto row : (*table)) {
@@ -669,7 +669,7 @@ namespace springtail::pg_fdw {
 
         // drop and create database on fdw
         std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
-        std::string drop_db = fmt::format("DROP DATABASE IF EXISTS {}", prefixed_name);
+        std::string drop_db = fmt::format("DROP DATABASE IF EXISTS {} WITH (FORCE)", prefixed_name);
         std::string create_db = fmt::format("CREATE DATABASE {}", prefixed_name);
 
         conn->exec(drop_db);
@@ -692,10 +692,10 @@ namespace springtail::pg_fdw {
         auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}});
         RedisDDL redis_ddl;
 
-        // get schemas, parse include, fetch from primary db if necessary
-        auto &&schemas = _get_schemas(db_id, db_name);
-
         uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
+
+        // get schemas, parse include, fetch from primary db if necessary
+        auto &&schemas = _get_schemas(db_id, db_name, xid);
 
         // connect to the database on the fdw
         conn = _connect_fdw(db_id, _db_prefix + db_name);

@@ -1,4 +1,3 @@
-import boto3
 import logging
 import os
 import sys
@@ -7,7 +6,6 @@ import tempfile
 import json
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
-from botocore.exceptions import ClientError
 
 # Get the parent directory of the current script (i.e., the project root directory)
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -20,8 +18,12 @@ from common import (
     makedir
 )
 
+from aws import AwsHelper
+
 S3_BIN_FOLDER = 'packages'
 S3_DOWNLOAD_PATH = '/tmp/'
+
+SPRINGTAIL_LIB_DIR = 'shared-lib' # relative to the install path
 
 # NOTE: this should match the environment variables in common/environment.hh
 ENV_VARS = [
@@ -30,6 +32,8 @@ ENV_VARS = [
     'REDIS_USER_DATABASE_ID',
     'REDIS_CONFIG_DATABASE_ID',
     'REDIS_PORT',
+    'REDIS_HOSTNAME',
+    'REDIS_SSL',
     'ORGANIZATION_ID',
     'ACCOUNT_ID',
     'DATABASE_INSTANCE_ID',
@@ -38,7 +42,8 @@ ENV_VARS = [
     'MOUNT_POINT',
     'FDW_ID',
     'REPLICATION_USER_PASSWORD',
-    'FDW_USER_PASSWORD'
+    'FDW_USER_PASSWORD',
+    'LD_LIBRARY_PATH'
 ]
 
 SNS_ENV_VARS = [
@@ -61,131 +66,20 @@ class Production:
         arn = os.environ.get('SNS_TOPIC_ARN')
         if not arn:
             raise ValueError("SNS_TOPIC_ARN environment variable not set")
+
         self.topic_arn : str = arn
-        self.sns_attributes : Dict[str, Any] = self._extract_attributes()
         self.install_path: str = install_path
 
-        self.logger = logging.getLogger("coordinator")
+        self.logger = logging.getLogger('springtail')
+        self.aws = AwsHelper()
+
+        self.sns_attributes : Dict[str, Any] = self._extract_attributes()
 
         logging.getLogger('boto3').setLevel(logging.CRITICAL)
         logging.getLogger('botocore').setLevel(logging.CRITICAL)
         logging.getLogger('nose').setLevel(logging.CRITICAL)
         logging.getLogger('s3transfer').setLevel(logging.CRITICAL)
         logging.getLogger('urllib3').setLevel(logging.CRITICAL)
-
-    def _download_s3_binaries(
-        self,
-        bucket: str,
-        folder: str,
-        local_path: str,
-        prefix: str = 'springtail-'
-    ) -> Optional[str]:
-        """
-        Get the latest springtail binaries file from S3 based on filename timestamp.
-
-        Args:
-            bucket: S3 bucket name
-            folder: Folder prefix in bucket (no leading/trailing slash needed)
-            local_path: Local path to download the file
-            prefix: Prefix to filter files by (default: 'springtail_')
-
-        Returns:
-            str: path to the downloaded file, None if failed
-        """
-        s3 = boto3.client('s3')
-
-        try:
-            self.send_sns('download_start')
-
-            # List objects with the given prefix
-            prefix = f"{folder}/{prefix}" if folder else "{prefix}"
-            response = s3.list_objects_v2(
-                Bucket=bucket,
-                Prefix=prefix
-            )
-
-            if 'Contents' not in response or not response['Contents']:
-                self.logger.warning(f"No objects found in {bucket}/{prefix}")
-                return None
-
-            files = [obj['Key'] for obj in response['Contents']]
-
-            self.logger.debug(f"Found {len(response['Contents'])} objects in {prefix}")
-            self.logger.debug(f"Objects: {files}")
-
-            # Sort by the YYYYMMDD portion of filename
-            latest_file = sorted(
-                files,
-                key=lambda x: x.split(prefix)[1].split('.')[0],
-                reverse=True
-            )[0]
-
-            self.logger.debug(f"Latest springtail file: {latest_file}")
-
-            # download the file
-            filename = os.path.join(local_path, os.path.basename(latest_file))
-            s3.download_file(bucket, latest_file, filename)
-
-            self.send_sns('download_complete', version=latest_file)
-
-            return filename
-
-        except ClientError as e:
-            error_code = e.response['Error']['Code']
-            self.logger.error(f"Failed to get latest springtail file: {error_code}")
-            print(f"Failed to get latest springtail file: {error_code}")
-            self.send_sns('download_failed')
-            sys.exit(1)
-            return None
-        except Exception as e:
-            self.logger.error(f"Failed to get latest springtail file: {str(e)}")
-            print(f"Failed todd get latest springtail file: {str(e)}")
-            self.send_sns('download_failed')
-            sys.exit(1)
-            return None
-
-
-    def _send_sns_notification(
-        self,
-        topic_arn: str,
-        subject: str,
-        message: str,
-        attributes: Optional[Dict[str, Any]] = {}
-    ) -> bool:
-        """
-        Send a notification to an SNS topic.
-
-        Args:
-            topic_arn: The ARN of the SNS topic
-            message: The message to send
-            subject: Optional subject line (useful for email subscriptions)
-            attributes: Optional message attributes
-
-        Returns:
-            bool: True if message was sent successfully, False otherwise
-        """
-        sns = boto3.client('sns')
-
-        try:
-            if attributes:
-                message_attributes = {
-                    k: {'DataType': 'String', 'StringValue': str(v)}
-                    for k, v in attributes.items()
-                }
-            else:
-                message_attributes = {}
-
-            sns.publish(TopicArn=topic_arn, Message=message, Subject=subject, MessageAttributes=message_attributes)
-
-            return True
-
-        except ClientError as e:
-            error_code = e.response['Error']['Code']
-            self.logger.error(f"Failed to send sns message: {error_code}")
-            return False
-        except Exception as e:
-            self.logger.error(f"Failed to send sns message: {str(e)}")
-            return False
 
 
     def install_binaries(self) -> None:
@@ -202,18 +96,30 @@ class Production:
 
         self.logger.info(f"Downloading springtail binaries from {s3_bucket}/{S3_BIN_FOLDER} to {S3_DOWNLOAD_PATH}")
 
-        springtail_tgz = self._download_s3_binaries(s3_bucket, S3_BIN_FOLDER, S3_DOWNLOAD_PATH)
-
+        self.send_sns('download_start')
+        prefix = 'springtail-'
+        springtail_tgz = self.aws.s3_download(s3_bucket, S3_BIN_FOLDER,
+                                              S3_DOWNLOAD_PATH, prefix,
+                                              sort_func=lambda x: x.split(prefix)[1].split('.')[0])
         if not springtail_tgz:
+            self.send_sns('download_failed')
             raise ValueError("Failed to download springtail binaries")
+
+        self.send_sns('download_complete', version=(os.path.basename(springtail_tgz)))
 
         try:
             # Create the install directory if it doesn't exist
             if not os.path.exists(self.install_path):
                 makedir(self.install_path)
 
-            # Install the binaries
+            # set LD_LIBRARY_PATH
+            os.environ['LD_LIBRARY_PATH'] = os.path.join(self.install_path, SPRINGTAIL_LIB_DIR)
+
+            # Install the binaries and shared libraries
             run_command('sudo', ['tar', 'xzf', springtail_tgz, '-C', self.install_path])
+
+            # Make sure shared-lib is readable by all
+            run_command('sudo', ['chmod', '-R', '755', os.path.join(self.install_path, SPRINGTAIL_LIB_DIR)])
 
             self.logger.info(f"Springtail binaries installed to {self.install_path}")
             self.send_sns('install_complete', version=os.path.basename(springtail_tgz))
@@ -233,7 +139,7 @@ class Production:
         lib_dir = run_command('pg_config', ['--pkglibdir'])
 
         # copy the extension files to the share directory
-        logging.info(f"Copying extension files to the share directory: {share_dir}")
+        self.logger.info(f"Copying extension files to the share directory: {share_dir}")
         sp_sharedir = os.path.join(self.install_path, 'share')
         share_dir = os.path.join(share_dir.strip(), 'extension')
 
@@ -248,10 +154,14 @@ class Production:
 
         # Update the postgres configuration file
         # version string is like: 'PostgreSQL 16.4 (Ubuntu 16.4-0ubuntu0.24.04.2)'
-        logging.info("Updating postgres environment file")
+        self.logger.info("Updating postgres environment file")
         version_str = run_command('pg_config', ['--version']).strip()
         version = version_str.split(' ')[1].split('.')[0]
         env_file = f'/etc/postgresql/{version}/main/environment'
+
+        # Update the localhost socket connection to use scram-sha-256
+        self.logger.info("Setting up pg_hba.conf")
+        run_command('sudo', ['sed', '-i', 's/^local[[:space:]]\\+all[[:space:]]\\+all[[:space:]]\\+\\(md5\\|peer\\)/local   all   all   scram-sha-256/', f'/etc/postgresql/{version}/main/pg_hba.conf'])
 
         # Write the environment variables to a temporary file
         with tempfile.NamedTemporaryFile(delete=True, mode='w') as temp_file:
@@ -259,6 +169,7 @@ class Production:
             for var in ENV_VARS:
                 value = os.environ.get(var)
                 if value:
+                    value = value.replace("'", "''")
                     temp_file.write(f"{var} = '{value}'\n")
             temp_file.flush()
 
@@ -285,9 +196,7 @@ class Production:
                 attributes[var] = value
 
         # get aws instance id
-        token = run_command('curl', ['-s', 'http://169.254.169.254/latest/api/token', '-X', 'PUT', '-H', 'X-aws-ec2-metadata-token-ttl-seconds: 21600'])
-        instance_id = run_command('curl', ['-s', 'http://169.254.169.254/latest/meta-data/instance-id', '-H', f'X-aws-ec2-metadata-token: {token}'])
-
+        instance_id = self.aws.get_instance_id()
         attributes['AWS_INSTANCE_ID'] = instance_id
 
         # generate SRN: format: srn:1:1:aws:dbi/82
@@ -355,4 +264,27 @@ class Production:
 
         self.logger.info(f"SNS message: {subject}")
 
-        self._send_sns_notification(self.topic_arn, subject, message, attributes)
+        self.aws.send_sns_notification(self.topic_arn, subject, message, attributes)
+
+    def get_replication_user(self) -> Optional[Dict[str, str]] :
+        """Retrieve replication user creds from AWS Secrets Manager."""
+
+        # construct the secret name
+        org_id = self.sns_attributes['organization_id']
+        account_id = self.sns_attributes['account_id']
+        db_instance_id = self.sns_attributes['database_instance_id']
+        secret_name = f"sk/{org_id}/{account_id}/aws/dbi/{db_instance_id}/primary_db_password"
+
+        self.logger.debug(f"Attempting to retrieve secret for: {secret_name}")
+
+        secret = self.aws.get_secret(secret_name)
+        if not secret:
+            self.logger.error(f"Secret not found for: {secret_name}")
+            return None
+
+        # find the replication user
+        for user in secret:
+            if user['role'] == 'replication':
+                return user
+
+        return None

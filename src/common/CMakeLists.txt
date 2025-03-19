@@ -5,6 +5,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(c-ares CONFIG REQUIRED)
 find_package(opentelemetry-cpp CONFIG REQUIRED)
 find_package(PostgreSQL REQUIRED)
+find_package(AWSSDK REQUIRED COMPONENTS core secretsmanager)
 
 set(COMMON_LIB_SOURCES
   coordinator.cc
@@ -19,6 +20,7 @@ set(COMMON_LIB_SOURCES
   timestamp.cc
   tracing.cc
   tracking_allocator.cc
+  aws.cc
 )
 
 add_library(springtail_common ${COMMON_LIB_SOURCES})
@@ -41,6 +43,7 @@ target_link_libraries(springtail_common
         opentelemetry-cpp::otlp_http_exporter
         opentelemetry-cpp::otlp_http_metric_exporter
         opentelemetry-cpp::otlp_http_log_record_exporter
+        ${AWSSDK_LIBRARIES}
 )
 
 add_executable(test_thread test/test_thread.cc)

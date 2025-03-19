@@ -90,7 +90,7 @@
         "dns_name": null
     },
     "proxy": {
-        "NOTE": "cert and key required for ssl; modes = [primary|normal|shadow]",
+        "NOTE": "cert and key required for ssl; modes = [primary|normal|shadow]; pg_shadow for testing",
         "enable_ssl": false,
         "port": 8888,
         "threads": 4,
@@ -98,7 +98,8 @@
         "key_path": null,
         "mode": "primary",
         "shadow_log_path": null,
-        "log_level": 3
+        "log_level": 3,
+        "use_pg_shadow": true
     },
     "org": {
         "NOTE": "this section is for testing only, in production env vars are used",
@@ -106,6 +107,7 @@
 	"account_id": "123",
         "db_instance_id": 1234,
         "fdw_id": "1",
+        "replication_user": "springtail",
         "replication_user_password": "springtail",
         "fdw_user_password": "springtail"
     },
@@ -140,6 +142,6 @@
         }
     },
     "otel": {
-	"enabled": true
+	    "enabled": true
     }
 }
