@@ -38,7 +38,7 @@ main(int argc, char* argv[])
 
     std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
     runners.emplace();
-    runners->emplace_back(std::make_unique<xid_mgr::XidMgrRunner>(vm.count("xid") && vm.count("dbid"), db_id, starting_xid));
+    runners->emplace_back(std::make_unique<xid_mgr::XidMgrRunner>(vm.count("xid"), db_id, starting_xid));
 
     springtail_init_daemon(runners, "xid_mgr", pidfile);
 

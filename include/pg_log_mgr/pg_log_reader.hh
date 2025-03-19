@@ -227,6 +227,7 @@ namespace springtail::pg_log_mgr {
         uint64_t _pg_log_timestamp{0};      ///< Timestamp id of the current Postgres log
         uint64_t _db_id; ///< The database ID
         uint64_t _committed_xid; ///< The most recently committed XID at startup
+        bool _is_streaming{false};     ///< This flag indicates that the log is inside streaming block
         std::filesystem::path _current_path; ///< current log file path
         std::filesystem::path _repl_log_path;   ///< Path for Postgres logs storage directory
         std::filesystem::path _xact_log_path;   ///< Path for Springtail logs storage directory

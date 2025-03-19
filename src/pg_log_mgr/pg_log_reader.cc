@@ -586,11 +586,12 @@ namespace springtail::pg_log_mgr {
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Logs rollover to the new log timestamp id: {}", msg->pg_log_timestamp);
             _pg_log_timestamp = msg->pg_log_timestamp;
             _xact_log_writer.rotate(msg->pg_log_timestamp);
-            if (_current_batch != nullptr && _current_xact == nullptr) {
+            if (_is_streaming) {
                 fs::create_empty_file_with_timestamp(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL_STREAMING, PgLogMgr::LOG_SUFFIX, msg->pg_log_timestamp);
             }
             _remove_old_log_files();
         }
+        _is_streaming = msg->is_streaming;
         // handle the message
         switch(msg->msg_type) {
         case PgMsgEnum::BEGIN:
