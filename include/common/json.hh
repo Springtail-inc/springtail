@@ -80,6 +80,17 @@ namespace springtail {
     private:
         template<typename T> static inline void
         _get_to_helper(const nlohmann::json &json, T &result) {
+            if constexpr (std::is_same_v<T, bool>) {
+                if (json.is_string()) {
+                    std::string val;
+                    json.get_to(val);
+                    result = (val == "true" || val == "1");
+                } else {
+                    result = json.get<bool>();
+                }
+                return;
+            }
+
             if constexpr(std::is_integral_v<T>) {
                 if (json.is_string()) {
                     std::string val;
@@ -88,9 +99,10 @@ namespace springtail {
                 } else {
                     json.get_to(result);
                 }
-            } else {
-                json.get_to(result);
+                return;
             }
+
+            json.get_to(result);
         }
     };
 }

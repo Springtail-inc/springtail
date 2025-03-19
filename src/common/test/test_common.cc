@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <common/init.hh>
 #include <common/logging.hh>
+#include <common/json.hh>
 
 using namespace springtail;
 
@@ -75,4 +76,23 @@ TEST(CommonTest, SplitQuotedString) {
     ASSERT_EQ(result[0], "\"hello\"");
     ASSERT_EQ(result[1], "b");
     ASSERT_EQ(result[2], "c");
+}
+
+TEST(JsonTest, Json)
+{
+    nlohmann::json json = R"(
+        {
+            "key1": "value1",
+            "key2": 2,
+            "key3": true,
+            "key4": "false",
+            "key5": "45"
+        }
+    )"_json;
+    ASSERT_EQ(Json::get_or<std::string>(json, "key1", "test"), "value1");
+    ASSERT_EQ(Json::get_or<int>(json, "key2", 0), 2);
+    ASSERT_EQ(Json::get_or<bool>(json, "key3", false), true);
+    ASSERT_EQ(Json::get_or<bool>(json, "key4", true), false);
+    ASSERT_EQ(Json::get_or<int>(json, "key5", 0), 45);
+    ASSERT_EQ(Json::get_or<std::string>(json, "key5", "0"), "45");
 }

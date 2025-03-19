@@ -59,6 +59,8 @@ jobs:
           git config --global --add safe.directory /__w/springtail/springtail
           # Turns off the OTEL in the system.json.settings
           jq '.otel.enabled = false' system.json.settings > tmp.json && mv tmp.json system.json.settings
+          # Replace the correct `springtail` code directory
+          sed -i -e 's|/home/dev/springtail|/__w/springtail/springtail|g' system.json.settings
           cp system.json.settings system.json.test
           mkdir -p /opt/springtail/pids
           service redis-server start
@@ -142,7 +144,7 @@ jobs:
         if: success() || failure()      # run this step even if previous step failed
         with:
           name: 'Unit Test Logs'
-          path: debug/unit-test-*.log
+          path: debug/unit-test-*.log.tar.gz
 
       - name: Create Superuser for test
         if: success() || failure()      # run this step even if previous step failed
@@ -209,7 +211,7 @@ jobs:
         if: success() || failure()      # run this step even if previous step failed
         with:
           name: 'Integration Test Logs'
-          path: ./python/testing/integration-test-*.log
+          path: ./python/testing/integration-test-*.log.tar.gz
 
       - uses: actions/upload-artifact@v4
         if: success() || failure()      # run this step even if previous step failed

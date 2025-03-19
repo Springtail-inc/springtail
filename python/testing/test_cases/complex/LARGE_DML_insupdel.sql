@@ -1,3 +1,6 @@
+## metadata
+### sync_timeout 20
+
 ## test
 -- Create tables with SERIAL primary keys
 CREATE TABLE table1 (
