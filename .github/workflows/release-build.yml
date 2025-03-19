@@ -16,6 +16,7 @@ on:
         type: string
         required: true
       slack_webhook_url:
+        type: string
         description: "The Slack webhook URL."
         required: true
     secrets:
@@ -25,7 +26,6 @@ on:
       aws_ecr_docker_password:
         description: "The password for the ECR docker registry."
         required: true
-
 
 jobs:
   build:
