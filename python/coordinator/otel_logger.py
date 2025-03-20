@@ -65,7 +65,7 @@ def init_otel_logging(endpoint: str):
 
     # Create logger provider
     logger_provider = LoggerProvider()
-    exporter = OTLPLogExporter(insecure=True, endpoint=endpoint)
+    exporter = OTLPLogExporter(endpoint=endpoint)
     logger_provider.add_log_record_processor(CustomLogProcessor(exporter))
     set_logger_provider(logger_provider)
 
@@ -100,7 +100,7 @@ def init_logging(
 
     # **Handler 2: OTLP (INFO and above)**
     if 'enabled' in otel_config and otel_config['enabled'] and 'host' in otel_config and 'port' in otel_config:
-        otel_handler = init_otel_logging(f"{otel_config.get('host', 'localhost')}:{otel_config.get('port', '4318')}")
+        otel_handler = init_otel_logging(f"http://{otel_config.get('host', 'localhost')}:{otel_config.get('port', '4318')}/v1/logs")
         otel_handler.setLevel(logging.INFO)  # Send only INFO and above to OTEL
         logger.addHandler(otel_handler)
 

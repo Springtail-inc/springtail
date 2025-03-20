@@ -20,8 +20,17 @@ class PostgresComponent(Component):
                  pid_path: str,
                  name: str = "postgres") :
         """Initialize a new PostgresComponent"""
-        super().__init__(name, id, path, pid_path)
         self.logger = logging.getLogger('springtail')
+
+        version_str = run_command('pg_config', ['--version']).strip()
+        self.version = version_str.split(' ')[1].split('.')[0]
+
+        environment = os.environ.get('DEPLOYMENT_ENV', 'development')
+        self.is_production = False
+        if environment == 'production':
+            self.is_production = True
+
+        super().__init__(name, id, path, pid_path)
 
     def start(self) -> bool:
         """
@@ -30,17 +39,31 @@ class PostgresComponent(Component):
             True if successful, False otherwise
         """
         self.logger.debug("Starting Postgres")
-        run_command('sudo', ['service', 'postgresql', 'start'])
+        if self.is_production:
+            run_command('sudo', ['systemctl', 'restart', f'postgresql@{self.version}-main'])
+        else:
+            run_command('sudo', ['service', 'postgresql', 'restart'])
+
+        # since we have restarted, clear the pid
+        self.pid = None
+        self.process = None
+        self.state = ComponentState.STARTING
 
         # Wait for process to start
         timeout = time.time() + self.startup_timeout
         while time.time() < timeout:
+            # Check if the process has started
+            if os.path.exists(self.pid_path):
+                self.pid = super()._pid_from_file()
+                self.process = psutil.Process(self.pid)
+
             if self.is_running():
-                if os.path.exists(self.pid_path):
-                    self.pid = super()._pid_from_file()
-                    self.state = ComponentState.RUNNING
-                    self.process = psutil.Process(self.pid)
-                    return True
+                self.state = ComponentState.RUNNING
+                return True
+
+            self.pid = None
+            self.process = None
+
             time.sleep(0.5)
 
         return False
@@ -75,7 +98,10 @@ class PostgresComponent(Component):
             True if successful, False otherwise
         """
         self.logger.debug("Shutting down Postgres")
-        run_command('sudo', ['service', 'postgresql', 'stop'])
+        if self.is_production:
+            run_command('sudo', ['systemctl', 'stop', f'postgresql@{self.version}-main'])
+        else:
+            run_command('sudo', ['service', 'postgresql', 'stop'])
 
         # Wait for process to terminate
         timeout = time.time() + self.shutdown_timeout
