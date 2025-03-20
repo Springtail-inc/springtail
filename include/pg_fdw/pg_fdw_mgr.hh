@@ -206,7 +206,6 @@ namespace springtail::pg_fdw {
         std::shared_ptr<sys_tbl_mgr::ShmCache> _roots_cache; ///< An IPC cache shared by pg_xid_subscriber_daemon
 
         // static methods
-
         /** Helper to convert field to PG Datum */
         static Datum _get_datum_from_field(FieldPtr field,
                                            const Extent::Row &row,
