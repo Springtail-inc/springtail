@@ -116,6 +116,14 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     auto table_id = entry.first;
                     auto copy_info = entry.second;
 
+                    if ( copy_info == nullptr ){
+                        // During resync if the table is found to be invalid as part of the copy flow, the table
+                        // becomes invalidated the copy_ptr becomes null, in those cases we don't need to
+                        // perform any operaion and just skip
+                        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Copy info not present for table {}", table_id);
+                        continue;
+                    }
+
                     SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "table_id {}", table_id);
 
                     // perform the table swap
@@ -342,7 +350,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         coordinator->unregister_threads(daemon_type, cleanup_threads);
     }
 
-    void 
+    void
     Committer::_invalidate_systbl_cache(uint64_t db, const nlohmann::json &completed_ddls)
     {
         auto client = sys_tbl_mgr::Client::get_instance();
@@ -357,7 +365,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         }
     }
 
-    void 
+    void
     Committer::_create_indexer()
     {
         // use the same worker count for Indexer
@@ -557,7 +565,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         auto op_f = wc_schema->get_field("__springtail_op");
         auto wc_fields = wc_schema->get_fields(columns);
         auto wc_key_fields = wc_schema->get_fields(schema->get_sort_keys());
-                
+
         // XXX We know that these operations are sorted in key + LSN order, so we should be
         //     able to perform a more efficient merge using hints.  For a large extent we
         //     could parallelize the mutations.  The one exception is a table truncation,

@@ -233,11 +233,6 @@ namespace springtail
                              std::set<TableMetadata> &table_oids);
 
         /**
-         * @brief Get excluded items for a given db_id
-         */
-        void _populate_invalid_tables();
-
-        /**
          * @brief Copy table from remote system
          */
         std::shared_ptr<proto::CopyTableInfo> _copy_table(uint64_t db_id,
