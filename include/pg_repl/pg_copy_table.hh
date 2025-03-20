@@ -244,7 +244,7 @@ namespace springtail
          * @brief Copy table from remote system
          */
         std::shared_ptr<proto::CopyTableInfo> _copy_table(uint64_t db_id,
-                                                          springtail::XidLsn &xid,
+                                                          const springtail::XidLsn &xid,
                                                           const std::string &table_name,
                                                           const std::string &schema_name,
                                                           uint64_t table_oid,

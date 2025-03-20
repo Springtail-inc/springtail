@@ -964,6 +964,8 @@ namespace springtail::pg_fdw {
 
             // check for schema-namespace match
             if (table_ns_id != namespace_id) {
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Skipping row due to namespace mismatch {}, {}",
+                                    table_ns_id, namespace_id);
                 continue;
             }
 
@@ -993,6 +995,8 @@ namespace springtail::pg_fdw {
                         table_map.erase(entry);
                     }
                 }
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Removed non-existant table {}.{} tid={}, xid={}",
+                                    schema, table_name, tid, xid);
                 continue;
             }
 

@@ -1,3 +1,6 @@
+## metadata
+### sync_timeout 20
+
 ## test
 CREATE TABLE IF NOT EXISTS test1 (
     id SERIAL PRIMARY KEY,
