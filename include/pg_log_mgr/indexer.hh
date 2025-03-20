@@ -81,13 +81,15 @@ namespace springtail::committer {
          * Cleans up empty entries from the map.
          * 
          * @param db_id The database ID to process.
+         * @return std::optional<uint64_t> The XID that got reconciled or nullopt if none
          */
-        void process_first_pending_reconciliation(uint64_t db_id);
+        std::optional<uint64_t> process_first_pending_reconciliation(uint64_t db_id);
 
         /**
          * @brief Processes the first pending xid's entries for the first available db_id in the map.
+         * @return std::optional<std::pair<uint64_t, uint64_t>> db_id and XID completed if reconciled, otherwise std::nullopt.
          */
-        void process_first_pending_reconciliation();
+        std::optional<std::pair<uint64_t, uint64_t>> process_first_pending_reconciliation();
 
     private:
         void task(std::stop_token st);
@@ -167,7 +169,8 @@ namespace springtail::committer {
         /*
          * Pick the XIDs for the given db_id and reconcile indexes 
          * belonging to the the XIDs
+         * @return std::optional<uint64_t> The XID that got reconciled or nullopt if none
          */
-        void _process_first_pending_reconciliation(decltype(_pending_idx_reconciliation_map)::iterator db_it);
+        std::optional<uint64_t> _process_first_pending_reconciliation(PendingReconMap::iterator db_it);
     };
 }

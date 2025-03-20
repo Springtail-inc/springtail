@@ -328,45 +328,37 @@ namespace springtail::committer {
             .first->second.push_back(std::move(idxState)); // Add IndexState to the list
     }
 
-    /**
-     * @brief Processes the first pending xid's entries for the given db_id.
-     * 
-     * Iterates through the first xid's entries, calling recon() for each.
-     * Cleans up empty entries from the map.
-     * 
-     * @param db_id The database ID to process.
-     */
-    void 
+    std::optional<uint64_t>
     Indexer::process_first_pending_reconciliation(uint64_t db_id) {
         std::scoped_lock lock(_pending_recon_map_mtx);
         auto db_it = _pending_idx_reconciliation_map.find(db_id);
         if (db_it == _pending_idx_reconciliation_map.end()) {
-            return; // No pending entries for this db_id
+            return std::nullopt; // No pending entries for this db_id
         }
-        _process_first_pending_reconciliation(db_it);
+        return _process_first_pending_reconciliation(db_it);
     }
 
-    /**
-     * @brief Processes the first pending xid's entries for the first available db_id in the map.
-     * 
-     * If no entries are found, the method simply returns.
-     */
-    void 
+    std::optional<std::pair<uint64_t, uint64_t>>
     Indexer::process_first_pending_reconciliation() {
         std::scoped_lock lock(_pending_recon_map_mtx);
         if (_pending_idx_reconciliation_map.empty()) {
-            return; // Map is empty
+            return std::nullopt;
         }
         auto db_it = _pending_idx_reconciliation_map.begin();
-        _process_first_pending_reconciliation(db_it);
+        auto xid_opt = _process_first_pending_reconciliation(db_it);
+        if (xid_opt) {
+            return std::pair(db_it->first, *xid_opt);
+        } else {
+            return std::nullopt;
+        }
     }
 
-    void 
+    std::optional<uint64_t>
     Indexer::_process_first_pending_reconciliation(PendingReconMap::iterator db_it) {
         auto& xid_map = db_it->second;
         if (xid_map.empty()) {
             _pending_idx_reconciliation_map.erase(db_it); // Clean up empty db_id entry
-            return;
+            return std::nullopt;
         }
 
         // Get iterator to the first xid entry
@@ -383,6 +375,7 @@ namespace springtail::committer {
         if (xid_map.empty()) {
             _pending_idx_reconciliation_map.erase(db_it); // Remove empty db_id entry
         }
+        return xid_it->first;
     }
 
     void

@@ -67,7 +67,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             uint64_t db_id = result->db();
 
             // Handle catchup for indexes if any are pending
-            _indexer->process_first_pending_reconciliation(db_id);
+            const auto& idx_reconciled_xid_opt = _indexer->process_first_pending_reconciliation(db_id);
 
             auto token_1 = logging::set_context_variables({{"db_id", std::to_string(db_id)}});
 
@@ -273,8 +273,9 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 _redis_ddl.commit_ddl(db_id, xid);
             }
 
-            if (!index_ddls.is_null()) {
-                _redis_ddl.commit_index_ddl(db_id, xid);
+            // Commit index XID as they complete reconciliation
+            if (idx_reconciled_xid_opt) {
+                _redis_ddl.commit_index_ddl(db_id, *idx_reconciled_xid_opt);
             }
 
             SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "XID completed: {}@{}", db_id, xid);
@@ -424,18 +425,6 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     assert(false);
                 }
             }
-        }
-
-        // wait for completion
-        for (auto [db_id, xid, ddls] : precommit) {
-            _indexer->wait_for_completion(db_id);
-        }
-
-        //finalize and commit
-        auto client = sys_tbl_mgr::Client::get_instance();
-        for (auto const& [db_id, xid, ddls] : precommit) {
-            client->finalize(db_id, xid);
-            _redis_ddl.commit_ddl(db_id, xid);
         }
     }
 
