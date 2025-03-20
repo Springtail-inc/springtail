@@ -68,7 +68,7 @@ PROXY_DAEMONS = [
     ('proxy', 'src/proxy/proxy')
 ]
 
-ALL_DAEMONS = CORE_DAEMONS + FDW_DAEMONS
+ALL_DAEMONS = CORE_DAEMONS + FDW_DAEMONS + PROXY_DAEMONS
 
 ALL_DAEMONS_NAMES = [name[0] for name in ALL_DAEMONS]
 
@@ -339,12 +339,6 @@ def start_proxy(props : Properties, build_dir : str, restart: bool = False) -> N
     # Start the proxy
     print("Starting proxy...")
     start_daemons(build_dir, PROXY_DAEMONS, restart)
-
-def stop_proxy(props : Properties) -> None:
-    """Stop the proxy."""
-    # Stop the proxy
-    print("Stopping proxy...")
-    stop_daemons(props.get_pid_path(), PROXY_DAEMONS)
 
 def wait_for_running(props : Properties) -> None:
     """Wait for the system to be in a running state."""

@@ -587,7 +587,7 @@ class TestCase:
             self._fdw.close()
         for connection in self._connections:
             self._connections[connection].close()
-            self._connections[connection] = springtail.connect_instance(self._props, self._primary_name)
+            self._connections[connection] = springtail.connect_db_instance(self._props, self._primary_name)
 
         # run the cleanup commands
         if len(self._sections['cleanup']) > 0:
