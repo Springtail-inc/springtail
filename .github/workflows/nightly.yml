@@ -41,8 +41,8 @@ jobs:
       # The path to the Springtail logs, keep consistent with the `log_path` inside
       # system.json.test
       SPRINGTAIL_LOG_PATH: /opt/springtail/logs
-      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-      SLACK_CHANNEL: C08H8TE1V4G
+      SLACK_WEBHOOK_URL: ${{ vars.GENERIC_SLACK_WEBHOOK_URL }}
+      SLACK_CHANNEL: '#nightly-builds'
 
     steps:
       - name: Checkout repository

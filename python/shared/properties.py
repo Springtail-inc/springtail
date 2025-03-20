@@ -111,6 +111,9 @@ class Properties:
             self.aws = AwsHelper()
             (self.replication_user, self.replication_user_password) = self._get_replication_user_from_aws()
 
+            # unset the REPLICATION_USER_PASSWORD environment variable
+            os.environ.pop('REPLICATION_USER_PASSWORD', None)
+
         self.redis = Redis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db, ssl=self.redis_ssl,
                            username=self.redis_user, password=self.redis_password, encoding="utf-8", decode_responses=True)
 
@@ -476,6 +479,7 @@ def main():
     print(f"proxy_host: {props.get_hostname('proxy')}")
     print(f"coordinator_state: {props.get_coordinator_state()}")
     print(f"proxy_config: {props.integration_test_config()}")
+    print(f"otel_config: {props.get_otel_config()}")
 
     env_vars = [
         'ORGANIZATION_ID',
