@@ -84,7 +84,7 @@
         "replication_log_path": "repl_logs",
         "transaction_log_path": "xact_logs",
 	"log_size_rollover_threshold": 134217728,
-        "archive_logs": false"
+        "archive_logs": false
     },
     "fs": {
         "mount_point": "/opt/springtail/data",
