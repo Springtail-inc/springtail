@@ -13,6 +13,7 @@ namespace springtail::pg_fdw {
     {
         using DbId = uint64_t;
         using TableId = uint64_t;
+        using Xid = uint64_t;
 
         explicit PgXidSubscriberMgr(size_t cache_size);
         ~PgXidSubscriberMgr();
@@ -26,7 +27,7 @@ namespace springtail::pg_fdw {
 
         std::condition_variable_any _cv;
         std::mutex _m;
-        std::queue<std::pair<DbId, TableId>> _populate_queue;
+        std::queue<std::pair<DbId, Xid>> _populate_queue;
 
         void _enqueue_populate_job(DbId db, uint64_t xid);
         // running in a thread

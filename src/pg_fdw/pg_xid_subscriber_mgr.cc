@@ -111,12 +111,16 @@ PgXidSubscriberMgr::_populate_worker(std::stop_token st)
         if (!_cv.wait(g, st, [this]{ return !_populate_queue.empty(); })) {
             break;
         }
-        auto [db, tid] = _populate_queue.front();
+        auto [db, xid] = _populate_queue.front();
         _populate_queue.pop();
         auto table_ids = _cache->get_db_tables(db);
-        for (auto v: table_ids) {
+        for (auto tid: table_ids) {
+            XidLsn x{xid};
+            if (!_client->exists(db, tid, x)) {
+                continue;
+            }
             // the client will cache data in _cache
-            _client->get_roots(db, v, tid);
+            _client->get_roots(db, tid, xid);
             if (st.stop_requested()) {
                 break;
             }
