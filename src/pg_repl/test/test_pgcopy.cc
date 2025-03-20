@@ -1,23 +1,19 @@
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/json.hh>
-#include <common/properties.hh>
 #include <common/logging.hh>
-#include <common/redis.hh>
+#include <common/properties.hh>
 #include <common/redis_types.hh>
-
-#include <redis/redis_containers.hh>
-
+#include <common/redis.hh>
 #include <pg_repl/pg_copy_table.hh>
-
+#include <proto/pg_copy_table.pb.h>
+#include <redis/redis_containers.hh>
 #include <sys_tbl_mgr/client.hh>
-#include <sys_tbl_mgr/table.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
-
-#include <xid_mgr/xid_mgr_client.hh>
-
+#include <sys_tbl_mgr/table.hh>
 #include <test/services.hh>
+#include <xid_mgr/xid_mgr_client.hh>
 
 using namespace springtail;
 
@@ -28,8 +24,15 @@ namespace {
         std::filesystem::path _base_dir;
 
         static void SetUpTestSuite() {
-            springtail_init();
-            _services.init();
+            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+            runners.emplace();
+            runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
+            runners->emplace_back(std::make_unique<IOMgrRunner>());
+
+            auto service_runners = test::get_services(true, true, true);
+            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
+
+            springtail_init_test(runners);
 
             // create the public namespace
             auto client = sys_tbl_mgr::Client::get_instance();
@@ -46,10 +49,8 @@ namespace {
         }
 
         static void TearDownTestSuite() {
-            _services.shutdown();
+            springtail_shutdown();
         }
-
-        static test::Services _services;
 
         void SetUp() override {
             nlohmann::json db_config = Properties::get_db_config(db_id);
@@ -70,8 +71,6 @@ namespace {
         uint64_t db_id = 1;
     };
 
-    test::Services PgCopyTable_Test::_services{true, true, true};
-
     TEST_F(PgCopyTable_Test, CopyTable)
     {
         std::string table_name = "test_pgcopy";
@@ -85,44 +84,38 @@ namespace {
         ASSERT_EQ(res.size(), 1);
         ASSERT_EQ(res[0]->tids.size(), 1);
 
-        uint32_t oid = res[0]->tids[0];
+        uint32_t oid = res[0]->tids[0].first;
         xid = res[0]->target_xid;
 
         // apply the system table changes
         auto client = sys_tbl_mgr::Client::get_instance();
 
-        auto redis = RedisMgr::get_instance()->get_client();
-        std::string key = fmt::format(redis::HASH_SYNC_TABLE_OPS,
-                                      Properties::get_db_instance_id(), db_id);
-        std::vector<std::string> hkeys;
-        redis->hkeys(key, std::back_inserter(hkeys));
-
-        for (const std::string &hkey : hkeys) {
-            auto &&value = redis->hget(key, hkey);
-            auto json = nlohmann::json::parse(*value);
+        for (auto &entry : res[0]->tids) {
+            auto copy_info = entry.second;
 
             // perform the table swap
             // note: we wait to perform this operation in the GC-2 to ensure that all system
             //       table mutations up to this XID have already been applied, otherwise we
             //       could potentially get a stray column added before the swap XID showing
             //       up in the schema since it wouldn't get deleted by the DROP TABLE
-            auto namespace_req = common::json_to_thrift<sys_tbl_mgr::NamespaceRequest>(json[0]);
-            namespace_req.xid = xid;
-            namespace_req.lsn = constant::MAX_LSN - 2;
+            auto* namespace_req = copy_info->mutable_namespace_req();
+            namespace_req->set_xid(xid);
+            namespace_req->set_lsn(constant::MAX_LSN - 2);
 
-            auto create_req = common::json_to_thrift<sys_tbl_mgr::TableRequest>(json[1]);
-            create_req.xid = xid;
-            create_req.lsn = constant::MAX_LSN - 1;
+            auto* create_req = copy_info->mutable_table_req();
+            create_req->set_xid(xid);
+            create_req->set_lsn(constant::MAX_LSN - 1);
 
-            auto index_reqs = common::json_to_thrift_vector<sys_tbl_mgr::IndexRequest>(json[2]);
+            auto *indexes = copy_info->mutable_index_reqs();
+            std::vector<proto::IndexRequest> index_reqs;
+            for (auto &index : *indexes) {
+                index_reqs.push_back(index);
+            }
+            auto *roots_req = copy_info->mutable_roots_req();
+            roots_req->set_xid(xid);
 
-            auto roots_req = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[3]);
-            roots_req.xid = xid;
-
-            client->swap_sync_table(namespace_req, create_req, index_reqs, roots_req);
-
-            // clear the table entry from the hash
-            redis->hdel(key, hkey);
+            // Perform the table swap using the updated copy_info
+            client->swap_sync_table(*namespace_req, *create_req, index_reqs, *roots_req);
         }
 
         // finalize the system metadata

@@ -1,17 +1,16 @@
 #pragma once
 
 #include <memory>
-#include <fstream>
 #include <filesystem>
 #include <map>
-#include <vector>
+
+#include <opentelemetry/metrics/meter.h>
+#include <opentelemetry/metrics/provider.h>
 
 #include <common/concurrent_queue.hh>
 #include <common/redis_types.hh>
 #include <common/tracing.hh>
 #include <common/timestamp.hh>
-
-#include <garbage_collector/xid_ready.hh>
 
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_msg_stream.hh>
@@ -19,12 +18,14 @@
 #include <redis/redis_containers.hh>
 #include <redis/redis_ddl.hh>
 
+#include <pg_log_mgr/xid_ready.hh>
+
 #include <storage/extent.hh>
 #include <storage/field.hh>
 #include <storage/xid.hh>
 
-#include <opentelemetry/metrics/meter.h>
-#include <opentelemetry/metrics/provider.h>
+#include <pg_log_mgr/pg_xact_log_writer.hh>
+#include <xid_mgr/xid_mgr_client.hh>
 
 namespace springtail::pg_log_mgr {
     /**
@@ -34,14 +35,26 @@ namespace springtail::pg_log_mgr {
      */
     class PgLogReader {
     public:
+        /** convenience type for the shared msg queue */
+        using PgMsgQueuePtr = std::shared_ptr<ConcurrentQueue<PgMsg>>;
+
         /** convenience type for the shared transaction queue */
-        using PgTransactionQueuePtr = std::shared_ptr<ConcurrentQueue<PgTransaction>>;
+        using CommitterQueuePtr = std::shared_ptr<ConcurrentQueue<committer::XidReady>>;
 
         /**
          * @brief Construct a new Pg Log Reader object
          * @param queue queue to enqueue parsed xactions for xid logger and GC
          */
-        PgLogReader(uint64_t db_id, const PgTransactionQueuePtr queue);
+        PgLogReader(uint64_t db_id, uint32_t queue_size,
+                    const std::filesystem::path &xact_log_path,
+                    CommitterQueuePtr committer_queue);
+
+        ~PgLogReader();
+        /**
+         * @brief Queues a message to be processed by the log reader.
+         * @param msg The PgMsg object to process.
+         */
+        void enqueue_msg(PgMsgPtr msg);
 
         /**
          * @brief Process next set of messages from log file
@@ -52,14 +65,6 @@ namespace springtail::pg_log_mgr {
         void process_log(const std::filesystem::path &path,
                          uint64_t start_offset,
                          int num_messages);
-
-        /**
-         * @brief Set the xact map object; moves contents of xact_map to _xact_map
-         * @param xact_map xact map -- will be empty after call
-         */
-        void set_xact_map(std::map<uint32_t, PgTransactionPtr> &xact_map) {
-            _xact_map.swap(xact_map);
-        }
 
         /**
          * Set the starting point for XID assignment.
@@ -86,11 +91,10 @@ namespace springtail::pg_log_mgr {
             static constexpr uint32_t MAX_BATCH_SIZE = 4 * 1024 * 1024;
 
         public:
-            Batch(uint64_t db_id, int32_t pg_xid)
-                : _db(db_id), _pg_xid(pg_xid)
+            Batch(uint64_t db_id, int32_t pg_xid, const CommitterQueuePtr committer_queue)
+                : _db(db_id), _pg_xid(pg_xid), _committer_queue(committer_queue)
             {
-                auto provider = opentelemetry::trace::Provider::GetTracerProvider();
-                auto tracer = provider->GetTracer("PgLogReader");
+                auto tracer = tracing::tracer("PgLogReader");
                 _span = tracer->StartSpan("Transaction");
                 _span->SetAttribute("pg_xid", pg_xid);
             }
@@ -208,21 +212,32 @@ namespace springtail::pg_log_mgr {
             uint64_t _lsn = 0; ///< The LSN counter
 
             tracing::SpanPtr _span; ///< Timing for the txn processing.
+            CommitterQueuePtr _committer_queue; ///< Reference to the committer queue
         };
         using BatchPtr = std::shared_ptr<Batch>;
 
         uint64_t _db_id; ///< The database ID
+        uint64_t _committed_xid; ///< The most recently committed XID at startup
         std::filesystem::path _current_path; ///< current log file path
         PgMsgStreamReader _reader;           ///< msg stream reader for log file
-        PgTransactionQueuePtr _queue;        ///< shared queue for xactions
+        CommitterQueuePtr _committer_queue;  ///< shared queue for committer
         PgTransactionPtr _current_xact;      ///< current transaction
-        std::map<uint32_t, PgTransactionPtr> _xact_map; ///< in progress xact map
+        std::map<uint32_t, PgTransactionPtr> _xact_map; ///< in progress xact map for streams
+
         std::atomic<uint64_t> _next_xid{0};        ///< next xid in xid range
+
+        ConcurrentQueue<PgMsg> _msg_queue; ///< Queue of PgMsg records to process
+        std::thread _msg_thread; ///< Thread for processing messages using the _msg_worker()
+
+        PgXactLogWriter _xact_log_writer; ///< For logging the xact mapping of pgxid to springtail XID
 
         /** Tracks mutation batches using a map of pgxid -> Extent.  The pgxid is always the
             top-most pgxid and never a subtxn, which are handled within the batch. */
         std::map<int32_t, BatchPtr> _batch_map;
         BatchPtr _current_batch; ///< The batch matching the current pg xid
+
+        /** Worker function that processes the messages from the internal queue. */
+        void _msg_worker();
 
         /** Process a PG message */
         void _process_msg(PgMsgPtr msg);

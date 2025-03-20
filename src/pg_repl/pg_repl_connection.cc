@@ -4,6 +4,7 @@
 #include <sstream>
 #include <variant>
 #include <vector>
+#include <absl/log/check.h>
 
 #include <sys/time.h>
 #include <sys/select.h>
@@ -28,7 +29,7 @@ namespace springtail
 {
     /** SQL command to fetch current LSN from server */
     static constexpr char CURRENT_LSN_SQL[] = "SELECT pg_current_wal_lsn()";
-    static constexpr char CONFIRMED_FLUSH_LSN_SQL[] = "SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = '{}'";
+    static constexpr char CONFIRMED_FLUSH_LSN_SQL[] = "SELECT wal_status, confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = '{}'";
 
 
     PgReplConnection::PgReplConnection(const int db_port,
@@ -90,12 +91,12 @@ namespace springtail
         // reconnect non-streaming connection
         connect();
         // restart streaming
-        start_streaming(_last_flushed_lsn);
+        start_streaming(_last_flushed_lsn, false);
     }
 
 
     void
-    PgReplConnection::start_streaming(LSN_t LSN)
+    PgReplConnection::start_streaming(LSN_t LSN, bool do_init)
     {
         if (_started_streaming) {
             // error already streaming
@@ -120,24 +121,52 @@ namespace springtail
             _proto_version = 1;
         }
 
-        // no existing LSN, find the last confirmed one and use it
-        if (LSN == INVALID_LSN) {
-            // execute query: SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = 'slot_name';
-            _connection->exec(fmt::format(CONFIRMED_FLUSH_LSN_SQL, _slot_name));
-
-            // process results; sanity checks first
-            if (_connection->status() != PGRES_TUPLES_OK ||
-                _connection->ntuples() <= 0 || _connection->length(0, 0) < 1) {
-                SPDLOG_ERROR("Error querying confirmed_flush_lsn\n");
-                throw PgQueryError();
-            }
-
-            // result in form: XXX/XXX; convert to LSN_t
-            char *str = _connection->get_value(0, 0);
-            LSN = pg_msg::str_to_LSN(str);
-
-            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Found current LSN: {}", LSN);
+        // execute query: SELECT wal_status, confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = 'slot_name';
+        _connection->exec(fmt::format(CONFIRMED_FLUSH_LSN_SQL, _slot_name));
+        // process results; sanity checks first
+        if (_connection->status() != PGRES_TUPLES_OK ||
+            _connection->ntuples() < 1 || _connection->nfields() < 2) {
+            SPDLOG_ERROR("Error querying confirmed_flush_lsn\n");
+            _connection->clear();
+            throw PgQueryError();
         }
+
+        // get wal_status
+        char *wal_status = _connection->get_value(0, 0);
+        char *lsn_str = _connection->get_value(0, 1);
+        LSN_t confirmed_flush_lsn = pg_msg::str_to_LSN(lsn_str);
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Found current LSN: {}", confirmed_flush_lsn);
+
+        if (wal_status != nullptr && std::strcmp(wal_status, "lost") == 0) {
+            // if we have a 'lost' status, we need to recreate the slot or hard fail
+            SPDLOG_ERROR("Replication slot is lost");
+            _connection->clear();
+
+            if (do_init) {
+                // try and re-estable the slot
+                try {
+                    drop_replication_slot();
+                    LSN = create_replication_slot();
+                    confirmed_flush_lsn = LSN;
+                } catch (const std::exception& e) {
+                    SPDLOG_ERROR("Failed to recreate replication slot: {}", e.what());
+                    throw PgReplicationSlotError();
+                }
+            } else {
+                throw PgReplicationSlotError();
+            }
+        } else {
+            _connection->clear();
+        }
+
+        if (LSN == INVALID_LSN) {
+            // no existing LSN, find the last confirmed one and use it
+            // result in form: XXX/XXX; convert to LSN_t
+            LSN = confirmed_flush_lsn;
+        }
+
+        DCHECK_GE(LSN, confirmed_flush_lsn);
+
         _last_flushed_lsn = LSN;
 
         // replication start command
@@ -173,8 +202,14 @@ namespace springtail
         // skip over rest of result message
         _skip_message();
 
+        // set last received time to now, starts timer for idle delay
+        _last_received_time = get_pgtime_in_millis();
+
         _copy_state = NEW_MSG;
         _started_streaming = true;
+
+        // close the connection; we don't need it anymore
+        _connection->disconnect();
     }
 
 
@@ -232,10 +267,12 @@ namespace springtail
         if (_started_streaming) {
             // check to see if we should fetch latest LSN to sync back
             int64_t now = get_pgtime_in_millis();
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Now: {}, Last received time: {}, now - last received time: {}", now, _last_received_time, now - _last_received_time);
             if ((now - _last_received_time) > IDLE_SLOT_TIMEOUT_MSEC) {
                 // see if we've been idle for longer (received no data)
                 // than IDLE_SLOT_TIMEOUT_MSEC; if so we force an update
                 // based on the current LSN
+                SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Forcing LSN update due to idle slot");
                 _fast_forward_stream();
             }
 
@@ -287,8 +324,11 @@ namespace springtail
     {
         while (!_shutdown) {
             int r = _stream_connection->read(buffer, length, async);
-            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Read {} bytes from connection (errno={})", r, errno);
-            if (r == -1 && (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR)) {
+            // Extract the errno into a separate variable to ensure the the SPDLOG_DEBUG_MODULE below this
+            // doesn't overwrite the err code
+            auto err_no = errno;
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Read {} bytes from connection (errno={})", r, err_no);
+            if (r == -1 && (err_no == EWOULDBLOCK || err_no == EAGAIN || err_no == EINTR)) {
                 r = wait_for_data();
                 if (r >= 0) {
                     // either data is now available or it isn't
@@ -298,12 +338,12 @@ namespace springtail
             }
 
             if (r < 0) {
-                if (errno == ECONNRESET) {
+                if (err_no == ECONNRESET) {
                     SPDLOG_ERROR("Error recv got ECONNRESET\n");
                     throw PgNotConnectedError();
                 }
 
-                SPDLOG_ERROR("Error recv return < 0; errno={}\n", errno);
+                SPDLOG_ERROR("Error recv return < 0; errno={}\n", err_no);
                 throw PgIOError();
             }
 
@@ -595,8 +635,6 @@ namespace springtail
             _server_latest_lsn = wal_end;
         }
 
-        _last_received_time = send_time;
-
         if (response_requested) {
             _send_standby_status_msg();
         }
@@ -644,7 +682,11 @@ namespace springtail
         // execute query: SELECT pg_current_wal_lsn()
         const char *cmd = CURRENT_LSN_SQL;
 
-        // execute query
+        // check connection and execute query
+        if (!_connection->is_connected()) {
+            _connection->connect(_db_host, _db_name, _db_user, _db_pass, _db_port, false);
+        }
+
         _connection->exec(cmd);
 
         // process results; sanity checks first
@@ -657,10 +699,18 @@ namespace springtail
         // result in form: XXX/XXX; convert to LSN_t
         char *str = _connection->get_value(0, 0);
         LSN_t lsn = pg_msg::str_to_LSN(str);
+
+        // disconnect from db
         _connection->clear();
+        _connection->disconnect();
+
+        // update last received time
+        _last_received_time = get_pgtime_in_millis();
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Primary LSN={}, Last flushed LSN={}, MsgEnd LSN={}", lsn, _last_flushed_lsn, _message_end_lsn);
 
         // check that LSN is ahead of where we are
-        if (lsn < _message_end_lsn) {
+        if (lsn == _last_flushed_lsn || lsn < _message_end_lsn) {
             // nothing to do, we'll get there
             return;
         }
@@ -673,6 +723,7 @@ namespace springtail
 
         // fast forward stream
         _last_flushed_lsn = lsn;
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Fast forwarding stream to LSN: {}", lsn);
 
         _send_standby_status_msg();
     }
@@ -787,17 +838,18 @@ namespace springtail
             throw PgStreamingError();
         }
 
-        std::string slot_name = _connection->escape_identifier(_slot_name);
+        std::string slot_name = _connection->escape_string(_slot_name);
 
-        std::string cmd = fmt::format("DROP_REPLICATION_SLOT {}", slot_name);
+        std::string cmd = fmt::format("SELECT pg_drop_replication_slot('{}')", slot_name);
 
         // execute query
         SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Executing query drop replication slot: cmd={}", cmd);
         _connection->exec(cmd);
 
         // process results
-        if (_connection->status() == PGRES_COMMAND_OK) {
-            SPDLOG_ERROR("Error dropping replication slot\n");
+        if (_connection->status() != PGRES_TUPLES_OK &&
+            _connection->status() != PGRES_COMMAND_OK) {
+            SPDLOG_ERROR("Error dropping replication slot: {}\n", slot_name);
             _connection->clear();
             throw PgQueryError();
         }
@@ -806,76 +858,49 @@ namespace springtail
     }
 
 
-    void
-    PgReplConnection::create_replication_slot(bool export_snapshot,
-                                              bool temporary)
+    LSN_t
+    PgReplConnection::create_replication_slot()
     {
         if (_started_streaming) {
             throw PgStreamingError();
         }
 
-        std::stringstream s;
+        std::string slot_name = _connection->escape_string(_slot_name);
 
-        // escape slot name
-        std::string slot_name = _connection->escape_identifier(_slot_name);
-
-        bool use_new_syntax = (_server_version >= 150000);
-
-        // setup command
-        s << "CREATE_REPLICATION_SLOT " << slot_name;
-        if (temporary) {
-            s << " TEMPORARY";
-        }
-
-        s << " LOGICAL pgoutput";
-
-        if (use_new_syntax) {
-            s << " (";
-            if (export_snapshot) {
-                s << "SNAPSHOT 'export'";
-            } else {
-                s << "SNAPSHOT 'nothing'";
-            }
-            s << ")";
-        } else {
-            // uses old format style
-            if (export_snapshot) {
-                s << " EXPORT_SNAPSHOT";
-            } else {
-                s << " NOEXPORT_SNAPSHOT";
-            }
-        }
-
-        const std::string& tmp = s.str();
-        const char* cmd = tmp.c_str();
-
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Executing query create repl slot: cmd={}", cmd);
+        std::string cmd = fmt::format("SELECT * FROM pg_create_logical_replication_slot('{}', 'pgoutput')", slot_name);
 
         // execute query
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Executing query create replication slot: cmd={}", cmd);
         _connection->exec(cmd);
 
         // process results
-        if (_connection->status() != PGRES_TUPLES_OK) {
-            SPDLOG_ERROR("Error executing CREATE_REPLICATION_SLOT: msg={}\n", _connection->error_message());
+        if (_connection->status() != PGRES_COMMAND_OK &&
+            _connection->status() != PGRES_TUPLES_OK) {
+            SPDLOG_ERROR("Error creating replication slot: {}", slot_name);
             _connection->clear();
             throw PgQueryError();
         }
 
-        // check result number of tuples and columns
-        if (_connection->ntuples() != 1 || _connection->nfields() != 4) {
-            SPDLOG_ERROR("Unexpected number of rows or columns for CREATE REPLICATION SLOT: rows={}, cols={}\n",
-                         _connection->ntuples(), _connection->nfields());
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Replication slot created successfully: {}", slot_name);
+
+        if (_connection->ntuples() < 1 && _connection->nfields() != 2) {
+            SPDLOG_ERROR("Replication slot creation did not return expected number of tuples for slot: {}", slot_name);
             _connection->clear();
             throw PgQueryError();
         }
 
-        // result unused:
-        // 0,0 = slot_name, 0,1 = XXX/XXX earliest LSN for streaming
-        // 0,2 = snapshot name, 0,3 = output plugin
+        // get slot name and lsn, convert lsn and return it
+        char *slot_name_str = _connection->get_value(0, 0);
+        char *lsn_str = _connection->get_value(0, 1);
 
-        _export_name = _connection->get_string(0,2);
+        DCHECK_NE(slot_name_str, nullptr);
+        DCHECK_EQ(std::strcmp(slot_name_str, slot_name.c_str()), 0);
+        DCHECK_NE(lsn_str, nullptr);
 
-        _connection->clear();
+        LSN_t lsn_output = pg_msg::str_to_LSN(lsn_str); // capture the output
+        _connection->clear(); // clear the connection now
+
+        return lsn_output;
     }
 
 

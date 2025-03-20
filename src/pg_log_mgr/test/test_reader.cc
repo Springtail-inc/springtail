@@ -5,7 +5,7 @@
 
 #include <stdio.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/logging.hh>
 #include <common/exception.hh>
 #include <common/concurrent_queue.hh>
@@ -48,16 +48,6 @@ namespace {
         {
             return _create_repl_logger();
         }
-
-        PgXactLogWriterPtr create_xact_log_writer()
-        {
-            return _create_xact_logger();
-        }
-
-        void process_xact(PgTransactionPtr xact)
-        {
-            _process_xact(xact);
-        }
     };
 
     class LogReader_Test : public ::testing::Test {
@@ -67,8 +57,12 @@ namespace {
         static constexpr char const * const XACT_LOG_DIR = "/tmp/test_xact_log";
 
         static void SetUpTestSuite() {
-            springtail_init();
-            _services.init();
+            auto service_runners = test::get_services(true, true, false);
+            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+            runners.emplace();
+            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
+
+            springtail_init_test(runners);
 
             // create the public namespace
             auto client = sys_tbl_mgr::Client::get_instance();
@@ -85,10 +79,8 @@ namespace {
         }
 
         static void TearDownTestSuite() {
-            _services.shutdown();
+            springtail_shutdown();
         }
-
-        static test::Services _services;
 
         void SetUp() override {
             // create a new log file
@@ -172,13 +164,11 @@ namespace {
         bool using_redis = false;
         FILE *_fp = nullptr;
         std::filesystem::path _log_file{LOG_FILE};
-        PgLogReader::PgTransactionQueuePtr _queue = std::make_shared<ConcurrentQueue<PgTransaction>>();
-        PgLogReader _log_reader{1, _queue}; // note: hard-codes DB ID as 1
+        PgLogReader::CommitterQueuePtr _committer_queue = std::make_shared<ConcurrentQueue<committer::XidReady>>();
+        PgLogReader _log_reader{1, 8192, XACT_LOG_DIR, _committer_queue}; // note: hard-codes DB ID as 1
         std::vector<PgTransactionPtr> _xact_list;
         std::shared_ptr<TestLogMgr> _log_mgr;
     };
-
-    test::Services LogReader_Test::_services{true, true, false};
 
     TEST_F(LogReader_Test, ProcessLog)
     {
@@ -238,9 +228,6 @@ namespace {
             using_redis = false;
             GTEST_SKIP() << "Redis is not running, skipping test";
         }
-
-        // initialize the log mgr
-        PgXactLogWriterPtr xact_writer = _log_mgr->create_xact_log_writer();
 
         // create a new log file
         process_json_cmd_file(std::filesystem::path(JSON_FILE));

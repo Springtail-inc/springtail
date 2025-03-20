@@ -2,6 +2,9 @@ enable_language(C)
 
 find_package(PostgreSQL REQUIRED)
 find_package(Boost COMPONENTS program_options REQUIRED)
+find_package(Boost COMPONENTS interprocess REQUIRED)
+
+include(FdwTestSetup)
 
 set(PG_FDW_SOURCES
     pg_fdw.c
@@ -25,6 +28,7 @@ target_include_directories(springtail_pg_fdw
 if(${LINUX})
     target_link_options(springtail_pg_fdw
         PRIVATE -Wl,--unresolved-symbols=ignore-all
+        PRIVATE -Wl,-rpath,/home/dev/springtail/shared-lib
     )
     target_link_options(regress
         PRIVATE -Wl,--unresolved-symbols=ignore-all
@@ -41,6 +45,7 @@ else()
 endif()
 
 target_link_libraries(springtail_pg_fdw
+    PRIVATE springtail_pg
     PRIVATE springtail_common
     PRIVATE springtail_storage
     PRIVATE springtail_xid_mgr
@@ -60,6 +65,7 @@ target_link_libraries(pg_ddl_daemon
 )
 add_dsymutil_command(pg_ddl_daemon)
 
+
 # Extract transitive dependencies of libraryC
 get_target_property(POSTGRES_DEP_LIBS PostgreSQL::PostgreSQL INTERFACE_LINK_LIBRARIES)
 
@@ -78,6 +84,7 @@ set(END_GROUP "")
 endif()
 
 target_link_libraries(dump_table
+     PRIVATE springtail_pg
      PRIVATE springtail_common
      PRIVATE springtail_storage
      PRIVATE springtail_sys_tbl_mgr
@@ -110,6 +117,7 @@ target_include_directories(test_where
     PRIVATE ${PostgreSQL_INCLUDE_DIRS}
 )
 target_link_libraries(test_where
+    PRIVATE springtail_pg
     PRIVATE springtail_common
     PRIVATE springtail_test
     PRIVATE ${START_GROUP}
@@ -139,3 +147,21 @@ install(FILES
     springtail_fdw.control
     DESTINATION share
 )
+
+add_executable(test_pg_ddl_mgr
+    test/test_pg_ddl_mgr.cc
+    pg_ddl_mgr.cc)
+target_include_directories(test_pg_ddl_mgr
+    PRIVATE ${PROJECT_SOURCE_DIR}/include
+    PRIVATE ${PostgreSQL_INCLUDE_DIRS})
+target_link_libraries(test_pg_ddl_mgr
+    PRIVATE springtail_common
+    PRIVATE springtail_pg
+    PRIVATE springtail_redis
+    PRIVATE springtail_test
+    PRIVATE GTest::gtest_main)
+add_dsymutil_command(test_pg_ddl_mgr)
+
+# dependencies for copying fdw files to postgres shared directory
+add_dependencies(copy_fdw_files springtail_pg_fdw)
+add_dependencies(test_pg_ddl_mgr copy_fdw_files)

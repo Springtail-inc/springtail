@@ -1,30 +1,24 @@
 #include <iostream>
 
 #include <boost/program_options.hpp>
+#include <unistd.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <xid_mgr/xid_mgr_server.hh>
 
 using namespace springtail;
 
-namespace {
-    void
-    handle_sigint(int signal)
-    {
-        xid_mgr::XidMgrServer::get_instance()->stop();
-    }
-}
-
-int main(int argc, char *argv[])
+int
+main(int argc, char* argv[])
 {
     uint64_t starting_xid;
-    uint64_t db_id=1;
+    uint64_t db_id = 1;
 
     namespace po = boost::program_options;
     po::options_description desc("Allowed options");
     desc.add_options()("help,h", "Help message.");
-    desc.add_options()("xid,x", po::value<uint64_t>(&starting_xid)->default_value(2), "The starting XID.");
-    desc.add_options()("dbid,d", po::value<uint64_t>(&db_id)->default_value(1), "DB ID.");
+    desc.add_options()("xid,x", po::value<uint64_t>(&starting_xid), "The starting XID.");
+    desc.add_options()("dbid,d", po::value<uint64_t>(&db_id), "DB ID.");
     desc.add_options()("daemonize", "Start the server as a daemon");
 
     po::variables_map vm;
@@ -41,20 +35,15 @@ int main(int argc, char *argv[])
     if (vm.count("daemonize")) {
         pidfile = "xid_mgr.pid";
     }
-    springtail_init("xid_mgr", pidfile);
 
-    if (vm.count("xid") && vm.count("dbid")) {
-        // note: since the defaults are set this always commits the starting_xid of 2 for db_id 1
-        xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, starting_xid, false);
-    }
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<xid_mgr::XidMgrRunner>(vm.count("xid") && vm.count("dbid"), db_id, starting_xid));
 
-    // register the SIGINT handler
-    std::signal(SIGINT, handle_sigint);
+    springtail_init_daemon(runners, "xid_mgr", pidfile);
 
-    // start the server
-    xid_mgr::XidMgrServer::get_instance()->startup();
+    springtail_daemon_run();
 
-    // shutdown the server
-    xid_mgr::XidMgrServer::shutdown();
+    springtail_shutdown();
     return 0;
 }

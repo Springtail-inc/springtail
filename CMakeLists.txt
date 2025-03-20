@@ -10,6 +10,8 @@ project(Springtail
   DESCRIPTION "Springtail source code"
   LANGUAGES CXX)
 
+set(ENV{VCPKG_OVERLAY_PORTS} "${PROJECT_SOURCE_DIR}/vcpkg-ports")
+
 ## add ctest framework
 include(CTest)
 
@@ -21,6 +23,17 @@ endif()
 ## Cmake modules in ./cmake (for finding libraries)
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 include(SetSystem)
+
+# set triplets for dynamic linking; this MUST come before the vcpkg.cmake include
+set(VCPKG_OVERLAY_TRIPLETS "${PROJECT_SOURCE_DIR}/vcpkg-triplets")
+if (${LINUX})
+    if (${CMAKE_ARCHITECTURE} MATCHES "arm64")
+        set(VCPKG_TARGET_TRIPLET "arm64-linux-dynamic" CACHE STRING "Triplet: arm64-linux-dynamic")
+    endif()
+    if (${CMAKE_ARCHITECTURE} MATCHES "x64")
+        set(VCPKG_TARGET_TRIPLET "x64-linux-dynamic" CACHE STRING "Triplet: x64-linux-dynamic")
+    endif()
+endif()
 
 ## include the vcpkg.cmake configuration to support find_package from vcpkg
 include("${PROJECT_SOURCE_DIR}/external/vcpkg/scripts/buildsystems/vcpkg.cmake")
@@ -70,8 +83,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   # set debug level to debug for debug builds
   add_definitions( -D SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG )
   set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
+  set( BUILD_TYPE "debug")
 else()
   add_definitions( -D SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO )
+  set ( BUILD_TYPE "release")
 endif()
 
 if(DEFINED ENV{SPRINGTAIL_INCLUDE_TIME_TRACES})
@@ -92,15 +107,15 @@ endif()
 set(MODULES
   benchmarks
   common
+  grpc
   redis
   storage
-  garbage_collector
   pg_repl
   write_cache
   sys_tbl_mgr
   pg_log_mgr
   xid_mgr
-  thrift
+  proto
   proxy
   pg_fdw
   test
@@ -114,6 +129,9 @@ foreach(MODULE ${MODULES})
   configure_file(${PROJECT_SOURCE_DIR}/scripts/CTestCustom.cmake.in ${MODULE_BIN_DIR}/CTestCustom.cmake @ONLY)
 endforeach(MODULE ${MODULES})
 
+## install shared libraries to shared-lib directory
+include(InstallLibs)
+
 ## configure CTestCustom.cmake for top level
 configure_file(${PROJECT_SOURCE_DIR}/scripts/CTestCustom.cmake.in ${PROJECT_BINARY_DIR}/CTestCustom.cmake @ONLY)
 
@@ -126,3 +144,4 @@ message(STATUS "Compiler cxx debug flags: " ${CMAKE_CXX_FLAGS_DEBUG})
 message(STATUS "Compiler cxx release flags: " ${CMAKE_CXX_FLAGS_RELEASE})
 message(STATUS "Compiler cxx flags:" ${CMAKE_CXX_FLAGS})
 message(STATUS "Byte order for target: " ${CMAKE_CXX_BYTE_ORDER})
+message(STATUS "Target triplet: " ${VCPKG_TARGET_TRIPLET})

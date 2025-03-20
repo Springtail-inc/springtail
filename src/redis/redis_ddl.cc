@@ -16,7 +16,7 @@ namespace {
             RedisClient& redis,
             uint64_t db_id,
             uint64_t xid
-            ) 
+            )
     {
         std::string ddl_key = fmt::format(queue,
                 Properties::get_db_instance_id(), db_id, xid);
@@ -41,7 +41,7 @@ namespace {
             uint64_t db_id,
             uint64_t xid,
             nlohmann::json ddls
-            ) 
+            )
     {
         nlohmann::json op;
         op["db_id"] = db_id;
@@ -120,7 +120,7 @@ namespace springtail {
         _precommit<redis::QUEUE_DDL_XID, redis::HASH_DDL_PRECOMMIT>(*_redis, db_id, xid, ddls);
     }
 
-    void RedisDDL::precommit_index_ddl(uint64_t db_id, uint64_t xid, nlohmann::json ddls) 
+    void RedisDDL::precommit_index_ddl(uint64_t db_id, uint64_t xid, nlohmann::json ddls)
     {
         _precommit<redis::QUEUE_INDEX_DDL_XID, redis::HASH_DDL_INDEX_PRECOMMIT>(*_redis, db_id, xid, ddls);
     }
@@ -369,7 +369,7 @@ namespace springtail {
 
         // retrieve the schema XID for all FDWs for db_id
         std::string match = fmt::format("{}:*", db_id);
-        std::vector<std::string> values;
+        std::map<std::string, std::string> values;
 
         // redis hscan hash_key match
         auto cursor = 0;
@@ -380,10 +380,10 @@ namespace springtail {
             }
         }
 
-        // find the minimium XID across the FDWs
+        // find the minimum XID across the FDWs
         uint64_t min_xid = constant::LATEST_XID;
         for (const auto &value : values) {
-            uint64_t xid = std::stoull(value);
+            uint64_t xid = std::stoull(value.second);
             if (xid < min_xid) {
                 min_xid = xid;
             }

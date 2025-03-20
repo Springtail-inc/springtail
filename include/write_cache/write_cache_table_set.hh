@@ -9,9 +9,6 @@
 #include <cassert>
 #include <vector>
 
-#include <thrift/write_cache/ThriftWriteCache.h>
-#include <thrift/write_cache/write_cache_types.h>
-
 #include <common/timestamp.hh>
 #include <write_cache/write_cache_index_common.hh>
 #include <write_cache/write_cache_index_node.hh>

@@ -9,7 +9,7 @@
 #include <boost/program_options.hpp>
 #include <nlohmann/json.hpp>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/constants.hh>
 #include <common/json.hh>
 
@@ -181,7 +181,7 @@ dump_table(uint64_t db_id,
         }
     }
 
-    PgFdwMgr::fdw_init(nullptr);
+    PgFdwMgr::fdw_init(nullptr, false);
     PgFdwMgr *mgr = PgFdwMgr::get_instance();
 
     // create the fdw state for the table @xid and begin the scan
@@ -231,7 +231,6 @@ dump_table(uint64_t db_id,
 
 int main(int argc, char *argv[])
 {
-    springtail_init();
 
     std::string table;
     std::string schema;
@@ -240,7 +239,12 @@ int main(int argc, char *argv[])
     uint64_t tid=0;
     bool list = false;
 
-    springtail::springtail_init();
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<SchemaMgrRunner>());
+    runners->emplace_back(std::make_unique<TableMgrRunner>());
+
+    springtail_init_test(runners, false);
 
     // parse the arguments
     namespace po = boost::program_options;
@@ -285,5 +289,6 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    springtail_shutdown();
     return 0;
 }

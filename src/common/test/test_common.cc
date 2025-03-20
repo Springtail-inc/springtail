@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/logging.hh>
+#include <common/json.hh>
 
 using namespace springtail;
 
@@ -25,7 +26,7 @@ TEST(CommonTest, SplitString2) {
 }
 
 TEST(LoggingTest, Logging) {
-    springtail::springtail_init();
+    springtail_init_test();
     SPDLOG_DEBUG_MODULE(0x01, "Test log message, no args");
     SPDLOG_DEBUG_MODULE(0x01, "Test log message: 1 arg {}", 1);
     SPDLOG_DEBUG_MODULE(0x01, "Test log message: 2 args {} {}", 1, 2);
@@ -33,6 +34,7 @@ TEST(LoggingTest, Logging) {
     SPDLOG_DEBUG_MODULE(0x01, "Test log message: 4 args {} {} {} {}", 1, 2, 3, 4);
     SPDLOG_DEBUG_MODULE(0x01, "Test log message: 5 args {} {} {} {} {}", 1, 2, 3, 4, 5);
     SPDLOG_DEBUG_MODULE(0x01, "Test log message: 6 args {} {} {} {} {} {}", 1, 2, 3, 4, 5, 6);
+    springtail_shutdown();
 }
 
 TEST(CommonTest, EscapeQuotedString) {
@@ -74,4 +76,23 @@ TEST(CommonTest, SplitQuotedString) {
     ASSERT_EQ(result[0], "\"hello\"");
     ASSERT_EQ(result[1], "b");
     ASSERT_EQ(result[2], "c");
+}
+
+TEST(JsonTest, Json)
+{
+    nlohmann::json json = R"(
+        {
+            "key1": "value1",
+            "key2": 2,
+            "key3": true,
+            "key4": "false",
+            "key5": "45"
+        }
+    )"_json;
+    ASSERT_EQ(Json::get_or<std::string>(json, "key1", "test"), "value1");
+    ASSERT_EQ(Json::get_or<int>(json, "key2", 0), 2);
+    ASSERT_EQ(Json::get_or<bool>(json, "key3", false), true);
+    ASSERT_EQ(Json::get_or<bool>(json, "key4", true), false);
+    ASSERT_EQ(Json::get_or<int>(json, "key5", 0), 45);
+    ASSERT_EQ(Json::get_or<std::string>(json, "key5", "0"), "45");
 }

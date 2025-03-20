@@ -4,41 +4,47 @@ find_package(GTest CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(c-ares CONFIG REQUIRED)
 find_package(opentelemetry-cpp CONFIG REQUIRED)
-find_package(gRPC CONFIG REQUIRED)
+find_package(PostgreSQL REQUIRED)
+find_package(AWSSDK REQUIRED COMPONENTS core secretsmanager)
 
 set(COMMON_LIB_SOURCES
   coordinator.cc
-  common.cc
+  init.cc
   dns_resolver.cc
   exception.cc
   logging.cc
   properties.cc
   redis.cc
   redis_cache.cc
+  multi_queue_thread_manager.cc
   timestamp.cc
   time_trace.cc
   tracing.cc
   tracking_allocator.cc
+  aws.cc
 )
 
 add_library(springtail_common ${COMMON_LIB_SOURCES})
 target_include_directories(springtail_common PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(springtail_common
   PUBLIC absl::check
-         cpptrace::cpptrace
-         spdlog::spdlog
-         fmt::fmt
-         redis++::redis++_static
-	       nlohmann_json::nlohmann_json
-         c-ares::cares
-	 opentelemetry-cpp::api
-	 opentelemetry-cpp::sdk
-	 opentelemetry-cpp::trace
-	 opentelemetry-cpp::metrics
-	 opentelemetry-cpp::ostream_span_exporter
-	 opentelemetry-cpp::otlp_grpc_client
-	 opentelemetry-cpp::otlp_grpc_exporter
-	 opentelemetry-cpp::otlp_grpc_metrics_exporter
+        cpptrace::cpptrace
+        spdlog::spdlog
+        fmt::fmt
+        redis++::redis++
+        nlohmann_json::nlohmann_json
+        c-ares::cares
+        opentelemetry-cpp::api
+        opentelemetry-cpp::sdk
+        opentelemetry-cpp::trace
+        opentelemetry-cpp::metrics
+        opentelemetry-cpp::logs
+        opentelemetry-cpp::ostream_span_exporter
+        opentelemetry-cpp::otlp_http_client
+        opentelemetry-cpp::otlp_http_exporter
+        opentelemetry-cpp::otlp_http_metric_exporter
+        opentelemetry-cpp::otlp_http_log_record_exporter
+        ${AWSSDK_LIBRARIES}
 )
 
 add_executable(test_thread test/test_thread.cc)
@@ -91,6 +97,11 @@ target_include_directories(test_redis_cache PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_redis_cache PRIVATE springtail_common Boost::thread GTest::gtest_main)
 add_dsymutil_command(test_redis_cache)
 
+add_executable(test_thread_manager test/test_thread_manager.cc multi_queue_thread_manager.cc)
+target_include_directories(test_thread_manager PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_thread_manager PRIVATE springtail_common GTest::gtest_main)
+add_dsymutil_command(test_thread_manager)
+
 add_executable(test_timestamp test/test_timestamp.cc)
 target_include_directories(test_timestamp PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_timestamp PRIVATE springtail_common GTest::gtest_main)
@@ -111,5 +122,6 @@ gtest_discover_tests(test_synchronizer)
 gtest_discover_tests(test_exception)
 gtest_discover_tests(test_coordinator)
 gtest_discover_tests(test_redis_cache)
+gtest_discover_tests(test_thread_manager)
 gtest_discover_tests(test_timestamp)
 gtest_discover_tests(test_time_trace)

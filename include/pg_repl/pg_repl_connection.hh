@@ -132,12 +132,13 @@ namespace springtail
         /** server's latest lsn (from wal_end or keep alive) */
         LSN_t _server_latest_lsn = INVALID_LSN;
 
-        /** last time copy data received */
-        int64_t _last_received_time;
+        /** last time copy data received
+         * determines when to fast forward stream based on idle time */
+        int64_t _last_received_time{0};
         /** last time status was sent */
-        int64_t _last_status_time;
+        int64_t _last_status_time{0};
         /** last time data was flushed */
-        std::atomic<int64_t> _last_flushed_time;
+        std::atomic<int64_t> _last_flushed_time{0};
 
         /**
          * @brief Send standby status feedback message to server
@@ -291,10 +292,12 @@ namespace springtail
          * @brief Start streaming
          *
          * @param LSN start at specified LSN, or latest if 0 (INVALID_LST)
+         * @param do_init flag to initialize settings
          * @throws PgStreamingError if connection is already streaming
          * @throws PgQueryError if replication command failed
+         * @throws PgReplicationSlotError if replication slot is lost (fatal error)
          */
-        void start_streaming(LSN_t LSN);
+        void start_streaming(LSN_t LSN, bool do_init);
 
         /**
          * @brief Stop streaming; close streaming connection
@@ -322,13 +325,11 @@ namespace springtail
 
         /**
          * @brief Create the replication slot
-         * @param export_snapshot export the snapshot
-         * @param temporary temporary slot; per session
+         * @return LSN of the slot
          * @throws PgStreamingError if streaming already started
          * @throws PgQueryError on query error
          */
-        void create_replication_slot(bool export_snapshot,
-                                     bool temporary);
+        LSN_t create_replication_slot();
 
         /**
          * @brief Drop the replication slot from the server

@@ -8,6 +8,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <common/aws.hh>
 #include <common/redis_cache.hh>
 #include <common/singleton.hh>
 
@@ -69,7 +70,6 @@ namespace springtail {
 
         /**
          * @brief Function for separate redis cache initialization
-         *
          */
         void init_cache() { _cache = std::make_shared<RedisCache>(true); }
 
@@ -77,6 +77,18 @@ namespace springtail {
         static inline uint64_t get_db_instance_id() {
             _assert_instance();
             return  get_instance()->_get_db_instance_id();
+        }
+
+        /** Helper to get organization id */
+        static inline std::string get_organization_id() {
+            _assert_instance();
+            return get_instance()->_get_organization_id();
+        }
+
+        /** Helper to get account id */
+        static inline std::string get_account_id() {
+            _assert_instance();
+            return get_instance()->_get_account_id();
         }
 
         /** Helper to get fs mount point */
@@ -177,11 +189,12 @@ namespace springtail {
     private:
         /** json containing parsed settings file */
         nlohmann::json _json;
-        /**
-         * @brief RedisCache object
-         *
-         */
+
+        /** RedisCache object */
         std::shared_ptr<RedisCache> _cache;
+
+        /** AWS for secrets mgr */
+        std::shared_ptr<AwsHelper> _aws_helper;
 
         /**
          * @brief Construct a new Properties object
@@ -212,6 +225,11 @@ namespace springtail {
         void _load_redis(const std::string &config_file);
 
         /**
+         * @brief Set the replication user variables from AWS secrets manager
+         */
+        void _set_replication_user_from_aws();
+
+        /**
          * @brief Internal get database instance id
          *
          * @return uint64_t
@@ -220,6 +238,28 @@ namespace springtail {
             assert (_json.contains(ORG_CONFIG));
             assert (_json[ORG_CONFIG].contains("db_instance_id"));
             return _json[ORG_CONFIG]["db_instance_id"];
+        }
+
+        /**
+         * @brief Internal get organization id
+         *
+         * @return std::string
+         */
+        std::string _get_organization_id() {
+            assert (_json.contains(ORG_CONFIG));
+            assert (_json[ORG_CONFIG].contains("organization_id"));
+            return _json[ORG_CONFIG]["organization_id"];
+        }
+
+        /**
+         * @brief Internal get account id
+         *
+         * @return std::string
+         */
+        std::string _get_account_id() {
+            assert (_json.contains(ORG_CONFIG));
+            assert (_json[ORG_CONFIG].contains("account_id"));
+            return _json[ORG_CONFIG]["account_id"];
         }
 
         /**

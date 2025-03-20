@@ -93,10 +93,6 @@ def run_tests(factory: ComponentFactory) -> None:
     test(sys_tbl_mgr_daemon)
     assert not sys_tbl_mgr_daemon.is_running()
 
-    gc_daemon = factory.create_gc_daemon()
-    test(gc_daemon)
-    assert not gc_daemon.is_running()
-
     postgres = factory.create_postgres()
     test(postgres)
     assert not postgres.is_running()
@@ -152,9 +148,6 @@ if __name__ == "__main__":
 
     if args.stopall:
         # Stop all components
-        gc_daemon = factory.create_gc_daemon()
-        if not gc_daemon.shutdown() and not gc_daemon.kill():
-            raise ValueError("Failed to stop gc_daemon")
         sys_tbl_mgr_daemon = factory.create_sys_tbl_mgr_daemon()
         if not sys_tbl_mgr_daemon.shutdown() and not sys_tbl_mgr_daemon.kill():
             raise ValueError("Failed to stop sys_tbl_mgr_daemon")
@@ -181,8 +174,6 @@ if __name__ == "__main__":
         component = factory.create_xid_mgr_daemon()
     elif component_name == 'sys_tbl_mgr_daemon':
         component = factory.create_sys_tbl_mgr_daemon()
-    elif component_name == 'gc_daemon':
-        component = factory.create_gc_daemon()
     elif component_name == 'postgres':
         component = factory.create_postgres()
     elif component_name == 'ddl_daemon':

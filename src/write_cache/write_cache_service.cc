@@ -1,166 +1,100 @@
-
 #include <write_cache/write_cache_service.hh>
-#include <write_cache/write_cache_server.hh>
-#include <write_cache/write_cache_index.hh>
-#include <write_cache/write_cache_table_set.hh>
 
-#include <write_cache/extent_mapper.hh>
+#include <common/json.hh>
+#include <common/properties.hh>
+#include <grpc/grpc_server.hh>
+#include <nlohmann/json.hpp>
+#include <proto/write_cache.grpc.pb.h>
+#include <write_cache/write_cache_index.hh>
+#include <write_cache/write_cache_server.hh>
+#include <write_cache/write_cache_table_set.hh>
 
 namespace springtail {
 
-    void
-    ThriftWriteCacheService::ping(thrift::write_cache::Status& _return)
-    {
-        WriteCacheServer::call_wrapper([&_return]() {
-            _return.__set_status(thrift::write_cache::StatusCode::SUCCESS);
-            _return.__set_message("PONG");
-
-            std::cout << "Got ping\n";
-        });
-    }
-
-    void
-    ThriftWriteCacheService::get_extents(thrift::write_cache::GetExtentsResponse& _return, const thrift::write_cache::GetExtentsRequest& request)
-    {
-        WriteCacheServer::call_wrapper([&_return, &request]() {
-            WriteCacheServer *server = WriteCacheServer::get_instance();
-            WriteCacheIndexPtr index = server->get_index(request.db_id);
-
-            uint64_t cursor = request.cursor;
-            PostgresTimestamp commit_ts;
-            std::vector<WriteCacheIndexExtentPtr> extents =
-                index->get_extents(request.table_id, request.xid,
-                                request.count, cursor, commit_ts);
-
-            for (const auto &e: extents) {
-                thrift::write_cache::Extent extent;
-                extent.xid = e->xid;
-                extent.xid_seq = e->xid_seq;
-
-                // serialze the extent data
-                extent.__set_data(e->data->serialize());
-
-                _return.extents.push_back(std::move(extent));
-            }
-
-            _return.cursor = cursor;
-            _return.table_id = request.table_id;
-            _return.commit_ts = commit_ts.micros();
-        });
-    }
-
-    void
-    ThriftWriteCacheService::evict_table(thrift::write_cache::Status& _return,
-                                         const thrift::write_cache::EvictTableRequest& request)
-    {
-        WriteCacheServer::call_wrapper([&_return, &request]() {
-            WriteCacheServer *server = WriteCacheServer::get_instance();
-            WriteCacheIndexPtr index = server->get_index(request.db_id);
-
-            index->evict_table(request.table_id, request.xid);
-
-            _return.__set_status(thrift::write_cache::StatusCode::SUCCESS);
-        });
-    }
-
-    void
-    ThriftWriteCacheService::evict_xid(thrift::write_cache::Status& _return,
-                                       const thrift::write_cache::EvictXidRequest& request)
-    {
-        WriteCacheServer::call_wrapper([&_return, &request]() {
-            WriteCacheServer *server = WriteCacheServer::get_instance();
-            WriteCacheIndexPtr index = server->get_index(request.db_id);
-
-            index->evict_xid(request.xid);
-
-            _return.__set_status(thrift::write_cache::StatusCode::SUCCESS);
-        });
-    }
-
-    void
-    ThriftWriteCacheService::list_tables(thrift::write_cache::ListTablesResponse& _return,
-                                         const thrift::write_cache::ListTablesRequest& request)
-    {
-        WriteCacheServer::call_wrapper([&_return, &request]() {
-            WriteCacheServer *server = WriteCacheServer::get_instance();
-            WriteCacheIndexPtr index = server->get_index(request.db_id);
-
-            uint64_t cursor = request.cursor;
-
-            auto &&tids = index->get_tids(request.xid, request.count, cursor);
-            for (auto tid: tids) {
-                _return.table_ids.push_back(tid);
-            }
-
-            _return.cursor = cursor;
-        });
-    }
-
-    //// EXTENT MAPPER API
-
-    void
-    ThriftWriteCacheService::add_mapping(thrift::write_cache::Status &_return,
-                                         const thrift::write_cache::AddMappingRequest &request)
-    {
-        WriteCacheServer::call_wrapper([&_return, &request]() {
-            ExtentMapper *mapper = ExtentMapper::get_instance(request.db_id);
-
-            // note: unfortunately need to copy the data to shift to uin64_t type
-            std::vector<uint64_t> new_eids(request.new_eids.begin(), request.new_eids.end());
-            mapper->add_mapping(request.table_id, request.target_xid,
-                                request.old_eid, new_eids);
-
-            _return.__set_status(thrift::write_cache::StatusCode::SUCCESS);
-        });
-    }
-
-    void
-    ThriftWriteCacheService::set_lookup(thrift::write_cache::Status &_return,
-                                        const thrift::write_cache::SetLookupRequest &request)
-    {
-        WriteCacheServer::call_wrapper([&_return, &request]() {
-            ExtentMapper *mapper = ExtentMapper::get_instance(request.db_id);
-            mapper->set_lookup(request.table_id, request.target_xid, request.extent_id);
-
-            _return.__set_status(thrift::write_cache::StatusCode::SUCCESS);
-        });
-    }
-
-    void
-    ThriftWriteCacheService::forward_map(thrift::write_cache::ExtentMapResponse &_return,
-                                         const thrift::write_cache::ForwardMapRequest &request)
-    {
-        WriteCacheServer::call_wrapper([&_return, &request]() {
-            ExtentMapper *mapper = ExtentMapper::get_instance(request.db_id);
-            auto &&response = mapper->forward_map(request.table_id,
-                                                request.target_xid, request.extent_id);
-
-            _return.extent_ids.insert(_return.extent_ids.end(), response.begin(), response.end());
-        });
-    }
-
-    void
-    ThriftWriteCacheService::reverse_map(thrift::write_cache::ExtentMapResponse &_return,
-                                         const thrift::write_cache::ReverseMapRequest &request)
-    {
-        WriteCacheServer::call_wrapper([&_return, &request]() {
-            ExtentMapper *mapper = ExtentMapper::get_instance(request.db_id);
-            auto &&response = mapper->reverse_map(request.table_id, request.access_xid,
-                                                request.target_xid, request.extent_id);
-
-            _return.extent_ids.insert(_return.extent_ids.end(), response.begin(), response.end());
-        });
-    }
-
-    void
-    ThriftWriteCacheService::expire_map(thrift::write_cache::Status &_return,
-                                        const thrift::write_cache::ExpireMapRequest &request)
-    {
-        WriteCacheServer::call_wrapper([&_return, &request]() {
-            ExtentMapper *mapper = ExtentMapper::get_instance(request.db_id);
-            mapper->expire(request.table_id, request.commit_xid);
-
-            _return.__set_status(thrift::write_cache::StatusCode::SUCCESS);
-        });
-    }
+grpc::Status WriteCacheService::Ping(grpc::ServerContext* context,
+                    const google::protobuf::Empty* request,
+                    google::protobuf::Empty* response)
+{
+    ServerSpan span(context, "WriteCacheService", "Ping");
+    std::cout << "Got ping\n";
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
+    return grpc::Status::OK;
 }
+
+grpc::Status WriteCacheService::GetExtents(grpc::ServerContext* context,
+                            const proto::GetExtentsRequest* request,
+                            proto::GetExtentsResponse* response)
+{
+    ServerSpan span(context, "WriteCacheService", "GetExtents");
+    WriteCacheServer* server = WriteCacheServer::get_instance();
+    WriteCacheIndexPtr index = server->get_index(request->db_id());
+
+    uint64_t cursor = request->cursor();
+    PostgresTimestamp commit_ts;
+    std::vector<WriteCacheIndexExtentPtr> extents = index->get_extents(
+        request->table_id(), request->xid(), request->count(), cursor, commit_ts);
+
+    for (const auto& e : extents) {
+        auto* extent = response->add_extents();
+        extent->set_xid(e->xid);
+        extent->set_xid_seq(e->xid_seq);
+        extent->set_data(e->data->serialize());
+    }
+
+    response->set_cursor(cursor);
+    response->set_table_id(request->table_id());
+    response->set_commit_ts(commit_ts.micros());
+
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
+    return grpc::Status::OK;
+}
+
+grpc::Status WriteCacheService::EvictTable(grpc::ServerContext* context,
+                              const proto::EvictTableRequest* request,
+                              google::protobuf::Empty* response)
+{
+    ServerSpan span(context, "WriteCacheService", "EvictTable");
+    WriteCacheServer* server = WriteCacheServer::get_instance();
+    WriteCacheIndexPtr index = server->get_index(request->db_id());
+
+    index->evict_table(request->table_id(), request->xid());
+
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
+    return grpc::Status::OK;
+}
+
+grpc::Status WriteCacheService::EvictXid(grpc::ServerContext* context,
+                            const proto::EvictXidRequest* request,
+                            google::protobuf::Empty* response)
+{
+    ServerSpan span(context, "WriteCacheService", "EvictXid");
+    WriteCacheServer* server = WriteCacheServer::get_instance();
+    WriteCacheIndexPtr index = server->get_index(request->db_id());
+
+    index->evict_xid(request->xid());
+
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
+    return grpc::Status::OK;
+}
+
+grpc::Status WriteCacheService::ListTables(grpc::ServerContext* context,
+                              const proto::ListTablesRequest* request,
+                              proto::ListTablesResponse* response)
+{
+    ServerSpan span(context, "WriteCacheService", "ListTables");
+    WriteCacheServer* server = WriteCacheServer::get_instance();
+    WriteCacheIndexPtr index = server->get_index(request->db_id());
+
+    uint64_t cursor = request->cursor();
+
+    auto&& tids = index->get_tids(request->xid(), request->count(), cursor);
+    for (auto tid : tids) {
+        response->add_table_ids(tid);
+    }
+
+    response->set_cursor(cursor);
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
+    return grpc::Status::OK;
+}
+
+}  // namespace springtail

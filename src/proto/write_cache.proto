@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package springtail.proto;
+
+import "google/protobuf/empty.proto";
+
+// Extent object
+message Extent {
+  int64 xid = 1;
+  int64 xid_seq = 2;
+  bytes data = 3;
+}
+
+// Request message for get_extents
+message GetExtentsRequest {
+  int64 db_id = 1;
+  int64 table_id = 2;
+  int64 xid = 3;
+  int64 cursor = 4;
+  int32 count = 5;
+}
+
+// Response message for get_extents
+message GetExtentsResponse {
+  int64 table_id = 1;
+  int64 cursor = 2;
+  repeated Extent extents = 3;
+  int64 commit_ts = 4;  // Postgres timestamp in microseconds since 2000-01-01
+}
+
+// Request message for list_tables
+message ListTablesRequest {
+  int64 db_id = 1;
+  int64 xid = 2;
+  int64 cursor = 3;
+  int32 count = 4;
+}
+
+// Response message for list_tables
+message ListTablesResponse {
+  int64 cursor = 1;
+  repeated int64 table_ids = 2;
+}
+
+// Request message for evict_table
+message EvictTableRequest {
+  int64 db_id = 1;
+  int64 table_id = 2;
+  int64 xid = 3;
+}
+
+// Request message for evict_xid
+message EvictXidRequest {
+  int64 db_id = 1;
+  int64 xid = 2;
+}
+
+message ExtentMapResponse {
+  repeated int64 extent_ids = 1;
+}
+
+// WriteCache service definition
+service WriteCache {
+  // Health check
+  rpc Ping(google.protobuf.Empty) returns (google.protobuf.Empty) {}
+
+  // Core write cache functions
+  rpc GetExtents(GetExtentsRequest) returns (GetExtentsResponse) {}
+  rpc ListTables(ListTablesRequest) returns (ListTablesResponse) {}
+  rpc EvictTable(EvictTableRequest) returns (google.protobuf.Empty) {}
+  rpc EvictXid(EvictXidRequest) returns (google.protobuf.Empty) {}
+}

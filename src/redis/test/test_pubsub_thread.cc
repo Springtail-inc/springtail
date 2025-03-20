@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 
@@ -12,7 +12,7 @@ namespace {
     class RedisPubSub_Test : public testing::TestWithParam<bool> {
     protected:
         static void SetUpTestSuite() {
-            springtail_init();
+            springtail_init_test();
 
             // See if redis is enabled
             try {
@@ -23,7 +23,7 @@ namespace {
             }
         }
         static void TearDownTestSuite() {
-            RedisMgr::get_instance()->shutdown();
+            springtail_shutdown();
         }
     protected:
         std::mutex _data_mutex;
@@ -82,7 +82,6 @@ TEST_P(RedisPubSub_Test, SingleSubscriberTest) {
             fmt::format(redis::DB_CONFIG, "5050"),
             fmt::format(redis::HASH_FDW, "5050"),
             fmt::format(redis::DB_INSTANCE_STATE, "5050"),
-            fmt::format(redis::QUEUE_GC_XID_READY, "5050"),
             fmt::format(redis::QUEUE_DDL_XID, "5050", "4242", "2222"),
             fmt::format(redis::HASH_DDL_PRECOMMIT, "5050"),
             fmt::format(redis::QUEUE_DDL_FDW, "5050", "4242"),

@@ -6,7 +6,7 @@
 
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/constants.hh>
 #include <common/json.hh>
 #include <common/object_cache.hh>
@@ -30,9 +30,14 @@ namespace {
     class SysTblMgr_Test : public testing::Test {
     public:
         static void SetUpTestSuite() {
-            springtail_init(std::nullopt, std::nullopt, LOG_ALL ^ (LOG_CACHE | LOG_STORAGE));
+            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+            runners.emplace();
+            runners->emplace_back(std::make_unique<IOMgrRunner>());
 
-            _services.init();
+            auto service_runners = test::get_services(true, true, false);
+            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
+
+            springtail_init_test(runners, LOG_ALL ^ (LOG_CACHE | LOG_STORAGE));
 
             // create the public namespace
             auto client = sys_tbl_mgr::Client::get_instance();
@@ -49,11 +54,9 @@ namespace {
         }
 
         static void TearDownTestSuite() {
-            sys_tbl_mgr::Client::shutdown();
-            _services.shutdown();
+            springtail_shutdown();
         }
 
-        static test::Services _services;
         static std::mutex _mutex;
         static XidLsn _xid;
         static uint64_t _db;
@@ -74,7 +77,6 @@ namespace {
         sys_tbl_mgr::Client *_client = sys_tbl_mgr::Client::get_instance();
     };
 
-    test::Services SysTblMgr_Test::_services(true, true, false);
     XidLsn SysTblMgr_Test::_xid(1, 0);
     std::mutex SysTblMgr_Test::_mutex;
     uint64_t SysTblMgr_Test::_db = 1;
@@ -256,7 +258,7 @@ namespace {
         _set_index_state(tid, index_id, sys_tbl::IndexNames::State::NOT_READY);
 
         auto info = _client->get_index_info(_db, index_id, _xid);
-        ASSERT_EQ(info.id, index_id);
+        ASSERT_EQ(info.id(), index_id);
         ASSERT_EQ(schema_meta->indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::READY);
 
         _finalize();
@@ -265,14 +267,14 @@ namespace {
         _verify_schema(tid, index_id);
 
         info = _client->get_index_info(_db, index_id, _xid);
-        ASSERT_EQ(info.id, index_id);
+        ASSERT_EQ(info.id(), index_id);
 
         // use optional table ID
         info = _client->get_index_info(_db, index_id, _xid, tid);
-        ASSERT_EQ(info.id, index_id);
+        ASSERT_EQ(info.id(), index_id);
 
         info = _client->get_index_info(_db, constant::INDEX_PRIMARY, _xid, tid);
-        ASSERT_EQ(info.id, constant::INDEX_PRIMARY);
+        ASSERT_EQ(info.id(), constant::INDEX_PRIMARY);
 
         // change the index to the ready state
         _set_index_state(tid, index_id, sys_tbl::IndexNames::State::READY);
@@ -294,7 +296,8 @@ namespace {
     }
 
     // Tests index drop
-    TEST_F(SysTblMgr_Test, DropIndex) {
+    TEST_F(SysTblMgr_Test, DropIndex)
+    {
         uint64_t tid = 100004;
         uint64_t index_id = 5001;
 
@@ -316,7 +319,7 @@ namespace {
         schema_meta = _client->get_schema(_db, tid, _xid);
         ASSERT_EQ(schema_meta->indexes.size(), 2);
 
-        //drop index
+        // drop index
         _drop_index(index_id);
 
         schema_meta = _client->get_schema(_db, tid, _xid);
@@ -329,9 +332,9 @@ namespace {
         ASSERT_EQ(schema_meta->indexes.size(), 1);
     }
 
-
     // Tests table create / alter / drop
-    TEST_F(SysTblMgr_Test, CreateAlterDrop) {
+    TEST_F(SysTblMgr_Test, CreateAlterDrop)
+    {
         uint64_t tid = 100000;
         uint64_t start_xid = _xid.xid;
 
@@ -347,22 +350,22 @@ namespace {
         ASSERT_EQ(metadata->roots.size(), 0);
         ASSERT_EQ(metadata->stats.row_count, 0);
 
-        auto &&schema_meta = _client->get_schema(_db, tid, { start_xid - 1, constant::MAX_LSN });
+        auto &&schema_meta = _client->get_schema(_db, tid, {start_xid - 1, constant::MAX_LSN});
         ASSERT_EQ(schema_meta->columns.size(), 0);
 
-        schema_meta = _client->get_schema(_db, tid, { start_xid, 0 });
+        schema_meta = _client->get_schema(_db, tid, {start_xid, 0});
         ASSERT_EQ(schema_meta->columns.size(), 2);
 
-        schema_meta = _client->get_schema(_db, tid, { start_xid, 1 });
+        schema_meta = _client->get_schema(_db, tid, {start_xid, 1});
         ASSERT_EQ(schema_meta->columns.size(), 2);
 
-        schema_meta = _client->get_schema(_db, tid, { start_xid, 3 });
+        schema_meta = _client->get_schema(_db, tid, {start_xid, 3});
         ASSERT_EQ(schema_meta->columns.size(), 2);
 
         // verify correctness after finalize
         _finalize();
 
-        auto exists = _client->exists(_db, tid, { start_xid, 0 });
+        auto exists = _client->exists(_db, tid, {start_xid, 0});
         ASSERT_TRUE(exists);
 
         metadata = _client->get_roots(_db, tid, start_xid);
@@ -370,16 +373,16 @@ namespace {
         ASSERT_EQ(metadata->roots[0].extent_id, constant::UNKNOWN_EXTENT);
         ASSERT_EQ(metadata->stats.row_count, 0);
 
-        schema_meta = _client->get_schema(_db, tid, { start_xid - 1, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, {start_xid - 1, constant::MAX_LSN});
         ASSERT_EQ(schema_meta->columns.size(), 0);
 
-        schema_meta = _client->get_schema(_db, tid, { start_xid, 0 });
+        schema_meta = _client->get_schema(_db, tid, {start_xid, 0});
         ASSERT_EQ(schema_meta->columns.size(), 2);
 
-        schema_meta = _client->get_schema(_db, tid, { start_xid, 1 });
+        schema_meta = _client->get_schema(_db, tid, {start_xid, 1});
         ASSERT_EQ(schema_meta->columns.size(), 2);
 
-        schema_meta = _client->get_schema(_db, tid, { start_xid, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, {start_xid, constant::MAX_LSN});
         ASSERT_EQ(schema_meta->columns.size(), 2);
 
         // drop the table
@@ -391,28 +394,28 @@ namespace {
         ASSERT_EQ(metadata->roots[0].extent_id, constant::UNKNOWN_EXTENT);
         ASSERT_EQ(metadata->stats.row_count, 0);
 
-        schema_meta = _client->get_schema(_db, tid, { start_xid - 1, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, {start_xid - 1, constant::MAX_LSN});
         ASSERT_EQ(schema_meta->columns.size(), 0);
 
-        schema_meta = _client->get_schema(_db, tid, { start_xid, 1 });
+        schema_meta = _client->get_schema(_db, tid, {start_xid, 1});
         ASSERT_EQ(schema_meta->columns.size(), 2);
 
-        schema_meta = _client->get_schema(_db, tid, { start_xid, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, {start_xid, constant::MAX_LSN});
         ASSERT_EQ(schema_meta->columns.size(), 2);
 
-        schema_meta = _client->get_schema(_db, tid, { start_xid + 1, 0 });
+        schema_meta = _client->get_schema(_db, tid, {start_xid + 1, 0});
         ASSERT_EQ(schema_meta->columns.size(), 0);
 
         // verify correctness after finalize
         _finalize();
 
-        schema_meta = _client->get_schema(_db, tid, { start_xid - 1, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, {start_xid - 1, constant::MAX_LSN});
         ASSERT_EQ(schema_meta->columns.size(), 0);
 
-        schema_meta = _client->get_schema(_db, tid, { start_xid, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, {start_xid, constant::MAX_LSN});
         ASSERT_EQ(schema_meta->columns.size(), 2);
 
-        schema_meta = _client->get_schema(_db, tid, { start_xid + 1, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, {start_xid + 1, constant::MAX_LSN});
         ASSERT_EQ(schema_meta->columns.size(), 0);
 
         metadata = _client->get_roots(_db, tid, start_xid);
@@ -426,7 +429,8 @@ namespace {
     }
 
     // Tests interleaving of DDL and DML interactions with the system tables
-    TEST_F(SysTblMgr_Test, Complex) {
+    TEST_F(SysTblMgr_Test, Complex)
+    {
         uint64_t check_xid = _xid.xid;
         uint64_t tid = 100001;
         uint64_t index_id = 5003;
@@ -436,11 +440,11 @@ namespace {
 
         // "add data" to the table
         _create_index(tid, "x", index_id);
-        _client->update_roots(_db, tid, _xid.xid, {{{ 0, 0 }}, {15}});
+        _client->update_roots(_db, tid, _xid.xid, {{{0, 0}}, {15}});
         _finalize();
 
         // add more data to the table
-        _client->update_roots(_db, tid, _xid.xid, {{{ 0, 100 }}, {30}});
+        _client->update_roots(_db, tid, _xid.xid, {{{0, 100}}, {30}});
         _finalize();
 
         // rename col2 => coltwo
@@ -450,7 +454,8 @@ namespace {
         _finalize();
 
         // add a column col3
-        msg.columns.push_back({"colthree", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 3, 0, true, false});
+        msg.columns.push_back({"colthree", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt,
+                               3, 0, true, false});
         _alter_table(msg);
 
         // rename the table x => y
@@ -463,7 +468,8 @@ namespace {
 
         // verify the virtual schema creation from the cache prior to finalize
         _next_lsn();
-        auto schema_check = _client->get_target_schema(_db, tid, { _xid.xid - 1, constant::MAX_LSN }, _xid);
+        auto schema_check =
+            _client->get_target_schema(_db, tid, {_xid.xid - 1, constant::MAX_LSN}, _xid);
         ASSERT_EQ(schema_check->history.size(), 2);
         ASSERT_EQ(schema_check->history[0].update_type, SchemaUpdateType::NEW_COLUMN);
         ASSERT_EQ(schema_check->history[1].update_type, SchemaUpdateType::NAME_CHANGE);
@@ -477,7 +483,7 @@ namespace {
         // verify the data at each step
 
         // XID 0
-        auto&& schema_meta = _client->get_schema(_db, tid, { check_xid - 1, constant::MAX_LSN });
+        auto &&schema_meta = _client->get_schema(_db, tid, {check_xid - 1, constant::MAX_LSN});
         ASSERT_EQ(schema_meta->columns.size(), 0);
 
         // XID 1
@@ -486,7 +492,7 @@ namespace {
         ASSERT_EQ(metadata->roots[0].index_id, 0);
         ASSERT_EQ(metadata->stats.row_count, 15);
 
-        schema_meta = _client->get_schema(_db, tid, { check_xid, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, {check_xid, constant::MAX_LSN});
         ASSERT_EQ(schema_meta->columns.size(), 2);
         ASSERT_EQ(schema_meta->columns[0].name, "col1");
         ASSERT_EQ(schema_meta->columns[1].name, "col2");
@@ -500,7 +506,7 @@ namespace {
         ASSERT_EQ(metadata->roots[0].extent_id, 100);
         ASSERT_EQ(metadata->stats.row_count, 30);
 
-        schema_meta = _client->get_schema(_db, tid, { check_xid, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, {check_xid, constant::MAX_LSN});
         ASSERT_EQ(schema_meta->columns.size(), 2);
         ASSERT_EQ(schema_meta->columns[0].name, "col1");
         ASSERT_EQ(schema_meta->columns[1].name, "col2");
@@ -514,7 +520,7 @@ namespace {
         ASSERT_EQ(metadata->roots[0].extent_id, 100);
         ASSERT_EQ(metadata->stats.row_count, 30);
 
-        schema_meta = _client->get_schema(_db, tid, { check_xid, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, {check_xid, constant::MAX_LSN});
         ASSERT_EQ(schema_meta->columns.size(), 2);
         ASSERT_EQ(schema_meta->columns[0].name, "col1");
         ASSERT_EQ(schema_meta->columns[1].name, "coltwo");
@@ -528,7 +534,7 @@ namespace {
         ASSERT_EQ(metadata->roots[0].extent_id, 100);
         ASSERT_EQ(metadata->stats.row_count, 30);
 
-        schema_meta = _client->get_schema(_db, tid, { check_xid, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, {check_xid, constant::MAX_LSN});
         ASSERT_EQ(schema_meta->columns.size(), 3);
         ASSERT_EQ(schema_meta->columns[0].name, "col1");
         ASSERT_EQ(schema_meta->columns[1].name, "coltwo");
@@ -542,7 +548,7 @@ namespace {
         ASSERT_EQ(metadata->roots.size(), 0);
         ASSERT_EQ(metadata->stats.row_count, 0);
 
-        schema_meta = _client->get_schema(_db, tid, { check_xid, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, {check_xid, constant::MAX_LSN});
         ASSERT_EQ(schema_meta->columns.size(), 0);
         ASSERT_EQ(schema_meta->indexes.size(), 0);
 

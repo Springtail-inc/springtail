@@ -1,23 +1,17 @@
 #pragma once
 
+#include <map>
 #include <mutex>
 #include <memory>
 
+#include <grpc/grpc_server_manager.hh>
+#include <common/service_register.hh>
 #include <common/singleton.hh>
-
 #include <write_cache/write_cache_index.hh>
-#include <write_cache/write_cache_service.hh>
-#include <thrift/common/thrift_server.hh>
 
 namespace springtail {
 
-    class WriteCacheServer final :
-        public springtail::thrift::Server<WriteCacheServer,
-                                        thrift::write_cache::ThriftWriteCacheProcessorFactory,
-                                        ThriftWriteCacheService,
-                                        thrift::write_cache::ThriftWriteCacheIfFactory,
-                                        thrift::write_cache::ThriftWriteCacheIf>,
-        public Singleton<WriteCacheServer>
+    class WriteCacheServer final : public Singleton<WriteCacheServer>
     {
         friend class Singleton<WriteCacheServer>;
     public:
@@ -34,25 +28,34 @@ namespace springtail {
             return it->second;
         }
 
+        void startup();
+
     private:
-        /**
-         * @brief Construct a new Write Cache Server object
-         */
         WriteCacheServer();
-
-        /**
-         * @brief Destroy the Write Cache Server object; shouldn't be called directly use shutdown()
-         */
-         ~WriteCacheServer() override = default;
-
-        /** shutdown from shutdown(), called once */
-        void _internal_shutdown() override;
+        ~WriteCacheServer() override = default;
 
         /** indexes mutex */
         std::mutex _mutex;
 
         /** map of indexes by db_id */
         std::map<uint64_t, WriteCacheIndexPtr> _indexes;
+
+        GrpcServerManager _grpc_server_manager;
+
+        void _internal_shutdown() override;
+    };
+
+    class WriteCacheRunner : public ServiceRunner {
+    public:
+        WriteCacheRunner() :
+            ServiceRunner("WriteCacheServer") {}
+        bool start() override {
+            WriteCacheServer::get_instance()->startup();
+            return true;
+        }
+        void stop() override {
+            WriteCacheServer::shutdown();
+        }
     };
 
 } // namespace springtail

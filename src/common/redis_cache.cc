@@ -25,8 +25,12 @@ RedisCache::RedisCache(bool config_db)
     tie(_db_id, _client) = RedisMgr::get_instance()->create_client(config_db);
     _subscriber = RedisMgr::get_instance()->get_subscriber(1, config_db);
 
+
     _subscribe_pattern = "__keyspace@" + std::to_string(_db_id) + "__:" + std::to_string(_instance_id) + ":*";
     _subscriber->psubscribe(_subscribe_pattern);
+    _subscriber->on_meta([this](sw::redis::Subscriber::MsgType type, sw::redis::OptionalString channel, long long num){
+        _process_meta(type, channel, num);
+    });
     _subscriber->on_pmessage([this](const std::string &pattern, const std::string &channel, const std::string &msg) {
         _process_notification(pattern, channel, msg);
     });
@@ -34,6 +38,7 @@ RedisCache::RedisCache(bool config_db)
     _init_storage();
 
     _subscriber_thread = std::thread(&RedisCache::_run, this);
+    _init_finished.wait(false);
 }
 
 RedisCache::~RedisCache()
@@ -43,6 +48,31 @@ RedisCache::~RedisCache()
     _subscriber_thread.join();
     SPDLOG_DEBUG("Joined subscriber thread {}", _id);
     _subscriber->punsubscribe(_subscribe_pattern);
+}
+
+static std::map<sw::redis::Subscriber::MsgType, std::string> msg_type_to_str = {
+    {sw::redis::Subscriber::MsgType::SUBSCRIBE,     "SUBSCRIBE"    },
+    {sw::redis::Subscriber::MsgType::UNSUBSCRIBE,   "UNSUBSCRIBE"  },
+    {sw::redis::Subscriber::MsgType::PSUBSCRIBE,    "PSUBSCRIBE"   },
+    {sw::redis::Subscriber::MsgType::PUNSUBSCRIBE,  "PUNSUBSCRIBE" },
+    {sw::redis::Subscriber::MsgType::MESSAGE,       "MESSAGE"      },
+    {sw::redis::Subscriber::MsgType::PMESSAGE,      "PMESSAGE"     },
+    {sw::redis::Subscriber::MsgType::SSUBSCRIBE,    "SSUBSCRIBE"   },
+    {sw::redis::Subscriber::MsgType::SUNSUBSCRIBE,  "SUNSUBSCRIBE" },
+    {sw::redis::Subscriber::MsgType::SMESSAGE,      "SMESSAGE"     },
+    {sw::redis::Subscriber::MsgType::UNKNOWN,       "UNKNOWN"      }
+};
+
+void RedisCache::_process_meta(sw::redis::Subscriber::MsgType type, sw::redis::OptionalString channel, long long num)
+{
+    SPDLOG_DEBUG("received meta notification: message type: {}; channel: {}; num = {}", msg_type_to_str[type], channel, num);
+    if (!_init_finished) {
+        if (type == sw::redis::Subscriber::MsgType::PSUBSCRIBE &&
+                    channel.has_value() && channel.value() == _subscribe_pattern) {
+            _init_finished = true;
+            _init_finished.notify_one();
+        }
+    }
 }
 
 void

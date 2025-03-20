@@ -176,7 +176,7 @@ namespace springtail {
          * @brief escape a string; a literal not for identifiers
          *
          * @param str string to escape
-         * @return string with escaped characters
+         * @return string with escaped characters; does NOT include ''
          */
         std::string escape_string(const std::string &str);
 
@@ -309,6 +309,15 @@ namespace springtail {
 
         /** Simple version of escape identifier */
         static std::string _escape_identifier(const char *str);
+
+        /** helper functions for reading and writing */
+        static ssize_t _secure_read(PGconn *conn, char *ptr, size_t len);
+        static ssize_t _secure_write(PGconn *conn, const char *ptr, size_t len);
+        static ssize_t _ssl_read(PGconn *conn, char *ptr, size_t len);
+        static ssize_t _non_ssl_read(PGconn *conn, char *ptr, size_t len);
+        static ssize_t _ssl_write(PGconn *conn, const char *ptr, size_t len);
+        static ssize_t _non_ssl_write(PGconn *conn, const char *ptr, size_t len);
+
     };
     using LibPqConnectionPtr = std::shared_ptr<LibPqConnection>;
 };

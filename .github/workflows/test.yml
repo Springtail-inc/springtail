@@ -23,7 +23,7 @@ on:
 jobs:
   test:
     name: test
-    runs-on: warp-ubuntu-latest-arm64-4x-spot
+    runs-on: warp-ubuntu-latest-arm64-4x
     timeout-minutes: 30
     container:
       image: ${{ inputs.builder_image_version_tag }}
@@ -42,22 +42,10 @@ jobs:
       GITHUB_LATEST_SHA: ${{ github.event.pull_request.head.sha }}
       NUM_PROCS: ${{ inputs.num_procs }}
     steps:
-      - name: Clean up
-        run: |
-          rm -f /opt/springtail/pids/*
-          rm -f /__w/springtail/springtail/*.{log,gz,xml}
-
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           clean: true
-
-      - name: install-aws-cli-action
-        uses: unfor19/install-aws-cli-action@v1
-        with:
-          version: 2                         # default
-          verbose: false                     # default
-          arch: arm64
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -69,14 +57,23 @@ jobs:
       - name: Prepare Tests
         run: |
           git config --global --add safe.directory /__w/springtail/springtail
+          # Turns off the OTEL in the system.json.settings
+          jq '.otel.enabled = false' system.json.settings > tmp.json && mv tmp.json system.json.settings
+          # Replace the correct `springtail` code directory
+          sed -i -e 's|/home/dev/springtail|/__w/springtail/springtail|g' system.json.settings
           cp system.json.settings system.json.test
           mkdir -p /opt/springtail/pids
           service redis-server start
+          
+          # Copies over the fdw_config file to the designated location
+          conf_file=/etc/postgresql/16/main/postgresql.conf
+          fdw_config_file_path=$(grep -E "^springtail_fdw.config_file_path" $conf_file | awk '{print $3}' | tr -d "'")
+          mkdir -p $(dirname $fdw_config_file_path)
+          cp system.json.settings $fdw_config_file_path
 
       - name: Build
         run: |
           ln -s /home/dev/external external
-          ./clean.sh
           ./debug.sh -j ${NUM_PROCS}
 
       - name: Prepare DB for Unit Tests
@@ -100,8 +97,6 @@ jobs:
           make test ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose --stop-on-failure" 2>&1 | tee tmplog
           
           # List the open listening ports and processes info after tests are done
-          sudo apt update
-          sudo apt install net-tools          
           echo "==== Listening Ports ===="
           netstat -tulnp
           # Show the full launching command of each
@@ -121,9 +116,11 @@ jobs:
           # Grab the short SHA
           _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
           
-          log_file="unit-test-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-$(date +%s).log" 
-          mv tmplog $log_file
-          unit_test_log_s3key="s3://devsupport.springtail.internal/testlogs/$(date +"%Y/%m/%d/%H")/$log_file"
+          _TIMESTAMP=$(date +"%Y-%m-%d-%H-%M-%S")
+          log_file="unit-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log.tar.gz" 
+          tar zcvf $log_file tmplog
+          rm tmplog
+          unit_test_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_PR_ID}/$log_file"
           
           aws s3 cp "$log_file" "$unit_test_log_s3key"
           echo "*** Unit Test Log S3 Key: $unit_test_log_s3key"
@@ -147,7 +144,7 @@ jobs:
         if: success() || failure()      # run this step even if previous step failed
         with:
           name: 'Unit Test Logs'
-          path: debug/unit-test-*.log
+          path: debug/unit-test-*.log.tar.gz
 
       - name: Create Superuser for test
         if: success() || failure()      # run this step even if previous step failed
@@ -174,32 +171,34 @@ jobs:
           then 
             _LOG_FLAG="failed"
           fi
-          # Timestamp
-          _LOG_TIMESTAMP=$(date +%s)
-          _LOG_DATE=$(date +"%Y/%m/%d/%H")
-          
           # Grab the current PR ID
           _LOG_PR_ID="${GITHUB_EVENT_PULL_REQUEST_NUMBER}"
           # Grab the short SHA
           _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
           
-          log_file="integration-test-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-${_LOG_TIMESTAMP}.log" 
-          mv tmplog $log_file
+          _TIMESTAMP=$(date +"%Y-%m-%d-%H-%M-%S")
+          log_file="integration-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log.tar.gz" 
+          tar zcvf $log_file tmplog
+          rm tmplog
           
           # Integration test log
-          integration_test_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_DATE}/$log_file"
+          integration_test_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_PR_ID}/$log_file"
           aws s3 cp "$log_file" "$integration_test_log_s3key"
           echo "*** Integration Test Log S3 Key: $integration_test_log_s3key"
-          
-          # Springtail service log
-          springtail_log_file="springtail-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-${_LOG_TIMESTAMP}.tar.gz"
-          output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../debug)
-          fname=$(echo $output  | cut -f2 -d':' | xargs | head -1)
-          mv $fname $springtail_log_file
-          springtail_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_DATE}/$springtail_log_file"
-          aws s3 cp "$springtail_log_file" "$springtail_log_s3key"
-          echo "*** Springtail Log S3 Key: $springtail_log_s3key"
 
+          # Only upload Springtail logs if the _LOG_FLAG is 'failed'
+          if [ "$_LOG_FLAG" = "failed" ]; then
+            # Springtail service log
+            echo "Integration test failed, uploading Springtail logs..."
+            springtail_log_file="springtail-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.tar.gz"
+            output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../debug)
+            fname=$(echo $output  | cut -f2 -d':' | xargs | head -1)
+            mv $fname $springtail_log_file
+            springtail_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_PR_ID}/${springtail_log_file}"
+            aws s3 cp "$springtail_log_file" "$springtail_log_s3key"
+            echo "*** Springtail Log S3 Key: $springtail_log_s3key"
+          fi
+          
       - name: Integration Test Report
         uses: dorny/test-reporter@v1
         if: success() || failure()                         # run this step even if previous step failed
@@ -212,7 +211,7 @@ jobs:
         if: success() || failure()      # run this step even if previous step failed
         with:
           name: 'Integration Test Logs'
-          path: ./python/testing/integration-test-*.log
+          path: ./python/testing/integration-test-*.log.tar.gz
 
       - uses: actions/upload-artifact@v4
         if: success() || failure()      # run this step even if previous step failed

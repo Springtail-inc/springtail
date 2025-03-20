@@ -5,6 +5,7 @@
 
 #include <pg_log_mgr/pg_log_coordinator.hh>
 #include <pg_log_mgr/pg_log_mgr.hh>
+#include <pg_log_mgr/xid_ready.hh>
 
 #include <write_cache/write_cache_server.hh>
 
@@ -16,11 +17,6 @@ namespace springtail::pg_log_mgr {
         std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
         redis_cache->remove_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
 
-        // shutdown the write cache thread
-        WriteCacheServer::get_instance()->stop();
-        _write_cache_thread.join();
-        WriteCacheServer::shutdown();
-
         // shut down all log managers
         std::unique_lock lock(_mutex);
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Shutting down {} log mgrs", _log_mgrs.size());
@@ -29,9 +25,13 @@ namespace springtail::pg_log_mgr {
             lm.second->join();
         }
         lock.unlock();
+
+        // stop committer thread
+        _committer->shutdown();
+        _committer_thread.join();
     }
 
-    PgLogCoordinator::PgLogCoordinator() : _shutdown_counter(1)
+    PgLogCoordinator::PgLogCoordinator()
     {
         _cache_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [this](const std::string &path, const nlohmann::json &new_value) -> void {
@@ -64,6 +64,9 @@ namespace springtail::pg_log_mgr {
         // read instance config
         Properties::get_primary_db_config(_host, _port, _user_name, _password);
 
+        // initialize committer queue
+        _committer_queue = std::make_shared<ConcurrentQueue<committer::XidReady>>();
+
         // read log mgr config
         nlohmann::json log_mgr_config = Properties::get(Properties::LOG_MGR_CONFIG);
         auto optional_repl_log = Json::get<std::string>(log_mgr_config, "replication_log_path");
@@ -74,6 +77,10 @@ namespace springtail::pg_log_mgr {
         } else {
             SPDLOG_ERROR("Error when reading pg_log_mgr config");
         }
+
+        // Start the committer thread
+        _committer = std::make_shared<springtail::committer::Committer>(1, _committer_queue);
+        _committer_thread = std::thread(&springtail::committer::Committer::run, _committer);
 
         // get instance id
         _db_instance_id = Properties::get_db_instance_id();
@@ -86,12 +93,7 @@ namespace springtail::pg_log_mgr {
             uint64_t db_id = db.first;
             _add_database(db_id);
         }
-
-        // create a thread for the write cache
-        _write_cache_thread = std::thread([](){
-            WriteCacheServer::get_instance()->startup();
-        });
-   }
+    }
 
     void
     PgLogCoordinator::_add_database(uint64_t db_id)
@@ -115,7 +117,7 @@ namespace springtail::pg_log_mgr {
         std::unique_lock lock(_mutex);
 
         // create log mgr
-        PgLogMgrPtr log_mgr = std::make_shared<PgLogMgr>(db_id, repl_log_path, xact_log_path, _host, db_name, _user_name, _password, pub_name, slot_name, _port);
+        PgLogMgrPtr log_mgr = std::make_shared<PgLogMgr>(db_id, repl_log_path, xact_log_path, _host, db_name, _user_name, _password, pub_name, slot_name, _port, _committer_queue);
         _log_mgrs[db_id] = log_mgr;
 
         lock.unlock();

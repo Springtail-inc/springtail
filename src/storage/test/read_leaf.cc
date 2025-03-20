@@ -1,4 +1,4 @@
-#include <common/common.hh>
+#include <common/init.hh>
 
 #include <storage/csv_field.hh>
 #include <storage/btree.hh>
@@ -10,8 +10,11 @@ int
 main(int argc,
      char *argv[])
 {
-    springtail_init();
-    
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<IOMgrRunner>());
+    springtail_init(runners);
+
     // construct a schema for testing
     std::vector<SchemaColumn> columns({
             { "table_id", 0, SchemaType::UINT64, 0, false },
@@ -36,4 +39,5 @@ main(int argc,
         ++count;
     }
     std::cout << count << std::endl;
+    springtail_shutdown();
 }

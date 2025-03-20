@@ -1,6 +1,5 @@
 #pragma once
 
-#include <iostream>
 #include <fstream>
 #include <cstdint>
 #include <cstring>
@@ -11,10 +10,6 @@ namespace springtail
     /** Defined by CMake pass in with -D */
     #if !defined(CXX_BYTE_ORDER)
     #error Error CXX_BYTE_ORDER not defined
-    #endif
-
-    #ifndef UINT64CONST
-    #define UINT64CONST(c) UINT64_C(c)
     #endif
 
     #if CXX_BYTE_ORDER == BIG_ENDIAN
@@ -33,33 +28,19 @@ namespace springtail
     static inline uint16_t
     pg_bswap16(uint16_t x)
     {
-        return
-            ((x << 8) & 0xff00) |
-            ((x >> 8) & 0x00ff);
+        return __builtin_bswap16(x);
     }
 
     static inline uint32_t
     pg_bswap32(uint32_t x)
     {
-        return
-            ((x << 24) & 0xff000000) |
-            ((x << 8) & 0x00ff0000) |
-            ((x >> 8) & 0x0000ff00) |
-            ((x >> 24) & 0x000000ff);
+        return __builtin_bswap32(x);
     }
 
     static inline uint64_t
     pg_bswap64(uint64_t x)
     {
-        return
-            ((x << 56) & UINT64CONST(0xff00000000000000)) |
-            ((x << 40) & UINT64CONST(0x00ff000000000000)) |
-            ((x << 24) & UINT64CONST(0x0000ff0000000000)) |
-            ((x << 8) & UINT64CONST(0x000000ff00000000)) |
-            ((x >> 8) & UINT64CONST(0x00000000ff000000)) |
-            ((x >> 24) & UINT64CONST(0x0000000000ff0000)) |
-            ((x >> 40) & UINT64CONST(0x000000000000ff00)) |
-            ((x >> 56) & UINT64CONST(0x00000000000000ff));
+        return __builtin_bswap64(x);
     }
 
     #define pg_hton16(x)        pg_bswap16(x)
@@ -210,7 +191,7 @@ namespace springtail
 
     /** postgres command uses time as defined since 01/01/2000 00:00:00
         this is the number of msec from 1970 to 2000 */
-    static const int64_t MSEC_SINCE_Y2K = 946684800000L;
+    static const int64_t MSEC_SINCE_Y2K = 946684800000LL;
 
     /**
      * @brief Get number milliseconds since 01/01/2000 00:00

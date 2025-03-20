@@ -1,0 +1,115 @@
+#pragma once
+
+#include <common/common.hh>
+#include <fmt/ranges.h>
+#include <proto/pg_copy_table.pb.h>
+
+namespace springtail::committer {
+
+    /**
+     * Object used to communicate which XID the LogParser has completed so that the Committer can
+     * begin operation.  Passed via a Redis queue.
+     */
+    class XidReady {
+    public:
+        /**
+         * A sub-class holding data used by the XACT_MSG type.
+         */
+        class XactMsg {
+        public:
+            explicit XactMsg(uint64_t xid)
+                : _xid(xid)
+            { }
+
+            uint64_t xid() const {
+                return _xid;
+            }
+
+        private:
+            uint64_t _xid;
+        };
+
+        /**
+         * A sub-class holding data used by the TABLE_SYNC_SWAP and TABLE_SYNC_COMMIT types.
+         */
+        class SwapMsg {
+        public:
+            using TableInfo = std::pair<int32_t, std::shared_ptr<proto::CopyTableInfo>>;
+
+            SwapMsg(uint64_t xid, std::vector<TableInfo> &&tids)
+                : _xid(xid),
+                  _tids(tids)
+            { }
+
+            const uint64_t xid() const {
+                return _xid;
+            }
+
+            const std::vector<TableInfo> &tids() const {
+                return _tids;
+            }
+
+        private:
+            uint64_t _xid;
+            std::vector<TableInfo> _tids;
+        };
+
+        /**
+         * Type enum for the various XidReady messages to the Committer.
+         */
+        enum Type : char {
+            XACT_MSG = 'X',
+            TABLE_SYNC_START = 'S',
+            TABLE_SYNC_SWAP = 'W',
+            TABLE_SYNC_COMMIT = 'C'
+        };
+
+        /** Constructor for SWAP and COMMIT messages. */
+        XidReady(const Type &type, uint64_t db_id, SwapMsg &&msg)
+            : _type(type),
+              _db_id(db_id),
+              _msg(msg)
+        {
+            assert(_type == Type::TABLE_SYNC_SWAP || _type == Type::TABLE_SYNC_COMMIT);
+        }
+
+        /** Constructor for TABLE_SYNC_START messages. */
+        explicit XidReady(uint64_t db_id)
+            : _type(Type::TABLE_SYNC_START),
+              _db_id(db_id)
+        { }
+
+        /** Constructor for messages that are XACT_MSG. */
+        XidReady(uint64_t db_id, XactMsg &&msg)
+            : _type(Type::XACT_MSG),
+              _db_id(db_id),
+              _msg(msg)
+        { }
+
+        /** A getter for the type. */
+        Type type() const {
+            return _type;
+        }
+
+        /** A getter for the database ID. */
+        uint64_t db() const {
+            return _db_id;
+        }
+
+        /** A getter for the XactMsg. */
+        const XactMsg &xact() const {
+            return std::get<XactMsg>(*_msg);
+        }
+
+        /** A getter for the SwapMsg. */
+        const SwapMsg &swap() const {
+            return std::get<SwapMsg>(*_msg);
+        }
+
+    private:
+        Type _type; ///< The message type.
+        uint64_t _db_id; ///< The database ID.
+        std::optional<std::variant<XactMsg, SwapMsg>> _msg; ///< The underlying message data.
+    };
+
+}

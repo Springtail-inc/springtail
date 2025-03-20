@@ -1,8 +1,10 @@
 #include <boost/thread.hpp>
 
+#include <common/service_register.hh>
 #include <common/singleton.hh>
-#include <garbage_collector/xid_ready.hh>
+#include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
+#include <proto/pg_copy_table.pb.h>
 
 namespace springtail::pg_log_mgr {
     /**
@@ -13,12 +15,21 @@ namespace springtail::pg_log_mgr {
     public:
         /**
          * Marks that the LogParser has issued a resync request for the given table so that
-         * mutations can be ignored.  This record is replaced by a full XidRecord when
-         * add_sync() is called from the TABLE_SYNC_MSG message coming through the log.
+         * mutations can be ignored.  Once picked up by the copy thread, it is moved to the inflight
+         * map.
          *
          * @return true if this is the first table from this sync-set
          */
-        bool mark_resync(uint64_t db_id, uint64_t table_id);
+        bool mark_resync(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+
+        /**
+         * Marks that the coppy thread has started the COPY request for this table.  This record is
+         * replaced by a full XidRecord when add_sync() is called from the TABLE_SYNC_MSG message
+         * coming through the log.
+         *
+         * @return true if this is the first table from this sync-set
+         */
+        void mark_inflight(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
         /**
          * Add the metadata for a given table sync into the tracker.
@@ -33,14 +44,14 @@ namespace springtail::pg_log_mgr {
          * @param pg_xid The pg_xid of the current transaction.
          * @return An optional XidReady containing the swap/commit details if available.
          */
-        std::optional<gc::XidReady> check_commit(uint64_t db_id, uint32_t pg_xid);
+        std::shared_ptr<committer::XidReady> check_commit(uint64_t db_id, uint32_t pg_xid);
 
         /**
          * Clears any tables that were part of the swap/commit.
          * @param db_id The database to clear.
          * @param commit_msg The XidReady containing the swap/commit details.
          */
-        void clear_tables(uint64_t db_id, const gc::XidReady &commit_msg);
+        void clear_tables(uint64_t db_id, const committer::XidReady &commit_msg);
 
         /**
          * Remove a given table from the sync tracker.  Called after we have passed all of the
@@ -58,6 +69,8 @@ namespace springtail::pg_log_mgr {
         bool should_skip(uint64_t db_id, uint64_t table_id, uint32_t pg_xid) const;
 
     private:
+        using TablePair = std::pair<int32_t, std::shared_ptr<proto::CopyTableInfo>>;
+
         /**
          * Internal class representing the XID metadata for an individual table sync.
          */
@@ -107,7 +120,7 @@ namespace springtail::pg_log_mgr {
             /**
              * Retrieve the list of tables that were part of this sync.
              */
-            const std::vector<int32_t> &tids() const {
+            const std::vector<TablePair> &tids() const {
                 return _tids;
             }
 
@@ -122,7 +135,7 @@ namespace springtail::pg_log_mgr {
             uint32_t _pg_xid; ///< The PG xid at which the sync occurred
             uint32_t _xmax; ///< The XMAX at postgres for the sync transaction
             std::set<uint32_t> _inflight; ///< The in-flight PG xids for the sync txn
-            std::vector<int32_t> _tids; ///< The table ids being synced
+            std::vector<TablePair> _tids; ///< The table ids being synced and their associated RPC data
         };
 
     private:
@@ -138,9 +151,32 @@ namespace springtail::pg_log_mgr {
         /** db -> target XID of sync. */
         std::map<uint64_t, uint64_t> _target_xid_map;
 
-        /** db-> table indicating that a resync was issued but we haven't seen the
-            TABLE_SYNC_MSG log entry for the table yet. */
-        std::map<uint64_t, std::set<uint64_t>> _resync_map;
+        /** db-> table indicating that a resync was issued but it hasn't been picked up by the copy
+            thread yet. */
+        std::map<uint64_t, std::map<uint64_t, std::set<XidLsn>>> _resync_map;
+
+        /** db-> table indicating that a copy for the table is in-flight but hasn't completed,
+            meaning we haven't seen the TABLE_SYNC_MSG log entry for the table yet. */
+        std::map<uint64_t, std::set<uint64_t>> _inflight_map;
     };
+
+    class SyncTrackerRunner : public ServiceRunner {
+    public:
+        SyncTrackerRunner() : ServiceRunner("SyncTracker") {}
+
+        ~SyncTrackerRunner() override = default;
+
+        bool start() override
+        {
+            SyncTracker::get_instance();
+            return true;
+        }
+
+        void stop() override
+        {
+            SyncTracker::shutdown();
+        }
+    };
+
 }
 

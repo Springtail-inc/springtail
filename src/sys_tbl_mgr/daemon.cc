@@ -1,22 +1,18 @@
+#include <unistd.h>
+
 #include <iostream>
 
 #include <boost/program_options.hpp>
-
-#include <common/common.hh>
+#include <common/init.hh>
+#include <sys_tbl_mgr/schema_mgr.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 #include <sys_tbl_mgr/server.hh>
 
 using namespace springtail;
 
-namespace {
-    void
-    handle_sigint(int signal)
-    {
-        sys_tbl_mgr::Server::get_instance()->stop();
-    }
-}
-
-
-int main(int argc, char *argv[]) {
+int
+main(int argc, char *argv[])
+{
     namespace po = boost::program_options;
     po::options_description desc("Allowed options");
     desc.add_options()("help,h", "Help message.");
@@ -36,15 +32,18 @@ int main(int argc, char *argv[]) {
     if (vm.count("daemonize")) {
         pidfile = "sys_tbl_mgr.pid";
     }
-    springtail_init("sys_tbl_mgr", pidfile);
 
-    // register the SIGINT handler
-    std::signal(SIGINT, handle_sigint);
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<IOMgrRunner>());
+    runners->emplace_back(std::make_unique<SchemaMgrRunner>());
+    runners->emplace_back(std::make_unique<TableMgrRunner>());
+    runners->emplace_back(std::make_unique<sys_tbl_mgr::SysTblMgrRunner>());
 
-    // start the server
-    sys_tbl_mgr::Server::get_instance()->startup();
+    springtail_init_daemon(runners, "sys_tbl_mgr", pidfile);
 
-    // shutdown the server
-    sys_tbl_mgr::Server::shutdown();
+    springtail_daemon_run();
+
+    springtail_shutdown();
     return 0;
 }

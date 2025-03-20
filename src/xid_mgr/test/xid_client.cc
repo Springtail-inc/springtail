@@ -1,7 +1,7 @@
 #include <iostream>
 #include <boost/program_options.hpp>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/properties.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
@@ -13,10 +13,14 @@ main(int argc, char **argv)
 {
     bool get = false;
     bool set = false;
+    bool schema_change = false;
     uint64_t xid = 0;
     uint64_t db_id = 1;
 
-    springtail_init();
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
+    springtail_init(runners);
 
     // parse the arguments
     namespace po = boost::program_options;
@@ -26,6 +30,8 @@ main(int argc, char **argv)
     desc.add_options()("set,s", "Set latest committed xid");
     desc.add_options()("dbid,d", po::value<uint64_t>(&db_id)->default_value(1), "DB ID.");
     desc.add_options()("xid,x", po::value<uint64_t>(&xid)->default_value(0), "Xid to set");
+    desc.add_options()("change,c", po::value<bool>(&schema_change)->default_value(false),
+        "Has schema change (for testing set command so that the new xid is recorded in history)");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -66,9 +72,9 @@ main(int argc, char **argv)
 
     if (set) {
         // set the xid
-        xid_mgr->commit_xid(db_id, xid, false);
+        xid_mgr->commit_xid(db_id, xid, schema_change);
     }
 
-    XidMgrClient::shutdown();
+    springtail_shutdown();
     return 0;
 }

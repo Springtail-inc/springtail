@@ -1,5 +1,7 @@
 find_package(Boost COMPONENTS program_options REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(gRPC CONFIG REQUIRED)
+find_package(Protobuf CONFIG REQUIRED)
 
 # source files
 set(XID_MGR_SOURCES
@@ -7,14 +9,27 @@ set(XID_MGR_SOURCES
     xid_mgr_server.cc
     xid_mgr_service.cc
     xid_partition.cc
+    xid_mgr_subscriber.cc
 )
 
 # add the library target
 add_library(springtail_xid_mgr ${XID_MGR_SOURCES})
-target_include_directories(springtail_xid_mgr PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(springtail_xid_mgr
+    PUBLIC
+    ${CMAKE_BINARY_DIR}/src  # For generated protobuf files
+    PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+)
 target_link_libraries(springtail_xid_mgr
-    PUBLIC springtail_common
-    PRIVATE thrift_xid_mgr nlohmann_json::nlohmann_json
+    PUBLIC
+    springtail_common
+    springtail_grpc
+    springtail_redis
+    PRIVATE
+    proto_xid_manager
+    nlohmann_json::nlohmann_json
+    gRPC::grpc++
+    protobuf::libprotobuf
 )
 
 add_executable(xid_mgr_daemon xid_mgr_daemon.cc)
@@ -30,14 +45,12 @@ add_executable(threaded_test test/threaded_test.cc)
 target_include_directories(threaded_test PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
 target_link_libraries(threaded_test
     PUBLIC springtail_common
+           springtail_test
            springtail_xid_mgr
     PRIVATE Boost::program_options
             GTest::gtest_main
 )
 add_dsymutil_command(threaded_test)
-
-# hook tests into gtest framework
-gtest_discover_tests(threaded_test)
 
 add_executable(xid_client test/xid_client.cc)
 target_include_directories(xid_client PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
@@ -55,6 +68,28 @@ target_link_libraries(xid_dump
     PRIVATE Boost::program_options
 )
 add_dsymutil_command(xid_dump)
+
+add_executable(test_ssl test/test_ssl.cc)
+target_include_directories(test_ssl
+    PUBLIC
+    ${CMAKE_BINARY_DIR}/src # for generated protobuf files
+    PRIVATE
+    ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH}
+)
+target_link_libraries(test_ssl
+    PUBLIC
+    springtail_common
+    springtail_test
+    springtail_xid_mgr
+    PRIVATE
+    Boost::program_options
+    GTest::gtest_main
+)
+add_dsymutil_command(test_ssl)
+
+# gtests
+gtest_discover_tests(threaded_test)
+gtest_discover_tests(test_ssl)
 
 # install daemon to install directory
 install(TARGETS xid_mgr_daemon RUNTIME DESTINATION bin/system)

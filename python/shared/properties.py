@@ -1,10 +1,15 @@
 import json
-import redis
 import sys
 import os
 import time
 import logging
+from redis import Redis
+from typing import Optional, Dict
 from common import parse_bool
+from aws import AwsHelper
+
+# AWS secret manager secret name for database users
+DB_USERS_SECRET = "sk/{}/{}/aws/dbi/{}/primary_db_password"
 
 class Properties:
     def __init__(self, config_file=None, load_redis=False) -> None:
@@ -13,7 +18,7 @@ class Properties:
 
         if load_redis:
             try:
-                self.__load_redis(config_file)
+                self._load_redis(config_file)
             except KeyError as e:
                 raise Exception(f'JSON key error while loading redis, missing key: {e}')
 
@@ -22,7 +27,7 @@ class Properties:
         self.cache = {}
 
         if config_file is None and 'SPRINGTAIL_PROPERTIES_FILE' in os.environ:
-            self.config_file = os.environ.get('SPRINGTAIL_PROPERTIES_FILE')
+            config_file = os.environ.get('SPRINGTAIL_PROPERTIES_FILE')
 
         if config_file:
             # remove the environment variable; prevents daemons from reloading redis
@@ -46,8 +51,15 @@ class Properties:
                 self.redis_ssl = system_json['redis']['ssl'] if 'ssl' in system_json['redis'] else False
                 self.db_instance_id = str(system_json['org']['db_instance_id'])
                 self.fdw_id = system_json['org']['fdw_id']
-                self.replication_user_password = system_json['org']['replication_user_password']
                 self.fdw_user_password = system_json['org']['fdw_user_password']
+
+                # for test env, replication user and password are set in system.json
+                self.replication_user = system_json['org']['replication_user']
+                self.replication_user_password = system_json['org']['replication_user_password']
+
+                # not in config file, but will be set in production env
+                self.instance_key = None
+                self.service_name = None
 
                 # set the environment variables
                 env_vars = {
@@ -65,8 +77,8 @@ class Properties:
                     'MOUNT_POINT': system_json['fs']['mount_point'],
                     'LUSTRE_MOUNT_NAME': system_json['fs']['mount_name'],
                     'LUSTRE_DNS_NAME': system_json['fs']['dns_name'],
-                    'REPLICATION_USER_PASSWORD': self.replication_user_password,
-                    'FDW_USER_PASSWORD': self.fdw_user_password
+                    'FDW_USER_PASSWORD': self.fdw_user_password,
+                    'REPLICATION_USER_PASSWORD': self.replication_user_password
                 }
 
                 for (key, value) in env_vars.items():
@@ -78,20 +90,43 @@ class Properties:
         else:
             # otherwise, read in redis settings from environment
             self.redis_host = os.environ.get('REDIS_HOST', 'localhost')
-            self.redis_port = os.environ.get('REDIS_PORT', 6379)
+            self.redis_port = int(os.environ.get('REDIS_PORT', 6379))
             self.redis_user = os.environ.get('REDIS_USER', 'default')
             self.redis_ssl = parse_bool(os.environ.get('REDIS_SSL', '0'))
             self.redis_password = os.environ.get('REDIS_PASSWORD', None)
-            self.redis_data_db = os.environ.get('REDIS_USER_DATABASE_ID', 1)
-            self.redis_config_db = os.environ.get('REDIS_CONFIG_DATABASE_ID', 0)
+            self.redis_data_db = int(os.environ.get('REDIS_USER_DATABASE_ID', 1))
+            self.redis_config_db = int(os.environ.get('REDIS_CONFIG_DATABASE_ID', 0))
             self.redis_ssl = parse_bool(os.environ.get('REDIS_SSL', 'false'))
             self.db_instance_id = os.environ.get('DATABASE_INSTANCE_ID', None)
-            self.replication_user_password = os.environ.get('REPLICATION_USER_PASSWORD', None)
             self.fdw_user_password = os.environ.get('FDW_USER_PASSWORD', None)
             self.fdw_id = os.environ.get('FDW_ID', None)
+            self.org_id = os.environ.get('ORGANIZATION_ID', None)
+            self.account_id = os.environ.get('ACCOUNT_ID', None)
 
-        self.redis = redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db, ssl=self.redis_ssl,
-                                       username=self.redis_user, password=self.redis_password, encoding="utf-8", decode_responses=True)
+            # not in config file, but will be set in production env
+            self.instance_key = os.environ.get('INSTANCE_KEY', None)
+            self.service_name = os.environ.get('SERVICE_NAME', None)
+
+            # fetch replication user from aws secrets manager
+            self.aws = AwsHelper()
+            (self.replication_user, self.replication_user_password) = self._get_replication_user_from_aws()
+
+        self.redis = Redis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db, ssl=self.redis_ssl,
+                           username=self.redis_user, password=self.redis_password, encoding="utf-8", decode_responses=True)
+
+    def _get_replication_user_from_aws(self) -> tuple[str, str]:
+        """Get the replication user and password from AWS Secrets Manager."""
+        secret = DB_USERS_SECRET.format(self.org_id, self.account_id, self.db_instance_id)
+
+        secret_data = self.aws.get_secret(secret)
+        if secret_data is None:
+            raise Exception(f"Failed to get secret {secret}")
+
+        for user in secret_data:
+            if user['role'] == 'replication':
+                return user['username'], user['password']
+
+        raise Exception("Replication user not found in AWS secrets.")
 
     def get_db_configs(self) -> list[dict]:
         """Return a json array of database instance id:name pairs.
@@ -127,15 +162,19 @@ class Properties:
 
         config = json.loads(self.redis.hget(key, 'primary_db'))
         config['password'] = self.replication_user_password
+        config['replication_user'] = self.replication_user
         self.cache[key] = config
 
         return config
 
-    def get_fdw_config(self) -> dict:
+    def get_fdw_config(self, nocache : bool = False) -> dict:
         """Return a config object for foreign data wrapper configuration."""
         key = str(self.db_instance_id) + ':fdw'
-        if 'fdw_config' in self.cache:
+        if 'fdw_config' in self.cache and not nocache:
             return self.cache['fdw_config']
+
+        if not self.fdw_id:
+            return {}
 
         config = json.loads(self.redis.hget(key, self.fdw_id))
         config['password'] = self.fdw_user_password
@@ -166,6 +205,14 @@ class Properties:
 
         return config
 
+    def get_otel_config(self) -> dict:
+        """Return the OpenTelemetry configuration."""
+        system_config = self.get_system_config()
+        if 'otel' not in system_config:
+            raise Exception('otel not found in system settings')
+        otel = system_config['otel']
+        return otel
+
     def get_mount_path(self) -> str:
         """Return the mount point for the file system."""
         return os.environ.get('MOUNT_POINT')
@@ -188,7 +235,7 @@ class Properties:
         # see common/redis_types.hh PUBSUB_LIVENESS_NOTIFY
         return self.db_instance_id + ':pubsub:liveness_notify'
 
-    def __load_redis(self, config_file=None) -> None:
+    def _load_redis(self, config_file=None) -> None:
         """Load redis based on a system.json file.
         :param config_file: the system.json file to load, if None
         then use SPRINGTAIL_PROPERTIES_FILE
@@ -204,8 +251,9 @@ class Properties:
         self.init(config_file)
 
         # connect to the Redis config server
-        self.redis_data = redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_data_db,
-            username=self.redis_user, password=self.redis_password, encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
+        self.redis_data = Redis(host=self.redis_host, port=self.redis_port, db=self.redis_data_db,
+                                username=self.redis_user, password=self.redis_password,
+                                encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
 
         # load the system settings into Redis
         with open(config_file) as f:
@@ -262,7 +310,7 @@ class Properties:
             self.redis.hset(fdw_key, fdw_id, fdw_json_str)
             self.redis.sadd(fdw_key + '_ids', fdw_id)
 
-    def wait_for_state(self, state, id, timeout=600) -> None:
+    def wait_for_state(self, state : str, id : int, error_state : str = "", timeout : int = 600) -> None:
         """Wait for the database state to reach the desired state.
         :param state: the state to wait for
         :param id: the database id to check
@@ -271,8 +319,11 @@ class Properties:
         key = self.db_instance_id + ':instance_state'
         start = time.time()
         while True:
-            if self.redis.hget(key, str(id)) == state:
+            current_state = self.redis.hget(key, str(id))
+            if current_state == state:
                 return
+            if error_state != "" and current_state == error_state:
+                raise Exception(f"Database {id} entered error state {error_state}")
             time.sleep(1)
             if time.time() - start > timeout:
                 break
@@ -293,14 +344,36 @@ class Properties:
         system_config = self.get_system_config()
         if 'log_path' not in system_config['logging']:
             raise Exception('log_path not found in system settings')
-        log_path = os.path.dirname(system_config['logging']['log_path'])
+
+        log_path = system_config['logging']['log_path']
+
+        # check if the log path is a file; if so return the directory
+        if os.path.isfile(log_path):
+            log_path = os.path.dirname(system_config['logging']['log_path'])
+
         return log_path
 
-    def get_data_redis(self) -> redis.StrictRedis:
+    def get_data_redis(self) -> Redis:
         """Return the data redis object."""
-        return redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_data_db,
-                                 username=self.redis_user, password=self.redis_password,
-                                 encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
+        return Redis(host=self.redis_host, port=self.redis_port, db=self.redis_data_db,
+                     username=self.redis_user, password=self.redis_password,
+                     encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
+
+    def get_config_redis(self) -> Redis:
+        """Return the config redis object."""
+        return Redis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db,
+                     username=self.redis_user, password=self.redis_password,
+                     encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
+
+    def get_hostname(self, type : str) -> str:
+        """Return the hostname for the given type."""
+        key = self.db_instance_id + ':instance_config'
+        return self.redis.hget(key, f'hostname:{type}')
+
+    def get_db_states(self) -> dict:
+        """Return a dictionary of database states."""
+        key = self.db_instance_id + ':instance_state'
+        return self.redis.hgetall(key)
 
     def set_db_state(self, dbname : str, state :str) -> None:
         """Set the state of a database, use cautiously."""
@@ -351,4 +424,67 @@ class Properties:
         # set the state to initialize
         self.redis.hset(self.db_instance_id + ':instance_state', new_id, 'initialize')
 
+    def get_coordinator_state(self) -> str:
+        """Return the coordinator state."""
+        key = self.db_instance_id + ':coordinator_state'
+        if not self.service_name or not self.instance_key:
+            return 'running' # for test env.
+        field_key = self.service_name + ':' + self.instance_key
+        return self.redis.hget(key, field_key)
 
+    def set_coordinator_state(self, state: str) -> None:
+        """Set the coordinator state."""
+        if not self.service_name or not self.instance_key:
+            return # for test env.
+        key = self.db_instance_id + ':coordinator_state'
+        field_key = self.service_name + ':' + self.instance_key
+        self.redis.hset(key, field_key, state)
+
+def main():
+    # init logging for console output
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+    # call the get functions and print the results
+    props = Properties()
+    print(f"db_configs: {props.get_db_configs()}")
+    print(f"db_instance_config: {props.get_db_instance_config()}")
+    if props.get_fdw_id():
+        print(f"fdw_config: {props.get_fdw_config()}")
+    print(f"proxy_config: {props.get_proxy_config()}")
+    print(f"system_config: {props.get_system_config()}")
+    print(f"mount_path: {props.get_mount_path()}")
+    print(f"fdw_id: {props.get_fdw_id()}")
+    print(f"db_instance_id: {props.get_db_instance_id()}")
+    print(f"liveness_hash: {props.get_liveness_hash()}")
+    print(f"liveness_notification_pubsub: {props.get_liveness_notification_pubsub()}")
+    print(f"pid_path: {props.get_pid_path()}")
+    print(f"log_path: {props.get_log_path()}")
+    print(f"ingest_host: {props.get_hostname('ingestion')}")
+    print(f"proxy_host: {props.get_hostname('proxy')}")
+    print(f"coordinator_state: {props.get_coordinator_state()}")
+
+    env_vars = [
+        'ORGANIZATION_ID',
+        'ACCOUNT_ID',
+        'FDW_ID',
+        'DATABASE_INSTANCE_ID',
+        'REDIS_HOSTNAME',
+        'REDIS_PORT',
+        'REDIS_USER',
+        'REDIS_PASSWORD',
+        'REDIS_USER_DATABASE_ID',
+        'REDIS_CONFIG_DATABASE_ID',
+        'REDIS_SSL',
+        'MOUNT_POINT',
+        'LUSTRE_MOUNT_NAME',
+        'LUSTRE_DNS_NAME',
+        'FDW_USER_PASSWORD',
+        'REPLICATION_USER_PASSWORD'
+    ]
+
+    print("\nEnvironment Variables:")
+    for var in env_vars:
+        print(f"{var} = '{os.environ.get(var)}'")
+
+if __name__ == "__main__":
+    main()

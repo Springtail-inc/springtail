@@ -31,6 +31,11 @@ namespace springtail {
             const char *json_obj_name = std::get<2>(variable);
             const char *json_key_name = std::get<3>(variable);
 
+            std::string env_var_name = std::get<0>(variable);
+            std::string env_var_value = env_var == nullptr ? "null" : env_var;
+
+            SPDLOG_INFO("Reading environment variable: {}={}", env_var_name, env_var_value);
+
             if (env_var != nullptr) {
                 switch (type) {
                     case environment::STR:
@@ -57,6 +62,7 @@ namespace springtail {
     {
         // verify we have the redis config
         if (_json.contains(REDIS_CONFIG) == false) {
+            SPDLOG_ERROR("Error creating redis client, config not found");
             throw Error("Error missing redis config in environment\nTry setting SPRINGTAIL_PROPERTIES_FILE to settings.json");
         }
 
@@ -69,7 +75,8 @@ namespace springtail {
             redis_config["config_db"].is_null() ||
             redis_config.contains("db") == false ||
             redis_config["db"].is_null()) {
-            throw Error("Error missing redis config in environment\nTry setting SPRINGTAIL_PROPERTIES_FILE to settings.json");            throw Error("Error missing redis config in environment");
+                SPDLOG_ERROR("Error creating redis, config: {}", _json[REDIS_CONFIG].dump());
+                throw Error("Error missing redis config in environment\nTry setting SPRINGTAIL_PROPERTIES_FILE to settings.json");            throw Error("Error missing redis config in environment");
         }
 
         // extract redis config from json
@@ -166,7 +173,7 @@ namespace springtail {
         RedisClientPtr redis_client = _create_redis_client();
 
         // Clear the Redis data and config databases
-        redis_client->flushdb();
+        redis_client->flushall();
 
         // set db instance id
         uint64_t db_instance_id = system_json["org"]["db_instance_id"].get<uint64_t>();
@@ -288,6 +295,7 @@ namespace springtail {
         }
 
         if (!load_redis || file == nullptr) {
+            SPDLOG_INFO("Loading properties from environment/redis");
             // read the base config from the environment
             _read_environment();
 
@@ -456,20 +464,35 @@ namespace springtail {
             throw RedisNotFoundError("Error missing db_instance_id in redis");
         }
 
-        // get the org config and see if there is a replication_user_password
-        nlohmann::json org = _json[ORG_CONFIG];
-        std::string replication_user_password;
-        if (org.contains("replication_user_password")) {
-            Json::get_to<std::string>(org, "replication_user_password", replication_user_password);
+        SPDLOG_DEBUG("Primary DB Config: {}", primary_db_config.dump());
+
+        // in production, moving away from replication_user creds in redis/env
+        if (!primary_db_config.contains("replication_user")) {
+            // pull from aws secrets mgr, this updates _json[ORG_CONFIG]
+            // with replication_user and replication_user_password
+            _set_replication_user_from_aws();
         }
 
-        if (!replication_user_password.empty()) {
+        // get the org config and see if there is a replication_user_password
+        nlohmann::json org = _json[ORG_CONFIG];
+        if (org.contains("replication_user_password")) {
+            std::string replication_user_password;
+            Json::get_to<std::string>(org, "replication_user_password", replication_user_password);
             primary_db_config["password"] = replication_user_password;
         }
+
+        if (org.contains("replication_user")) {
+            std::string replication_user;
+            Json::get_to<std::string>(org, "replication_user", replication_user);
+            primary_db_config["replication_user"] = replication_user;
+        }
+
         return primary_db_config;
     }
 
-    void Properties::_get_primary_db_config(std::string &host, int &port, std::string &user, std::string &password) {
+    void
+    Properties::_get_primary_db_config(std::string &host, int &port, std::string &user, std::string &password)
+    {
         auto primary_config = _get_primary_db_config();
 
         auto optional_host = Json::get<std::string>(primary_config, "host");
@@ -528,6 +551,38 @@ namespace springtail {
         nlohmann::json props = _json[Properties::LOGGING_CONFIG];
         std::string pid_path = Json::get_or<std::string>(props, Properties::PID_PATH, "/var/springtail/pids");
         return pid_path;
+    }
+
+    void
+    Properties::_set_replication_user_from_aws()
+    {
+        uint64_t org_id;
+        uint64_t account_id;
+        uint64_t db_instance_id;
+
+        Json::get_to<uint64_t>(_json[ORG_CONFIG], "organization_id", org_id);
+        Json::get_to<uint64_t>(_json[ORG_CONFIG], "account_id", account_id);
+        Json::get_to<uint64_t>(_json[ORG_CONFIG], "db_instance_id", db_instance_id);
+
+        std::string key = fmt::format(AwsHelper::DB_USERS_SECRET, org_id, account_id, db_instance_id);
+
+        if (_aws_helper == nullptr) {
+            _aws_helper = std::make_shared<AwsHelper>();
+        }
+
+        nlohmann::json secret = _aws_helper->get_secret(key);
+        CHECK(secret.is_array());
+
+        // iterate through json and find role="replication"
+        for (auto &user: secret) {
+            CHECK(user.is_object());
+            CHECK(user.contains("role"));
+            if (user["role"] == "replication") {
+                _json[ORG_CONFIG]["replication_user"] = user["username"];
+                _json[ORG_CONFIG]["replication_user_password"] = user["password"];
+                break;
+            }
+        }
     }
 
 }

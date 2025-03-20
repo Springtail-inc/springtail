@@ -10,7 +10,7 @@
 #include <storage/io_request.hh>
 #include <storage/io_mgr.hh>
 
-#include <common/common.hh>
+#include <common/init.hh>
 
 /**
  * @brief Helper to generate random data
@@ -141,15 +141,29 @@ sync_write(std::shared_ptr<springtail::IOHandle> fh_write,
     next_offset = write_response->next_offset;
 }
 
-TEST(IOTest, FHTests)
+class IOTest : public ::testing::Test {
+public:
+    static void SetUpTestSuite() {
+        // Init springtail
+        std::optional<std::vector<std::unique_ptr<springtail::ServiceRunner>>> runners;
+        runners.emplace();
+        runners->emplace_back(std::make_unique<springtail::IOMgrRunner>());
+
+        springtail::springtail_init_test(runners);
+    }
+
+    static void TearDownTestSuite() {
+        springtail::springtail_shutdown();
+    }
+};
+
+TEST_F(IOTest, FHTests)
 {
     int files = (springtail::IOMgr::MAX_FILE_OBJECTS * 2);
     int count = (springtail::IOMgr::MAX_FILE_HANDLES_PER_FILE + 2);
     int data_len = 512;
 
     std::vector<std::pair<std::string, uint64_t>> file_offsets;
-
-    springtail::springtail_init();
 
     springtail::IOMgr *IOMgr = springtail::IOMgr::get_instance();
 
@@ -187,11 +201,10 @@ TEST(IOTest, FHTests)
     IOMgr->shutdown(); // don't use IOMgr past this point
 }
 
-TEST(IOTest, IOTests)
+TEST_F(IOTest, IOTests)
 {
     const char *FILE1 = "/tmp/testfile";
     const char *FILE2 = "/tmp/testfile2";
-    springtail::springtail_init();
 
     std::filesystem::remove(FILE1);
     std::filesystem::remove(FILE2);

@@ -35,8 +35,19 @@ class Component:
                  path: str,
                  pid_path: str,
                  args: List[str] = [],
+                 force_shutdown: bool = True,
                  shutdown_signal: ShutdownSignal = ShutdownSignal.SIGTERM):
-        """Initialize a new component"""
+        """Initialize a new component
+
+        Args:
+            name: The name of the component
+            id: The ID of the component
+            path: The path to the component binary
+            pid_path: The path to the PID file
+            args: Additional arguments to pass to the component
+            force_shutdown: Forcefully shutdown the component on startup if running
+            shutdown_signal: The signal to send to the component on shutdown
+        """
         self.name = name
         self.id = id
         self.path = os.path.join(path, name)
@@ -49,25 +60,29 @@ class Component:
         self.state : ComponentState = ComponentState.STOPPED
         self.process: Optional[psutil.Process] = None
         self.pid: Optional[int] = None
-        self.logger = logging.getLogger(f"Component-{self.name}")
+        self.logger = logging.getLogger('springtail')
 
         if not os.path.exists(self.path):
             raise ValueError(f"Component path not found: {self.path}")
 
         # check if component is already running
-        pid = self.__check_running(self.pid)
+        pid = self._check_running(self.pid)
         if pid:
             self.pid = pid
             self.process = psutil.Process(self.pid)
             self.state = ComponentState.RUNNING
+
+            if force_shutdown:
+                self.logger.info(f"Found running component {self.name}: state={self.state}, pid={self.pid}; shutting it down for startup")
+                self.shutdown()
         else:
             self.pid = None
             self.process = None
             self.state = ComponentState.STOPPED
 
-        self.logger.info(f"Initialized component {self.name}: state={self.state}")
+        self.logger.info(f"Initialized component {self.name}: state={self.state}, pid={self.pid}")
 
-    def __check_running(self, pid : Optional[int]) -> Optional[int]:
+    def _check_running(self, pid : Optional[int]) -> Optional[int]:
         """
         Check if the component is already running.
         Returns:
@@ -125,7 +140,7 @@ class Component:
 
         return None
 
-    def id(self) -> str:
+    def get_id(self) -> str:
         """
         Get the ID of the component
         Returns:
@@ -133,7 +148,7 @@ class Component:
         """
         return self.id
 
-    def name(self) -> str:
+    def get_name(self) -> str:
         """
         Get the name of the component
         Returns:
@@ -201,7 +216,7 @@ class Component:
             self.logger.error(f"Failed to start component {self.name}: {str(e)}")
             return False
 
-    def kill(self) -> bool:
+    def kill(self) -> Optional[bool]:
         """
         Kill the component process
         Returns:
@@ -211,7 +226,7 @@ class Component:
         if self.pid:
             try:
                 os.kill(self.pid, signal.SIGKILL)
-                return self.__wait_shutdown()
+                return self._wait_shutdown()
             except Exception as e:
                 self.logger.error(f"Error killing component {self.name}: {str(e)}")
 
@@ -220,18 +235,18 @@ class Component:
             if proc.info['name'] == self.name:
                 try:
                     proc.kill()
-                    return self.__wait_shutdown()
+                    return self._wait_shutdown()
                 except Exception as e:
                     self.logger.error(f"Error killing component {self.name}: {str(e)}")
 
         return False
 
-    def __wait_shutdown(self) -> None:
+    def _wait_shutdown(self) -> bool:
         """Wait for the process to shutdown"""
         # Wait for process to terminate
         shutdown_timeout = time.time() + self.shutdown_timeout
         while time.time() < shutdown_timeout:
-            if self.process.is_running():
+            if self.process is not None and self.process.is_running():
                 time.sleep(0.1)
                 continue
 
@@ -253,7 +268,7 @@ class Component:
 
         return False
 
-    def shutdown(self, sig: int = None) -> bool:
+    def shutdown(self, sig: Optional[int] = None) -> bool:
         """
         Shutdown the component process
         Returns:
@@ -268,10 +283,10 @@ class Component:
 
         try:
             self.state = ComponentState.STOPPING
-            os.kill(self.pid, sig)
+            if self.pid is not None:
+                os.kill(self.pid, sig)
 
-            if self.__wait_shutdown():
-                return True
+            return self._wait_shutdown()
 
         except ProcessLookupError:
             # Process already terminated

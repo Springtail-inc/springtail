@@ -6,6 +6,8 @@
 #include <queue>
 #include <lz4.h>
 
+#include <common/service_register.hh>
+#include <common/singleton.hh>
 #include <common/thread_pool.hh>
 #include <common/object_cache.hh>
 #include <storage/compressors.hh>
@@ -21,7 +23,8 @@ namespace springtail {
     /**
      * @brief Singleton IOMgr; used to retrieve IOSysFHs
      */
-    class IOMgr {
+    class IOMgr : public Singleton<IOMgr> {
+        friend class Singleton<IOMgr>;
     public:
         /** IO Mode for opening a file; APPEND appends to end of file; WRITE allows overwrite */
         enum IO_MODE { READ, APPEND, WRITE };
@@ -31,10 +34,12 @@ namespace springtail {
         static const int MAX_FILE_HANDLES_PER_FILE=4; ///< number of read file handles per file object
 
         /**
-         * @brief getInstance() of singleton IOMgr; create if it doesn't exist.
-         * @return instance of IOMgr
+         * @brief Initialize IOMgr object
+         * @param num_threads     Initial number of threads for thread pool (NUM_THREADS)
+         * @param max_filehandles Initial size of file handle cache (MAX_FILE_OBJECTS)
          */
-        static IOMgr *get_instance();
+         void init(int num_threads, int max_filehandles);
+
 
         /**
          * @brief Open a file, retrieve virtual FH from IOMgr singleton instance
@@ -43,7 +48,7 @@ namespace springtail {
          * @param mode        Mode of file (read, write, append)
          * @param compressed  Is this a compressed file (boolean)
          * @return std::shared_ptr<IOHandle> Ptr to IOHandle representing file
-         */        
+         */
         std::shared_ptr<IOHandle> open(const std::filesystem::path &path, IO_MODE mode, bool compressed);
 
         /**
@@ -53,11 +58,11 @@ namespace springtail {
          * @param mode        Mode of file (read, write, append)
          * @param compressed  Is this a compressed file (boolean)
          * @return std::shared_ptr<IOHandle> Ptr to IOHandle representing file
-         */  
-        std::shared_ptr<IOHandle> open(const char *path, IO_MODE mode, bool compressed);        
+         */
+        std::shared_ptr<IOHandle> open(const char *path, IO_MODE mode, bool compressed);
 
         /**
-         * @brief Remove file at path; 
+         * @brief Remove file at path;
          * NOTE: currently no checking for ongoing IO or locking
          * @param path Path to remove
          */
@@ -68,7 +73,7 @@ namespace springtail {
          * @param request IO request to queue
          */
         inline void queue_request(std::shared_ptr<IORequest> request) {
-            _thread_pool.queue(request);
+            _thread_pool->queue(request);
         }
 
         /**
@@ -84,19 +89,11 @@ namespace springtail {
         std::shared_ptr<IOFile> lookup(const std::filesystem::path &path,
                                        bool compressed);
 
-
-        /**
-         * @brief Shuts down the IOMgr instance by deleting _instance.  It causes the thread pool and LRU cache
-         * destructors to run.  The thread pool will cleanly shutdown all worker threads by enqueing a shutdown
-         * message and waiting for it to complete in all threads.
-         */
-        void shutdown();
-
         /**
          * @brief Resize filehandle cache
          * @param size new size
          */
-        void resize_cache(int size) { _file_cache.resize(size); };
+        void resize_cache(int size) { _file_cache->resize(size); };
 
         //
 
@@ -126,35 +123,35 @@ namespace springtail {
 
     protected:
 
-        static IOMgr *_instance;             ///< static instance (singleton)
-        static std::mutex _instance_mutex;   ///< protects lookup/creation of singleton _instance
-
         /**
          * @brief Construct a new IOMgr object
          * @param num_threads     Initial number of threads for thread pool (NUM_THREADS)
          * @param max_filehandles Initial size of file handle cache (MAX_FILE_OBJECTS)
          */
-        IOMgr(int num_threads, int max_filehandles);
+        IOMgr() = default;
 
         /**
          * @brief Destroy the IOMgr object
          */
-        ~IOMgr(){};
+        ~IOMgr() override = default;
+
+        /**
+         * @brief Shuts down the IOMgr instance by deleting _instance.  It causes the thread pool and LRU cache
+         * destructors to run.  The thread pool will cleanly shutdown all worker threads by enqueing a shutdown
+         * message and waiting for it to complete in all threads.
+         */
+         void _internal_shutdown() override;
 
     private:
-        ThreadPool<IORequest> _thread_pool;  ///< worker thread pool
+        std::shared_ptr<ThreadPool<IORequest>> _thread_pool;  ///< worker thread pool
 
-        LruObjectCache<std::filesystem::path, IOFile> _file_cache; ///< file object cache
+        std::shared_ptr<LruObjectCache<std::filesystem::path, IOFile>> _file_cache; ///< file object cache
 
         std::mutex _cache_mutex;  ///< mutex to protect file object cache lookups/inserts
 
         std::mutex _compressor_mutex; ///< mutex for compressor pool
 
         std::mutex _decompressor_mutex; ///< mutex for decompressor pool
-
-        // delete copy constructor
-        IOMgr(const IOMgr &)          = delete;
-        void operator=(const IOMgr &) = delete;
 
         /** pool of compressor objects -- size matches thread pool size */
         std::queue<std::shared_ptr<Compressor>> _compressors;
@@ -169,5 +166,23 @@ namespace springtail {
          * @return false File handle could not be evicted (busy with IO)
          */
         static bool _evict_callback(std::shared_ptr<IOFile> filehandle);
+    };
+
+    class IOMgrRunner : public ServiceRunner {
+    public:
+        IOMgrRunner() :
+            ServiceRunner("IOMgr") {}
+
+        bool start()
+        {
+            IOMgr::get_instance()->init(IOMgr::NUM_THREADS, IOMgr::MAX_FILE_OBJECTS);
+            return true;
+        }
+
+        void stop()
+        {
+            IOMgr::shutdown();
+        }
+
     };
 }

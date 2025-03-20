@@ -1,37 +1,40 @@
 #pragma once
 
-#include <thrift/sys_tbl_mgr/Service.h>
-#include <thrift/common/thrift_server.hh>
-
+#include <grpc/grpc_server_manager.hh>
+#include <common/service_register.hh>
 #include <common/singleton.hh>
-
-#include <sys_tbl_mgr/service.hh>
 
 namespace springtail::sys_tbl_mgr {
 
-    class Server final:
-        public springtail::thrift::Server<Server,
-                                            ServiceProcessorFactory,
-                                            Service,
-                                            ServiceIfFactory,
-                                            ServiceIf>,
-        public Singleton<Server>
-    {
-        friend class Singleton<Server>;
-    private:
-        /**
-         * @brief Construct a new Write Cache Server object
-         */
-        Server();
+class Server final : public Singleton<Server> {
+    friend class Singleton<Server>;
 
-        /**
-         * @brief Destroy the Write Cache Server object; shouldn't be called directly use shutdown()
-         */
-         ~Server() override = default;
+public:
+    void startup();
 
-        /** shutdown from shutdown(), called once */
-        void _internal_shutdown() override;
+    ~Server() override = default;
 
-    };
+private:
+    Server();
 
-} // namespace springtail
+    GrpcServerManager _grpc_server_manager;
+
+    void _internal_shutdown() override;
+};
+
+class SysTblMgrRunner : public ServiceRunner {
+public:
+    SysTblMgrRunner() :
+        ServiceRunner("SysTblMgr") {}
+
+    bool start() override {
+        Server::get_instance()->startup();
+        return true;
+    }
+
+    void stop() override {
+        Server::shutdown();
+    }
+};
+
+}  // namespace springtail::sys_tbl_mgr

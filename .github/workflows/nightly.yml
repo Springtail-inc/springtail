@@ -41,7 +41,8 @@ jobs:
       # The path to the Springtail logs, keep consistent with the `log_path` inside
       # system.json.test
       SPRINGTAIL_LOG_PATH: /opt/springtail/logs
-
+      SLACK_WEBHOOK_URL: ${{ vars.GENERIC_SLACK_WEBHOOK_URL }}
+      SLACK_CHANNEL: '#nightly-builds'
 
     steps:
       - name: Checkout repository
@@ -235,12 +236,81 @@ jobs:
           # Find the file matching this name exactly: `regression.diff.proxy.out`
           # under the $TMPDIR directory (recursive) and upload it to S3
           regression_diff_file=$(find /tmp -name "regression.diff.proxy.out")
-          regression_diff_s3_key="${TEST_LOG_S3_FULL_PREFIX}/regression.diff.proxy-${GITHUB_SHORT_SHA}-${_TIMESTAMP}.out"  
-          aws s3 cp $regression_diff_file $regression_diff_s3_key
-          echo "*** Proxy Regression Diff S3 Key: $regression_diff_s3_key"
+          # Only upload to S3 if the file exists
+          if [ -f "$regression_diff_file" ]; then
+              regression_diff_s3_key="${TEST_LOG_S3_FULL_PREFIX}/regression.diff.proxy-${GITHUB_SHORT_SHA}-${_TIMESTAMP}.out"  
+              aws s3 cp $regression_diff_file $regression_diff_s3_key
+              echo "*** Proxy Regression Diff S3 Key: $regression_diff_s3_key"
+          fi
+          # Save the 
 
       - name: Package and Upload Build artifacts to S3
         if: success()
         run: |
           ./package.sh
-          aws s3 cp "releases/$(ls -t releases/*.tgz | head -n1)" s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/
+          cd releases
+          PKG_NAME=$(ls -t *.tgz | head -n1)
+          aws s3 cp $PKG_NAME s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/
+          echo "PACKAGE_NAME=s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/${PKG_NAME}" >> $GITHUB_ENV
+
+      - name: Notify Slack on success
+        if: success()
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ env.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "channel": "${{ env.SLACK_CHANNEL}}",
+              "text": ":tada: :tada: Nightly Build & Test Success",
+              "attachments": [
+                {
+                  "color": "#36a64f",
+                  "fields": [
+                    {
+                      "title": "Git SHA",
+                      "value": "${{ github.sha }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Build Artifacts",
+                      "value": "${{ env.PACKAGE_NAME }}",
+                      "short": false
+                    },
+                    {
+                      "title": "Logs",
+                      "value": "s3://${{ env.DEVSUPPORT_BUCKET_NAME }}/${{ env.TEST_LOGS_S3_PREFIX }}/${{ env.CURRENT_DATE }}/"
+                    }
+                  ]
+                }
+              ]
+            }
+
+      - name: Notify Slack on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ env.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "channel": "${{ env.SLACK_CHANNEL }}",
+              "text": ":crying_cat_face: Nightly Build & Test Failed ",
+              "attachments": [
+                {
+                  "color": "#DF3A01",
+                  "fields": [
+                    {
+                      "title": "Git SHA",
+                      "value": "${{ github.sha }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Logs",
+                      "value": "s3://${{ env.DEVSUPPORT_BUCKET_NAME }}/${{ env.TEST_LOGS_S3_PREFIX }}/${{ env.CURRENT_DATE }}/"
+                    }
+                  ]
+                }
+              ]
+            }
+

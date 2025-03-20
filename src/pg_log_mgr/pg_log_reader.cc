@@ -2,13 +2,13 @@
 
 #include <common/logging.hh>
 #include <common/tracing.hh>
-#include <garbage_collector/xid_ready.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
 #include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/sync_tracker.hh>
 #include <pg_repl/pg_msg_stream.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_types.hh>
+#include <pg_repl/table_sync_request.hh>
 #include <storage/xid.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/schema_mgr.hh>
@@ -18,10 +18,18 @@
 
 namespace springtail::pg_log_mgr {
 
-    PgLogReader::PgLogReader(uint64_t db_id, const PgTransactionQueuePtr queue)
+    PgLogReader::PgLogReader(uint64_t db_id, uint32_t queue_size,
+                             const std::filesystem::path &xact_log_path,
+                             const CommitterQueuePtr committer_queue)
         : _db_id(db_id),
-          _queue(queue)
+          _committer_queue(committer_queue),
+          _msg_queue(queue_size),
+          _xact_log_writer(xact_log_path)
     {
+        // retrieve the most recently committed XID at startup
+        _committed_xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
+
+        // add the metric for replication lag tracking
         auto meter = opentelemetry::metrics::Provider::GetMeterProvider()->GetMeter("pg_log_mgr");
         _postgres_log_reader_latencies = std::shared_ptr<opentelemetry::metrics::Histogram<double>>(
             meter
@@ -30,6 +38,15 @@ namespace springtail::pg_log_mgr {
                                         "and when we process it in the log reader",
                                         "ms")
                 .release());
+
+        // start the message processing thread
+        _msg_thread = std::thread(&PgLogReader::_msg_worker, this);
+    }
+
+    PgLogReader::~PgLogReader()
+    {
+        _msg_queue.shutdown(true);
+        _msg_thread.join();
     }
 
     void
@@ -183,7 +200,7 @@ namespace springtail::pg_log_mgr {
             entry.extent = std::make_shared<Extent>(ExtentType{}, 0, entry.schema->row_size());
             entry.start_lsn = _lsn;
         }
-        
+
         // add the mutation to the batch
         auto &&row = entry.extent->append();
         if constexpr (T == PgMsgEnum::INSERT || T == PgMsgEnum::UPDATE) {
@@ -405,20 +422,18 @@ namespace springtail::pg_log_mgr {
                 nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
                 if (action.get<std::string>() == "resync") {
                     // mark the table as syncing to ensure we properly skip messages
-                    bool is_first = SyncTracker::get_instance()->mark_resync(_db, table_msg.oid);
+                    bool is_first = SyncTracker::get_instance()->mark_resync(_db, table_msg.oid, xidlsn);
 
                     // notify the PgLogParser to resync the table
                     auto key = fmt::format(redis::QUEUE_SYNC_TABLES,
                                            Properties::get_db_instance_id(), _db);
-                    RedisQueue<std::string> table_sync_queue(key);
-                    table_sync_queue.push(std::to_string(table_msg.oid));
+                    RedisQueue<TableSyncRequest> table_sync_queue(key);
+                    TableSyncRequest request(table_msg.oid, xidlsn);
+                    table_sync_queue.push(request);
 
                     // notify the Committer to stop committing XIDs
                     if (is_first) {
-                        RedisQueue<gc::XidReady>
-                            committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
-                                                        Properties::get_db_instance_id()));
-                        committer_queue.push(gc::XidReady(_db));
+                        _committer_queue->push(std::make_shared<committer::XidReady>(_db));
                     }
                 } else if (action.get<std::string>() != "no_change") {
                     redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
@@ -480,6 +495,27 @@ namespace springtail::pg_log_mgr {
     }
 
     void
+    PgLogReader::enqueue_msg(PgMsgPtr msg)
+    {
+        _msg_queue.push(msg);
+    }
+
+    void
+    PgLogReader::_msg_worker()
+    {
+        while (!_msg_queue.is_shutdown()) {
+            // Try to get next message from queue, wait up to 1 second
+            auto msg = _msg_queue.pop(1);
+            if (msg == nullptr) {
+                continue;
+            }
+
+            // Process the message
+            _process_msg(msg);
+        }
+    }
+
+    void
     PgLogReader::process_log(const std::filesystem::path &path,
                              uint64_t start_offset,
                              int num_messages)
@@ -497,7 +533,8 @@ namespace springtail::pg_log_mgr {
             pg_msg::MSG_UPDATE,
             pg_msg::MSG_DELETE,
             pg_msg::MSG_TRUNCATE,
-            pg_msg::MSG_MESSAGE // this will capture create_table, drop_table, alter_table, create_index, drop_index
+            pg_msg::MSG_MESSAGE // this will capture create_table, drop_table, alter_table,
+                                // create_index, drop_index
         };
 
         _current_path = path;
@@ -516,7 +553,7 @@ namespace springtail::pg_log_mgr {
                 }
 
                 // process the message
-                _process_msg(msg);
+                this->enqueue_msg(msg);
             }
 
             if (num_messages > 0) {
@@ -651,16 +688,11 @@ namespace springtail::pg_log_mgr {
                                     uint64_t xid)
     {
         // check if we need to perform a table swap / commit before proceeding
-        auto &&xid_msg = SyncTracker::get_instance()->check_commit(db_id, pg_xid);
-        if (xid_msg) {
-            // connect to the committer queue
-            RedisQueue<gc::XidReady>
-                committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
-                                            Properties::get_db_instance_id()));
-
+        auto xid_msg = SyncTracker::get_instance()->check_commit(db_id, pg_xid);
+        if (xid_msg != nullptr) {
             // synchronously issue the swap/commit at the GC-2 prior to processing this xid
-            SPDLOG_DEBUG_MODULE(LOG_GC, "Issue TABLE_SYNC_COMMIT on {} @ {}", db_id, xid);
-            committer_queue.push(*xid_msg);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Issue TABLE_SYNC_COMMIT on {} @ {}", db_id, xid);
+            _committer_queue->push(xid_msg);
 
             // once the swap/commit is complete, we can clear the entry from the sync
             // tracker and continue processing
@@ -674,14 +706,12 @@ namespace springtail::pg_log_mgr {
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Begin: xid={}, xact_lsn={}\n", begin_msg.xid, begin_msg.xact_lsn);
 
         PgTransactionPtr xact = std::make_shared<PgTransaction>(PgTransaction::TYPE_COMMIT);
-        xact->begin_path = _current_path;
-        xact->begin_offset = _reader.header_offset();
         xact->xact_lsn = begin_msg.xact_lsn;
         xact->xid = begin_msg.xid;
         _current_xact = xact;
 
         // prepare a batch for processing
-        _current_batch = std::make_shared<Batch>(_db_id, begin_msg.xid);
+        _current_batch = std::make_shared<Batch>(_db_id, begin_msg.xid, _committer_queue);
         _batch_map.try_emplace(begin_msg.xid, _current_batch);
     }
 
@@ -697,42 +727,49 @@ namespace springtail::pg_log_mgr {
             return;
         }
 
-        assert (xact->type == PgTransaction::TYPE_COMMIT);
+        CHECK_EQ(xact->type, PgTransaction::TYPE_COMMIT);
 
-        // set transaction path and end offset
-        xact->commit_path = _current_path;
-        xact->commit_offset = _reader.offset();
-
-        // update the write cache and system tables as needed
+        // assign a Springtail XID to this transaction
         uint64_t xid = this->get_next_xid();
-        _current_batch->commit(xid, PostgresTimestamp(commit_msg.commit_ts));
+
+        // If the assigned XID is <= the most recently committed XID, then we need to skip this
+        // transaction.  This can occur in the unlikely case that we are performing a log recovery
+        // and the Committer got ahead of the XactLog flushing so that the committed XID is ahead of
+        // the most recently written PGXID -> Springtail XID mapping.
+        if (xid <= _committed_xid) {
+            // we abort this batch since it was already processed
+            _current_batch->abort(PostgresTimestamp(commit_msg.commit_ts));
+        } else {
+            // update the write cache and system tables as needed
+            _current_batch->commit(xid, PostgresTimestamp(commit_msg.commit_ts));
+        }
+
+        // clear the current batch
         _batch_map.erase(xact->xid);
         _current_batch = nullptr;
-
-        // connect to the committer queue
-        RedisQueue<gc::XidReady>
-            committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
-                                        Properties::get_db_instance_id()));
 
         // check if we need to perform a table swap / commit before proceeding
         _check_sync_commit(_db_id, xact->xid, xid);
 
-        // Record latency between postgres commit time and when we process it
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now() -
-            PostgresTimestamp(commit_msg.commit_ts).to_system_time());
-        _postgres_log_reader_latencies->Record(duration.count(), _context);
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR,
-                            "Commit processed {} milliseconds after postgres commit",
-                            duration.count());
+        // write the pg_xid -> xid mapping
+        _xact_log_writer.log(xact->xid, xid);
 
-        // message the Committer
-        SPDLOG_DEBUG_MODULE(LOG_GC, "Issue XID to committer on {} @ {}", _db_id, xid);
-        committer_queue.push(gc::XidReady(_db_id, gc::XidReady::XactMsg(xid)));
+        if (xid > _committed_xid) {
+            // Record latency between postgres commit time and when we process it
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now() -
+                PostgresTimestamp(commit_msg.commit_ts).to_system_time());
+            _postgres_log_reader_latencies->Record(duration.count(), _context);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR,
+                                "Commit processed {} milliseconds after postgres commit",
+                                duration.count());
 
-        // pass the xact to the xact logging thread
-        xact->springtail_xid = xid;
-        _queue->push(xact);
+            // message the Committer
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Issue XID to committer on {} @ {}", _db_id, xid);
+            _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::XactMsg(xid)));
+        }
+
+        // clear the current xact
         _current_xact = nullptr;
     }
 
@@ -751,20 +788,11 @@ namespace springtail::pg_log_mgr {
 
         // new transaction
         PgTransactionPtr xact = std::make_shared<PgTransaction>(PgTransaction::TYPE_COMMIT);
-        xact->begin_path = _current_path;
-        xact->begin_offset = _reader.header_offset();
         xact->xid = start_msg.xid;
         _xact_map.insert({xact->xid, xact});
 
-        PgTransactionPtr stream_xact = std::make_shared<PgTransaction>(PgTransaction::TYPE_STREAM_START);
-        stream_xact->begin_path = _current_path;
-        stream_xact->begin_offset = _reader.header_offset();
-        stream_xact->xid = start_msg.xid;
-
-        _queue->push(stream_xact);
-
         // prepare a batch for processing
-        _current_batch = std::make_shared<Batch>(_db_id, start_msg.xid);
+        _current_batch = std::make_shared<Batch>(_db_id, start_msg.xid, _committer_queue);
         _batch_map.try_emplace(start_msg.xid, _current_batch);
     }
 
@@ -784,26 +812,43 @@ namespace springtail::pg_log_mgr {
         }
 
         PgTransactionPtr xact = itr->second;
-        xact->commit_path = _current_path;
-        xact->commit_offset = _reader.offset();
         xact->xact_lsn = commit_msg.xact_lsn;
 
-        assert (xact->type == PgTransaction::TYPE_COMMIT);
+        CHECK_EQ(xact->type, PgTransaction::TYPE_COMMIT);
 
-        // commit the current batch
+        // assign the transaction a Springtail XID
         uint64_t xid = this->get_next_xid();
-        _current_batch->commit(xid, PostgresTimestamp(commit_msg.commit_ts));
+
+        // If the assigned XID is <= the most recently committed XID, then we need to skip this
+        // transaction.  This can occur in the unlikely case that we are performing a log recovery
+        // and the Committer got ahead of the XactLog flushing so that the committed XID is ahead of
+        // the most recently written PGXID -> Springtail XID mapping.
+        if (xid <= _committed_xid) {
+            // we abort this batch since it was already processed
+            _current_batch->abort(PostgresTimestamp(commit_msg.commit_ts));
+        } else {
+            // update the write cache and system tables as needed
+            _current_batch->commit(xid, PostgresTimestamp(commit_msg.commit_ts));
+        }
+
+        // free the batch
         _batch_map.erase(commit_msg.xid);
 
-        // message the Committer
-        RedisQueue<gc::XidReady> committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
-                                                             Properties::get_db_instance_id()));
-        committer_queue.push(gc::XidReady(_db_id, gc::XidReady::XactMsg(xid)));
+        // write the pg_xid -> xid mapping
+        // note: we do this even if the xact isn't being committed since it is needed for recovery
+        //       in the case of a crash
+        // XXX I'm not sure we should do this in the case where the xact log is ahead of the most
+        //     recently committed XID?  Do we need to truncate it first somehow?
+        _xact_log_writer.log(commit_msg.xid, xid);
 
-        // pass the xact to the xact logging thread
-        xact->springtail_xid = xid;
+        if (xid > _committed_xid) {
+            // message the Committer
+            _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::XactMsg(xid)));
+        }
+
+        // remove the xact from the active map
         _xact_map.erase(itr);
-        _queue->push(xact);
+        _current_batch = nullptr;
     }
 
     void
@@ -821,10 +866,6 @@ namespace springtail::pg_log_mgr {
 
         if (abort_msg.sub_xid == abort_msg.xid) {
             // if sub_xid == xid, then it's a top level xact that aborted
-            // add it to the xact queue for logging
-            PgTransactionPtr xact = itr->second;
-            xact->type = PgTransaction::TYPE_STREAM_ABORT;
-            _queue->push(xact);
             // remove it from the map
             _xact_map.erase(itr);
 
@@ -832,9 +873,6 @@ namespace springtail::pg_log_mgr {
             _current_batch->abort(PostgresTimestamp(abort_msg.abort_ts));
             _batch_map.erase(abort_msg.xid);
         } else {
-            // subtransaction aborted, add to parent xact aborted list
-            itr->second->aborted_xids.insert(abort_msg.sub_xid);
-
             // abort the subtxn
             _current_batch->abort_subtxn(abort_msg.sub_xid, PostgresTimestamp(abort_msg.abort_ts));
             _batch_map.erase(abort_msg.sub_xid);
@@ -864,7 +902,6 @@ namespace springtail::pg_log_mgr {
             xact = itr->second;
             pg_xid_txn = xact->xid;
         }
-        xact->oids.insert(oid);
 
         // check if we should ignore this message
         if (SyncTracker::get_instance()->should_skip(_db_id, oid, pg_xid_txn)) {

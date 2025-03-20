@@ -1,0 +1,17 @@
+[req]
+default_bits = 2048
+prompt = no
+default_md = sha256
+distinguished_name = req_distinguished_name
+req_extensions = v3_req
+
+[req_distinguished_name]
+C = US
+ST = California
+L = San Francisco
+O = Springtail
+CN = springtail_grpc  # Client Common Name
+
+[v3_req]
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = critical, clientAuth

@@ -1,11 +1,12 @@
-#include <common/constants.hh>
+#include <algorithm>
 #include <stdlib.h>
 #include <shared_mutex>
 
 #include <fmt/core.h>
 #include <nlohmann/json.hpp>
 
-#include <common/common.hh>
+#include <common/constants.hh>
+#include <common/init.hh>
 #include <common/exception.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
@@ -14,6 +15,8 @@
 #include <common/redis_types.hh>
 
 #include <redis/redis_ddl.hh>
+
+#include <pg_repl/pg_common.hh>
 
 #include <pg_fdw/exception.hh>
 #include <pg_fdw/pg_fdw_mgr.hh>
@@ -48,18 +51,23 @@ namespace springtail::pg_fdw {
     // The intersection must start at the first index column and be
     // continuous.
     std::vector<ConstQualPtr>
-    _get_index_quals(Index const& idx, List const* qual_list) {
-
+    _get_index_quals(const PgFdwState *state, Index const& idx, List const* qual_list) {
         if (!qual_list) {
             return {};
         }
 
-        auto find_qual = [&qual_list](auto pos) -> ConstQualPtr {
+        auto find_qual = [&state, &qual_list](auto pos) -> ConstQualPtr {
             const ListCell *lc{};
             foreach(lc, qual_list) {
                 ConstQualPtr qual = static_cast<ConstQualPtr>(lfirst(lc));
-                if (PgFdwMgr::_is_type_sortable(qual->base.typeoid, qual->base.op) && 
-                        qual->base.isArray == false &&  
+
+                //must be of the same internal type
+                if (convert_pg_type(state->columns.at(pos).pg_type) != convert_pg_type(qual->base.typeoid)) {
+                    continue;
+                }
+
+                if (PgFdwMgr::_is_type_sortable(qual->base.typeoid, qual->base.op) &&
+                        qual->base.isArray == false &&
                         qual->base.varattno == pos ) {
                     return qual;
                 }
@@ -91,33 +99,37 @@ namespace springtail::pg_fdw {
 
     std::once_flag PgFdwMgr::_init_flag;
 
+    // TODO: convert this class to singleton
     PgFdwMgr*
     PgFdwMgr::_init()
     {
-        elog(NOTICE, "Initializing PgFdwMgr");
-
-        // initialize logging
-        try {
-            springtail_init(PG_FDW_LOG_FILE_PREFIX, std::nullopt, LOG_ALL);
-        } catch (const std::exception &e) {
-            elog(ERROR, "Error initializing logging: %s", e.what());
-        }
-
+        elog(INFO, "Initializing PgFdwMgr");
         _instance = new PgFdwMgr();
-
         return _instance;
     }
 
     /* called from PG_init */
     void
-    PgFdwMgr::fdw_init(const char *config_file)
+    PgFdwMgr::fdw_init(const char *config_file, bool init)
     {
-        if (config_file != nullptr) {
+        if (config_file != nullptr && strlen(config_file) > 0) {
             // set env variables based on redis config
             // we don't reload redis config here, just set the env variables
-            elog(NOTICE, "Setting properties from file: %s", config_file);
+            elog(INFO, "Setting properties from file: %s", config_file);
             Properties::set_env_from_file(config_file);
             ::unsetenv("SPRINGTAIL_PROPERTIES_FILE");
+        }
+
+        if (init) {
+            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+            runners.emplace();
+            runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
+            runners->emplace_back(std::make_unique<GrpcClientRunner<sys_tbl_mgr::Client>>());
+            runners->emplace_back(std::make_unique<IOMgrRunner>());
+            runners->emplace_back(std::make_unique<SchemaMgrRunner>());
+            runners->emplace_back(std::make_unique<TableMgrRunner>());
+
+            springtail_init(runners, false, PG_FDW_LOG_FILE_PREFIX, LOG_ALL);
         }
 
         SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing PgFdwMgr");
@@ -245,7 +257,7 @@ namespace springtail::pg_fdw {
     PgFdwMgr::_set_scan_iterators(PgFdwState *state)
     {
         // this will return a pair of iterators based on the conditions.
-        // for ASC order, scan from iter_start to iter_end with (iter_start++) 
+        // for ASC order, scan from iter_start to iter_end with (iter_start++)
         // for DESC order, scan from iter_end to iter_end with (iter_end--)
         // make sure to handle the special case for NOT_EQUALS while scanning
         if (!state->index.has_value()) {
@@ -284,7 +296,7 @@ namespace springtail::pg_fdw {
                 state->iter_start.emplace(state->table->begin(state->index->id));
                 state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id));
                 break;
-            case NOT_EQUALS: 
+            case NOT_EQUALS:
                 if (state->scan_asc) {
                     state->iter_start.emplace(state->table->begin(state->index->id));
                     state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id));
@@ -305,7 +317,7 @@ namespace springtail::pg_fdw {
                 state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id));
                 state->iter_end.emplace(state->table->end(state->index->id));
                 break;
-            case UNSUPPORTED: 
+            case UNSUPPORTED:
                 CHECK(false);
                 break;
         }
@@ -320,7 +332,7 @@ namespace springtail::pg_fdw {
             std::vector<ConstQualPtr> best;
 
             for (auto const& idx: state->indexes) {
-                auto index_quals = _get_index_quals(idx, qual_list);
+                auto index_quals = _get_index_quals(state, idx, qual_list);
                 if (index_quals.empty()) {
                     continue;
                 }
@@ -342,7 +354,7 @@ namespace springtail::pg_fdw {
             // Always use the sortgroup index
             state->index = *state->sortgroup_index;
 
-            auto index_quals = _get_index_quals(*state->sortgroup_index, qual_list);
+            auto index_quals = _get_index_quals(state, *state->sortgroup_index, qual_list);
             if (!index_quals.empty()) {
                 state->filtered_quals = std::move(index_quals);
             }
@@ -541,7 +553,7 @@ namespace springtail::pg_fdw {
                 }
 
                 if (!(pathkey->nulls_first? pathkey->reversed: !pathkey->reversed)) {
-                    SPDLOG_DEBUG_MODULE(LOG_FDW, "This combination isn't supported: null_first={}, reversed={}", 
+                    SPDLOG_DEBUG_MODULE(LOG_FDW, "This combination isn't supported: null_first={}, reversed={}",
                             pathkey->nulls_first, pathkey->reversed);
                     return {};
                 }
@@ -551,18 +563,23 @@ namespace springtail::pg_fdw {
             pg_state->scan_asc = (reversed == false);
         }
 
-        auto check_index = [](const Index& idx, const List* sortgroup) -> List* {
+        auto check_index = [pg_state](const Index& idx, const List* sortgroup) -> List* {
             int i = 0;
-            ListCell   *lc;
+            ListCell *lc;
             std::vector<DeparsedSortGroup*> keys;
             foreach(lc, sortgroup) {
                 DeparsedSortGroup *pathkey = static_cast<DeparsedSortGroup *>(lfirst(lc));
-                int attnum = pathkey->attnum;
 
                 // must match sortgroup completely
-                if (i == idx.columns.size() || attnum != idx.columns[i].position) {
+                if (i == idx.columns.size() || pathkey->attnum != idx.columns[i].position) {
                     return {};
                 }
+
+                CHECK(idx.columns[i].position > 0);
+                if (!_is_type_sortable(pg_state->columns.at(idx.columns[i].position).pg_type, LESS_THAN)) {
+                    return {};
+                }
+
                 keys.push_back(pathkey);
                 i++;
             }
@@ -627,7 +644,7 @@ namespace springtail::pg_fdw {
                 attnums = list_append_unique_int(attnums, col.position);
             }
             item = lappend(item, attnums);
-            
+
             double rows = 1; // number of rows with unique key
             if (!idx.is_unique) {
                 rows = 100; //just some number to indicate different cost
@@ -884,6 +901,7 @@ namespace springtail::pg_fdw {
                                         const std::string &db_name,
                                         uint64_t schema_xid)
     {
+        auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
         List                 *commands = NIL;
         std::set<std::string> table_set;
 
@@ -1047,13 +1065,20 @@ namespace springtail::pg_fdw {
                 current_table = std::get<1>(it->second);
             }
 
+            std::string column_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row));
             bool exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(row);
             if (!exists) {
+                auto it = std::find_if(columns.begin(), columns.end(),
+                [&column_name](const std::tuple<std::string, std::string, bool> &column) {
+                        return std::get<0>(column) == column_name;
+                    });
+                if (it != columns.end()) {
+                    columns.erase(it);
+                }
                 continue;
             }
 
             // add column if it exists
-            std::string column_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row));
             int32_t pg_type(fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(row));
             bool nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(row);
 
@@ -1094,6 +1119,9 @@ namespace springtail::pg_fdw {
             case CHAROID:
             case UUIDOID:
                 return true;
+            case NUMERICOID: //DECIMAL(x,y)
+                //TODO: https://linear.app/springtail/issue/SPR-556/
+                return false;
             case VARCHAROID:
             case TEXTOID:
                 // due to different collations/encodings we only support equality for text

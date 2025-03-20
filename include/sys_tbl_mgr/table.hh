@@ -12,6 +12,14 @@
 
 namespace springtail {
 
+namespace table_helpers {
+
+/** Constructs the full directory path for a table given the parameters. */
+std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t db_id,
+                                    uint64_t table_id, uint64_t snapshot_xid);
+
+} // namespace table_helpers
+
     /**
      * Structure to hold table statistics.  Currently only holds the row count of the table.
      */
@@ -455,6 +463,13 @@ namespace springtail {
                      const TableMetadata &metadata,
                      ExtentSchemaPtr schema,
                      bool for_gc = false);
+
+        ~MutableTable() {
+            // if we have a dirty, empty page, then evict it
+            if (_empty_page) {
+                _empty_page->evict();
+            }
+        }
 
         /**
          * Returns the file of the raw data associated with the table.

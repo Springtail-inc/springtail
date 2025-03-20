@@ -1,7 +1,7 @@
 #include <fmt/core.h>
 #include <cassert>
 
-#include <common/common.hh>
+#include <common/init.hh>
 #include <common/timestamp.hh>
 #include <common/threaded_test.hh>
 #include <common/tracking_allocator.hh>
@@ -16,11 +16,17 @@ using namespace springtail;
 
 namespace {
     class WriteCacheIndexTest : public ::testing::Test {
-    protected:
-        void SetUp() override {
+    public:
+        static void SetUpTestSuite() {
             // Init springtail
-            springtail_init();
+            springtail_init_test();
+        }
+        static void TearDownTestSuite() {
+            springtail_shutdown();
+        }
+    protected:
 
+        void SetUp() override {
             // Initialize WriteCacheIndex with 4 partitions
             index = std::make_shared<WriteCacheIndex>(4);
         }
