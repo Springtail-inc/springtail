@@ -24,6 +24,7 @@ namespace springtail::pg_proxy {
         "AND d.datistemplate = false;";
 
     static const std::vector<std::string> PASSWORD_TYPE_TO_STR = {
+        "INVALID",
         "TEXT",
         "MD5",
         "SCRAM"
