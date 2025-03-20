@@ -53,21 +53,16 @@ namespace springtail::committer {
         auto it = _work_set.find(key);
         if (it == _work_set.end()) {
             // note: the work item has _ddl.empty() == true
-            // it means to drop the index
-            _work_set[key] = {db_id, xid, {}};
+            // it means to drop the index right away
+            _work_set[key] = {db_id, xid, {}, IndexStatus::Deleting};
             _queue.push(key);
             _cv.notify_one();
         } else {
-            // TODO: we catch the case when the index is dropped in the middle b/c
-            // the case isn't fully supported. The main problem is with managing
-            // XID (finalize) updates.
-            // The issues with XID will need to be resolved anyway for supporting 
-            // asynchronous index updates.
-            // Basically it would assert here if a single XID action contains
-            // DDL's to create an index with index_id=1234.
-            assert(false);
-            // clear DDL, it will tell the worker to cancel the index build
-            it->second._ddl = {};
+            // mark the status as Aborting, it will tell the worker to
+            // cancel the index build / catchup
+            // and proceed for dropping the index
+            it->second._xid = xid;
+            it->second._status = IndexStatus::Aborting;
         }
     }
 
@@ -123,16 +118,16 @@ namespace springtail::committer {
                 _queue.pop();
                 params = _work_set[key];
             }
-            if (!params._ddl.is_null()) {
+            if (params.is_status(IndexStatus::Building)) {
                 _add_to_pending_reconciliation(_build(st, key, params));
             } else {
-                _drop(st, key, params);
+                _add_to_pending_reconciliation(IndexState(nullptr, key, params, std::numeric_limits<uint64_t>::max()));
             }
         }
         SPDLOG_INFO("Indexer thread joined");
     }
 
-    void Indexer::_drop(std::stop_token st, const Key& key, const IndexParams& idx)
+    void Indexer::_drop(const Key& key, const IndexParams& idx)
     {
         assert(idx._ddl.is_null());
 
@@ -274,10 +269,7 @@ namespace springtail::committer {
         std::unique_lock g(_m);
         auto const& params = _work_set[key];
         // index drop requested while we've been building it
-        if (params._ddl.is_null()) {
-            return true;
-        }
-        return false;
+        return params.is_status(IndexStatus::Aborting);
     }
 
     void
@@ -305,8 +297,8 @@ namespace springtail::committer {
         _cv_done.notify_one();
 
         auto client = sys_tbl_mgr::Client::get_instance();
-        if (!work_item._ddl.is_null()) {
-            auto extent_id = root->finalize();
+        auto extent_id = root->finalize();
+        if (work_item.is_status(IndexStatus::Building)) {
             auto meta = client->get_roots(db_id, tid, end_xid);
             meta->roots.emplace_back(key.second, extent_id);
             client->update_roots(db_id, tid, end_xid, *meta);
@@ -314,10 +306,9 @@ namespace springtail::committer {
         } else {
             // the index was deleted while we were building it
             root->truncate();
-            // TODO: figure out out how to change the index state here to DELETED with the same XID
-            assert(work_item._xid > end_xid);
-            XidLsn xid{work_item._xid};
-            client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
+            root->finalize();
+            // XXX: since the root was not added in the first place,
+            // should we record the latest state of the root even if its dropped while building?
         }
 
         // TODO: revisit it when we support asynchronous index builds
@@ -398,44 +389,72 @@ namespace springtail::committer {
     Indexer::_reconcile_index(IndexState& idxState)
     {
         auto [db_id, index_id] = idxState._key;
-        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Index reconciliation in progress: {}:{}", db_id, index_id);
+        auto end_xid = idxState._idx._xid;
+        auto is_fresh_drop = false;
+        auto is_drop_while_processing = false;
+        {
+            std::unique_lock g(_m);
 
-        // index column positions
-        std::vector<uint32_t> idx_cols;
-        for (auto const& col : idxState._idx._ddl["columns"]) {
-            idx_cols.push_back(col["position"]);
+            // fetch the latest state of the work item before we proceed for catchup
+            auto&& work_item = _work_set[idxState._key];
+            end_xid = work_item._xid;
+            // When a fresh work item comes in for drop index
+            // there wont be any DDL
+            is_fresh_drop = work_item.is_status(IndexStatus::Deleting);
+
+            // When drop index request comes in when
+            // we are in the process of building/catching-up
+            // status will denote to proceed for drop
+            is_drop_while_processing = work_item.is_status(IndexStatus::Aborting);
         }
 
-        // Get the next_extent from disk using the stats last offset
-        auto table = TableMgr::get_instance()->get_table(db_id, idxState._tid, idxState._idx._xid);
-        auto next_eid = table->get_stats().end_offset;
-        auto next_page = table->read_page_from_disk(next_eid);
-        auto end_xid = idxState._idx._xid;
+        if (is_fresh_drop) {
+            // Do clear drop index
+            _drop(idxState._key, idxState._idx);
+        } else if (is_drop_while_processing) {
+            // since btree inserts have a possibility of partial flush,
+            // we will do full flush of root once at whichever stage it is in,
+            // truncate and flush again
+            _commit_build(idxState._root, idxState._key, idxState._idx, end_xid);
+        } else {
+            SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Index reconciliation in progress: {}:{}", db_id, index_id);
 
-        while (!next_page->empty()) {
-            end_xid = next_page->header().xid;
-            // Get the previous_extent_id from next_extent header
-            // and fetch the extent from disk using the extent_id
-            if (auto prev_eid = next_page->header().prev_offset; prev_eid != constant::UNKNOWN_EXTENT) {
-                // Retrieve the page for previous_extent_id
-                auto prev_page = table->read_page_from_disk(prev_eid);
-
-                // and invalidate index for the rows in the page
-                indexer_helpers::invalidate_index_for_page(db_id, index_id, idxState._tid, prev_eid,
-                        prev_page, idxState._root, XidLsn(prev_page->header().xid), idx_cols);
+            // index column positions
+            std::vector<uint32_t> idx_cols;
+            for (auto const& col : idxState._idx._ddl["columns"]) {
+                idx_cols.push_back(col["position"]);
             }
 
-            // Populate index for the rows in the next page
-            indexer_helpers::populate_index_for_page(db_id, index_id, idxState._tid, next_eid,
-                    next_page, idxState._root, XidLsn(next_page->header().xid), idx_cols);
+            // Get the next_extent from disk using the stats last offset
+            auto table = TableMgr::get_instance()->get_table(db_id, idxState._tid, idxState._idx._xid);
+            auto next_eid = table->get_stats().end_offset;
+            auto next_page = table->read_page_from_disk(next_eid);
 
-            // Get the next page using end offset of that XID
-            table = TableMgr::get_instance()->get_table(db_id, idxState._tid, next_page->header().xid);
-            next_eid = table->get_stats().end_offset;
-            next_page = table->read_page_from_disk(next_eid);
+            while (!next_page->empty()) {
+                end_xid = next_page->header().xid;
+                // Get the previous_extent_id from next_extent header
+                // and fetch the extent from disk using the extent_id
+                if (auto prev_eid = next_page->header().prev_offset; prev_eid != constant::UNKNOWN_EXTENT) {
+                    // Retrieve the page for previous_extent_id
+                    auto prev_page = table->read_page_from_disk(prev_eid);
+
+                    // and invalidate index for the rows in the page
+                    indexer_helpers::invalidate_index_for_page(db_id, index_id, idxState._tid, prev_eid,
+                            prev_page, idxState._root, XidLsn(prev_page->header().xid), idx_cols);
+                }
+
+                // Populate index for the rows in the next page
+                indexer_helpers::populate_index_for_page(db_id, index_id, idxState._tid, next_eid,
+                        next_page, idxState._root, XidLsn(next_page->header().xid), idx_cols);
+
+                // Get the next page using end offset of that XID
+                table = TableMgr::get_instance()->get_table(db_id, idxState._tid, next_page->header().xid);
+                next_eid = table->get_stats().end_offset;
+                next_page = table->read_page_from_disk(next_eid);
+            }
+            // Commit the index
+            SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Initiating Index commit: {}:{}", db_id, index_id);
+            _commit_build(idxState._root, idxState._key, idxState._idx, end_xid);
         }
-        // Commit the index
-        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Initiating Index commit: {}:{}", db_id, index_id);
-        _commit_build(idxState._root, idxState._key, idxState._idx, end_xid);
     }
 }  // namespace springtail::gc

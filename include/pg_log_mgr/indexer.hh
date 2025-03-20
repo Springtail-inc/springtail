@@ -18,10 +18,26 @@ namespace springtail::committer {
      */
     class Indexer {
     public:
+        enum class IndexStatus {
+            Building,     // Default state
+            Deleting,
+            Aborting
+        };
         struct IndexParams {
             uint64_t _db_id;
             uint64_t _xid;
             nlohmann::json _ddl;
+            IndexStatus _status = IndexStatus::Building;
+
+            /**
+             * @brief Checks if the current status matches the expected status.
+             *
+             * @param expected The status to compare against.
+             * @return true if the current status matches the expected status, false otherwise.
+             */
+            bool is_status(IndexStatus expected) const {
+                return _status == expected;
+            }
         };
 
         explicit Indexer(uint32_t worker_count);
@@ -85,7 +101,7 @@ namespace springtail::committer {
 
         IndexState _build(std::stop_token st, const Key& key, const IndexParams& idx);
 
-        void _drop(std::stop_token st, const Key& key, const IndexParams& idx);
+        void _drop(const Key& key, const IndexParams& idx);
 
         bool _was_dropped(const Key& key);
         void _commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx, uint64_t end_xid);
