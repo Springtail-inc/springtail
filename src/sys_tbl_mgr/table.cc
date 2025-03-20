@@ -25,11 +25,11 @@ get_table_dir(const std::filesystem::path &base,
 } // namespace table_helpers
 
 namespace indexer_helpers {
-    void invalidate_index_for_page(uint64_t db_id, uint64_t index_id, uint64_t table_id, uint64_t extent_id,
-            StorageCache::SafePagePtr &page, const MutableBTreePtr &root, XidLsn &&xid_lsn, const std::vector<uint32_t> &idx_cols)
+    void invalidate_index_for_page(uint64_t db_id, uint64_t table_id, uint64_t extent_id,
+            const StorageCache::SafePagePtr &page, const MutableBTreePtr &root, XidLsn &&xid_lsn, const std::vector<uint32_t> &idx_cols)
     {
         // Fetch the schema at the page
-        auto&& schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id, xid_lsn);
+        auto&& schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id, std::move(xid_lsn));
 
         auto value_fields = std::make_shared<FieldArray>(2);
         value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
@@ -48,10 +48,10 @@ namespace indexer_helpers {
 
     }
 
-    void populate_index_for_page(uint64_t db_id, uint64_t index_id, uint64_t table_id, uint64_t extent_id,
-            StorageCache::SafePagePtr &page, const MutableBTreePtr &root, XidLsn &&xid_lsn, const std::vector<uint32_t> &idx_cols)
+    void populate_index_for_page(uint64_t db_id, uint64_t table_id, uint64_t extent_id,
+            const StorageCache::SafePagePtr &page, const MutableBTreePtr &root, XidLsn &&xid_lsn, const std::vector<uint32_t> &idx_cols)
     {
-        auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id, xid_lsn);
+        auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id, std::move(xid_lsn));
         uint32_t row_id = 0;
         auto value_fields = std::make_shared<FieldArray>(2);
         value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
@@ -763,7 +763,7 @@ namespace indexer_helpers {
         // INVALIDATE SECONDARY INDEXES
 
         for (auto const& [index_id, idx]: _secondary_indexes) {
-            indexer_helpers::invalidate_index_for_page(_db_id, index_id, _id, orig_page->key().second,
+            indexer_helpers::invalidate_index_for_page(_db_id, _id, orig_page->key().second,
                     orig_page, idx.first, XidLsn(_access_xid), idx.second);
         }
     }
@@ -808,7 +808,7 @@ namespace indexer_helpers {
             // POPULATE SECONDARY INDEXES
 
             for (auto const& [index_id, idx]: _secondary_indexes) {
-                indexer_helpers::populate_index_for_page(_db_id, index_id, _id, extent_id,
+                indexer_helpers::populate_index_for_page(_db_id, _id, extent_id,
                         new_page, idx.first, XidLsn(_target_xid), idx.second);
             }
         }

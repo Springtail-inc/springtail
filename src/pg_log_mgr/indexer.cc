@@ -121,7 +121,7 @@ namespace springtail::committer {
             if (params.is_status(IndexStatus::Building)) {
                 _add_to_pending_reconciliation(_build(st, key, params));
             } else {
-                _add_to_pending_reconciliation(IndexState(nullptr, key, params, std::numeric_limits<uint64_t>::max()));
+                _add_to_pending_reconciliation(IndexState{nullptr, key, params, std::numeric_limits<uint64_t>::max()});
             }
         }
         SPDLOG_INFO("Indexer thread joined");
@@ -382,14 +382,14 @@ namespace springtail::committer {
     Indexer::_reconcile_index(IndexState& idxState)
     {
         auto [db_id, index_id] = idxState._key;
-        auto end_xid = idxState._idx._xid;
+        uint64_t end_xid;
         auto is_fresh_drop = false;
         auto is_drop_while_processing = false;
         {
             std::unique_lock g(_m);
 
             // fetch the latest state of the work item before we proceed for catchup
-            auto&& work_item = _work_set[idxState._key];
+            const auto& work_item = _work_set[idxState._key];
             end_xid = work_item._xid;
             // When a fresh work item comes in for drop index
             // there wont be any DDL
@@ -432,12 +432,12 @@ namespace springtail::committer {
                     auto prev_page = table->read_page_from_disk(prev_eid);
 
                     // and invalidate index for the rows in the page
-                    indexer_helpers::invalidate_index_for_page(db_id, index_id, idxState._tid, prev_eid,
+                    indexer_helpers::invalidate_index_for_page(db_id, idxState._tid, prev_eid,
                             prev_page, idxState._root, XidLsn(prev_page->header().xid), idx_cols);
                 }
 
                 // Populate index for the rows in the next page
-                indexer_helpers::populate_index_for_page(db_id, index_id, idxState._tid, next_eid,
+                indexer_helpers::populate_index_for_page(db_id, idxState._tid, next_eid,
                         next_page, idxState._root, XidLsn(next_page->header().xid), idx_cols);
 
                 // Get the next page using end offset of that XID
