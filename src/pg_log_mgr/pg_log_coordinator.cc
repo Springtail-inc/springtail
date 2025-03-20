@@ -76,6 +76,7 @@ namespace springtail::pg_log_mgr {
         auto optional_repl_log = Json::get<std::string>(log_mgr_config, "replication_log_path");
         auto optional_trans_log = Json::get<std::string>(log_mgr_config, "transaction_log_path");
         _log_size_rollover_threshold = Json::get_or<uint64_t>(log_mgr_config, "log_size_rollover_threshold", PgLogMgr::LOG_ROLLOVER_SIZE_BYTES);
+        _archive_logs = Json::get_or<bool>(log_mgr_config, "archive_logs", false);
 
         if (optional_repl_log.has_value() && optional_trans_log.has_value()) {
             _repl_log = optional_repl_log.value();
@@ -123,7 +124,9 @@ namespace springtail::pg_log_mgr {
         std::unique_lock lock(_mutex);
 
         // create log mgr
-        PgLogMgrPtr log_mgr = std::make_shared<PgLogMgr>(db_id, repl_log_path, xact_log_path, _host, db_name, _user_name, _password, pub_name, slot_name, _log_size_rollover_threshold, _port, _committer_queue);
+        PgLogMgrPtr log_mgr = std::make_shared<PgLogMgr>(db_id, repl_log_path, xact_log_path, _host, db_name, _user_name,
+                                                         _password, pub_name, slot_name, _log_size_rollover_threshold,
+                                                         _port, _archive_logs, _committer_queue);
         _log_mgrs[db_id] = log_mgr;
 
         lock.unlock();

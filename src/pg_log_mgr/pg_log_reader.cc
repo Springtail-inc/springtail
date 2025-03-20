@@ -23,8 +23,10 @@ namespace springtail::pg_log_mgr {
     PgLogReader::PgLogReader(uint64_t db_id, uint32_t queue_size,
                              const std::filesystem::path &repl_log_path,
                              const std::filesystem::path &xact_log_path,
-                             const CommitterQueuePtr committer_queue)
+                             const CommitterQueuePtr committer_queue,
+                             const bool archive_logs)
         : _db_id(db_id),
+          _archive_logs(archive_logs),
           _repl_log_path(repl_log_path),
           _xact_log_path(xact_log_path),
           _committer_queue(committer_queue),
@@ -574,9 +576,9 @@ namespace springtail::pg_log_mgr {
     PgLogReader::_remove_old_log_files()
     {
         uint64_t min_timestamp = _xid_ts_tracker->get_min_timestamp();
-        fs::cleanup_files_from_dir(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX, min_timestamp);
-        fs::cleanup_files_from_dir(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL_STREAMING, PgLogMgr::LOG_SUFFIX, min_timestamp);
-        fs::cleanup_files_from_dir(_xact_log_path, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX, min_timestamp);
+        fs::cleanup_files_from_dir(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX, min_timestamp, _archive_logs);
+        fs::cleanup_files_from_dir(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL_STREAMING, PgLogMgr::LOG_SUFFIX, min_timestamp, _archive_logs);
+        fs::cleanup_files_from_dir(_xact_log_path, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX, min_timestamp, _archive_logs);
     }
 
     void

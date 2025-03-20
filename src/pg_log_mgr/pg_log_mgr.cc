@@ -31,6 +31,7 @@ namespace springtail::pg_log_mgr {
                        const std::string &pub_name, const std::string &slot_name,
                        uint64_t log_size_rollover_threshold,
                        int port,
+                       bool archive_logs,
                        std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue)
     : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
       _host(host), _db_name(db_name), _user_name(user_name),
@@ -42,7 +43,7 @@ namespace springtail::pg_log_mgr {
       _xact_log_path(xact_log_path),
       _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
     {
-        _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, xact_log_path, _committer_queue);
+        _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, xact_log_path, _committer_queue, archive_logs);
 
         // construct the callback for watching for database state changes
         _cache_watcher_db_states = std::make_shared<RedisCache::RedisChangeWatcher>(
