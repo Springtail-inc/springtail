@@ -1,4 +1,3 @@
-#include <codecvt>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -80,14 +79,10 @@ namespace {
         };
 
         void SetUp() override {
-            std::string overrides = "otel.enabled=false";
-            ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
-
             auto service_runners = test::get_services(true, false, false);
             std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
             runners.emplace();
             std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
-            runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
             springtail_init_test(runners);
 
             _subscriber = std::make_unique<Subscriber>();
@@ -99,8 +94,6 @@ namespace {
             SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Shutting down server");
             springtail_shutdown();
         }
-
-
 
         void run_clients(int thread_id, int iterations)
         {

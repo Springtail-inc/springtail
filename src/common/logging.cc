@@ -219,7 +219,7 @@ public:
 
             if (host && port) {
                 std::string endpoint = fmt::format("{}:{}/v1/logs", *host, *port);
-                auto otel_sink = std::make_shared<OpenTelemetrySinkMt>("springtail", endpoint);
+                auto otel_sink = std::make_shared<OpenTelemetrySink>("springtail", endpoint);
                 set_level(otel_sink, log_level);
                 sinks.push_back(otel_sink);
                 SPDLOG_INFO("Enabling OTel logging sink with endpoint: {}", endpoint);

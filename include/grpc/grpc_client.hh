@@ -4,12 +4,8 @@
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/security/credentials.h>
 #include <opentelemetry/context/propagation/global_propagator.h>
-#include <opentelemetry/context/propagation/text_map_propagator.h>
-#include <opentelemetry/context/runtime_context.h>
 #include <opentelemetry/semconv/incubating/rpc_attributes.h>
-#include <opentelemetry/semconv/network_attributes.h>
 #include <opentelemetry/trace/provider.h>
-#include <opentelemetry/trace/span.h>
 
 #include <chrono>
 #include <string_view>

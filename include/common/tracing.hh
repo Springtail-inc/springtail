@@ -8,7 +8,6 @@
 #include <opentelemetry/sdk/trace/span_data.h>
 #include <opentelemetry/trace/tracer.h>
 
-#include <opentelemetry/metrics/provider.h>
 #include <opentelemetry/sdk/metrics/meter_provider.h>
 
 #include <common/singleton.hh>
@@ -21,7 +20,7 @@ using SpanPtr = opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>;
 
 /**
  * @brief A custom span exporter that logs OpenTelemetry spans using spdlog
- * 
+ *
  * This exporter implements the OpenTelemetry SpanExporter interface to export
  * tracing spans by logging them through spdlog. It processes each span's name,
  * attributes, and other properties and outputs them as structured log messages.
@@ -52,7 +51,7 @@ private:
     void log_span(const opentelemetry::sdk::trace::SpanData& span)
     {
         // Log basic span information
-        SPDLOG_INFO("Span Name: {}", span.GetName().data());
+        std::string log_str = fmt::format("Span Name: {}", span.GetName().data());
 
         // You can log other properties (e.g., span attributes, start/end times, etc.)
         const auto& attributes = span.GetAttributes();
@@ -74,17 +73,17 @@ private:
                 value_str = fmt::format("Unsupported Type: {}", value.index());
             }
 
-            SPDLOG_INFO("Attribute - {}: {}", key, value_str);
+            log_str += fmt::format("\n      Attribute - {}: {}", key, value_str);
         }
 
         // Span's start and end time can be logged if needed (if available)
         auto start_time = span.GetStartTime();
         auto duration = span.GetDuration();
-        SPDLOG_INFO(
-            "Start Time: {} | Duration: {}",
+        log_str += fmt::format("\n      Start Time: {} | Duration: {}",
             std::chrono::duration_cast<std::chrono::milliseconds>(start_time.time_since_epoch())
                 .count(),
             std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
+        SPDLOG_INFO(log_str);
     }
 };
 

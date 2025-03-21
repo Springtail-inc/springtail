@@ -142,7 +142,9 @@
         }
     },
     "otel": {
-	    "enabled": true
+            "enabled": false,
+            "host": "127.0.0.1",
+            "port": 4318
     },
     "integration_test_config": {
 	    "use_proxy": false
