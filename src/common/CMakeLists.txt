@@ -5,6 +5,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(c-ares CONFIG REQUIRED)
 find_package(opentelemetry-cpp CONFIG REQUIRED)
 find_package(PostgreSQL REQUIRED)
+find_package(AWSSDK REQUIRED COMPONENTS core secretsmanager)
 
 set(COMMON_LIB_SOURCES
   coordinator.cc
@@ -17,8 +18,10 @@ set(COMMON_LIB_SOURCES
   redis_cache.cc
   multi_queue_thread_manager.cc
   timestamp.cc
+  time_trace.cc
   tracing.cc
   tracking_allocator.cc
+  aws.cc
 )
 
 add_library(springtail_common ${COMMON_LIB_SOURCES})
@@ -41,6 +44,7 @@ target_link_libraries(springtail_common
         opentelemetry-cpp::otlp_http_exporter
         opentelemetry-cpp::otlp_http_metric_exporter
         opentelemetry-cpp::otlp_http_log_record_exporter
+        ${AWSSDK_LIBRARIES}
 )
 
 add_executable(test_thread test/test_thread.cc)
@@ -103,6 +107,11 @@ target_include_directories(test_timestamp PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_timestamp PRIVATE springtail_common GTest::gtest_main)
 add_dsymutil_command(test_timestamp)
 
+add_executable(test_time_trace test/test_time_trace.cc)
+target_include_directories(test_time_trace PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_time_trace PRIVATE springtail_common GTest::gtest_main)
+add_dsymutil_command(test_time_trace)
+
 gtest_discover_tests(test_thread)
 gtest_discover_tests(test_queue)
 gtest_discover_tests(test_common)
@@ -115,3 +124,4 @@ gtest_discover_tests(test_coordinator)
 gtest_discover_tests(test_redis_cache)
 gtest_discover_tests(test_thread_manager)
 gtest_discover_tests(test_timestamp)
+gtest_discover_tests(test_time_trace)

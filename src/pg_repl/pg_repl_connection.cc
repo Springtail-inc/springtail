@@ -202,6 +202,9 @@ namespace springtail
         // skip over rest of result message
         _skip_message();
 
+        // set last received time to now, starts timer for idle delay
+        _last_received_time = get_pgtime_in_millis();
+
         _copy_state = NEW_MSG;
         _started_streaming = true;
 
@@ -612,7 +615,7 @@ namespace springtail
         LSN_t wal_end = recvint64(&buffer[pos]); // read wal end LSN
         pos += 8;
 
-        int64_t send_time = recvint64(&buffer[pos]);
+        [[maybe_unused]] int64_t send_time = recvint64(&buffer[pos]);
         pos += 8;
 
         SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Keep alive msg recvd: wal_end={}, send_time={}, last_flushed LSN={}",
