@@ -620,7 +620,7 @@ namespace springtail
         LSN_t wal_end = recvint64(&buffer[pos]); // read wal end LSN
         pos += 8;
 
-        int64_t send_time = recvint64(&buffer[pos]);
+        [[maybe_unused]] int64_t send_time = recvint64(&buffer[pos]);
         pos += 8;
 
         SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Keep alive msg recvd: wal_end={}, send_time={}, last_flushed LSN={}",
