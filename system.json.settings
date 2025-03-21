@@ -143,5 +143,8 @@
     },
     "otel": {
 	    "enabled": true
+    },
+    "integration_test_config": {
+	    "use_proxy": false
     }
 }

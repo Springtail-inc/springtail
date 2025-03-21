@@ -197,6 +197,18 @@ class Properties:
 
         return proxy_config
 
+    def get_integration_test_config(self) -> dict:
+        """Return the integration test configuration as an object."""
+        key = str(self.db_instance_id) + ':instance_config'
+        if 'integration_test_config' in self.cache:
+            return self.cache['integration_test_config']
+
+        config = json.loads(self.redis.hget(key, 'system_settings'))
+        integration_test_config = config['integration_test_config']
+        self.cache['integration_test_config'] = integration_test_config
+
+        return integration_test_config
+
     def get_system_config(self) -> dict:
         """Return the system configuration as an object."""
         key = str(self.db_instance_id) + ':instance_config'
@@ -292,6 +304,7 @@ class Properties:
         sys_config_json['sys_tbl_mgr'] = system_json['sys_tbl_mgr']
         sys_config_json['proxy'] = system_json['proxy']
         sys_config_json['otel'] = system_json['otel']
+        sys_config_json['integration_test_config'] = system_json['integration_test_config']
 
         self.redis.hset(db_instance_key, 'system_settings', json.dumps(sys_config_json))
 
@@ -465,6 +478,7 @@ def main():
     print(f"ingest_host: {props.get_hostname('ingestion')}")
     print(f"proxy_host: {props.get_hostname('proxy')}")
     print(f"coordinator_state: {props.get_coordinator_state()}")
+    print(f"proxy_config: {props.integration_test_config()}")
     print(f"otel_config: {props.get_otel_config()}")
 
     env_vars = [
