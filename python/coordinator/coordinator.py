@@ -3,13 +3,11 @@ import sys
 import yaml
 import logging
 import argparse
-import string
 import signal
 import time
 import threading
 import traceback
 from typing import Optional
-from random import SystemRandom
 
 # Get the parent directory of the current script (i.e., the project root directory)
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -26,6 +24,7 @@ from sysutils import stop_daemons
 from component_factory import ComponentFactory
 from scheduler import Scheduler, CoordinatorState
 from production import Production
+from postgres_helper import PostgresHelper
 
 # import the xid_mgr_client
 from xid_mgr import XidMgrClient
@@ -150,9 +149,10 @@ class Coordinator:
                         self.logger.error("Failed to start Postgres")
                         raise ValueError("Failed to start Postgres")
 
-                # create the ddl user
-                ddl_password = self._gen_random_string(16)
-                postgres.create_user('ddl_user', ddl_password, True, True)
+                # create the ddl user and fdw user
+                pg_helper = PostgresHelper()
+                (_, ddl_password) = pg_helper.create_ddl_user()
+                pg_helper.create_fdw_user()
 
                 # in test startup ingestion services
                 if not self.production:
@@ -246,16 +246,6 @@ class Coordinator:
         if not ((os.stat(log_path).st_mode & 0o777) & 0o002):
             raise ValueError(f"Log path is not writable: {log_path}")
 
-
-    def _gen_random_string(self, length: int) -> str:
-        """
-        Generate a random string of the specified length.
-        Arguments:
-            length -- the length of the string
-        Returns:
-            a random string of the specified length
-        """
-        return ''.join(SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(length))
 
     def _wait_for_ingestion(self, props: Properties) -> None:
         """
