@@ -310,7 +310,7 @@ class Component:
             return False
 
         try:
-            if not self.process:
+            if not self.process or self.process.pid != self.pid:
                 self.process = psutil.Process(self.pid)
 
             running = self.process.is_running()

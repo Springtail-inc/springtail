@@ -450,6 +450,13 @@ namespace springtail {
             // try connection
             connection = PQconnectdb(conninfo.c_str());
             if (PQstatus(connection) != CONNECTION_OK) {
+                // mask out password for logs
+                std::string conninfo = fmt::format("{}='{}' port={} dbname='{}' user='{}' \
+                    password='****' {}client_encoding={} \
+                    options='-c datestyle=ISO -c intervalstyle=postgres -c extra_float_digits=3'",
+                    hosttype, host, db_port, name, user,
+                    (replication ? "replication=database ": ""), encoding);
+
                 SPDLOG_ERROR("Error connecting: conninfo: {}, msg: {}", conninfo, PQerrorMessage(connection));
                 PQfinish(connection);
 
