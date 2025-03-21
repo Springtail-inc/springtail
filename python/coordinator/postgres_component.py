@@ -145,19 +145,3 @@ class PostgresComponent(Component):
             return False
 
         return True
-
-    def create_user(self, user: str, password: str, superuser: bool = False):
-        """
-        Create a new user with the given password
-        """
-        self.logger.debug(f"Creating user {user}")
-        check_cmd = f"SELECT 1 FROM pg_roles WHERE rolname = '{user}'"
-        res = run_command('sudo', ['-u', 'postgres', 'psql', '-tAc', check_cmd])
-        if res:
-            self.logger.debug(f"User {user} already exists, dropping")
-            # reassign ownership of all objects owned by the user
-            run_command('sudo', ['-u', 'postgres', 'psql', '-f', f"REASSIGN OWNED BY {user} TO postgres"])
-
-        cmd = f"CREATE USER {user} WITH PASSWORD '{password}' LOGIN {'SUPERUSER' if superuser else ''}"
-        run_command('sudo', ['-u', 'postgres', 'psql', '-c', cmd])
-
