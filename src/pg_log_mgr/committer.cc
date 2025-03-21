@@ -66,9 +66,6 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             }
             uint64_t db_id = result->db();
 
-            // Handle catchup for indexes if any are pending
-            const auto& idx_reconciled_xid_opt = _indexer->process_first_pending_reconciliation(db_id);
-
             auto token_1 = logging::set_context_variables({{"db_id", std::to_string(db_id)}});
 
             // handle a TABLE_SYNC_START
@@ -247,6 +244,9 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 _indexer->process_ddls(db_id, xid, index_ddls);
             }
 
+            // Handle catchup for indexes if any are pending
+            const auto& idx_reconciled_xid_opt = _indexer->process_first_pending_reconciliation(db_id);
+
             if (!completed_ddls.is_null()) {
                 // pre-commit the DDLs to be applied to the FDWs
                 _redis_ddl.precommit_ddl(db_id, xid, completed_ddls);
@@ -416,7 +416,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                         }
                         XidLsn xid_c(xid);
                         sys_tbl_mgr::Client::get_instance()->create_index(db_id, xid_c,
-                                msg, sys_tbl::IndexNames::State::READY);
+                                msg, sys_tbl::IndexNames::State::NOT_READY);
                         _indexer->build({db_id, xid, ddl});
                     }
                 } else if (action == "drop_index") {
