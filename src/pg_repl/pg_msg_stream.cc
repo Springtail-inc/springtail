@@ -1015,12 +1015,7 @@ namespace springtail {
 
         json["oid"].get_to(drop_table_msg.oid);
         json["schema"].get_to(drop_table_msg.namespace_name);
-        if ( json.contains("name") ){
-            json["name"].get_to(drop_table_msg.table);
-        } else if (json.contains("table")) {
-            // From create/alter table flow
-            json["table"].get_to(drop_table_msg.table);
-        }
+        json["name"].get_to(drop_table_msg.table);
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_TABLE);
         msg->msg.emplace<PgMsgDropTable>(drop_table_msg);

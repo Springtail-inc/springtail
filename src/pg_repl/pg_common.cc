@@ -1,14 +1,13 @@
 #include <pg_repl/pg_common.hh>
-#include <utility>
 
 extern "C" {
     #include <postgres.h>
     #include <catalog/pg_type.h>
 }
 
-namespace springtail
+namespace springtail 
 {
-    SchemaType
+    SchemaType 
     convert_pg_type(int32_t pg_type)
     {
         switch (pg_type) {
@@ -49,4 +48,5 @@ namespace springtail
                 return SchemaType::BINARY;
         }
     }
+
 }

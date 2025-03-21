@@ -745,23 +745,6 @@ namespace springtail
             uint32_t table_oid = _connection.get_int32(i, 2);
             uint32_t schema_oid = _connection.get_int32(i, 3);
 
-            if (_invalid_tables.contains(schema_name) &&
-                _invalid_tables[schema_name].contains(table_name)) {
-                SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Skipping table: {}.{}", schema_name, table_name);
-
-                // Create JSON object for the skipped table
-                nlohmann::json table_info = {
-                    {"schema", schema_name},
-                    {"table", table_name},
-                    {"columns", _invalid_tables[schema_name][table_name]["columns"]}
-                };
-
-                // Store in Redis
-                TableValidator::get_instance()->populate_invalid_tables_in_redis(table_oid, table_info);
-
-                continue;
-            }
-
             table_oids.insert({schema_name, table_name, schema_oid, table_oid});
         }
 

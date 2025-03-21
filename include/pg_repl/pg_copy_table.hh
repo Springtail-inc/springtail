@@ -152,7 +152,6 @@ namespace springtail
         bool _oid_flag = false;
 
         PgTableSchema _schema;
-        nlohmann::json _invalid_tables;
 
         /**
          * @brief Extract schema from table and store in internal _schema object
