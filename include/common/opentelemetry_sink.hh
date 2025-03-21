@@ -13,8 +13,6 @@
 #include <string>
 #include <utility>
 
-// template<typename Mutex>
-// class OpenTelemetrySink : public spdlog::sinks::base_sink<Mutex>
 class OpenTelemetrySink : public spdlog::sinks::sink
 {
 public:
