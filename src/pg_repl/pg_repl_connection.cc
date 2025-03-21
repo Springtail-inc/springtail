@@ -165,7 +165,12 @@ namespace springtail
             LSN = confirmed_flush_lsn;
         }
 
-        DCHECK_GE(LSN, confirmed_flush_lsn);
+        if (LSN < confirmed_flush_lsn) {
+            // this is possible if we've ack'ed (fast forwarded), the LSN
+            // due to an idle DB; use the value returned from the DB
+            SPDLOG_WARN("Error: LSN {} is less than confirmed_flush_lsn {}", LSN, confirmed_flush_lsn);
+            LSN = confirmed_flush_lsn;
+        }
 
         _last_flushed_lsn = LSN;
 

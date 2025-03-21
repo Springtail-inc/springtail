@@ -4,6 +4,7 @@ import psutil
 import time
 import logging
 from typing import Dict, List, Optional
+
 from component import Component, ComponentState
 
 from common import (
@@ -145,7 +146,7 @@ class PostgresComponent(Component):
 
         return True
 
-    def create_user(self, user: str, password: str, drop : bool = True, superuser: bool = False):
+    def create_user(self, user: str, password: str, superuser: bool = False):
         """
         Create a new user with the given password
         """
@@ -153,17 +154,10 @@ class PostgresComponent(Component):
         check_cmd = f"SELECT 1 FROM pg_roles WHERE rolname = '{user}'"
         res = run_command('sudo', ['-u', 'postgres', 'psql', '-tAc', check_cmd])
         if res:
-            if drop:
-                self.logger.debug(f"User {user} already exists, dropping")
-                # reassign ownership of all objects owned by the user
-                run_command('sudo', ['-u', 'postgres', 'psql', '-c', f"REASSIGN OWNED BY {user} TO postgres"])
-                # this will drop everything the user owns in the current db, should be ok in FDW
-                run_command('sudo', ['-u', 'postgres', 'psql', '-c', f"DROP OWNED BY {user}"])
-                # then drop the user
-                run_command('sudo', ['-u', 'postgres', 'psql', '-c', f"DROP USER {user}"])
-            else:
-                self.logger.debug(f"User {user} already exists")
-                return
+            self.logger.debug(f"User {user} already exists, dropping")
+            # reassign ownership of all objects owned by the user
+            run_command('sudo', ['-u', 'postgres', 'psql', '-f', f"REASSIGN OWNED BY {user} TO postgres"])
 
         cmd = f"CREATE USER {user} WITH PASSWORD '{password}' LOGIN {'SUPERUSER' if superuser else ''}"
         run_command('sudo', ['-u', 'postgres', 'psql', '-c', cmd])
+

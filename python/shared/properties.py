@@ -78,6 +78,9 @@ class Properties:
                     'LUSTRE_MOUNT_NAME': system_json['fs']['mount_name'],
                     'LUSTRE_DNS_NAME': system_json['fs']['dns_name'],
                     'FDW_USER_PASSWORD': self.fdw_user_password,
+
+                    # needed for a variety of reasons in test env.
+                    'REPLICATION_USER': self.replication_user,
                     'REPLICATION_USER_PASSWORD': self.replication_user_password
                 }
 
