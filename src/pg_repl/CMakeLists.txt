@@ -2,6 +2,7 @@
 # source files
 set(PG_LIB_SOURCES
     pg_repl_msg.cc
+    pg_table_validator.cc
     pg_repl_connection.cc
     libpq_connection.cc
     pg_copy_table.cc

@@ -442,7 +442,7 @@ namespace springtail
         _set_schema(table_name, schema_name, table_oid, schema_oid);
 
         // validate the columns to see if there are invalid columns
-        auto invalid_columns = TableValidator::_validate_ddl_and_get_invalid_columns<SchemaColumn>(
+        auto invalid_columns = TableValidator::get_instance()->validate_ddl_and_get_invalid_columns<SchemaColumn>(
                 schema_name, table_oid, _schema.columns);
         if ( invalid_columns.size() > 0 ){
             SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Invalid columns found as part of _copy_table for table_oid {}", table_oid);
@@ -452,7 +452,7 @@ namespace springtail
                 {"columns", invalid_columns}
             };
 
-            TableValidator::populate_invalid_tables_in_redis(table_oid, table_info);
+            TableValidator::get_instance()->populate_invalid_tables_in_redis(table_oid, table_info);
             return nullptr;
         }
 
@@ -757,7 +757,7 @@ namespace springtail
                 };
 
                 // Store in Redis
-                TableValidator::populate_invalid_tables_in_redis(table_oid, table_info);
+                TableValidator::get_instance()->populate_invalid_tables_in_redis(table_oid, table_info);
 
                 continue;
             }
