@@ -89,6 +89,11 @@ else()
   set ( BUILD_TYPE "release")
 endif()
 
+if(DEFINED ENV{SPRINGTAIL_INCLUDE_TIME_TRACES})
+  add_definitions( -D SPRINGTAIL_INCLUDE_TIME_TRACES )
+  message(STATUS "Include time traces.")
+endif()
+
 ## include external projects
 include(ExternalProjects)
 
