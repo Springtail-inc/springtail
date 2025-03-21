@@ -123,6 +123,7 @@ namespace springtail::committer {
         RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         
         // reconciliation Index
+
         /**
          * @brief Represents the state of an index after the initial build.
          * 

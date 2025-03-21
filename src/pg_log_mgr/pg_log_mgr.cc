@@ -38,7 +38,8 @@ namespace springtail::pg_log_mgr {
       _repl_log_path(repl_log_path),
       _committer_queue(committer_queue),
       _xact_log_path(xact_log_path),
-      _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
+      _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
+      _index_recon_queue(fmt::format(redis::QUEUE_INDEX_RECON, _db_instance_id, _db_id))
     {
         _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, xact_log_path, _committer_queue);
 
@@ -135,6 +136,9 @@ namespace springtail::pg_log_mgr {
         // for table re-syncs that might have to be run
         _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
 
+        // start the index recon thread
+        _recon_thread = std::thread(&PgLogMgr::_index_recon_thread, this);
+
         // start the log reader thread since it is also used to process recovery messages
         _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
 
@@ -210,6 +214,28 @@ namespace springtail::pg_log_mgr {
         // if in replay done set to running XXX
         _internal_state.test_and_set(STATE_REPLAYING, STATE_RUNNING);
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Current state is running: {}", (_internal_state.get() == STATE_RUNNING));
+    }
+
+    void
+    PgLogMgr::_index_recon_thread()
+    {
+        while (!_shutdown) {
+            // block on redis index recon queue w/timeout for shutdown
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Waiting for index recon queue");
+            auto request = _index_recon_queue.pop(REDIS_WORKER_ID, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+            if (request == nullptr) {
+                continue; // timeout, check for shutdown
+            }
+
+            //Pass it to log reader to notify committer
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Request received for index recon");
+            PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::INDEX_RECON);
+            _pg_log_reader->enqueue_msg(msg);
+
+            // update redis state
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Committing index recon queue");
+            _index_recon_queue.commit(REDIS_WORKER_ID);
+        }
     }
 
     void

@@ -97,7 +97,8 @@ namespace springtail::pg_log_mgr {
           _repl_log_path(repl_log_path),
           _committer_queue(std::make_shared<ConcurrentQueue<committer::XidReady>>()),
           _xact_log_path(xact_log_path),
-          _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
+          _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
+          _index_recon_queue(fmt::format(redis::QUEUE_INDEX_RECON, _db_instance_id, _db_id))
         {
             _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, xact_log_path, _committer_queue);
         }
@@ -226,6 +227,17 @@ namespace springtail::pg_log_mgr {
 
         /** Handle state change; callback from Redis pubsub */
         void _handle_external_state_change(const redis::db_state_change::DBState new_state);
+
+        // Index reconciliation
+
+        RedisQueue<std::string> _index_recon_queue; ///< redis queue for index recon requests
+        std::thread _recon_thread;            ///< Index recon thread
+        /*
+         * Index recon thread; waits on index recon requests
+         */
+        void _index_recon_thread();
+
+
     };
     using PgLogMgrPtr = std::shared_ptr<PgLogMgr>;
 

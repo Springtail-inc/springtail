@@ -675,7 +675,11 @@ namespace springtail::pg_log_mgr {
                 _check_sync_commit(_db_id, sync_msg.pg_xid, sync_msg.target_xid);
                 break;
             }
-
+        case PgMsgEnum::INDEX_RECON:
+            {
+                _process_index_recon(msg);
+                break;
+            }
         default:
             SPDLOG_WARN("Unknown message type: {}", static_cast<uint8_t>(msg->msg_type));
             break;
@@ -698,6 +702,13 @@ namespace springtail::pg_log_mgr {
             // tracker and continue processing
             SyncTracker::get_instance()->clear_tables(db_id, *xid_msg);
         }
+    }
+
+    void
+    PgLogReader::_process_index_recon(const PgMsgPtr &msg)
+    {
+        uint64_t xid = this->get_next_xid();
+        _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::XactMsg(xid)));
     }
 
     void

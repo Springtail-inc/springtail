@@ -3,7 +3,10 @@
 #include <assert.h>
 #include <algorithm>
 #include <pg_log_mgr/indexer.hh>
+#include <redis/redis_containers.hh>
 #include <common/logging.hh>
+#include <common/redis_types.hh>
+#include <common/properties.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <sys_tbl_mgr/client.hh>
 
@@ -321,11 +324,16 @@ namespace springtail::committer {
     Indexer::_add_to_pending_reconciliation(IndexState&& idxState)
     {
         std::scoped_lock lock(_pending_recon_map_mtx);
+        auto [db_id, index_id] = idxState._key;
         _pending_idx_reconciliation_map
-            .try_emplace(idxState._idx._db_id)   // Ensure db_id entry exists
+            .try_emplace(db_id)                  // Ensure db_id entry exists
             .first->second
             .try_emplace(idxState._idx._xid)     // Ensure xid entry exists
             .first->second.push_back(std::move(idxState)); // Add IndexState to the list
+
+        // Push to index recon reader to notify committer
+        auto _index_recon_queue = RedisQueue<std::string>(fmt::format(redis::QUEUE_INDEX_RECON, Properties::get_db_instance_id(), db_id));
+        _index_recon_queue.push(fmt::format("{}:{}", db_id, index_id));
     }
 
     std::optional<uint64_t>
@@ -382,7 +390,7 @@ namespace springtail::committer {
     Indexer::_reconcile_index(IndexState& idxState)
     {
         auto [db_id, index_id] = idxState._key;
-        uint64_t end_xid;
+        uint64_t end_xid = 0;
         auto is_fresh_drop = false;
         auto is_drop_while_processing = false;
         {

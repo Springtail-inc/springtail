@@ -80,6 +80,12 @@ namespace springtail::redis {
     static constexpr char QUEUE_SYNC_TABLES[] = "{}:queue:sync_tables:{}";
 
     /**
+     * Queue for index recon requests;
+     * args: <db_instance_id>, <db_id>
+     */
+    static constexpr char QUEUE_INDEX_RECON[] = "{}:queue:index_recon:{}";
+
+    /**
      * Key / value for log mgr resync point; value is filename:offset
      * args: <db_instance_id>, <db_id>
      */

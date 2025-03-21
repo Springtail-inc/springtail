@@ -239,7 +239,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             if (!index_ddls.is_null()) {
                 _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
 
-                // build the indexes, allowing them to happen in the background
+                // process the indexes - create/drop, allowing them to happen in the background
                 _indexer->process_ddls(db_id, xid, index_ddls);
             }
 
