@@ -145,6 +145,6 @@
 	    "enabled": true
     },
     "integration_test_config": {
-	    "use_proxy": true
+	    "use_proxy": false
     }
 }
