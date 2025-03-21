@@ -108,7 +108,6 @@ namespace springtail::pg_fdw {
         return _instance;
     }
 
-
     /* called from PG_init */
     void
     PgFdwMgr::fdw_init(const char *config_file, bool init)
