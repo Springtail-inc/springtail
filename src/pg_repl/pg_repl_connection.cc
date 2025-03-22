@@ -168,7 +168,7 @@ namespace springtail
         if (LSN < confirmed_flush_lsn) {
             // this is possible if we've ack'ed (fast forwarded), the LSN
             // due to an idle DB; use the value returned from the DB
-            SPDLOG_WARN("Error: LSN {} is less than confirmed_flush_lsn {}", LSN, confirmed_flush_lsn);
+            SPDLOG_WARN("LSN {} is less than confirmed_flush_lsn {}", LSN, confirmed_flush_lsn);
             LSN = confirmed_flush_lsn;
         }
 
