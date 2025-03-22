@@ -1,7 +1,6 @@
 import logging
 import os
 import sys
-import time
 import tempfile
 import json
 from datetime import datetime, timezone
@@ -19,6 +18,8 @@ from common import (
 )
 
 from aws import AwsHelper
+
+from postgres_component import PostgresComponent
 
 S3_BIN_FOLDER = 'packages'
 S3_DOWNLOAD_PATH = '/tmp/'
@@ -41,7 +42,6 @@ ENV_VARS = [
     'LUSTRE_MOUNT_NAME',
     'MOUNT_POINT',
     'FDW_ID',
-    'REPLICATION_USER_PASSWORD',
     'FDW_USER_PASSWORD',
     'LD_LIBRARY_PATH'
 ]
@@ -62,7 +62,11 @@ class Production:
     """
 
     def __init__(self, install_path: str):
-        """Initialize the production environment."""
+        """Initialize the production environment.
+
+        Args:
+            install_path (str): The path where the springtail binaries will be installed
+        """
         arn = os.environ.get('SNS_TOPIC_ARN')
         if not arn:
             raise ValueError("SNS_TOPIC_ARN environment variable not set")
@@ -176,10 +180,14 @@ class Production:
             # Copy the contents of the temporary file to the environment file
             run_command('sudo', ['cp', temp_file.name, env_file])
 
-        # restart postgres
-        self.logger.info("Restarting postgres")
-        run_command('sudo', ['service', 'postgresql', 'restart'])
-        time.sleep(5)
+        # stop postgres
+        bindir = run_command('pg_config', ['--bindir']).strip()
+        pg = PostgresComponent(name="postgres",
+                               id="10",
+                               path=bindir,
+                               pid_path=f'/var/run/postgresql/{version}-main.pid')
+        pg.shutdown()
+
 
     def _extract_attributes(self) -> Dict[str, Any]:
         """

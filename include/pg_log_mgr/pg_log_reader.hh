@@ -49,11 +49,13 @@ namespace springtail::pg_log_mgr {
          * @param repl_log_path   - path of replication logs directory
          * @param xact_log_path   - path of transaction logs directory
          * @param committer_queue - queue for passing work to committer
+         * @param archive_logs    - flag for turning on repl and xact logs archiving
          */
         PgLogReader(uint64_t db_id, uint32_t queue_size,
                     const std::filesystem::path &repl_log_path,
                     const std::filesystem::path &xact_log_path,
-                    CommitterQueuePtr committer_queue);
+                    const CommitterQueuePtr committer_queue,
+                    const bool archive_logs);
 
         ~PgLogReader();
         /**
@@ -228,6 +230,7 @@ namespace springtail::pg_log_mgr {
         uint64_t _db_id; ///< The database ID
         uint64_t _committed_xid; ///< The most recently committed XID at startup
         bool _is_streaming{false};     ///< This flag indicates that the log is inside streaming block
+        bool _archive_logs{false};     ///< This flag indicates that the reader should archive old logs instead of removing them
         std::filesystem::path _current_path; ///< current log file path
         std::filesystem::path _repl_log_path;   ///< Path for Postgres logs storage directory
         std::filesystem::path _xact_log_path;   ///< Path for Springtail logs storage directory

@@ -38,6 +38,7 @@ namespace springtail::pg_log_mgr {
         uint64_t _db_instance_id;                  ///< database instance id
         uint64_t _log_size_rollover_threshold;     ///< log size rollover threshold
         int _port;                                 ///< port for connecting to database
+        bool _archive_logs{false};                 ///< flag to turn on log archiving
 
         std::shared_ptr<ConcurrentQueue<committer::XidReady>> _committer_queue;
 

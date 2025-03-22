@@ -80,6 +80,8 @@ namespace springtail::pg_log_mgr {
          * @param pub_name publication name
          * @param slot_name replication slot name
          * @param port postgres port
+         * @param archive_logs flag to turn on log archiving in log reader
+         * @param committer_queue queue for submitting xids to committer
          */
         PgLogMgr(uint64_t db_id,
                  const std::filesystem::path &repl_log_path,
@@ -89,6 +91,7 @@ namespace springtail::pg_log_mgr {
                  const std::string &pub_name, const std::string &slot_name,
                  uint64_t log_size_rollover_threshold,
                  int port,
+                 bool archive_logs,
                  std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue);
 
         /**
@@ -105,7 +108,7 @@ namespace springtail::pg_log_mgr {
           _xact_log_path(xact_log_path),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
         {
-            _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, xact_log_path, _committer_queue);
+            _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, xact_log_path, _committer_queue, false);
         }
 
         /** Start the pipeline; setup the log reader/writer log files etc. */

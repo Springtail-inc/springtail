@@ -112,10 +112,9 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
                 // go through the hash of sys tbl operations
                 for (auto &entry : result->swap().tids()) {
-                    auto table_id = entry.first;
                     auto copy_info = entry.second;
 
-                    SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "table_id {}", table_id);
+                    SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "table_id {}", entry.first);
 
                     // perform the table swap
                     // note: we wait to perform this operation in the GC-2 to ensure that all system

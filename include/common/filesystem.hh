@@ -264,18 +264,29 @@ namespace springtail {
         cleanup_files_from_dir(const std::filesystem::path& dir,
                                std::string_view prefix,
                                std::string_view suffix,
-                               uint64_t timestamp_limit)
+                               uint64_t timestamp_limit,
+                               bool archive = false)
         {
+            if (archive && !std::filesystem::exists(dir / "archive")) {
+                // create archive directory
+                std::filesystem::create_directory(dir / "archive");
+            }
             for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                auto path = entry.path();
+                auto filename = path.filename();
                 // Check if it's a regular file and matches the prefix and suffix
-                if (std::filesystem::is_regular_file(entry) &&
-                    entry.path().filename().string().find(prefix) == 0 &&
-                    entry.path().filename().string().find(suffix) != std::string::npos) {
+                if (std::filesystem::is_regular_file(path) &&
+                    filename.string().find(prefix) == 0 &&
+                    filename.string().find(suffix) != std::string::npos) {
 
                     // Extract the timestamp from the file name
-                    auto timestamp = extract_timestamp_from_file(entry.path(), prefix, suffix);
+                    auto timestamp = extract_timestamp_from_file(path, prefix, suffix);
                     if (timestamp.has_value() && timestamp.value() < timestamp_limit) {
-                        std::filesystem::remove(entry.path());
+                        if (!archive) {
+                            std::filesystem::remove(path);
+                        } else {
+                            std::filesystem::rename(path, dir / "archive" / filename);
+                        }
                     }
                 }
             }
