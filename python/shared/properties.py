@@ -78,6 +78,9 @@ class Properties:
                     'LUSTRE_MOUNT_NAME': system_json['fs']['mount_name'],
                     'LUSTRE_DNS_NAME': system_json['fs']['dns_name'],
                     'FDW_USER_PASSWORD': self.fdw_user_password,
+
+                    # needed for a variety of reasons in test env.
+                    'REPLICATION_USER': self.replication_user,
                     'REPLICATION_USER_PASSWORD': self.replication_user_password
                 }
 
@@ -478,7 +481,7 @@ def main():
     print(f"ingest_host: {props.get_hostname('ingestion')}")
     print(f"proxy_host: {props.get_hostname('proxy')}")
     print(f"coordinator_state: {props.get_coordinator_state()}")
-    print(f"proxy_config: {props.integration_test_config()}")
+    print(f"test_proxy_config: {props.get_integration_test_config()}")
     print(f"otel_config: {props.get_otel_config()}")
 
     env_vars = [

@@ -183,7 +183,8 @@ namespace springtail::pg_fdw {
         // get map of dbs id:name from redis
         auto dbs = Properties::get_databases();
 
-        LibPqConnectionPtr conn = _connect_fdw(std::nullopt, "postgres");
+        // connect to the db to setup the replicated dbs, the fdw user and foreign servers
+        LibPqConnectionPtr conn = _connect_fdw(std::nullopt, "template1");
 
         // see if the fdw user exists, if not create it
         _fdw_username = username;
