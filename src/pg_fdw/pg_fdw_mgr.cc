@@ -170,8 +170,8 @@ namespace springtail::pg_fdw {
             rd_lock.unlock();
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state: db_id: {}, tid: {}, xid: {}, pg_xid: {}",
-                            db_id, tid, xid, pg_xid);
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state: db_id: {}, tid: {}, xid: {}, pg_xid: {}, schema_xid: {}",
+                            db_id, tid, xid, pg_xid, schema_xid);
 
         TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid);
         PgFdwState *state = new PgFdwState{table, tid, xid};

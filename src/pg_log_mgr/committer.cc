@@ -161,13 +161,14 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     // perform a commit to the XidMgr
                     _xid_mgr->commit_xid(db_id, completed_xid, true);
                     _committed_xids[db_id] = completed_xid;
+
+                    SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, completed_xid);
+                    // notify the FDW of the schema changes
+                    _redis_ddl.commit_ddl(db_id, completed_xid);
                 } else {
                     _xid_mgr->record_ddl_change(db_id, completed_xid);
                 }
                 _completed_xids[db_id] = completed_xid;
-
-                // notify the FDW of the schema changes
-                _redis_ddl.commit_ddl(db_id, completed_xid);
 
                 if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
                     // notify everyone that the database is now in the "ready" state
@@ -259,16 +260,21 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 // commit the completed XID
                 _xid_mgr->commit_xid(db_id, xid, !completed_ddls.is_null());
                 _committed_xids[db_id] = xid;
+
+                // push completed DDL changes to the FDWs
+                // XXX we could make this conditional on there being outstanding DDL changes
+                SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, xid);
+                _redis_ddl.commit_ddl(db_id, xid);
             } else if (!completed_ddls.is_null()) {
                 // don't commit, but record any DDL changes to the history
                 _xid_mgr->record_ddl_change(db_id, xid);
             }
             _completed_xids[db_id] = xid;
 
-            if (!completed_ddls.is_null()) {
-                // push completed DDL changes to the FDWs
-                _redis_ddl.commit_ddl(db_id, xid);
-            }
+            // if (!completed_ddls.is_null()) {
+            //     // push completed DDL changes to the FDWs
+            //     _redis_ddl.commit_ddl(db_id, xid);
+            // }
 
             if (!index_ddls.is_null()) {
                 _redis_ddl.commit_index_ddl(db_id, xid);
@@ -433,6 +439,8 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         //finalize and commit
         auto client = sys_tbl_mgr::Client::get_instance();
         for (auto const& [db_id, xid, ddls] : precommit) {
+            // XXX I think this is not safe since it might have already been called -- we need to do
+            //     this another way, probably by injecting a record into the committer queue
             client->finalize(db_id, xid);
             _redis_ddl.commit_ddl(db_id, xid);
         }

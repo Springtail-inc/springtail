@@ -249,60 +249,73 @@ namespace springtail::pg_fdw {
         while (!_is_shutting_down) {
             try {
                 // blocking redis call to get next set of DDL statements
-                // XXX we could potentially parallelize updates to different db IDs
-                nlohmann::json ddls = redis_ddl.get_next_ddls(_fdw_id);
-                if (ddls.empty()) {
-                    continue;
+                auto &&ddls_vec = redis_ddl.get_next_ddls(_fdw_id);
+                if (ddls_vec.empty()) {
+                    continue; // check for shutdown and then re-check for queued DDL changes
                 }
 
-                uint64_t db_id = ddls.at("db_id").get<uint64_t>();
-                uint64_t schema_xid = ddls.at("xid").get<uint64_t>();
-
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Applying DDLs for db_id: {}, schema_xid: {}", db_id, schema_xid);
-
+                // check if we should skip applying any of the DDLs based on already-applied XIDs
                 std::shared_lock db_lock(_db_mutex);
-                if (_db_xid_map.contains(db_id) && _db_xid_map[db_id] >= schema_xid) {
-                    SPDLOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
-                                db_id, _db_xid_map[db_id], schema_xid);
-                    // unlocking here because continue will send it to the start of the while loop
+                std::map<uint64_t, std::map<uint64_t, nlohmann::json>> db_map;
+                for (auto &entry : ddls_vec) {
+                    uint64_t db_id = entry.at("db_id").get<uint64_t>();
+                    uint64_t schema_xid = entry.at("xid").get<uint64_t>();
+                    auto ddls = entry.at("ddls");
+
+                    if (_db_xid_map.contains(db_id) && _db_xid_map[db_id] >= schema_xid) {
+                        SPDLOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
+                                    db_id, _db_xid_map[db_id], schema_xid);
+                    } else {
+                        db_map[db_id][schema_xid] = ddls;
+                    }
+                }
+                if (db_map.empty()) {
+                    SPDLOG_WARN("All schemas have already been applied");
                     db_lock.unlock();
                     redis_ddl.commit_fdw_no_update(_fdw_id);
                     continue;
                 }
                 db_lock.unlock();
 
-                _thread_manager->queue_request(std::make_shared<common::MultiQueueRequest>(
-                    db_id, [this, &redis_ddl, db_id, schema_xid, ddls]() {
-                        try {
-                            // apply the DDL statements
-                            bool status = _update_schemas(db_id, schema_xid, ddls);
-                            if (!status) {
-                                // error occured, abort the DDL
-                                SPDLOG_ERROR("Failed to apply DDL statements");
-                                redis_ddl.abort_fdw(_fdw_id);
-                                DCHECK(false);
-                                return;
+                // queue each DBs DDL statements for processing
+                for (const auto &[db_id, xid_map] : db_map) {
+                    _thread_manager->queue_request(std::make_shared<common::MultiQueueRequest>(
+                        db_id, [this, &redis_ddl, db_id, xid_map]() {
+                            try {
+                                // apply the DDL statements
+                                bool status = _update_schemas(db_id, xid_map);
+                                if (!status) {
+                                    // error occured, abort the DDL
+                                    SPDLOG_ERROR("Failed to apply DDL statements");
+                                    redis_ddl.abort_fdw(_fdw_id);
+                                    DCHECK(false);
+                                    return;
+                                }
+
+                                // success, update schema XID if applied, otherwise they may be
+                                // queued
+                                uint64_t schema_xid = xid_map.rbegin()->first;
+                                SPDLOG_DEBUG_MODULE(
+                                    LOG_FDW, "Updating redis ddl @ through schema XID: {}, db_id: {}",
+                                    schema_xid, db_id);
+                                redis_ddl.update_schema_xid(_fdw_id, db_id, schema_xid);
+
+                                std::unique_lock db_lock_unique(_db_mutex);
+                                _db_xid_map[db_id] = schema_xid;
+                                db_lock_unique.unlock();
+
+                            } catch (Error &e) {
+                                SPDLOG_ERROR("Springtail exception in thread manager task");
+                                DCHECK(false);  // assert in debug
+                                e.log_backtrace();
+                            } catch (...) {
+                                // handle exception
+                                SPDLOG_ERROR("Exception in thread manager task");
+                                DCHECK(false);  // assert in debug
                             }
+                        }));
+                }
 
-                            // success, update schema XID if applied, otherwise they may be queued
-                            SPDLOG_DEBUG_MODULE(LOG_FDW, "Updating redis ddl @ schema XID: {}, db_id: {}", schema_xid, db_id);
-                            redis_ddl.update_schema_xid(_fdw_id, db_id, schema_xid);
-
-                            std::unique_lock db_lock_unique(_db_mutex);
-                            _db_xid_map[db_id] = schema_xid;
-                            db_lock_unique.unlock();
-
-                        } catch (Error &e) {
-                            SPDLOG_ERROR("Springtail exception in thread manager task");
-                            DCHECK(false); // assert in debug
-                            e.log_backtrace();
-                        } catch (...) {
-                            // handle exception
-                            SPDLOG_ERROR("Exception in thread manager task");
-                            DCHECK(false); // assert in debug
-                        }
-                    }
-                ));
             } catch (Error &e) {
                 SPDLOG_ERROR("Springtail exception in DDL thread");
                 DCHECK(false); // assert in debug
@@ -355,23 +368,23 @@ namespace springtail::pg_fdw {
 
     bool
     PgDDLMgr::_update_schemas(uint64_t db_id,
-                              uint64_t schema_xid,
-                              const nlohmann::json &ddls)
+                              const std::map<uint64_t, nlohmann::json> &xid_map)
     {
         // get the database name for the db_id; XXX should see if we can swtich to OID
         std::string db_name = Properties::get_db_name(db_id);
         LibPqConnectionPtr conn = _connect_fdw(db_id, _db_prefix + db_name);
 
         try {
-            std::set<std::string> schemas;
-
             // generate a DDL statement for each JSON in the transaction
             std::vector<std::string> txn;
-            for (const auto &ddl : ddls.at("ddls")) {
-                txn.push_back(_gen_sql_from_json(conn, SPRINGTAIL_FDW_SERVER_NAME, ddl, schemas));
+            for (auto &[xid, ddls] : xid_map) {
+                for (const auto &ddl : ddls) {
+                    txn.push_back(_gen_sql_from_json(conn, SPRINGTAIL_FDW_SERVER_NAME, ddl));
+                }
             }
 
             // generate a statement to alter the server options with the schema XID
+            uint64_t schema_xid = xid_map.rbegin()->first;
             txn.push_back(fmt::format("ALTER SERVER {} OPTIONS (SET {} '{}')",
                                       SPRINGTAIL_FDW_SERVER_NAME,
                                       SPRINGTAIL_FDW_SCHEMA_XID_OPTION,
@@ -411,8 +424,7 @@ namespace springtail::pg_fdw {
     std::string
     PgDDLMgr::_gen_sql_from_json(LibPqConnectionPtr conn,
                                  const std::string &server_name,
-                                 const nlohmann::json &ddl,
-                                 std::set<std::string> &schemas)
+                                 const nlohmann::json &ddl)
     {
         assert(ddl.is_object());
         assert(ddl.contains("action"));
@@ -436,9 +448,6 @@ namespace springtail::pg_fdw {
                         col.at("nullable")
                     });
             }
-
-            // for create table get the schema name
-            schemas.insert(ddl.at("schema").get<std::string>());
 
             // generate the CREATE TABLE statement
             return _gen_fdw_table_sql(conn, server_name, ddl.at("schema"), ddl.at("table"),
