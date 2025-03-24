@@ -60,20 +60,6 @@ namespace springtail::committer {
          */
         void drop(uint64_t db_id, uint64_t index_id, uint64_t xid);
 
-
-        /**
-         * This will wait for the index work completion for given db and table.
-         * @param db_id The ID of the database.
-         * @param tid The ID of the table.
-         */
-        void wait_for_completion(uint64_t db_id, uint64_t tid);
-
-        /**
-         * This will wait for the index work completion for given db. 
-         * @param db_id The ID of the database.
-         */
-        void wait_for_completion(uint64_t db_id);
-
         /**
          * @brief Processes the first pending xid's entries for the given db_id.
          * 
@@ -84,12 +70,6 @@ namespace springtail::committer {
          * @return std::optional<uint64_t> The XID that got reconciled or nullopt if none
          */
         std::optional<uint64_t> process_first_pending_reconciliation(uint64_t db_id);
-
-        /**
-         * @brief Processes the first pending xid's entries for the first available db_id in the map.
-         * @return std::optional<std::pair<uint64_t, uint64_t>> db_id and XID completed if reconciled, otherwise std::nullopt.
-         */
-        std::optional<std::pair<uint64_t, uint64_t>> process_first_pending_reconciliation();
 
     private:
         void task(std::stop_token st);
@@ -107,9 +87,6 @@ namespace springtail::committer {
 
         bool _was_dropped(const Key& key);
         void _commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx, uint64_t end_xid);
-
-        // this is to notify when an index modifiction is completed 
-        std::condition_variable _cv_done;
 
         // work state
         std::condition_variable_any _cv;

@@ -70,41 +70,6 @@ namespace springtail::committer {
         }
     }
 
-    void Indexer::wait_for_completion(uint64_t db_id)
-    {
-        auto find_work = [&]() {
-            auto it = std::ranges::find_if(_work_set,
-                    [&](auto const& v) { 
-                        return v.first.first == db_id;
-                    });
-            return it != _work_set.end();
-        };
-
-        // wait for the key {db, tid} to be removed from the working set
-        std::unique_lock g(_m);
-        _cv_done.wait(g, [&find_work]{return !find_work();});
-    }
-
-    void Indexer::wait_for_completion(uint64_t db_id, uint64_t tid)
-    {
-        auto find_work = [&]() {
-            auto it = std::ranges::find_if(_work_set,
-                    [&](auto const& v) { 
-                        if (v.first.first == db_id && !v.second._ddl.is_null()) {
-                            return v.second._ddl["table_id"] == tid;
-                        }
-                        return false;
-                    });
-            return it != _work_set.end();
-        };
-
-        // wait for the key {db, tid} to be removed from the working set
-        std::unique_lock g(_m);
-        while( find_work()  ) {
-            _cv_done.wait(g, [&find_work]{return !find_work();});
-        }
-    }
-
     void Indexer::task(std::stop_token st) 
     {
         while(!st.stop_requested()) {
@@ -149,7 +114,6 @@ namespace springtail::committer {
             assert(work_item._ddl.is_null());
 
             _work_set.erase(key);
-            _cv_done.notify_one();
         }
 
         XidLsn xid{idx._xid};
@@ -298,7 +262,6 @@ namespace springtail::committer {
         work_item = _work_set[key];
 
         _work_set.erase(key);
-        _cv_done.notify_one();
 
         auto client = sys_tbl_mgr::Client::get_instance();
         auto extent_id = root->finalize();
@@ -344,21 +307,6 @@ namespace springtail::committer {
             return std::nullopt; // No pending entries for this db_id
         }
         return _process_first_pending_reconciliation(db_it);
-    }
-
-    std::optional<std::pair<uint64_t, uint64_t>>
-    Indexer::process_first_pending_reconciliation() {
-        std::scoped_lock lock(_pending_recon_map_mtx);
-        if (_pending_idx_reconciliation_map.empty()) {
-            return std::nullopt;
-        }
-        auto db_it = _pending_idx_reconciliation_map.begin();
-        auto xid_opt = _process_first_pending_reconciliation(db_it);
-        if (xid_opt) {
-            return std::pair(db_it->first, *xid_opt);
-        } else {
-            return std::nullopt;
-        }
     }
 
     std::optional<uint64_t>
