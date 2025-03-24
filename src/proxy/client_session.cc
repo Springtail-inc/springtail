@@ -54,28 +54,28 @@ namespace springtail::pg_proxy {
         // main entry point for client session
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session running", _id);
 
-        do {
-            // go through fds and check if we have any pending data
-            // first check client session
-            if (fds.contains(_connection->get_socket())) {
-                // wrap with error handler to catch any exceptions
-                _wrap_error_handler([this] {
+        // wrap with error handler to catch any exceptions
+        _wrap_error_handler([this, &fds] {
+            do {
+                // go through fds and check if we have any pending data
+                // first check client session
+                if (fds.contains(_connection->get_socket())) {
                     _process_connection();
-                });
-            }
+                }
 
-            // check if we have any server sessions
-            if (_primary_session && fds.contains(_primary_session->get_connection()->get_socket())) {
-                _primary_session->process_connection(_gen_seq_id());
-            }
+                // check if we have any server sessions
+                if (_state != ERROR && _primary_session && fds.contains(_primary_session->get_connection()->get_socket())) {
+                    _primary_session->process_connection(_gen_seq_id());
+                }
 
-            if (_replica_session && fds.contains(_replica_session->get_connection()->get_socket())) {
-                _replica_session->process_connection(_gen_seq_id());
-            }
+                if (_state != ERROR && _replica_session && fds.contains(_replica_session->get_connection()->get_socket())) {
+                    _replica_session->process_connection(_gen_seq_id());
+                }
 
-            fds.clear();
+                fds.clear();
 
-        } while (_has_pending_data(fds));
+            } while ((_state != ERROR) && !is_shutdown() && _has_pending_data(fds));
+        });
 
         PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[C:{}] Client session done", _id);
     }
@@ -220,14 +220,17 @@ namespace springtail::pg_proxy {
     void
     ClientSession::shutdown_session(void)
     {
+        // grab a shared pointer to self, to avoid losing the reference during cleanup
+        ClientSessionPtr self = shared_from_this();
+
         // Callback from Session::_handle_error()
         PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Client session shutting down", _id);
 
         // first close connection and remove from server poll list
         // this removes all associated sockets from this session
-        ProxyServer::get_instance()->log_disconnect(shared_from_this());
+        ProxyServer::get_instance()->log_disconnect(self);
         _connection->close();
-        ProxyServer::get_instance()->shutdown_session(shared_from_this());
+        ProxyServer::get_instance()->shutdown_session(self);
 
         // notify server replica/primary sessions via shutdown_server_sessions()
         uint64_t seq_id = _gen_seq_id();

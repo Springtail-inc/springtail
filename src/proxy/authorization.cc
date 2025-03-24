@@ -293,6 +293,7 @@ ClientAuthorization::_handle_auth(uint64_t seq_id)
                 return;
             }
 
+            case TEXT: // mapping TEXT to SCRAM for client auth
             case SCRAM: {
                 // see if this is the first or second message
                 if (_login->scram_state.server_nonce == nullptr) {
@@ -320,7 +321,7 @@ ClientAuthorization::_handle_auth(uint64_t seq_id)
             }
 
             default:
-                SPDLOG_ERROR("Invalid auth continue state");
+                SPDLOG_ERROR("Invalid login type: {}", static_cast<int8_t>(_login->type));
                 throw ProxyAuthError();
         }
     }

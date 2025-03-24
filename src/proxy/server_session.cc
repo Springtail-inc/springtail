@@ -1040,17 +1040,23 @@ namespace springtail::pg_proxy {
     ServerSession::shutdown_session()
     {
         // callback from Session::_handle_error()
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session is shutting down, socket={}", _id, _connection->get_socket());
+
+        // grab a shared pointer to self, to avoid losing the reference during cleanup
+        ServerSessionPtr self = shared_from_this();
 
         // notify client session of error
         auto client = get_client_session();
         if (client != nullptr) {
-            client->server_shutdown(shared_from_this());
+            client->server_shutdown(self);
         }
 
         // on error, the server shuts down the connection and releases the session
-        ProxyServer::get_instance()->log_disconnect(shared_from_this());
+        ProxyServer::get_instance()->shutdown_session(self);
+
+        // do the disconnect
+        ProxyServer::get_instance()->log_disconnect(self);
         _connection->close();
-        ProxyServer::get_instance()->shutdown_session(shared_from_this());
 
         // clear all internal data structures
         reset_session();

@@ -410,6 +410,8 @@ namespace springtail::pg_proxy {
             }
             lock2.unlock();
 
+            DCHECK_EQ(n, 0);
+
             // queue the sessions that are now session
             PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Queueing {} sessions", runnable_sessions.size());
             for (auto &session : runnable_sessions) {
@@ -479,19 +481,41 @@ namespace springtail::pg_proxy {
         CHECK(lock.owns_lock());
 
         auto session_itr = _session_sockets.find(session);
-        if (session_itr == _session_sockets.end()) {
-            SPDLOG_WARN("Session not found in session sockets map: {}", session->name());
+        if (session_itr != _session_sockets.end()) {
+            // this is the primary session used for lookup
+            // go through the list of sockets and remove them
+            for (auto socket: session_itr->second) {
+                _waiting_sessions.erase(socket);
+                _sessions.erase(socket);
+            }
+
+            // remove the session from the sockets map (session->socket)
+            _session_sockets.erase(session_itr);
             return;
         }
 
-        // go through the list of sockets and remove them
-        for (auto socket: session_itr->second) {
-            _waiting_sessions.erase(socket);
-            _sessions.erase(socket);
+        // this is a secondary session, most likely a server session
+        // need to remove its socket from the appropriate maps
+        int socket = session->get_connection()->get_socket();
+
+        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Session not found in session sockets, removing socket: {}", socket);
+
+        _waiting_sessions.erase(socket);
+
+        // find the primary session by socket
+        auto itr = _sessions.find(socket);
+        if (itr == _sessions.end()) {
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Socket {} not found in sessions map", socket);
+            return;
         }
 
-        // remove the session from the sockets map (session->socket)
-        _session_sockets.erase(session_itr);
+        // do a lookup in the session sockets list
+        auto primary_itr = _session_sockets.find(itr->second);
+        if (primary_itr != _session_sockets.end()) {
+            // remove the socket from the vector of sockets associated with the primary session
+            primary_itr->second.erase(std::remove(primary_itr->second.begin(),
+                primary_itr->second.end(), socket), primary_itr->second.end());
+        }
     }
 
     void

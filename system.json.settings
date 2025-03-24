@@ -109,7 +109,8 @@
         "fdw_id": "1",
         "replication_user": "springtail",
         "replication_user_password": "springtail",
-        "fdw_user_password": "springtail"
+        "fdw_user_password": "springtail",
+	"aws_mock_override": false
     },
     "db_instances": {
         "1234": {
