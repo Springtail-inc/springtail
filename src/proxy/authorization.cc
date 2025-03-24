@@ -910,7 +910,7 @@ ServerAuthorization::_handle_auth_scram_continue(BufferPtr buffer, uint64_t seq_
     if (_login->type == SCRAM) {
         user.scram_ClientKey = _login->scram_state.ClientKey;
         user.has_scram_keys = true;
-    }  else if (_login->type == TEXT) {
+    } else if (_login->type == TEXT) {
         user.has_scram_keys = false;
 
         if (_login->password.size() >= sizeof(user.passwd)) {
@@ -968,9 +968,13 @@ ServerAuthorization::_handle_auth_scram_complete(BufferPtr buffer)
     }
 
     PgUser user;
-    user.scram_ClientKey = _login->scram_state.ClientKey;
-    user.scram_ServerKey = _login->scram_state.ServerKey;
-    user.has_scram_keys = true;
+    if (_login->type == SCRAM) {
+        user.scram_ClientKey = _login->scram_state.ClientKey;
+        user.scram_ServerKey = _login->scram_state.ServerKey;
+        user.has_scram_keys = true;
+    } else if (_login->type == TEXT) {
+        user.has_scram_keys = false;
+    }
 
     // last step, verify the server signature
     if (!verify_server_signature(&_login->scram_state, &user, ServerSignature)) {

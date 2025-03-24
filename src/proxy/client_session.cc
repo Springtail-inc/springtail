@@ -20,9 +20,6 @@
 #include <proxy/buffer_pool.hh>
 #include <proxy/logging.hh>
 
-#include <proxy/auth/md5.h>
-#include <proxy/auth/scram.hh>
-
 namespace springtail::pg_proxy {
 
     ClientSession::ClientSession(ProxyConnectionPtr connection)

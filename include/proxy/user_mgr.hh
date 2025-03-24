@@ -56,7 +56,7 @@ namespace springtail::pg_proxy {
               password(password),
               salt(salt)
         {
-            if (type == SCRAM) {
+            if (type == SCRAM || type == TEXT) {
                 memset(&scram_state, 0, sizeof(scram_state));
                 SPDLOG_DEBUG_MODULE(LOG_PROXY, "new userlogin scram state: {:p}", (void *)&scram_state);
             }

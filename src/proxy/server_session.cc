@@ -16,9 +16,6 @@
 #include <proxy/logging.hh>
 #include <proxy/database.hh>
 #include <proxy/util.hh>
-#include <proxy/auth/md5.h>
-#include <proxy/auth/sha256.h>
-#include <proxy/auth/scram.hh>
 
 namespace springtail::pg_proxy {
 
