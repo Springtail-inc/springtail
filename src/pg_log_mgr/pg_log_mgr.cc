@@ -223,15 +223,12 @@ namespace springtail::pg_log_mgr {
         while (!_shutdown) {
             // block on index recon queue w/timeout for shutdown
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Waiting for index recon queue");
-            auto request = _index_recon_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
-            if (request == nullptr) {
-                continue; // timeout, check for shutdown
+            if (auto request = _index_recon_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT); request) {
+                //Pass it to log reader to notify committer
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Request received for index recon for {}", *request);
+                auto msg = std::make_shared<PgMsg>(PgMsgEnum::INDEX_RECON);
+                _pg_log_reader->enqueue_msg(msg);
             }
-
-            //Pass it to log reader to notify committer
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Request received for index recon for {}", *request);
-            auto msg = std::make_shared<PgMsg>(PgMsgEnum::INDEX_RECON);
-            _pg_log_reader->enqueue_msg(msg);
         }
     }
 
