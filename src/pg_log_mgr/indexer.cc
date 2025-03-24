@@ -12,7 +12,8 @@
 
 namespace springtail::committer {
 
-    Indexer::Indexer(uint32_t worker_count) 
+    Indexer::Indexer(uint32_t worker_count, std::shared_ptr<ConcurrentQueue<std::string>> index_recon_queue)
+        : _index_recon_queue(index_recon_queue)
     {
         assert(worker_count);
         for (auto i = 0; i != worker_count; ++i) {
@@ -332,8 +333,7 @@ namespace springtail::committer {
             .first->second.push_back(std::move(idxState)); // Add IndexState to the list
 
         // Push to index recon reader to notify committer
-        auto _index_recon_queue = RedisQueue<std::string>(fmt::format(redis::QUEUE_INDEX_RECON, Properties::get_db_instance_id(), db_id));
-        _index_recon_queue.push(fmt::format("{}:{}", db_id, index_id));
+        _index_recon_queue->push(std::make_shared<std::string>(fmt::format("{}:{}", db_id, index_id)));
     }
 
     std::optional<uint64_t>

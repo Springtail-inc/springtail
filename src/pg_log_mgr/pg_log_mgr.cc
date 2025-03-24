@@ -30,7 +30,8 @@ namespace springtail::pg_log_mgr {
                        const std::string &user_name, const std::string &password,
                        const std::string &pub_name, const std::string &slot_name,
                        int port,
-                       std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue)
+                       std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
+                       std::shared_ptr<ConcurrentQueue<std::string>> index_recon_queue)
     : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
       _host(host), _db_name(db_name), _user_name(user_name),
       _password(password), _pub_name(pub_name), _slot_name(slot_name), _port(port),
@@ -39,7 +40,7 @@ namespace springtail::pg_log_mgr {
       _committer_queue(committer_queue),
       _xact_log_path(xact_log_path),
       _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
-      _index_recon_queue(fmt::format(redis::QUEUE_INDEX_RECON, _db_instance_id, _db_id))
+      _index_recon_queue(index_recon_queue)
     {
         _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, xact_log_path, _committer_queue);
 
@@ -220,9 +221,9 @@ namespace springtail::pg_log_mgr {
     PgLogMgr::_index_recon_thread()
     {
         while (!_shutdown) {
-            // block on redis index recon queue w/timeout for shutdown
+            // block on index recon queue w/timeout for shutdown
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Waiting for index recon queue");
-            auto request = _index_recon_queue.pop(REDIS_WORKER_ID, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+            auto request = _index_recon_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (request == nullptr) {
                 continue; // timeout, check for shutdown
             }
@@ -231,10 +232,6 @@ namespace springtail::pg_log_mgr {
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Request received for index recon");
             PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::INDEX_RECON);
             _pg_log_reader->enqueue_msg(msg);
-
-            // update redis state
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Committing index recon queue");
-            _index_recon_queue.commit(REDIS_WORKER_ID);
         }
     }
 

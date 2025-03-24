@@ -40,7 +40,7 @@ namespace springtail::committer {
             }
         };
 
-        explicit Indexer(uint32_t worker_count);
+        explicit Indexer(uint32_t worker_count, std::shared_ptr<ConcurrentQueue<std::string>> index_recon_queue);
 
         Indexer(const Indexer&) = delete;
         Indexer& operator=(const Indexer&) = delete;
@@ -173,5 +173,10 @@ namespace springtail::committer {
          * @return std::optional<uint64_t> The XID that got reconciled or nullopt if none
          */
         std::optional<uint64_t> _process_first_pending_reconciliation(PendingReconMap::iterator db_it);
+
+        /*
+         * @brief A queue for indexer to notify committer to trigger index reconciliation
+         */
+        std::shared_ptr<ConcurrentQueue<std::string>> _index_recon_queue;
     };
 }

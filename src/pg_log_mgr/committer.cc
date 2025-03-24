@@ -236,15 +236,15 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
             nlohmann::json index_ddls = _redis_ddl.get_index_ddls_xid(db_id, xid);
 
+            // Handle catchup for indexes if any are pending
+            const auto& idx_reconciled_xid_opt = _indexer->process_first_pending_reconciliation(db_id);
+
             if (!index_ddls.is_null()) {
                 _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
 
                 // process the indexes - create/drop, allowing them to happen in the background
                 _indexer->process_ddls(db_id, xid, index_ddls);
             }
-
-            // Handle catchup for indexes if any are pending
-            const auto& idx_reconciled_xid_opt = _indexer->process_first_pending_reconciliation(db_id);
 
             if (!completed_ddls.is_null()) {
                 // pre-commit the DDLs to be applied to the FDWs
@@ -363,7 +363,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
     Committer::_create_indexer()
     {
         // use the same worker count for Indexer
-        _indexer = std::make_unique<Indexer>(_worker_count);
+        _indexer = std::make_unique<Indexer>(_worker_count, _index_recon_queue);
 
         // cleanup
         auto &&precommit = _redis_ddl.get_precommit_index_ddl();
