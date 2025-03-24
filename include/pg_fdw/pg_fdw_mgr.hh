@@ -262,5 +262,8 @@ namespace springtail::pg_fdw {
 
         friend std::vector<ConstQualPtr>
         _get_index_quals(const PgFdwState *state, Index const& idx, List const* qual_list);
+
+        /** Helper to create an IPC cache for table roots */
+        std::shared_ptr<sys_tbl_mgr::ShmCache> _try_create_cache();
     };
 } // namespace springtail::pg_fdw

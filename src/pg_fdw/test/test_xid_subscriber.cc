@@ -67,7 +67,7 @@ namespace {
         auto xid_mgr = XidMgrClient::get_instance();
 
         // this will create shm cache asynchronously 
-        PgXidSubscriberMgr s(10*1024);
+        PgXidSubscriberMgr s(10*1024, 4);
 
         // this the same cache created by PgXidSubscriber
         std::unique_ptr<sys_tbl_mgr::ShmCache> cache;
