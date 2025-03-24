@@ -122,12 +122,16 @@ PgXidSubscriberMgr::_populate_worker(std::stop_token st)
 {
     while(!st.stop_requested()) {
         // get the next work item
-        std::unique_lock g(_m);
-        if (!_cv.wait(g, st, [this]{ return !_populate_queue.empty(); })) {
-            break;
+        decltype(_populate_queue)::value_type item; 
+        {
+            std::unique_lock g(_m);
+            if (!_cv.wait(g, st, [this]{ return !_populate_queue.empty(); })) {
+                break;
+            }
+            item = _populate_queue.front();
+            _populate_queue.pop();
         }
-        auto [db, xid] = _populate_queue.front();
-        _populate_queue.pop();
+        auto [db, xid] = item;
         auto table_ids = _cache->get_db_tables(db);
         for (auto tid: table_ids) {
             XidLsn x{xid};
