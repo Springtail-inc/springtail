@@ -229,8 +229,8 @@ namespace springtail::pg_log_mgr {
             }
 
             //Pass it to log reader to notify committer
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Request received for index recon");
-            PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::INDEX_RECON);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Request received for index recon for {}", *request);
+            auto msg = std::make_shared<PgMsg>(PgMsgEnum::INDEX_RECON);
             _pg_log_reader->enqueue_msg(msg);
         }
     }

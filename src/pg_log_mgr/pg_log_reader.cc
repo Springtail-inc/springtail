@@ -704,8 +704,10 @@ namespace springtail::pg_log_mgr {
         }
     }
 
+    // msg is unused as we want to only trigger
+    // index reconciliation via committer
     void
-    PgLogReader::_process_index_recon(const PgMsgPtr &msg)
+    PgLogReader::_process_index_recon([[maybe_unused]] const PgMsgPtr &msg)
     {
         uint64_t xid = this->get_next_xid();
         _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::XactMsg(xid)));

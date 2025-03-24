@@ -124,7 +124,7 @@ namespace springtail::committer {
         uint32_t _worker_count;
         ConcurrentQueue<WorkerEntry> _worker_queue; ///< The queue of work for the worker threads.
         std::shared_ptr<ConcurrentQueue<XidReady>> _committer_queue;
-        std::shared_ptr<ConcurrentQueue<std::string>> _index_recon_queue; ///< Queue where index recon requests is received
+        std::shared_ptr<ConcurrentQueue<std::string>> _index_recon_queue; ///< Queue where index recon requests are received
         std::vector<std::thread> _worker_threads; ///< The worker threads.
 
         std::atomic<uint64_t> _shutdown = false; ///< Causes the committer to shut down when set to true.
