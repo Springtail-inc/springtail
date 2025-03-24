@@ -1,3 +1,4 @@
+#include <chrono>
 #include <pg_fdw/pg_xid_subscriber_mgr.hh>
 #include <common/properties.hh>
 #include <nlohmann/json.hpp>
@@ -5,6 +6,7 @@
 #include <xid_mgr/xid_mgr_client.hh>
 #include <xid_mgr/xid_mgr_subscriber.hh>
 #include <sys_tbl_mgr/client.hh>
+#include <common/coordinator.hh>
 
 using namespace springtail;
 using namespace springtail::pg_fdw;
@@ -25,6 +27,11 @@ PgXidSubscriberMgr::~PgXidSubscriberMgr()
 void
 PgXidSubscriberMgr::task(std::stop_token st)
 {
+    static constexpr char const * const XID_SUBSCRIBER_WORKER_ID = "xid_subscriber";
+
+    auto coordinator = Coordinator::get_instance();
+    coordinator->register_thread(Coordinator::DaemonType::XID_SUBSCRIBER, XID_SUBSCRIBER_WORKER_ID);
+
     // remove old cache if any and create a new one
     sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_ROOTS);
     _cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS, _cache_size);
@@ -61,11 +68,17 @@ PgXidSubscriberMgr::task(std::stop_token st)
     }
 
     // keep alive
-    auto period = sys_tbl_mgr::ShmCache::XID_KEEP_ALIVE_PERIOD / 3;
+    auto cache_keep_alive = sys_tbl_mgr::ShmCache::XID_KEEP_ALIVE_PERIOD / 3;
+    auto coordinator_keep_alive = std::chrono::milliseconds(1000*constant::COORDINATOR_KEEP_ALIVE_TIMEOUT) / 2;
+    auto loop_time_period = std::min(cache_keep_alive, coordinator_keep_alive);
 
     XidMgrClient *xid_client = XidMgrClient::get_instance();
 
     while(!st.stop_requested()) {
+
+        // mark alive with coordinator
+        coordinator->mark_alive(Coordinator::DaemonType::XID_SUBSCRIBER, XID_SUBSCRIBER_WORKER_ID);
+
         if (connected == false) { 
             if (subscriber) {
                 // GRPC is supposed to delete it after cancel()
@@ -78,7 +91,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
             subscriber = std::make_unique<XidMgrSubscriber>(xid_client->get_channel(), 
                     XidMgrSubscriber::Callbacks{on_push, on_disconnect});
         }
-        std::this_thread::sleep_for(period);
+        std::this_thread::sleep_for(loop_time_period);
         _cache->keep_alive();
     }
     if (subscriber) {
