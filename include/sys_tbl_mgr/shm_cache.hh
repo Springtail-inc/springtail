@@ -1,3 +1,6 @@
+#pragma once
+
+#include <chrono>
 #include <optional>
 #include <boost/interprocess/managed_shared_memory.hpp>
 #include <boost/interprocess/sync/named_sharable_mutex.hpp>
@@ -19,6 +22,9 @@ namespace springtail::sys_tbl_mgr {
 namespace ipc = boost::interprocess;
 namespace bmi = boost::multi_index;
 
+// global cache names
+static constexpr char SHM_CACHE_ROOTS[] = "springtail.roots";
+
 using DbId = uint64_t;
 using TableId = uint64_t;
 using Xid = uint64_t;
@@ -32,6 +38,13 @@ using Xid = uint64_t;
 class ShmCache
 {
 public:
+
+    /**
+     * In order for get_committed_xid() to return a valid XID, update_committed_xid() must
+     * be called at least once every XID_KEEP_ALIVE_PERIOD.
+     */
+    static constexpr std::chrono::duration XID_KEEP_ALIVE_PERIOD = std::chrono::milliseconds(6);
+
     /*
      * Create a new cache with the given name. If a cache with
      * the name already exists, it will throw.
@@ -82,11 +95,41 @@ public:
      */
     static void remove(const std::string& name);
 
+    /**
+     * This will update committed XID and set _xid_committed_time to now().
+     * @param db The DB ID.
+     * @param xid The XID.
+     */
+    void update_committed_xid(DbId db, Xid xid);
+
+    /**
+     * This must be called periodically (see XID_KEEP_ALIVE_PERIOD).
+     * to keep the committed XID as being up to date.
+     */
+    void keep_alive();
+
+    /**
+     * Return the last committed Xid if it is up to date or false otherwise.
+     * The function will check that now() - _xid_commit_time < XID_KEEP_ALIVE_PERIOD.
+     */
+    std::optional<Xid> get_committed_xid(DbId db);
+
+    bool is_alive();
+
+
+    /**
+     * Return all tables that are tracked by the cache.
+     */
+    std::vector<TableId> get_db_tables(DbId db);
+
 private:
+    void _init();
+
     // if free memory size goes below the limit, we start evictions
     // until we reach the watermark
     constexpr static double FREE_MEM_LIMIT = 0.3; // 30%
     constexpr static double FREE_MEM_WATERMARK = 0.5; // 50%
+                                                      //
 
     /**
      * This will verify that the cache has free space as defined by
@@ -101,7 +144,7 @@ private:
     template <typename T>
     using Alloc = ipc::allocator<T, ipc::managed_shared_memory::segment_manager>;
 
-    using String =  ipc::basic_string<char, std::char_traits<char>, Alloc<char>>;
+    using String =  ipc::vector<char, Alloc<char>>;
 
     using Key = std::pair<DbId, TableId>;
 
@@ -158,6 +201,13 @@ private:
     // The objects are deleted when the shared memory is deleted.
     Cache* _cache;
     Lru* _lru;
+
+    // Xid updates
+    using Time = std::chrono::time_point<std::chrono::high_resolution_clock>;
+    using XidMap = ipc::map<DbId, Xid, std::less<DbId>, Alloc<std::pair<const DbId, Xid>>>;
+
+    Time* _xid_commit_time;
+    XidMap* _committed_xid_map;
 };
 
 }  // namespace springtail::sys_tbl_mgr

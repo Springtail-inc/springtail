@@ -15,6 +15,18 @@
 
 namespace springtail::pg_proxy {
 
+static void
+decode_error(BufferPtr buffer, std::string &code, std::string &message)
+{
+    // Error response
+    std::string severity;
+    std::string text;
+
+    ProxyProtoError::decode_error(buffer, severity, text, code, message);
+
+    SPDLOG_ERROR("Error response from server: {}, {}, {}", text, code, message);
+}
+
 bool
 ClientAuthorization::process_auth_data(uint64_t seq_id)
 {
@@ -34,10 +46,6 @@ ClientAuthorization::process_auth_data(uint64_t seq_id)
         default:
             // do nothing
             break;
-    }
-
-    if (_state == ERROR) {
-        throw ProxyAuthError();
     }
 
     return (_state == READY);
@@ -142,6 +150,7 @@ ClientAuthorization::_process_startup_msg(int32_t remaining, uint64_t seq_id)
     if (_user == nullptr) {
         SPDLOG_ERROR("User {} not found", username);
         _state = ERROR;
+        _error_code = ProxyProtoError::INVALID_PASSWORD;
         return;
     }
     _database = database;
@@ -149,6 +158,7 @@ ClientAuthorization::_process_startup_msg(int32_t remaining, uint64_t seq_id)
     if (!optional_db_id.has_value()) {
         SPDLOG_ERROR("Database {} not found", _database);
         _state = ERROR;
+        _error_code = ProxyProtoError::INVALID_DATABASE;
         return;
     }
     _db_id = optional_db_id.value();
@@ -180,6 +190,7 @@ ClientAuthorization::_process_ssl_request()
     if (ssl == nullptr) {
         SPDLOG_ERROR("Failed to create SSL context");
         _state = ERROR;
+        _error_code = ProxyProtoError::CONNECTION_FAILURE;
         return;
     }
 
@@ -216,9 +227,9 @@ ClientAuthorization::_send_auth_req(uint64_t seq_id)
 
         default:
             SPDLOG_ERROR("User {} not found", _user->username());
-            ProxyProtoError::encode_error(buffer, ProxyProtoError::INVALID_PASSWORD,
-                                          "password authentication failed");
-            throw ProxyAuthError();
+            _error_code = ProxyProtoError::INVALID_PASSWORD;
+            _state = ERROR;
+            break;
     }
 
     // we've encoded the auth message above, now we send it, for AUTH_OK it is already sent
@@ -293,6 +304,7 @@ ClientAuthorization::_handle_auth(uint64_t seq_id)
                 return;
             }
 
+            case TEXT: // mapping TEXT to SCRAM for client auth
             case SCRAM: {
                 // see if this is the first or second message
                 if (_login->scram_state.server_nonce == nullptr) {
@@ -320,7 +332,7 @@ ClientAuthorization::_handle_auth(uint64_t seq_id)
             }
 
             default:
-                SPDLOG_ERROR("Invalid auth continue state");
+                SPDLOG_ERROR("Invalid login type: {}", static_cast<int8_t>(_login->type));
                 throw ProxyAuthError();
         }
     }
@@ -390,6 +402,7 @@ ClientAuthorization::_handle_scram_auth_continue(const std::string_view data, ui
     }
 
     // verify the nonce and the proof from client
+    // verify_client_proof sets client key in scram state
     if (!verify_final_nonce(&_login->scram_state, client_final_nonce) ||
         !verify_client_proof(&_login->scram_state, proof)) {
         SPDLOG_ERROR("Invalid SCRAM response (nonce or proof does not match)");
@@ -621,6 +634,8 @@ ServerAuthorization::_handle_message(uint64_t seq_id)
         }
 
         case 'E':
+            // Error response
+            decode_error(buffer, _error_code, _error_message);
             _state = ERROR;
             break;
 
@@ -859,6 +874,7 @@ ServerAuthorization::_handle_auth_scram(BufferPtr buffer, uint64_t seq_id)
         throw ProxyAuthError();
     }
 
+    // sets client_nonce and client_first_message_bare in scram_state
     char *client_first_message = build_client_first_message(&_login->scram_state);
     if (client_first_message == nullptr) {
         SPDLOG_ERROR("Failed to build client first message");
@@ -897,6 +913,7 @@ ServerAuthorization::_handle_auth_scram_continue(BufferPtr buffer, uint64_t seq_
     int salt_len;
     std::string input(data);
 
+    // sets: server_first_message, server_nonce, salt, iterations in scram_state
     if (!read_server_first_message(&_login->scram_state, input.data(),
                                    &_login->scram_state.server_nonce, &_login->scram_state.salt,
                                    &salt_len, &_login->scram_state.iterations)) {
@@ -909,7 +926,7 @@ ServerAuthorization::_handle_auth_scram_continue(BufferPtr buffer, uint64_t seq_
     if (_login->type == SCRAM) {
         user.scram_ClientKey = _login->scram_state.ClientKey;
         user.has_scram_keys = true;
-    }  else if (_login->type == TEXT) {
+    } else if (_login->type == TEXT) {
         user.has_scram_keys = false;
 
         if (_login->password.size() >= sizeof(user.passwd)) {
@@ -918,7 +935,6 @@ ServerAuthorization::_handle_auth_scram_continue(BufferPtr buffer, uint64_t seq_
         }
         // size check done above, don't remove it...
         strncpy(user.passwd, _login->password.c_str(), std::min(_login->password.size(), sizeof(user.passwd)-1));
-
     } else {
         SPDLOG_ERROR("Invalid password type for SCRAM");
         throw ProxyAuthError();
@@ -967,9 +983,13 @@ ServerAuthorization::_handle_auth_scram_complete(BufferPtr buffer)
     }
 
     PgUser user;
-    user.scram_ClientKey = _login->scram_state.ClientKey;
-    user.scram_ServerKey = _login->scram_state.ServerKey;
-    user.has_scram_keys = true;
+    if (_login->type == SCRAM) {
+        user.scram_ClientKey = _login->scram_state.ClientKey;
+        user.scram_ServerKey = _login->scram_state.ServerKey;
+        user.has_scram_keys = true;
+    } else if (_login->type == TEXT) {
+        user.has_scram_keys = false;
+    }
 
     // last step, verify the server signature
     if (!verify_server_signature(&_login->scram_state, &user, ServerSignature)) {
