@@ -236,8 +236,8 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
             nlohmann::json index_ddls = _redis_ddl.get_index_ddls_xid(db_id, xid);
 
-            // Handle catchup for indexes if any are pending
-            const auto& idx_reconciled_xid_opt = _indexer->process_first_pending_reconciliation(db_id);
+            // Trigger index reconciliation for the earliest pending XID
+            const auto& idx_reconciled_xid_opt = _indexer->process_next_reconciliation(db_id);
 
             if (!index_ddls.is_null()) {
                 _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);

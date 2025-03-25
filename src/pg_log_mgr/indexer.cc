@@ -296,17 +296,17 @@ namespace springtail::committer {
     }
 
     std::optional<uint64_t>
-    Indexer::process_first_pending_reconciliation(uint64_t db_id) {
+    Indexer::process_next_reconciliation(uint64_t db_id) {
         std::scoped_lock lock(_pending_reconciliation_map_mtx);
         auto db_it = _pending_idx_reconciliation_map.find(db_id);
         if (db_it == _pending_idx_reconciliation_map.end()) {
             return std::nullopt; // No pending entries for this db_id
         }
-        return _process_first_pending_reconciliation(db_it);
+        return _process_next_reconciliation(db_it);
     }
 
     std::optional<uint64_t>
-    Indexer::_process_first_pending_reconciliation(PendingReconMap::iterator db_it) {
+    Indexer::_process_next_reconciliation(PendingReconMap::iterator db_it) {
         auto& xid_map = db_it->second;
         if (xid_map.empty()) {
             _pending_idx_reconciliation_map.erase(db_it); // Clean up empty db_id entry
