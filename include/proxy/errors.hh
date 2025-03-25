@@ -19,12 +19,13 @@ namespace pg_proxy {
         static inline void
         encode_error(BufferPtr buffer,
                      const std::string_view error_code,
-                     const std::string_view error_message)
+                     const std::string_view error_message,
+                     const std::string severity = "ERROR")
         {
             buffer->put('E');
-            buffer->put32(23 + error_code.size() + error_message.size());
-            buffer->put_string("SERROR");
-            buffer->put_string("VERROR");
+            buffer->put32(10 + severity.size() + error_code.size() + error_message.size());
+            buffer->put('S');
+            buffer->put_string(severity);
             buffer->put('C');
             buffer->put_string(error_code);
             buffer->put('M');

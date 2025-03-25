@@ -104,22 +104,11 @@ namespace springtail::pg_proxy {
         // main entry point for thread processing
         // resume from where we left off
         switch(_state) {
-            case STARTUP: {
+            case STARTUP:
                 // startup messages, no auth done yet
-                uint64_t seq_id = _gen_seq_id();
-                if (_auth->process_auth_data(seq_id)) {
-                    // auth done, haven't sent ready for query yet
-                    _state = AUTH_SERVER;
-                    _db_id = _auth->db_id();
-                    _database = _auth->database();
-                    _user = _auth->user();
-                    _parameters = _auth->parameters();
-
-                    PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session auth done, db={}, user={}", _id, _database, _user->username());
-                    _primary_session = _create_server_session(Session::Type::PRIMARY, seq_id);
-                }
+                _handle_auth();
                 break;
-            }
+
             case READY:
                 // completed auth ready for queries
                 _handle_request();
@@ -135,6 +124,70 @@ namespace springtail::pg_proxy {
                 _state = ERROR;
                 break;
         }
+    }
+
+    void
+    ClientSession::_handle_auth()
+    {
+        // startup messages, no auth done yet
+        uint64_t seq_id = _gen_seq_id();
+        bool auth_done = false;
+
+        try {
+            // process the auth data, it may throw an exception, or just set _state to ERROR
+            auth_done = _auth->process_auth_data(seq_id);
+        } catch (ProxyAuthError &e) {
+            _state = ERROR;
+        }
+
+        if (_state == ERROR) {
+            // auth failed, handle the error
+            std::string error_code = _auth->get_error_code();
+            if (error_code.empty()) {
+                error_code = "28P01";
+            }
+
+            PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session auth failed: {}", _id, error_code);
+
+            // encode and send error message
+            BufferPtr buffer = BufferPool::get_instance()->get(128);
+            ProxyProtoError::encode_error(buffer, error_code, "authentication failed", "FATAL");
+            _send_buffer(buffer, seq_id);
+
+            // throw the error
+            throw ProxyAuthError();
+        }
+
+        if (auth_done) {
+            // auth done, haven't sent ready for query yet
+            // need to finish server authentication
+            _state = AUTH_SERVER;
+            _db_id = _auth->db_id();
+            _database = _auth->database();
+            _user = _auth->user();
+            _parameters = _auth->parameters();
+
+            PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session auth done, db={}, user={}", _id, _database, _user->username());
+            _primary_session = _create_server_session(Session::Type::PRIMARY, seq_id);
+        }
+    }
+
+    void
+    ClientSession::server_auth_error(ServerSessionPtr session,
+                                     uint64_t seq_id,
+                                     const std::string &error_code,
+                                     const std::string &error_message)
+    {
+        // if primary create login error
+        if (session->type() != Session::Type::PRIMARY) {
+            return;
+        }
+
+        // client session only waits for the primary auth to be done
+        // if we get an error here, we should send it to the client
+        BufferPtr buffer = BufferPool::get_instance()->get(1024);
+        ProxyProtoError::encode_error(buffer, error_code, error_message, "FATAL");
+        _send_buffer(buffer, seq_id);
     }
 
     void

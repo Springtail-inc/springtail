@@ -306,6 +306,14 @@ namespace springtail::pg_proxy {
                         auto &&params = _auth->server_parameters();
                         cs->server_auth_done(shared_from_this(), params);
                     }
+
+                    if (_state == ERROR) {
+                        auto error = _auth->get_error();
+                        auto cs = get_client_session();
+                        CHECK_NE(cs, nullptr);
+                        cs->server_auth_error(shared_from_this(), seq_id, error.first, error.second);
+                    }
+
                     break;
 
                 case READY:

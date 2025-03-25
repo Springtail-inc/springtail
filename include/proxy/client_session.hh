@@ -102,8 +102,19 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Callback from Server indicating that authentication is done
+         * @param session server session
+         * @param parameters parameters from server
          */
         void server_auth_done(ServerSessionPtr session, const std::unordered_map<std::string, std::string> &parameters);
+
+        /**
+         * @brief Callback from Server indicating that a message is ready
+         * @param session server session
+         * @param seq_id sequence id
+         * @param error_code error code
+         * @param error_message error message
+         */
+        void server_auth_error(ServerSessionPtr session, uint64_t seq_id, const std::string &error_code, const std::string &error_message);
 
         /**
          * @brief Callback from Server indicating that a message is ready
@@ -166,6 +177,9 @@ namespace springtail::pg_proxy {
          * @brief Read in data from client, parse queries and dispatch to server session
          */
         void _handle_request();
+
+        /** Handle authentication request */
+        void _handle_auth();
 
         /** Handle simple query request */
         void _handle_simple_query(BufferPtr buffer, uint64_t seq_id);
