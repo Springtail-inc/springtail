@@ -31,7 +31,7 @@ namespace springtail::pg_log_mgr {
                        const std::string &pub_name, const std::string &slot_name,
                        int port,
                        std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
-                       std::shared_ptr<ConcurrentQueue<std::string>> index_recon_queue)
+                       std::shared_ptr<ConcurrentQueue<std::string>> index_reconciliation_queue)
     : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
       _host(host), _db_name(db_name), _user_name(user_name),
       _password(password), _pub_name(pub_name), _slot_name(slot_name), _port(port),
@@ -40,7 +40,7 @@ namespace springtail::pg_log_mgr {
       _committer_queue(committer_queue),
       _xact_log_path(xact_log_path),
       _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
-      _index_recon_queue(index_recon_queue)
+      _index_reconciliation_queue(index_reconciliation_queue)
     {
         _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, xact_log_path, _committer_queue);
 
@@ -137,8 +137,8 @@ namespace springtail::pg_log_mgr {
         // for table re-syncs that might have to be run
         _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
 
-        // start the index recon thread
-        _recon_thread = std::thread(&PgLogMgr::_index_recon_thread, this);
+        // start the index reconciliation thread
+        _reconciliation_thread = std::thread(&PgLogMgr::_index_reconciliation_thread, this);
 
         // start the log reader thread since it is also used to process recovery messages
         _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
@@ -218,14 +218,14 @@ namespace springtail::pg_log_mgr {
     }
 
     void
-    PgLogMgr::_index_recon_thread()
+    PgLogMgr::_index_reconciliation_thread()
     {
         while (!_shutdown) {
-            // block on index recon queue w/timeout for shutdown
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Waiting for index recon queue");
-            if (auto request = _index_recon_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT); request) {
+            // block on index reconciliation queue w/timeout for shutdown
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Waiting for index reconciliation request");
+            if (auto request = _index_reconciliation_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT); request) {
                 //Pass it to log reader to notify committer
-                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Request received for index recon for {}", *request);
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Request received for index reconciliation for {}", *request);
                 auto msg = std::make_shared<PgMsg>(PgMsgEnum::INDEX_RECON);
                 _pg_log_reader->enqueue_msg(msg);
             }

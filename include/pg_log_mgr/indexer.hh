@@ -40,7 +40,7 @@ namespace springtail::committer {
             }
         };
 
-        explicit Indexer(uint32_t worker_count, std::shared_ptr<ConcurrentQueue<std::string>> index_recon_queue);
+        explicit Indexer(uint32_t worker_count, std::shared_ptr<ConcurrentQueue<std::string>> index_reconciliation_queue);
 
         Indexer(const Indexer&) = delete;
         Indexer& operator=(const Indexer&) = delete;
@@ -126,7 +126,7 @@ namespace springtail::committer {
         PendingReconMap _pending_idx_reconciliation_map;
 
         // Mutex to access pending reconciliation map
-        std::mutex _pending_recon_map_mtx;
+        std::mutex _pending_reconciliation_map_mtx;
 
         /**
          * @brief Adds an IndexState to the pending reconciliation map.
@@ -154,6 +154,6 @@ namespace springtail::committer {
         /*
          * @brief A queue for indexer to notify committer to trigger index reconciliation
          */
-        std::shared_ptr<ConcurrentQueue<std::string>> _index_recon_queue;
+        std::shared_ptr<ConcurrentQueue<std::string>> _index_reconciliation_queue;
     };
 }

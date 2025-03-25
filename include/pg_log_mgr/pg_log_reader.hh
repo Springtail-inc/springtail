@@ -263,7 +263,7 @@ namespace springtail::pg_log_mgr {
         /** Check if we need to perform a table swap / commit and notify the Committer if so. */
         void _check_sync_commit(uint64_t db_id, int32_t pg_xid, uint64_t xid);
 
-        /** Notify the Committer for an index recon */
+        /** Notify the Committer for an index reconciliation */
         void _process_index_recon(const PgMsgPtr &msg);
 
         std::shared_ptr<opentelemetry::metrics::Histogram<double>> _postgres_log_reader_latencies;

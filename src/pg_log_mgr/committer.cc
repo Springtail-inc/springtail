@@ -363,7 +363,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
     Committer::_create_indexer()
     {
         // use the same worker count for Indexer
-        _indexer = std::make_unique<Indexer>(_worker_count, _index_recon_queue);
+        _indexer = std::make_unique<Indexer>(_worker_count, _index_reconciliation_queue);
 
         // cleanup
         auto &&precommit = _redis_ddl.get_precommit_index_ddl();

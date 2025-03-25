@@ -12,8 +12,8 @@
 
 namespace springtail::committer {
 
-    Indexer::Indexer(uint32_t worker_count, std::shared_ptr<ConcurrentQueue<std::string>> index_recon_queue)
-        : _index_recon_queue(index_recon_queue)
+    Indexer::Indexer(uint32_t worker_count, std::shared_ptr<ConcurrentQueue<std::string>> index_reconciliation_queue)
+        : _index_reconciliation_queue(index_reconciliation_queue)
     {
         assert(worker_count);
         for (auto i = 0; i != worker_count; ++i) {
@@ -283,7 +283,7 @@ namespace springtail::committer {
     void
     Indexer::_add_to_pending_reconciliation(IndexState&& idxState)
     {
-        std::scoped_lock lock(_pending_recon_map_mtx);
+        std::scoped_lock lock(_pending_reconciliation_map_mtx);
         auto [db_id, index_id] = idxState._key;
         _pending_idx_reconciliation_map
             .try_emplace(db_id)                  // Ensure db_id entry exists
@@ -291,13 +291,13 @@ namespace springtail::committer {
             .try_emplace(idxState._idx._xid)     // Ensure xid entry exists
             .first->second.push_back(std::move(idxState)); // Add IndexState to the list
 
-        // Push to index recon reader to notify committer
-        _index_recon_queue->push(std::make_shared<std::string>(fmt::format("{}:{}", db_id, index_id)));
+        // Push to index reconciliation reader to notify committer
+        _index_reconciliation_queue->push(std::make_shared<std::string>(fmt::format("{}:{}", db_id, index_id)));
     }
 
     std::optional<uint64_t>
     Indexer::process_first_pending_reconciliation(uint64_t db_id) {
-        std::scoped_lock lock(_pending_recon_map_mtx);
+        std::scoped_lock lock(_pending_reconciliation_map_mtx);
         auto db_it = _pending_idx_reconciliation_map.find(db_id);
         if (db_it == _pending_idx_reconciliation_map.end()) {
             return std::nullopt; // No pending entries for this db_id

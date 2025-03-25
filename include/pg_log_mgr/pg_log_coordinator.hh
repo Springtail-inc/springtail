@@ -42,7 +42,7 @@ namespace springtail::pg_log_mgr {
         /*
          * @brief A queue for indexer to notify committer to trigger index reconciliation
          **/
-        std::shared_ptr<ConcurrentQueue<std::string>> _index_recon_queue;
+        std::shared_ptr<ConcurrentQueue<std::string>> _index_reconciliation_queue;
 
         /**
          * @brief Function for performing shutdown that is called by Singleton
