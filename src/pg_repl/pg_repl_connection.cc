@@ -670,7 +670,7 @@ namespace springtail
         int64_t send_time = recvint64(&buffer[pos]);
         pos += 8;
 
-        _last_received_time = send_time;
+        _last_received_time = send_time / 1000;
         _message_start_lsn = wal_start;
         _message_end_lsn = wal_end;
 

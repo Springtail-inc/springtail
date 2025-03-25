@@ -56,7 +56,7 @@ namespace springtail::pg_proxy {
               password(password),
               salt(salt)
         {
-            if (type == SCRAM) {
+            if (type == SCRAM || type == TEXT) {
                 memset(&scram_state, 0, sizeof(scram_state));
                 SPDLOG_DEBUG_MODULE(LOG_PROXY, "new userlogin scram state: {:p}", (void *)&scram_state);
             }
@@ -241,20 +241,23 @@ namespace springtail::pg_proxy {
 
     private:
         friend class SingletonWithThread<UserMgr>;      ///< the base class should be friend
+
+        /** The password string types used in the secrets mgr */
+        static constexpr const char* PASSWORD_STRING_TEXT = "text";
+        static constexpr const char* PASSWORD_STRING_MD5 = "md5";
+        static constexpr const char* PASSWORD_STRING_SCRAM = "scram-sha-256";
+
         /**
          * @brief Private constructor
-         *
          */
         UserMgr() = default;
         /**
          * @brief Private destructor
-         *
          */
         ~UserMgr() override = default;
 
         /**
          * @brief Comparison operator for ordering User objects by username inside the map container
-         *
          */
         struct CompareUserByName {
             bool operator()(const UserPtr &lhs, const UserPtr &rhs) const {

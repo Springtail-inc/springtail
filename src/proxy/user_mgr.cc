@@ -36,34 +36,42 @@ namespace springtail::pg_proxy {
         : _username(username),
           _salt(0)
     {
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "Creating new {} user user: {}, password: XXXX, salt: {}",
+            PASSWORD_TYPE_TO_STR[type], _username, _salt);
         set_password(password, type);
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Created new {} user user: {}, password: {}, salt: {}",
-                            PASSWORD_TYPE_TO_STR[_password_type], _username, _password, _salt);
     }
 
     void
     User::set_password(const std::string &password, PasswordType type)
     {
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "Setting password for user: {}, type: {}", _username, PASSWORD_TYPE_TO_STR[type]);
+
         std::unique_lock lock(_user_mutex);
         _password = password;
         _salt = 0;
-
         _password_type = type;
 
         switch (type) {
-            case SCRAM:
+            case SCRAM: {
                 _scram_keys = std::make_shared<ScramKeys>();
 
                 int iters;
-                char *saltp;
+                char *saltp = nullptr;
                 uint8_t stored_key[SCRAM_KEY_LEN];
 
                 // extract server key
-                parse_scram_secret(_password.c_str(), &iters, &saltp, stored_key, _scram_keys->server_key);
+                if (!parse_scram_secret(_password.c_str(), &iters, &saltp, stored_key, _scram_keys->server_key)) {
+                    SPDLOG_ERROR("Failed to parse SCRAM secret for user: {}", _username);
+                    _password_type = INVALID;
+                    return;
+                }
+                _scram_keys->server_key_set = true;
+
                 memset(_scram_keys->client_key, 0, SCRAM_KEY_LEN);
 
                 free (saltp);
                 break;
+            }
 
             case MD5:
                 get_random_bytes((uint8_t*)&_salt, 4);
@@ -83,6 +91,8 @@ namespace springtail::pg_proxy {
 
         // if scram type copy both the keys, although only serverkey may be set
         if (_password_type == SCRAM) {
+            CHECK_NE(_scram_keys, nullptr);
+            CHECK(_scram_keys->server_key_set);
             memcpy(login->scram_state.ServerKey, _scram_keys->server_key, SCRAM_KEY_LEN);
             memcpy(login->scram_state.ClientKey, _scram_keys->client_key, SCRAM_KEY_LEN);
         }
@@ -175,11 +185,11 @@ namespace springtail::pg_proxy {
                     }
 
                     PasswordType password_type;
-                    if (type == "text") {
+                    if (type == PASSWORD_STRING_TEXT) {
                         password_type = TEXT;
-                    } else if (type == "md5") {
+                    } else if (type == PASSWORD_STRING_MD5) {
                         password_type = MD5;
-                    } else if (type == "scram-sha-256") {
+                    } else if (type == PASSWORD_STRING_SCRAM) {
                         password_type = SCRAM;
                     } else {
                         SPDLOG_WARN("Unknown password type: {}", type);
