@@ -356,10 +356,36 @@ class TestCase:
                            WHERE n.nspname = '{command["schema"]}' AND t.relname = '{command["table"]}' AND c.contype = 'p';"""
                 results['primary'] = self._execute_sql(cursor, sql, True)
 
-                # XXX retrieve the secondary index information for the table
+                sql = f"""SELECT c.oid as table_id, i.indexrelid as index_id, unnest(string_to_array(i.indkey::text, ' '))::int as column_id
+                    FROM pg_index i
+                    JOIN pg_class c ON c.oid = i.indrelid
+                    JOIN pg_namespace ns ON ns.oid = c.relnamespace
+                    WHERE c.relname = '{command["table"]}' AND ns.nspname = '{command["schema"]}'
+                    AND i.indisprimary IS FALSE
+                    ORDER BY column_id ASC;
+                """
+                results['secondary'] = self._execute_sql(cursor, sql, True)
 
                 return results
 
+
+    def _get_ranking_sql(self, is_index_query: bool = False) -> str:
+        index_cond = 'AND index_id <> 0' if is_index_query is True else 'AND index_id = 0'
+
+        xid_sql = f"""SELECT xid, lsn
+            FROM "__pg_springtail_catalog"."indexes"
+            WHERE table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)
+            {index_cond}
+            ORDER BY xid DESC, lsn DESC
+            {"LIMIT 1" if not is_index_query else ""}"""
+
+        ranking_sql = f"""SELECT *
+            FROM "__pg_springtail_catalog"."indexes"
+            WHERE table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)
+            {index_cond}
+            AND (xid, lsn) IN ({xid_sql})"""
+
+        return ranking_sql
 
     def _replica_command(self, command: dict) -> list:
         """Runs a SQL command against the Springtail replica
@@ -402,14 +428,16 @@ class TestCase:
                                 AND index_id = 0
                                 ORDER BY xid DESC, lsn DESC
                                 LIMIT 1"""
-                ranking_sql = f"""SELECT *
-                                  FROM "__pg_springtail_catalog"."indexes"
-                                  WHERE table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)
-                                    AND index_id = 0
-                                    AND (xid, lsn) IN ({xid_sql})"""
+
+                ranking_sql = self._get_ranking_sql()
                 sql = f"""WITH latest_table AS ({with_sql}), ranked_columns AS ({ranking_sql})
                           SELECT column_id, position FROM ranked_columns ORDER BY position ASC;"""
                 results['primary'] = self._execute_sql(cursor, sql, True)
+
+                index_sql = self._get_ranking_sql(is_index_query=True)
+                sql = f"""WITH latest_table AS ({with_sql}), ranked_indexes AS ({index_sql})
+                         SELECT table_id, index_id, column_id FROM ranked_indexes ORDER BY column_id ASC;"""
+                results['secondary'] = self._execute_sql(cursor, sql, True)
 
                 return results
 
