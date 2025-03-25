@@ -89,9 +89,14 @@ def run_tests(factory: ComponentFactory) -> None:
     xid_mgr_daemon.start()
     assert xid_mgr_daemon.is_running()
 
+    pg_xid_subscriber_daemon = factory.create_pg_xid_subscriber_daemon()
+    test(pg_xid_subscriber_daemon)
+    assert not sys_tbl_mgr_daemon.is_running()
+
     sys_tbl_mgr_daemon = factory.create_sys_tbl_mgr_daemon()
     test(sys_tbl_mgr_daemon)
     assert not sys_tbl_mgr_daemon.is_running()
+
 
     postgres = factory.create_postgres()
     test(postgres)
@@ -151,6 +156,9 @@ if __name__ == "__main__":
         sys_tbl_mgr_daemon = factory.create_sys_tbl_mgr_daemon()
         if not sys_tbl_mgr_daemon.shutdown() and not sys_tbl_mgr_daemon.kill():
             raise ValueError("Failed to stop sys_tbl_mgr_daemon")
+        pg_xid_subscriber_daemon = factory.create_pg_xid_subscriber_daemon()
+        if not pg_xid_subscriber_daemon.shutdown() and not pg_xid_subscriber_daemon.kill():
+            raise ValueError("Failed to stop pg_xid_subscriber_daemon")
         ddl_daemon = factory.create_ddl_daemon('test_user', 'test_password')
         if not ddl_daemon.shutdown() and not ddl_daemon.kill():
             raise ValueError("Failed to stop ddl_daemon")
