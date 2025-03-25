@@ -85,7 +85,7 @@ namespace springtail::committer {
 
                 key = _queue.front();
                 _queue.pop();
-                params = _work_set[key];
+                params = _work_set.at(key);
             }
             if (params.is_status(IndexStatus::Building)) {
                 _add_to_pending_reconciliation(_build(st, key, params));
@@ -110,7 +110,7 @@ namespace springtail::committer {
             std::unique_lock g(_m);
 
             // fetch the latest state of the work item before we erase it
-            work_item = _work_set[key];
+            work_item = _work_set.at(key);
             assert(work_item._ddl.is_null());
 
             _work_set.erase(key);
@@ -235,7 +235,7 @@ namespace springtail::committer {
     Indexer::_was_dropped(const Key& key)
     {
         std::unique_lock g(_m);
-        auto const& params = _work_set[key];
+        auto const& params = _work_set.at(key);
         // index drop requested while we've been building it
         return params.is_status(IndexStatus::Aborting);
     }
@@ -259,7 +259,7 @@ namespace springtail::committer {
         std::unique_lock g(_m);
 
         // fetch the latest state of the work item before we erase it
-        work_item = _work_set[key];
+        work_item = _work_set.at(key);
 
         _work_set.erase(key);
 
@@ -272,10 +272,10 @@ namespace springtail::committer {
             client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::READY);
         } else {
             // the index was deleted while we were building it
+            // lets also finalize here as part of the tree
+            // may have got finalized while we were building.
             root->truncate();
             root->finalize();
-            // XXX: since the root was not added in the first place,
-            // should we record the latest state of the root even if its dropped while building?
         }
     }
 
@@ -341,7 +341,7 @@ namespace springtail::committer {
             std::unique_lock g(_m);
 
             // fetch the latest state of the work item before we proceed for catchup
-            const auto& work_item = _work_set[idxState._key];
+            const auto& work_item = _work_set.at(idxState._key);
             end_xid = work_item._xid;
             // When a fresh work item comes in for drop index
             // there wont be any DDL
