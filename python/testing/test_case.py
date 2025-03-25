@@ -382,9 +382,7 @@ class TestCase:
             ORDER BY i.xid DESC, i.lsn DESC
             {"LIMIT 1" if not is_index_query else ""}"""
 
-
-        ## have to see if we can avoid DISTINCT here
-        ranking_sql = f"""SELECT DISTINCT i.table_id, i.column_id, i.index_id, i.position
+        ranking_sql = f"""SELECT i.*
             FROM "__pg_springtail_catalog"."indexes" i
             JOIN "__pg_springtail_catalog"."index_names" n
             ON i.xid = n.xid AND i.lsn = n.lsn
