@@ -150,7 +150,7 @@ ClientAuthorization::_process_startup_msg(int32_t remaining, uint64_t seq_id)
     if (_user == nullptr) {
         SPDLOG_ERROR("User {} not found", username);
         _state = ERROR;
-        _error_code = "28P01";
+        _error_code = ProxyProtoError::INVALID_PASSWORD;
         return;
     }
     _database = database;
@@ -158,7 +158,7 @@ ClientAuthorization::_process_startup_msg(int32_t remaining, uint64_t seq_id)
     if (!optional_db_id.has_value()) {
         SPDLOG_ERROR("Database {} not found", _database);
         _state = ERROR;
-        _error_code = "3D000";
+        _error_code = ProxyProtoError::INVALID_DATABASE;
         return;
     }
     _db_id = optional_db_id.value();
@@ -190,7 +190,7 @@ ClientAuthorization::_process_ssl_request()
     if (ssl == nullptr) {
         SPDLOG_ERROR("Failed to create SSL context");
         _state = ERROR;
-        _error_code = "08006";
+        _error_code = ProxyProtoError::CONNECTION_FAILURE;
         return;
     }
 
@@ -227,8 +227,7 @@ ClientAuthorization::_send_auth_req(uint64_t seq_id)
 
         default:
             SPDLOG_ERROR("User {} not found", _user->username());
-            ProxyProtoError::encode_error(buffer, ProxyProtoError::INVALID_PASSWORD,
-                                          "password authentication failed");
+            _error_code = ProxyProtoError::INVALID_PASSWORD;
             _state = ERROR;
             break;
     }

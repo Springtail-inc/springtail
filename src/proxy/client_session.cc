@@ -144,7 +144,7 @@ namespace springtail::pg_proxy {
             // auth failed, handle the error
             std::string error_code = _auth->get_error_code();
             if (error_code.empty()) {
-                error_code = "28P01";
+                error_code = ProxyProtoError::INVALID_PASSWORD;
             }
 
             PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session auth failed: {}", _id, error_code);
