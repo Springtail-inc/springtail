@@ -202,6 +202,23 @@ class TestCase:
                             'table': directive[2]
                         }, section, is_threaded, cur_txn, line_num)
 
+                    # Usage - verify_exists <schema> <table> <replica_exists>
+                    # Ex: ### verify_exists public test_init true
+                    # Determines if a specific table is present in the replica, used in scenarios where an valid table
+                    # is altered to add some invalid columns
+                    elif directive[0] == 'verify_exists':
+                        if section != 'verify':
+                            self._raise_error(f'{line_num}: "verify_exists" must be part of the "verify" section')
+                        if len(directive) < 4:
+                            self._raise_error(f'{line_num}: "verify_exists" must specify a schema, table, and replica exists value')
+
+                        self._append_command({
+                            'type': 'verify_exists',
+                            'schema': directive[1],
+                            'table': directive[2],
+                            'replica_exists': directive[3] == 'true'
+                        }, section, is_threaded, cur_txn, line_num)
+
                     elif directive[0] == 'autocommit':
                         if section != 'metadata':
                             self._raise_error(f'{line_num}: "autocommit" must be specified in the "metadata" section')
@@ -228,6 +245,9 @@ class TestCase:
                 elif line.startswith('##'):
                     # entering a new section
                     section = line[2:].strip()
+                    # reset the threaded and current transaciton for the new section
+                    is_threaded = False
+                    cur_txn = self._metadata['default_txn']
                     if section not in self._sections and section != 'metadata':
                         self._raise_error(f'{line_num}: Unknown section: {section}')
 
@@ -329,6 +349,24 @@ class TestCase:
 
                 return []
 
+            if command['type'] == 'verify_exists':
+                results = {}
+
+                sql = f"""
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM pg_class c
+                        JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
+                        WHERE n.nspname = '{command["schema"]}' AND c.relname = '{command["table"]}'
+                        AND c.relkind = 'r'
+                    );
+                """
+
+                sql_result = self._execute_sql(cursor, sql, True)
+                results['exists'] = True if sql_result else False
+
+                return results
+
             elif command['type'] == 'schema_check':
                 results = {}
 
@@ -369,6 +407,29 @@ class TestCase:
         with self._fdw.cursor() as cursor:
             if command['type'] == 'sql':
                 return self._execute_sql(cursor, command['sql'], True)
+
+            elif command['type'] == 'verify_exists':
+                results = {}
+                replica_result = True
+
+                with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists"
+                               FROM "__pg_springtail_catalog"."table_names"
+                               JOIN "__pg_springtail_catalog"."namespace_names" ON "namespace_names"."namespace_id" = "table_names"."namespace_id"
+                               WHERE "namespace_names"."name" = '{command["schema"]}' AND "table_names"."name" = '{command["table"]}'
+                               ORDER BY "table_names"."xid" DESC, "table_names"."lsn" DESC
+                               LIMIT 1"""
+                sql = f"""WITH latest_table AS ({with_sql})
+                          SELECT exists FROM latest_table LIMIT 1"""
+
+                sql_result = self._execute_sql(cursor, sql, True)
+                if not sql_result:
+                    replica_result = False
+                else:
+                    replica_result = sql_result[0][0]
+
+                results['exists'] = replica_result == bool(command['replica_exists'])
+
+                return results
 
             elif command['type'] == 'schema_check':
                 results = {}
@@ -519,7 +580,7 @@ class TestCase:
 
                     # execute the transactions in parallel
                     for txn in subsection['parallel']:
-                        future = executor.submit(self._execute_commands, subsction['parallel'][txn])
+                        future = executor.submit(self._execute_commands, subsection['parallel'][txn])
                         futures.append(future)
 
                     # wait for completion of all threads

@@ -16,7 +16,6 @@ INSERT INTO invalid_table_with_non_standard_collation (id, name, latin_text) VAL
 ALTER TABLE invalid_table_with_non_standard_collation DROP COLUMN latin_text;
 
 ## verify
--- Table shouldn't be present
 SELECT * FROM invalid_table_with_non_standard_collation;
 
 ## cleanup

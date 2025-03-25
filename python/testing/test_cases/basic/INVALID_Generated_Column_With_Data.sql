@@ -15,7 +15,7 @@ INSERT INTO invalid_table_with_generated_column_with_data (length, width) VALUES
 ALTER TABLE invalid_table_with_generated_column_with_data DROP COLUMN area;
 
 ## verify
-SELECT 1;
+SELECT * FROM invalid_table_with_generated_column_with_data;
 
 ## cleanup
 DROP TABLE IF EXISTS invalid_table_with_generated_column_with_data;
