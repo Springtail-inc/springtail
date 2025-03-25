@@ -191,9 +191,8 @@ namespace springtail::pg_proxy {
     public:
         /**
          * @brief Sleep interval for user manager thread
-         *
          */
-        static constexpr uint32_t USER_MGR_SLEEP_INTERVAL_SECS = 5;
+        static constexpr uint32_t USER_MGR_SLEEP_INTERVAL_SECS = 15;
 
         /**
          * @brief Initialize UserMgr object
