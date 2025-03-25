@@ -832,13 +832,26 @@ ServerAuthorization::_handle_auth_md5(BufferPtr buffer, uint64_t seq_id)
     _login->salt = salt;
 
     char md5[MD5_PASSWD_LEN + 1];
-    // calculate md5 hash; skip the 'md5' prefix on the password; add salt and compute
-    assert(_login->password.starts_with("md5"));
-    if (!pg_md5_encrypt(_login->password.c_str() + 3, reinterpret_cast<char *>(&_login->salt), 4,
-                        md5)) {
-        SPDLOG_ERROR("Failed to calculate MD5 hash");
+    char md5_password_holder[MD5_PASSWD_LEN + 1];
+    const char *md5_password = nullptr;
+
+    if (_login->type == PasswordType::MD5) {
+        assert(_login->password.starts_with("md5"));
+        // password is already md5 hashed: md5(password + username)
+        md5_password = _login->password.c_str() + 3;
+    } else if (_login->type == PasswordType::TEXT) {
+        // first step is to hash the (password + username)
+        pg_md5_encrypt(_login->password.c_str(), _login->username.c_str(), _login->username.size(),
+                       md5_password_holder);
+        md5_password = md5_password_holder + 3;
+    } else {
+        SPDLOG_ERROR("Invalid password type for MD5");
         throw ProxyAuthError();
     }
+
+    // second step is to hash the result of the first step + salt
+    pg_md5_encrypt(md5_password, reinterpret_cast<char *>(&_login->salt), 4, md5);
+
     md5[MD5_PASSWD_LEN] = '\0';
 
     // encode md5 auth response

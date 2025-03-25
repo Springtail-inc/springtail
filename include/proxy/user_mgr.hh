@@ -33,6 +33,7 @@ namespace springtail::pg_proxy {
      * Used by a session during authentication
      */
     struct UserLogin {
+        std::string username;
         PasswordType type;
 
         /** Scram state, freed in destructor */
@@ -45,20 +46,14 @@ namespace springtail::pg_proxy {
         std::string password;
         uint32_t    salt;
 
-        explicit UserLogin(PasswordType type=TEXT)
-            : type(type)
-        {
-            memset(&scram_state, 0, sizeof(scram_state));
-        }
-
-        UserLogin(PasswordType type, const std::string &password, uint32_t salt=0)
-            : type(type),
+        UserLogin(const std::string &username, PasswordType type, const std::string &password, uint32_t salt=0)
+            : username(username),
+              type(type),
               password(password),
               salt(salt)
         {
             if (type == SCRAM || type == TEXT) {
                 memset(&scram_state, 0, sizeof(scram_state));
-                SPDLOG_DEBUG_MODULE(LOG_PROXY, "new userlogin scram state: {:p}", (void *)&scram_state);
             }
         }
 
@@ -196,9 +191,8 @@ namespace springtail::pg_proxy {
     public:
         /**
          * @brief Sleep interval for user manager thread
-         *
          */
-        static constexpr uint32_t USER_MGR_SLEEP_INTERVAL_SECS = 5;
+        static constexpr uint32_t USER_MGR_SLEEP_INTERVAL_SECS = 15;
 
         /**
          * @brief Initialize UserMgr object
