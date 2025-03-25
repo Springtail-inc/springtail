@@ -169,7 +169,8 @@ class Coordinator:
                     return
 
                 self.scheduler.register_component(postgres, 3)
-                self.scheduler.register_component(factory.create_ddl_daemon('ddl_user', ddl_password), 4)
+                self.scheduler.register_component(factory.create_xid_subscriber_daemon(), 4)
+                self.scheduler.register_component(factory.create_ddl_daemon('ddl_user', ddl_password), 5)
 
             case "proxy":
                 self.scheduler.register_component(factory.create_proxy(), 1)

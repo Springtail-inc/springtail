@@ -21,7 +21,8 @@ namespace springtail {
             GC_MGR=5,
             SYS_TBL_MGR=6,
             PROXY=7,
-            FDW=8
+            FDW=8,
+            XID_SUBSCRIBER=9
         };
 
         /**

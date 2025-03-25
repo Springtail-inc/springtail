@@ -1,27 +1,25 @@
 #include <absl/log/check.h>
 #include <bits/ranges_algo.h>
 #include <sys_tbl_mgr/shm_cache.hh>
+#include <common/logging.hh>
 
 using namespace springtail::sys_tbl_mgr;
 
 ShmCache::ShmCache(std::string name, size_t size)
     :_name{std::move(name)},
     _created{true},
-    _mutex{ipc::create_only, (_name + std::string(".mutex")).c_str()},
-    _shm{ipc::create_only, _name.c_str(), size},
+    _mutex{ipc::create_only, (_name + std::string(".mutex")).c_str(),
+        []{ipc::permissions  p; p.set_unrestricted(); return p;}() },
+    _shm{ipc::create_only, _name.c_str(), size, nullptr,
+        []{ipc::permissions  p; p.set_unrestricted(); return p;}() },
     _messages_alloc{_shm.get_segment_manager()},
     _string_alloc{_shm.get_segment_manager()}
 {
+
+    SPDLOG_DEBUG_MODULE(LOG_CACHE, "ShmCache open: {} - {}", _name, size);
     auto free_size = _shm.get_free_memory();
     CHECK(free_size <=  size);
-    CHECK(_shm.check_sanity());
-
-    _cache = _shm.find_or_construct<Cache>("cache")(
-            Cache::allocator_type(_shm.get_segment_manager()));
-    CHECK(_cache);
-    _lru = _shm.find_or_construct<Lru>("lru")(
-            Lru::allocator_type(_shm.get_segment_manager()));
-    CHECK(_lru);
+    _init();
 }
 
 ShmCache::ShmCache(std::string name)
@@ -32,6 +30,21 @@ ShmCache::ShmCache(std::string name)
     _messages_alloc{_shm.get_segment_manager()},
     _string_alloc{_shm.get_segment_manager()}
 {
+    SPDLOG_DEBUG_MODULE(LOG_CACHE, "ShmCache open: {}", _name);
+    _init();
+}
+
+ShmCache::~ShmCache() 
+{
+    SPDLOG_DEBUG_MODULE(LOG_CACHE, "ShmCache deleted: {} - {}", _name, _created);
+    if (_created) {
+        remove(_name);
+    }
+}
+
+void 
+ShmCache::_init() 
+{
     CHECK(_shm.check_sanity());
 
     _cache = _shm.find_or_construct<Cache>("cache")(
@@ -40,14 +53,16 @@ ShmCache::ShmCache(std::string name)
     _lru = _shm.find_or_construct<Lru>("lru")(
             Lru::allocator_type(_shm.get_segment_manager()));
     CHECK(_lru);
+
+    _xid_commit_time = _shm.find_or_construct<Time>("commit_time")();
+    CHECK(_xid_commit_time);
+
+    _committed_xid_map = _shm.find_or_construct<XidMap>("committed_xid")(
+            XidMap::allocator_type(_shm.get_segment_manager()));
+
+    CHECK(_committed_xid_map);
 }
 
-ShmCache::~ShmCache() 
-{
-    if (_created) {
-        remove(_name);
-    }
-}
 
 void 
 ShmCache::remove(const std::string& name)
@@ -56,6 +71,64 @@ ShmCache::remove(const std::string& name)
     Mutex::remove((name + std::string(".mutex")).c_str());
 }
     
+void 
+ShmCache::update_committed_xid(DbId db, Xid xid) 
+{
+    ipc::scoped_lock<Mutex> lock(_mutex,
+            std::chrono::system_clock::now() + std::chrono::seconds(5)
+            );
+    CHECK(lock.owns());
+
+    *_xid_commit_time = std::chrono::high_resolution_clock::now();
+    (*_committed_xid_map)[db] = xid;
+}
+
+void 
+ShmCache::keep_alive() 
+{
+    ipc::scoped_lock<Mutex> lock(_mutex,
+            std::chrono::system_clock::now() + std::chrono::seconds(5)
+            );
+    CHECK(lock.owns());
+
+    *_xid_commit_time = std::chrono::high_resolution_clock::now();
+}
+
+bool 
+ShmCache::is_alive()
+{
+    ipc::sharable_lock<Mutex> lock(_mutex,
+            std::chrono::system_clock::now() + std::chrono::seconds(5)
+            );
+    CHECK(lock.owns());
+    if ( (std::chrono::high_resolution_clock::now() -  *_xid_commit_time) > XID_KEEP_ALIVE_PERIOD) {
+        return false;
+    }
+    return true;
+}
+
+std::optional<Xid> 
+ShmCache::get_committed_xid(DbId db)
+{
+    ipc::sharable_lock<Mutex> lock(_mutex,
+            std::chrono::system_clock::now() + std::chrono::seconds(5)
+            );
+    CHECK(lock.owns());
+
+    if (*_xid_commit_time == Time()) {
+        return {};
+    }
+
+    if ( (std::chrono::high_resolution_clock::now() -  *_xid_commit_time) > XID_KEEP_ALIVE_PERIOD) {
+        return {};
+    }
+
+    auto it = _committed_xid_map->find(db);
+    if (it == _committed_xid_map->end()) {
+        return {};
+    }
+    return it->second;
+}
 
 size_t
 ShmCache::size() const
@@ -67,6 +140,27 @@ ShmCache::size() const
     CHECK(lock.owns());
 
     return _lru->size();
+}
+
+std::vector<TableId> 
+ShmCache::get_db_tables(DbId db)
+{
+    std::vector<TableId> r;
+
+    ipc::sharable_lock<Mutex> lock(_mutex,
+            std::chrono::system_clock::now() + std::chrono::seconds(5)
+            );
+
+    CHECK(lock.owns());
+
+    auto& seq_idx = _lru->get<0>();
+    for (auto const& v: seq_idx) {
+        if (v.db == db && std::ranges::find(r, v.tid) == r.end()) {
+            r.push_back(v.tid);
+        }
+    }
+
+    return r;
 }
 
 bool 
@@ -103,7 +197,7 @@ ShmCache::insert(DbId db, TableId tid, Xid xid, const std::string& msg)
 
             CHECK(it != _cache->end());
 
-            item.msg = msg.c_str();
+            item.msg.insert(item.msg.end(), msg.data(), msg.data() + msg.size());
 
             if (!it->second.empty() && (--it->second.end())->xid < xid) {
                 it->second.push_back(item);
@@ -168,7 +262,7 @@ ShmCache::find(DbId db, TableId tid, Xid xid)
         if (itt->xid != xid) {
             return {};
         }
-        ret = std::string(itt->msg.c_str(), itt->msg.size());
+        ret = std::string(itt->msg.data(), itt->msg.size());
 
         //check if the item is near the top of LRU
         size_t top_cnt = static_cast<double>(_lru->size())*0.1; //in the top 10%

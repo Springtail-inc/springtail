@@ -65,6 +65,17 @@ target_link_libraries(pg_ddl_daemon
 )
 add_dsymutil_command(pg_ddl_daemon)
 
+add_executable(pg_xid_subscriber_daemon pg_xid_subscriber_daemon.cc pg_xid_subscriber_mgr.cc)
+target_include_directories(pg_xid_subscriber_daemon
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+    PRIVATE ${PostgreSQL_INCLUDE_DIRS}
+)
+target_link_libraries(pg_xid_subscriber_daemon
+    PRIVATE springtail_common
+    PRIVATE springtail_pg
+    PRIVATE Boost::program_options
+)
+add_dsymutil_command(pg_xid_subscriber_daemon)
 
 # Extract transitive dependencies of libraryC
 get_target_property(POSTGRES_DEP_LIBS PostgreSQL::PostgreSQL INTERFACE_LINK_LIBRARIES)
@@ -128,9 +139,32 @@ target_link_libraries(test_where
 add_dsymutil_command(test_where)
 gtest_discover_tests(test_where)
 
+add_executable(test_xid_subscriber test/test_xid_subscriber.cc test/mock_pg.c pg_xid_subscriber_mgr.cc)
+target_include_directories(test_xid_subscriber
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+    PRIVATE ${PostgreSQL_INCLUDE_DIRS}
+)
+target_link_libraries(test_xid_subscriber
+    PRIVATE springtail_pg
+    PRIVATE springtail_common
+    PRIVATE springtail_test
+    PRIVATE springtail_sys_tbl_mgr
+    PRIVATE ${START_GROUP}
+        ${POSTGRES_DEP_LIBS}
+    ${END_GROUP}
+    PRIVATE GTest::gtest_main
+)
+add_dsymutil_command(test_xid_subscriber)
+gtest_discover_tests(test_xid_subscriber)
+
 # install ddl daemon to install directory
 install(TARGETS
     pg_ddl_daemon
+    RUNTIME DESTINATION bin/system
+)
+
+install(TARGETS
+    pg_xid_subscriber_daemon
     RUNTIME DESTINATION bin/system
 )
 

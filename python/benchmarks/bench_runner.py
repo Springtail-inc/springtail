@@ -115,7 +115,7 @@ def run_benchmark(
 
         for n, f in benchmarks.items():
             print(f"\nBenchmark: {n}")
-            bench = BenchCase(n, f, config_file, build_dir)
+            bench = BenchCase(props, n, f, config_file, build_dir)
             result = bench.run(setup_timeout)
             for d, t in result.items():
                 print(f"   {d}: {t}")

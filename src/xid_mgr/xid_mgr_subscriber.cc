@@ -22,6 +22,7 @@ XidMgrSubscriber::XidMgrSubscriber(std::shared_ptr<grpc::Channel> ch, Callbacks 
 
 XidMgrSubscriber::~XidMgrSubscriber()
 {
+    SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Deleted");
     _stub.reset();
 }
 
