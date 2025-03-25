@@ -277,10 +277,6 @@ namespace springtail::committer {
             // XXX: since the root was not added in the first place,
             // should we record the latest state of the root even if its dropped while building?
         }
-
-        // TODO: revisit it when we support asynchronous index builds
-        // so that the lock and _cv_done are not required while
-        // root->finalize() and sys table updates.
     }
 
     // Index reconciliation flows

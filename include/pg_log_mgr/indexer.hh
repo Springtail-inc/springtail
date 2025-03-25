@@ -122,7 +122,7 @@ namespace springtail::committer {
          * Maps a database ID to a map of transaction IDs (XIDs), each holding
          * a list of `IndexState` entries pending reconciliation.
          */
-        using PendingReconMap = std::map<uint64_t, std::map<uint64_t, std::list<IndexState>>>;
+        using PendingReconMap = std::unordered_map<uint64_t, std::unordered_map<uint64_t, std::list<IndexState>>>;
         PendingReconMap _pending_idx_reconciliation_map;
 
         // Mutex to access pending reconciliation map
