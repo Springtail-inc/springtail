@@ -580,8 +580,8 @@ namespace springtail::pg_proxy {
 
         // setup ssl config
         bool enable_ssl = Json::get_or<bool>(json, "enable_ssl", false);
-        std::filesystem::path certificate = Json::get_or<std::filesystem::path>(json, "cert", "");
-        std::filesystem::path key = Json::get_or<std::filesystem::path>(json, "key", "");
+        std::filesystem::path certificate = Json::get_or<std::filesystem::path>(json, "cert_path", "");
+        std::filesystem::path key = Json::get_or<std::filesystem::path>(json, "key_path", "");
         if (enable_ssl &&
             (!std::filesystem::exists(certificate) || !std::filesystem::exists(key))) {
             throw Error("Certificate/key file does not exist and ssl is enabled");

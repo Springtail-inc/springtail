@@ -53,7 +53,8 @@ SNS_ENV_VARS = [
     'SERVICE_NAME',
     'INSTANCE_KEY',
     'HOSTNAME',
-    'FDW_ID'
+    'FDW_ID',
+    'AWS_REGION'
 ]
 
 class Production:
