@@ -140,6 +140,26 @@ namespace springtail::pg_fdw {
         std::call_once(_init_flag, _init);
     }
 
+
+
+    std::shared_ptr<sys_tbl_mgr::ShmCache>
+    PgFdwMgr::_try_create_cache() 
+    {
+        std::unique_lock<std::shared_mutex> lock(_mutex);
+        try {
+            auto cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS);
+            return cache; 
+        } catch (const boost::interprocess::bad_alloc&) {
+            // the cache hasn't been created
+            // this could happen if xid_mgr_subscriber isn't running
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state unable to open the roots cache");
+        } catch (const std::exception& e) {
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state exception:{} ", e.what());
+            throw;
+        }
+        return {};
+    }
+
     PgFdwState *
     PgFdwMgr::fdw_create_state(uint64_t db_id,
                                uint64_t tid,
@@ -154,25 +174,6 @@ namespace springtail::pg_fdw {
             sys_tbl_mgr::Client::get_instance()->invalidate_db(db_id, XidLsn(schema_xid));
         }
 
-
-        auto try_create_cache = [&]() -> std::shared_ptr<sys_tbl_mgr::ShmCache> {
-            std::unique_lock<std::shared_mutex> lock(_mutex);
-            try {
-                auto cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS);
-                return cache; 
-            } catch (const boost::interprocess::bad_alloc&) {
-                // the cache hasn't been created
-                // this could happen if xid_mgr_subscriber isn't running
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state unable to open the roots cache: db_id: {}, tid: {}, pg_xid: {}",
-                        db_id, tid, pg_xid);
-            } catch (const std::exception& e) {
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state exception:{} ", e.what());
-                throw;
-            }
-            return {};
-        };
-
-
         std::optional<uint64_t> cached_xid;
 
         // try to use the cache
@@ -184,7 +185,7 @@ namespace springtail::pg_fdw {
 
         if (!_roots_cache) {
             rd_lock.unlock();
-            _roots_cache = try_create_cache();
+            _roots_cache = _try_create_cache();
             sys_tbl_mgr::Client::get_instance()->use_roots_cache(_roots_cache);
             rd_lock.lock();
         } else {
@@ -192,7 +193,7 @@ namespace springtail::pg_fdw {
 
                 rd_lock.unlock();
 
-                auto cache = try_create_cache();
+                auto cache = _try_create_cache();
                 if (cache) {
                     // start using the new cache
                     sys_tbl_mgr::Client::get_instance()->use_roots_cache(_roots_cache);

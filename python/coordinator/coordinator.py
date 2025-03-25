@@ -132,7 +132,6 @@ class Coordinator:
         match self.service_name:
             case "ingestion":
                 self.scheduler.register_component(factory.create_xid_mgr_daemon(), 1)
-                self.scheduler.register_component(factory.create_xid_subscriber_daemon(), 1)
                 self.scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 2)
                 self.scheduler.register_component(factory.create_log_mgr_daemon(), 3)
 
@@ -170,7 +169,8 @@ class Coordinator:
                     return
 
                 self.scheduler.register_component(postgres, 3)
-                self.scheduler.register_component(factory.create_ddl_daemon('ddl_user', ddl_password), 4)
+                self.scheduler.register_component(factory.create_xid_subscriber_daemon(), 4)
+                self.scheduler.register_component(factory.create_ddl_daemon('ddl_user', ddl_password), 5)
 
             case "proxy":
                 self.scheduler.register_component(factory.create_proxy(), 1)
