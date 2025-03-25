@@ -19,15 +19,15 @@ namespace springtail::committer {
     class Indexer {
     public:
         enum class IndexStatus {
-            Building,     // Default state
-            Deleting,
-            Aborting
+            BUILDING,     // Default state
+            DELETING,
+            ABORTING
         };
         struct IndexParams {
             uint64_t _db_id;
             uint64_t _xid;
             nlohmann::json _ddl;
-            IndexStatus _status = IndexStatus::Building;
+            IndexStatus _status = IndexStatus::BUILDING;
 
             /**
              * @brief Checks if the current status matches the expected status.

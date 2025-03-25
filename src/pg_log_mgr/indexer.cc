@@ -58,15 +58,15 @@ namespace springtail::committer {
         if (it == _work_set.end()) {
             // note: the work item has _ddl.empty() == true
             // it means to drop the index right away
-            _work_set[key] = {db_id, xid, {}, IndexStatus::Deleting};
+            _work_set[key] = {db_id, xid, {}, IndexStatus::DELETING};
             _queue.push(key);
             _cv.notify_one();
         } else {
-            // mark the status as Aborting, it will tell the worker to
+            // mark the status as ABORTING, it will tell the worker to
             // cancel the index build / catchup
             // and proceed for dropping the index
             it->second._xid = xid;
-            it->second._status = IndexStatus::Aborting;
+            it->second._status = IndexStatus::ABORTING;
         }
     }
 
@@ -87,7 +87,7 @@ namespace springtail::committer {
                 _queue.pop();
                 params = _work_set.at(key);
             }
-            if (params.is_status(IndexStatus::Building)) {
+            if (params.is_status(IndexStatus::BUILDING)) {
                 _add_to_pending_reconciliation(_build(st, key, params));
             } else {
                 _add_to_pending_reconciliation(IndexState{nullptr, key, params, std::numeric_limits<uint64_t>::max()});
@@ -237,7 +237,7 @@ namespace springtail::committer {
         std::unique_lock g(_m);
         auto const& params = _work_set.at(key);
         // index drop requested while we've been building it
-        return params.is_status(IndexStatus::Aborting);
+        return params.is_status(IndexStatus::ABORTING);
     }
 
     void
@@ -265,7 +265,7 @@ namespace springtail::committer {
 
         auto client = sys_tbl_mgr::Client::get_instance();
         auto extent_id = root->finalize();
-        if (work_item.is_status(IndexStatus::Building)) {
+        if (work_item.is_status(IndexStatus::BUILDING)) {
             auto meta = client->get_roots(db_id, tid, end_xid);
             meta->roots.emplace_back(key.second, extent_id);
             client->update_roots(db_id, tid, end_xid, *meta);
@@ -345,12 +345,13 @@ namespace springtail::committer {
             end_xid = work_item._xid;
             // When a fresh work item comes in for drop index
             // there wont be any DDL
-            is_fresh_drop = work_item.is_status(IndexStatus::Deleting);
+            is_fresh_drop = work_item.is_status(IndexStatus::DELETING);
 
-            // When drop index request comes in when
-            // we are in the process of building/catching-up
-            // status will denote to proceed for drop
-            is_drop_while_processing = work_item.is_status(IndexStatus::Aborting);
+            // When drop index request comes in while
+            // we are in the process of building/catching-up,
+            // ABORTING status will denote that, to proceed for abort
+            // in the commit phase
+            is_drop_while_processing = work_item.is_status(IndexStatus::ABORTING);
         }
 
         if (is_fresh_drop) {
