@@ -833,7 +833,7 @@ ServerAuthorization::_handle_auth_md5(BufferPtr buffer, uint64_t seq_id)
 
     char md5[MD5_PASSWD_LEN + 1];
     char md5_password_holder[MD5_PASSWD_LEN + 1];
-    const char *md5_password;
+    const char *md5_password = nullptr;
 
     if (_login->type == PasswordType::MD5) {
         assert(_login->password.starts_with("md5"));
@@ -844,6 +844,9 @@ ServerAuthorization::_handle_auth_md5(BufferPtr buffer, uint64_t seq_id)
         pg_md5_encrypt(_login->password.c_str(), _login->username.c_str(), _login->username.size(),
                        md5_password_holder);
         md5_password = md5_password_holder + 3;
+    } else {
+        SPDLOG_ERROR("Invalid password type for MD5");
+        throw ProxyAuthError();
     }
 
     // second step is to hash the result of the first step + salt
