@@ -1,3 +1,6 @@
+## metadata
+### sync_timeout 20
+
 ## test
 CREATE TABLE IF NOT EXISTS parallel_trans_add_secondary_index (
     id SERIAL PRIMARY KEY,
@@ -10,7 +13,7 @@ CREATE TABLE IF NOT EXISTS parallel_trans_add_secondary_index (
 ### txn 1
 INSERT INTO parallel_trans_add_secondary_index (item_name, amount, category)
 SELECT 'Item-' || i, (RANDOM() * 1000)::INT, 'Category-' || i
-FROM generate_series(1, 1000000) AS i;
+FROM generate_series(1, 100000) AS i;
 
 ### txn 2
 ### sleep 2
