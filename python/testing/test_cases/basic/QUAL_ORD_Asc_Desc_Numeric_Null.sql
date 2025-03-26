@@ -44,10 +44,8 @@ VALUES
 (9, 'Order I', '2025-02-09', 120.00, FALSE, 'Ninth order info', 'Y', 12.0),
 (10, 'Order J', '2025-02-10', 450.25, TRUE, 'Tenth order details', 'N', 45.2);
 
-### sleep 1 -- wait a bit for indexes to be reconciled
-
 ## verify
-### schema_check public asc_desc_numeric_null
+### schema_check public asc_desc_numeric_null 1
 -- col3 = Specific Date
 SELECT col3, col4 FROM asc_desc_numeric_null WHERE col3 = '2025-02-05';
 

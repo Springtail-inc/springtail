@@ -44,10 +44,8 @@ VALUES
 (9, 'Order I', '2025-02-09', 120.00, FALSE, 'Ninth order info', 'Y', 12.0),
 (10, 'Order J', '2025-02-10', 450.25, TRUE, 'Tenth order details', 'N', 45.2);
 
-### sleep 1 -- wait a bit for indexes to be reconciled
-
 ## verify
-### schema_check public numeric_and_nulls
+### schema_check public numeric_and_nulls 1
 -- col3 IS NULL and col4 > 100
 SELECT col3, col4, col5 FROM numeric_and_nulls WHERE col3 IS NULL AND col4 > 100.00 ORDER BY col3 ASC;
 

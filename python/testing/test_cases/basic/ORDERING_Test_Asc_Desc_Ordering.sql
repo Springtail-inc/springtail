@@ -44,10 +44,8 @@ VALUES
 (9, 'Order I', '2025-02-09', 120.00, FALSE, 'Ninth order info', 'Y', 12.0),
 (10, 'Order J', '2025-02-10', 450.25, TRUE, 'Tenth order details', 'N', 45.2);
 
-### sleep 1 -- wait a bit for indexes to be reconciled
-
 ## verify
-### schema_check public asc_desc_ordering
+### schema_check public asc_desc_ordering 1
 SELECT col3 FROM asc_desc_ordering ORDER BY col3 DESC;
 SELECT col1, col2, col3 FROM asc_desc_ordering ORDER BY col4 ASC, col5 DESC;
 SELECT col1, col2, col3 FROM asc_desc_ordering ORDER BY col6 ASC;

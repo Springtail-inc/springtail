@@ -162,6 +162,8 @@ class TestCase:
                     elif directive[0] == 'sleep':
                         if section != 'test':
                             self._raise_error(f'{line_num}: "sleep" must be part of the "test" section')
+                        if not is_threaded:
+                            self._raise_error(f'{line_num}: "sleep" must be part of a transaction within a parallel sub-section')
                         if len(directive) < 2:
                             self._raise_error(f'{line_num}: "sleep" must specify a duration')
 
@@ -192,12 +194,14 @@ class TestCase:
                         if section != 'verify':
                             self._raise_error(f'{line_num}: "schema_check" must be part of the "verify" section')
                         if len(directive) < 3:
-                            self._raise_error(f'{line_num}: "schema_check" must specify a schema and table')
+                            self._raise_error(f'{line_num}: "schema_check" must specify a schema and table, \
+                                    with an optional wait time for secondary indexes reconciliation')
 
                         self._append_command({
                             'type': 'schema_check',
                             'schema': directive[1],
-                            'table': directive[2]
+                            'table': directive[2],
+                            'wait_for': int(directive[3]) if len(directive) > 3 else 0
                         }, section, is_threaded, cur_txn, line_num)
 
                     elif directive[0] == 'autocommit':
@@ -367,6 +371,31 @@ class TestCase:
                 return results
 
 
+    def _wait_for_index_reconciliation(self, cursor, wait_for: int = 0) -> bool:
+        base_sql = """select index_id
+            FROM "__pg_springtail_catalog"."index_names"
+            WHERE state = {} AND index_id <> 0"""
+
+        start_time = time.time()
+
+        while True:
+            # Convert list of tuples into a set of integers
+            not_ready_result = {row[0] for row in self._execute_sql(cursor, base_sql.format(0), True)}
+            ready_result = {row[0] for row in self._execute_sql(cursor, base_sql.format(1), True)}
+
+            logging.info(f'NOT READY RESULT: {not_ready_result}')
+            logging.info(f'READY RESULT: {ready_result}')
+            logging.info(f'READYSAME: {ready_result == not_ready_result}')
+            # If results match, return immediately
+            if not_ready_result == ready_result:
+                return True
+
+            # If wait_for is 0 or time is exceeded, return False
+            if wait_for == 0 or (time.time() - start_time) >= wait_for:
+                raise TimeoutError(
+                    f"Secondary indexes not in sync within {wait_for}s"
+                )
+
     def _get_ranking_sql(self, is_index_query: bool = False) -> str:
         index_cond = 'AND i.index_id <> 0' if is_index_query is True else 'AND i.index_id = 0'
 
@@ -437,6 +466,9 @@ class TestCase:
                 sql = f"""WITH latest_table AS ({with_sql}), ranked_columns AS ({ranking_sql})
                           SELECT column_id, position FROM ranked_columns ORDER BY position ASC;"""
                 results['primary'] = self._execute_sql(cursor, sql, True)
+
+                # Wait for index reconciliation
+                self._wait_for_index_reconciliation(cursor, command["wait_for"])
 
                 index_sql = self._get_ranking_sql(is_index_query=True)
                 sql = f"""WITH latest_table AS ({with_sql}), ranked_indexes AS ({index_sql})
