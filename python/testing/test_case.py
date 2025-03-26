@@ -202,18 +202,18 @@ class TestCase:
                             'table': directive[2]
                         }, section, is_threaded, cur_txn, line_num)
 
-                    # Usage - verify_exists <schema> <table> <replica_exists>
-                    # Ex: ### verify_exists public test_init true
+                    # Usage - table_exists <schema> <table> <replica_exists>
+                    # Ex: ### table_exists public test_init true
                     # Determines if a specific table is present in the replica, used in scenarios where an valid table
                     # is altered to add some invalid columns
-                    elif directive[0] == 'verify_exists':
+                    elif directive[0] == 'table_exists':
                         if section != 'verify':
-                            self._raise_error(f'{line_num}: "verify_exists" must be part of the "verify" section')
+                            self._raise_error(f'{line_num}: "table_exists" must be part of the "verify" section')
                         if len(directive) < 4:
-                            self._raise_error(f'{line_num}: "verify_exists" must specify a schema, table, and replica exists value')
+                            self._raise_error(f'{line_num}: "table_exists" must specify a schema, table, and replica exists value')
 
                         self._append_command({
-                            'type': 'verify_exists',
+                            'type': 'table_exists',
                             'schema': directive[1],
                             'table': directive[2],
                             'replica_exists': directive[3] == 'true'
@@ -245,7 +245,7 @@ class TestCase:
                 elif line.startswith('##'):
                     # entering a new section
                     section = line[2:].strip()
-                    # reset the threaded and current transaciton for the new section
+                    # reset the threaded and current transaction for the new section
                     is_threaded = False
                     cur_txn = self._metadata['default_txn']
                     if section not in self._sections and section != 'metadata':
@@ -349,7 +349,7 @@ class TestCase:
 
                 return []
 
-            if command['type'] == 'verify_exists':
+            if command['type'] == 'table_exists':
                 results = {}
 
                 sql = f"""
@@ -408,7 +408,7 @@ class TestCase:
             if command['type'] == 'sql':
                 return self._execute_sql(cursor, command['sql'], True)
 
-            elif command['type'] == 'verify_exists':
+            elif command['type'] == 'table_exists':
                 results = {}
                 replica_result = True
 

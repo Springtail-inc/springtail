@@ -15,7 +15,7 @@ ALTER TABLE invalid_table_initially_valid_made_invalid ADD COLUMN latin_text TEX
 INSERT INTO invalid_table_initially_valid_made_invalid (id, name, latin_text) VALUES (3, 'Third', 'Texte en français');
 
 ## verify
-### verify_exists public invalid_table_initially_valid_made_invalid false
+### table_exists public invalid_table_initially_valid_made_invalid false
 
 ## cleanup
 DROP TABLE IF EXISTS invalid_table_initially_valid_made_invalid;
