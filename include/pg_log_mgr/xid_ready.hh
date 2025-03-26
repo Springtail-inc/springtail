@@ -4,6 +4,8 @@
 #include <fmt/ranges.h>
 #include <proto/pg_copy_table.pb.h>
 
+#include <pg_log_mgr/wal_progress_tracker.hh>
+
 namespace springtail::committer {
 
     /**
@@ -80,10 +82,11 @@ namespace springtail::committer {
         { }
 
         /** Constructor for messages that are XACT_MSG. */
-        XidReady(uint64_t db_id, XactMsg &&msg)
+        XidReady(uint64_t db_id, XactMsg &&msg, pg_log_mgr::WalProgressTrackerPtr xid_tracker = nullptr)
             : _type(Type::XACT_MSG),
               _db_id(db_id),
-              _msg(msg)
+              _msg(msg),
+              _xid_tracker(xid_tracker)
         { }
 
         /** A getter for the type. */
@@ -106,10 +109,17 @@ namespace springtail::committer {
             return std::get<SwapMsg>(*_msg);
         }
 
+        /** A function to notify tracker about xid. */
+        void notify_tracker(uint64_t xid) {
+            CHECK(_xid_tracker);
+            _xid_tracker->remove_xid(xid);
+        }
+
     private:
         Type _type; ///< The message type.
         uint64_t _db_id; ///< The database ID.
         std::optional<std::variant<XactMsg, SwapMsg>> _msg; ///< The underlying message data.
+        pg_log_mgr::WalProgressTrackerPtr _xid_tracker;
     };
 
 }

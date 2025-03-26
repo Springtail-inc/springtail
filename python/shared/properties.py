@@ -208,6 +208,8 @@ class Properties:
             return self.cache['integration_test_config']
 
         config = json.loads(self.redis.hget(key, 'system_settings'))
+        if 'integration_test_config' not in config:
+            return {}
         integration_test_config = config['integration_test_config']
         self.cache['integration_test_config'] = integration_test_config
 

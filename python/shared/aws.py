@@ -2,7 +2,6 @@ import boto3
 import logging
 import json
 import os
-import sys
 from typing import Optional, Dict, Any, Callable
 from botocore.exceptions import ClientError
 
@@ -13,7 +12,7 @@ class AwsHelper:
     def __init__(self):
         self.logger = logging.getLogger('springtail')
         self.s3 = boto3.client('s3')
-        self.sns = boto3.client('sns')
+        self.sns = boto3.client('sns', region_name='us-east-1')
 
 
     def get_instance_id(self) -> Optional[str]:
@@ -119,6 +118,10 @@ class AwsHelper:
             else:
                 message_attributes = {}
 
+            # log sns to otel as well
+            self.logger.info(message, extra=attributes)
+
+            # send the sns message
             self.sns.publish(TopicArn=topic_arn, Message=message, Subject=subject, MessageAttributes=message_attributes)
 
             return True

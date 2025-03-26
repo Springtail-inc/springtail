@@ -163,30 +163,47 @@ namespace springtail {
         std::string precommit_key = fmt::format(redis::HASH_DDL_PRECOMMIT, db_instance_id);
 
         // get the pre-committed DDLs and figure out which ones we can commit based on the given XID
-        std::vector<std::string> commit_keys;
+        // note: we use a map to make sure we apply things in XID order
+        std::map<uint64_t, std::string> commit_keys;
         std::vector<std::string> hkeys;
 
         _redis->hkeys(precommit_key, std::back_inserter(hkeys));
         for (const auto &key : hkeys) {
             std::vector<std::string> split;
             common::split_string(":", key, split);
-            if (stoull(split[0]) == db_id && stoull(split[1]) <= xid) {
-                commit_keys.push_back(key);
+
+            uint64_t entry_xid = stoull(split[1]);
+            if (stoull(split[0]) == db_id && entry_xid <= xid) {
+                commit_keys.try_emplace(entry_xid, key);
             }
         }
 
+        // if there are no keys to commit, then return
+        if (commit_keys.empty()) {
+            return;
+        }
+
+        // pull each key's value and prepare for the transaction
+        // note: this is safe because the values of individual keys won't change once written
+        std::map<std::string, std::string> commit_map;
+        for (const auto &entry : commit_keys) {
+            const auto &key = entry.second;
+            auto &&value = _redis->hget(precommit_key, key);
+            CHECK(value.has_value());
+
+            commit_map.emplace(key, *value);
+        }
+
         // move from the pre-commit to the DDL queue of each FDW, all in a single transaction
-        for (const auto &key : commit_keys) {
-            auto ts = _redis->transaction(false, false);
-            auto r = ts.redis();
-            // NOTE: if the precommit_key hash could change, then we should do a watch here
-            auto &&value = r.hget(precommit_key, key);
-            assert (value.has_value());
+        auto ts = _redis->transaction(false, false);
+
+        for (const auto &entry : commit_map) {
+            const auto &key = entry.first;
+            nlohmann::json ddls = nlohmann::json::parse(entry.second);
 
             // iterate through the DDL statements and see if any
             // result in the addition or removal of a table/schema
             // or the renaming of a table and add them to the table set for this db
-            nlohmann::json ddls = nlohmann::json::parse(*value);
             for (auto ddl: ddls.at("ddls")) {
                 assert(ddl.is_object());
                 assert(ddl.contains("action"));
@@ -217,10 +234,11 @@ namespace springtail {
             for (const std::string &fdw_id : fdw_ids) {
                 std::string fdw_key = fmt::format(redis::QUEUE_DDL_FDW, db_instance_id, fdw_id);
                 // note: this is equivalent to RedisQueue::push()
-                ts.lpush(fdw_key, *value);
+                ts.lpush(fdw_key, entry.second);
             }
-            ts.hdel(precommit_key, key).exec();
+            ts.hdel(precommit_key, key);
         }
+        ts.exec();
     }
 
     void
@@ -313,21 +331,24 @@ namespace springtail {
     }
 
 
-    nlohmann::json
+    std::vector<nlohmann::json>
     RedisDDL::get_next_ddls(const std::string &fdw_id)
     {
-        nlohmann::json ddls;
-
         // retrieve the next set of DDLs to apply for the given FDW; this blocks
         std::string key = fmt::format(redis::QUEUE_DDL_FDW, Properties::get_db_instance_id(), fdw_id);
         RedisQueue<std::string> queue(key);
 
         auto value = queue.pop("active", 2);
         if (value == nullptr) {
-            return ddls;
+            return {};
         }
 
-        ddls = nlohmann::json::parse(*value);
+        std::vector<nlohmann::json> ddls;
+        do {
+            ddls.push_back(nlohmann::json::parse(*value));
+            value = queue.try_pop("active");
+        } while (value != nullptr);
+
         return ddls;
     }
 

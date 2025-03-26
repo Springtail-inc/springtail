@@ -111,9 +111,7 @@ namespace springtail::pg_fdw {
          * @return Status of the operation. True if successful, false otherwise.
          */
         bool _update_schemas(uint64_t db_id,
-                             uint64_t schema_xid,
-                             const nlohmann::json &ddls);
-
+                             const std::map<uint64_t, nlohmann::json> &xid_map);
 
         /** Helper to execute ddl statements for this db */
         /**
@@ -167,8 +165,7 @@ namespace springtail::pg_fdw {
         std::string
         _gen_sql_from_json(LibPqConnectionPtr conn,
                            const std::string &server_name,
-                           const nlohmann::json &ddl,
-                           std::set<std::string> &schemas);
+                           const nlohmann::json &ddl);
 
         /** Helper to generate sql for FDW foreign table */
         static std::string

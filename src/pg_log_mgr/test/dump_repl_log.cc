@@ -42,7 +42,13 @@ int main(int argc, char *argv[])
     while (start_file && std::filesystem::exists(*start_file)) {
 
         PgMsgStreamReader reader(*start_file, start_offset, -1);
-        std::cout << "\nScanning log: " << *start_file << std::endl;
+        if (start_offset == 0 &&
+                    fs::timestamp_file_exists(*start_file,
+                                              pg_log_mgr::PgLogMgr::LOG_PREFIX_REPL,
+                                              pg_log_mgr::PgLogMgr::LOG_PREFIX_REPL_STREAMING,
+                                              pg_log_mgr::PgLogMgr::LOG_SUFFIX)) {
+            reader.set_streaming();
+        }
 
         // consume messages from log; num_messages of -1 means go until eos
         bool eos = false; // end of stream
