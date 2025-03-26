@@ -27,6 +27,8 @@ PgXidSubscriberMgr::~PgXidSubscriberMgr()
 void
 PgXidSubscriberMgr::task(std::stop_token st)
 {
+    SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "PgXidSubscriberMgr task starting");
+
     static constexpr char const * const XID_SUBSCRIBER_WORKER_ID = "xid_subscriber";
 
     auto coordinator = Coordinator::get_instance();
@@ -47,15 +49,15 @@ PgXidSubscriberMgr::task(std::stop_token st)
     // XID subscriber callbacks
     auto on_push = [this](DbId db, uint64_t xid) {
         // when we get an XID push notification, we pass it to the workers
-        // and return immediately. A worker calls get_roots() that will 
+        // and return immediately. A worker calls get_roots() that will
         // attempt to populate the cache.
         SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XID push notification {} - {}", db, xid);
         _cache->update_committed_xid(db, xid);
         _enqueue_populate_job(db, xid);
     };
-    auto on_disconnect = [&connected]() { 
+    auto on_disconnect = [&connected]() {
         SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrSubscriber disconnected");
-        connected = false; 
+        connected = false;
     };
 
     std::unique_ptr<XidMgrSubscriber> subscriber;
@@ -79,7 +81,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
         // mark alive with coordinator
         coordinator->mark_alive(Coordinator::DaemonType::XID_SUBSCRIBER, XID_SUBSCRIBER_WORKER_ID);
 
-        if (connected == false) { 
+        if (connected == false) {
             if (subscriber) {
                 // GRPC is supposed to delete it after cancel()
                 auto p = subscriber.release();
@@ -88,7 +90,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
             }
             connected = true;
-            subscriber = std::make_unique<XidMgrSubscriber>(xid_client->get_channel(), 
+            subscriber = std::make_unique<XidMgrSubscriber>(xid_client->get_channel(),
                     XidMgrSubscriber::Callbacks{on_push, on_disconnect});
         }
         std::this_thread::sleep_for(loop_time_period);
@@ -106,7 +108,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
     _cache.reset();
 }
 
-void 
+void
 PgXidSubscriberMgr::_enqueue_populate_job(DbId db, uint64_t xid)
 {
     {
@@ -117,12 +119,12 @@ PgXidSubscriberMgr::_enqueue_populate_job(DbId db, uint64_t xid)
     _cv.notify_all();
 }
 
-void 
-PgXidSubscriberMgr::_populate_worker(std::stop_token st) 
+void
+PgXidSubscriberMgr::_populate_worker(std::stop_token st)
 {
     while(!st.stop_requested()) {
         // get the next work item
-        decltype(_populate_queue)::value_type item; 
+        decltype(_populate_queue)::value_type item;
         {
             std::unique_lock g(_m);
             if (!_cv.wait(g, st, [this]{ return !_populate_queue.empty(); })) {
@@ -149,7 +151,7 @@ PgXidSubscriberMgr::_populate_worker(std::stop_token st)
     }
 }
 
-bool 
+bool
 PgXidSubscriberRunner::start()
 {
     nlohmann::json json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
@@ -157,8 +159,10 @@ PgXidSubscriberRunner::start()
     uint64_t roots_cache_size = 0;
     Json::get_to<uint64_t>(json, "roots_shm_cache_size", roots_cache_size);
 
+    SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "PgXidSubscriberRunner starting with cache size {}", roots_cache_size);
+
     if (!roots_cache_size) {
-        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Bad cache size");
+        SPDLOG_ERROR("Bad cache size, terminating PgXidSubscriberRunner");
         return false;
     }
 
@@ -167,11 +171,12 @@ PgXidSubscriberRunner::start()
 
     // fetch RPC properties for the sys_tbl_mgr server
     if (!Json::get_to(json, "rpc_config", rpc_json)) {
-        throw Error("SysTblMgr RPC settings are not found");
+        SPDLOG_ERROR("SysTblMgr RPC settings are not found, terminating PgXidSubscriberRunner");
+        return false;
     }
 
-    // The worker threads as used to make RPC requests to the sys table service while 
-    // populate the cache. We use the same number or threds as there are in the RPC in service.
+    // The worker threads as used to make RPC requests to the sys table service while
+    // populate the cache. We use the same number or threads as there are in the RPC in service.
     auto worker_count = Json::get_or<size_t>(rpc_json, "server_worker_threads", 1);
 
     _mgr = std::make_unique<PgXidSubscriberMgr>(roots_cache_size, worker_count);
@@ -179,7 +184,7 @@ PgXidSubscriberRunner::start()
     return true;
 }
 
-void 
+void
 PgXidSubscriberRunner::stop()
 {
     _mgr.reset();

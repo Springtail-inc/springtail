@@ -87,7 +87,7 @@ namespace springtail::pg_proxy {
     User::get_user_login() const
     {
         std::shared_lock lock(_user_mutex);
-        UserLoginPtr login = std::make_shared<UserLogin>(_password_type, _password, _salt);
+        UserLoginPtr login = std::make_shared<UserLogin>(_username, _password_type, _password, _salt);
 
         // if scram type copy both the keys, although only serverkey may be set
         if (_password_type == SCRAM) {
