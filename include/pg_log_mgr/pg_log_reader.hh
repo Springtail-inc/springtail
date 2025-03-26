@@ -54,8 +54,8 @@ namespace springtail::pg_log_mgr {
         PgLogReader(uint64_t db_id, uint32_t queue_size,
                     const std::filesystem::path &repl_log_path,
                     const std::filesystem::path &xact_log_path,
-                    const CommitterQueuePtr committer_queue,
-                    const bool archive_logs);
+                    CommitterQueuePtr committer_queue,
+                    bool archive_logs);
 
         ~PgLogReader();
         /**

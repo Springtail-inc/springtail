@@ -152,6 +152,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
                 // pre-commit the DDLs in case there's a failure
                 _redis_ddl.precommit_ddl(db_id, completed_xid, ddls);
+                _has_ddl_precommit = true;
 
                 if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
                     // finalize the system metadata
@@ -163,7 +164,10 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
                     SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, completed_xid);
                     // notify the FDW of the schema changes
-                    _redis_ddl.commit_ddl(db_id, completed_xid);
+                    if (_has_ddl_precommit) {
+                        _redis_ddl.commit_ddl(db_id, completed_xid);
+                        _has_ddl_precommit = false;
+                    }
                 } else {
                     _xid_mgr->record_ddl_change(db_id, completed_xid);
                 }
@@ -247,6 +251,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             if (!completed_ddls.is_null()) {
                 // pre-commit the DDLs to be applied to the FDWs
                 _redis_ddl.precommit_ddl(db_id, xid, completed_ddls);
+                _has_ddl_precommit = true;
             }
 
             // check if we are doing an active table sync, in which case we have to block commits
@@ -262,18 +267,16 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
                 // push completed DDL changes to the FDWs
                 // XXX we could make this conditional on there being outstanding DDL changes
-                SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, xid);
-                _redis_ddl.commit_ddl(db_id, xid);
+                if (_has_ddl_precommit) {
+                    SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, xid);
+                    _redis_ddl.commit_ddl(db_id, xid);
+                    _has_ddl_precommit = false;
+                }
             } else if (!completed_ddls.is_null()) {
                 // don't commit, but record any DDL changes to the history
                 _xid_mgr->record_ddl_change(db_id, xid);
             }
             _completed_xids[db_id] = xid;
-
-            // if (!completed_ddls.is_null()) {
-            //     // push completed DDL changes to the FDWs
-            //     _redis_ddl.commit_ddl(db_id, xid);
-            // }
 
             if (!index_ddls.is_null()) {
                 _redis_ddl.commit_index_ddl(db_id, xid);
