@@ -35,6 +35,7 @@ class TestSet:
         self._config_file = config_file
         self._build_dir = build_dir
         self._props = springtail.Properties(config_file, True)
+        self._name = os.path.splitext(os.path.basename(self._config_file))[0] + ' - ' + os.path.basename(self._directory)
 
         # constuct the special "config" test case for global setup and cleanup
         self._config = TestCase(os.path.join(directory, _GLOBAL_CONFIG_FILE), self._props, self._build_dir, ['setup', 'cleanup'])
@@ -188,7 +189,7 @@ class TestSet:
         skipped_tests = sum(1 for r in results if r['result'] == 'SKIPPED')
 
         print('\n')
-        print(f'--- Test Summary: {os.path.basename(self._directory)} ---')
+        print(f'--- Test Summary: {self._name} ---')
         print(f'Total tests found: {len(self._tests)}')
         print(f'Total tests run: {passed_tests + failed_tests}')
         print(f'Tests passed: {passed_tests}')
@@ -215,9 +216,8 @@ class TestSet:
         passed_tests = sum(1 for r in results if r['result'] == 'SUCCESS')
         failed_tests = sum(1 for r in results if r['result'] == 'FAILED')
 
-        name = os.path.splitext(os.path.basename(self._config_file))[0] + ' - ' + os.path.basename(self._directory)
         suite = etree.Element('testsuite',
-                              name=name,
+                              name=self._name,
                               tests=f'{len(results)}',
                               failures=f'{failed_tests}')
 
