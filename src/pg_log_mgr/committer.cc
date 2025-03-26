@@ -266,7 +266,6 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 _committed_xids[db_id] = xid;
 
                 // push completed DDL changes to the FDWs
-                // XXX we could make this conditional on there being outstanding DDL changes
                 if (_has_ddl_precommit) {
                     SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, xid);
                     _redis_ddl.commit_ddl(db_id, xid);
