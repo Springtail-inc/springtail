@@ -15,16 +15,19 @@ namespace pg_proxy {
         constexpr static std::string_view INVALID_PASSWORD = "28P01";
         constexpr static std::string_view SYNTAX_ERROR = "42601";
         constexpr static std::string_view PERMISSION_DENIED = "42501";
+        constexpr static std::string_view INVALID_DATABASE = "3D000";
+        constexpr static std::string_view CONNECTION_FAILURE = "08006";
 
         static inline void
         encode_error(BufferPtr buffer,
                      const std::string_view error_code,
-                     const std::string_view error_message)
+                     const std::string_view error_message,
+                     const std::string severity = "ERROR")
         {
             buffer->put('E');
-            buffer->put32(23 + error_code.size() + error_message.size());
-            buffer->put_string("SERROR");
-            buffer->put_string("VERROR");
+            buffer->put32(11 + severity.size() + error_code.size() + error_message.size());
+            buffer->put('S');
+            buffer->put_string(severity);
             buffer->put('C');
             buffer->put_string(error_code);
             buffer->put('M');

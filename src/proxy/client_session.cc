@@ -20,9 +20,6 @@
 #include <proxy/buffer_pool.hh>
 #include <proxy/logging.hh>
 
-#include <proxy/auth/md5.h>
-#include <proxy/auth/scram.hh>
-
 namespace springtail::pg_proxy {
 
     ClientSession::ClientSession(ProxyConnectionPtr connection)
@@ -54,28 +51,28 @@ namespace springtail::pg_proxy {
         // main entry point for client session
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session running", _id);
 
-        do {
-            // go through fds and check if we have any pending data
-            // first check client session
-            if (fds.contains(_connection->get_socket())) {
-                // wrap with error handler to catch any exceptions
-                _wrap_error_handler([this] {
+        // wrap with error handler to catch any exceptions
+        _wrap_error_handler([this, &fds] {
+            do {
+                // go through fds and check if we have any pending data
+                // first check client session
+                if (fds.contains(_connection->get_socket())) {
                     _process_connection();
-                });
-            }
+                }
 
-            // check if we have any server sessions
-            if (_primary_session && fds.contains(_primary_session->get_connection()->get_socket())) {
-                _primary_session->process_connection(_gen_seq_id());
-            }
+                // check if we have any server sessions
+                if (_state != ERROR && _primary_session && fds.contains(_primary_session->get_connection()->get_socket())) {
+                    _primary_session->process_connection(_gen_seq_id());
+                }
 
-            if (_replica_session && fds.contains(_replica_session->get_connection()->get_socket())) {
-                _replica_session->process_connection(_gen_seq_id());
-            }
+                if (_state != ERROR && _replica_session && fds.contains(_replica_session->get_connection()->get_socket())) {
+                    _replica_session->process_connection(_gen_seq_id());
+                }
 
-            fds.clear();
+                fds.clear();
 
-        } while (_has_pending_data(fds));
+            } while ((_state != ERROR) && !is_shutdown() && _has_pending_data(fds));
+        });
 
         PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[C:{}] Client session done", _id);
     }
@@ -107,22 +104,11 @@ namespace springtail::pg_proxy {
         // main entry point for thread processing
         // resume from where we left off
         switch(_state) {
-            case STARTUP: {
+            case STARTUP:
                 // startup messages, no auth done yet
-                uint64_t seq_id = _gen_seq_id();
-                if (_auth->process_auth_data(seq_id)) {
-                    // auth done, haven't sent ready for query yet
-                    _state = AUTH_SERVER;
-                    _db_id = _auth->db_id();
-                    _database = _auth->database();
-                    _user = _auth->user();
-                    _parameters = _auth->parameters();
-
-                    PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session auth done, db={}, user={}", _id, _database, _user->username());
-                    _primary_session = _create_server_session(Session::Type::PRIMARY, seq_id);
-                }
+                _handle_auth();
                 break;
-            }
+
             case READY:
                 // completed auth ready for queries
                 _handle_request();
@@ -138,6 +124,70 @@ namespace springtail::pg_proxy {
                 _state = ERROR;
                 break;
         }
+    }
+
+    void
+    ClientSession::_handle_auth()
+    {
+        // startup messages, no auth done yet
+        uint64_t seq_id = _gen_seq_id();
+        bool auth_done = false;
+
+        try {
+            // process the auth data, it may throw an exception, or just set _state to ERROR
+            auth_done = _auth->process_auth_data(seq_id);
+        } catch (ProxyAuthError &e) {
+            _state = ERROR;
+        }
+
+        if (_state == ERROR) {
+            // auth failed, handle the error
+            std::string error_code = _auth->get_error_code();
+            if (error_code.empty()) {
+                error_code = ProxyProtoError::INVALID_PASSWORD;
+            }
+
+            PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session auth failed: {}", _id, error_code);
+
+            // encode and send error message
+            BufferPtr buffer = BufferPool::get_instance()->get(128);
+            ProxyProtoError::encode_error(buffer, error_code, "authentication failed", "FATAL");
+            _send_buffer(buffer, seq_id);
+
+            // throw the error
+            throw ProxyAuthError();
+        }
+
+        if (auth_done) {
+            // auth done, haven't sent ready for query yet
+            // need to finish server authentication
+            _state = AUTH_SERVER;
+            _db_id = _auth->db_id();
+            _database = _auth->database();
+            _user = _auth->user();
+            _parameters = _auth->parameters();
+
+            PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session auth done, db={}, user={}", _id, _database, _user->username());
+            _primary_session = _create_server_session(Session::Type::PRIMARY, seq_id);
+        }
+    }
+
+    void
+    ClientSession::server_auth_error(ServerSessionPtr session,
+                                     uint64_t seq_id,
+                                     const std::string &error_code,
+                                     const std::string &error_message)
+    {
+        // if primary create login error
+        if (session->type() != Session::Type::PRIMARY) {
+            return;
+        }
+
+        // client session only waits for the primary auth to be done
+        // if we get an error here, we should send it to the client
+        BufferPtr buffer = BufferPool::get_instance()->get(1024);
+        ProxyProtoError::encode_error(buffer, error_code, error_message, "FATAL");
+        _send_buffer(buffer, seq_id);
     }
 
     void
@@ -220,14 +270,17 @@ namespace springtail::pg_proxy {
     void
     ClientSession::shutdown_session(void)
     {
+        // grab a shared pointer to self, to avoid losing the reference during cleanup
+        ClientSessionPtr self = shared_from_this();
+
         // Callback from Session::_handle_error()
         PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Client session shutting down", _id);
 
         // first close connection and remove from server poll list
         // this removes all associated sockets from this session
-        ProxyServer::get_instance()->log_disconnect(shared_from_this());
+        ProxyServer::get_instance()->log_disconnect(self);
         _connection->close();
-        ProxyServer::get_instance()->shutdown_session(shared_from_this());
+        ProxyServer::get_instance()->shutdown_session(self);
 
         // notify server replica/primary sessions via shutdown_server_sessions()
         uint64_t seq_id = _gen_seq_id();

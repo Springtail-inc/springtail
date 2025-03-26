@@ -61,7 +61,8 @@ CORE_DAEMONS = [
 ]
 
 FDW_DAEMONS = [
-    ('pg_ddl_daemon', 'src/pg_fdw/pg_ddl_daemon', '-s,/var/run/postgresql')
+    ('pg_ddl_daemon', 'src/pg_fdw/pg_ddl_daemon', '-s,/var/run/postgresql'),
+    ('pg_xid_subscriber_daemon', 'src/pg_fdw/pg_xid_subscriber_daemon')
 ]
 
 PROXY_DAEMONS = [

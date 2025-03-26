@@ -12,7 +12,10 @@ namespace springtail {
     class Coordinator : public Singleton<Coordinator> {
         friend class Singleton<Coordinator>;
     public:
-        /** Daemon type */
+        /**
+         * Daemon type
+         * NOTE: if updating this, must update LivenessDaemonType in scheduler.py
+         */
         enum DaemonType : uint8_t {
             LOG_MGR=1,
             WRITE_CACHE=2,
@@ -21,7 +24,8 @@ namespace springtail {
             GC_MGR=5,
             SYS_TBL_MGR=6,
             PROXY=7,
-            FDW=8
+            FDW=8,
+            XID_SUBSCRIBER=9
         };
 
         /**
