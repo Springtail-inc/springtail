@@ -1,9 +1,10 @@
 #include <fmt/format.h>
 
-#include <common/common.hh>
+#include <common/init.hh>
 
 #include <pg_log_mgr/pg_xact_log_reader.hh>
 #include <pg_log_mgr/pg_log_mgr.hh>
+#include "common/init.hh"
 
 using namespace springtail;
 using namespace springtail::pg_log_mgr;
@@ -17,6 +18,12 @@ int main(int argc, char *argv[])
 
     std::filesystem::path log_dir = argv[1];
 
+    std::vector<std::unique_ptr<ServiceRunner>> service_runners;
+    service_runners.emplace_back(std::make_unique<ExceptionRunner>());
+    service_runners.emplace_back(std::make_unique<IOMgrRunner>());
+
+    springtail_init_custom(service_runners);
+
     PgXactLogReader reader(log_dir);
     reader.begin();
 
@@ -26,4 +33,6 @@ int main(int argc, char *argv[])
                                  reader.get_pg_xid(), reader.get_xid()) << std::endl;
         has_more = reader.next();
     } while (has_more);
+
+    springtail_shutdown();
 }

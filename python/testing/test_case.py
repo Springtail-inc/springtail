@@ -298,6 +298,12 @@ class TestCase:
 
             # restart Springtail at the target XID
             springtail.restart(self._props, self._build_dir, start_xid=target_xid)
+
+            # reconnect to the replica database
+            if self._fdw:
+                self._fdw.close()
+                self._fdw = springtail.connect_fdw_instance(self._props, self._replica_name)
+
             return None
 
         # handle SQL statements

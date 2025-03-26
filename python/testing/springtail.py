@@ -477,12 +477,7 @@ def current_xid(props: Properties, db_id: int) -> int:
     rpc_config = config['xid_mgr']['rpc_config']
 
     hostname = props.get_hostname('ingestion')
-    port = rpc_config['server_port']
-    if not rpc_config['ssl']:
-        client = XidMgrClient(hostname, port)
-    else:
-        client = XidMgrClient(hostname, port, rpc_config['client_trusted'],
-                              rpc_config['client_key'], rpc_config['client_cert'])
+    client = XidMgrClient(hostname, rpc_config)
     return client.get_committed_xid(db_id)
 
 
