@@ -158,7 +158,7 @@ namespace springtail::pg_proxy {
                     tv.tv_sec = 1;  // 1 second timeout
                     tv.tv_usec = 0;
 
-                    int ret = select(client + 1, &readfds, NULL, NULL, &tv);
+                    int ret = select(client + 1, &readfds, nullptr, nullptr, &tv);
                     if (ret < 0) {
                         break;  // Error
                     } else if (ret == 0) {
