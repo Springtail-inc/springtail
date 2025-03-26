@@ -228,6 +228,9 @@ class TestCase:
                 elif line.startswith('##'):
                     # entering a new section
                     section = line[2:].strip()
+                    # reset the threaded and current transaction for the new section
+                    is_threaded = False
+                    cur_txn = self._metadata['default_txn']
                     if section not in self._sections and section != 'metadata':
                         self._raise_error(f'{line_num}: Unknown section: {section}')
 
@@ -284,7 +287,7 @@ class TestCase:
         # check for non-SQL statements
         if command['type'] == 'sleep':
             # sleep for 'duration' seconds
-            time.sleep(command['duration'])
+            time.sleep(float(command['duration']))
             return None
 
         if command['type'] == 'force_recovery':
@@ -519,7 +522,7 @@ class TestCase:
 
                     # execute the transactions in parallel
                     for txn in subsection['parallel']:
-                        future = executor.submit(self._execute_commands, subsction['parallel'][txn])
+                        future = executor.submit(self._execute_commands, subsection['parallel'][txn])
                         futures.append(future)
 
                     # wait for completion of all threads
