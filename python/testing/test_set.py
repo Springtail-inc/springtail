@@ -151,7 +151,7 @@ class TestSet:
 
             # if we should stop the tests, break the loop
             if test_failed and not shutdown_on_fail:
-                self._tests[test_file].check_logs()
+                springtail.check_logs(self._config_file)
                 break
 
             # try to perform cleanup
@@ -162,7 +162,7 @@ class TestSet:
 
             # check here if the test failed nad we need to check the logs
             if test_failed:
-                self._tests[test_file].check_logs()
+                springtail.check_logs(self._config_file)
                 break
 
         # if a test failed and we don't shutdown on failure, return immediately
@@ -215,8 +215,9 @@ class TestSet:
         passed_tests = sum(1 for r in results if r['result'] == 'SUCCESS')
         failed_tests = sum(1 for r in results if r['result'] == 'FAILED')
 
+        name = os.path.splitext(os.path.basename(self._config_file))[0] + ' - ' + os.path.basename(self._directory)
         suite = etree.Element('testsuite',
-                              name=os.path.basename(self._directory),
+                              name=name,
                               tests=f'{len(results)}',
                               failures=f'{failed_tests}')
 
