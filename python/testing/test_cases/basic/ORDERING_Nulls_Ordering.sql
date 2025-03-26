@@ -42,6 +42,8 @@ VALUES
 (10, 'Order J', '2025-02-10', 450.25, NULL, 'Tenth order details', 'N', 45.2),
 (11, 'Order K', NULL, NULL, NULL, NULL, 'Y', NULL);
 
+### sleep 1 -- wait a bit for indexes to be reconciled
+
 ## verify
 ### schema_check public nulls_ordering
 SELECT col3, col4 FROM nulls_ordering ORDER BY col3 ASC NULLS FIRST, col4 ASC NULLS FIRST;

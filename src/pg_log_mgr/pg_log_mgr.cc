@@ -226,7 +226,7 @@ namespace springtail::pg_log_mgr {
             if (auto request = _index_reconciliation_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT); request) {
                 //Pass it to log reader to notify committer
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Request received for index reconciliation for {}", *request);
-                auto msg = std::make_shared<PgMsg>(PgMsgEnum::INDEX_RECON);
+                auto msg = std::make_shared<PgMsg>(PgMsgEnum::RECONCILE_INDEX);
                 _pg_log_reader->enqueue_msg(msg);
             }
         }

@@ -236,7 +236,7 @@ namespace springtail
         CREATE_NAMESPACE, ALTER_NAMESPACE, DROP_NAMESPACE,
         CREATE_INDEX, DROP_INDEX, COPY_SYNC,
         // Custom committer notifiers
-        INDEX_RECON
+        RECONCILE_INDEX
     };
 
     /**

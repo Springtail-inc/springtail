@@ -296,17 +296,17 @@ namespace springtail::committer {
     }
 
     std::optional<uint64_t>
-    Indexer::process_next_reconciliation(uint64_t db_id) {
+    Indexer::process_next_reconciliation(uint64_t db_id, uint64_t end_xid) {
         std::scoped_lock lock(_pending_reconciliation_map_mtx);
         auto db_it = _pending_idx_reconciliation_map.find(db_id);
         if (db_it == _pending_idx_reconciliation_map.end()) {
             return std::nullopt; // No pending entries for this db_id
         }
-        return _process_next_reconciliation(db_it);
+        return _process_next_reconciliation(db_it, end_xid);
     }
 
     std::optional<uint64_t>
-    Indexer::_process_next_reconciliation(PendingReconMap::iterator db_it) {
+    Indexer::_process_next_reconciliation(PendingReconMap::iterator db_it, uint64_t end_xid) {
         auto& xid_map = db_it->second;
         if (xid_map.empty()) {
             _pending_idx_reconciliation_map.erase(db_it); // Clean up empty db_id entry
@@ -319,7 +319,7 @@ namespace springtail::committer {
 
         // Process each entry in the list
         for (auto& idxState : idx_list) {
-            _reconcile_index(idxState);
+            _reconcile_index(idxState, end_xid);
         }
 
         // Clean up if entries are empty
@@ -331,10 +331,9 @@ namespace springtail::committer {
     }
 
     void
-    Indexer::_reconcile_index(IndexState& idxState)
+    Indexer::_reconcile_index(IndexState& idxState, uint64_t end_xid)
     {
         auto [db_id, index_id] = idxState._key;
-        uint64_t end_xid = 0;
         auto is_fresh_drop = false;
         auto is_drop_while_processing = false;
         {
@@ -342,7 +341,6 @@ namespace springtail::committer {
 
             // fetch the latest state of the work item before we proceed for catchup
             const auto& work_item = _work_set.at(idxState._key);
-            end_xid = work_item._xid;
             // When a fresh work item comes in for drop index
             // there wont be any DDL
             is_fresh_drop = work_item.is_status(IndexStatus::DELETING);
@@ -377,7 +375,6 @@ namespace springtail::committer {
             auto next_page = table->read_page_from_disk(next_eid);
 
             while (!next_page->empty()) {
-                end_xid = next_page->header().xid;
                 // Get the previous_extent_id from next_extent header
                 // and fetch the extent from disk using the extent_id
                 if (auto prev_eid = next_page->header().prev_offset; prev_eid != constant::UNKNOWN_EXTENT) {

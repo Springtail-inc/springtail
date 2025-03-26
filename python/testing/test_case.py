@@ -162,8 +162,6 @@ class TestCase:
                     elif directive[0] == 'sleep':
                         if section != 'test':
                             self._raise_error(f'{line_num}: "sleep" must be part of the "test" section')
-                        if not is_threaded:
-                            self._raise_error(f'{line_num}: "sleep" must be part of a transaction within a parallel sub-section')
                         if len(directive) < 2:
                             self._raise_error(f'{line_num}: "sleep" must specify a duration')
 
@@ -284,7 +282,7 @@ class TestCase:
         # check for non-SQL statements
         if command['type'] == 'sleep':
             # sleep for 'duration' seconds
-            time.sleep(command['duration'])
+            time.sleep(int(command['duration']))
             return None
 
         if command['type'] == 'force_recovery':

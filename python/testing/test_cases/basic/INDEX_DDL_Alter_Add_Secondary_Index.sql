@@ -16,6 +16,8 @@ CREATE INDEX idx_col3 ON secondary_index_create (col3);
 CREATE INDEX idx_col4_col5 ON secondary_index_create (col4, col5);
 CREATE INDEX idx_col7 ON secondary_index_create (col7);
 
+### sleep 1 -- wait a bit for indexes to be reconciled
+
 ## verify
 ### schema_check public secondary_index_create
 

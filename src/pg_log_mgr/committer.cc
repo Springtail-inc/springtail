@@ -181,9 +181,16 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 continue;
             }
 
-            // note: from here we know we have an XACT_MSG
-            assert(result->type() == XidReady::Type::XACT_MSG);
-            uint64_t xid = result->xact().xid();
+            // note: from here we know we have an XACT_MSG or RECONCILE_INDEX
+            // XXX: Once we confirm we can commit the index at table's last XID safely,
+            //      we can remove the type RECONCILE_INDEX
+            assert(result->type() == XidReady::Type::XACT_MSG || result->type() == XidReady::Type::RECONCILE_INDEX);
+            uint64_t xid = 0;
+            if (result->type() == XidReady::Type::RECONCILE_INDEX) {
+                xid = result->reconcile().xid();
+            } else {
+                xid = result->xact().xid();
+            }
             auto token_4 = logging::set_context_variables({{"xid", std::to_string(xid)}});
             SPDLOG_INFO("Process XID: {}@{}", db_id, xid);
             assert(xid > completed_xid);
@@ -237,7 +244,13 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             nlohmann::json index_ddls = _redis_ddl.get_index_ddls_xid(db_id, xid);
 
             // Trigger index reconciliation for the earliest pending XID
-            const auto& idx_reconciled_xid_opt = _indexer->process_next_reconciliation(db_id);
+            uint64_t idx_reconciled_xid = 0;
+            if (result->type() == XidReady::Type::RECONCILE_INDEX) {
+                const auto& idx_reconciled_xid_opt = _indexer->process_next_reconciliation(db_id, xid);
+                if (idx_reconciled_xid_opt) {
+                    idx_reconciled_xid = *idx_reconciled_xid_opt;
+                }
+            }
 
             if (!index_ddls.is_null()) {
                 _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
@@ -273,8 +286,8 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             }
 
             // Commit index XID as they complete reconciliation
-            if (idx_reconciled_xid_opt) {
-                _redis_ddl.commit_index_ddl(db_id, *idx_reconciled_xid_opt);
+            if (result->type() == XidReady::Type::RECONCILE_INDEX && idx_reconciled_xid != 0) {
+                _redis_ddl.commit_index_ddl(db_id, idx_reconciled_xid);
             }
 
             SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "XID completed: {}@{}", db_id, xid);
