@@ -18,6 +18,7 @@
 #include <sys_tbl_mgr/table.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/shm_cache.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
 
@@ -202,6 +203,9 @@ namespace springtail::pg_fdw {
 
         std::atomic<uint64_t> _schema_xid; ///< The most recently seen schema XID
 
+        std::shared_ptr<sys_tbl_mgr::ShmCache> _roots_cache; ///< An IPC cache shared by pg_xid_subscriber_daemon
+
+        // static methods
         /** Helper to convert field to PG Datum */
         static Datum _get_datum_from_field(FieldPtr field,
                                            const Extent::Row &row,
@@ -258,5 +262,8 @@ namespace springtail::pg_fdw {
 
         friend std::vector<ConstQualPtr>
         _get_index_quals(const PgFdwState *state, Index const& idx, List const* qual_list);
+
+        /** Helper to create an IPC cache for table roots */
+        std::shared_ptr<sys_tbl_mgr::ShmCache> _try_create_cache();
     };
 } // namespace springtail::pg_fdw

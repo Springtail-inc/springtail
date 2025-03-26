@@ -38,9 +38,9 @@ typedef struct ScramState {
 		bool adhoc;	/* SCRAM data made up from plain-text password */
 		int iterations;
 		char *salt;	/* base64-encoded */
-		uint8_t ClientKey[32];	/* SHA256_DIGEST_LENGTH */
-		uint8_t StoredKey[32];
-		uint8_t ServerKey[32];
+		uint8_t ClientKey[SHA256_DIGEST_LENGTH];
+		uint8_t StoredKey[SHA256_DIGEST_LENGTH];
+		uint8_t ServerKey[SHA256_DIGEST_LENGTH];
 } ScramState;
 
 typedef struct PgUser {

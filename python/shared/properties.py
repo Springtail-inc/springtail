@@ -3,6 +3,7 @@ import sys
 import os
 import time
 import logging
+import argparse
 from redis import Redis
 from typing import Optional, Dict
 from common import parse_bool
@@ -207,6 +208,8 @@ class Properties:
             return self.cache['integration_test_config']
 
         config = json.loads(self.redis.hget(key, 'system_settings'))
+        if 'integration_test_config' not in config:
+            return {}
         integration_test_config = config['integration_test_config']
         self.cache['integration_test_config'] = integration_test_config
 
@@ -459,12 +462,21 @@ class Properties:
         field_key = self.service_name + ':' + self.instance_key
         self.redis.hset(key, field_key, state)
 
+def parse_args():
+    """Parse the command line arguments."""
+    parser = argparse.ArgumentParser(description='Properties utility')
+    parser.add_argument('--config', help='The system.json file to load')
+    parser.add_argument('--load', action='store_true', help='Load the redis configuration')
+    return parser.parse_args()
+
 def main():
     # init logging for console output
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
+    args = parse_args()
+
     # call the get functions and print the results
-    props = Properties()
+    props = Properties(config_file=args.config, load_redis=args.load)
     print(f"db_configs: {props.get_db_configs()}")
     print(f"db_instance_config: {props.get_db_instance_config()}")
     if props.get_fdw_id():

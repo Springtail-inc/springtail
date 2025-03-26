@@ -14,6 +14,7 @@ class ComponentFactory:
     DDL_ID = "3"
     SYS_TBL_MGR_ID = "4"
     PROXY_ID = "5"
+    XID_SUBSCRIBER_ID = "6"
     POSTGRES = "10"
 
     def __init__(self, install_dir : str, pid_dir : str):
@@ -83,4 +84,14 @@ class ComponentFactory:
             id=self.POSTGRES,
             path=bindir,
             pid_path=f'/var/run/postgresql/{version}-main.pid'
+        )
+
+    def create_xid_subscriber_daemon(self) -> Component:
+        """Create a new XID subscriber component."""
+        return Component(
+            name="pg_xid_subscriber_daemon",
+            id=self.XID_SUBSCRIBER_ID,
+            args=["--daemon"],
+            path=self.install_dir,
+            pid_path=os.path.join(self.pid_dir, 'pg_xid_subscriber.pid')
         )

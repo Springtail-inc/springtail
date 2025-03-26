@@ -70,6 +70,12 @@ public:
      */
     const UserPtr user() const { return _user; }
 
+    /**
+     * @brief Get error code if there is one
+     * @return std::string error code
+     */
+    const std::string &get_error_code() const { return _error_code; }
+
 private:
     enum State : int8_t { STARTUP = 0, SSL_HANDSHAKE = 1, AUTH = 2, READY = 3, ERROR = 99 };
 
@@ -84,6 +90,8 @@ private:
     uint64_t _db_id;
     UserPtr _user;
     UserLoginPtr _login;
+
+    std::string _error_code;
 
     /** read startup packet */
     void _handle_startup(uint64_t seq_id);
@@ -135,8 +143,7 @@ public:
           _login(user->get_user_login()),
           _type(type),
           _parameters(parameters)
-    {
-    }
+    {}
 
     /**
      * @brief Send startup message
@@ -162,6 +169,15 @@ public:
         return _server_parameters;
     }
 
+    /**
+     * @brief Get the error code and message if there is one
+     * @return std::pair<std::string, std::string> error code and message
+     */
+    std::pair<std::string, std::string> get_error() const
+    {
+        return {_error_code, _error_message};
+    }
+
 private:
     /** internal server auth state */
     enum State : int8_t {
@@ -185,6 +201,9 @@ private:
 
     int32_t _pid;
     int32_t _cancel_key;
+
+    std::string _error_code;
+    std::string _error_message;
 
     /** parameters from client session */
     std::unordered_map<std::string, std::string> _parameters;
