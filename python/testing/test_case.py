@@ -352,18 +352,7 @@ class TestCase:
             if command['type'] == 'table_exists':
                 results = {}
 
-                sql = f"""
-                    SELECT EXISTS (
-                        SELECT 1
-                        FROM pg_class c
-                        JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
-                        WHERE n.nspname = '{command["schema"]}' AND c.relname = '{command["table"]}'
-                        AND c.relkind = 'r'
-                    );
-                """
-
-                sql_result = self._execute_sql(cursor, sql, True)
-                results['exists'] = True if sql_result else False
+                results['exists'] = command['replica_exists']
 
                 return results
 
@@ -422,12 +411,10 @@ class TestCase:
                           SELECT exists FROM latest_table LIMIT 1"""
 
                 sql_result = self._execute_sql(cursor, sql, True)
-                if not sql_result:
-                    replica_result = False
-                else:
-                    replica_result = sql_result[0][0]
 
-                results['exists'] = replica_result == bool(command['replica_exists'])
+                replica_result = False if not sql_result else sql_result[0][0]
+
+                results['exists'] = replica_result
 
                 return results
 
