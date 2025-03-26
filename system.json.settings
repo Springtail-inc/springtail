@@ -94,6 +94,7 @@
         "NOTE": "cert and key required for ssl; modes = [primary|normal|shadow]; pg_shadow for testing",
         "enable_ssl": false,
         "port": 8888,
+        "keep_alive_port": 0,
         "threads": 4,
         "cert_path": null,
         "key_path": null,
@@ -105,13 +106,13 @@
     "org": {
         "NOTE": "this section is for testing only, in production env vars are used",
         "organization_id": "9876",
-	"account_id": "123",
+        "account_id": "123",
         "db_instance_id": 1234,
         "fdw_id": "1",
         "replication_user": "springtail",
         "replication_user_password": "springtail",
         "fdw_user_password": "springtail",
-	"aws_mock_override": false
+        "aws_mock_override": false
     },
     "db_instances": {
         "1234": {

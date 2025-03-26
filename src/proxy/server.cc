@@ -41,6 +41,7 @@ namespace springtail::pg_proxy {
                       int thread_pool_size,
                       const std::filesystem::path &cert_file,
                       const std::filesystem::path &key_file,
+                      int keep_alive_port,
                       MODE mode,
                       bool enable_ssl,
                       LoggerPtr shadow_logger)
@@ -90,7 +91,6 @@ namespace springtail::pg_proxy {
             exit(1);
         }
 
-
         if ((_efd = eventfd(0, EFD_NONBLOCK | EFD_SEMAPHORE)) < 0) {
             SPDLOG_ERROR("Error creating eventfd\n");
             close(_socket);
@@ -100,7 +100,81 @@ namespace springtail::pg_proxy {
         // ignore SIGPIPE signals
         ::signal(SIGPIPE, SIG_IGN);
 
+        if (keep_alive_port > 0) {
+            _keep_alive_thread = std::thread(&ProxyServer::_start_keep_alive, this, keep_alive_port);
+        }
+
         SPDLOG_INFO("Proxy server initialized and is listening on port={}", proxy_port);
+    }
+
+    void
+    ProxyServer::_start_keep_alive(int port)
+    {
+        int socket = ::socket(AF_INET6, SOCK_STREAM, 0);
+        if (socket < 0) {
+            SPDLOG_ERROR("Error creating keepalive socket");
+            return;
+        }
+
+        struct sockaddr_in6 addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin6_family = AF_INET6;
+        addr.sin6_addr = in6addr_any;
+        addr.sin6_port = htons(port);
+
+        int flags = 1;
+        if (setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &flags, sizeof(int)) < 0) {
+            SPDLOG_ERROR("Error setting keepalive socket options: SO_REUSEADDR");
+            ::close(socket);
+            return;
+        }
+
+        if (bind(socket, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
+            SPDLOG_ERROR("Error binding keepalive socket");
+            ::close(socket);
+            return;
+        }
+
+        if (listen(socket, 1) < 0) {
+            SPDLOG_ERROR("Error listening on keepalive socket");
+            ::close(socket);
+            return;
+        }
+
+        SPDLOG_INFO("Keepalive socket listening on port {}", port);
+
+        while (!_shutdown) {
+            int client = accept(socket, nullptr, nullptr);
+            if (client >= 0) {
+                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Accepted keepalive connection");
+                // Wait for remote disconnect with timeout to check shutdown flag
+                char buf[32];
+                fd_set readfds;
+                struct timeval tv;
+
+                while (!_shutdown) {
+                    FD_ZERO(&readfds);
+                    FD_SET(client, &readfds);
+                    tv.tv_sec = 1;  // 1 second timeout
+                    tv.tv_usec = 0;
+
+                    int ret = select(client + 1, &readfds, NULL, NULL, &tv);
+                    if (ret < 0) {
+                        break;  // Error
+                    } else if (ret == 0) {
+                        continue;  // Timeout, check shutdown flag
+                    }
+
+                    // Data available to read
+                    ssize_t n = read(client, buf, sizeof(buf));
+                    if (n <= 0) break;  // EOF or error
+                }
+                ::close(client);
+            }
+        }
+
+        ::close(socket);
+        SPDLOG_INFO("Keepalive socket closed, keepalive thread exiting");
     }
 
     void
@@ -435,7 +509,11 @@ namespace springtail::pg_proxy {
             ::SSL_CTX_free(_ssl_ctx_client);
         }
 
+        // shutdown thread pool
         _thread_pool->shutdown();
+
+        // wait for keepalive thread to finish
+        _keep_alive_thread.join();
 
         // flush logger
         if (_logger) {
@@ -575,7 +653,7 @@ namespace springtail::pg_proxy {
         nlohmann::json json = Properties::get(Properties::PROXY_CONFIG);
         int num_threads = Json::get_or<int>(json, "threads", 4);
         int port = Json::get_or<int>(json, "port", 8888);
-
+        int keep_alive_port = Json::get_or<int>(json, "keep_alive_port", 0);
         int log_level = Json::get_or<int>(json, "log_level", 1);
 
         // setup ssl config
@@ -633,7 +711,7 @@ namespace springtail::pg_proxy {
         }
 
         ProxyServer *server = ProxyServer::get_instance();
-        server->init(port, num_threads, certificate, key, server_mode, enable_ssl, logger);
+        server->init(port, num_threads, certificate, key, keep_alive_port, server_mode, enable_ssl, logger);
         server->set_log_level(log_level);
 
         _proxy_thread = std::thread(&ProxyServer::run, ProxyServer::get_instance());

@@ -137,6 +137,9 @@ namespace springtail::pg_proxy {
             // process the auth data, it may throw an exception, or just set _state to ERROR
             auth_done = _auth->process_auth_data(seq_id);
         } catch (ProxyAuthError &e) {
+            // print backtrace
+            SPDLOG_ERROR("[C:{}] Client session auth error: {}", _id, e.what());
+            e.log_backtrace();
             _state = ERROR;
         }
 
