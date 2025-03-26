@@ -5,7 +5,6 @@ CREATE TABLE IF NOT EXISTS parallel_trans_ddl (
 );
 
 ### parallel
-### parallel
 ### txn 1
 ALTER TABLE parallel_trans_ddl ADD COLUMN first_column TEXT;
 INSERT INTO parallel_trans_ddl (first_column) VALUES ('First column value 1');
