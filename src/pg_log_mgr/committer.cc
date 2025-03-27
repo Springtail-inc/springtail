@@ -83,7 +83,6 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             if (itr == _completed_xids.end()) {
                 completed_xid = _xid_mgr->get_committed_xid(db_id, 0);
                 _completed_xids[db_id] = completed_xid;
-                _committed_xids[db_id] = completed_xid;
             } else {
                 completed_xid = itr->second;
             }
@@ -161,6 +160,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
                 // pre-commit the DDLs in case there's a failure
                 _redis_ddl.precommit_ddl(db_id, completed_xid, ddls);
+                _has_ddl_precommit = true;
 
                 if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
                     // finalize the system metadata
@@ -169,13 +169,17 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     // perform a commit to the XidMgr
                     _xid_mgr->commit_xid(db_id, completed_xid, true);
                     _committed_xids[db_id] = completed_xid;
+
+                    SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, completed_xid);
+                    // notify the FDW of the schema changes
+                    if (_has_ddl_precommit) {
+                        _redis_ddl.commit_ddl(db_id, completed_xid);
+                        _has_ddl_precommit = false;
+                    }
                 } else {
                     _xid_mgr->record_ddl_change(db_id, completed_xid);
                 }
                 _completed_xids[db_id] = completed_xid;
-
-                // notify the FDW of the schema changes
-                _redis_ddl.commit_ddl(db_id, completed_xid);
 
                 if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
                     // notify everyone that the database is now in the "ready" state
@@ -255,6 +259,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             if (!completed_ddls.is_null()) {
                 // pre-commit the DDLs to be applied to the FDWs
                 _redis_ddl.precommit_ddl(db_id, xid, completed_ddls);
+                _has_ddl_precommit = true;
             }
 
             // check if we are doing an active table sync, in which case we have to block commits
@@ -267,20 +272,24 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 // commit the completed XID
                 _xid_mgr->commit_xid(db_id, xid, !completed_ddls.is_null());
                 _committed_xids[db_id] = xid;
+
+                // push completed DDL changes to the FDWs
+                if (_has_ddl_precommit) {
+                    SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, xid);
+                    _redis_ddl.commit_ddl(db_id, xid);
+                    _has_ddl_precommit = false;
+                }
             } else if (!completed_ddls.is_null()) {
                 // don't commit, but record any DDL changes to the history
                 _xid_mgr->record_ddl_change(db_id, xid);
             }
             _completed_xids[db_id] = xid;
 
-            if (!completed_ddls.is_null()) {
-                // push completed DDL changes to the FDWs
-                _redis_ddl.commit_ddl(db_id, xid);
-            }
-
             if (!index_ddls.is_null()) {
                 _redis_ddl.commit_index_ddl(db_id, xid);
             }
+
+            result->notify_tracker(xid);
 
             SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "XID completed: {}@{}", db_id, xid);
         }
@@ -439,6 +448,8 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         //finalize and commit
         auto client = sys_tbl_mgr::Client::get_instance();
         for (auto const& [db_id, xid, ddls] : precommit) {
+            // XXX I think this is not safe since it might have already been called -- we need to do
+            //     this another way, probably by injecting a record into the committer queue
             client->finalize(db_id, xid);
             _redis_ddl.commit_ddl(db_id, xid);
         }

@@ -1,10 +1,7 @@
 #pragma once
 
 #include <filesystem>
-#include <fstream>
 #include <memory>
-#include <string>
-#include <vector>
 
 #include <pg_repl/pg_repl_msg.hh>
 #include <storage/extent.hh>

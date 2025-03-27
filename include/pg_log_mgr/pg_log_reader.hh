@@ -19,6 +19,7 @@
 #include <redis/redis_containers.hh>
 #include <redis/redis_ddl.hh>
 
+#include <pg_log_mgr/wal_progress_tracker.hh>
 #include <pg_log_mgr/xid_ready.hh>
 
 #include <storage/extent.hh>
@@ -44,11 +45,18 @@ namespace springtail::pg_log_mgr {
 
         /**
          * @brief Construct a new Pg Log Reader object
-         * @param queue queue to enqueue parsed xactions for xid logger and GC
+         * @param db_id           - database id
+         * @param queue_size      - size of the message queue owned by this object
+         * @param repl_log_path   - path of replication logs directory
+         * @param xact_log_path   - path of transaction logs directory
+         * @param committer_queue - queue for passing work to committer
+         * @param archive_logs    - flag for turning on repl and xact logs archiving
          */
         PgLogReader(uint64_t db_id, uint32_t queue_size,
+                    const std::filesystem::path &repl_log_path,
                     const std::filesystem::path &xact_log_path,
-                    CommitterQueuePtr committer_queue);
+                    CommitterQueuePtr committer_queue,
+                    bool archive_logs);
 
         ~PgLogReader();
         /**
@@ -60,10 +68,12 @@ namespace springtail::pg_log_mgr {
         /**
          * @brief Process next set of messages from log file
          * @param path file path
+         * @param timestamp log file timestamp
          * @param start_offset starting file offset
          * @param num_messages number of messages to process (-1 read until end of file)
          */
         void process_log(const std::filesystem::path &path,
+                         uint64_t timestamp,
                          uint64_t start_offset,
                          int num_messages);
 
@@ -225,9 +235,14 @@ namespace springtail::pg_log_mgr {
         };
         using BatchPtr = std::shared_ptr<Batch>;
 
+        uint64_t _pg_log_timestamp{0};      ///< Timestamp id of the current Postgres log
         uint64_t _db_id; ///< The database ID
         uint64_t _committed_xid; ///< The most recently committed XID at startup
+        bool _is_streaming{false};     ///< This flag indicates that the log is inside streaming block
+        bool _archive_logs{false};     ///< This flag indicates that the reader should archive old logs instead of removing them
         std::filesystem::path _current_path; ///< current log file path
+        std::filesystem::path _repl_log_path;   ///< Path for Postgres logs storage directory
+        std::filesystem::path _xact_log_path;   ///< Path for Springtail logs storage directory
         PgMsgStreamReader _reader;           ///< msg stream reader for log file
         CommitterQueuePtr _committer_queue;  ///< shared queue for committer
         PgTransactionPtr _current_xact;      ///< current transaction
@@ -244,6 +259,11 @@ namespace springtail::pg_log_mgr {
             top-most pgxid and never a subtxn, which are handled within the batch. */
         std::map<int32_t, BatchPtr> _batch_map;
         BatchPtr _current_batch; ///< The batch matching the current pg xid
+
+        WalProgressTrackerPtr _xid_ts_tracker;      ///< Timestamps and Xids tracker object
+
+        /** Function for cleaning up old log files. */
+        void _remove_old_log_files();
 
         /** Worker function that processes the messages from the internal queue. */
         void _msg_worker();

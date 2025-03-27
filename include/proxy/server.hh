@@ -38,6 +38,7 @@ namespace springtail::pg_proxy {
          * @param thread_pool_size - number of threads in the thread pool
          * @param cert_file - path to the server certificate file
          * @param key_file - path to the server key file
+         * @param keep_alive_port - port for keepalive connections, 0 disable
          * @param mode - mode of the server
          * @param enable_ssl - enable SSL
          * @param logger - logger object for shadow mode
@@ -46,6 +47,7 @@ namespace springtail::pg_proxy {
                   int thread_pool_size,
                   const std::filesystem::path &cert_file,
                   const std::filesystem::path &key_file,
+                  int keep_alive_port=0,
                   MODE mode=MODE::NORMAL,
                   bool enable_ssl=false,
                   LoggerPtr shadow_logger=nullptr);
@@ -128,6 +130,7 @@ namespace springtail::pg_proxy {
 
         uint32_t _id;  ///< unique id for this proxy server
         std::shared_ptr<ThreadPool<Session>> _thread_pool;    ///< thread pool for handling incoming session data
+        std::thread _keep_alive_thread;  ///< thread for handling keepalive connections
 
         std::mutex _waiting_sessions_mutex;   ///< mutex for _waiting_sessions set and _sessions map
         std::set<int> _waiting_sessions;      ///< set of connection sockets waiting for read data
@@ -158,6 +161,9 @@ namespace springtail::pg_proxy {
 
         /** Wake up intternal event loop to reprocess waiting session */
         void _wake_event_loop();
+
+        /** Start keep alive thread */
+        void _start_keep_alive(int port);
     };
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
 

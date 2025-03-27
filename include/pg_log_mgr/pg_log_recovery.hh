@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pg_log_mgr/pg_log_reader.hh>
+#include <pg_log_mgr/pg_xact_log_reader.hh>
 #include <pg_repl/pg_msg_stream.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 
