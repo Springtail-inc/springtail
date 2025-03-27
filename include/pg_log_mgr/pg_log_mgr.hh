@@ -129,6 +129,8 @@ namespace springtail::pg_log_mgr {
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "reader thread joined");
             _table_copy_thread.join();
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "copy thread joined");
+            _reconciliation_thread.join();
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Index reconciliation thread joined");
         }
 
         /** Set shutdown flag */
