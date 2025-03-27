@@ -5,6 +5,7 @@ import logging
 import redis
 import threading
 import traceback
+from enum import Enum, StrEnum
 from typing import Dict, Optional
 
 from component import Component
@@ -20,7 +21,7 @@ from properties import Properties
 
 from production import Production
 
-class CoordinatorState:
+class CoordinatorState(StrEnum):
     """Coordinator state class"""
     SHUTDOWN = 'shutdown'
     STARTUP = 'startup'
@@ -28,12 +29,39 @@ class CoordinatorState:
     DEAD = 'dead'
     RELOAD = 'reload'
 
+# Note: this must be kept in sync with the C++ DaemonType in coordinator.hh
+# Mapping to service names must also be updated below
+class LivenessDaemonType(Enum):
+    """Enumeration for Liveness Daemon types"""
+    LOG_MGR = 1
+    WRITE_CACHE = 2
+    XID_MGR = 3
+    DDL_MGR = 4
+    GC_MGR = 5
+    SYS_TBL_MGR = 6
+    PROXY = 7
+    FDW = 8
+    XID_SUBSCRIBER = 9
+
+# Mapping from LivenessDaemonType to service names
+LIVENESS_DAEMON_TO_SERVICE = {
+    LivenessDaemonType.LOG_MGR: 'ingestion',
+    LivenessDaemonType.WRITE_CACHE: 'ingestion',
+    LivenessDaemonType.XID_MGR: 'ingestion',
+    LivenessDaemonType.DDL_MGR: 'fdw',
+    LivenessDaemonType.GC_MGR: 'ingestion',
+    LivenessDaemonType.SYS_TBL_MGR: 'ingestion',
+    LivenessDaemonType.PROXY: 'proxy',
+    LivenessDaemonType.FDW: 'fdw',
+    LivenessDaemonType.XID_SUBSCRIBER: 'fdw',
+}
+
 class Scheduler:
     """Scheduler class to manage the lifecycle of components"""
 
     def __init__(self,
         props: Properties,
-        service_name : Optional[str],
+        service_name : str,
         production : Optional[Production] = None,
         allowed_timeout_secs: int = 15
     ):
@@ -47,7 +75,7 @@ class Scheduler:
                 NOTE: see constants.hh for the default keep alive timeout
         """
         self.props = props
-        self.service_name = service_name
+        self.service_name = service_name.lower()
         self.production = production
         self.redis = props.get_data_redis()
         self.liveness_hash = props.get_liveness_hash()
@@ -61,6 +89,9 @@ class Scheduler:
         # Setup pubsub for liveness notifications
         self.pubsub = self.redis.pubsub(ignore_subscribe_messages=True)
         self.pubsub.subscribe(self.liveness_pubsub)
+
+        # Create list of daemon ids for this service (for daemon checks)
+        self.liveness_ids = [str(daemon.value) for daemon, service in LIVENESS_DAEMON_TO_SERVICE.items() if service.lower() == self.service_name]
 
         self.shutdown_event = threading.Event()
 
@@ -77,7 +108,7 @@ class Scheduler:
             True if all components started successfully
         """
         # Clear timeout tracking
-        self.timeouts.clear()
+        self._init_timeouts()
 
         # Sort components by startup order
         sorted_components = sorted(
@@ -183,6 +214,7 @@ class Scheduler:
         Check the liveness of all components
         Returns:
             True if any components has failed.
+            False if no components have failed.
         """
         # Check for timeout messages in Redis
         data = self.redis.hgetall(self.liveness_hash)
@@ -195,14 +227,17 @@ class Scheduler:
         # value format: timestamp (epoch ms)
         timeouts: Dict[str, int] = {}
         for key, value in data.items():
-            self.logger.debug(f"Got timeout data: {key}:{value}")
             id = key.split(':')[0]
-            if id not in self.components:
+            if id not in self.liveness_ids:
                 continue
             if id not in timeouts:
                 timeouts[id] = int(value)
             else:
                 timeouts[id] = min(timeouts[id], int(value))
+            self.logger.debug(f"Got timeout data: {key}:{value}")
+
+        if not timeouts:
+            return False
 
         # Merge with existing timeouts
         self.timeouts.update(timeouts)
@@ -212,11 +247,11 @@ class Scheduler:
         self.logger.debug(f"Checking timeouts: allowed: {self.allowed_timeout}, min_time: {min_time}")
         for id, timestamp in self.timeouts.items():
             if timestamp < min_time:
-                self.logger.error(f"Timeout for component: {self.components[id].get_name()}, {timestamp} < {min_time} {time.time() * 1000 - timestamp}")
-                if id in self.components:  # this should always be true
-                    if self.production:
-                        self.production.send_sns('failure', self.components[id].get_name())
-                    return True
+                name = LivenessDaemonType(int(id)).name
+                self.logger.error(f"Timeout for component: {name}, {timestamp} < {min_time} {time.time() * 1000 - timestamp}")
+                if self.production:
+                    self.production.send_sns('failure', name)
+                return True
 
         return False
 
@@ -246,10 +281,12 @@ class Scheduler:
         """
         Initialize timeouts for all registered components, clear any existing timeouts from redis
         """
+        self.timeouts.clear()
+
         keys = self.redis.hkeys(self.liveness_hash)
         for key in keys:
             id = key.split(':')[0]
-            if id in self.components:
+            if id in self.liveness_ids:
                 self.redis.hdel(self.liveness_hash, key)
 
     def _check_coordinator_state(self) -> None:

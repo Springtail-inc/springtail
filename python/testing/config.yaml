@@ -1,4 +1,20 @@
+# Folder holding the test cases
 test_folder: 'test_cases'
+
+# the location of the Springtail configuration file to use
 system_json_path: '../../system.json.test'
+
+# the location of the Springtail build
 build_dir: '../../debug'
+
+# the default test sets to run
 default_test_sets: ['basic', 'framework', 'recovery']
+
+# the configuration overlays to apply
+overlays:
+  # uses a small repl log size to force more frequent log rotations
+  small_log_rotate:
+    test_sets: ['recovery']
+  # uses a small data cache size to force more frequent eviction
+  small_cache_size:
+    test_sets: ['basic']

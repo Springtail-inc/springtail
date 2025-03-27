@@ -243,9 +243,16 @@ namespace springtail::xid_mgr {
             return committed_xid;
         }
 
+        // if the history is ahead of the commit, return the committed xid
+        auto target_xid = (*pos_i) - 1;
+        if (target_xid > committed_xid) {
+            SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Partition: get committed xid: {}; ahead of history {}", committed_xid, target_xid);
+            return committed_xid;
+        }
+
         // if we found an entry in the history, return the XID directly before that
-        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Partition: xid limited by schema_xid: {}", (*pos_i) - 1);
-        return (*pos_i) - 1;
+        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Partition: xid limited by schema_xid: {} -> {}", schema_xid, target_xid);
+        return target_xid;
     }
 
 } // namespace springtail::xid_mgr

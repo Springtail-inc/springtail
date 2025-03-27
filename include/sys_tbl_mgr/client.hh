@@ -12,6 +12,7 @@
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table.hh>
 #include <proto/sys_tbl_mgr.grpc.pb.h>
+#include <sys_tbl_mgr/shm_cache.hh>
 
 namespace springtail::sys_tbl_mgr {
 
@@ -70,6 +71,8 @@ public:
      */
     void invalidate_db(uint64_t db_id, const XidLsn &xid);
 
+    void use_roots_cache(std::shared_ptr<ShmCache> c);
+
 private:
     Client();
     ~Client() override = default;
@@ -82,6 +85,7 @@ private:
 
     std::shared_ptr<grpc::Channel> _channel;
     std::unique_ptr<proto::SysTblMgr::Stub> _stub;
+    std::atomic<std::shared_ptr<ShmCache>> _roots_cache;
 };
 
 } // namespace springtail::sys_tbl_mgr

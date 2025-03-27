@@ -29,18 +29,21 @@ namespace springtail::pg_log_mgr {
                        const std::string &host, const std::string &db_name,
                        const std::string &user_name, const std::string &password,
                        const std::string &pub_name, const std::string &slot_name,
+                       uint64_t log_size_rollover_threshold,
                        int port,
+                       bool archive_logs,
                        std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue)
     : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
       _host(host), _db_name(db_name), _user_name(user_name),
-      _password(password), _pub_name(pub_name), _slot_name(slot_name), _port(port),
+      _password(password), _pub_name(pub_name), _slot_name(slot_name),
+      _log_size_rollover_threshold(log_size_rollover_threshold), _port(port),
       _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
       _repl_log_path(repl_log_path),
       _committer_queue(committer_queue),
       _xact_log_path(xact_log_path),
       _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
     {
-        _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, xact_log_path, _committer_queue);
+        _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, xact_log_path, _committer_queue, archive_logs);
 
         // construct the callback for watching for database state changes
         _cache_watcher_db_states = std::make_shared<RedisCache::RedisChangeWatcher>(
@@ -392,17 +395,11 @@ namespace springtail::pg_log_mgr {
         _writer_thread = std::thread(&PgLogMgr::_log_writer_thread, this);
     }
 
-    void
-    PgLogMgr::_lsn_callback(LSN_t lsn)
-    {
-        _pg_conn.set_last_flushed_LSN(lsn);
-    }
-
     /** Thread for writing log data */
     void
     PgLogMgr::_log_writer_thread()
     {
-        PgLogWriterPtr logger = this->_create_repl_logger();
+        PgLogWriterPtr logger = _create_repl_logger();
 
         PgCopyData data;
         uint64_t start_offset = logger->offset();
@@ -461,9 +458,9 @@ namespace springtail::pg_log_mgr {
             start_offset = end_offset;
 
             // check to see if we should rollover log
-            if (end_offset > LOG_ROLLOVER_SIZE_BYTES) {
+            if (end_offset > _log_size_rollover_threshold) {
                 logger->close();
-                logger = this->_create_repl_logger();
+                logger = _create_repl_logger();
                 start_offset = 0;
             }
         }
@@ -516,8 +513,8 @@ namespace springtail::pg_log_mgr {
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Processing log entry: path={}, start_offset={}, num_messages={}",
                                 log_entry->path, log_entry->start_offset, log_entry->num_messages);
 
-            _pg_log_reader->process_log(log_entry->path, log_entry->start_offset,
-                                        log_entry->num_messages);
+            _pg_log_reader->process_log(log_entry->path, _logger_file_timestamp.load(),
+                                        log_entry->start_offset, log_entry->num_messages);
         }
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Exiting log reader thread");
     }
@@ -526,6 +523,9 @@ namespace springtail::pg_log_mgr {
     PgLogMgr::_create_repl_logger()
     {
         std::filesystem::path file = fs::create_log_file(_repl_log_path, LOG_PREFIX_REPL, LOG_SUFFIX);
+        auto file_timestamp = fs::extract_timestamp_from_file(file, LOG_PREFIX_REPL, LOG_SUFFIX);
+        DCHECK(file_timestamp.has_value());
+        _logger_file_timestamp.store(file_timestamp.value());
 
         return std::make_shared<PgLogWriter>(file,
             [this](LSN_t lsn) { _pg_conn.set_last_flushed_LSN(lsn); });

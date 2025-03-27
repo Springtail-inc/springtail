@@ -46,6 +46,7 @@ public:
             while (reverse_iter != _service_list.rend()) {
                 SPDLOG_INFO("Stopping service {}", (*reverse_iter)->get_name());
                 (*reverse_iter)->stop();
+                ++reverse_iter;
             }
             return false;
         }

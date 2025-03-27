@@ -1,5 +1,6 @@
 import argparse
 import jinja2
+import json
 import logging
 from lxml import etree
 import os
@@ -8,6 +9,13 @@ import yaml
 
 from test_case import TestCase
 from test_set import TestSet
+
+# Get the parent directory of the current script (i.e., the project root directory)
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# add shared code to the import path
+sys.path.append(os.path.join(project_root, 'shared'))
+from common import merge_json
 
 def gen_test_cases(test_set: str,
                    test_files: list,
@@ -38,7 +46,7 @@ def gen_all_tests(test_folder: str,
 
     Returns True if all test cases pass.
     """
-    logging.info(f"Running all test cases from folder: {test_folder}")
+    logging.info(f"Scanning all test cases from folder: {test_folder}")
 
     if test_dirs is None:
         test_dirs = sorted(os.listdir(test_folder))
@@ -52,6 +60,41 @@ def gen_all_tests(test_folder: str,
         test_sets.append(TestSet(os.path.join(test_folder, test_set), config_file, build_dir))
 
     return test_sets
+
+
+def create_configurations(tmp_config_dir: str,
+                          default_config_file: str,
+                          test_config: dict) -> None:
+    """Creates Springtail configuration files for the default config
+    as well as all overlays into a temporary directory.
+
+    """
+    # Clear or create the temporary config directory
+    if os.path.exists(tmp_config_dir):
+        for f in os.listdir(tmp_config_dir):
+            os.remove(os.path.join(tmp_config_dir, f))
+    else:
+        os.makedirs(tmp_config_dir)
+
+    # load the default configuration
+    with open(system_json_path, 'r') as f:
+        default_config = json.load(f)
+
+    # write out the default configuration
+    with open(os.path.join(tmp_config_dir, 'default.json'), 'w') as f:
+        json.dump(default_config, f, indent=2)
+
+    if not test_config.get('overlays'):
+        return
+
+    # write out a full configuration for each overlay
+    for overlay_name in yaml_config['overlays']:
+        overlay_file = os.path.join('overlays', overlay_name + '.json')
+        with open(overlay_file) as f:
+            overlay_data = json.load(f)
+        merged_config = merge_json(default_config, overlay_data)
+        with open(os.path.join(tmp_config_dir, f'{overlay_name}.json'), 'w') as f:
+            json.dump(merged_config, f, indent=2)
 
 
 def try_generate_junit(junit_file: str, test_sets: list[TestSet]) -> None:
@@ -174,7 +217,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Run Springtail tests")
     parser.add_argument('-c', '--config', type=str, default='config.yaml', help='Path to the test configuration file')
     parser.add_argument('-j', '--junit', type=str, help='Output test results to the specified JUnit XML file')
-    parser.add_argument('--check', action='store_true', help='Check logs for errors after tests complete')
+    parser.add_argument('-o', '--overlay', type=str, help='Run using a specific overlay config')
     parser.add_argument('test_set', type=str, nargs='?', help='Limit to a specific test set')
     parser.add_argument('test_case', type=str, nargs='*', help='Limit to a specific test case from the test set')
     return parser.parse_args()
@@ -203,16 +246,46 @@ if __name__ == "__main__":
     # set the log level and format
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-    # build the test sets
-    if args.test_set is None:
-        tests = gen_all_tests(test_folder, system_json_path, build_dir, default_test_sets)
-    else:
-        if args.test_case is None:
-            tests = gen_test_set(os.path.join(test_folder, args.test_set),
-                                 system_json_path, build_dir)
+    # prepare the configuration(s)
+    tmp_config_dir = 'tmp_configs'
+    create_configurations(tmp_config_dir, system_json_path, yaml_config)
+
+    # Process overlay configurations
+    if args.overlay:
+        if (yaml_config.get('overlays') is None) or (args.overlay not in yaml_config['overlays']):
+            raise ValueError(f'overlay "{args.overlay}" does not exist in the configuration')
+        overlay_config_file = os.path.join(tmp_config_dir, f'{args.overlay}.json')
+
+        # build the test sets for the requested overlay
+        if args.test_set is None:
+            overlay_test_sets = yaml_config['overlays'][args.overlay]['test_sets']
+            tests = gen_all_tests(test_folder, overlay_config_file, build_dir, overlay_test_sets)
         else:
-            tests = gen_test_cases(os.path.join(test_folder, args.test_set), args.test_case,
-                                   system_json_path, build_dir)
+            if args.test_case is None:
+                tests = gen_test_set(os.path.join(test_folder, args.test_set),
+                                     overlay_config_file, build_dir)
+            else:
+                tests = gen_test_cases(os.path.join(test_folder, args.test_set), args.test_case,
+                                       overlay_config_file, build_dir)
+
+    else:
+        default_config_file = os.path.join(tmp_config_dir, 'default.json')
+        if args.test_set is None:
+            tests = gen_all_tests(test_folder, default_config_file, build_dir, default_test_sets)
+
+            if yaml_config.get('overlays'):
+                for overlay_name in yaml_config['overlays']:
+                    overlay_config_file = os.path.join(tmp_config_dir, f'{overlay_name}.json')
+                    overlay_test_sets = yaml_config['overlays'][overlay_name]['test_sets']
+                    tests += gen_all_tests(test_folder, overlay_config_file,
+                                           build_dir, overlay_test_sets)
+        else:
+            if args.test_case is None:
+                tests = gen_test_set(os.path.join(test_folder, args.test_set),
+                                     default_config_file, build_dir)
+            else:
+                tests = gen_test_cases(os.path.join(test_folder, args.test_set), args.test_case,
+                                       default_config_file, build_dir)
 
     # run the tests
     for test in tests:
@@ -229,3 +302,7 @@ if __name__ == "__main__":
     # exit with error on failure
     if not success:
         sys.exit(-1)
+
+    # if we succeeded, clean up the configurations
+    for f in os.listdir(tmp_config_dir):
+        os.remove(os.path.join(tmp_config_dir, f))
