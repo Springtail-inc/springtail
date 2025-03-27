@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <thread>
 
 #include <pg_repl/pg_repl_msg.hh>
@@ -17,7 +18,6 @@ namespace springtail::pg_log_mgr {
 class PgXactLogWriter {
 public:
     static constexpr int PG_XLOG_MIN_FSYNC_MS = 250;
-    static constexpr uint64_t PG_XLOG_MAX_FILE_SIZE = 1024 * 1024;
 
     static constexpr uint8_t PG_XLOG_MAGIC[] = {0xA3, 0xF9, 0x4B};
 
@@ -38,7 +38,10 @@ public:
     /** Close the file */
     void close();
 
+    void rotate(uint64_t timestamp);
+
 private:
+    std::shared_mutex _file_mutex;        ///< mutex concurrent access to _file
     std::filesystem::path _file;          ///< current file path
     std::thread _fsync_thread;            ///< The background flushing thread.
     std::atomic<bool> _shutdown = false;  ///< Shutdown flag for the sync thread
@@ -54,6 +57,8 @@ private:
 
     /** fsync thread */
     void _fsync_worker();
+
+    void _flush_current_extent();
 };
 
 using PgXactLogWriterPtr = std::shared_ptr<PgXactLogWriter>;

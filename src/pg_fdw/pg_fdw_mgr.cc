@@ -152,9 +152,9 @@ namespace springtail::pg_fdw {
         } catch (const boost::interprocess::bad_alloc&) {
             // the cache hasn't been created
             // this could happen if xid_mgr_subscriber isn't running
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state unable to open the roots cache");
+            SPDLOG_ERROR("fdw_create_state unable to open the roots cache");
         } catch (const std::exception& e) {
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state exception:{} ", e.what());
+            SPDLOG_ERROR("fdw_create_state exception:{} ", e.what());
             throw;
         }
         return {};
@@ -232,8 +232,8 @@ namespace springtail::pg_fdw {
             rd_lock.unlock();
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state: db_id: {}, tid: {}, xid: {}, pg_xid: {}",
-                            db_id, tid, xid, pg_xid);
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state: db_id: {}, tid: {}, xid: {}, pg_xid: {}, schema_xid: {}",
+                            db_id, tid, xid, pg_xid, schema_xid);
 
         TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid);
         PgFdwState *state = new PgFdwState{table, tid, xid};
@@ -1026,6 +1026,8 @@ namespace springtail::pg_fdw {
 
             // check for schema-namespace match
             if (table_ns_id != namespace_id) {
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Skipping row due to namespace mismatch {}, {}",
+                                    table_ns_id, namespace_id);
                 continue;
             }
 
@@ -1055,6 +1057,8 @@ namespace springtail::pg_fdw {
                         table_map.erase(entry);
                     }
                 }
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Removed non-existant table {}.{} tid={}, xid={}",
+                                    schema, table_name, tid, xid);
                 continue;
             }
 

@@ -35,6 +35,7 @@ class TestSet:
         self._config_file = config_file
         self._build_dir = build_dir
         self._props = springtail.Properties(config_file, True)
+        self._name = os.path.splitext(os.path.basename(self._config_file))[0] + ' - ' + os.path.basename(self._directory)
 
         # constuct the special "config" test case for global setup and cleanup
         self._config = TestCase(os.path.join(directory, _GLOBAL_CONFIG_FILE), self._props, self._build_dir, ['setup', 'cleanup'])
@@ -151,7 +152,7 @@ class TestSet:
 
             # if we should stop the tests, break the loop
             if test_failed and not shutdown_on_fail:
-                self._tests[test_file].check_logs()
+                springtail.check_logs(self._config_file)
                 break
 
             # try to perform cleanup
@@ -162,7 +163,7 @@ class TestSet:
 
             # check here if the test failed nad we need to check the logs
             if test_failed:
-                self._tests[test_file].check_logs()
+                springtail.check_logs(self._config_file)
                 break
 
         # if a test failed and we don't shutdown on failure, return immediately
@@ -188,7 +189,7 @@ class TestSet:
         skipped_tests = sum(1 for r in results if r['result'] == 'SKIPPED')
 
         print('\n')
-        print(f'--- Test Summary: {os.path.basename(self._directory)} ---')
+        print(f'--- Test Summary: {self._name} ---')
         print(f'Total tests found: {len(self._tests)}')
         print(f'Total tests run: {passed_tests + failed_tests}')
         print(f'Tests passed: {passed_tests}')
@@ -216,7 +217,7 @@ class TestSet:
         failed_tests = sum(1 for r in results if r['result'] == 'FAILED')
 
         suite = etree.Element('testsuite',
-                              name=os.path.basename(self._directory),
+                              name=self._name,
                               tests=f'{len(results)}',
                               failures=f'{failed_tests}')
 

@@ -448,7 +448,7 @@ namespace springtail
 
     std::shared_ptr<proto::CopyTableInfo>
     PgCopyTable::_copy_table(uint64_t db_id,
-                             springtail::XidLsn &xid,
+                             const springtail::XidLsn &xid,
                              const std::string &table_name,
                              const std::string &schema_name,
                              uint64_t table_oid,
@@ -1148,7 +1148,8 @@ namespace springtail
             // add the table to the copy queue
             copy_queue->push(std::make_shared<CopyRequest>(table_md.table_name,
                                                            table_md.namespace_name,
-                                                           table_md.table_oid));
+                                                           table_md.table_oid,
+                                                           table_md.namespace_oid));
         }
 
         // shutdown the copy queue; blocks until queue is empty

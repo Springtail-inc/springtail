@@ -301,6 +301,12 @@ class TestCase:
 
             # restart Springtail at the target XID
             springtail.restart(self._props, self._build_dir, start_xid=target_xid)
+
+            # reconnect to the replica database
+            if self._fdw:
+                self._fdw.close()
+                self._fdw = springtail.connect_fdw_instance(self._props, self._replica_name)
+
             return None
 
         # handle SQL statements
@@ -599,22 +605,6 @@ class TestCase:
         # close the database connections
         for connection in self._connections:
             self._connections[connection].close()
-
-
-    def check_logs(self) -> None:
-        log_path = self._props.get_log_path()
-        error_logs = sysutils.check_backtrace(log_path)
-        if not error_logs:
-            return # if no errors, return
-
-        logging.error(f'Found errors in logs: {error_logs}')
-
-        for log in error_logs:
-            backtrace = sysutils.extract_backtrace(log)
-            if backtrace:
-                self._log_errors.append(f'Error in {os.path.basename(log)}:\n{"\n".join(backtrace)}\n')
-            else:
-                self._log_errors.append(f'Error in {os.path.basename(log)} -- could not extract backtrace\n')
 
 
     def skip(self) -> None:
