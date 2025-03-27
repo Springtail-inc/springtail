@@ -389,9 +389,6 @@ class TestCase:
             not_ready_result = {row[0] for row in self._execute_sql(cursor, base_sql.format(0), True)}
             ready_result = {row[0] for row in self._execute_sql(cursor, base_sql.format(1), True)}
 
-            logging.info(f'NOT READY RESULT: {not_ready_result}')
-            logging.info(f'READY RESULT: {ready_result}')
-            logging.info(f'READYSAME: {ready_result == not_ready_result}')
             # If results match, return immediately
             if not_ready_result == ready_result:
                 return True
