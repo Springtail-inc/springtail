@@ -229,6 +229,24 @@ def parse_bool(value: str) -> bool:
     return value.lower() in ('true', '1', 't', 'y', 'yes')
 
 
+def merge_json(base: dict, overlay: dict):
+    """
+    Recursively merges overlay JSON into base JSON.
+
+    :param base: The base JSON dictionary.
+    :param overlay: The overlay JSON dictionary.
+    :return: A new dictionary with merged values.
+    """
+    merged = base.copy()
+    for key, value in overlay.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            merged[key] = merge_json(merged[key], value)  # Recursive merge
+        else:
+            merged[key] = value  # Replace value
+
+    return merged
+
+
 def wait_for_replica_condition(
     replica_conn: psycopg2.extensions.connection,
     check_sql: str,
