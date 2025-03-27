@@ -150,6 +150,7 @@ namespace springtail {
          */
         static uint64_t scan_log(const std::filesystem::path &file, bool truncate=false);
 
+        void set_streaming() { _streaming = true; }
     protected:
         // Proto V1; message lengths if fixed length; excludes first byte for opcode
         static inline constexpr int LEN_BEGIN    = (8 + 8 + 4);

@@ -134,7 +134,7 @@ namespace springtail {
          * @return A JSON object containing the XID at which the DDLs were applied and an array of
          *         the DDL statements themselves.
          */
-        nlohmann::json get_next_ddls(const std::string &fdw_id);
+        std::vector<nlohmann::json> get_next_ddls(const std::string &fdw_id);
 
         /**
          * Used by the FDW to abort applying a set of DDL statements and place them back on the

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <filesystem>
 #include <thread>
@@ -50,6 +51,7 @@ namespace springtail::pg_log_mgr {
 
         /** replication and transaction log prefixes and suffix */
         static constexpr char const * const LOG_PREFIX_REPL = "pg_log_repl_";
+        static constexpr char const * const LOG_PREFIX_REPL_STREAMING = "pg_log_streaming_";
         static constexpr char const * const LOG_PREFIX_XACT = "pg_log_xact_";
         static constexpr char const * const LOG_SUFFIX = ".log";
 
@@ -63,6 +65,9 @@ namespace springtail::pg_log_mgr {
 
         static constexpr int QUEUE_SIZE = 256;
 
+        /** minimum size for log rollover */
+        static constexpr int LOG_ROLLOVER_SIZE_BYTES = 128 * 1024 * 1024;
+
         /**
          * @brief Construct a new Pg Log Mgr object
          * @param db_id db id
@@ -75,6 +80,8 @@ namespace springtail::pg_log_mgr {
          * @param pub_name publication name
          * @param slot_name replication slot name
          * @param port postgres port
+         * @param archive_logs flag to turn on log archiving in log reader
+         * @param committer_queue queue for submitting xids to committer
          */
         PgLogMgr(uint64_t db_id,
                  const std::filesystem::path &repl_log_path,
@@ -82,7 +89,9 @@ namespace springtail::pg_log_mgr {
                  const std::string &host, const std::string &db_name,
                  const std::string &user_name, const std::string &password,
                  const std::string &pub_name, const std::string &slot_name,
+                 uint64_t log_size_rollover_threshold,
                  int port,
+                 bool archive_logs,
                  std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
                  std::shared_ptr<ConcurrentQueue<std::string>> index_reconciliation_queue);
 
@@ -101,7 +110,7 @@ namespace springtail::pg_log_mgr {
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
           _index_reconciliation_queue(std::make_shared<ConcurrentQueue<std::string>>())
         {
-            _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, xact_log_path, _committer_queue);
+            _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, xact_log_path, _committer_queue, false);
         }
 
         /** Start the pipeline; setup the log reader/writer log files etc. */
@@ -136,9 +145,6 @@ namespace springtail::pg_log_mgr {
         PgLogWriterPtr _create_repl_logger();
 
     private:
-        /** minimum size for log rollover */
-        static constexpr int LOG_ROLLOVER_SIZE_BYTES = 128 * 1024 * 1024;
-
         static constexpr int MAX_REDIS_BATCH_SIZE = 300;
 
         /** internal state */
@@ -162,6 +168,7 @@ namespace springtail::pg_log_mgr {
         std::string _password;
         std::string _pub_name;
         std::string _slot_name;
+        uint64_t _log_size_rollover_threshold;
         int _port;
 
         /** Internal state synchronizer */
@@ -189,9 +196,6 @@ namespace springtail::pg_log_mgr {
         /** Process data from replication stream in loop, queue path, offsets */
         void _log_writer_thread();
 
-        /** callback from log writer class to update lsn from fsync thread*/
-        void _lsn_callback(LSN_t lsn);
-
         ///// Stage 2 of pipeline, reading replication log and updating the write cache
         std::thread _reader_thread;         ///< log reader thread
         CommitterQueuePtr _committer_queue; ///< queue between reader and committer
@@ -202,10 +206,9 @@ namespace springtail::pg_log_mgr {
 
         ///// Stage 3 of pipeline, mapping pg xids to xids; notify GC
         std::filesystem::path _xact_log_path;      ///< xact log base path
-        std::filesystem::path _xact_sync_log_file; ///< xact table copy log base path
-        PgXactLogWriterPtr _xact_logger = nullptr; ///< xact log writer
 
         LSN_t _last_pushed_lsn = INVALID_LSN;      ///< last pushed lsn to redis queue for GC
+        std::atomic<uint64_t> _logger_file_timestamp;
 
         /** notify xact handler to start sync */
         void _notify_xact_start_sync();

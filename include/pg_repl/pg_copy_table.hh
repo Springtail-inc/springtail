@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <string>
 #include <memory>
+#include <set>
 #include <vector>
 #include <optional>
 
@@ -227,7 +228,7 @@ namespace springtail
         /**
          * @brief Get table oids based on json specifying schema and table includes
          * @param include_json json object specifying schema and table includes
-         * @param table_oids output: table name, schema name, oid   
+         * @param table_oids output: table name, schema name, oid
          * @param db_id database id
          */
         void _get_table_oids(const nlohmann::json &include_json,
@@ -243,7 +244,7 @@ namespace springtail
          * @brief Copy table from remote system
          */
         std::shared_ptr<proto::CopyTableInfo> _copy_table(uint64_t db_id,
-                                                          springtail::XidLsn &xid,
+                                                          const springtail::XidLsn &xid,
                                                           const std::string &table_name,
                                                           const std::string &schema_name,
                                                           uint64_t table_oid,

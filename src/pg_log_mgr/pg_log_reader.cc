@@ -1,7 +1,9 @@
 #include <cassert>
 
+#include <common/filesystem.hh>
 #include <common/logging.hh>
 #include <common/tracing.hh>
+#include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
 #include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/sync_tracker.hh>
@@ -19,13 +21,19 @@
 namespace springtail::pg_log_mgr {
 
     PgLogReader::PgLogReader(uint64_t db_id, uint32_t queue_size,
+                             const std::filesystem::path &repl_log_path,
                              const std::filesystem::path &xact_log_path,
-                             const CommitterQueuePtr committer_queue)
+                             CommitterQueuePtr committer_queue,
+                             bool archive_logs)
         : _db_id(db_id),
+          _archive_logs(archive_logs),
+          _repl_log_path(repl_log_path),
+          _xact_log_path(xact_log_path),
           _committer_queue(committer_queue),
           _msg_queue(queue_size),
           _xact_log_writer(xact_log_path)
     {
+        _xid_ts_tracker = std::make_shared<WalProgressTracker>();
         // retrieve the most recently committed XID at startup
         _committed_xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
 
@@ -517,13 +525,14 @@ namespace springtail::pg_log_mgr {
 
     void
     PgLogReader::process_log(const std::filesystem::path &path,
+                             uint64_t timestamp,
                              uint64_t start_offset,
                              int num_messages)
     {
         // init stream reader
         _reader.set_file(path, start_offset);
 
-        std::vector<char> filter = {
+        static std::vector<char> filter = {
             pg_msg::MSG_BEGIN,
             pg_msg::MSG_COMMIT,
             pg_msg::MSG_STREAM_START,
@@ -551,6 +560,7 @@ namespace springtail::pg_log_mgr {
                 if (msg == nullptr) {
                     continue;
                 }
+                msg->pg_log_timestamp = timestamp;
 
                 // process the message
                 this->enqueue_msg(msg);
@@ -563,8 +573,27 @@ namespace springtail::pg_log_mgr {
     }
 
     void
+    PgLogReader::_remove_old_log_files()
+    {
+        uint64_t min_timestamp = _xid_ts_tracker->get_min_timestamp();
+        fs::cleanup_files_from_dir(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX, min_timestamp, _archive_logs);
+        fs::cleanup_files_from_dir(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL_STREAMING, PgLogMgr::LOG_SUFFIX, min_timestamp, _archive_logs);
+        fs::cleanup_files_from_dir(_xact_log_path, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX, min_timestamp, _archive_logs);
+    }
+
+    void
     PgLogReader::_process_msg(PgMsgPtr msg)
     {
+        if (_pg_log_timestamp < msg->pg_log_timestamp) {
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Logs rollover to the new log timestamp id: {}", msg->pg_log_timestamp);
+            _pg_log_timestamp = msg->pg_log_timestamp;
+            _xact_log_writer.rotate(msg->pg_log_timestamp);
+            if (_is_streaming) {
+                fs::create_empty_file_with_timestamp(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL_STREAMING, PgLogMgr::LOG_SUFFIX, msg->pg_log_timestamp);
+            }
+            _remove_old_log_files();
+        }
+        _is_streaming = msg->is_streaming;
         // handle the message
         switch(msg->msg_type) {
         case PgMsgEnum::BEGIN:
@@ -726,6 +755,7 @@ namespace springtail::pg_log_mgr {
         // prepare a batch for processing
         _current_batch = std::make_shared<Batch>(_db_id, begin_msg.xid, _committer_queue);
         _batch_map.try_emplace(begin_msg.xid, _current_batch);
+        _xid_ts_tracker->add_pg_xid(_current_xact->xid, _pg_log_timestamp);
     }
 
     void
@@ -749,12 +779,15 @@ namespace springtail::pg_log_mgr {
         // transaction.  This can occur in the unlikely case that we are performing a log recovery
         // and the Committer got ahead of the XactLog flushing so that the committed XID is ahead of
         // the most recently written PGXID -> Springtail XID mapping.
+        auto postgres_timestamp = PostgresTimestamp(commit_msg.commit_ts);
         if (xid <= _committed_xid) {
             // we abort this batch since it was already processed
-            _current_batch->abort(PostgresTimestamp(commit_msg.commit_ts));
+            _current_batch->abort(postgres_timestamp);
+            _xid_ts_tracker->remove_pg_xid(_current_xact->xid);
         } else {
             // update the write cache and system tables as needed
-            _current_batch->commit(xid, PostgresTimestamp(commit_msg.commit_ts));
+            _current_batch->commit(xid, postgres_timestamp);
+            _xid_ts_tracker->add_xid(_current_xact->xid, xid);
         }
 
         // clear the current batch
@@ -770,8 +803,7 @@ namespace springtail::pg_log_mgr {
         if (xid > _committed_xid) {
             // Record latency between postgres commit time and when we process it
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now() -
-                PostgresTimestamp(commit_msg.commit_ts).to_system_time());
+                std::chrono::system_clock::now() - postgres_timestamp.to_system_time());
             _postgres_log_reader_latencies->Record(duration.count(), _context);
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR,
                                 "Commit processed {} milliseconds after postgres commit",
@@ -779,7 +811,8 @@ namespace springtail::pg_log_mgr {
 
             // message the Committer
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Issue XID to committer on {} @ {}", _db_id, xid);
-            _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::XactMsg(xid)));
+            _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::XactMsg(xid),
+                                    _xid_ts_tracker));
         }
 
         // clear the current xact
@@ -807,6 +840,7 @@ namespace springtail::pg_log_mgr {
         // prepare a batch for processing
         _current_batch = std::make_shared<Batch>(_db_id, start_msg.xid, _committer_queue);
         _batch_map.try_emplace(start_msg.xid, _current_batch);
+        _xid_ts_tracker->add_pg_xid(xact->xid, _pg_log_timestamp);
     }
 
     void
@@ -839,9 +873,11 @@ namespace springtail::pg_log_mgr {
         if (xid <= _committed_xid) {
             // we abort this batch since it was already processed
             _current_batch->abort(PostgresTimestamp(commit_msg.commit_ts));
+            _xid_ts_tracker->remove_pg_xid(commit_msg.xid);
         } else {
             // update the write cache and system tables as needed
             _current_batch->commit(xid, PostgresTimestamp(commit_msg.commit_ts));
+            _xid_ts_tracker->add_xid(commit_msg.xid, xid);
         }
 
         // free the batch
@@ -856,7 +892,8 @@ namespace springtail::pg_log_mgr {
 
         if (xid > _committed_xid) {
             // message the Committer
-            _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::XactMsg(xid)));
+            _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::XactMsg(xid),
+                                    _xid_ts_tracker));
         }
 
         // remove the xact from the active map
@@ -885,6 +922,7 @@ namespace springtail::pg_log_mgr {
             // abort the txn
             _current_batch->abort(PostgresTimestamp(abort_msg.abort_ts));
             _batch_map.erase(abort_msg.xid);
+            _xid_ts_tracker->remove_pg_xid(abort_msg.xid);
         } else {
             // abort the subtxn
             _current_batch->abort_subtxn(abort_msg.sub_xid, PostgresTimestamp(abort_msg.abort_ts));

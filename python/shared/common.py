@@ -264,6 +264,7 @@ def wait_for_replica_condition(
             )
 
             if is_valid:
+                print(f"Result: {result}")
                 return time.time() - start
 
         if time.time() - start > timeout:

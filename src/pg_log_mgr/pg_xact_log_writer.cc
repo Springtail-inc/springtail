@@ -1,12 +1,9 @@
 #include <absl/log/check.h>
-#include <errno.h>
 #include <fcntl.h>
-#include <stdio.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <chrono>
-#include <iostream>
 #include <vector>
 
 #include <common/common.hh>
@@ -68,18 +65,48 @@ PgXactLogWriter::close()
 }
 
 void
+PgXactLogWriter::rotate(uint64_t timestamp)
+{
+    // flush current _extent
+    _flush_current_extent();
+
+    // flush log file to disk
+    std::unique_lock<std::shared_mutex> file_lock(_file_mutex);
+    std::error_code ec;
+    if (std::filesystem::exists(_file, ec)) {
+        auto handle = IOMgr::get_instance()->open(_file, IOMgr::IO_MODE::APPEND, true);
+        auto response = handle->sync();
+        DCHECK(response->is_success());
+    }
+    _file = fs::create_log_file_with_timestamp(_file.parent_path(), PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX, timestamp);
+    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Rolled over to the new file: _file = ", _file.c_str());
+}
+
+void
+PgXactLogWriter::_flush_current_extent()
+{
+    // check if the extent needs to be flushed
+    std::unique_lock lock(_mutex);
+    if (_extent->empty()) {
+        return;
+    }
+
+    // swap the extent object
+    // note: we aren't going through the StorageCache here
+    auto sync_extent = _extent;
+    _extent = std::make_shared<Extent>(ExtentType(), 0, _schema->row_size());
+
+    // flush the data to disk
+    _flush_extent(sync_extent);
+}
+
+void
 PgXactLogWriter::_flush_extent(ExtentPtr extent)
 {
+    std::shared_lock<std::shared_mutex> lock(_file_mutex);
     auto handle = IOMgr::get_instance()->open(_file, IOMgr::IO_MODE::APPEND, true);
     auto response = extent->async_flush(handle);
-
-    // wait for the async flush to complete
-    uint64_t filesize = response.get()->next_offset;
-
-    // rotate if the filesize has crossed a given threshold
-    if (filesize > PG_XLOG_MAX_FILE_SIZE) {
-        _file = fs::create_log_file(_file.parent_path(), PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX);
-    }
+    response.get();
 }
 
 void
@@ -94,20 +121,7 @@ PgXactLogWriter::_fsync_worker()
             break;
         }
 
-        // check if the extent needs to be flushed
-        std::unique_lock lock(_mutex);
-        if (_extent->empty()) {
-            continue;
-        }
-
-        // swap the extent object
-        // note: we aren't going through the StorageCache here
-        auto sync_extent = _extent;
-        _extent = std::make_shared<Extent>(ExtentType(), 0, _schema->row_size());
-        lock.unlock();
-
-        // flush the data to disk
-        _flush_extent(sync_extent);
+        _flush_current_extent();
     }
 }
 
