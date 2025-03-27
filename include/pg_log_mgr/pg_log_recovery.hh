@@ -1,7 +1,7 @@
 #pragma once
 
 #include <pg_log_mgr/pg_log_reader.hh>
-#include <pg_log_mgr/pg_xact_log_reader.hh>
+#include <pg_log_mgr/pg_xact_log_reader_mmap.hh>
 #include <pg_repl/pg_msg_stream.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 
@@ -18,6 +18,7 @@ public:
           _pg_log_reader(log_reader)
     {
         _committed_xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Starting recovery with last committed xid = {}", _committed_xid);
     }
 
     /**
@@ -42,7 +43,7 @@ private:
     /** Helper to process an individual message during _skip_committed() */
     bool _process_msg(PgMsgPtr msg,
                       uint32_t log_number,
-                      PgXactLogReader &xact_reader,
+                      PgXactLogReaderMmap &xact_reader,
                       uint32_t &cur_pgxid);
 
     /** Play back only the "active" transaction from the replication log until we have replayed the

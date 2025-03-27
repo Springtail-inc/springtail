@@ -25,7 +25,7 @@
 #include <storage/field.hh>
 #include <storage/xid.hh>
 
-#include <pg_log_mgr/pg_xact_log_writer.hh>
+#include <pg_log_mgr/pg_xact_log_writer_mmap.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 
 namespace springtail::pg_log_mgr {
@@ -54,8 +54,9 @@ namespace springtail::pg_log_mgr {
         PgLogReader(uint64_t db_id, uint32_t queue_size,
                     const std::filesystem::path &repl_log_path,
                     const std::filesystem::path &xact_log_path,
-                    CommitterQueuePtr committer_queue,
-                    bool archive_logs);
+                    const CommitterQueuePtr committer_queue,
+                    const uint64_t log_size_rollover_threshold,
+                    const bool archive_logs);
 
         ~PgLogReader();
         /**
@@ -244,7 +245,7 @@ namespace springtail::pg_log_mgr {
         ConcurrentQueue<PgMsg> _msg_queue; ///< Queue of PgMsg records to process
         std::thread _msg_thread; ///< Thread for processing messages using the _msg_worker()
 
-        PgXactLogWriter _xact_log_writer; ///< For logging the xact mapping of pgxid to springtail XID
+        PgXactLogWriterMmap _xact_log_writer; ///< For logging the xact mapping of pgxid to springtail XID
 
         /** Tracks mutation batches using a map of pgxid -> Extent.  The pgxid is always the
             top-most pgxid and never a subtxn, which are handled within the batch. */
