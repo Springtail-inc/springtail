@@ -24,13 +24,13 @@ namespace indexer_helpers {
     /*
      * Invalidate index for the rows present in the passed page
      */
-    void invalidate_index_for_page(uint64_t db_id, uint64_t table_id, uint64_t extent_id, const StorageCache::SafePagePtr &page,
+    void invalidate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
             const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
 
     /*
      * Populate index for the rows present in the passed page
      */
-    void populate_index_for_page(uint64_t db_id, uint64_t table_id, uint64_t extent_id, const StorageCache::SafePagePtr &page,
+    void populate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
             const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
 } // namespace indexer_helpers
 

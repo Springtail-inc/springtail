@@ -386,13 +386,11 @@ namespace springtail::committer {
                     auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idxState._tid, XidLsn(prev_page->header().xid));
 
                     // and invalidate index for the rows in the page
-                    indexer_helpers::invalidate_index_for_page(db_id, idxState._tid, prev_eid,
-                            prev_page, idxState._root, idx_cols, prev_schema);
+                    indexer_helpers::invalidate_index_for_page(prev_eid, prev_page, idxState._root, idx_cols, prev_schema);
                 }
 
                 // Populate index for the rows in the next page
-                indexer_helpers::populate_index_for_page(db_id, idxState._tid, next_eid,
-                        next_page, idxState._root, idx_cols, table->schema());
+                indexer_helpers::populate_index_for_page(next_eid, next_page, idxState._root, idx_cols, table->schema());
 
                 // Get the next page using end offset of that XID
                 next_eid = table->get_stats().end_offset;

@@ -25,8 +25,8 @@ get_table_dir(const std::filesystem::path &base,
 } // namespace table_helpers
 
 namespace indexer_helpers {
-    void invalidate_index_for_page(uint64_t db_id, uint64_t table_id, uint64_t extent_id,
-            const StorageCache::SafePagePtr &page, const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols,
+    void invalidate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
+            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols,
             const ExtentSchemaPtr& schema)
     {
         auto value_fields = std::make_shared<FieldArray>(2);
@@ -46,8 +46,8 @@ namespace indexer_helpers {
 
     }
 
-    void populate_index_for_page(uint64_t db_id, uint64_t table_id, uint64_t extent_id,
-            const StorageCache::SafePagePtr &page, const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols,
+    void populate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
+            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols,
             const ExtentSchemaPtr& schema)
     {
         uint32_t row_id = 0;
@@ -761,8 +761,7 @@ namespace indexer_helpers {
         // INVALIDATE SECONDARY INDEXES
 
         for (auto const& [index_id, idx]: _secondary_indexes) {
-            indexer_helpers::invalidate_index_for_page(_db_id, _id, orig_page->key().second,
-                    orig_page, idx.first, idx.second, _schema);
+            indexer_helpers::invalidate_index_for_page(orig_page->key().second, orig_page, idx.first, idx.second, _schema);
         }
     }
 
@@ -806,8 +805,7 @@ namespace indexer_helpers {
             // POPULATE SECONDARY INDEXES
 
             for (auto const& [index_id, idx]: _secondary_indexes) {
-                indexer_helpers::populate_index_for_page(_db_id, _id, extent_id,
-                        new_page, idx.first, idx.second, _schema);
+                indexer_helpers::populate_index_for_page(extent_id, new_page, idx.first, idx.second, _schema);
             }
         }
     }
