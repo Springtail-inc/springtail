@@ -375,23 +375,26 @@ namespace springtail::committer {
             auto next_page = table->read_page_from_disk(next_eid);
 
             while (!next_page->empty()) {
+                // Get the table at the next_page XID
+                table = TableMgr::get_instance()->get_table(db_id, idxState._tid, next_page->header().xid);
+
                 // Get the previous_extent_id from next_extent header
                 // and fetch the extent from disk using the extent_id
                 if (auto prev_eid = next_page->header().prev_offset; prev_eid != constant::UNKNOWN_EXTENT) {
                     // Retrieve the page for previous_extent_id
                     auto prev_page = table->read_page_from_disk(prev_eid);
+                    auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idxState._tid, XidLsn(prev_page->header().xid));
 
                     // and invalidate index for the rows in the page
                     indexer_helpers::invalidate_index_for_page(db_id, idxState._tid, prev_eid,
-                            prev_page, idxState._root, XidLsn(prev_page->header().xid), idx_cols, table->schema());
+                            prev_page, idxState._root, idx_cols, prev_schema);
                 }
 
                 // Populate index for the rows in the next page
                 indexer_helpers::populate_index_for_page(db_id, idxState._tid, next_eid,
-                        next_page, idxState._root, XidLsn(next_page->header().xid), idx_cols, table->schema());
+                        next_page, idxState._root, idx_cols, table->schema());
 
                 // Get the next page using end offset of that XID
-                table = TableMgr::get_instance()->get_table(db_id, idxState._tid, next_page->header().xid);
                 next_eid = table->get_stats().end_offset;
                 next_page = table->read_page_from_disk(next_eid);
             }

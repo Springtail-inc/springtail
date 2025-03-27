@@ -393,7 +393,7 @@ class TestCase:
             if not_ready_result == ready_result:
                 return True
 
-            # If wait_for is 0 or time is exceeded, return False
+            # If wait_for is 0 or time is exceeded, raise TimeoutError
             if wait_for == 0 or (time.time() - start_time) >= wait_for:
                 raise TimeoutError(
                     f"Secondary indexes not in sync within {wait_for}s"
@@ -457,12 +457,6 @@ class TestCase:
                                 JOIN "__pg_springtail_catalog"."namespace_names" ON "namespace_names"."namespace_id" = "table_names"."namespace_id"
                                 WHERE "namespace_names"."name" = '{command["schema"]}' AND "table_names"."name" = '{command["table"]}'
                                 ORDER BY "table_names"."xid" DESC, "table_names"."lsn" DESC
-                                LIMIT 1"""
-                xid_sql = """SELECT "indexes"."xid", "indexes"."lsn"
-                                FROM "__pg_springtail_catalog"."indexes"
-                                WHERE table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)
-                                AND index_id = 0
-                                ORDER BY xid DESC, lsn DESC
                                 LIMIT 1"""
 
                 ranking_sql = self._get_ranking_sql()

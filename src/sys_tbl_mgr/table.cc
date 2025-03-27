@@ -26,7 +26,7 @@ get_table_dir(const std::filesystem::path &base,
 
 namespace indexer_helpers {
     void invalidate_index_for_page(uint64_t db_id, uint64_t table_id, uint64_t extent_id,
-            const StorageCache::SafePagePtr &page, const MutableBTreePtr &root, const XidLsn &xid_lsn, const std::vector<uint32_t> &idx_cols,
+            const StorageCache::SafePagePtr &page, const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols,
             const ExtentSchemaPtr& schema)
     {
         auto value_fields = std::make_shared<FieldArray>(2);
@@ -47,7 +47,7 @@ namespace indexer_helpers {
     }
 
     void populate_index_for_page(uint64_t db_id, uint64_t table_id, uint64_t extent_id,
-            const StorageCache::SafePagePtr &page, const MutableBTreePtr &root, const XidLsn &xid_lsn, const std::vector<uint32_t> &idx_cols,
+            const StorageCache::SafePagePtr &page, const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols,
             const ExtentSchemaPtr& schema)
     {
         uint32_t row_id = 0;
@@ -762,7 +762,7 @@ namespace indexer_helpers {
 
         for (auto const& [index_id, idx]: _secondary_indexes) {
             indexer_helpers::invalidate_index_for_page(_db_id, _id, orig_page->key().second,
-                    orig_page, idx.first, XidLsn(_access_xid), idx.second, _schema);
+                    orig_page, idx.first, idx.second, _schema);
         }
     }
 
@@ -807,7 +807,7 @@ namespace indexer_helpers {
 
             for (auto const& [index_id, idx]: _secondary_indexes) {
                 indexer_helpers::populate_index_for_page(_db_id, _id, extent_id,
-                        new_page, idx.first, XidLsn(_target_xid), idx.second, _schema);
+                        new_page, idx.first, idx.second, _schema);
             }
         }
     }
