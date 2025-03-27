@@ -1,0 +1,8 @@
+{
+    "storage": {
+	"data_cache_size": 32,
+        "page_cache_size": 32,
+        "btree_cache_size": 8,
+        "max_extent_per_page": 2
+    }
+}
