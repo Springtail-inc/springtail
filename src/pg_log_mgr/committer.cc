@@ -295,9 +295,9 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             // Commit index XID as they complete reconciliation
             if (result->type() == XidReady::Type::RECONCILE_INDEX && idx_reconciled_xid != 0) {
                 _redis_ddl.commit_index_ddl(db_id, idx_reconciled_xid);
+            } else if (result->type() == XidReady::Type::XACT_MSG) {
+                result->notify_tracker(xid);
             }
-
-            result->notify_tracker(xid);
 
             SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "XID completed: {}@{}", db_id, xid);
         }
