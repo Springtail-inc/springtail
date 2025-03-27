@@ -122,7 +122,7 @@ namespace {
             tbl_msg.columns = std::vector<PgMsgSchemaColumn>(
                 {{"table_id", static_cast<uint8_t>(SchemaType::UINT64), 0, std::nullopt, 1, -1,
                   false, false, false},
-                 {"name", static_cast<uint8_t>(SchemaType::UINT64), 0, std::nullopt, 2, 0, false,
+                 {"name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 2, 0, false,
                   true, false},
                  {"offset", static_cast<uint8_t>(SchemaType::UINT64), 0, std::nullopt, 3, -1, false,
                   false, false}});
