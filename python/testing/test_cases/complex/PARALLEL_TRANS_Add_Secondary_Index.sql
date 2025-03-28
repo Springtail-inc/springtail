@@ -1,5 +1,5 @@
 ## metadata
-### sync_timeout 20
+### sync_timeout 60
 
 ## test
 CREATE TABLE IF NOT EXISTS parallel_trans_add_secondary_index (

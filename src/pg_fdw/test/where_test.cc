@@ -113,7 +113,16 @@ namespace {
                 _attrs[i]->attnum = _columns[i].position;
                 strncpy(_attrs[i]->attname.data, _columns[i].column_name.c_str(), NAMEDATALEN - 1);
 
-                _target_list = lappend(_target_list, makeInteger(_attrs[i]->attnum));
+                // We have to construct a SpringtailTargetColumn
+                // note: this uses new so has a memory leak, but it's fine for the unit test
+                SpringtailTargetColumn *target = new SpringtailTargetColumn;
+                target->attname = new String;
+                target->attname->sval = new char[_columns[i].column_name.size() + 1];
+                strncpy(target->attname->sval, _columns[i].column_name.c_str(), _columns[i].column_name.size());
+                target->attname->sval[_columns[i].column_name.size()] = 0;
+                target->attnum = _columns[i].position;
+
+                _target_list = lappend(_target_list, target);
             }
         }
 
@@ -345,6 +354,13 @@ namespace {
             // don't call create state as it calls xid mgr, just create state
             auto table = TableMgr::get_instance()->get_table(_db_id, _tid, _table_xid);
             PgFdwState *state = new PgFdwState{table, _tid, _table_xid};
+
+            // populate the attr_map -- usually done in fdw_get_rel_size()
+            ListCell *lc;
+            foreach(lc, _target_list) {
+                auto column = (SpringtailTargetColumn *)lfirst(lc);
+                state->attr_map.try_emplace(column->attnum, column->attnum);
+            }
 
             if (sortgroup)  {
                 SpringtailPlanState plan;

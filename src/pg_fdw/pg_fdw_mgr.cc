@@ -253,11 +253,22 @@ namespace springtail::pg_fdw {
         std::vector<std::string> target_colnames;
         int i = 0;
         foreach(lc, target_list) {
-            int attno = intVal(lfirst(lc));
-            target_colnames.push_back(state->columns[attno].name);
+            // note: This is the attnum from the FDW's representation of the external table, not the
+            //       column ID on the primary.  We need to map the local attnum to the primary's column ID.
+            auto column = (SpringtailTargetColumn *)lfirst(lc);
+            int attno = column->attnum;
+            assert(state->attr_map.contains(attno));
+
+            auto col_i = state->columns.find(state->attr_map.at(attno));
+            if (col_i == state->columns.end()) {
+                SPDLOG_WARN("Couldn't find FDW attribute number: {}", attno);
+                continue;
+            }
+
+            target_colnames.push_back(col_i->second.name);
             state->target_columns.insert({attno,i++});
             SPDLOG_DEBUG_MODULE(LOG_FDW, "Target list column: {}:{}",
-                                attno, state->columns[attno].name);
+                                attno, col_i->second.name);
         }
 
         // init quals
@@ -270,7 +281,7 @@ namespace springtail::pg_fdw {
         for (int j = 0; j < state->filtered_quals.size(); j++) {
             int attno = state->filtered_quals[j]->base.varattno;
             if (!state->target_columns.contains(attno)) {
-                target_colnames.push_back(state->columns[attno].name);
+                target_colnames.push_back(state->columns.at(state->attr_map.at(attno)).name);
                 state->target_columns.insert({attno, i++});
             }
         }
@@ -577,8 +588,9 @@ namespace springtail::pg_fdw {
 
             // set value
             if (!nulls[i]) {
-                assert (attrs[i]->atttypid == state->columns[attno].pg_type);
-                values[i] = _get_datum_from_field(field, row, state->columns[attno].pg_type, attrs[i]->atttypmod);
+                auto &column = state->columns.at(state->attr_map.at(attno));
+                assert (attrs[i]->atttypid == column.pg_type);
+                values[i] = _get_datum_from_field(field, row, column.pg_type, attrs[i]->atttypmod);
             } else {
                 values[i] = 0;
             }
@@ -731,8 +743,22 @@ namespace springtail::pg_fdw {
         ListCell *lc;
         *width = 0;
         foreach(lc, target_list) {
-            int attno = intVal(lfirst(lc));
-            switch (state->columns[attno].pg_type) {
+            auto column = (SpringtailTargetColumn *)lfirst(lc);
+
+            auto name_i = state->name_map.find(strVal(column->attname));
+            if (name_i == state->name_map.end()) {
+                SPDLOG_WARN("Couldn't find column: {}", strVal(column->attname));
+                continue;
+            }
+            state->attr_map.try_emplace(column->attnum, name_i->second);
+
+            auto col_i = state->columns.find(name_i->second);
+            if (col_i == state->columns.end()) {
+                SPDLOG_ERROR("Couldn't find column position: {}", name_i->second);
+                continue;
+            }
+
+            switch (col_i->second.pg_type) {
                 case FLOAT8OID:
                 case INT8OID:
                 case TIMESTAMPOID:
@@ -1278,6 +1304,10 @@ namespace springtail::pg_fdw {
             : table(table), tid(tid), xid(xid), stats(table->get_stats())
     {
         columns = SchemaMgr::get_instance()->get_columns(table->db(), tid, { xid, constant::MAX_LSN });
+        for (const auto &entry : columns) {
+            name_map[entry.second.name] = entry.second.position;
+        }
+
         if (tid > constant::MAX_SYSTEM_TABLE_ID) {
             auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(table->db(), tid, { xid, constant::MAX_LSN });
             indexes = meta->indexes;

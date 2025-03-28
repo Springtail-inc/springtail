@@ -334,7 +334,7 @@ springtail_GetForeignRelSize(PlannerInfo *root,
     baserel->fdw_private = planstate;
 
     // get the estimate of the number of rows and width of the table
-   multicorn_getRelSize(root, baserel, foreigntableid, planstate);
+    multicorn_getRelSize(root, baserel, foreigntableid, planstate);
 }
 
 /**
@@ -433,9 +433,8 @@ springtail_IterateForeignScan(ForeignScanState *node)
 
     Form_pg_attribute attrs[slot->tts_tupleDescriptor->natts];
 
-    for (int i = 0; i < slot->tts_tupleDescriptor->natts; i++)
-	{
-		Form_pg_attribute attr = TupleDescAttr(slot->tts_tupleDescriptor,i);
+    for (int i = 0; i < slot->tts_tupleDescriptor->natts; i++) {
+        Form_pg_attribute attr = TupleDescAttr(slot->tts_tupleDescriptor,i);
         attrs[i] = attr;
     }
 
