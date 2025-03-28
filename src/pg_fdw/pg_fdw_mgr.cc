@@ -290,7 +290,7 @@ namespace springtail::pg_fdw {
         // set the iterators for the scan taking quals into consideration
         _set_scan_iterators(state);
         SPDLOG_WARN("Traces reset, {}", state->target_columns.size());
-        traces.reset();
+        time_trace::traces.reset();
     }
 
 
@@ -484,9 +484,9 @@ namespace springtail::pg_fdw {
               ~trace() {
                   if (_s) {
                       TIME_TRACE_STOP(one);
-                      TIME_TRACESET_UPDATE(traces, _n, one);
+                      TIME_TRACESET_UPDATE(time_trace::traces, _n, one);
                       if (*_eos) {
-                          TIME_TRACESET_LOG(traces);
+                          TIME_TRACESET_LOG(time_trace::traces);
                       }
                   }
               }

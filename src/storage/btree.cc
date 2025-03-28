@@ -5,28 +5,10 @@
 #include <common/time_trace.hh>
 
 
-namespace springtail
-{
-    struct trace
-    {
-        TIME_TRACE(one);
-        std::string _n;
-
-        trace(std::string n) : _n{std::move(n)} {
-            TIME_TRACE_START(one);
-        }
-
-        ~trace() {
-            TIME_TRACE_STOP(one);
-            TIME_TRACESET_UPDATE(traces, _n, one);
-        }
-    };
-}
-
 namespace springtail {
 
             BTree::Iterator& BTree::Iterator::operator++() {
-                trace tr("btree_iterator");
+                TIME_TRACE_SCOPED("btree_iterator");
                 // can't iterate forward on end()
                 assert(_node != nullptr);
 
@@ -40,7 +22,7 @@ namespace springtail {
                 uint32_t depth = 0;
 
                 {
-                trace tr("btree_iterator_loop1");
+                TIME_TRACE_SCOPED("btree_iterator_loop1");
 
                 // go up the tree
                 while (_node->row_i == _node->page->end()) {
@@ -60,7 +42,7 @@ namespace springtail {
 
                 // now go back down the tree
                 {
-                trace tr("btree_iterator_loop2");
+                TIME_TRACE_SCOPED("btree_iterator_loop2");
 
                 auto cache = StorageCache::get_instance();
                 while (depth > 0) {

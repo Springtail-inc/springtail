@@ -1,6 +1,7 @@
 #pragma once
 
 #include <absl/log/check.h>
+#include <list>
 
 #include <common/logging.hh>
 #include <common/timer.hh>
@@ -42,26 +43,44 @@ struct Trace {
  */
 struct FlatTraceSet {
     using Item = std::pair<std::string, Trace>;
-    std::vector<Item> traces;
+    using List = std::list<Item>;
+    List traces;
 
     FlatTraceSet() = default;
 
     FlatTraceSet(const FlatTraceSet &) = delete;
     FlatTraceSet &operator=(const FlatTraceSet &) = delete;
 
-    void init(std::string_view name);
+    Trace& init(std::string_view name);
     void update(std::string_view name, const Trace &trace);
+    Trace& find(std::string_view name);
 
     void reset();
     std::string format();
 };
 
-}  // namespace springtail::time_trace
-   //
-namespace springtail
+struct scoped_trace
 {
-   extern time_trace::FlatTraceSet traces;
+    time_trace::Trace& _t;
+
+    scoped_trace(time_trace::Trace& t) : _t{t} {
+        _t.start();
+    }
+
+    ~scoped_trace() {
+        _t.stop();
+    }
+};
+
+extern time_trace::FlatTraceSet traces;
+
+inline time_trace::Trace& create_trace(std::string_view n) 
+{
+    return traces.init(n);
 }
+
+}  // namespace springtail::time_trace
+
 
 #if defined(SPRINGTAIL_INCLUDE_TIME_TRACES)
 
@@ -74,6 +93,7 @@ namespace springtail
 #define TIME_TRACE(trace) time_trace::Trace trace
 #define TIME_TRACE_START(trace) trace.start()
 #define TIME_TRACE_STOP(trace) trace.stop()
+#define TIME_TRACE_SCOPED(name) static time_trace::Trace& tr = time_trace::create_trace(name); time_trace::scoped_trace s(tr);
 
 #else
 
@@ -86,5 +106,6 @@ namespace springtail
 #define TIME_TRACE(trace)
 #define TIME_TRACE_START(trace)
 #define TIME_TRACE_STOP(trace)
+#define TIME_TRACE_SCOPED(name)
 
 #endif

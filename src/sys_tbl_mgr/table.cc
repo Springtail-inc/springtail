@@ -11,25 +11,6 @@
 #include <common/time_trace.hh>
 
 
-namespace springtail
-{
-    struct trace
-    {
-        TIME_TRACE(one);
-        std::string _n;
-
-        trace(std::string n) : _n{std::move(n)} {
-            TIME_TRACE_START(one);
-        }
-
-        ~trace() {
-            TIME_TRACE_STOP(one);
-            TIME_TRACESET_UPDATE(traces, _n, one);
-        }
-    };
-}
-
-
 namespace springtail {
 
 namespace table_helpers {
@@ -1230,11 +1211,11 @@ get_table_dir(const std::filesystem::path &base,
 
     void Table::Iterator::Primary::next()
     {
-        trace tr("table_primary_next_total");
+        TIME_TRACE_SCOPED("table_primary_next_total");
 
         // move to the next row in the data extent
         {
-        trace tr("table_primary_next_1");
+        TIME_TRACE_SCOPED("table_primary_next_1");
         ++_page_i;
         if (_page_i != _page->end()) {
             return;
@@ -1243,7 +1224,7 @@ get_table_dir(const std::filesystem::path &base,
 
         // no more rows in the extent, so need to move to the next data extent
         {
-        trace tr("table_primary_next_2");
+        TIME_TRACE_SCOPED("table_primary_next_2");
         ++_btree_i;
         if (_btree_i == _btree->end()) {
             return;
@@ -1252,7 +1233,7 @@ get_table_dir(const std::filesystem::path &base,
 
         // retrieve the data extent
         {
-        trace tr("table_primary_next_3");
+        TIME_TRACE_SCOPED("table_primary_next_3");
         _page = _table->_read_page_via_primary(_btree_i);
         _page_i = _page->begin();
         }

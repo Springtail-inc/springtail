@@ -2,22 +2,20 @@
 
 #include <common/time_trace.hh>
 
-namespace springtail
-{
-    time_trace::FlatTraceSet traces;
-};
-
 namespace springtail::time_trace {
 
-void
+time_trace::FlatTraceSet traces;
+
+Trace&
 FlatTraceSet::init(std::string_view name)
 {
     auto it = std::ranges::find_if(traces, [&name](auto const& v) { return v.first == name; });
     if (it == traces.end()) {
-        traces.emplace_back(Item(name, Trace()));
-    } else {
-        it->second.reset();
+        List::value_type& a = traces.emplace_back(Item(name, Trace()));
+        return a.second;
     }
+    it->second.reset();
+    return it->second;
 }
 
 void
@@ -29,6 +27,13 @@ FlatTraceSet::update(std::string_view name, const Trace& trace)
     } else {
         it->second += trace;
     }
+}
+
+Trace& 
+FlatTraceSet::find(std::string_view name)
+{
+    auto it = std::ranges::find_if(traces, [&name](auto const& v) { return v.first == name; });
+    return it->second;
 }
 
 void
