@@ -74,25 +74,18 @@ void TracingAndMetrics::_register_histograms() {
 void
 TracingAndMetrics::_init_metrics(const ::opentelemetry::sdk::resource::Resource& resource)
 {
-    // check if we should send to an otlp server
-    auto json = Properties::get(Properties::OTEL_CONFIG);
-    auto host = Json::get<std::string>(json, "metrics_host");
-    auto port = Json::get<int>(json, "metrics_port");
-
     opentelemetry::exporter::otlp::OtlpHttpMetricExporterOptions options;
-    if (host && port) {
+    if (_otel_remote && _host && _port) {
         // host ex: http://otel_collector, port ex: 4318
-        options.url = fmt::format("{}:{}/v1/metrics", *host, *port);
+        options.url = fmt::format("{}:{}/v1/metrics", *_host, *_port);
         SPDLOG_INFO("Enabling OTel metrics over HTTP: {}", options.url);
     }
     ::opentelemetry::sdk::metrics::PeriodicExportingMetricReaderOptions reader_options;
-    auto export_interval_millis = Json::get<int>(json, "metrics_export_interval_millis");
-    if (export_interval_millis) {
-        reader_options.export_interval_millis = std::chrono::milliseconds(*export_interval_millis);
+    if (_metrics_export_interval_millis) {
+        reader_options.export_interval_millis = std::chrono::milliseconds(*_metrics_export_interval_millis);
     }
-    auto export_timeout_millis = Json::get<int>(json, "metrics_export_timeout_millis");
-    if (export_timeout_millis) {
-        reader_options.export_timeout_millis = std::chrono::milliseconds(*export_timeout_millis);
+    if (_metrics_export_timeout_millis) {
+        reader_options.export_timeout_millis = std::chrono::milliseconds(*_metrics_export_timeout_millis);
     }
 
     auto exporter = opentelemetry::exporter::otlp::OtlpHttpMetricExporterFactory::Create(options);
@@ -121,22 +114,20 @@ TracingAndMetrics::_init_tracing(const opentelemetry::sdk::resource::Resource& r
     auto multi_processor = std::make_unique<opentelemetry::sdk::trace::MultiSpanProcessor>(
         std::vector<std::unique_ptr<opentelemetry::sdk::trace::SpanProcessor>>{});
 
-    // create the SPDLOG exporter
-    auto log_exporter = std::make_unique<SpdlogExporter>();
-    std::unique_ptr<opentelemetry::sdk::trace::SpanProcessor> log_processor =
-        std::make_unique<opentelemetry::sdk::trace::SimpleSpanProcessor>(std::move(log_exporter));
-
-    SPDLOG_INFO("Enabling OTel logging");
-    multi_processor->AddProcessor(std::move(log_processor));
+    if (!_otel_remote) {
+        // create the SPDLOG exporter
+        auto log_exporter = std::make_unique<SpdlogExporter>();
+        std::unique_ptr<opentelemetry::sdk::trace::SpanProcessor> log_processor =
+            std::make_unique<opentelemetry::sdk::trace::SimpleSpanProcessor>(std::move(log_exporter));
+        SPDLOG_INFO("Enabling OTel logging");
+        multi_processor->AddProcessor(std::move(log_processor));
+    }
 
     // check if we should send to an otlp server
-    auto json = Properties::get(Properties::OTEL_CONFIG);
-    auto host = Json::get<std::string>(json, "host");
-    auto port = Json::get<int>(json, "port");
-    if (host && port) {
+    if (_otel_remote && _host && _port) {
         opentelemetry::exporter::otlp::OtlpHttpExporterOptions options;
         // host ex: http://otel_collector, port ex: 4318
-        options.url = fmt::format("{}:{}/v1/traces", *host, *port);
+        options.url = fmt::format("{}:{}/v1/traces", *_host, *_port);
 
         std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> otlp_exporter =
             std::make_unique<opentelemetry::exporter::otlp::OtlpHttpExporter>(options);
@@ -161,9 +152,12 @@ TracingAndMetrics::init(std::string_view component_name)
     // check the otel properties
     auto json = Properties::get(Properties::OTEL_CONFIG);
     SPDLOG_INFO("OTel: {}", json.dump());
-    bool enabled = Json::get_or<bool>(json, "enabled", true);
+    _otel_enabled = Json::get_or<bool>(json, "enabled", false);
+    _otel_remote = Json::get_or<bool>(json, "remote", false);
+    _metrics_export_interval_millis = Json::get<int>(json, "metrics_export_interval_millis");
+    _metrics_export_timeout_millis = Json::get<int>(json, "metrics_export_timeout_millis");
 
-    if (enabled) {
+    if (_otel_enabled) {
         auto resource = _create_default_otel_resource(component_name);
         _init_metrics(resource);
         _init_tracing(resource);

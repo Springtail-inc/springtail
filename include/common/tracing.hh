@@ -124,6 +124,13 @@ private:
 
     opentelemetry::context::Context _context;
 
+    std::optional<std::string> _host;
+    std::optional<int> _port;
+    std::optional<int> _metrics_export_interval_millis;
+    std::optional<int> _metrics_export_timeout_millis;
+    bool _otel_enabled{false};
+    bool _otel_remote{false};
+
     /**
     * @brief Map of counter names to their corresponding counters
     */

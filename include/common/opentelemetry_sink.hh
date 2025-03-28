@@ -1,3 +1,5 @@
+#pragma once
+
 #include <common/properties.hh>
 
 #include <spdlog/spdlog.h>
@@ -71,13 +73,17 @@ private:
         opentelemetry::logs::Severity::kInfo
     };
 
-
 public:
     void
     log(const spdlog::details::log_msg &msg) override
     {
+        // only log messages with allowed log level
+        if (msg.level < level_) {
+            return;
+        }
+
         opentelemetry::logs::Severity severity;
-        if (msg.level >= spdlog::level::n_levels) {
+        if (msg.level < spdlog::level::n_levels) {
             severity = _severity_map[msg.level];
         } else {
             severity = opentelemetry::logs::Severity::kInfo;

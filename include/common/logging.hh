@@ -12,10 +12,6 @@
 #include <fmt/ostream.h>
 #include <fmt/std.h>
 
-#include <opentelemetry/baggage/baggage.h>
-#include <opentelemetry/baggage/baggage_context.h>
-#include <opentelemetry/context/context.h>
-#include <opentelemetry/context/context_value.h>
 #include <opentelemetry/context/runtime_context.h>
 #include <spdlog/spdlog.h>
 

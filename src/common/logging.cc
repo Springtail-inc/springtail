@@ -20,6 +20,8 @@
 #include <common/json.hh>
 #include <common/opentelemetry_sink.hh>
 
+#include <opentelemetry/baggage/baggage_context.h>
+
 namespace springtail {
 
 namespace logging {
@@ -210,17 +212,19 @@ public:
 
         // Check OpenTelemetry configuration
         auto otel_config = Properties::get(Properties::OTEL_CONFIG);
-        bool otel_enabled = Json::get_or<bool>(otel_config, "enabled", true);
+        bool otel_enabled = Json::get_or<bool>(otel_config, "enabled", false);
+        bool otel_remote = Json::get_or<bool>(otel_config, "remote", false);
 
-        if (otel_enabled) {
+        if (otel_enabled && otel_remote) {
             // host ex: http://otel_collector, port ex: 4318
             auto host = Json::get<std::string>(otel_config, "host");
             auto port = Json::get<int>(otel_config, "port");
+            auto remote_log_level = Json::get_or<std::string>(otel_config, "remote_log_level", "info");
 
             if (host && port) {
                 std::string endpoint = fmt::format("{}:{}/v1/logs", *host, *port);
                 auto otel_sink = std::make_shared<OpenTelemetrySink>("springtail", endpoint);
-                set_level(otel_sink, log_level);
+                set_level(otel_sink, remote_log_level);
                 sinks.push_back(otel_sink);
                 SPDLOG_INFO("Enabling OTel logging sink with endpoint: {}", endpoint);
             }
