@@ -327,7 +327,7 @@ namespace springtail {
                 }
             }
 
-            CacheExtentPtr operator*() const {
+            const CacheExtentPtr& operator*() const {
                 return _extent;
             }
 
@@ -664,31 +664,7 @@ namespace springtail {
                 /**
                  * Increment operator -- moves to point at the next row in the page.
                  */
-                Iterator &operator++() {
-                    // move to the next row
-                    ++_row;
-
-                    // check if this is the end of the extent
-                    if (_row != (*_extent)->end()) {
-                        return *this;
-                    }
-
-                    // move to the next extent
-                    ++_extent_i;
-                    if (_extent_i == _page->_extents.end()) {
-                        // at the end, return
-                        _extent = SafeExtent();
-                        return *this;
-                    }
-
-                    // retrieve the extent
-                    _extent = _extent_i->make_safe_extent(_page->_file);
-
-                    // start at the first row
-                    _row = (*_extent)->begin();
-
-                    return *this;
-                }
+                Iterator &operator++();
 
                 /**
                  * Decrement operator -- moves to point at the previous row in the page.

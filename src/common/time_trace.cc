@@ -2,6 +2,11 @@
 
 #include <common/time_trace.hh>
 
+namespace springtail
+{
+    time_trace::FlatTraceSet traces;
+};
+
 namespace springtail::time_trace {
 
 void

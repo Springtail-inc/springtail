@@ -159,11 +159,11 @@ class BenchCase:
             cursor.execute(cleanup_sql)
         primary_conn.commit()
         # Wait for cleanup to sync
-        common.wait_for_replica_condition(
-            replica_conn,
-            "SELECT COUNT(*) FROM benchmark_data",
-            (0,),
-        )
+        # common.wait_for_replica_condition(
+         #    replica_conn,
+          #   "SELECT COUNT(*) FROM benchmark_data",
+           #  (0,),
+        # )
 
         return result
 

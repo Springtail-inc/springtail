@@ -79,53 +79,8 @@ namespace springtail {
             /**
              * Moves to the next entry in the tree.  Performs an in-order traversal of the tree to find leaf nodes.
              */
-            Iterator& operator++() {
-                // can't iterate forward on end()
-                assert(_node != nullptr);
 
-                // move to the next row in the leaf extent
-                ++_node->row_i;
-                if (_node->row_i != _node->page->end()) {
-                    return *this;
-                }
-
-                // if at the end of the extent, traverse up the tree to find the next entry
-                uint32_t depth = 0;
-
-                // go up the tree
-                while (_node->row_i == _node->page->end()) {
-                    // iterate up to the parent
-                    ++depth;
-                    _node = _node->parent;
-
-                    // if we were at the end of the root extent, then no more entries
-                    if (_node == nullptr) {
-                        return *this;
-                    }
-
-                    // move to the next entry in the parent
-                    ++(_node->row_i);
-                }
-
-                // now go back down the tree
-                auto cache = StorageCache::get_instance();
-                while (depth > 0) {
-                    // read the child's extent ID
-                    uint64_t extent_id = _btree->_branch_child_f->get_uint64(*(_node->row_i));
-
-                    // read the child extent
-                    SPDLOG_DEBUG_MODULE(LOG_BTREE, "Get page {}", extent_id);
-                    auto child = cache->get(_btree->_file, extent_id, _btree->_xid);
-
-                    --depth;
-                    auto begin = child->begin();
-                    _node = std::make_shared<Node>(std::move(child), begin, _node);
-                }
-
-                // return the iterator
-                return *this;
-            }
-
+            Iterator& operator++();
             Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
 
             /**

@@ -57,6 +57,11 @@ struct FlatTraceSet {
 };
 
 }  // namespace springtail::time_trace
+   //
+namespace springtail
+{
+   extern time_trace::FlatTraceSet traces;
+}
 
 #if defined(SPRINGTAIL_INCLUDE_TIME_TRACES)
 

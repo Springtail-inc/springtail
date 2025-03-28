@@ -9,7 +9,69 @@
 
 #include <sys_tbl_mgr/system_tables.hh>
 
+#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
+#include <common/time_trace.hh>
+
+
+
+namespace springtail
+{
+    struct trace
+    {
+        TIME_TRACE(one);
+        std::string _n;
+
+        trace(std::string n) : _n{std::move(n)} {
+            TIME_TRACE_START(one);
+        }
+
+        ~trace() {
+            TIME_TRACE_STOP(one);
+            TIME_TRACESET_UPDATE(traces, _n, one);
+        }
+    };
+}
+
 namespace springtail {
+
+
+    StorageCache::Page::Iterator &StorageCache::Page::Iterator::operator++() {
+
+            trace tr("page_iterator_total");
+        
+            // move to the next row
+            {
+            trace tr("page_iterator__1");
+            ++_row;
+
+            // check if this is the end of the extent
+            if (_row != (*_extent)->end()) {
+                return *this;
+            }
+            }
+
+            // move to the next extent
+            {
+            trace tr("page_iterator_2");
+            ++_extent_i;
+            if (_extent_i == _page->_extents.end()) {
+                // at the end, return
+                _extent = SafeExtent();
+                return *this;
+            }
+            }
+
+            // retrieve the extent
+            {
+            trace tr("page_iterator_3");
+            _extent = _extent_i->make_safe_extent(_page->_file);
+
+            // start at the first row
+            _row = (*_extent)->begin();
+            }
+
+            return *this;
+        }
 
     /* static member initialization must happen outside of class */
     StorageCache* StorageCache::_instance = {nullptr};
@@ -59,6 +121,7 @@ namespace springtail {
     {
         SPDLOG_DEBUG_MODULE(LOG_CACHE, "GET file {} eid {} xid {} txid {}",
                             file, extent_id, access_xid, target_xid);
+        trace tr("storage_cache_get_total");
 
         // note: target_xid must be at or beyond the access_xid
         CHECK_GE(target_xid, access_xid);
@@ -138,6 +201,8 @@ namespace springtail {
                                  uint64_t access_xid,
                                  uint64_t target_xid)
     {
+        trace tr("page_get_total");
+
         CHECK(extent_id != constant::UNKNOWN_EXTENT);
 
         SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, access_xid, target_xid);
@@ -145,12 +210,17 @@ namespace springtail {
         boost::unique_lock lock(_mutex);
 
         // check if the page already exists in the cache for the given target XID
+        {
+            trace tr("page_get_total_try");
         PagePtr page = _try_get(file, extent_id, target_xid);
         if (page != nullptr) {
             tracing::increment_counter(STORAGE_CACHE_GET_CALLS, tracing::get_db_id_xid_map(0, target_xid));
             SPDLOG_DEBUG_MODULE(LOG_CACHE, "Found in cache");
             return page;
         }
+        }
+
+        SPDLOG_WARN("Cache miss");
 
         // XXX eventually use the access_xid and extent_id to get the proper set of extents to start
         //     from; for now we assume that the single extent_id *is* the full list of extents for

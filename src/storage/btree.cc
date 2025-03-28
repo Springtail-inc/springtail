@@ -1,7 +1,86 @@
 #include <common/constants.hh>
 #include <storage/btree.hh>
 
+#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
+#include <common/time_trace.hh>
+
+
+namespace springtail
+{
+    struct trace
+    {
+        TIME_TRACE(one);
+        std::string _n;
+
+        trace(std::string n) : _n{std::move(n)} {
+            TIME_TRACE_START(one);
+        }
+
+        ~trace() {
+            TIME_TRACE_STOP(one);
+            TIME_TRACESET_UPDATE(traces, _n, one);
+        }
+    };
+}
+
 namespace springtail {
+
+            BTree::Iterator& BTree::Iterator::operator++() {
+                trace tr("btree_iterator");
+                // can't iterate forward on end()
+                assert(_node != nullptr);
+
+                // move to the next row in the leaf extent
+                ++_node->row_i;
+                if (_node->row_i != _node->page->end()) {
+                    return *this;
+                }
+
+                // if at the end of the extent, traverse up the tree to find the next entry
+                uint32_t depth = 0;
+
+                {
+                trace tr("btree_iterator_loop1");
+
+                // go up the tree
+                while (_node->row_i == _node->page->end()) {
+                    // iterate up to the parent
+                    ++depth;
+                    _node = _node->parent;
+
+                    // if we were at the end of the root extent, then no more entries
+                    if (_node == nullptr) {
+                        return *this;
+                    }
+
+                    // move to the next entry in the parent
+                    ++(_node->row_i);
+                }
+                }
+
+                // now go back down the tree
+                {
+                trace tr("btree_iterator_loop2");
+
+                auto cache = StorageCache::get_instance();
+                while (depth > 0) {
+                    // read the child's extent ID
+                    uint64_t extent_id = _btree->_branch_child_f->get_uint64(*(_node->row_i));
+
+                    // read the child extent
+                    SPDLOG_DEBUG_MODULE(LOG_BTREE, "Get page {}", extent_id);
+                    auto child = cache->get(_btree->_file, extent_id, _btree->_xid);
+
+                    --depth;
+                    auto begin = child->begin();
+                    _node = std::make_shared<Node>(std::move(child), begin, _node);
+                }
+                }
+
+                // return the iterator
+                return *this;
+            }
+
     BTree::BTree(const std::filesystem::path &file,
                  uint64_t xid,
                  ExtentSchemaPtr schema,

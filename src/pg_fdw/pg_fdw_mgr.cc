@@ -46,6 +46,9 @@ extern "C" {
     #include <tcop/utility.h>
 }
 
+#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
+#include <common/time_trace.hh>
+
 namespace springtail::pg_fdw {
     using springtail::Index;
 
@@ -286,6 +289,8 @@ namespace springtail::pg_fdw {
 
         // set the iterators for the scan taking quals into consideration
         _set_scan_iterators(state);
+        SPDLOG_WARN("Traces reset, {}", state->target_columns.size());
+        traces.reset();
     }
 
 
@@ -454,6 +459,7 @@ namespace springtail::pg_fdw {
         _set_scan_iterators(state);
     }
 
+
     bool
     PgFdwMgr::fdw_iterate_scan(PgFdwState *state,
                                int num_attrs,
@@ -462,11 +468,41 @@ namespace springtail::pg_fdw {
                                bool *nulls,
                                bool *eos)
     {
+        struct trace
+          {
+              bool* _eos;
+              TIME_TRACE(one);
+              std::string _n;
+              bool _s;
+
+              trace(bool *eos, std::string n, bool s) : _eos(eos), _n{std::move(n)}, _s{s} {
+                  if (_s) {
+                      TIME_TRACE_START(one);
+                  }
+              }
+
+              ~trace() {
+                  if (_s) {
+                      TIME_TRACE_STOP(one);
+                      TIME_TRACESET_UPDATE(traces, _n, one);
+                      if (*_eos) {
+                          TIME_TRACESET_LOG(traces);
+                      }
+                  }
+              }
+          };
+
+        trace tr(eos, "fdw_trace_total", state->target_columns.empty() );
+
+
         // Note: for now always scan up, so we don't need to check if we are scanning down
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_iterate_scan: tid: {}", state->tid);
 
         // default to not end of scan
         *eos = false;
+
+        {
+            trace tr(eos, "fdw_trace_end_check", state->target_columns.empty() );
 
         // check iterator is valid
         if (!state->iter_start.has_value()) {
@@ -516,11 +552,15 @@ namespace springtail::pg_fdw {
             *eos = true;
             return false;
         }
+        }
 
         if (!state->scan_asc) {
             --(*state->iter_end);
         }
 
+
+        {
+        trace tr(eos, "fdw_trace_read_row", state->target_columns.empty() );
         // get current row
         Extent::Row row{state->scan_asc? *(*state->iter_start) : *(*state->iter_end)};
         state->rows_fetched++;
@@ -547,8 +587,11 @@ namespace springtail::pg_fdw {
                 SPDLOG_DEBUG_MODULE(LOG_FDW, "Qual not equal, skipping row");
                 state->rows_skipped++;
                 // increment iterator if scanning up
+                {
+                trace tr(eos, "fdw_trace_iterator 0", state->target_columns.empty());
                 if (state->scan_asc) {
                     ++(*state->iter_start);
+                }
                 }
                 return false;
             }
@@ -562,7 +605,6 @@ namespace springtail::pg_fdw {
             if (!state->target_columns.contains(attno)) {
                 nulls[i] = true;
                 values[i] = 0;
-                SPDLOG_WARN("Skipping column: {}; not found in target column", attno);
                 continue;
             }
 
@@ -583,10 +625,14 @@ namespace springtail::pg_fdw {
                 values[i] = 0;
             }
         }
+        }
 
         // increment iterator if scanning up
+        {
+        trace tr(eos, "fdw_trace_iterator_increment", state->target_columns.empty());
         if (state->scan_asc) {
             ++(*state->iter_start);
+        }
         }
 
         return true;
