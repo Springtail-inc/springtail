@@ -553,6 +553,9 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         sort_keys.push_back("__springtail_lsn");
 
         auto columns = schema->column_order();
+        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "xid={}:{}, columns={}",
+                            xid.xid, xid.lsn,
+                            common::join_string(",", columns.begin(), columns.end()));
 
         SchemaColumn op("__springtail_op", 0, SchemaType::UINT8, 0, false);
         SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
@@ -579,6 +582,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             case INSERT:
                 {
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
+                    SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "INSERT value={}", tuple->to_string());
                     table->insert(tuple, wc_extent->xid, constant::UNKNOWN_EXTENT);
                     break;
                 }

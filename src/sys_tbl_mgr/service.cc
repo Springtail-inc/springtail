@@ -2231,12 +2231,17 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
     // Check for removals: any column in oldMap that's missing in newMap
     for (const auto& [pos, old_col] : oldMap) {
         if (newMap.find(pos) == newMap.end()) {
+#if ENABLE_SCHEMA_MUTATES
             // Column has been removed
             *update.mutable_column() = *old_col;
             update.set_update_type(static_cast<int8_t>(SchemaUpdateType::REMOVE_COLUMN));
             update.set_exists(false);
             ddl["action"] = "col_drop";
             ddl["column"] = old_col->name();
+#else
+            ddl["action"] = "resync";
+            update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
+#endif
             return update;
         }
     }
@@ -2245,6 +2250,7 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
     for (const auto& [pos, new_col] : newMap) {
         if (oldMap.find(pos) == oldMap.end()) {
             // A new column has been added
+#if ENABLE_SCHEMA_MUTATES
             if (new_col->has_default_value()) {
                 ddl["action"] = "resync";
                 update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
@@ -2260,6 +2266,10 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
                     ddl["column"]["default"] = new_col->default_value();
                 }
             }
+#else
+            ddl["action"] = "resync";
+            update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
+#endif
             return update;
         }
     }
@@ -2284,12 +2294,17 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
             // A column going from nullable to not-nullable results in NULL values being
             // populated with a default, which aren't sent via the log.
             if (!old_col->is_nullable() && new_col->is_nullable()) {
+#if ENABLE_SCHEMA_MUTATES
                 *update.mutable_column() = *new_col;
                 update.set_update_type(static_cast<int8_t>(SchemaUpdateType::NULLABLE_CHANGE));
                 update.set_exists(true);
                 ddl["action"] = "col_nullable";
                 ddl["column"]["name"] = new_col->name();
                 ddl["column"]["nullable"] = new_col->is_nullable();
+#else
+                ddl["action"] = "resync";
+                update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
+#endif
                 return update;
             }
 

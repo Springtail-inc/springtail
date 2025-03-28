@@ -475,9 +475,13 @@ namespace {
         _next_lsn();
         auto schema_check =
             _client->get_target_schema(_db, tid, {_xid.xid - 1, constant::MAX_LSN}, _xid);
+#if ENABLE_SCHEMA_MUTATES
         ASSERT_EQ(schema_check->history.size(), 2);
         ASSERT_EQ(schema_check->history[0].update_type, SchemaUpdateType::NEW_COLUMN);
         ASSERT_EQ(schema_check->history[1].update_type, SchemaUpdateType::NAME_CHANGE);
+#else
+        ASSERT_EQ(schema_check->history.size(), 0);
+#endif
 
         _finalize();
 
@@ -554,11 +558,18 @@ namespace {
         ASSERT_EQ(metadata->stats.row_count, 30);
 
         schema_meta = _client->get_schema(_db, tid, {check_xid, constant::MAX_LSN});
+#if ENABLE_SCHEMA_MUTATES
         ASSERT_EQ(schema_meta->columns.size(), 3);
         ASSERT_EQ(schema_meta->columns[0].name, "col1");
         ASSERT_EQ(schema_meta->columns[1].name, "coltwo");
         ASSERT_EQ(schema_meta->columns[2].name, "col3");
         ASSERT_EQ(schema_meta->indexes.size(), 2);
+#else
+        ASSERT_EQ(schema_meta->columns.size(), 2);
+        ASSERT_EQ(schema_meta->columns[0].name, "col1");
+        ASSERT_EQ(schema_meta->columns[1].name, "coltwo");
+        ASSERT_EQ(schema_meta->indexes.size(), 2);
+#endif
 
         // XID 5
         ++check_xid;
@@ -580,6 +591,7 @@ namespace {
         ASSERT_EQ(schema_meta->columns[0].name, "col1");
         ASSERT_EQ(schema_meta->columns[1].name, "col2");
 
+#if ENABLE_SCHEMA_MUTATES
         ASSERT_EQ(schema_meta->history.size(), 6);
 
         ASSERT_EQ(schema_meta->history[0].update_type, SchemaUpdateType::REMOVE_COLUMN);
@@ -607,6 +619,21 @@ namespace {
         ASSERT_EQ(schema_meta->history[5].update_type, SchemaUpdateType::REMOVE_COLUMN);
         ASSERT_EQ(schema_meta->history[5].name, "col3");
         ASSERT_EQ(schema_meta->history[5].xid, check_xid);
+#else
+        ASSERT_EQ(schema_meta->history.size(), 3);
+
+        ASSERT_EQ(schema_meta->history[0].update_type, SchemaUpdateType::REMOVE_COLUMN);
+        ASSERT_EQ(schema_meta->history[0].name, "col1");
+        ASSERT_EQ(schema_meta->history[0].xid, check_xid);
+
+        ASSERT_EQ(schema_meta->history[1].update_type, SchemaUpdateType::NAME_CHANGE);
+        ASSERT_EQ(schema_meta->history[1].name, "coltwo");
+        ASSERT_EQ(schema_meta->history[1].xid, check_xid - 2);
+
+        ASSERT_EQ(schema_meta->history[2].update_type, SchemaUpdateType::REMOVE_COLUMN);
+        ASSERT_EQ(schema_meta->history[2].name, "coltwo");
+        ASSERT_EQ(schema_meta->history[2].xid, check_xid);
+#endif
     }
 
     // Threaded test with interleaving of DDL and DML interactions with the system tables along with

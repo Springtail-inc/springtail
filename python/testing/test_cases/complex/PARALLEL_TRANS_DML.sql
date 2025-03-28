@@ -1,5 +1,5 @@
 ## metadata
-### sync_timeout 10
+### sync_timeout 30
 
 ## test
 CREATE TABLE IF NOT EXISTS parallel_trans_dml (

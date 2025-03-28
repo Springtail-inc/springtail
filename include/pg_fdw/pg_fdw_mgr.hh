@@ -70,6 +70,9 @@ namespace springtail::pg_fdw {
         std::optional<Table::Iterator> iter_end = std::nullopt;
 
         std::map<uint32_t, SchemaColumn> columns;     ///< Column map from ID to column metadata
+        std::unordered_map<int, uint32_t> attr_map; ///< Map from FDW local attribute number to Springtail's column position
+        std::unordered_map<std::string, uint32_t> name_map; ///< Map from column name to Springtail column position
+
         std::map<int,int> target_columns;             ///< Map of target columns, from attno to field idx
         std::vector<ConstQualPtr> filtered_quals;     ///< List of quals (for where clause)
         std::vector<Index> indexes; ///< List of table indexes including the primary index.
