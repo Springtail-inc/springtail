@@ -72,7 +72,7 @@ namespace {
 
         // write first
         {
-            PgXactLogWriterMmap writer(log_path, 10);
+            PgXactLogWriterMmap writer(log_path);
             uint64_t timestamp = get_log_timestamp();
             writer.rotate(timestamp);
 
@@ -126,7 +126,7 @@ namespace {
         // write first
         {
             uint64_t initial_xid = 10;
-            PgXactLogWriterMmap writer(log_path, initial_xid);
+            PgXactLogWriterMmap writer(log_path);
             uint64_t timestamp = get_log_timestamp();
             writer.rotate(timestamp);
 
@@ -157,7 +157,7 @@ namespace {
         for (auto current_iterations: iterations) {
             uint64_t current_xid = 10;
             {
-                PgXactLogWriterMmap writer(log_path, current_xid);
+                PgXactLogWriterMmap writer(log_path);
 
                 for (uint32_t i = 0; i < 3; i++) {
                     uint64_t timestamp = get_log_timestamp();
@@ -189,7 +189,7 @@ namespace {
     {
         // test empty first page
         {
-            PgXactLogWriterMmap writer(log_path, 10);
+            PgXactLogWriterMmap writer(log_path);
 
             for (uint32_t i = 0; i < 3; i++) {
                 uint64_t timestamp = get_log_timestamp();
@@ -221,7 +221,7 @@ namespace {
         uint32_t iterations = 384;
         uint64_t current_xid = 10;
         {
-            PgXactLogWriterMmap writer(log_path, current_xid);
+            PgXactLogWriterMmap writer(log_path);
 
             for (uint32_t i = 0; i < 3; i++) {
                 last_timestamp = get_log_timestamp();
@@ -235,8 +235,20 @@ namespace {
         }
         ASSERT_EQ(current_xid, iterations * 3 + 10);
         {
+            PgXactLogReaderMmap reader(log_path, current_xid - 20, true);
+            uint64_t found_xid = 10;
+            ASSERT_TRUE(reader.begin());
+            do {
+                ASSERT_EQ(reader.get_pg_xid(), found_xid);
+                ASSERT_EQ(reader.get_xid(), found_xid + 1);
+                found_xid++;
+            } while(reader.next());
+            ASSERT_EQ(found_xid, current_xid - 20);
+            reader.cleanup_logs();
+        }
+        {
             current_xid -= 20;
-            PgXactLogWriterMmap writer(log_path, current_xid);
+            PgXactLogWriterMmap writer(log_path);
             writer.rotate(last_timestamp);
             for (uint32_t j = 0; j < iterations; j++) {
                 uint32_t pg_xid = current_xid;
@@ -264,7 +276,7 @@ namespace {
         uint64_t third_timestamp = 0;
         uint64_t current_xid = 10;
         {
-            PgXactLogWriterMmap writer(log_path, current_xid);
+            PgXactLogWriterMmap writer(log_path);
 
             // first log file
             first_timestamp = get_log_timestamp();
@@ -293,7 +305,21 @@ namespace {
 
         current_xid = 13;
         {
-            PgXactLogWriterMmap writer(log_path, current_xid);
+            PgXactLogReaderMmap reader(log_path, current_xid, true);
+            ASSERT_TRUE(reader.begin());
+            ASSERT_EQ(reader.get_pg_xid(), 101);
+            ASSERT_EQ(reader.get_xid(), 11);
+            ASSERT_TRUE(reader.next());
+            ASSERT_EQ(reader.get_pg_xid(), 102);
+            ASSERT_EQ(reader.get_xid(), 12);
+            ASSERT_TRUE(reader.next());
+            ASSERT_EQ(reader.get_pg_xid(), 103);
+            ASSERT_EQ(reader.get_xid(), 13);
+            ASSERT_FALSE(reader.next());
+            reader.cleanup_logs();
+        }
+        {
+            PgXactLogWriterMmap writer(log_path);
 
             writer.rotate(first_timestamp);
             writer.log(105, 15);
@@ -375,7 +401,7 @@ namespace {
         uint64_t log_timestamp = 0;
 
         {
-            PgXactLogWriterMmap writer(log_path, 10);
+            PgXactLogWriterMmap writer(log_path);
 
             log_timestamp = get_log_timestamp();
             writer.rotate(log_timestamp);
@@ -391,8 +417,31 @@ namespace {
             writer.log(110, 20);
         }
         {
+            PgXactLogReaderMmap reader(log_path, 15, true);
+
+            ASSERT_TRUE(reader.begin());
+            ASSERT_EQ(reader.get_pg_xid(), 101);
+            ASSERT_EQ(reader.get_xid(), 11);
+
+            ASSERT_TRUE(reader.next());
+            ASSERT_EQ(reader.get_pg_xid(), 102);
+            ASSERT_EQ(reader.get_xid(), 12);
+
+            ASSERT_TRUE(reader.next());
+            ASSERT_EQ(reader.get_pg_xid(), 103);
+            ASSERT_EQ(reader.get_xid(), 13);
+
+            ASSERT_TRUE(reader.next());
+            ASSERT_EQ(reader.get_pg_xid(), 104);
+            ASSERT_EQ(reader.get_xid(), 14);
+
+            ASSERT_FALSE(reader.next());
+            reader.cleanup_logs();
+        }
+
+        {
             // recover from the timestamp that does not exist
-            PgXactLogWriterMmap writer(log_path, 15);
+            PgXactLogWriterMmap writer(log_path);
             writer.rotate(log_timestamp);
 
             writer.log(111, 21);

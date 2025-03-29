@@ -24,7 +24,6 @@ namespace springtail::pg_log_mgr {
                              const std::filesystem::path &repl_log_path,
                              const std::filesystem::path &xact_log_path,
                              const CommitterQueuePtr committer_queue,
-                             const uint64_t log_size_rollover_threshold,
                              const bool archive_logs)
         : _db_id(db_id),
           // retrieve the most recently committed XID at startup
@@ -34,7 +33,7 @@ namespace springtail::pg_log_mgr {
           _xact_log_path(xact_log_path),
           _committer_queue(committer_queue),
           _msg_queue(queue_size),
-          _xact_log_writer(xact_log_path, _committed_xid)
+          _xact_log_writer(xact_log_path)
     {
         _xid_ts_tracker = std::make_shared<WalProgressTracker>();
 

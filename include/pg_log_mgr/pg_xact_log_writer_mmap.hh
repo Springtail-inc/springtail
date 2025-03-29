@@ -28,7 +28,7 @@ public:
      * @param base_dir - directory to store the files in
      * @param committed_xid - committed xid to start writing from
      */
-    PgXactLogWriterMmap(const std::filesystem::path &base_dir, uint64_t committed_xid);
+    PgXactLogWriterMmap(const std::filesystem::path &base_dir);
 
     /**
      * @brief Destroy the Pg Xact Log Writer Mmap object
@@ -57,17 +57,9 @@ private:
     size_t _file_size{0};               ///< file size - multiple of page size
     size_t _mmap_offset{0};             ///< offset of mmap segment
     size_t _last_offset{0};             ///< offset inside the mmap segment, points to the next available memory location
-    uint64_t _committed_xid;            ///< last committed xid to recover to if applicable
     XidElement *_file_mem{nullptr};     ///< pointer to the mmaped memory
     int _fd{-1};                        ///< file descriptor of the open file, when set to -1, it means that no file is open
     bool _first_file{true};             ///< first file flag
-
-    /**
-     * @brief Goes through the first log file and find the location of the last committed xid.
-     *          After that it continues to write from this position.
-     *
-     */
-    void _recover();
 
     /**
      * @brief Flush from memory to file.

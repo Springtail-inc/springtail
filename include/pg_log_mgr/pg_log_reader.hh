@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <filesystem>
 #include <map>
@@ -55,7 +56,6 @@ namespace springtail::pg_log_mgr {
                     const std::filesystem::path &repl_log_path,
                     const std::filesystem::path &xact_log_path,
                     const CommitterQueuePtr committer_queue,
-                    const uint64_t log_size_rollover_threshold,
                     const bool archive_logs);
 
         ~PgLogReader();
@@ -95,6 +95,8 @@ namespace springtail::pg_log_mgr {
         uint64_t get_next_xid() {
             return _next_xid.fetch_add(1, std::memory_order_relaxed);
         }
+
+        bool archive_logs() { return _archive_logs; }
 
     private:
         class Batch {

@@ -2,8 +2,10 @@
 
 #include <fstream>
 #include <filesystem>
+#include <functional>
 #include <optional>
 
+#include <arm_neon.h>
 #include <fmt/format.h>
 
 namespace springtail {
@@ -259,13 +261,15 @@ namespace springtail {
          * @param prefix    - file prefix
          * @param suffix    - file suffix
          * @param timestamp_limit   - timestamp id limit
+         * @param comp      - compare function for deciding which files to remove
          */
         static void
         cleanup_files_from_dir(const std::filesystem::path& dir,
                                std::string_view prefix,
                                std::string_view suffix,
                                uint64_t timestamp_limit,
-                               bool archive = false)
+                               bool archive = false,
+                               std::function<bool (uint64_t, uint64_t)> comp = std::less<uint64_t>())
         {
             if (archive && !std::filesystem::exists(dir / "archive")) {
                 // create archive directory
@@ -281,7 +285,7 @@ namespace springtail {
 
                     // Extract the timestamp from the file name
                     auto timestamp = extract_timestamp_from_file(path, prefix, suffix);
-                    if (timestamp.has_value() && timestamp.value() < timestamp_limit) {
+                    if (timestamp.has_value() && comp(timestamp.value(), timestamp_limit)) {
                         if (!archive) {
                             std::filesystem::remove(path);
                         } else {

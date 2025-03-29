@@ -3,7 +3,6 @@
 #include <pg_log_mgr/pg_log_reader.hh>
 #include <pg_log_mgr/pg_xact_log_reader_mmap.hh>
 #include <pg_repl/pg_msg_stream.hh>
-#include <xid_mgr/xid_mgr_client.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -12,12 +11,13 @@ public:
     PgLogRecovery(uint64_t db_id,
                   const std::filesystem::path &repl_path,
                   const std::filesystem::path &xact_path,
-                  std::shared_ptr<PgLogReader> log_reader)
+                  std::shared_ptr<PgLogReader> log_reader,
+                  uint64_t committed_xid)
         : _repl_path(repl_path),
           _xact_path(xact_path),
+          _committed_xid(committed_xid),
           _pg_log_reader(log_reader)
     {
-        _committed_xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Starting recovery with last committed xid = {}", _committed_xid);
     }
 
@@ -80,7 +80,7 @@ private:
 
     std::filesystem::path _repl_path;
     std::filesystem::path _xact_path;
-    uint64_t _committed_xid;
+    uint64_t _committed_xid;        ///< Holds the last commited xid.
 
     /** Interface for reading the replication log. */
     PgMsgStreamReader _repl_reader;
