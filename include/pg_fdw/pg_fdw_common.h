@@ -28,11 +28,21 @@ extern "C" {
 #define SPRINGTAIL_FDW_DB_NAME_OPTION "db_name"              ///< Option name for database name
 #define SPRINGTAIL_FDW_SCHEMA_XID_OPTION "schema_xid"        ///< Option name for schema xid
 
+/** Target list items. */
+typedef struct SpringtailTargetColumn {
+#if PG_VERSION_NUM < 150000
+    Value *attname;
+#else
+    String *attname;
+#endif
+    int attnum; ///< The FDW's attribute number for the column
+} SpringtailTargetColumn;
+
 /** Plan state created in get rel size */
 typedef struct SpringtailPlanState {
     uint64_t tid;
     double   width;
-    List    *target_list;       ///< List of target columns (int attno)
+    List    *target_list;       ///< List of target columns (SpringtailTargetColumn)
     List    *pathkeys;          ///< List of de-parsed path keys (DeparsedSortGroup)
     List    *qual_list;         ///< List of predicate clauses (BaseQual)
     void    *pg_fdw_state;

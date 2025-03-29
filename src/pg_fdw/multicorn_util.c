@@ -798,6 +798,30 @@ extractColumns(List *reltargetlist, List *restrictinfolist)
     return columns;
 }
 
+/*
+ *	Returns a "Value" node containing the string name of the column from a var.
+ */
+#if PG_VERSION_NUM < 150000
+Value *
+#else
+String *
+#endif
+colnameFromVar(Var *var, PlannerInfo *root)
+{
+	RangeTblEntry *rte = rte = planner_rt_fetch(var->varno, root);
+	char	   *attname = get_attname(rte->relid, var->varattno, false);
+
+	if (attname == NULL)
+	{
+		return NULL;
+	}
+	else
+	{
+		return makeString(attname);
+	}
+}
+
+
 void
 multicorn_getRelSize(PlannerInfo *root,
                      RelOptInfo *baserel,
@@ -821,6 +845,8 @@ multicorn_getRelSize(PlannerInfo *root,
         RelationClose(rel);
     }
 
+    // We store both the attnum and the attname in the target_list so that we can generate a mapping
+    // between the local FDW attnum and the Springtail column position.
     if (needWholeRow)
     {
         int			i;
@@ -831,7 +857,12 @@ multicorn_getRelSize(PlannerInfo *root,
 
             if (!att->attisdropped)
             {
-                planstate->target_list = lappend(planstate->target_list, makeInteger(att->attnum));
+                // save the local attno and the attname
+                SpringtailTargetColumn *target = (SpringtailTargetColumn *)palloc0(sizeof(SpringtailTargetColumn));
+                target->attname = makeString(NameStr(att->attname));
+                target->attnum = att->attnum;
+
+                planstate->target_list = lappend(planstate->target_list, target);
             }
         }
     }
@@ -840,10 +871,16 @@ multicorn_getRelSize(PlannerInfo *root,
         /* Pull "var" clauses to build an appropriate target list */
         foreach(lc, extractColumns(baserel->reltarget->exprs, baserel->baserestrictinfo))
         {
-            // modified to use attrno instead of name
-            Var		   *var = (Var *) lfirst(lc);
-            int         attnum = var->varattno;
-            planstate->target_list = lappend(planstate->target_list, makeInteger(attnum));
+            Var *var = (Var *) lfirst(lc);
+
+            // save the local attno and the attname
+            SpringtailTargetColumn *target = (SpringtailTargetColumn *)palloc0(sizeof(SpringtailTargetColumn));
+            target->attname = colnameFromVar(var, root);
+            target->attnum = var->varattno;
+
+            if (target->attname != NULL && strVal(target->attname) != NULL) {
+                planstate->target_list = lappend(planstate->target_list, target);
+            }
         }
     }
     /* Extract the restrictions from the plan. */

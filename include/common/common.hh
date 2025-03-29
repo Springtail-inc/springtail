@@ -8,6 +8,7 @@
 #include <deque>
 #include <string>
 #include <vector>
+#include <sstream>
 
 #include <common/logging.hh>
 #include <common/properties.hh>
