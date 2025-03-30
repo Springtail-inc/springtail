@@ -1,33 +1,16 @@
 #pragma once
 
-#include <cstdint>
-#include <memory>
-#include <filesystem>
-#include <map>
-
-#include <opentelemetry/metrics/meter.h>
-#include <opentelemetry/metrics/provider.h>
-
-#include <common/concurrent_queue.hh>
-#include <common/redis_types.hh>
 #include <common/tracing.hh>
 #include <common/timestamp.hh>
 
-#include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_msg_stream.hh>
-
-#include <redis/redis_containers.hh>
-#include <redis/redis_ddl.hh>
 
 #include <pg_log_mgr/wal_progress_tracker.hh>
 #include <pg_log_mgr/xid_ready.hh>
 
-#include <storage/extent.hh>
 #include <storage/field.hh>
-#include <storage/xid.hh>
 
 #include <pg_log_mgr/pg_xact_log_writer_mmap.hh>
-#include <xid_mgr/xid_mgr_client.hh>
 
 namespace springtail::pg_log_mgr {
     /**

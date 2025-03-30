@@ -8,8 +8,8 @@
 
 namespace springtail::pg_log_mgr {
 
-PgXactLogWriterMmap::PgXactLogWriterMmap(const std::filesystem::path &base_dir, uint64_t committed_xid) :
-            _base_dir(base_dir), _committed_xid(committed_xid)
+PgXactLogWriterMmap::PgXactLogWriterMmap(const std::filesystem::path &base_dir) :
+            _base_dir(base_dir)
 {
     // create the base directory for the file if it doesn't exist
     std::filesystem::create_directories(_base_dir);
@@ -21,61 +21,6 @@ PgXactLogWriterMmap::~PgXactLogWriterMmap()
         ::munmap(_file_mem, PG_XLOG_PAGE_SIZE);
         ::close(_fd);
     }
-}
-
-void
-PgXactLogWriterMmap::_recover()
-{
-    // read buffer
-    XidElement xid_elements[PG_XLOG_PAGE_SIZE/sizeof(XidElement)];
-    // number of elements in the read buffer
-    size_t xid_elements_size = PG_XLOG_PAGE_SIZE/sizeof(XidElement);
-    // void pointer to read buffer
-    void *buffer = reinterpret_cast<void *>(xid_elements);
-    int ret;
-
-    // read the page
-    while ((ret = ::read(_fd, buffer, PG_XLOG_PAGE_SIZE)) != 0) {
-        if (ret == -1) {
-            throw Error(fmt::format("Error reading from file {}; error {}: {}", _file.string(), errno, strerror(errno)));
-        }
-        // raise exception if somehow we did not read enough data
-        if (ret != PG_XLOG_PAGE_SIZE) {
-            throw Error(fmt::format("Error: read incomplete page from file {}", _file.string()));
-        }
-
-        // find position of the last committed xid
-        size_t i = 0;
-        while (i < xid_elements_size) {
-            uint64_t current_xid = xid_elements[i].xid;
-            // check if we reached the end of xid records
-            if (current_xid == 0) {
-                throw Error(fmt::format("Error: file {}, end of xid records reached before committed xid is found", _file.string()));
-            }
-            // move file offset
-            if (current_xid <= _committed_xid) {
-                _last_offset += sizeof(XidElement);
-            }
-            // same or greater xid found
-            if (current_xid >= _committed_xid) {
-                SPDLOG_INFO("Found current_xid: {}; _committed_xid: {}", current_xid, _committed_xid);
-
-                // truncate file up to the committed xid entry
-                if (::ftruncate(_fd, _last_offset) == -1) {
-                    throw Error(fmt::format("Failed to resize file {}; error {}: {}", _file.string(), errno, strerror(errno)));
-                }
-
-                // set up variables for memmory mapping
-                _mmap_offset = (_last_offset & ~(PG_XLOG_PAGE_SIZE - 1));
-                _file_size = _mmap_offset + PG_XLOG_PAGE_SIZE;
-                _last_offset = _last_offset & (PG_XLOG_PAGE_SIZE - 1);
-
-                return;
-            }
-            i++;
-        }
-    }
-    throw Error(fmt::format("Error: file {}, end of file reached before committed xid is found", _file.string()));
 }
 
 void
@@ -101,14 +46,17 @@ PgXactLogWriterMmap::rotate(uint64_t timestamp)
     // if the file already exists, we are in recovery mode
     if (std::filesystem::exists(_file) && _first_file) {
         // open file
-        _fd = ::open(_file.c_str(), O_RDWR, 0666);
+        _fd = ::open(_file.c_str(), O_RDWR, 0664);
         if (_fd == -1) {
             throw Error(fmt::format("Failed to open file {}; error {}: {}", _file.string(), errno, strerror(errno)));
         }
-        _recover();
+        _file_size = std::filesystem::file_size(_file);
+        _last_offset = _file_size & (PG_XLOG_PAGE_SIZE - 1);
+        _mmap_offset = (_file_size & ~(PG_XLOG_PAGE_SIZE - 1));
+        _file_size = _mmap_offset + PG_XLOG_PAGE_SIZE;
     } else {
         // open new file
-        _fd = ::open(_file.c_str(), O_CREAT | O_TRUNC | O_RDWR, 0666);
+        _fd = ::open(_file.c_str(), O_CREAT | O_TRUNC | O_RDWR, 0664);
         if (_fd == -1) {
             throw Error(fmt::format("Failed to open file {}; error {}: {}", _file.string(), errno, strerror(errno)));
         }

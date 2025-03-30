@@ -1,22 +1,15 @@
-#include <cassert>
-
 #include <common/filesystem.hh>
 #include <common/logging.hh>
 #include <common/tracing.hh>
+
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
-#include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/sync_tracker.hh>
-#include <pg_repl/pg_msg_stream.hh>
-#include <pg_repl/pg_repl_msg.hh>
-#include <pg_repl/pg_types.hh>
-#include <pg_repl/table_sync_request.hh>
-#include <storage/xid.hh>
+
+#include <redis/redis_ddl.hh>
 #include <sys_tbl_mgr/client.hh>
-#include <sys_tbl_mgr/schema_mgr.hh>
 #include <write_cache/write_cache_func.hh>
-#include <opentelemetry/metrics/meter.h>
-#include <opentelemetry/metrics/provider.h>
+#include <xid_mgr/xid_mgr_client.hh>
 
 namespace springtail::pg_log_mgr {
 
