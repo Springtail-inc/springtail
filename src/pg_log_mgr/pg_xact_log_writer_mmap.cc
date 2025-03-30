@@ -46,7 +46,7 @@ PgXactLogWriterMmap::rotate(uint64_t timestamp)
     // if the file already exists, we are in recovery mode
     if (std::filesystem::exists(_file) && _first_file) {
         // open file
-        _fd = ::open(_file.c_str(), O_RDWR, 0664);
+        _fd = ::open(_file.c_str(), O_RDWR, 0660);
         if (_fd == -1) {
             throw Error(fmt::format("Failed to open file {}; error {}: {}", _file.string(), errno, strerror(errno)));
         }
@@ -56,7 +56,7 @@ PgXactLogWriterMmap::rotate(uint64_t timestamp)
         _file_size = _mmap_offset + PG_XLOG_PAGE_SIZE;
     } else {
         // open new file
-        _fd = ::open(_file.c_str(), O_CREAT | O_TRUNC | O_RDWR, 0664);
+        _fd = ::open(_file.c_str(), O_CREAT | O_TRUNC | O_RDWR, 0660);
         if (_fd == -1) {
             throw Error(fmt::format("Failed to open file {}; error {}: {}", _file.string(), errno, strerror(errno)));
         }

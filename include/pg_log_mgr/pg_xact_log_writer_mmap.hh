@@ -28,7 +28,7 @@ public:
      * @param base_dir - directory to store the files in
      * @param committed_xid - committed xid to start writing from
      */
-    PgXactLogWriterMmap(const std::filesystem::path &base_dir);
+    explicit PgXactLogWriterMmap(const std::filesystem::path &base_dir);
 
     /**
      * @brief Destroy the Pg Xact Log Writer Mmap object

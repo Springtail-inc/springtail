@@ -70,7 +70,7 @@ PgXactLogReaderMmap::_open_next_file()
         SPDLOG_INFO("Current file: {}", _current_file->string());
 
         // open file
-        _fd = ::open(_current_file.value().c_str(), O_RDWR, 0664);
+        _fd = ::open(_current_file.value().c_str(), O_RDWR, 0660);
         if (_fd == -1) {
             throw Error(fmt::format("Failed to open file {}; error {}: {}", _current_file.value().string(), errno, strerror(errno)));
         }
