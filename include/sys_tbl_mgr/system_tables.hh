@@ -2,6 +2,14 @@
 
 #include <storage/field.hh>
 
+/** Wraps code blocks that would allow some layout-altering schema changes to be handled without a
+ *  table resync.  Enabling these would require two key changes: (1) the FDW would need to utilize
+ *  the virtual schema that matches the current extent's XID rather than the schema of the
+ *  transaction's XID, and (2) the secondary index handling would need to be updated to re-build any
+ *  secondary indexes that were reliant on a modified column or to be dropped when a utilized column
+ *  was dropped. */
+#define ENABLE_SCHEMA_MUTATES 0
+
 namespace springtail::sys_tbl {
 
 /**

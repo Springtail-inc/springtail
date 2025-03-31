@@ -43,6 +43,11 @@ namespace springtail {
         int32_t pg_type;
         bool exists;
         bool nullable;
+        bool is_generated;
+        bool is_non_standard_collation;
+        bool is_user_defined_type;
+        std::string type_name;
+        std::string collation;
         std::optional<uint32_t> pkey_position; ///< position in primary key, if any, 0 based no holes
         std::optional<std::string> default_value;
         SchemaUpdateType update_type = SchemaUpdateType::NEW_COLUMN;
