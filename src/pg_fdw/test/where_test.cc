@@ -111,7 +111,7 @@ namespace {
                 _attrs[i] = new FormData_pg_attribute();
                 _attrs[i]->atttypid = INT4OID;
                 _attrs[i]->attnum = _columns[i].position;
-                strncpy(_attrs[i]->attname.data, _columns[i].column_name.c_str(), NAMEDATALEN - 1);
+                strncpy(_attrs[i]->attname.data, _columns[i].name.c_str(), NAMEDATALEN - 1);
 
                 // We have to construct a SpringtailTargetColumn
                 // note: this uses new so has a memory leak, but it's fine for the unit test

@@ -844,12 +844,20 @@ namespace springtail {
             PgMsgSchemaColumn column;
             nlohmann::json json = el.value();
 
-            json["name"].get_to(column.column_name);
+            json["name"].get_to(column.name);
             json["position"].get_to(column.position);
             json["pg_type"].get_to(column.pg_type);
             json["is_nullable"].get_to(column.is_nullable);
             json["is_pkey"].get_to(column.is_pkey);
             json["is_generated"].get_to(column.is_generated);
+            if (!json["type_name"].is_null()) {
+                column.type_name = json["type_name"].get<std::string>();
+            }
+            if (!json["collation"].is_null()) {
+                column.collation = json["collation"].get<std::string>();
+            }
+            json["is_non_standard_collation"].get_to(column.is_non_standard_collation);
+            json["is_user_defined_type"].get_to(column.is_user_defined_type);
 
             if (!json["pkey_pos"].is_null()) {
                 json["pkey_pos"].get_to(column.pk_position);
@@ -989,6 +997,8 @@ namespace springtail {
         PgMsgDropTable drop_table_msg;
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Decoded drop table: json: {}", json.dump());
 
         // check object type, could be an index, default value or something other
         // than a table; if so we skip decoding

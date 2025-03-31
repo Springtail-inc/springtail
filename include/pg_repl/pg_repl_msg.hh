@@ -155,7 +155,7 @@ namespace springtail
 
     /** Column schema for a single column used by Create table and Alter table */
     struct PgMsgSchemaColumn {
-        std::string column_name;
+        std::string name;
         uint8_t type; // springtail schema type
         int32_t pg_type; // postgres type oid
         std::optional<std::string> default_value;
@@ -164,6 +164,10 @@ namespace springtail
         bool is_nullable;
         bool is_pkey;        // is primary key
         bool is_generated;  // is this a generated column
+        bool is_non_standard_collation;
+        bool is_user_defined_type;
+        std::string type_name;
+        std::string collation;
     };
 
     /** Create table/alter table message decoded */

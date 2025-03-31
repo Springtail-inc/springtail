@@ -114,6 +114,14 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 for (auto &entry : result->swap().tids()) {
                     auto copy_info = entry.second;
 
+                    if ( copy_info == nullptr ){
+                        // During resync if the table is found to be invalid as part of the copy flow, the table
+                        // becomes invalidated the copy_ptr becomes null, in those cases we don't need to
+                        // perform any operaion and just skip
+                        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Copy info not present for table {}", entry.first);
+                        continue;
+                    }
+
                     SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "table_id {}", entry.first);
 
                     // perform the table swap

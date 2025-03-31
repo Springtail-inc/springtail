@@ -252,7 +252,7 @@ namespace pg_msg {
                 ss << "  columns=" << table.columns.size() << std::endl;
 
                 for (PgMsgSchemaColumn &column: table.columns) {
-                    ss << "  - name=" << column.column_name << std::endl;
+                    ss << "  - name=" << column.name << std::endl;
                     ss << "  - type=" << std::to_string(column.type) << std::endl;
                     ss << "  - default=" << column.default_value.value_or("NULL") << std::endl;
                     ss << "  - is_nullable=" << column.is_nullable << std::endl;
@@ -277,7 +277,7 @@ namespace pg_msg {
                 ss << "  columns=" << table.columns.size() << std::endl;
 
                 for (PgMsgSchemaColumn &column: table.columns) {
-                    ss << "  - name=" << column.column_name << std::endl;
+                    ss << "  - name=" << column.name << std::endl;
                     ss << "  - type=" << std::to_string(column.type) << std::endl;
                     ss << "  - default=" << column.default_value.value_or("NULL") << std::endl;
                     ss << "  - is_nullable=" << column.is_nullable << std::endl;
