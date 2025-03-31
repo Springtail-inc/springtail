@@ -497,7 +497,6 @@ static bool calculate_client_proof(ScramState *scram_state,
 		if (rc == SASLPREP_OOM)
 			return false;
 		if (rc != SASLPREP_SUCCESS) {
-			SPDLOG_ERROR("SCRAM: SASLprep failed: {}", (int)rc);
 			prep_password = strdup(user->passwd);
 			if (!prep_password)
 				return false;
