@@ -153,6 +153,16 @@ target_link_libraries(test_msg_queue
 )
 gtest_discover_tests(test_msg_queue)
 
+add_executable(test_scram test/test_scram.cc)
+target_include_directories(test_scram
+    PRIVATE ${CMAKE_SOURCE_DIR}/include
+)
+target_link_libraries(test_scram
+    PUBLIC springtail_common springtail_proxy
+    PRIVATE GTest::gtest_main
+)
+gtest_discover_tests(test_scram)
+
 # install proxy to install directory
 install(TARGETS
     proxy

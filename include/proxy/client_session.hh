@@ -26,6 +26,7 @@ namespace springtail::pg_proxy {
     {
     public:
         constexpr static int STATEMENT_CACHE_SIZE = 100;
+        constexpr static int AUTH_TIMEOUT_SECS = 60;
 
         ClientSession(const ClientSession&) = delete;
         ClientSession& operator=(const ClientSession&) = delete;
@@ -151,6 +152,8 @@ namespace springtail::pg_proxy {
         ClientAuthorizationPtr _auth; ///< client authorization
 
         std::deque<SessionMsgPtr> _msg_queue; ///< queue of messages to be processed
+
+        uint64_t _start_time; ///< start time of session in epoch ms
 
         /** Helper to queue message internally, for batch push to server session */
         void _queue_msg(SessionMsgPtr msg) {

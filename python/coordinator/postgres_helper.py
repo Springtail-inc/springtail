@@ -174,7 +174,7 @@ class PostgresHelper:
                 sql.SQL("CREATE USER {} WITH PASSWORD {} {};").format(
                     sql.Identifier(user),
                     sql.Literal(password),
-                    sql.SQL(" WITH SUPERUSER" if superuser else "")
+                    sql.SQL(" SUPERUSER" if superuser else "")
                 )
             )
             self.logger.info(f"User '{user}' created successfully.")

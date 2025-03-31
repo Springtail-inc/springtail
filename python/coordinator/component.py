@@ -171,7 +171,7 @@ class Component:
         Returns:
             True if successful, False otherwise
         """
-        self.logger.debug("Starting component")
+        self.logger.debug(f"Starting component {self.name}")
 
         if self.is_running():
             self.logger.info(f"Component {self.name} already running")
@@ -314,15 +314,15 @@ class Component:
                 self.process = psutil.Process(self.pid)
 
             running = self.process.is_running()
-            self.logger.debug(f"Process {self.pid} {'is' if running else 'is not'} running")
+            self.logger.debug(f"Process {self.name}, {self.pid} {'is' if running else 'is not'} running")
 
             return running
 
         except psutil.NoSuchProcess:
-            self.logger.warning(f"Process {self.pid} not found")
+            self.logger.warning(f"Process {self.name}, {self.pid} not found")
             return False
         except Exception:
-            self.logger.warning(f"Exception, Process {self.pid} not found")
+            self.logger.warning(f"Exception, Process {self.name}, {self.pid} not found")
             return False
 
     def is_alive(self) -> bool:

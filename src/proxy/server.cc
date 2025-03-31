@@ -513,7 +513,9 @@ namespace springtail::pg_proxy {
         _thread_pool->shutdown();
 
         // wait for keepalive thread to finish
-        _keep_alive_thread.join();
+        if (_keep_alive_thread.joinable()) {
+            _keep_alive_thread.join();
+        }
 
         // flush logger
         if (_logger) {

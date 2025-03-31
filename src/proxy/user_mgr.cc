@@ -160,6 +160,7 @@ namespace springtail::pg_proxy {
 
         LibPqConnection conn;
 
+        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Starting AWS secrets query thread");
         while (!_is_shutting_down()) {
             try {
                 // get the user credentials from AWS secrets manager
@@ -178,6 +179,8 @@ namespace springtail::pg_proxy {
                     std::string password = user["password"];
                     std::string role = user["role"];
                     std::string type = user["type"];
+
+                    PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Found user: {}, {}, {}", username, role, type);
 
                     // only add users with role database
                     if (role != "database") {
