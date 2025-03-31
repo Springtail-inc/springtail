@@ -96,15 +96,15 @@ inline time_trace::Trace& create_trace(FlatTraceSet& set, std::string_view n)
 #define TIME_TRACESET(trace_set) time_trace::FlatTraceSet trace_set
 #define TIME_TRACESET_INIT(trace_set, name) trace_set.init(name)
 #define TIME_TRACESET_UPDATE(trace_set, name, trace) trace_set.update(name, trace)
-#define TIME_TRACESET_RESET(trace_set) trace_set.reset();
-#define TIME_TRACESET_LOG(trace_set) SPDLOG_INFO(trace_set.format());
+#define TIME_TRACESET_RESET(trace_set) trace_set.reset()
+#define TIME_TRACESET_LOG(trace_set) SPDLOG_INFO(trace_set.format())
 
 #define TIME_TRACE(trace) time_trace::Trace trace
 #define TIME_TRACE_START(trace) trace.start()
 #define TIME_TRACE_STOP(trace) trace.stop()
 
 // 'name' must not have white spaces. It is used in symbol names.
-#define TIME_TRACE_SCOPED(trace_set, name) static time_trace::Trace& tr_##name = time_trace::create_trace(trace_set, #name); time_trace::ScopedTrace s_##name(tr_##name);
+#define TIME_TRACE_SCOPED(trace_set, name) static time_trace::Trace& tr_##name = time_trace::create_trace(trace_set, #name); time_trace::ScopedTrace s_##name(tr_##name)
 
 #else
 
