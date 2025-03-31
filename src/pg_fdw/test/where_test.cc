@@ -117,9 +117,9 @@ namespace {
                 // note: this uses new so has a memory leak, but it's fine for the unit test
                 SpringtailTargetColumn *target = new SpringtailTargetColumn;
                 target->attname = new String;
-                target->attname->sval = new char[_columns[i].column_name.size() + 1];
-                strncpy(target->attname->sval, _columns[i].column_name.c_str(), _columns[i].column_name.size());
-                target->attname->sval[_columns[i].column_name.size()] = 0;
+                target->attname->sval = new char[_columns[i].name.size() + 1];
+                strncpy(target->attname->sval, _columns[i].name.c_str(), _columns[i].name.size());
+                target->attname->sval[_columns[i].name.size()] = 0;
                 target->attnum = _columns[i].position;
 
                 _target_list = lappend(_target_list, target);
