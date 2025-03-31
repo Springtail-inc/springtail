@@ -25,8 +25,11 @@ namespace springtail::pg_proxy {
     class ClientSession : public Session
     {
     public:
+        /** Prepared statement cache size */
         constexpr static int STATEMENT_CACHE_SIZE = 100;
-        constexpr static int AUTH_TIMEOUT_SECS = 60;
+
+        /** Default timeout for authentication */
+        constexpr static int AUTH_TIMEOUT_MS = 60*1000; // 60 seconds
 
         ClientSession(const ClientSession&) = delete;
         ClientSession& operator=(const ClientSession&) = delete;

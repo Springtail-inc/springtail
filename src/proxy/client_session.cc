@@ -140,7 +140,7 @@ namespace springtail::pg_proxy {
             auth_done = _auth->process_auth_data(seq_id);
 
             // check for timeout if auth not done
-            if (!auth_done && common::get_time_in_millis() - _start_time > AUTH_TIMEOUT_SECS) {
+            if (!auth_done && common::get_time_in_millis() - _start_time > AUTH_TIMEOUT_MS) {
                 // auth timed out
                 PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session auth timeout", _id);
                 throw ProxyAuthError();

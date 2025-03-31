@@ -49,6 +49,10 @@ ClientAuthorization::process_auth_data(uint64_t seq_id)
             break;
     }
 
+    if (_state == ERROR) {
+        throw ProxyAuthError();
+    }
+
     return (_state == READY);
 }
 
@@ -149,11 +153,12 @@ ClientAuthorization::_process_startup_msg(int32_t remaining, uint64_t seq_id)
     // get user info and store it
     _user = UserMgr::get_instance()->get_user(username, database);
     if (_user == nullptr) {
-        SPDLOG_ERROR("User {} not found", username);
+        SPDLOG_ERROR("User {} not found for database {}", username, database);
         _state = ERROR;
         _error_code = ProxyProtoError::INVALID_PASSWORD;
         return;
     }
+
     _database = database;
     auto optional_db_id = DatabaseMgr::get_instance()->get_database_id(_database);
     if (!optional_db_id.has_value()) {
