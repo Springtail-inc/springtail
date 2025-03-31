@@ -82,19 +82,20 @@ namespace springtail
     static constexpr char SECONDARY_INDEX_QUERY[] =
         "SELECT"
         "    idx.indexrelid AS index_id, "
-        "    i.relname AS index_name, "
+        "    ns.nspname || '.' || i.relname AS index_name, "
         "    a.attname AS column_name, "
         "    s.snum AS secondary_index_num, "
         "    a.attnum AS column_attnum, "
         "    idx.indisunique AS is_unique "
         "FROM pg_index idx "
         "JOIN pg_class i ON i.oid = idx.indexrelid "
+        "JOIN pg_namespace ns ON ns.oid = i.relnamespace "
         "JOIN pg_attribute a ON a.attrelid = idx.indrelid "
         "JOIN generate_subscripts(idx.indkey, 1) s(snum) ON idx.indkey[s.snum] = a.attnum "
         "LEFT JOIN pg_constraint c ON c.conindid = idx.indexrelid AND c.contype = 'p' "
         "WHERE idx.indrelid = {} "
         "  AND c.conname IS NULL "
-        "ORDER BY i.relname, index_name, s.snum ";
+        "ORDER BY ns.nspname,i.relname, index_name, s.snum ";
 
     /** select current xmin:xmax:list of xids in progress from DB as start of this transaction;
      *  result: xmin:xmax:xid,xid,... */
@@ -510,6 +511,7 @@ namespace springtail
             index_info->set_namespace_name(_schema.schema_name);
             index_info->set_is_unique(index.is_unique);
             index_info->set_name(index.name);
+            index_info->set_state(index.state);
 
             for (const auto &column : index.columns) {
                 auto* index_column = index_info->add_columns();
