@@ -3622,7 +3622,7 @@ ALTER TABLE ONLY employees
 COMMIT;
 
 ### sync
-### force_recovery 13
+### force_recovery 10
 
 ## verify
 SELECT * FROM customer_customer_demo;
