@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 
 #include <common/common.hh>
+#include <pg_repl/pg_table_validator.hh>
 #include <pg_repl/libpq_connection.hh>
 #include <proto/pg_copy_table.pb.h>
 #include <storage/field.hh>
@@ -152,7 +153,6 @@ namespace springtail
         bool _oid_flag = false;
 
         PgTableSchema _schema;
-        nlohmann::json _excluded_items;
 
         /**
          * @brief Extract schema from table and store in internal _schema object
@@ -222,8 +222,7 @@ namespace springtail
          * @param db_id database id
          */
         void _get_table_oids(const std::string &query,
-                             std::set<TableMetadata> &table_oids,
-                             uint64_t db_id);
+                             std::set<TableMetadata> &table_oids);
 
         /**
          * @brief Get table oids based on json specifying schema and table includes
@@ -232,13 +231,7 @@ namespace springtail
          * @param db_id database id
          */
         void _get_table_oids(const nlohmann::json &include_json,
-                             std::set<TableMetadata> &table_oids,
-                             uint64_t db_id);
-
-        /**
-         * @brief Get excluded items for a given db_id
-         */
-        void _populate_excluded_items();
+                             std::set<TableMetadata> &table_oids);
 
         /**
          * @brief Copy table from remote system

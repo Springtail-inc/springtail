@@ -344,7 +344,7 @@ namespace {
         PgMsgTable &&msg = _create_table(tid, "x");
 
         // rename col2 => colnew
-        msg.columns[1].column_name = "colnew";
+        msg.columns[1].name = "colnew";
         _alter_table(msg);
 
         // verify system table correctness before finalize
@@ -453,7 +453,7 @@ namespace {
         _finalize();
 
         // rename col2 => coltwo
-        msg.columns[1].column_name = "coltwo";
+        msg.columns[1].name = "coltwo";
         _alter_table(msg);
 
         _finalize();
@@ -468,7 +468,7 @@ namespace {
         _alter_table(msg);
 
         // set change the name of column 3
-        msg.columns[2].column_name = "col3";
+        msg.columns[2].name = "col3";
         _alter_table(msg);
 
         // verify the virtual schema creation from the cache prior to finalize
@@ -659,14 +659,14 @@ namespace {
                 msg.columns.push_back({"col3", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 3, 0, true, false});
                 _alter_table(msg);
 
-                msg.columns.back().column_name = "colthree";
+                msg.columns.back().name = "colthree";
                 _alter_table(msg);
 
                 msg.columns.back().is_nullable = false;
                 msg.columns.back().default_value = "0";
                 _alter_table(msg);
 
-                msg.columns.back().column_name = "colIII";
+                msg.columns.back().name = "colIII";
                 _alter_table(msg);
 
                 msg.columns.pop_back();
