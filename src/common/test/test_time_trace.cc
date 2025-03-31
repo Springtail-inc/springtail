@@ -30,22 +30,37 @@ TEST(TimeTraceTest, Basic)
     TIME_TRACE_STOP(three);
 
     TIME_TRACE_STOP(one);
-
     TIME_TRACESET(traces);
+
+
     TIME_TRACESET_UPDATE(traces, "One", one);
     TIME_TRACESET_UPDATE(traces, "Two", two);
     TIME_TRACESET_UPDATE(traces, "Three", three);
     TIME_TRACESET_LOG(traces);
 
-    EXPECT_EQ(traces.traces[0].first, "One");
-    EXPECT_EQ(traces.traces[0].second.start_count, 1);
-    EXPECT_GE(traces.traces[0].second.timer.elapsed_ms(), 400ms);
-    EXPECT_LE(traces.traces[0].second.timer.elapsed_ms(), 420ms);
-    EXPECT_EQ(traces.traces[1].first, "Two");
-    EXPECT_EQ(traces.traces[1].second.start_count, 2);
-    EXPECT_GE(traces.traces[1].second.timer.elapsed_ms(), 200ms);
-    EXPECT_EQ(traces.traces[2].first, "Three");
-    EXPECT_EQ(traces.traces[2].second.start_count, 1);
-    EXPECT_GE(traces.traces[2].second.timer.elapsed_ms(), 100ms);
-    EXPECT_LE(traces.traces[2].second.timer.elapsed_ms(), 120ms);
+    auto it = traces.traces.begin();
+    EXPECT_EQ(it->first, "One");
+    EXPECT_EQ(it->second.start_count, 1);
+    EXPECT_GE(it->second.timer.elapsed_ms(), 400ms);
+    EXPECT_LE(it->second.timer.elapsed_ms(), 420ms);
+
+    ++it;
+    EXPECT_EQ(it->first, "Two");
+    EXPECT_EQ(it->second.start_count, 2);
+    EXPECT_GE(it->second.timer.elapsed_ms(), 200ms);
+
+    ++it;
+    EXPECT_EQ(it->first, "Three");
+    EXPECT_EQ(it->second.start_count, 1);
+    EXPECT_GE(it->second.timer.elapsed_ms(), 100ms);
+    EXPECT_LE(it->second.timer.elapsed_ms(), 120ms);
+
+    for (int i=0; i != 3; ++i) {
+        TIME_TRACE_SCOPED(traces, "scope");
+        std::this_thread::sleep_for(100ms);
+    }
+
+    auto tr = traces.find("scope");
+    EXPECT_GE(tr.timer.elapsed_ms(), 300ms);
+    EXPECT_EQ(tr.start_count, 3);
 }
