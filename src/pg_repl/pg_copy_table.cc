@@ -95,7 +95,7 @@ namespace springtail
         "LEFT JOIN pg_constraint c ON c.conindid = idx.indexrelid AND c.contype = 'p' "
         "WHERE idx.indrelid = {} "
         "  AND c.conname IS NULL "
-        "ORDER BY ns.nspname,i.relname, index_name, s.snum ";
+        "ORDER BY i.relname, index_name, s.snum ";
 
     /** select current xmin:xmax:list of xids in progress from DB as start of this transaction;
      *  result: xmin:xmax:xid,xid,... */
