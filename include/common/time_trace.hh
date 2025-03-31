@@ -59,24 +59,26 @@ struct FlatTraceSet {
     std::string format();
 };
 
-struct scoped_trace
+struct ScopedTrace
 {
     Trace& _t;
 
-    scoped_trace(Trace& t) : _t{t} {
+    explicit ScopedTrace(Trace& t) : _t{t} {
         _t.start();
     }
 
-    ~scoped_trace() {
+    ~ScopedTrace() {
         _t.stop();
     }
+
+    ScopedTrace(const ScopedTrace&) = delete;
 };
 
 /** 
  * This is a place for sharing traces across translation units.
  * The variable is instantiated in time_trace.cc of the common lib.
  */
-extern time_trace::FlatTraceSet traces;
+extern time_trace::FlatTraceSet traces;//NOSONAR reason: intended to be modified
 
 /**
  * @brief Initialize a new trace in the given set. This function is intended
@@ -101,7 +103,7 @@ inline time_trace::Trace& create_trace(FlatTraceSet& set, std::string_view n)
 #define TIME_TRACE_START(trace) trace.start()
 #define TIME_TRACE_STOP(trace) trace.stop()
 
-#define TIME_TRACE_SCOPED(trace_set, name) static time_trace::Trace& tr = time_trace::create_trace(trace_set, name); time_trace::scoped_trace s(tr);
+#define TIME_TRACE_SCOPED(trace_set, name) static time_trace::Trace& tr = time_trace::create_trace(trace_set, name); time_trace::ScopedTrace s(tr);
 
 #else
 

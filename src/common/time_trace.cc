@@ -10,12 +10,9 @@ Trace&
 FlatTraceSet::init(std::string_view name)
 {
     auto it = std::ranges::find_if(traces, [&name](auto const& v) { return v.first == name; });
-    if (it == traces.end()) {
-        List::value_type& a = traces.emplace_back(Item(name, Trace()));
-        return a.second;
-    }
-    it->second.reset();
-    return it->second;
+    CHECK(it == traces.end());
+    List::value_type& a = traces.emplace_back(Item(name, Trace()));
+    return a.second;
 }
 
 Trace&
