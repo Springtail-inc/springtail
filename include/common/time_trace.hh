@@ -103,7 +103,8 @@ inline time_trace::Trace& create_trace(FlatTraceSet& set, std::string_view n)
 #define TIME_TRACE_START(trace) trace.start()
 #define TIME_TRACE_STOP(trace) trace.stop()
 
-#define TIME_TRACE_SCOPED(trace_set, name) static time_trace::Trace& tr = time_trace::create_trace(trace_set, name); time_trace::ScopedTrace s(tr);
+// 'name' must not have white spaces. It is used in symbol names.
+#define TIME_TRACE_SCOPED(trace_set, name) static time_trace::Trace& tr_##name = time_trace::create_trace(trace_set, #name); time_trace::ScopedTrace s_##name(tr_##name);
 
 #else
 

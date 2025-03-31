@@ -36,7 +36,6 @@ TEST(TimeTraceTest, Basic)
     TIME_TRACESET_UPDATE(traces, "One", one);
     TIME_TRACESET_UPDATE(traces, "Two", two);
     TIME_TRACESET_UPDATE(traces, "Three", three);
-    TIME_TRACESET_LOG(traces);
 
     auto it = traces.traces.begin();
     EXPECT_EQ(it->first, "One");
@@ -56,11 +55,13 @@ TEST(TimeTraceTest, Basic)
     EXPECT_LE(it->second.timer.elapsed_ms(), 120ms);
 
     for (int i=0; i != 3; ++i) {
-        TIME_TRACE_SCOPED(traces, "scope");
+        TIME_TRACE_SCOPED(traces, scope_test);
         std::this_thread::sleep_for(100ms);
     }
 
-    auto tr = traces.find("scope");
+    auto tr = traces.find("scope_test");
     EXPECT_GE(tr.timer.elapsed_ms(), 300ms);
     EXPECT_EQ(tr.start_count, 3);
+
+    TIME_TRACESET_LOG(traces);
 }

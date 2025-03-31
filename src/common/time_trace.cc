@@ -4,7 +4,8 @@
 
 namespace springtail::time_trace {
 
-time_trace::FlatTraceSet traces;
+time_trace::FlatTraceSet traces; //NOSONAR reason: intended to be modified
+
 
 Trace&
 FlatTraceSet::init(std::string_view name)
@@ -19,6 +20,7 @@ Trace&
 FlatTraceSet::find(std::string_view name)
 {
     auto it = std::ranges::find_if(traces, [&name](auto const& v) { return v.first == name; });
+    CHECK(it != traces.end());
     return it->second;
 }
 
