@@ -5,7 +5,6 @@
 #include <functional>
 #include <optional>
 
-#include <arm_neon.h>
 #include <fmt/format.h>
 
 namespace springtail {
