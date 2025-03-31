@@ -25,7 +25,7 @@ jobs:
     name: test
     # Revert this  
     runs-on: image-builder
-    timeout-minutes: 30
+    timeout-minutes: 360
     container:
       image: ${{ inputs.builder_image_version_tag }}
       credentials:
