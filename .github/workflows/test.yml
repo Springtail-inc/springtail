@@ -133,7 +133,7 @@ jobs:
           sudo -u postgres psql -c "DROP DATABASE springtail"
           service postgresql stop
 
-        # Revert this- name: Unit Test Report
+      - name: Unit Test Report
         uses: dorny/test-reporter@v1
         if: success() || failure()      # run this step even if previous step failed
         with:
