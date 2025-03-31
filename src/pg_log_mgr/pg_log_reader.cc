@@ -187,9 +187,17 @@ namespace springtail::pg_log_mgr {
                                      int32_t tid,
                                      const PgMsgTupleData &data)
     {
+        XidLsn xidlsn(current_xid);
+
+        // XXX check if the system is aware of this table -- if not, need to skip this mutation
+        if (!txn->table_map.contains(tid) && !SchemaMgr::known_table(_db, tid, xidlsn)) {
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Skip mutation due to unknown table: oid={} pg_xid={}\n", tid, pg_xid);
+            return;
+        }
+
         // check if we should skip the mutation due to ongoing table sync
         if (SyncTracker::get_instance()->should_skip(_db, tid, _pg_xid)) {
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Skip mutation: oid={} pg_xid={}\n", tid, pg_xid);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Skip mutation due to ongoing sync: oid={} pg_xid={}\n", tid, pg_xid);
             return;
         }
 
@@ -200,8 +208,7 @@ namespace springtail::pg_log_mgr {
         auto &entry = txn->table_map[tid];
         if (entry.extent == nullptr) {
             if (entry.schema == nullptr) {
-                XidLsn current(current_xid);
-                entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, current);
+                entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, xidlsn);
                 entry.update_schema();
             }
 

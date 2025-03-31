@@ -122,33 +122,45 @@ namespace springtail::pg_log_mgr {
 
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Last committed XID: {}", next_xid-1);
 
-        // XXX currently we perform full recovery any time that the state is not INITIALIZE, but if
-        //     we had a clean shutdown mechanism, we could start up without any recovery
+        // Note: If we are in recovery then we need to start the copy and reader threads first so
+        //       that we can perform log replay, then we can start streaming from the last LSN.  But
+        //       if we are in initialization, then we actually need to start the streaming first,
+        //       then start the table copies so that we don't miss an mutations.
         uint64_t lsn = INVALID_LSN;
         bool do_init = (state == redis::db_state_change::REDIS_STATE_INITIALIZE);
-        PgLogRecovery recovery(_db_id, _repl_log_path, _xact_log_path, _pg_log_reader);
         if (do_init) {
             _startup_init();
+
+            // start streaming immediately so that we can't miss any mutations to copied tables
+            _start_streaming(lsn, true);
+
+            // initiate table copy thread; this will perform the initial copy of all tables
+            _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
+
+            // start the log reader thread since it is also required for processing table copy completions
+            _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
+
         } else {
+            // XXX currently we perform full recovery any time that the state is not INITIALIZE, but if
+            //     we had a clean shutdown mechanism, we could start up without any recovery
+            PgLogRecovery recovery(_db_id, _repl_log_path, _xact_log_path, _pg_log_reader);
             lsn = recovery.repair_logs();
             _startup_running();
-        }
 
-        // initiate table copy thread; do this before we start replaying the log since it's needed
-        // for table re-syncs that might have to be run
-        _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
+            // initiate table copy thread; do this before we start replaying the log since it's needed
+            // for table re-syncs that might have to be run
+            _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
 
-        // start the log reader thread since it is also used to process recovery messages
-        _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
-
-        // note: we wait to perform these actions until the log reader has been started
-        if (!do_init) {
+            // start the log reader thread since it is also used to process recovery messages
+            _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
+            
+            // note: we wait to perform these actions until the log reader has been started
             // perform the any required log recovery here
             recovery.replay_logs();
-        }
 
-        // system is ready to start streaming
-        _start_streaming(lsn, do_init);
+            // system is ready to start streaming
+            _start_streaming(lsn, false);
+        }
     }
 
     void
