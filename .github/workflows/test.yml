@@ -23,7 +23,8 @@ on:
 jobs:
   test:
     name: test
-    runs-on: warp-ubuntu-latest-arm64-4x
+    # Revert this  
+    runs-on: image-builder
     timeout-minutes: 30
     container:
       image: ${{ inputs.builder_image_version_tag }}
@@ -132,7 +133,7 @@ jobs:
           sudo -u postgres psql -c "DROP DATABASE springtail"
           service postgresql stop
 
-      - name: Unit Test Report
+        # Revert this- name: Unit Test Report
         uses: dorny/test-reporter@v1
         if: success() || failure()      # run this step even if previous step failed
         with:
@@ -162,6 +163,9 @@ jobs:
           cd python/testing
           service postgresql start
           ./startup.sh -s data_init.sql
+
+          # Revert this
+          sleep infinity
           
           python3 test_runner.py -c config.yaml -j /__w/springtail/springtail/integration-test-report.xml 2>&1 | tee tmplog
           
