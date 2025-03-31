@@ -85,10 +85,6 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
                     return (a._btree_i == b._btree_i);
                 }
 
-                virtual void next() = 0;
-                virtual void prev() = 0;
-                virtual const Extent::Row & row() const = 0;
-
                 const Table *_table{}; ///< A pointer to the Table object this iterator is for.
                 BTreePtr _btree; ///< A pointer to the BTree of the primary index.
                 BTree::Iterator _btree_i; ///< An iterator into the BTree.
@@ -115,10 +111,10 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
                 Primary(Primary&&) noexcept = default;
                 virtual ~Primary() = default;
 
-                void next() override;
-                void prev() override;
+                void next();
+                void prev();
 
-                const Extent::Row& row() const override 
+                const Extent::Row& row() const 
                 {
                     return *_page_i;
                 }
@@ -157,9 +153,9 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
                 Secondary(Secondary&&) = default;
                 virtual ~Secondary() = default;
 
-                void next() override;
-                void prev() override;
-                const Extent::Row& row() const override;
+                void next();
+                void prev();
+                const Extent::Row& row() const;
 
                 friend bool operator==(const Secondary& a, const Secondary& b) {
                     const Tracker& ta = a;
@@ -187,7 +183,12 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
             using reference         = const Extent::Row &;  // or also value_type&
 
             reference operator*() { 
-                return tracker().row();
+                if (auto p = std::get_if<Primary>(&_tracker)) {
+                    return p->row();
+                }
+                auto p = std::get_if<Secondary>(&_tracker);
+                assert(p);
+                return p->row();
             }
             pointer operator->() { return &*(*this); }
 
@@ -195,7 +196,13 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
              * Move the iterator forward to the next row.
              */
             Iterator& operator++() {
-                tracker().next();
+                if (auto p = std::get_if<Primary>(&_tracker)) {
+                    p->next();
+                } else if (auto p = std::get_if<Secondary>(&_tracker)) {
+                    p->next();
+                } else {
+                    assert(false);
+                }
                 return *this;
             }
 
@@ -203,7 +210,13 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
              * Move the iterator backward to the previous row.
              */
             Iterator& operator--() {
-                tracker().prev();
+                if (auto p = std::get_if<Primary>(&_tracker)) {
+                    p->prev();
+                } else if (auto p = std::get_if<Secondary>(&_tracker)) {
+                    p->prev();
+                } else {
+                    assert(false);
+                }
                 return *this;
             }
 
@@ -267,18 +280,6 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
                      ExtentSchemaPtr index_schema)
             { 
                 _tracker.emplace<Secondary>(table, btree, btree_i, index_schema);
-            }
-
-            Tracker& tracker() 
-            {
-                if (auto p = std::get_if<Primary>(&_tracker)) {
-                    return *p;
-                } else if (auto p = std::get_if<Secondary>(&_tracker)) {
-                    return *p;
-                } else {
-                    assert(false);
-                }
-                throw std::runtime_error("Bad iterator tracker");
             }
         };
 
