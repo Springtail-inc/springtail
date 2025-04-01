@@ -627,6 +627,7 @@ namespace springtail::pg_log_mgr {
             {
                 auto &insert = std::get<PgMsgInsert>(msg->msg);
                 int32_t pg_xid = (msg->is_streaming) ? insert.xid : _current_xact->xid;
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "INSERT pg_xid={} tid={}", pg_xid, insert.rel_id);
                 _current_batch->add_mutation<PgMsgEnum::INSERT>(this->get_current_xid(), pg_xid,
                                                                 insert.rel_id, insert.new_tuple);
                 break;
@@ -635,6 +636,7 @@ namespace springtail::pg_log_mgr {
             {
                 auto &remove = std::get<PgMsgDelete>(msg->msg);
                 int32_t pg_xid = (msg->is_streaming) ? remove.xid : _current_xact->xid;
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "DELETE pg_xid={} tid={}", pg_xid, remove.rel_id);
                 _current_batch->add_mutation<PgMsgEnum::DELETE>(this->get_current_xid(), pg_xid,
                                                                 remove.rel_id, remove.tuple);
                 break;
@@ -643,6 +645,7 @@ namespace springtail::pg_log_mgr {
             {
                 auto &update = std::get<PgMsgUpdate>(msg->msg);
                 int32_t pg_xid = (msg->is_streaming) ? update.xid : _current_xact->xid;
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "UPDATE pg_xid={} tid={}", pg_xid, update.rel_id);
                 if (update.old_type == 0) {
                     _current_batch->add_mutation<PgMsgEnum::UPDATE>(this->get_current_xid(), pg_xid,
                                                                     update.rel_id, update.new_tuple);
@@ -658,6 +661,7 @@ namespace springtail::pg_log_mgr {
 
         case PgMsgEnum::TRUNCATE:
             {
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "TRUNCATE pg_xid={}", this->get_current_xid());
                 _current_batch->truncate(this->get_current_xid(),
                                          std::get<PgMsgTruncate>(msg->msg));
                 break;
@@ -794,6 +798,7 @@ namespace springtail::pg_log_mgr {
         // write the pg_xid -> xid mapping
         _xact_log_writer.log(xact->xid, xid);
 
+        // note: this check should only be false when re-processing records during recovery
         if (xid > _committed_xid) {
             // Record latency between postgres commit time and when we process it
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(

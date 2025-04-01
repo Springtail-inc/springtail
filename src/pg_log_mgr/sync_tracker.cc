@@ -81,6 +81,14 @@ namespace springtail::pg_log_mgr {
 
         // make a record of the table mapping(s)
         auto record = std::make_shared<XidRecord>(sync_msg);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "XidRecord: pg_xid={} xmax={} xmin={}",
+                            sync_msg.pg_xid, sync_msg.xmax, sync_msg.xmin);
+        for (auto entry : sync_msg.xips) {
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "XidRecord: inflight={}", entry);
+        }
+        for (const auto &entry : sync_msg.tids) {
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "XidRecord: tid={}", entry.first);
+        }
 
         // make sure that the database has entries in the maps
         auto &db_map = (db_i == _sync_map.end()) ? _sync_map[sync_msg.db_id] : db_i->second;
