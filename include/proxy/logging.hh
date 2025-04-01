@@ -15,7 +15,8 @@ namespace springtail::pg_proxy {
         LOG_LEVEL_DEBUG1 = 1, // highest level, most priority
         LOG_LEVEL_DEBUG2 = 2,
         LOG_LEVEL_DEBUG3 = 3,
-        LOG_LEVEL_DEBUG4 = 4, // lowest level, least priority
+        LOG_LEVEL_DEBUG4 = 4,
+        LOG_LEVEL_DEBUG5 = 5 // lowest level, least priority
     };
 
     /** Global log level for the proxy -- defined in server.cc */
