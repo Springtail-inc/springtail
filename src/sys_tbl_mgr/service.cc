@@ -1323,7 +1323,7 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
             proto::IndexInfo index_info;
             {
                 // acquire a shared lock to ensure no one is doing a finalize
-                boost::shared_lock lock(_read_mutex);
+                boost::shared_lock _idx_read_lock(_read_mutex);
                 index_info = _get_index_info(*index_info_request);
             }
 
