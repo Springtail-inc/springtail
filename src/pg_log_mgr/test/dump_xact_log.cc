@@ -2,7 +2,7 @@
 
 #include <common/init.hh>
 
-#include <pg_log_mgr/pg_xact_log_reader.hh>
+#include <pg_log_mgr/pg_xact_log_reader_mmap.hh>
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include "common/init.hh"
 
@@ -20,11 +20,10 @@ int main(int argc, char *argv[])
 
     std::vector<std::unique_ptr<ServiceRunner>> service_runners;
     service_runners.emplace_back(std::make_unique<ExceptionRunner>());
-    service_runners.emplace_back(std::make_unique<IOMgrRunner>());
 
     springtail_init_custom(service_runners);
 
-    PgXactLogReader reader(log_dir);
+    PgXactLogReaderMmap reader(log_dir);
     reader.begin();
 
     bool has_more;

@@ -160,6 +160,7 @@ namespace springtail::pg_proxy {
 
         LibPqConnection conn;
 
+        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Starting AWS secrets query thread");
         while (!_is_shutting_down()) {
             try {
                 // get the user credentials from AWS secrets manager
@@ -178,6 +179,8 @@ namespace springtail::pg_proxy {
                     std::string password = user["password"];
                     std::string role = user["role"];
                     std::string type = user["type"];
+
+                    PROXY_DEBUG(LOG_LEVEL_DEBUG5, "Found user: {}, {}, {}", username, role, type);
 
                     // only add users with role database
                     if (role != "database") {
@@ -361,4 +364,25 @@ namespace springtail::pg_proxy {
             }
         }
     }
+
+    UserPtr
+    UserMgr::get_user(const std::string &username, const std::string &database) const
+    {
+        UserPtr user = std::make_shared<User>(username);
+        std::shared_lock lock(_mutex);
+
+        auto it = _users.find(user);
+        if (it != _users.end()) {
+            if ((*it)->find_database(database)) {
+                return *it;
+            } else {
+                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "User {} not allowed to access database {}", username, database);
+            }
+        } else {
+            PROXY_DEBUG(LOG_LEVEL_DEBUG1, "User {} not found", username);
+        }
+
+        return nullptr;
+    }
+
 } // namespace springtail::pg_proxy

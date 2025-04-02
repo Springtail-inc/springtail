@@ -39,16 +39,17 @@ class PostgresComponent(Component):
         Returns:
             True if successful, False otherwise
         """
-        self.logger.debug("Starting Postgres")
-        if self.is_production:
-            run_command('sudo', ['systemctl', 'restart', f'postgresql@{self.version}-main'])
-        else:
-            run_command('sudo', ['service', 'postgresql', 'restart'])
-
-        # since we have restarted, clear the pid
+        # since we are restarting, clear the pid
         self.pid = None
         self.process = None
         self.state = ComponentState.STARTING
+
+        self.logger.debug("Re-starting Postgres")
+        if self.is_production:
+            run_command('sudo', ['systemctl', 'stop', f'postgresql@{self.version}-main'])
+            run_command('sudo', ['systemctl', 'start', f'postgresql@{self.version}-main'])
+        else:
+            run_command('sudo', ['service', 'postgresql', 'restart'])
 
         # Wait for process to start
         timeout = time.time() + self.startup_timeout
@@ -142,6 +143,7 @@ class PostgresComponent(Component):
         try:
             run_command('sudo', ['-u', 'postgres', 'psql', '-c', 'select 1'])
         except Exception as e:
+            self.logger.error(f"Failed to connect to Postgres: {str(e)}")
             return False
 
         return True

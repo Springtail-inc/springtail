@@ -44,7 +44,7 @@ typedef struct ScramState {
 } ScramState;
 
 typedef struct PgUser {
-    char passwd[1024];
+    const char *passwd;
 	const uint8_t *scram_ClientKey; // size [32] pointer into ScramState
 	const uint8_t *scram_ServerKey; // size [32], pointer into ScramState
 	bool has_scram_keys;		/* true if the above two are valid */

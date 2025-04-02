@@ -211,18 +211,7 @@ namespace springtail::pg_proxy {
          * @param database database name
          * @return UserPtr user or nullptr if not found
          */
-        UserPtr get_user(const std::string &username, const std::string &database) const
-        {
-            UserPtr user = std::make_shared<User>(username);
-            std::shared_lock lock(_mutex);
-            auto it = _users.find(user);
-            if (it != _users.end()) {
-                if ((*it)->find_database(database)) {
-                    return *it;
-                }
-            }
-            return nullptr;
-        }
+        UserPtr get_user(const std::string &username, const std::string &database) const;
 
     protected:
         /**
@@ -316,7 +305,6 @@ namespace springtail::pg_proxy {
          * @param conn - connection object
          */
         void _connect_primary_db(LibPqConnection &conn);
-
     };
 
     class UserMgrRunner : public ServiceRunner {

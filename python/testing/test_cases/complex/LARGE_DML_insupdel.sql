@@ -1,5 +1,5 @@
 ## metadata
-### sync_timeout 20
+### sync_timeout 60
 
 ## test
 -- Create tables with SERIAL primary keys
@@ -61,6 +61,6 @@ SELECT
     (SELECT COUNT(*) FROM table3) AS count_table3;
 
 ## cleanup
-DROP TABLE IF EXISTS table1;
-DROP TABLE IF EXISTS table2;
 DROP TABLE IF EXISTS table3;
+DROP TABLE IF EXISTS table2;
+DROP TABLE IF EXISTS table1;

@@ -3,6 +3,7 @@
 #include <openssl/err.h>
 
 #include <common/logging.hh>
+#include <common/common.hh>
 
 #include <pg_repl/pg_types.hh>
 
@@ -36,6 +37,7 @@ namespace springtail::pg_proxy {
 
         // create the client auth object
         _auth = std::make_shared<ClientAuthorization>(connection, _id, _pid, _cancel_key);
+        _start_time = common::get_time_in_millis();
     }
 
     ClientSession::~ClientSession()
@@ -134,6 +136,14 @@ namespace springtail::pg_proxy {
         try {
             // process the auth data, it may throw an exception, or just set _state to ERROR
             auth_done = _auth->process_auth_data(seq_id);
+
+            // check for timeout if auth not done
+            if (!auth_done && common::get_time_in_millis() - _start_time > AUTH_TIMEOUT_MS) {
+                // auth timed out
+                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session auth timeout", _id);
+                throw ProxyAuthError();
+            }
+
         } catch (ProxyAuthError &e) {
             // print backtrace
             LOG_ERROR(LOG_PROXY, "[C:{}] Client session auth error: {}", _id, e.what());

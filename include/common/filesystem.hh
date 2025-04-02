@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <filesystem>
+#include <functional>
 #include <optional>
 
 #include <fmt/format.h>
@@ -255,12 +256,13 @@ namespace springtail {
          * @brief This function removes all the files from directory with the timestamp id
          *          less than given timestamp limit
          *
+         * @tparam Compare  - template parameter for comparison function
          * @param dir       - directory path
          * @param prefix    - file prefix
          * @param suffix    - file suffix
          * @param timestamp_limit   - timestamp id limit
          */
-        static void
+        template <typename Compare = std::less<uint64_t>> static void
         cleanup_files_from_dir(const std::filesystem::path& dir,
                                std::string_view prefix,
                                std::string_view suffix,
@@ -281,7 +283,7 @@ namespace springtail {
 
                     // Extract the timestamp from the file name
                     auto timestamp = extract_timestamp_from_file(path, prefix, suffix);
-                    if (timestamp.has_value() && timestamp.value() < timestamp_limit) {
+                    if (timestamp.has_value() && Compare()(timestamp.value(), timestamp_limit)) {
                         if (!archive) {
                             std::filesystem::remove(path);
                         } else {

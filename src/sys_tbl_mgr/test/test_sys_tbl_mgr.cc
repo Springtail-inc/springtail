@@ -344,7 +344,7 @@ namespace {
         PgMsgTable &&msg = _create_table(tid, "x");
 
         // rename col2 => colnew
-        msg.columns[1].column_name = "colnew";
+        msg.columns[1].name = "colnew";
         _alter_table(msg);
 
         // verify system table correctness before finalize
@@ -453,7 +453,7 @@ namespace {
         _finalize();
 
         // rename col2 => coltwo
-        msg.columns[1].column_name = "coltwo";
+        msg.columns[1].name = "coltwo";
         _alter_table(msg);
 
         _finalize();
@@ -468,16 +468,20 @@ namespace {
         _alter_table(msg);
 
         // set change the name of column 3
-        msg.columns[2].column_name = "col3";
+        msg.columns[2].name = "col3";
         _alter_table(msg);
 
         // verify the virtual schema creation from the cache prior to finalize
         _next_lsn();
         auto schema_check =
             _client->get_target_schema(_db, tid, {_xid.xid - 1, constant::MAX_LSN}, _xid);
+#if ENABLE_SCHEMA_MUTATES
         ASSERT_EQ(schema_check->history.size(), 2);
         ASSERT_EQ(schema_check->history[0].update_type, SchemaUpdateType::NEW_COLUMN);
         ASSERT_EQ(schema_check->history[1].update_type, SchemaUpdateType::NAME_CHANGE);
+#else
+        ASSERT_EQ(schema_check->history.size(), 0);
+#endif
 
         _finalize();
 
@@ -554,11 +558,18 @@ namespace {
         ASSERT_EQ(metadata->stats.row_count, 30);
 
         schema_meta = _client->get_schema(_db, tid, {check_xid, constant::MAX_LSN});
+#if ENABLE_SCHEMA_MUTATES
         ASSERT_EQ(schema_meta->columns.size(), 3);
         ASSERT_EQ(schema_meta->columns[0].name, "col1");
         ASSERT_EQ(schema_meta->columns[1].name, "coltwo");
         ASSERT_EQ(schema_meta->columns[2].name, "col3");
         ASSERT_EQ(schema_meta->indexes.size(), 2);
+#else
+        ASSERT_EQ(schema_meta->columns.size(), 2);
+        ASSERT_EQ(schema_meta->columns[0].name, "col1");
+        ASSERT_EQ(schema_meta->columns[1].name, "coltwo");
+        ASSERT_EQ(schema_meta->indexes.size(), 2);
+#endif
 
         // XID 5
         ++check_xid;
@@ -580,6 +591,7 @@ namespace {
         ASSERT_EQ(schema_meta->columns[0].name, "col1");
         ASSERT_EQ(schema_meta->columns[1].name, "col2");
 
+#if ENABLE_SCHEMA_MUTATES
         ASSERT_EQ(schema_meta->history.size(), 6);
 
         ASSERT_EQ(schema_meta->history[0].update_type, SchemaUpdateType::REMOVE_COLUMN);
@@ -607,6 +619,21 @@ namespace {
         ASSERT_EQ(schema_meta->history[5].update_type, SchemaUpdateType::REMOVE_COLUMN);
         ASSERT_EQ(schema_meta->history[5].name, "col3");
         ASSERT_EQ(schema_meta->history[5].xid, check_xid);
+#else
+        ASSERT_EQ(schema_meta->history.size(), 3);
+
+        ASSERT_EQ(schema_meta->history[0].update_type, SchemaUpdateType::REMOVE_COLUMN);
+        ASSERT_EQ(schema_meta->history[0].name, "col1");
+        ASSERT_EQ(schema_meta->history[0].xid, check_xid);
+
+        ASSERT_EQ(schema_meta->history[1].update_type, SchemaUpdateType::NAME_CHANGE);
+        ASSERT_EQ(schema_meta->history[1].name, "coltwo");
+        ASSERT_EQ(schema_meta->history[1].xid, check_xid - 2);
+
+        ASSERT_EQ(schema_meta->history[2].update_type, SchemaUpdateType::REMOVE_COLUMN);
+        ASSERT_EQ(schema_meta->history[2].name, "coltwo");
+        ASSERT_EQ(schema_meta->history[2].xid, check_xid);
+#endif
     }
 
     // Threaded test with interleaving of DDL and DML interactions with the system tables along with
@@ -632,14 +659,14 @@ namespace {
                 msg.columns.push_back({"col3", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 3, 0, true, false});
                 _alter_table(msg);
 
-                msg.columns.back().column_name = "colthree";
+                msg.columns.back().name = "colthree";
                 _alter_table(msg);
 
                 msg.columns.back().is_nullable = false;
                 msg.columns.back().default_value = "0";
                 _alter_table(msg);
 
-                msg.columns.back().column_name = "colIII";
+                msg.columns.back().name = "colIII";
                 _alter_table(msg);
 
                 msg.columns.pop_back();

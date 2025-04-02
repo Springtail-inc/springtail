@@ -328,9 +328,6 @@ namespace springtail::pg_proxy {
 
         /** list of database instances */
         std::set<DatabaseInstancePtr> _replicas;
-
-        /** get least loaded replica */
-        DatabaseInstancePtr _get_replica();
     };
     using DatabaseReplicaSetPtr = std::shared_ptr<DatabaseReplicaSet>;
 

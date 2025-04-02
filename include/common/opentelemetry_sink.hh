@@ -29,18 +29,29 @@ public:
         auto exporter = std::unique_ptr<opentelemetry::sdk::logs::LogRecordExporter>(
             new opentelemetry::exporter::otlp::OtlpHttpLogRecordExporter(options));
 
+        // Define global resource attributes
+        char *service_name = std::getenv("SERVICE_NAME");
+        char *instance_key = std::getenv("INSTANCE_KEY");
+        opentelemetry::sdk::resource::Resource resource = opentelemetry::sdk::resource::Resource::Create({
+            {"instance_id", std::to_string(springtail::Properties::get_db_instance_id())},
+            {"organization_id", springtail::Properties::get_organization_id()},
+            {"account_id", springtail::Properties::get_account_id()},
+            {"service_name", (service_name != nullptr) ? service_name : "springtail"},
+            {"instance_key", (instance_key != nullptr) ? instance_key : "unknown"}
+        });
+
         // Create a processor with the exporter
         auto processor = std::unique_ptr<opentelemetry::sdk::logs::LogRecordProcessor>(
             new opentelemetry::sdk::logs::BatchLogRecordProcessor(std::move(exporter)));
 
         // Create and set the logger provider
         auto provider = std::shared_ptr<opentelemetry::logs::LoggerProvider>(
-            new opentelemetry::sdk::logs::LoggerProvider(std::move(processor)));
+            new opentelemetry::sdk::logs::LoggerProvider(std::move(processor), resource));
         opentelemetry::logs::Provider::SetLoggerProvider(provider);
 
         // Get the logger with required parameters
         _logger = provider->GetLogger(
-            logger_name,                    // logger name
+            logger_name,                   // logger name
             "",                            // library name
             OPENTELEMETRY_SDK_VERSION,     // library version
             "",                            // schema URL
@@ -106,11 +117,22 @@ private:
     std::vector<std::pair<std::string, std::string>>
     _get_context_attributes(const spdlog::details::log_msg &msg)
     {
-        std::vector<std::pair<std::string, std::string>> attributes = _attributes;
-        attributes[0].second = std::move(msg.source.filename ? msg.source.filename : "");
-        std::string line_str = std::to_string(msg.source.line);
-        attributes[1].second = std::move(line_str);
-        attributes[2].second = std::move(msg.source.funcname ? msg.source.funcname : "");
+        // Instance properties
+        auto db_instance_id = springtail::Properties::get_db_instance_id();
+        std::string organization_id = springtail::Properties::get_organization_id();
+        std::string account_id = springtail::Properties::get_account_id();
+
+        std::vector<std::pair<std::string, std::string>> attributes;
+
+        // Source properties
+        attributes.emplace_back("source_file", msg.source.filename ? msg.source.filename : "");
+        attributes.emplace_back("source_line", std::to_string(msg.source.line));
+        attributes.emplace_back("source_func", msg.source.funcname ? msg.source.funcname : "");
+
+        // Instance properties
+        attributes.emplace_back("db_instance_id", std::to_string(db_instance_id));
+        attributes.emplace_back("organization_id", organization_id);
+        attributes.emplace_back("account_id", account_id);
 
         // Transaction properties
         for (const auto& key : springtail::logging::Logger::get_context_variables()) {
