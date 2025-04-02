@@ -280,7 +280,10 @@ class TestCase:
 
     def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool) -> list:
         """Execute the provided SQL using the provided cursor."""
-        logging.debug(f'Execute SQL: {sql}')
+        conn_info = cursor.connection.info
+        # log the connection info
+        conn_string = f'{conn_info.host}:{conn_info.port}:{conn_info.dbname}'
+        logging.debug(f'<{conn_string}> Execute SQL: {sql}')
         try:
             cursor.execute(sql)
 
@@ -542,7 +545,14 @@ class TestCase:
         # construct a connection for each transaction in the test
         for txn in self._txns:
             logging.debug(f'Connecting to database for txn "{txn}"')
-            self._connections[txn] = springtail.connect_instance(self._props, self._primary_name)
+
+            # Determine what config to use for the test phase
+            integration_test_config = self._props.get_integration_test_config()
+            use_proxy_for_test = integration_test_config["use_proxy_for_test"] if "use_proxy_for_test" in integration_test_config else False
+            if use_proxy_for_test:
+                self._connections[txn] = springtail.connect_proxy(self._props, self._primary_name)
+            else:
+                self._connections[txn] = springtail.connect_db_instance(self._props, self._primary_name)
             self._connections[txn].autocommit = self._metadata['autocommit']
 
         # connect to the replica database -- used to perform any 'sync' directives
@@ -614,6 +624,15 @@ class TestCase:
 
         # execute the verification commands against both databases, compare the results
         for command in self._sections['verify'][0]['sequential']:
+            # Determine what config to use for verify phase
+            integration_test_config = self._props.get_integration_test_config()
+            use_proxy_for_verify = integration_test_config["use_proxy_for_verify"] if "use_proxy_for_verify" in integration_test_config else False
+
+            if use_proxy_for_verify:
+                self._connections[command['txn']] = springtail.connect_proxy(self._props, self._primary_name)
+            else:
+                self._connections[command['txn']] = springtail.connect_db_instance(self._props, self._primary_name)
+
             primary_result = self._execute_command(command, True)
             replica_result = self._replica_command(command)
 

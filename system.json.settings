@@ -150,6 +150,7 @@
 	    "enabled": true
     },
     "integration_test_config": {
-	    "use_proxy": false
+	    "use_proxy_for_test": false,
+        "use_proxy_for_verify": false
     }
 }
