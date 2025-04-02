@@ -80,7 +80,7 @@ namespace springtail::pg_log_mgr {
             return _next_xid.fetch_add(1, std::memory_order_relaxed);
         }
 
-        bool archive_logs() { return _archive_logs; }
+        bool archive_logs() const { return _archive_logs; }
 
     private:
         class Batch {

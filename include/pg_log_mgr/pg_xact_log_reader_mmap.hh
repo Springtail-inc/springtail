@@ -20,7 +20,7 @@ public:
      * @param base_dir - directory where the log files are located
      * @param last_xid - last allowed transaction id
      */
-    explicit PgXactLogReaderMmap(const std::filesystem::path &base_dir, uint64_t last_xid = UINT64_MAX, bool archive = false);
+    explicit PgXactLogReaderMmap(const std::filesystem::path &base_dir, uint64_t last_xid = std::numeric_limits<uint64_t>::max(), bool archive = false);
 
     /**
      * @brief Destroy the Pg Xact Log Reader Mmap object
