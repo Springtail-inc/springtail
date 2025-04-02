@@ -57,14 +57,16 @@ class Coordinator:
         self.shutdown_event = threading.Event()
         self.scheduler = None
         self.logger = logging.getLogger('springtail')
+        self.debug = debug
 
         # Get the service type
-        self.service_name = service_name
+        self.service_name : str = service_name
         if not self.service_name:
-            self.service_name = os.environ.get('SERVICE_NAME')
-            if not self.service_name:
+            sn_env = os.environ.get('SERVICE_NAME')
+            if not sn_env:
                 self.logger.error("Service name not provided")
                 raise ValueError("Service name not provided")
+            self.service_name = sn_env
 
         # Check the service name
         if not self.service_name in ['ingestion', 'fdw', 'proxy']:
@@ -200,7 +202,7 @@ class Coordinator:
         self.scheduler.shutdown()
 
 
-    def shutdown(self, signum: int):
+    def shutdown(self, signum: int = 0):
         """
         Shutdown the coordinator.
         """
@@ -287,6 +289,7 @@ class Coordinator:
             except Exception as e:
                 continue
         self.logger.info("Ingestion service is ready")
+
 
 def parse_arguments():
     """Parse the command line arguments."""

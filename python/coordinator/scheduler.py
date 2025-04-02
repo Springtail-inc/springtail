@@ -132,6 +132,8 @@ class Scheduler:
                 self.logger.error(f"Component {component.name} failed to start within timeout")
                 return False
 
+        self.props.set_coordinator_state(CoordinatorState.RUNNING)
+
         return True
 
     def shutdown_all(self) -> bool:
@@ -298,33 +300,41 @@ class Scheduler:
 
         coordinator_state = self.props.get_coordinator_state()
 
-        if coordinator_state == CoordinatorState.RUNNING:
-            return
+        match coordinator_state:
+            case CoordinatorState.RUNNING:
+                return
 
-        if coordinator_state == CoordinatorState.SHUTDOWN:
-            self.logger.info("Coordinator state is shutdown, exiting")
-            self.shutdown()
+            case CoordinatorState.SHUTDOWN:
+                self.logger.info("Coordinator state is shutdown, exiting")
+                self.shutdown()
+                return
 
-        if coordinator_state == CoordinatorState.STARTUP:
-            self.logger.info("Coordinator state is startup, setting running state")
-            self.props.set_coordinator_state(CoordinatorState.RUNNING)
-            return
+            case CoordinatorState.STARTUP:
+                self.logger.info("Coordinator state is startup, setting running state")
+                self.props.set_coordinator_state(CoordinatorState.RUNNING)
+                return
 
-        if coordinator_state == CoordinatorState.RELOAD:
-            self.logger.info("Coordinator state is reload, shutting down services")
-            self.shutdown_all()
-            self.logger.info("Shutting down services complete, installing binaries")
-            if self.production:
-                self.production.install_binaries()
-            if self.service_name == 'fdw':
-                self.logger.info("Installing postgres_fdw")
+            case CoordinatorState.RELOAD:
+                self.logger.info("Coordinator state is reload, shutting down services")
+                self.shutdown_all()
+                self.logger.info("Shutting down services complete, installing binaries")
+
                 if self.production:
-                    self.production.install_pgfdw()
-            self.logger.info("Restarting services")
-            self.restart_all()
-            self.props.set_coordinator_state(CoordinatorState.RUNNING)
-            self.logger.info("Restarting services complete")
-            return;
+                    self.production.install_binaries()
+                    if self.service_name == 'fdw':
+                        self.logger.info("Installing postgres_fdw")
+                        self.production.install_pgfdw()
+
+                self.logger.info("Restarting services")
+                self.restart_all()
+
+                self.props.set_coordinator_state(CoordinatorState.RUNNING)
+                self.logger.info("Restarting services complete")
+                return
+
+            case _:  # default case
+                self.logger.error(f"Unknown coordinator state: {coordinator_state}")
+                return
 
     def monitor_timeouts(self) -> None:
         """
