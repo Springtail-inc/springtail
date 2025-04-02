@@ -3,12 +3,11 @@
 #include <assert.h>
 #include <algorithm>
 #include <pg_log_mgr/indexer.hh>
-#include <redis/redis_containers.hh>
 #include <common/logging.hh>
-#include <common/redis_types.hh>
 #include <common/properties.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <sys_tbl_mgr/client.hh>
+#include <storage/cache.hh>
 
 namespace springtail::committer {
 
@@ -36,13 +35,40 @@ namespace springtail::committer {
         }
     }
 
+    void Indexer::abort_indices(uint64_t db_id, uint64_t table_id)
+    {
+        std::scoped_lock g(_m, _table_idx_map_mtx);
+        auto db_it = _table_idx_map.find(db_id);
+        if (db_it == _table_idx_map.end()) {
+            return; // No entries for this db_id
+        }
+
+        auto table_it = db_it->second.find(table_id);
+        if (table_it == db_it->second.end()) {
+            return; // No entries for this table_id
+        }
+
+        // Iterate through all keys and set work_item as ABORTING
+        for (const Key& key : table_it->second) {
+            auto work_it = _work_set.find(key);
+            if (work_it != _work_set.end()) {
+                work_it->second._status = IndexStatus::ABORTING;
+            }
+        }
+    }
+
     void Indexer::build(IndexParams idx)
     {
         {
-            std::scoped_lock g(_m);
+            std::scoped_lock g(_m, _table_idx_map_mtx);
             Key key(idx._db_id, idx._ddl["id"]);
             // I don't think PG will issue two creates with the same index ID.
             assert(_work_set.find(key) == _work_set.end());
+            // Insert into table-indices map
+            _table_idx_map.try_emplace(idx._db_id)
+                .first->second
+                .try_emplace(idx._ddl["table_id"])
+                .first->second.push_back(key);
             _work_set[key] = std::move(idx);
             _queue.push(key);
         }
@@ -134,30 +160,15 @@ namespace springtail::committer {
             return;
         }
 
-        // index column positions
-        std::vector<uint32_t> idx_cols;
-        for (auto const& col : info.columns()) {
-            idx_cols.push_back(col.position());
-        }
+        // Construct the index file to drop the cache
+        std::filesystem::path table_base;
+        auto json = Properties::get(Properties::STORAGE_CONFIG);
+        Json::get_to<std::filesystem::path>(json, "table_dir", table_base);
+        table_base = Properties::make_absolute_path(table_base);
+        std::filesystem::path index_file = table_base / std::to_string(db_id) / fmt::format("{}-{}", info.table_id(), xid.xid) / fmt::format(constant::INDEX_FILE, index_id);
 
-        auto meta = client->get_roots(db_id, info.table_id(), idx._xid);
-        auto it = std::ranges::find_if(meta->roots,
-                                       [&](auto const& v) { return index_id == v.index_id; });
-        CHECK(it != meta->roots.end());
-
-        auto table =
-            TableMgr::get_instance()->get_mutable_table(db_id, info.table_id(), idx._xid, idx._xid);
-        auto root = table->create_index_root(index_id, idx_cols);
-        if (it->extent_id != constant::UNKNOWN_EXTENT) {
-            root->init(it->extent_id);
-        } else {
-            root->init_empty();
-        }
-        root->truncate();
-        root->finalize();
-
-        meta->roots.erase(it);
-        client->update_roots(db_id, info.table_id(), idx._xid, *meta);
+        // remove any dirty cached pages for this index since they don't need to be written
+        StorageCache::get_instance()->drop_for_truncate(index_file);
 
         SPDLOG_INFO("Index dropped: {}:{}", db_id, index_id);
     }
@@ -277,6 +288,9 @@ namespace springtail::committer {
             root->truncate();
             root->finalize();
         }
+
+        // Cleanup table-index map
+        _remove_index_key(db_id, tid, key);
     }
 
     // Index reconciliation flows
@@ -401,4 +415,27 @@ namespace springtail::committer {
             _commit_build(idxState._root, idxState._key, idxState._idx, end_xid);
         }
     }
+
+    void Indexer::_remove_index_key(uint64_t db_id, uint64_t table_id, const Key& key)
+    {
+        std::scoped_lock lock(_table_idx_map_mtx);
+        auto db_it = _table_idx_map.find(db_id);
+        if (db_it != _table_idx_map.end()) {
+            auto& table_map = db_it->second;
+            auto table_it = table_map.find(table_id);
+            if (table_it != table_map.end()) {
+                auto& key_list = table_it->second;
+                key_list.remove(key);  // Remove the key if it exists
+
+                // Clean up empty entries
+                if (key_list.empty()) {
+                    table_map.erase(table_it);
+                    if (table_map.empty()) {
+                        _table_idx_map.erase(db_it);
+                    }
+                }
+            }
+        }
+    }
+
 }  // namespace springtail::gc

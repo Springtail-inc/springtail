@@ -72,6 +72,17 @@ namespace springtail::committer {
          */
         std::optional<uint64_t> process_next_reconciliation(uint64_t db_id, uint64_t end_xid);
 
+        /**
+         * @brief Set ABORTING state for the indices of a given db_id and table_id.
+         *
+         * Locks both _table_idx_map and _work_set mutex, iterates through all keys,
+         * retrieves corresponding work item, and sets state to ABORTING.
+         *
+         * @param db_id Database ID.
+         * @param table_id Table ID.
+         */
+        void abort_indices(uint64_t db_id, uint64_t table_id);
+
     private:
         void task(std::stop_token st);
 
@@ -126,8 +137,19 @@ namespace springtail::committer {
         using PendingReconMap = std::unordered_map<uint64_t, std::unordered_map<uint64_t, std::list<IndexState>>>;
         PendingReconMap _pending_idx_reconciliation_map;
 
+        /**
+         * @brief Maps database IDs to table IDs and their associated index keys being built.
+         *
+         * Structure: { db_id - { table_id - [index keys] } }.
+         */
+        using TableIndicesMap = std::unordered_map<uint64_t, std::unordered_map<uint64_t, std::list<Key>>>;
+        TableIndicesMap _table_idx_map;
+
         // Mutex to access pending reconciliation map
         std::mutex _pending_reconciliation_map_mtx;
+
+        // Mutex to access table index map
+        std::mutex _table_idx_map_mtx;
 
         /**
          * @brief Adds an IndexState to the pending reconciliation map.
@@ -144,6 +166,14 @@ namespace springtail::committer {
          * @param idxState Index state
          */
         void _reconcile_index(IndexState& idxState, uint64_t end_xid);
+
+        /**
+         * @brief Removes an index key and cleans up empty entries.
+         * @param db_id Database ID.
+         * @param table_id Table ID.
+         * @param key Index key to remove.
+         */
+        void _remove_index_key(uint64_t db_id, uint64_t table_id, const Key& key);
 
         /*
          * Pick the XIDs for the given db_id and reconcile indexes 

@@ -33,7 +33,8 @@ namespace springtail::pg_log_mgr {
                        int port,
                        bool archive_logs,
                        std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
-                       std::shared_ptr<ConcurrentQueue<std::string>> index_reconciliation_queue)
+                       std::shared_ptr<ConcurrentQueue<std::string>> index_reconciliation_queue,
+                       std::shared_ptr<committer::Committer> committer)
     : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
       _host(host), _db_name(db_name), _user_name(user_name),
       _password(password), _pub_name(pub_name), _slot_name(slot_name),
@@ -43,7 +44,8 @@ namespace springtail::pg_log_mgr {
       _committer_queue(committer_queue),
       _xact_log_path(xact_log_path),
       _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
-      _index_reconciliation_queue(index_reconciliation_queue)
+      _index_reconciliation_queue(index_reconciliation_queue),
+      _committer(committer)
     {
         _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, xact_log_path, _committer_queue, archive_logs);
 
@@ -266,6 +268,7 @@ namespace springtail::pg_log_mgr {
                                     request->xid().xid, request->xid().lsn);
                 table_ids.insert(request->table_id());
                 SyncTracker::get_instance()->mark_inflight(_db_id, request->table_id(), request->xid()); // shift from resyncing to inflight
+                _committer->execute_on_resync(_db_id, request->table_id());
 
                 request = _redis_sync_queue.try_pop(REDIS_WORKER_ID);
             } while (request != nullptr);

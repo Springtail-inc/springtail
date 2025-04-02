@@ -1311,6 +1311,24 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
         if (xid.xid < record_xid) {
             continue;
         }
+
+        // Allow roots to be picked up even for non-primary key tables
+        if (index_id_f->get_uint64(*rrow_i) != constant::INDEX_PRIMARY) {
+            auto index_info_request = std::make_shared<proto::GetIndexInfoRequest>();
+            index_info_request->set_db_id(db_id);
+            index_info_request->set_index_id(index_id_f->get_uint64(*rrow_i));
+            index_info_request->set_xid(xid.xid);
+            index_info_request->set_lsn(xid.lsn);
+            index_info_request->set_table_id(table_id);
+            auto index_info = _get_index_info(*index_info_request);
+
+            if (static_cast<sys_tbl::IndexNames::State>(index_info.state()) != sys_tbl::IndexNames::State::READY) {
+                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index deleted or not-ready, so skipping the root {} -- {}",
+                        table_id, index_id_f->get_uint64(*rrow_i));
+                continue;
+            }
+        }
+
         proto::RootInfo ri;
         ri.set_index_id(index_id_f->get_uint64(*rrow_i));
         ri.set_extent_id(eid_f->get_uint64(*rrow_i));

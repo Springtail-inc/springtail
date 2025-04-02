@@ -738,43 +738,43 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::ALTER_TABLE:
             {
                 PgMsgTable &table_msg = std::get<PgMsgTable>(msg->msg);
-                _process_ddl(table_msg.oid, table_msg.xid, msg->is_streaming, msg);
+                _process_ddl(table_msg.oid, table_msg.oid, table_msg.xid, msg->is_streaming, msg);
                 break;
             }
         case PgMsgEnum::DROP_TABLE:
             {
                 PgMsgDropTable &drop_msg = std::get<PgMsgDropTable>(msg->msg);
-                _process_ddl(drop_msg.oid, drop_msg.xid, msg->is_streaming, msg);
+                _process_ddl(drop_msg.oid, drop_msg.oid, drop_msg.xid, msg->is_streaming, msg);
                 break;
             }
         case PgMsgEnum::CREATE_NAMESPACE:
             {
                 PgMsgNamespace &namespace_msg = std::get<PgMsgNamespace>(msg->msg);
-                _process_ddl(namespace_msg.oid, namespace_msg.xid, msg->is_streaming, msg);
+                _process_ddl(std::nullopt, namespace_msg.oid, namespace_msg.xid, msg->is_streaming, msg);
                 break;
             }
         case PgMsgEnum::ALTER_NAMESPACE:
             {
                 PgMsgNamespace &namespace_msg = std::get<PgMsgNamespace>(msg->msg);
-                _process_ddl(namespace_msg.oid, namespace_msg.xid, msg->is_streaming, msg);
+                _process_ddl(std::nullopt, namespace_msg.oid, namespace_msg.xid, msg->is_streaming, msg);
                 break;
             }
         case PgMsgEnum::DROP_NAMESPACE:
             {
                 PgMsgNamespace &namespace_msg = std::get<PgMsgNamespace>(msg->msg);
-                _process_ddl(namespace_msg.oid, namespace_msg.xid, msg->is_streaming, msg);
+                _process_ddl(std::nullopt, namespace_msg.oid, namespace_msg.xid, msg->is_streaming, msg);
                 break;
             }
         case PgMsgEnum::CREATE_INDEX:
             {
                 const auto &index_msg = std::get<PgMsgIndex>(msg->msg);
-                _process_ddl(index_msg.oid, index_msg.xid, msg->is_streaming, msg);
+                _process_ddl(index_msg.table_oid, index_msg.oid, index_msg.xid, msg->is_streaming, msg);
                 break;
             }
         case PgMsgEnum::DROP_INDEX:
             {
                 const auto &index_msg = std::get<PgMsgDropIndex>(msg->msg);
-                _process_ddl(index_msg.oid, index_msg.xid, msg->is_streaming, msg);
+                _process_ddl(std::nullopt, index_msg.oid, index_msg.xid, msg->is_streaming, msg);
                 break;
             }
         case PgMsgEnum::COPY_SYNC:
@@ -1012,7 +1012,7 @@ namespace springtail::pg_log_mgr {
     }
 
     void
-    PgLogReader::_process_ddl(uint32_t oid, int32_t pg_xid, bool is_streaming, PgMsgPtr msg)
+    PgLogReader::_process_ddl(std::optional<uint32_t> table_oid, uint32_t oid, int32_t pg_xid, bool is_streaming, PgMsgPtr msg)
     {
         int32_t pg_xid_txn;
         PgTransactionPtr xact;
@@ -1034,7 +1034,7 @@ namespace springtail::pg_log_mgr {
         }
 
         // check if we should ignore this message
-        if (SyncTracker::get_instance()->should_skip(_db_id, oid, pg_xid_txn)) {
+        if (table_oid && SyncTracker::get_instance()->should_skip(_db_id, table_oid.value(), pg_xid_txn)) {
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Skip DDL: oid={} pg_xid={}\n", oid, pg_xid_txn);
             return;
         }
