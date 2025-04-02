@@ -1,6 +1,7 @@
 #pragma once
 
 #include <absl/log/check.h>
+#include <list>
 
 #include <common/logging.hh>
 #include <common/timer.hh>
@@ -42,19 +43,51 @@ struct Trace {
  */
 struct FlatTraceSet {
     using Item = std::pair<std::string, Trace>;
-    std::vector<Item> traces;
+    using List = std::list<Item>;
+    List traces;
 
     FlatTraceSet() = default;
 
     FlatTraceSet(const FlatTraceSet &) = delete;
     FlatTraceSet &operator=(const FlatTraceSet &) = delete;
 
-    void init(std::string_view name);
+    Trace& init(std::string_view name);
     void update(std::string_view name, const Trace &trace);
+    Trace& find(std::string_view name);
 
     void reset();
     std::string format();
 };
+
+struct ScopedTrace
+{
+    Trace& _t;
+
+    explicit ScopedTrace(Trace& t) : _t{t} {
+        _t.start();
+    }
+
+    ~ScopedTrace() {
+        _t.stop();
+    }
+
+    ScopedTrace(const ScopedTrace&) = delete;
+};
+
+/** 
+ * This is a place for sharing traces across translation units.
+ * The variable is instantiated in time_trace.cc of the common lib.
+ */
+extern time_trace::FlatTraceSet traces;//NOSONAR reason: intended to be modified
+
+/**
+ * @brief Initialize a new trace in the given set. This function is intended
+ * to be used for initializing static traces within a scope (see TIME_TRACE_SCOPED).
+ */
+inline time_trace::Trace& create_trace(FlatTraceSet& set, std::string_view n)
+{
+    return set.init(n);
+}
 
 }  // namespace springtail::time_trace
 
@@ -63,12 +96,15 @@ struct FlatTraceSet {
 #define TIME_TRACESET(trace_set) time_trace::FlatTraceSet trace_set
 #define TIME_TRACESET_INIT(trace_set, name) trace_set.init(name)
 #define TIME_TRACESET_UPDATE(trace_set, name, trace) trace_set.update(name, trace)
-#define TIME_TRACESET_RESET(trace_set) trace_set.reset();
-#define TIME_TRACESET_LOG(trace_set) SPDLOG_INFO(trace_set.format());
+#define TIME_TRACESET_RESET(trace_set) trace_set.reset()
+#define TIME_TRACESET_LOG(trace_set) SPDLOG_INFO(trace_set.format())
 
 #define TIME_TRACE(trace) time_trace::Trace trace
 #define TIME_TRACE_START(trace) trace.start()
 #define TIME_TRACE_STOP(trace) trace.stop()
+
+// 'name' must not have white spaces. It is used in symbol names.
+#define TIME_TRACE_SCOPED(trace_set, name) static time_trace::Trace& tr_##name = time_trace::create_trace(trace_set, #name); time_trace::ScopedTrace s_##name(tr_##name)
 
 #else
 
@@ -81,5 +117,7 @@ struct FlatTraceSet {
 #define TIME_TRACE(trace)
 #define TIME_TRACE_START(trace)
 #define TIME_TRACE_STOP(trace)
+
+#define TIME_TRACE_SCOPED(trace_set, name)
 
 #endif

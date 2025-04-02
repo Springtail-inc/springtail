@@ -102,10 +102,6 @@ namespace indexer_helpers {
                     return (a._btree_i == b._btree_i);
                 }
 
-                virtual void next() = 0;
-                virtual void prev() = 0;
-                virtual const Extent::Row & row() const = 0;
-
                 const Table *_table{}; ///< A pointer to the Table object this iterator is for.
                 BTreePtr _btree; ///< A pointer to the BTree of the primary index.
                 BTree::Iterator _btree_i; ///< An iterator into the BTree.
@@ -132,10 +128,10 @@ namespace indexer_helpers {
                 Primary(Primary&&) noexcept = default;
                 virtual ~Primary() = default;
 
-                void next() override;
-                void prev() override;
+                void next();
+                void prev();
 
-                const Extent::Row& row() const override 
+                const Extent::Row& row() const 
                 {
                     return *_page_i;
                 }
@@ -174,9 +170,9 @@ namespace indexer_helpers {
                 Secondary(Secondary&&) = default;
                 virtual ~Secondary() = default;
 
-                void next() override;
-                void prev() override;
-                const Extent::Row& row() const override;
+                void next();
+                void prev();
+                const Extent::Row& row() const;
 
                 friend bool operator==(const Secondary& a, const Secondary& b) {
                     const Tracker& ta = a;
@@ -204,7 +200,12 @@ namespace indexer_helpers {
             using reference         = const Extent::Row &;  // or also value_type&
 
             reference operator*() { 
-                return tracker().row();
+                if (auto p = std::get_if<Primary>(&_tracker)) {
+                    return p->row();
+                }
+                auto p = std::get_if<Secondary>(&_tracker);
+                assert(p);
+                return p->row();
             }
             pointer operator->() { return &*(*this); }
 
@@ -212,7 +213,13 @@ namespace indexer_helpers {
              * Move the iterator forward to the next row.
              */
             Iterator& operator++() {
-                tracker().next();
+                if (auto p = std::get_if<Primary>(&_tracker)) {
+                    p->next();
+                } else if (auto p = std::get_if<Secondary>(&_tracker)) {
+                    p->next();
+                } else {
+                    assert(false);
+                }
                 return *this;
             }
 
@@ -220,7 +227,13 @@ namespace indexer_helpers {
              * Move the iterator backward to the previous row.
              */
             Iterator& operator--() {
-                tracker().prev();
+                if (auto p = std::get_if<Primary>(&_tracker)) {
+                    p->prev();
+                } else if (auto p = std::get_if<Secondary>(&_tracker)) {
+                    p->prev();
+                } else {
+                    assert(false);
+                }
                 return *this;
             }
 
@@ -284,18 +297,6 @@ namespace indexer_helpers {
                      ExtentSchemaPtr index_schema)
             { 
                 _tracker.emplace<Secondary>(table, btree, btree_i, index_schema);
-            }
-
-            Tracker& tracker() 
-            {
-                if (auto p = std::get_if<Primary>(&_tracker)) {
-                    return *p;
-                } else if (auto p = std::get_if<Secondary>(&_tracker)) {
-                    return *p;
-                } else {
-                    assert(false);
-                }
-                throw std::runtime_error("Bad iterator tracker");
             }
         };
 

@@ -517,7 +517,7 @@ namespace springtail {
 
         bool get_bool(const std::any &row) const override {
             // must be boolean type
-            CHECK_EQ(_type, SchemaType::BOOLEAN);
+            DCHECK_EQ(_type, SchemaType::BOOLEAN);
             assert(row.type() == typeid(Extent::Row));
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
@@ -526,7 +526,7 @@ namespace springtail {
 
         int8_t get_int8(const std::any &row) const override {
             // must be int8 type
-            CHECK_EQ(_type, SchemaType::INT8);
+            DCHECK_EQ(_type, SchemaType::INT8);
             assert(row.type() == typeid(Extent::Row));
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
@@ -535,7 +535,7 @@ namespace springtail {
 
         uint8_t get_uint8(const std::any &row) const override {
             // must be uint8 type
-            CHECK_EQ(_type, SchemaType::UINT8);
+            DCHECK_EQ(_type, SchemaType::UINT8);
             assert(row.type() == typeid(Extent::Row));
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
@@ -544,7 +544,7 @@ namespace springtail {
 
         int16_t get_int16(const std::any &row) const override {
             // must be int16 type
-            CHECK_EQ(_type, SchemaType::INT16);
+            DCHECK_EQ(_type, SchemaType::INT16);
             assert(row.type() == typeid(Extent::Row));
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
@@ -553,7 +553,7 @@ namespace springtail {
 
         uint16_t get_uint16(const std::any &row) const override {
             // must be uint16 type
-            CHECK_EQ(_type, SchemaType::UINT16);
+            DCHECK_EQ(_type, SchemaType::UINT16);
             assert(row.type() == typeid(Extent::Row));
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
@@ -563,7 +563,7 @@ namespace springtail {
 
         int32_t get_int32(const std::any &row) const override {
             // must be int32 type
-            CHECK_EQ(_type, SchemaType::INT32);
+            DCHECK_EQ(_type, SchemaType::INT32);
             assert(row.type() == typeid(Extent::Row));
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
@@ -572,7 +572,7 @@ namespace springtail {
 
         uint32_t get_uint32(const std::any &row) const override {
             // must be uint32 type
-            CHECK_EQ(_type, SchemaType::UINT32);
+            DCHECK_EQ(_type, SchemaType::UINT32);
             assert(row.type() == typeid(Extent::Row));
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
@@ -582,7 +582,7 @@ namespace springtail {
 
         int64_t get_int64(const std::any &row) const override {
             // must be int64 type
-            CHECK_EQ(_type, SchemaType::INT64);
+            DCHECK_EQ(_type, SchemaType::INT64);
             assert(row.type() == typeid(Extent::Row));
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
@@ -591,7 +591,7 @@ namespace springtail {
 
         uint64_t get_uint64(const std::any &row) const override {
             // must be uint64 type
-            CHECK_EQ(_type, SchemaType::UINT64);
+            DCHECK_EQ(_type, SchemaType::UINT64);
             assert(row.type() == typeid(Extent::Row));
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
@@ -601,7 +601,7 @@ namespace springtail {
 
         float get_float32(const std::any &row) const override {
             // must be float32 type
-            CHECK_EQ(_type, SchemaType::FLOAT32);
+            DCHECK_EQ(_type, SchemaType::FLOAT32);
             assert(row.type() == typeid(Extent::Row));
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
@@ -611,7 +611,7 @@ namespace springtail {
 
         double get_float64(const std::any &row) const override {
             // must be float64 type
-            CHECK_EQ(_type, SchemaType::FLOAT64);
+            DCHECK_EQ(_type, SchemaType::FLOAT64);
             assert(row.type() == typeid(Extent::Row));
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
@@ -621,7 +621,7 @@ namespace springtail {
 
         std::string_view get_text(const std::any &row) const override {
             // must be text type
-            CHECK_EQ(_type, SchemaType::TEXT);
+            DCHECK_EQ(_type, SchemaType::TEXT);
             assert(row.type() == typeid(Extent::Row));
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
@@ -631,7 +631,7 @@ namespace springtail {
 
         const std::span<const char> get_binary(const std::any &row) const override {
             // must be binary type
-            CHECK_EQ(_type, SchemaType::BINARY);
+            DCHECK_EQ(_type, SchemaType::BINARY);
             assert(row.type() == typeid(Extent::Row));
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
@@ -726,7 +726,7 @@ namespace springtail {
         }
 
         void set_text(const std::any &row, const std::string_view &value) override {
-            CHECK_EQ(_type, SchemaType::TEXT);
+            DCHECK_EQ(_type, SchemaType::TEXT);
             assert(row.type() == typeid(Extent::Row));
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
@@ -740,7 +740,7 @@ namespace springtail {
         }
 
         void set_binary(const std::any &row, const std::span<const char> &value) override {
-            CHECK_EQ(_type, SchemaType::BINARY);
+            DCHECK_EQ(_type, SchemaType::BINARY);
             assert(row.type() == typeid(Extent::Row));
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
@@ -1469,7 +1469,7 @@ namespace springtail {
             const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
-            CHECK_EQ(col.type, 'b');
+            DCHECK_EQ(col.type, 'b');
 
             // boolean should 1 byte
             assert(col.data.size() == 1);
@@ -1485,7 +1485,7 @@ namespace springtail {
             const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
-            CHECK_EQ(col.type, 'b');
+            DCHECK_EQ(col.type, 'b');
 
             // int16 should be 2 bytes
             assert(col.data.size() == 2);
@@ -1501,7 +1501,7 @@ namespace springtail {
             const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
-            CHECK_EQ(col.type, 'b');
+            DCHECK_EQ(col.type, 'b');
 
             // int32 should be 4 bytes
             assert(col.data.size() == 4);
@@ -1517,7 +1517,7 @@ namespace springtail {
             const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
-            CHECK_EQ(col.type, 'b');
+            DCHECK_EQ(col.type, 'b');
 
             // int64 should be 8 bytes
             assert(col.data.size() == 8);
@@ -1533,7 +1533,7 @@ namespace springtail {
             const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
-            CHECK_EQ(col.type, 'b');
+            DCHECK_EQ(col.type, 'b');
 
             // float should be 4 bytes
             assert(col.data.size() == 4);
@@ -1550,7 +1550,7 @@ namespace springtail {
             const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
-            CHECK_EQ(col.type, 'b');
+            DCHECK_EQ(col.type, 'b');
 
             // double should be 8 bytes
             assert(col.data.size() == 8);
@@ -1567,7 +1567,7 @@ namespace springtail {
             const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
-            CHECK_EQ(col.type, 'b');
+            DCHECK_EQ(col.type, 'b');
 
             // read in the binary data as a string
             return std::string_view(col.data.data(), col.data.size());
@@ -1580,7 +1580,7 @@ namespace springtail {
             const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
-            CHECK_EQ(col.type, 'b');
+            DCHECK_EQ(col.type, 'b');
 
             // read in the binary data as a string
             return std::span<const char>(col.data.begin(), col.data.size());

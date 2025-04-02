@@ -44,15 +44,17 @@ namespace springtail::pg_proxy {
         DCHECK_EQ(_client_session.lock(), nullptr);
 
         _wrap_error_handler([this] {
-            if (_defer_shadow_shutdown) {
-                // process any pending messages
-                process_connection(_seq_id);
-                return;
-            }
-
-            CHECK(_state == RESET_SESSION || _state == RESET_SESSION_READY);
-            // process the reset query response
-            _handle_reset_session_message();
+            do {
+                if (_defer_shadow_shutdown) {
+                    // process any pending messages
+                    process_connection(_seq_id);
+                } else {
+                    CHECK(_state == RESET_SESSION || _state == RESET_SESSION_READY);
+                    // process the reset query response
+                    _handle_reset_session_message();
+                }
+                // check if we have any pending messages necessary for SSL
+            } while (_state != ERROR && _connection->has_pending());
         });
     }
 

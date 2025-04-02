@@ -13,6 +13,8 @@ set(PG_LOG_SOURCES
     pg_log_recovery.cc
     pg_xact_log_writer.cc
     pg_xact_log_reader.cc
+    pg_xact_log_writer_mmap.cc
+    pg_xact_log_reader_mmap.cc
     sync_tracker.cc
 )
 
@@ -51,6 +53,14 @@ target_link_libraries(test_xact_log
 target_include_directories(test_xact_log PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_dsymutil_command(test_xact_log)
 
+add_executable(test_xact_log_mmap test/test_xact_log_mmap.cc)
+target_link_libraries(test_xact_log_mmap
+    PUBLIC springtail_pglog
+           springtail_common
+    PRIVATE GTest::gtest_main)
+target_include_directories(test_xact_log_mmap PRIVATE ${CMAKE_SOURCE_DIR}/include)
+add_dsymutil_command(test_xact_log_mmap)
+
 add_executable(test_pg_log_redis test/test_redis.cc)
 target_link_libraries(test_pg_log_redis
     PUBLIC springtail_pglog
@@ -87,4 +97,5 @@ install(TARGETS
 )
 
 gtest_discover_tests(test_xact_log)
+gtest_discover_tests(test_xact_log_mmap)
 gtest_discover_tests(test_pg_log_redis)
