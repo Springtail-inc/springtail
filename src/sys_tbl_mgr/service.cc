@@ -1300,11 +1300,11 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     uint64_t snapshot_xid = 0;
     auto rrow_i = roots_t->lower_bound(search_key);
 
-    auto index_info_request = std::make_shared<proto::GetIndexInfoRequest>();
-    index_info_request->set_db_id(db_id);
-    index_info_request->set_xid(xid.xid);
-    index_info_request->set_lsn(xid.lsn);
-    index_info_request->set_table_id(table_id);
+    proto::GetIndexInfoRequest index_info_request;
+    index_info_request.set_db_id(db_id);
+    index_info_request.set_xid(xid.xid);
+    index_info_request.set_lsn(xid.lsn);
+    index_info_request.set_table_id(table_id);
 
     for (; rrow_i != roots_t->end(); ++rrow_i) {
         if (table_id_f->get_uint64(*rrow_i) > table_id) {
@@ -1320,8 +1320,8 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
 
         // Allow roots to be picked up even for non-primary key tables
         if (index_id_f->get_uint64(*rrow_i) != constant::INDEX_PRIMARY) {
-            index_info_request->set_index_id(index_id_f->get_uint64(*rrow_i));
-            auto index_info = _get_index_info(*index_info_request);
+            index_info_request.set_index_id(index_id_f->get_uint64(*rrow_i));
+            auto index_info = _get_index_info(index_info_request);
 
             if (static_cast<sys_tbl::IndexNames::State>(index_info.state()) != sys_tbl::IndexNames::State::READY) {
                 SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index deleted or not-ready, so skipping the root {} -- {}",
