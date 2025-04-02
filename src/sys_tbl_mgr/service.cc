@@ -1208,6 +1208,7 @@ Service::_get_namespace_info(uint64_t db_id, const std::string& name, const XidL
     //       vacant table is broken right now, otherwise we could follow the main path.  See
     //       ticket SPR-520.
     if (table->empty()) {
+        SPDLOG_WARN("Namespace names table empty at xid {}:{}", xid.xid, xid.lsn);
         return nullptr;
     }
 

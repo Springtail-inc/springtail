@@ -26,6 +26,7 @@
 #include <storage/xid.hh>
 
 #include <pg_log_mgr/pg_xact_log_writer.hh>
+#include <sys_tbl_mgr/client.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 
 namespace springtail::pg_log_mgr {
@@ -96,13 +97,51 @@ namespace springtail::pg_log_mgr {
         }
 
     private:
+        class ExistsCache {
+        public:
+            ExistsCache(uint32_t size)
+                : _cache(size)
+            { }
+
+            bool exists(uint64_t db_id, uint32_t table_id, const XidLsn &xid) {
+                Key key(db_id, table_id);
+                {
+                    std::scoped_lock lock(_mutex);
+                    auto entry = _cache.get(key);
+                    if (entry) {
+                        return *entry;
+                    }
+                }
+
+                bool exists = sys_tbl_mgr::Client::get_instance()->exists(key.first, key.second, xid);
+
+                {
+                    std::scoped_lock lock(_mutex);
+                    _cache.insert(key, std::make_shared<bool>(exists));
+                }
+                return exists;
+            }
+
+            void insert(uint64_t db_id, uint32_t table_id, bool exists) {
+                std::scoped_lock lock(_mutex);
+                _cache.insert(Key{db_id, table_id}, std::make_shared<bool>(exists));
+            }
+
+        private:
+            using Key = std::pair<uint64_t, uint32_t>; ///< Pair of (db_id, table_id).
+            LruObjectCache<Key, bool> _cache; ///< Cache of exists flags for tables.
+            std::mutex _mutex; ///< Mutex to protect the cache.
+        };
+        using ExistsCachePtr = std::shared_ptr<ExistsCache>;
+
         class Batch {
             // 4 MB
             static constexpr uint32_t MAX_BATCH_SIZE = 4 * 1024 * 1024;
 
         public:
-            Batch(uint64_t db_id, int32_t pg_xid, const CommitterQueuePtr committer_queue)
-                : _db(db_id), _pg_xid(pg_xid), _committer_queue(committer_queue)
+            Batch(uint64_t db_id, int32_t pg_xid, const CommitterQueuePtr committer_queue,
+                  ExistsCachePtr exists_cache)
+                : _db(db_id), _pg_xid(pg_xid), _committer_queue(committer_queue), _exists_cache(exists_cache)
             {
                 auto tracer = tracing::tracer("PgLogReader");
                 _span = tracer->StartSpan("Transaction");
@@ -142,7 +181,7 @@ namespace springtail::pg_log_mgr {
             /**
              * Records a schema change into the batch.
              */
-            void schema_change(int32_t tid, int32_t pg_xid, PgMsgPtr msg);
+            void schema_change(uint64_t current_xid, int32_t tid, int32_t pg_xid, PgMsgPtr msg);
 
         private:
             //// INTERNAL STRUCTURES
@@ -223,6 +262,7 @@ namespace springtail::pg_log_mgr {
 
             tracing::SpanPtr _span; ///< Timing for the txn processing.
             CommitterQueuePtr _committer_queue; ///< Reference to the committer queue
+            ExistsCachePtr _exists_cache; ///< Reference to the exists cache
         };
         using BatchPtr = std::shared_ptr<Batch>;
 
@@ -252,6 +292,9 @@ namespace springtail::pg_log_mgr {
         BatchPtr _current_batch; ///< The batch matching the current pg xid
 
         WalProgressTrackerPtr _xid_ts_tracker;      ///< Timestamps and Xids tracker object
+
+        /** Cache indicating if a table exists at the latest XID seen committed by the log reader. */
+        ExistsCachePtr _exists_cache;
 
         /** Function for cleaning up old log files. */
         void _remove_old_log_files();
