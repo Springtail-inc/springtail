@@ -1300,22 +1300,6 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     uint64_t snapshot_xid = 0;
     auto rrow_i = roots_t->lower_bound(search_key);
 
-    // Find out ready indexes
-    std::unordered_map<int, bool> ready_index_map;
-    auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
-    auto names_schema = names_t->extent_schema();
-    auto names_fields = names_schema->get_fields();
-    auto index_name_search_key = sys_tbl::IndexNames::Primary::key_tuple(table_id, 0, 0, 0);
-
-    for (auto names_i = names_t->lower_bound(index_name_search_key); names_i != names_t->end(); ++names_i) {
-        auto& index_name_row = *names_i;
-        if (static_cast<sys_tbl::IndexNames::State>(names_fields->at(sys_tbl::IndexNames::Data::STATE)->get_uint8(index_name_row)) == sys_tbl::IndexNames::State::READY) {
-            ready_index_map[names_fields->at(sys_tbl::IndexNames::Data::INDEX_ID)->get_uint64(index_name_row)] = true;
-        } else if (ready_index_map.contains(names_fields->at(sys_tbl::IndexNames::Data::INDEX_ID)->get_uint64(index_name_row))) {
-            ready_index_map.erase(names_fields->at(sys_tbl::IndexNames::Data::INDEX_ID)->get_uint64(index_name_row));
-        }
-    }
-
     for (; rrow_i != roots_t->end(); ++rrow_i) {
         if (table_id_f->get_uint64(*rrow_i) > table_id) {
             break;
@@ -1329,10 +1313,25 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
         }
 
         // Allow roots to be picked up even for non-primary key tables
-        if (index_id_f->get_uint64(*rrow_i) != constant::INDEX_PRIMARY && !ready_index_map.contains(index_id_f->get_uint64(*rrow_i))) {
-            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index deleted or not-ready, so skipping the root {} -- {}", table_id,
-                                index_id_f->get_uint64(*rrow_i));
-            continue;
+        if (index_id_f->get_uint64(*rrow_i) != constant::INDEX_PRIMARY) {
+            auto index_info_request = std::make_shared<proto::GetIndexInfoRequest>();
+            index_info_request->set_db_id(db_id);
+            index_info_request->set_index_id(index_id_f->get_uint64(*rrow_i));
+            index_info_request->set_xid(xid.xid);
+            index_info_request->set_lsn(xid.lsn);
+            index_info_request->set_table_id(table_id);
+            proto::IndexInfo index_info;
+            {
+                // acquire a shared lock to ensure no one is doing a finalize
+                boost::shared_lock lock(_read_mutex);
+                index_info = _get_index_info(*index_info_request);
+            }
+
+            if (static_cast<sys_tbl::IndexNames::State>(index_info.state()) != sys_tbl::IndexNames::State::READY) {
+                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index deleted or not-ready, so skipping the root {} -- {}", table_id,
+                        index_id_f->get_uint64(*rrow_i));
+                continue;
+            }
         }
 
         proto::RootInfo ri;

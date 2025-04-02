@@ -4,8 +4,10 @@
 #include <algorithm>
 #include <pg_log_mgr/indexer.hh>
 #include <common/logging.hh>
+#include <common/properties.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <sys_tbl_mgr/client.hh>
+#include <storage/cache.hh>
 
 namespace springtail::committer {
 
@@ -172,30 +174,15 @@ namespace springtail::committer {
             return;
         }
 
-        // index column positions
-        std::vector<uint32_t> idx_cols;
-        for (auto const& col : info.columns()) {
-            idx_cols.push_back(col.position());
-        }
+        // Construct the index file to drop the cache
+        std::filesystem::path _table_base;
+        auto json = Properties::get(Properties::STORAGE_CONFIG);
+        Json::get_to<std::filesystem::path>(json, "table_dir", _table_base);
+        _table_base = Properties::make_absolute_path(_table_base);
+        std::filesystem::path index_file = _table_base / std::to_string(db_id) / fmt::format("{}-{}", info.table_id(), xid.xid) / fmt::format(constant::INDEX_FILE, index_id);
 
-        auto meta = client->get_roots(db_id, info.table_id(), idx._xid);
-        auto it = std::ranges::find_if(meta->roots,
-                                       [&](auto const& v) { return index_id == v.index_id; });
-        CHECK(it != meta->roots.end());
-
-        auto table =
-            TableMgr::get_instance()->get_mutable_table(db_id, info.table_id(), idx._xid, idx._xid);
-        auto root = table->create_index_root(index_id, idx_cols);
-        if (it->extent_id != constant::UNKNOWN_EXTENT) {
-            root->init(it->extent_id);
-        } else {
-            root->init_empty();
-        }
-        root->truncate();
-        root->finalize();
-
-        meta->roots.erase(it);
-        client->update_roots(db_id, info.table_id(), idx._xid, *meta);
+        // remove any dirty cached pages for this index since they don't need to be written
+        StorageCache::get_instance()->drop_for_truncate(index_file);
 
         SPDLOG_INFO("Index dropped: {}:{}", db_id, index_id);
     }
