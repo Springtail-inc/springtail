@@ -135,7 +135,7 @@ PgXactLogReaderMmap::cleanup_logs()
     }
 
     auto current_file_timestamp = fs::extract_timestamp_from_file(_current_file.value(), PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX);
-    fs::cleanup_files_from_dir(_base_dir, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX, current_file_timestamp.value(), _archive, std::greater<uint64_t>());
+    fs::cleanup_files_from_dir<std::greater<uint64_t>>(_base_dir, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX, current_file_timestamp.value(), _archive);
 
     // clean up
     _cleanup();

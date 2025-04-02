@@ -261,15 +261,13 @@ namespace springtail {
          * @param prefix    - file prefix
          * @param suffix    - file suffix
          * @param timestamp_limit   - timestamp id limit
-         * @param comp      - compare function for deciding which files to remove
          */
         template <typename Compare = std::less<uint64_t>> static void
         cleanup_files_from_dir(const std::filesystem::path& dir,
                                std::string_view prefix,
                                std::string_view suffix,
                                uint64_t timestamp_limit,
-                               bool archive = false,
-                               Compare comp = Compare())
+                               bool archive = false)
         {
             if (archive && !std::filesystem::exists(dir / "archive")) {
                 // create archive directory
@@ -285,7 +283,7 @@ namespace springtail {
 
                     // Extract the timestamp from the file name
                     auto timestamp = extract_timestamp_from_file(path, prefix, suffix);
-                    if (timestamp.has_value() && comp(timestamp.value(), timestamp_limit)) {
+                    if (timestamp.has_value() && Compare()(timestamp.value(), timestamp_limit)) {
                         if (!archive) {
                             std::filesystem::remove(path);
                         } else {
