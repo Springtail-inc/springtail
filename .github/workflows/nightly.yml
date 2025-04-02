@@ -214,25 +214,41 @@ jobs:
       - name: Run Proxy Tests
         if: success()
         run: |
-          cd python/testing/proxy
+          cd python/testing
+          python3 springtail.py -f ../../system.json.test --kill --build-dir ../../debug
+          
+          cd proxy
+          # Do not break out if errors occur
+          set +e
           python3 test_runner.py -t -s postgres_all
+          # set Failure flag is the above command exits non-zero exit code
+          _LOG_FLAG="succeeded"
+          if [ $? -ne 0 ]; then
+              _LOG_FLAG="failed"
+          fi
+          set -e
           
           _TIMESTAMP=$(date +%s)
           
           # Test log
-          log_file="proxy-regress-${GITHUB_SHORT_SHA}-${_TIMESTAMP}.log" 
+          log_file="proxy-regress-${GITHUB_SHORT_SHA}-${_TIMESTAMP}-${_LOG_FLAG}.log" 
           log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${log_file}"
           aws s3 cp proxy_regress.log $log_s3_key
           echo "*** Proxy Test Log S3 Key: $log_s3_key"
           
           # Springtail service logs (proxy)
           springtail_proxy_log_file="proxy-springtail-svc-${GITHUB_SHORT_SHA}-${_TIMESTAMP}.tar.gz"
-          # tar all logs starting with `proxy*` under the Springtail log path 
-          tar -czf $springtail_proxy_log_file ${SPRINGTAIL_LOG_PATH}/proxy*
-          springtail_log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${springtail_proxy_log_file}"
-          aws s3 cp $springtail_proxy_log_file $springtail_log_s3_key
-          echo "*** Springtail Proxy Logs S3 Key: $springtail_log_s3_key"
-          
+          # tar all logs under the Springtail log path
+          # only do the taring and uploading if there are something inside the log path
+          # checks if the log path is empty
+          if [ "$(ls -A ${SPRINGTAIL_LOG_PATH})" ]; then
+            tar -czf $springtail_proxy_log_file ${SPRINGTAIL_LOG_PATH}/*
+            springtail_log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${springtail_proxy_log_file}"
+            aws s3 cp $springtail_proxy_log_file $springtail_log_s3_key
+            echo "*** Springtail Proxy Logs S3 Key: $springtail_log_s3_key"
+          else
+            echo "*** No Springtail Proxy Logs to found inside ${SPRINGTAIL_LOG_PATH}"
+          fi
           # Find the file matching this name exactly: `regression.diff.proxy.out`
           # under the $TMPDIR directory (recursive) and upload it to S3
           regression_diff_file=$(find /tmp -name "regression.diff.proxy.out")
@@ -242,7 +258,6 @@ jobs:
               aws s3 cp $regression_diff_file $regression_diff_s3_key
               echo "*** Proxy Regression Diff S3 Key: $regression_diff_s3_key"
           fi
-          # Save the 
 
       - name: Package and Upload Build artifacts to S3
         if: success()

@@ -126,7 +126,7 @@ namespace springtail::pg_log_mgr {
         //     we had a clean shutdown mechanism, we could start up without any recovery
         uint64_t lsn = INVALID_LSN;
         bool do_init = (state == redis::db_state_change::REDIS_STATE_INITIALIZE);
-        PgLogRecovery recovery(_db_id, _repl_log_path, _xact_log_path, _pg_log_reader);
+        PgLogRecovery recovery(_db_id, _repl_log_path, _xact_log_path, _pg_log_reader, next_xid - 1);
         if (do_init) {
             _startup_init();
         } else {

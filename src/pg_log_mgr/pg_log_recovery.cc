@@ -74,7 +74,7 @@ PgLogRecovery::_skip_committed()
     _repl_reader.set_file(*_repl_log);
 
     // Open the xact log
-    PgXactLogReader xact_reader(_xact_path);
+    PgXactLogReaderMmap xact_reader(_xact_path, _committed_xid, _pg_log_reader->archive_logs());
     if (!xact_reader.begin()) {
         return true;
     }
@@ -105,21 +105,24 @@ PgLogRecovery::_skip_committed()
             _repl_log =
                 fs::get_next_log_file(*_repl_log, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
             if (!_repl_log) {
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "No next replication log found, last committed xid is not found");
                 return false;
             }
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Set streaming for file {}", _repl_log.value().string());
 
             ++log_number;
             _repl_reader.set_file(*_repl_log);
         }
     }
 
+    xact_reader.cleanup_logs();
     return true;
 }
 
 bool
 PgLogRecovery::_process_msg(PgMsgPtr msg,
                             uint32_t log_number,
-                            PgXactLogReader &xact_reader,
+                            PgXactLogReaderMmap &xact_reader,
                             uint32_t &cur_pgxid)
 {
     switch (msg->msg_type) {
@@ -168,6 +171,8 @@ PgLogRecovery::_process_msg(PgMsgPtr msg,
                 pgxid = commit_msg.xid;
             }
 
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Found COMMIT for pgxid {} with xact_xid {}", pgxid, xact_reader.get_xid());
+
             bool done = false;
             CHECK_LE(xact_reader.get_xid(), _committed_xid);
             if (pgxid != 0) {
@@ -175,10 +180,12 @@ PgLogRecovery::_process_msg(PgMsgPtr msg,
             }
 
             if (xact_reader.get_xid() == _committed_xid) {
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Found final commit");
                 _final_committed = {log_number, _repl_reader.block_end_offset(), *_repl_log};
                 done = true;
             } else {
                 done = !xact_reader.next();  // move to the next record in the xact log
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Advanced xact_reader to the next xid; done = {}", done);
             }
 
             return done;
@@ -211,6 +218,7 @@ PgLogRecovery::_replay_active()
     _repl_log = min_i->second.file;
     uint64_t timestamp = fs::extract_timestamp_from_file(_repl_log.value(), PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX).value();
     _repl_reader.set_file(*_repl_log, start_offset);
+    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replaying active from file {}", _repl_log.value().string());
 
     // replay repl log entries for the active set... skip everything else until we get to the end of
     // the _final_committed transaction
@@ -286,6 +294,7 @@ PgLogRecovery::_replay_active()
             if (_repl_log) {
                 _repl_reader.set_file(*_repl_log);
                 timestamp = fs::extract_timestamp_from_file(_repl_log.value(), PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX).value();
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replaying active from file {}", _repl_log.value().string());
             } else {
                 return false;
             }
@@ -306,8 +315,8 @@ PgLogRecovery::_replay_uncommitted()
                              // create_index, drop_index
     };
 
-    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replay remaining uncommitted messages");
     uint64_t timestamp = fs::extract_timestamp_from_file(_repl_log.value(), PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX).value();
+    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replaying uncommitted from file {}", _repl_log.value().string());
 
     while (_repl_log) {
         bool eob, eos;
@@ -325,6 +334,7 @@ PgLogRecovery::_replay_uncommitted()
             if (_repl_log) {
                 _repl_reader.set_file(*_repl_log);
                 timestamp = fs::extract_timestamp_from_file(_repl_log.value(), PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX).value();
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replaying uncommitted from file {}", _repl_log.value().string());
             }
         }
     }
