@@ -256,19 +256,20 @@ namespace springtail {
          * @brief This function removes all the files from directory with the timestamp id
          *          less than given timestamp limit
          *
+         * @tparam Compare  - template parameter for comparison function
          * @param dir       - directory path
          * @param prefix    - file prefix
          * @param suffix    - file suffix
          * @param timestamp_limit   - timestamp id limit
          * @param comp      - compare function for deciding which files to remove
          */
-        static void
+        template <typename Compare = std::less<uint64_t>> static void
         cleanup_files_from_dir(const std::filesystem::path& dir,
                                std::string_view prefix,
                                std::string_view suffix,
                                uint64_t timestamp_limit,
                                bool archive = false,
-                               std::function<bool (uint64_t, uint64_t)> comp = std::less<uint64_t>())
+                               Compare comp = Compare())
         {
             if (archive && !std::filesystem::exists(dir / "archive")) {
                 // create archive directory
