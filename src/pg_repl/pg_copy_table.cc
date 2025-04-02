@@ -446,7 +446,7 @@ namespace springtail
         auto invalid_columns = TableValidator::get_instance()->validate_ddl_and_get_invalid_columns<SchemaColumn>(
                 schema_name, table_oid, _schema.columns);
         if ( invalid_columns.size() > 0 ){
-            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Invalid columns found as part of _copy_table for table_oid {}", table_oid);
+            LOG_DEBUG(LOG_PG_REPL, "Invalid columns found as part of _copy_table for table_oid {}", table_oid);
             nlohmann::json table_info = {
                 {"schema", schema_name},
                 {"table", table_oid},

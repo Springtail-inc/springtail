@@ -18,7 +18,7 @@ public:
           _committed_xid(committed_xid),
           _pg_log_reader(log_reader)
     {
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Starting recovery with last committed xid = {}", _committed_xid);
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Starting recovery with last committed xid = {}", _committed_xid);
     }
 
     /**

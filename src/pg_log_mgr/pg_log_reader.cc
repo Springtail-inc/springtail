@@ -11,6 +11,8 @@
 #include <write_cache/write_cache_func.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 
+#include <opentelemetry/metrics/provider.h>
+
 namespace springtail::pg_log_mgr {
 
     PgLogReader::PgLogReader(uint64_t db_id, uint32_t queue_size,
@@ -444,7 +446,7 @@ namespace springtail::pg_log_mgr {
                 redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
 
                 if (TableValidator::get_instance()->check_if_table_is_invalid_in_redis(table_msg.oid)){
-                    SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Altering invalid table to valid with tid {}", table_msg.oid);
+                    LOG_DEBUG(LOG_PG_REPL, "Altering invalid table to valid with tid {}", table_msg.oid);
                     // The table is no longer invalid, remove the redis entry for the table
                     TableValidator::get_instance()->clear_invalid_table_in_redis(table_msg.oid);
                     // Trigger a resync to ensure the data is pulled for the table
@@ -471,7 +473,7 @@ namespace springtail::pg_log_mgr {
                     TableValidator::get_instance()->populate_invalid_tables_in_redis(table_msg.oid, table_info);
 
                     // Drop the table in FDW
-                    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Dropping invalid table as part of alter: xid={}, pg_xid={}, tid={}",
+                    LOG_DEBUG(LOG_PG_LOG_MGR, "Dropping invalid table as part of alter: xid={}, pg_xid={}, tid={}",
                                     xidlsn.xid, table_msg.xid, table_msg.oid);
                     PgMsgDropTable drop_table_msg;
                     drop_table_msg.xid = table_msg.xid;
@@ -488,7 +490,7 @@ namespace springtail::pg_log_mgr {
                     // Table is valid, but check if the table is previously invalid.
                     // If the table was invalid before then switch the type to a CREATE instead of an ALTER
                     if (TableValidator::get_instance()->check_if_table_is_invalid_in_redis(table_msg.oid)){
-                        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Recreating invalid table as part of ALTER: xid={}, pg_xid={}, tid={}",
+                        LOG_DEBUG(LOG_PG_LOG_MGR, "Recreating invalid table as part of ALTER: xid={}, pg_xid={}, tid={}",
                                     xidlsn.xid, table_msg.xid, table_msg.oid);
                         // The table is no longer invalid, remove the redis entry for the table
                         TableValidator::get_instance()->clear_invalid_table_in_redis(table_msg.oid);
@@ -683,7 +685,7 @@ namespace springtail::pg_log_mgr {
                 int32_t pg_xid = (msg->is_streaming) ? insert.xid : _current_xact->xid;
 
                 if (TableValidator::get_instance()->check_if_table_is_invalid_in_redis(insert.rel_id)){
-                    SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Prevent DML for invalid table with tid {}", insert.rel_id);
+                    LOG_DEBUG(LOG_PG_REPL, "Prevent DML for invalid table with tid {}", insert.rel_id);
                     break;
                 }
 
@@ -697,7 +699,7 @@ namespace springtail::pg_log_mgr {
                 int32_t pg_xid = (msg->is_streaming) ? remove.xid : _current_xact->xid;
 
                 if (TableValidator::get_instance()->check_if_table_is_invalid_in_redis(remove.rel_id)){
-                    SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Prevent DML for invalid table with tid {}", remove.rel_id);
+                    LOG_DEBUG(LOG_PG_REPL, "Prevent DML for invalid table with tid {}", remove.rel_id);
                     break;
                 }
 
@@ -711,7 +713,7 @@ namespace springtail::pg_log_mgr {
                 int32_t pg_xid = (msg->is_streaming) ? update.xid : _current_xact->xid;
 
                 if (TableValidator::get_instance()->check_if_table_is_invalid_in_redis(update.rel_id)){
-                    SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Prevent DML for invalid table with tid {}", update.rel_id);
+                    LOG_DEBUG(LOG_PG_REPL, "Prevent DML for invalid table with tid {}", update.rel_id);
                     break;
                 }
 

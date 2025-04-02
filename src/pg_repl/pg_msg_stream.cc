@@ -997,7 +997,7 @@ namespace springtail {
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Decoded drop table: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_REPL, "Decoded drop table: json: {}", json.dump());
 
         // check object type, could be an index, default value or something other
         // than a table; if so we skip decoding
