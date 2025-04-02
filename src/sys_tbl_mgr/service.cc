@@ -1320,12 +1320,7 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
             index_info_request->set_xid(xid.xid);
             index_info_request->set_lsn(xid.lsn);
             index_info_request->set_table_id(table_id);
-            proto::IndexInfo index_info;
-            {
-                // acquire a shared lock to ensure no one is doing a finalize
-                boost::shared_lock _idx_read_lock(_read_mutex);
-                index_info = _get_index_info(*index_info_request);
-            }
+            auto index_info = _get_index_info(*index_info_request);
 
             if (static_cast<sys_tbl::IndexNames::State>(index_info.state()) != sys_tbl::IndexNames::State::READY) {
                 SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index deleted or not-ready, so skipping the root {} -- {}",
