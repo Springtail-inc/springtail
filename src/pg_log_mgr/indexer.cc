@@ -175,11 +175,11 @@ namespace springtail::committer {
         }
 
         // Construct the index file to drop the cache
-        std::filesystem::path _table_base;
+        std::filesystem::path table_base;
         auto json = Properties::get(Properties::STORAGE_CONFIG);
-        Json::get_to<std::filesystem::path>(json, "table_dir", _table_base);
-        _table_base = Properties::make_absolute_path(_table_base);
-        std::filesystem::path index_file = _table_base / std::to_string(db_id) / fmt::format("{}-{}", info.table_id(), xid.xid) / fmt::format(constant::INDEX_FILE, index_id);
+        Json::get_to<std::filesystem::path>(json, "table_dir", table_base);
+        table_base = Properties::make_absolute_path(table_base);
+        std::filesystem::path index_file = table_base / std::to_string(db_id) / fmt::format("{}-{}", info.table_id(), xid.xid) / fmt::format(constant::INDEX_FILE, index_id);
 
         // remove any dirty cached pages for this index since they don't need to be written
         StorageCache::get_instance()->drop_for_truncate(index_file);

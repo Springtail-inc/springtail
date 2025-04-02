@@ -1328,8 +1328,8 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
             }
 
             if (static_cast<sys_tbl::IndexNames::State>(index_info.state()) != sys_tbl::IndexNames::State::READY) {
-                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index deleted or not-ready, so skipping the root {} -- {}", table_id,
-                        index_id_f->get_uint64(*rrow_i));
+                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index deleted or not-ready, so skipping the root {} -- {}",
+                        table_id, index_id_f->get_uint64(*rrow_i));
                 continue;
             }
         }
