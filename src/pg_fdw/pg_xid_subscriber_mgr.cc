@@ -15,19 +15,19 @@ PgXidSubscriberMgr::PgXidSubscriberMgr(size_t cache_size, size_t worker_count) :
     _cache_size{cache_size},
     _worker_count{worker_count}
 {
-    SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "PgXidSubscriberMgr creating {}, {}", _cache_size, _worker_count);
+    LOG_DEBUG(LOG_XID_MGR, "PgXidSubscriberMgr creating {}, {}", _cache_size, _worker_count);
     _t = std::make_unique<std::jthread>([this](std::stop_token st) { task(st); });
 }
 
 PgXidSubscriberMgr::~PgXidSubscriberMgr()
 {
-    SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "PgXidSubscriberMgr deleted");
+    LOG_DEBUG(LOG_XID_MGR, "PgXidSubscriberMgr deleted");
 }
 
 void
 PgXidSubscriberMgr::task(std::stop_token st)
 {
-    SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "PgXidSubscriberMgr task starting");
+    LOG_DEBUG(LOG_XID_MGR, "PgXidSubscriberMgr task starting");
 
     static constexpr char const * const XID_SUBSCRIBER_WORKER_ID = "xid_subscriber";
 
@@ -51,12 +51,12 @@ PgXidSubscriberMgr::task(std::stop_token st)
         // when we get an XID push notification, we pass it to the workers
         // and return immediately. A worker calls get_roots() that will
         // attempt to populate the cache.
-        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XID push notification {} - {}", db, xid);
+        LOG_DEBUG(LOG_XID_MGR, "XID push notification {} - {}", db, xid);
         _cache->update_committed_xid(db, xid);
         _enqueue_populate_job(db, xid);
     };
     auto on_disconnect = [&connected]() {
-        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrSubscriber disconnected");
+        LOG_DEBUG(LOG_XID_MGR, "XidMgrSubscriber disconnected");
         connected = false;
     };
 
@@ -101,7 +101,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
         auto p = subscriber.release();
         p->cancel();
     }
-    SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "PgXidSubscriberMgr thread stopping");
+    LOG_DEBUG(LOG_XID_MGR, "PgXidSubscriberMgr thread stopping");
     workers.clear();
     client = sys_tbl_mgr::Client::get_instance();
     client->use_roots_cache({});
@@ -159,10 +159,10 @@ PgXidSubscriberRunner::start()
     uint64_t roots_cache_size = 0;
     Json::get_to<uint64_t>(json, "roots_shm_cache_size", roots_cache_size);
 
-    SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "PgXidSubscriberRunner starting with cache size {}", roots_cache_size);
+    LOG_DEBUG(LOG_XID_MGR, "PgXidSubscriberRunner starting with cache size {}", roots_cache_size);
 
     if (!roots_cache_size) {
-        SPDLOG_ERROR("Bad cache size, terminating PgXidSubscriberRunner");
+        LOG_ERROR(LOG_XID_MGR, "Bad cache size, terminating PgXidSubscriberRunner");
         return false;
     }
 
@@ -171,7 +171,7 @@ PgXidSubscriberRunner::start()
 
     // fetch RPC properties for the sys_tbl_mgr server
     if (!Json::get_to(json, "rpc_config", rpc_json)) {
-        SPDLOG_ERROR("SysTblMgr RPC settings are not found, terminating PgXidSubscriberRunner");
+        LOG_ERROR(LOG_XID_MGR, "SysTblMgr RPC settings are not found, terminating PgXidSubscriberRunner");
         return false;
     }
 

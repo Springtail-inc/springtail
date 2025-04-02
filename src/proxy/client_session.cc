@@ -1,5 +1,3 @@
-#include <iostream>
-#include <sstream>
 #include <cassert>
 
 #include <openssl/err.h>
@@ -120,7 +118,7 @@ namespace springtail::pg_proxy {
                 break;
 
             default:
-                SPDLOG_ERROR("Invalid state: {}", (int8_t)_state);
+                LOG_ERROR(LOG_PROXY, "Invalid state: {}", (int8_t)_state);
                 _state = ERROR;
                 break;
         }
@@ -138,7 +136,7 @@ namespace springtail::pg_proxy {
             auth_done = _auth->process_auth_data(seq_id);
         } catch (ProxyAuthError &e) {
             // print backtrace
-            SPDLOG_ERROR("[C:{}] Client session auth error: {}", _id, e.what());
+            LOG_ERROR(LOG_PROXY, "[C:{}] Client session auth error: {}", _id, e.what());
             e.log_backtrace();
             _state = ERROR;
         }
@@ -364,7 +362,7 @@ namespace springtail::pg_proxy {
 
             case 'X':
                 // terminate
-                SPDLOG_ERROR("Terminate request");
+                LOG_ERROR(LOG_PROXY, "Terminate request");
                 _state = ERROR;
                 return;
 
@@ -380,7 +378,7 @@ namespace springtail::pg_proxy {
             case 'd':   // copy data
             case 'f': { // copy fail
                 if (get_associated_session() == nullptr) {
-                    SPDLOG_WARN("[C:{}] No associated server session", _id);
+                    LOG_WARN(LOG_PROXY, "[C:{}] No associated server session", _id);
                     // a c/d could come after an error message after ready for query
                     // in this case we drop it.
                     break;
@@ -410,7 +408,7 @@ namespace springtail::pg_proxy {
                 break;
 
             default:
-                SPDLOG_ERROR("Unsupported request code: {}", code);
+                LOG_ERROR(LOG_PROXY, "Unsupported request code: {}", code);
                 throw ProxyMessageError();
             }
         }
@@ -552,7 +550,7 @@ namespace springtail::pg_proxy {
         std::pair<QueryStmtPtr, bool> lookup_result = _stmt_cache.lookup_prepared(stmt);
         QueryStmtPtr prepared_stmt = lookup_result.first;
         if (prepared_stmt == nullptr) {
-            SPDLOG_ERROR("Prepared statement not found: {}", stmt);
+            LOG_ERROR(LOG_PROXY, "Prepared statement not found: {}", stmt);
             throw ProxyMessagePreparedError();
         }
 
@@ -599,7 +597,7 @@ namespace springtail::pg_proxy {
 
         QueryStmtPtr query_stmt = lookup_result.first;
         if (query_stmt == nullptr) {
-            SPDLOG_ERROR("Statement not found: {}", name);
+            LOG_ERROR(LOG_PROXY, "Statement not found: {}", name);
             throw ProxyMessagePreparedError();
         }
 
@@ -652,7 +650,7 @@ namespace springtail::pg_proxy {
                 qs_type = dep_stmt->extended_type;
             }
         } else {
-            SPDLOG_ERROR("Portal not found: {}", name);
+            LOG_ERROR(LOG_PROXY, "Portal not found: {}", name);
         }
 
         // cache the execute packet for the transaction
@@ -697,7 +695,7 @@ namespace springtail::pg_proxy {
             std::tie(dep_stmt, std::ignore) = _stmt_cache.lookup_prepared(name);
 
             if (dep_stmt == nullptr) {
-                SPDLOG_ERROR("Statement not found: {}", name);
+                LOG_ERROR(LOG_PROXY, "Statement not found: {}", name);
                 throw ProxyMessagePreparedError();
             }
 
@@ -828,7 +826,7 @@ namespace springtail::pg_proxy {
             from_pool = false;
 
             if ((session = db_mgr->allocate_session(type, _db_id, _user, _parameters)) == nullptr) {
-                SPDLOG_ERROR("Failed to allocate server session for user {}, database {}", _user->username(), _database);
+                LOG_ERROR(LOG_PROXY, "Failed to allocate server session for user {}, database {}", _user->username(), _database);
                 assert(0);
                 return nullptr;
             }

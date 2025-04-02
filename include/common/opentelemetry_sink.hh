@@ -98,14 +98,11 @@ public:
         auto attributes_view = opentelemetry::common::KeyValueIterableView<decltype(attributes)>{attributes};
 
         // Send to OpenTelemetry with source information
-        _logger->Log(
-            severity,
-            opentelemetry::nostd::string_view{log_message},
-            attributes_view
-        );
+        _logger->Log(severity, opentelemetry::nostd::string_view{log_message}, attributes_view);
     }
 
 private:
+    // TODO: not sure if we still need this since all this information will be now inside log message
     std::vector<std::pair<std::string, std::string>>
     _get_context_attributes(const spdlog::details::log_msg &msg)
     {
@@ -116,7 +113,7 @@ private:
         attributes[2].second = std::move(msg.source.funcname ? msg.source.funcname : "");
 
         // Transaction properties
-        for (const auto& key : springtail::logging::get_context_variables()) {
+        for (const auto& key : springtail::logging::Logger::get_context_variables()) {
             attributes.emplace_back(key.first, key.second);
         }
 
@@ -143,7 +140,6 @@ public:
     {
         std::lock_guard<std::mutex> lock(_formatter_mutex);
         _set_pattern(pattern);
-
     }
 
     void

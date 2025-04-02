@@ -34,13 +34,13 @@ namespace springtail::pg_proxy {
         socklen_t len = sizeof(addr);
 
         if (getpeername(_socket, (struct sockaddr *)&addr, &len) == -1) {
-            SPDLOG_ERROR("Error getting peer name: {}", strerror(errno));
+            LOG_ERROR(LOG_PROXY, "Error getting peer name: {}", strerror(errno));
             return "unknown";
         }
 
         int rc = getnameinfo((struct sockaddr *)&addr, len, host, sizeof(host), service, sizeof(service), NI_NUMERICHOST | NI_NUMERICSERV);
         if (rc != 0) {
-            SPDLOG_ERROR("Error getting name info: {}", gai_strerror(rc));
+            LOG_ERROR(LOG_PROXY, "Error getting name info: {}", gai_strerror(rc));
             return "unknown";
         }
 
@@ -102,9 +102,9 @@ namespace springtail::pg_proxy {
 
                 case SSL_ERROR_SYSCALL:
                     if (w == -1) {
-                        SPDLOG_ERROR("SSL_write: error syscall: {}", err);
+                        LOG_ERROR(LOG_PROXY, "SSL_write: error syscall: {}", err);
                     } else {
-                        SPDLOG_ERROR("SSL_write: error syscall: EOF detected");
+                        LOG_ERROR(LOG_PROXY, "SSL_write: error syscall: EOF detected");
                         w = -1;
                     }
                     break;
@@ -112,12 +112,12 @@ namespace springtail::pg_proxy {
                 case SSL_ERROR_ZERO_RETURN:
                 case SSL_ERROR_SSL:
                     msg = ERR_error_string(err, nullptr);
-                    SPDLOG_ERROR("SSL_write: error ssl: err={}, msg={}", err, msg);
+                    LOG_ERROR(LOG_PROXY, "SSL_write: error ssl: err={}, msg={}", err, msg);
                     w = -1;
                     break;
 
                 default:
-                    SPDLOG_ERROR("SSL_write: unknown error: {}", err);
+                    LOG_ERROR(LOG_PROXY, "SSL_write: unknown error: {}", err);
                     w = -1;
                     break;
                 }
@@ -143,7 +143,7 @@ namespace springtail::pg_proxy {
             } else if (n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
                 continue;
             } else {
-                SPDLOG_ERROR("Error writing to socket: {}", strerror(errno));
+                LOG_ERROR(LOG_PROXY, "Error writing to socket: {}", strerror(errno));
                 close();
                 throw ProxyIOError();
             }
@@ -190,16 +190,16 @@ namespace springtail::pg_proxy {
 
                 case SSL_ERROR_SYSCALL:
                     if (r == -1) {
-                        SPDLOG_ERROR("SSL_read: error syscall: {}", err);
+                        LOG_ERROR(LOG_PROXY, "SSL_read: error syscall: {}", err);
                     } else {
-                        SPDLOG_ERROR("SSL_read: error syscall: EOF detected");
+                        LOG_ERROR(LOG_PROXY, "SSL_read: error syscall: EOF detected");
                         r = -1;
                     }
                     break;
 
                 case SSL_ERROR_SSL:
                     msg = ERR_error_string(err, nullptr);
-                    SPDLOG_ERROR("SSL_read: error ssl: {}", msg);
+                    LOG_ERROR(LOG_PROXY, "SSL_read: error ssl: {}", msg);
                     r = -1;
                     break;
 
@@ -216,11 +216,11 @@ namespace springtail::pg_proxy {
                     * to close connection to frontend.
                     */
                     msg = ERR_error_string(err, nullptr);
-                    SPDLOG_ERROR("SSL_read: SSL_ERROR_ZERO_RETURN: {}", msg);
+                    LOG_ERROR(LOG_PROXY, "SSL_read: SSL_ERROR_ZERO_RETURN: {}", msg);
                     r = 0;
                     break;
                 default:
-                    SPDLOG_ERROR("SSL_read: unknown error: {}", err);
+                    LOG_ERROR(LOG_PROXY, "SSL_read: unknown error: {}", err);
                     r = -1;
                     break;
                 }
@@ -253,7 +253,7 @@ namespace springtail::pg_proxy {
                 continue;
             } else {
                 // Error occurred
-                SPDLOG_ERROR("Error reading from socket: {}", strerror(errno));
+                LOG_ERROR(LOG_PROXY, "Error reading from socket: {}", strerror(errno));
                 close();
                 throw ProxyIOError();
             }
@@ -276,7 +276,7 @@ namespace springtail::pg_proxy {
         std::string port_str = std::to_string(port);
         int status = getaddrinfo(hostname.c_str(), port_str.c_str(), &hints, &res);
         if (status != 0) {
-            SPDLOG_ERROR("Error resolving hostname {}: {}", hostname, gai_strerror(status));
+            LOG_ERROR(LOG_PROXY, "Error resolving hostname {}: {}", hostname, gai_strerror(status));
             throw ProxyIOConnectionError();
         }
 
@@ -298,7 +298,7 @@ namespace springtail::pg_proxy {
         freeaddrinfo(res);
 
         if (sock == -1) {
-            SPDLOG_ERROR("Error connecting to {}:{}", hostname, port);
+            LOG_ERROR(LOG_PROXY, "Error connecting to {}:{}", hostname, port);
             throw ProxyIOConnectionError();
         }
 
@@ -311,7 +311,7 @@ namespace springtail::pg_proxy {
         _ssl = ssl;
         int rc = ::SSL_set_fd(ssl, _socket);
         if (rc <= 0) {
-            SPDLOG_ERROR("Error setting SSL fd: {}", _socket);
+            LOG_ERROR(LOG_PROXY, "Error setting SSL fd: {}", _socket);
             throw ProxySSLConnectionError();
         }
 
@@ -331,7 +331,7 @@ namespace springtail::pg_proxy {
         int flags = fcntl(_socket, F_GETFL, 0);
         int rc = fcntl(_socket, F_SETFL, flags & ~O_NONBLOCK);
         if (rc < 0) {
-            SPDLOG_ERROR("Error setting socket to blocking: {}", strerror(errno));
+            LOG_ERROR(LOG_PROXY, "Error setting socket to blocking: {}", strerror(errno));
             throw ProxyIOError();
         }
     }
@@ -342,7 +342,7 @@ namespace springtail::pg_proxy {
         int flags = fcntl(_socket, F_GETFL, 0);
         int rc = fcntl(_socket, F_SETFL, flags | O_NONBLOCK);
         if (rc < 0) {
-            SPDLOG_ERROR("Error setting socket to non-blocking: {}", strerror(errno));
+            LOG_ERROR(LOG_PROXY, "Error setting socket to non-blocking: {}", strerror(errno));
             throw ProxyIOError();
         }
     }
@@ -358,13 +358,13 @@ namespace springtail::pg_proxy {
                 PROXY_DEBUG(LOG_LEVEL_DEBUG4, "SSL handshake in progress, need data: err={}", err);
                 return;
             case SSL_ERROR_SYSCALL:
-                SPDLOG_ERROR("SSL handshake failed: error syscall: errno={}\n", errno);
+                LOG_ERROR(LOG_PROXY, "SSL handshake failed: error syscall: errno={}\n", errno);
                 break;
             case SSL_ERROR_SSL:
-                SPDLOG_ERROR("SSL handshake failed: error ssl, msg={}", msg);
+                LOG_ERROR(LOG_PROXY, "SSL handshake failed: error ssl, msg={}", msg);
                 break;
             default:
-                SPDLOG_ERROR("SSL handshake failed: rc={}, err={}, msg={}", rc, err, msg);
+                LOG_ERROR(LOG_PROXY, "SSL handshake failed: rc={}, err={}, msg={}", rc, err, msg);
                 break;
         }
 

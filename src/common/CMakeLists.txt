@@ -47,6 +47,13 @@ target_link_libraries(springtail_common
         ${AWSSDK_LIBRARIES}
 )
 
+add_executable(log_tester test/log_tester.cc)
+target_include_directories(log_tester
+     PUBLIC ${PROJECT_SOURCE_DIR}/include
+)
+target_link_libraries(log_tester PRIVATE springtail_common)
+add_dsymutil_command(log_tester)
+
 add_executable(test_thread test/test_thread.cc)
 target_include_directories(test_thread PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_thread PRIVATE springtail_common GTest::gtest_main)

@@ -57,7 +57,7 @@ namespace springtail {
                       bool do_rollforward,
                       SafePagePtr::FlushCb flush_cb )
     {
-        SPDLOG_DEBUG_MODULE(LOG_CACHE, "GET file {} eid {} xid {} txid {}",
+        LOG_DEBUG(LOG_CACHE, "GET file {} eid {} xid {} txid {}",
                             file, extent_id, access_xid, target_xid);
 
         // note: target_xid must be at or beyond the access_xid
@@ -140,7 +140,7 @@ namespace springtail {
     {
         CHECK(extent_id != constant::UNKNOWN_EXTENT);
 
-        SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, access_xid, target_xid);
+        LOG_DEBUG(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, access_xid, target_xid);
 
         boost::unique_lock lock(_mutex);
 
@@ -148,7 +148,7 @@ namespace springtail {
         PagePtr page = _try_get(file, extent_id, target_xid);
         if (page != nullptr) {
             tracing::increment_counter(STORAGE_CACHE_GET_CALLS, tracing::get_db_id_xid_map(0, target_xid));
-            SPDLOG_DEBUG_MODULE(LOG_CACHE, "Found in cache");
+            LOG_DEBUG(LOG_CACHE, "Found in cache");
             return page;
         }
 
@@ -165,7 +165,7 @@ namespace springtail {
     StorageCache::PageCache::get_empty(const std::filesystem::path &file,
                                        uint64_t xid)
     {
-        SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}, {}", file, xid);
+        LOG_DEBUG(LOG_CACHE, "{}, {}", file, xid);
         boost::unique_lock lock(_mutex);
 
         _make_page_space(1);
@@ -176,7 +176,7 @@ namespace springtail {
     StorageCache::PageCache::put(PagePtr page,
                                  std::function<bool(std::shared_ptr<Page>)> flush_callback)
     {
-        SPDLOG_DEBUG_MODULE(LOG_CACHE, "PUT file {} eid {} s_xid {} e_xid {}",
+        LOG_DEBUG(LOG_CACHE, "PUT file {} eid {} s_xid {} e_xid {}",
                             page->_file, page->_extent_id, page->_start_xid, page->_end_xid);
 
         boost::unique_lock lock(_mutex);
@@ -208,7 +208,7 @@ namespace springtail {
     StorageCache::PageCache::evict(PagePtr page)
     {
         boost::unique_lock lock(_mutex);
-        SPDLOG_DEBUG_MODULE(LOG_CACHE, "EVICT file {} eid {} s_xid {} e_xid {}",
+        LOG_DEBUG(LOG_CACHE, "EVICT file {} eid {} s_xid {} e_xid {}",
                             page->_file, page->_extent_id, page->_start_xid, page->_end_xid);
 
         // page must be an unwritten dirty page
@@ -376,7 +376,7 @@ namespace springtail {
                                      uint64_t xid,
                                      const std::vector<uint64_t> &offsets)
     {
-        SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, xid, offsets.size());
+        LOG_DEBUG(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, xid, offsets.size());
 
         // create the page object with the given <file, extent_id> valid at the requested XID
         auto page = std::make_shared<Page>(file, extent_id, xid, xid, offsets);
@@ -433,7 +433,7 @@ namespace springtail {
         }
 
         // remove the page from the cache
-        SPDLOG_DEBUG_MODULE(LOG_CACHE, "Page evict file {} eid {} xid {}",
+        LOG_DEBUG(LOG_CACHE, "Page evict file {} eid {} xid {}",
                             page->key().first, page->key().second, page->xid());
         auto cache_i = _cache.find(page->key());
         cache_i->second.erase(page->xid());
@@ -983,7 +983,7 @@ namespace springtail {
             // get the old extent
             auto old_extent = ref.make_safe_extent(_file);
 
-            SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}@{} (size: {}) to {}@{} (size: {})",
+            LOG_DEBUG(LOG_CACHE, "{}@{} (size: {}) to {}@{} (size: {})",
                                 (*old_extent)->extent_id(),
                                 (*old_extent)->header().xid,
                                 (*old_extent)->header().row_size,
@@ -1063,7 +1063,7 @@ namespace springtail {
 
                 // update the reference with the details of the new extent
                 ref = e.get_ref();
-                SPDLOG_DEBUG_MODULE(LOG_CACHE, "Flushing extent {} -- new extent {}", _extent_id, ref.id());
+                LOG_DEBUG(LOG_CACHE, "Flushing extent {} -- new extent {}", _extent_id, ref.id());
             }
 
             // extent should always be clean at this point

@@ -29,7 +29,7 @@ int main() {
         error();
     } catch (springtail::Error &e) {
         e.log_backtrace();
-        SPDLOG_ERROR("Caught an error!");
+        LOG_ERROR(springtail::LOG_ALL, "Caught an error!");
     }
 
     std::cout << "Crash!" << std::endl;

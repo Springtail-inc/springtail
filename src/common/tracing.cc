@@ -78,7 +78,7 @@ TracingAndMetrics::_init_metrics(const ::opentelemetry::sdk::resource::Resource&
     if (_otel_remote && _host && _port) {
         // host ex: http://otel_collector, port ex: 4318
         options.url = fmt::format("{}:{}/v1/metrics", *_host, *_port);
-        SPDLOG_INFO("Enabling OTel metrics over HTTP: {}", options.url);
+        LOG_INFO(LOG_ALL, "Enabling OTel metrics over HTTP: {}", options.url);
     }
     ::opentelemetry::sdk::metrics::PeriodicExportingMetricReaderOptions reader_options;
     if (_metrics_export_interval_millis) {
@@ -119,7 +119,7 @@ TracingAndMetrics::_init_tracing(const opentelemetry::sdk::resource::Resource& r
         auto log_exporter = std::make_unique<SpdlogExporter>();
         std::unique_ptr<opentelemetry::sdk::trace::SpanProcessor> log_processor =
             std::make_unique<opentelemetry::sdk::trace::SimpleSpanProcessor>(std::move(log_exporter));
-        SPDLOG_INFO("Enabling OTel logging");
+        LOG_INFO(LOG_ALL, "Enabling OTel logging");
         multi_processor->AddProcessor(std::move(log_processor));
     }
 
@@ -135,7 +135,7 @@ TracingAndMetrics::_init_tracing(const opentelemetry::sdk::resource::Resource& r
             std::make_unique<opentelemetry::sdk::trace::SimpleSpanProcessor>(
                 std::move(otlp_exporter));
 
-        SPDLOG_INFO("Enabling OTel over HTTP: {}", options.url);
+        LOG_INFO(LOG_ALL, "Enabling OTel over HTTP: {}", options.url);
         multi_processor->AddProcessor(std::move(otlp_processor));
     }
 
@@ -151,7 +151,7 @@ TracingAndMetrics::init(std::string_view component_name)
 {
     // check the otel properties
     auto json = Properties::get(Properties::OTEL_CONFIG);
-    SPDLOG_INFO("OTel: {}", json.dump());
+    LOG_INFO(LOG_ALL, "OTel: {}", json.dump());
     _otel_enabled = Json::get_or<bool>(json, "enabled", false);
     _otel_remote = Json::get_or<bool>(json, "remote", false);
     _metrics_export_interval_millis = Json::get<int>(json, "metrics_export_interval_millis");
@@ -163,7 +163,7 @@ TracingAndMetrics::init(std::string_view component_name)
         _init_tracing(resource);
     } else {
         // use the Noop provider to drop all collected metrics
-        SPDLOG_INFO("Disabling OTel via NoopTracer/MeterProvider");
+        LOG_INFO(LOG_ALL, "Disabling OTel via NoopTracer/MeterProvider");
         std::shared_ptr<opentelemetry::trace::TracerProvider> trace_provider =
             std::make_shared<opentelemetry::trace::NoopTracerProvider>();
         opentelemetry::trace::Provider::SetTracerProvider(std::move(trace_provider));
@@ -231,7 +231,7 @@ TracingAndMetrics::increment_counter(std::string_view name, const std::unordered
     if(counter){
         counter->Add(1, _set_default_attributes(attributes), _context);
     } else {
-        SPDLOG_ERROR("Counter '{}' not found", name);
+        LOG_ERROR(LOG_ALL, "Counter '{}' not found", name);
     }
 }
 
@@ -248,7 +248,7 @@ TracingAndMetrics::record_histogram(std::string_view name, double value, const s
     if(histogram){
         histogram->Record(value, _set_default_attributes(attributes), _context);
     } else {
-        SPDLOG_ERROR("Histogram '{}' not found", name);
+        LOG_ERROR(LOG_ALL, "Histogram '{}' not found", name);
     }
 }
 

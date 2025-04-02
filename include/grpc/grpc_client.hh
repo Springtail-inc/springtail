@@ -119,14 +119,14 @@ retry_rpc_status(std::string_view service, std::string_view operation, Func&& fu
 
         attempts++;
         if (!should_retry(status) || attempts >= max_attempts) {
-            SPDLOG_WARN("{}: {} failed after {} attempts: {}", service, operation, attempts,
+            LOG_WARN(LOG_ALL, "{}: {} failed after {} attempts: {}", service, operation, attempts,
                         status.error_message());
             span->SetStatus(trace::StatusCode::kError, status.error_message());
             span->End();
             return status;
         }
 
-        SPDLOG_WARN("{}: {} attempt {} failed, retrying in {}ms: {}", service, operation, attempts,
+        LOG_WARN(LOG_ALL, "{}: {} attempt {} failed, retrying in {}ms: {}", service, operation, attempts,
                     backoff.count(), status.error_message());
 
         span->SetStatus(trace::StatusCode::kError, fmt::format("Attempt {} failed, retrying: {}",

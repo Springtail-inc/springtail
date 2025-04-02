@@ -30,7 +30,7 @@ XidMgrServer::XidMgrServer() {
     Json::get_to<std::string>(json, "base_path", base_path);
     _base_path = Properties::make_absolute_path(base_path);
 
-    SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: base_path: {}", _base_path.string());
+    LOG_DEBUG(LOG_XID_MGR, "XidMgrServer: base_path: {}", _base_path.string());
 
     if (!std::filesystem::exists(_base_path)) {
         std::filesystem::create_directories(_base_path);
@@ -63,11 +63,11 @@ void XidMgrServer::_load_partitions()
     std::set<int> partition_ids;
 
     // iterate over all files in the base path
-    SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: loading partitions from {}",
+    LOG_DEBUG(LOG_XID_MGR, "XidMgrServer: loading partitions from {}",
                         _base_path.string());
 
     for (const auto& entry : std::filesystem::directory_iterator(_base_path)) {
-        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: found file {}", entry.path().string());
+        LOG_DEBUG(LOG_XID_MGR, "XidMgrServer: found file {}", entry.path().string());
 
         if (!entry.is_regular_file()) {
             continue;
@@ -89,7 +89,7 @@ void XidMgrServer::_load_partitions()
     // iterate set in order to load partitions in order
     for (int id : partition_ids) {
         // create a partition and load it
-        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: loading partition {}", id);
+        LOG_DEBUG(LOG_XID_MGR, "XidMgrServer: loading partition {}", id);
 
         PartitionPtr partition = std::make_shared<Partition>(_base_path, id);
         partition->load();
@@ -148,7 +148,7 @@ PartitionPtr XidMgrServer::_get_partition(uint64_t db_id, bool create)
 uint64_t XidMgrServer::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
 {
     PartitionPtr partition;
-    auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
+    auto token = logging::Logger::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
     // first try to get partition without write lock
     std::shared_lock lock(_mutex);
     partition = _get_partition(db_id, false);
@@ -165,7 +165,7 @@ uint64_t XidMgrServer::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
 void XidMgrServer::commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_changes)
 {
     PartitionPtr partition;
-    auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(xid)}});
+    auto token = logging::Logger::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(xid)}});
     // first try to get partition without write lock
     std::shared_lock rd_lock(_mutex);
     partition = _get_partition(db_id, false);
@@ -193,7 +193,7 @@ void XidMgrServer::record_ddl_change(uint64_t db_id, uint64_t xid)
 {
     // note: code is nearly identical to commit_xid()... make sure they stay in sync
 
-    auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(xid)}});
+    auto token = logging::Logger::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(xid)}});
     PartitionPtr partition;
 
     // first try to get partition without write lock

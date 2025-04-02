@@ -64,7 +64,7 @@ struct FlatTraceSet {
 #define TIME_TRACESET_INIT(trace_set, name) trace_set.init(name)
 #define TIME_TRACESET_UPDATE(trace_set, name, trace) trace_set.update(name, trace)
 #define TIME_TRACESET_RESET(trace_set) trace_set.reset();
-#define TIME_TRACESET_LOG(trace_set) SPDLOG_INFO(trace_set.format());
+#define TIME_TRACESET_LOG(trace_set) LOG_INFO(LOG_ALL, "{}", trace_set.format());
 
 #define TIME_TRACE(trace) time_trace::Trace trace
 #define TIME_TRACE_START(trace) trace.start()

@@ -24,7 +24,7 @@ decode_error(BufferPtr buffer, std::string &code, std::string &message)
 
     ProxyProtoError::decode_error(buffer, severity, text, code, message);
 
-    SPDLOG_ERROR("Error response from server: {}, {}, {}", text, code, message);
+    LOG_ERROR(LOG_PROXY, "Error response from server: {}, {}, {}", text, code, message);
 }
 
 bool
@@ -72,7 +72,7 @@ ClientAuthorization::_handle_startup(uint64_t seq_id)
             break;
 
         case MSG_STARTUP_V2:
-            SPDLOG_ERROR("Startup message version 2.0, not supported");
+            LOG_ERROR(LOG_PROXY, "Startup message version 2.0, not supported");
             // not supported
             _state = ERROR;
             break;
@@ -82,7 +82,7 @@ ClientAuthorization::_handle_startup(uint64_t seq_id)
             break;
 
         default:
-            SPDLOG_ERROR("Invalid startup message code: {}", code);
+            LOG_ERROR(LOG_PROXY, "Invalid startup message code: {}", code);
             _state = ERROR;
             break;
     }
@@ -148,7 +148,7 @@ ClientAuthorization::_process_startup_msg(int32_t remaining, uint64_t seq_id)
     // get user info and store it
     _user = UserMgr::get_instance()->get_user(username, database);
     if (_user == nullptr) {
-        SPDLOG_ERROR("User {} not found", username);
+        LOG_ERROR(LOG_PROXY, "User {} not found", username);
         _state = ERROR;
         _error_code = ProxyProtoError::INVALID_PASSWORD;
         return;
@@ -156,7 +156,7 @@ ClientAuthorization::_process_startup_msg(int32_t remaining, uint64_t seq_id)
     _database = database;
     auto optional_db_id = DatabaseMgr::get_instance()->get_database_id(_database);
     if (!optional_db_id.has_value()) {
-        SPDLOG_ERROR("Database {} not found", _database);
+        LOG_ERROR(LOG_PROXY, "Database {} not found", _database);
         _state = ERROR;
         _error_code = ProxyProtoError::INVALID_DATABASE;
         return;
@@ -188,7 +188,7 @@ ClientAuthorization::_process_ssl_request()
     // allocate ssl struct for this connection; acting as server
     SSL *ssl = ProxyServer::get_instance()->SSL_new(true);
     if (ssl == nullptr) {
-        SPDLOG_ERROR("Failed to create SSL context");
+        LOG_ERROR(LOG_PROXY, "Failed to create SSL context");
         _state = ERROR;
         _error_code = ProxyProtoError::CONNECTION_FAILURE;
         return;
@@ -226,7 +226,7 @@ ClientAuthorization::_send_auth_req(uint64_t seq_id)
             break;
 
         default:
-            SPDLOG_ERROR("User {} not found", _user->username());
+            LOG_ERROR(LOG_PROXY, "User {} not found", _user->username());
             _error_code = ProxyProtoError::INVALID_PASSWORD;
             _state = ERROR;
             break;
@@ -269,20 +269,20 @@ ClientAuthorization::_handle_auth(uint64_t seq_id)
 
                 std::string_view client_passwd = buffer->get_string();
                 if (client_passwd.empty() || client_passwd.size() != MD5_PASSWD_LEN) {
-                    SPDLOG_ERROR("Empty password received; or password length mismatch");
+                    LOG_ERROR(LOG_PROXY, "Empty password received; or password length mismatch");
                     throw ProxyAuthError();
                 }
 
                 // calculate md5 hash; skip the 'md5' prefix on the password
                 if (!pg_md5_encrypt(_login->password.c_str() + 3,
                                     reinterpret_cast<char *>(&_login->salt), 4, md5)) {
-                    SPDLOG_ERROR("Failed to calculate MD5 hash");
+                    LOG_ERROR(LOG_PROXY, "Failed to calculate MD5 hash");
                     throw ProxyAuthError();
                 }
                 md5[MD5_PASSWD_LEN] = '\0';
 
                 if (strcmp(md5, client_passwd.data()) != 0) {
-                    SPDLOG_ERROR("MD5 password mismatch: : {} <> {}", md5, client_passwd);
+                    LOG_ERROR(LOG_PROXY, "MD5 password mismatch: : {} <> {}", md5, client_passwd);
                     char data[128];
                     BufferPtr write_buffer = std::make_shared<Buffer>(data, 128);
                     ProxyProtoError::encode_error(write_buffer, ProxyProtoError::INVALID_PASSWORD,
@@ -314,7 +314,7 @@ ClientAuthorization::_handle_auth(uint64_t seq_id)
                     // process as SASLInitialResponse
                     std::string_view scram_type = buffer->get_string();
                     if (scram_type != "SCRAM-SHA-256") {
-                        SPDLOG_ERROR("Unsupported scram type: {}", scram_type);
+                        LOG_ERROR(LOG_PROXY, "Unsupported scram type: {}", scram_type);
                         throw ProxyAuthError();
                     }
 
@@ -332,7 +332,7 @@ ClientAuthorization::_handle_auth(uint64_t seq_id)
             }
 
             default:
-                SPDLOG_ERROR("Invalid login type: {}", static_cast<int8_t>(_login->type));
+                LOG_ERROR(LOG_PROXY, "Invalid login type: {}", static_cast<int8_t>(_login->type));
                 throw ProxyAuthError();
         }
     }
@@ -346,7 +346,7 @@ ClientAuthorization::_handle_scram_auth(const std::string_view data, uint64_t se
     if (!read_client_first_message(raw.data(), &_login->scram_state.cbind_flag,
                                    &_login->scram_state.client_first_message_bare,
                                    &_login->scram_state.client_nonce)) {
-        SPDLOG_ERROR("Failed to read client first message");
+        LOG_ERROR(LOG_PROXY, "Failed to read client first message");
         throw ProxyAuthError();
     }
 
@@ -359,13 +359,13 @@ ClientAuthorization::_handle_scram_auth(const std::string_view data, uint64_t se
             type = PASSWORD_TYPE_PLAINTEXT;
             break;
         default:
-            SPDLOG_ERROR("Invalid password type for SCRAM authentication");
+            LOG_ERROR(LOG_PROXY, "Invalid password type for SCRAM authentication");
             throw ProxyAuthError();
     }
 
     if (!build_server_first_message(&_login->scram_state, _user->username().c_str(),
                                     _login->password.c_str(), type)) {
-        SPDLOG_ERROR("Failed to build server first message");
+        LOG_ERROR(LOG_PROXY, "Failed to build server first message");
         throw ProxyAuthError();
     }
 
@@ -397,7 +397,7 @@ ClientAuthorization::_handle_scram_auth_continue(const std::string_view data, ui
     if (!read_client_final_message(&_login->scram_state,
                                    reinterpret_cast<const uint8_t *>(data.data()), raw.data(),
                                    &client_final_nonce, &proof)) {
-        SPDLOG_ERROR("Failed to read client final message");
+        LOG_ERROR(LOG_PROXY, "Failed to read client final message");
         throw ProxyAuthError();
     }
 
@@ -405,7 +405,7 @@ ClientAuthorization::_handle_scram_auth_continue(const std::string_view data, ui
     // verify_client_proof sets client key in scram state
     if (!verify_final_nonce(&_login->scram_state, client_final_nonce) ||
         !verify_client_proof(&_login->scram_state, proof)) {
-        SPDLOG_ERROR("Invalid SCRAM response (nonce or proof does not match)");
+        LOG_ERROR(LOG_PROXY, "Invalid SCRAM response (nonce or proof does not match)");
         free(proof);
         throw ProxyAuthError();
     }
@@ -417,7 +417,7 @@ ClientAuthorization::_handle_scram_auth_continue(const std::string_view data, ui
     // finally send the final message to the client
     char *server_final_message = build_server_final_message(&_login->scram_state);
     if (server_final_message == nullptr) {
-        SPDLOG_ERROR("Failed to build server final message");
+        LOG_ERROR(LOG_PROXY, "Failed to build server final message");
         throw ProxyAuthError();
     }
 
@@ -586,7 +586,7 @@ ServerAuthorization::_handle_message(uint64_t seq_id)
             // auth response, at this point should be AUTH_OK
             int32_t status = buffer->get32();
             if (status != 0) {
-                SPDLOG_ERROR("Auth failed: {}", status);
+                LOG_ERROR(LOG_PROXY, "Auth failed: {}", status);
                 throw ProxyAuthError();
             }
 
@@ -640,7 +640,7 @@ ServerAuthorization::_handle_message(uint64_t seq_id)
             break;
 
         default:
-            SPDLOG_ERROR("Unknown message: {}", code);
+            LOG_ERROR(LOG_PROXY, "Unknown message: {}", code);
             _state = ERROR;
             break;
     }
@@ -697,7 +697,7 @@ ServerAuthorization::_send_ssl_handshake(uint64_t seq_id)
     // create the SSL object from the server's context, acting as a client
     SSL *ssl = ProxyServer::get_instance()->SSL_new(false);
     if (ssl == nullptr) {
-        SPDLOG_ERROR("Failed to create SSL object");
+        LOG_ERROR(LOG_PROXY, "Failed to create SSL object");
         _state = ERROR;
         return;
     }
@@ -813,7 +813,7 @@ ServerAuthorization::_handle_auth(BufferPtr buffer, uint64_t seq_id)
             break;
 
         default:
-            SPDLOG_ERROR("Unknown auth type: {}", auth_type);
+            LOG_ERROR(LOG_PROXY, "Unknown auth type: {}", auth_type);
             throw ProxyAuthError();
     }
 }
@@ -845,7 +845,7 @@ ServerAuthorization::_handle_auth_md5(BufferPtr buffer, uint64_t seq_id)
                        md5_password_holder);
         md5_password = md5_password_holder + 3;
     } else {
-        SPDLOG_ERROR("Invalid password type for MD5");
+        LOG_ERROR(LOG_PROXY, "Invalid password type for MD5");
         throw ProxyAuthError();
     }
 
@@ -869,7 +869,7 @@ ServerAuthorization::_handle_auth_scram(BufferPtr buffer, uint64_t seq_id)
 {
     // get user login info
     if (_login == nullptr) {
-        SPDLOG_ERROR("Failed to get user login info");
+        LOG_ERROR(LOG_PROXY, "Failed to get user login info");
         throw ProxyAuthError();
     }
 
@@ -883,14 +883,14 @@ ServerAuthorization::_handle_auth_scram(BufferPtr buffer, uint64_t seq_id)
     } while (!found && buffer->remaining() > 0);
 
     if (!found) {
-        SPDLOG_ERROR("No SASL mechanism found matching: SCRAM-SHA-256");
+        LOG_ERROR(LOG_PROXY, "No SASL mechanism found matching: SCRAM-SHA-256");
         throw ProxyAuthError();
     }
 
     // sets client_nonce and client_first_message_bare in scram_state
     char *client_first_message = build_client_first_message(&_login->scram_state);
     if (client_first_message == nullptr) {
-        SPDLOG_ERROR("Failed to build client first message");
+        LOG_ERROR(LOG_PROXY, "Failed to build client first message");
         throw ProxyAuthError();
     }
 
@@ -914,12 +914,12 @@ ServerAuthorization::_handle_auth_scram_continue(BufferPtr buffer, uint64_t seq_
     std::string_view data = buffer->get_bytes(data_len);
 
     if (_login->scram_state.client_nonce == nullptr) {
-        SPDLOG_ERROR("No client nonce set");
+        LOG_ERROR(LOG_PROXY, "No client nonce set");
         throw ProxyAuthError();
     }
 
     if (_login->scram_state.server_first_message != nullptr) {
-        SPDLOG_ERROR("Received second SCRAM-SHA-256 continue message");
+        LOG_ERROR(LOG_PROXY, "Received second SCRAM-SHA-256 continue message");
         throw ProxyAuthError();
     }
 
@@ -930,7 +930,7 @@ ServerAuthorization::_handle_auth_scram_continue(BufferPtr buffer, uint64_t seq_
     if (!read_server_first_message(&_login->scram_state, input.data(),
                                    &_login->scram_state.server_nonce, &_login->scram_state.salt,
                                    &salt_len, &_login->scram_state.iterations)) {
-        SPDLOG_ERROR("Failed to read server first message");
+        LOG_ERROR(LOG_PROXY, "Failed to read server first message");
         throw ProxyAuthError();
     }
 
@@ -943,13 +943,13 @@ ServerAuthorization::_handle_auth_scram_continue(BufferPtr buffer, uint64_t seq_
         user.has_scram_keys = false;
 
         if (_login->password.size() >= sizeof(user.passwd)) {
-            SPDLOG_ERROR("Password too long for SCRAM");
+            LOG_ERROR(LOG_PROXY, "Password too long for SCRAM");
             throw ProxyAuthError();
         }
         // size check done above, don't remove it...
         strncpy(user.passwd, _login->password.c_str(), std::min(_login->password.size(), sizeof(user.passwd)-1));
     } else {
-        SPDLOG_ERROR("Invalid password type for SCRAM");
+        LOG_ERROR(LOG_PROXY, "Invalid password type for SCRAM");
         throw ProxyAuthError();
     }
 
@@ -958,7 +958,7 @@ ServerAuthorization::_handle_auth_scram_continue(BufferPtr buffer, uint64_t seq_
         salt_len, _login->scram_state.iterations);
 
     if (client_final_message == nullptr) {
-        SPDLOG_ERROR("Failed to build client final message");
+        LOG_ERROR(LOG_PROXY, "Failed to build client final message");
         throw ProxyAuthError();
     }
 
@@ -982,7 +982,7 @@ ServerAuthorization::_handle_auth_scram_complete(BufferPtr buffer)
 
     // make sure we are in right flow
     if (_login->scram_state.server_first_message == nullptr) {
-        SPDLOG_ERROR("No server first message set");
+        LOG_ERROR(LOG_PROXY, "No server first message set");
         throw ProxyAuthError();
     }
 
@@ -991,7 +991,7 @@ ServerAuthorization::_handle_auth_scram_complete(BufferPtr buffer)
 
     // decode the final message from server
     if (!read_server_final_message(input.data(), ServerSignature)) {
-        SPDLOG_ERROR("Failed to read server final message");
+        LOG_ERROR(LOG_PROXY, "Failed to read server final message");
         throw ProxyAuthError();
     }
 
@@ -1006,7 +1006,7 @@ ServerAuthorization::_handle_auth_scram_complete(BufferPtr buffer)
 
     // last step, verify the server signature
     if (!verify_server_signature(&_login->scram_state, &user, ServerSignature)) {
-        SPDLOG_ERROR("Failed to verify server signature");
+        LOG_ERROR(LOG_PROXY, "Failed to verify server signature");
         throw ProxyAuthError();
     }
 }

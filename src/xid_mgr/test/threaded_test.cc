@@ -91,13 +91,13 @@ namespace {
         void TearDown() override {
             _threads.clear();
             // shutdown server
-            SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Shutting down server");
+            LOG_DEBUG(LOG_XID_MGR, "Shutting down server");
             springtail_shutdown();
         }
 
         void run_clients(int thread_id, int iterations)
         {
-            SPDLOG_INFO("Thread: {}, running {} iterations", thread_id, iterations);
+            LOG_INFO(LOG_ALL, "Thread: {}, running {} iterations", thread_id, iterations);
 
             for (int i = 0; i < iterations; i++) {
                 XidMgrClient *client = XidMgrClient::get_instance();
@@ -105,7 +105,7 @@ namespace {
                 client->commit_xid(1, xid + 1, false);
             }
 
-            SPDLOG_INFO("Thread: {}, finished", thread_id);
+            LOG_INFO(LOG_ALL, "Thread: {}, finished", thread_id);
         }
 
         std::vector<std::jthread> _threads;

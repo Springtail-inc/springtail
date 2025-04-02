@@ -61,7 +61,7 @@ TEST(ProxyParser_Test, TestParser)
         bool is_readable = true;
         std::string name;
         for (auto &r : res) {
-            SPDLOG_INFO("Query: {} is {}", std::get<0>(tests[i]), (r->is_read_safe ? "readable" : "NOT readable"));
+            LOG_INFO(LOG_ALL, "Query: {} is {}", std::get<0>(tests[i]), (r->is_read_safe ? "readable" : "NOT readable"));
             if (!r->is_read_safe) {
                 is_readable = false;
             }
@@ -72,11 +72,11 @@ TEST(ProxyParser_Test, TestParser)
 
         bool expected_readable = std::get<1>(tests[i]);
         if (is_readable != expected_readable) {
-            SPDLOG_ERROR("Mismatch in query expectations: expected={}, got={}", expected_readable, is_readable);
+            LOG_ERROR(LOG_ALL, "Mismatch in query expectations: expected={}, got={}", expected_readable, is_readable);
             Parser::dump_parse_tree(std::get<0>(tests[i]));
         }
         if (name != std::get<2>(tests[i])) {
-            SPDLOG_INFO("Name mismatch: {} != {}", name, std::get<2>(tests[i]));
+            LOG_INFO(LOG_ALL, "Name mismatch: {} != {}", name, std::get<2>(tests[i]));
         }
         EXPECT_EQ(is_readable, expected_readable);
         EXPECT_EQ(name, std::get<2>(tests[i]));

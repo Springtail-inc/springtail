@@ -42,13 +42,13 @@ public:
         for (const auto& span : spans) {
             const auto* span_data =
                 dynamic_cast<const opentelemetry::sdk::trace::SpanData*>(span.get());
-            log_span(*span_data);  // Log each span using spdlog
+            _log_span(*span_data);  // Log each span using spdlog
         }
         return opentelemetry::sdk::common::ExportResult::kSuccess;
     }
 
 private:
-    void log_span(const opentelemetry::sdk::trace::SpanData& span)
+    void _log_span(const opentelemetry::sdk::trace::SpanData& span)
     {
         // Log basic span information
         std::string log_str = fmt::format("Span Name: {}", span.GetName().data());
@@ -83,7 +83,7 @@ private:
             std::chrono::duration_cast<std::chrono::milliseconds>(start_time.time_since_epoch())
                 .count(),
             std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
-        SPDLOG_INFO(log_str);
+        LOG_INFO(LOG_ALL, "{}", log_str);
     }
 };
 

@@ -183,7 +183,7 @@ namespace springtail {
             }
 
             default:
-                SPDLOG_ERROR("Unsupported data type: {}", (int)this->get_type());
+                LOG_ERROR(LOG_ALL, "Unsupported data type: {}", (int)this->get_type());
                 throw TypeError();
             }
         }
@@ -265,7 +265,7 @@ namespace springtail {
             }
 
             default:
-                SPDLOG_ERROR("Unsupported data type: {}", (int)this->get_type());
+                LOG_ERROR(LOG_ALL, "Unsupported data type: {}", (int)this->get_type());
                 throw TypeError();
             }
         }
@@ -428,7 +428,7 @@ namespace springtail {
                 break;
 
             default:
-                SPDLOG_ERROR("Unsupported data type: {}", (int)this->get_type());
+                LOG_ERROR(LOG_ALL, "Unsupported data type: {}", (int)this->get_type());
                 throw TypeError();
             }
         }
@@ -1296,7 +1296,7 @@ namespace springtail {
                     break;
 
                 default:
-                    SPDLOG_ERROR("Unsupported data type: {}", (int)this->field(i)->get_type());
+                    LOG_ERROR(LOG_ALL, "Unsupported data type: {}", (int)this->field(i)->get_type());
                     throw TypeError();
                 }
             }

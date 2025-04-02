@@ -68,31 +68,31 @@ namespace springtail::pg_proxy {
 
         int flags = 1;
         if (setsockopt(_socket, SOL_SOCKET, SO_REUSEADDR, &flags, sizeof(int)) < 0) {
-            SPDLOG_ERROR("Error setting socket options: SO_REUSEADDR\n");
+            LOG_ERROR(LOG_PROXY, "Error setting socket options: SO_REUSEADDR\n");
             close(_socket);
             exit(1);
         }
 
         if (bind(_socket, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
-            SPDLOG_ERROR("Error binding to socket\n");
+            LOG_ERROR(LOG_PROXY, "Error binding to socket\n");
             close(_socket);
             exit(1);
         }
 
         if (fcntl(_socket, F_SETFL, O_NONBLOCK) < 0) {
-            SPDLOG_ERROR("Error setting socket non-blocking\n");
+            LOG_ERROR(LOG_PROXY, "Error setting socket non-blocking\n");
             close(_socket);
             exit(1);
         }
 
         if (listen(_socket, 16) < 0) {
-            SPDLOG_ERROR("Error listening on socket\n");
+            LOG_ERROR(LOG_PROXY, "Error listening on socket\n");
             close(_socket);
             exit(1);
         }
 
         if ((_efd = eventfd(0, EFD_NONBLOCK | EFD_SEMAPHORE)) < 0) {
-            SPDLOG_ERROR("Error creating eventfd\n");
+            LOG_ERROR(LOG_PROXY, "Error creating eventfd\n");
             close(_socket);
             exit(1);
         }
@@ -104,7 +104,7 @@ namespace springtail::pg_proxy {
             _keep_alive_thread = std::thread(&ProxyServer::_start_keep_alive, this, keep_alive_port);
         }
 
-        SPDLOG_INFO("Proxy server initialized and is listening on port={}", proxy_port);
+        LOG_INFO(LOG_PROXY, "Proxy server initialized and is listening on port={}", proxy_port);
     }
 
     void
@@ -112,7 +112,7 @@ namespace springtail::pg_proxy {
     {
         int socket = ::socket(AF_INET6, SOCK_STREAM, 0);
         if (socket < 0) {
-            SPDLOG_ERROR("Error creating keepalive socket");
+            LOG_ERROR(LOG_PROXY, "Error creating keepalive socket");
             return;
         }
 
@@ -124,24 +124,24 @@ namespace springtail::pg_proxy {
 
         int flags = 1;
         if (setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &flags, sizeof(int)) < 0) {
-            SPDLOG_ERROR("Error setting keepalive socket options: SO_REUSEADDR");
+            LOG_ERROR(LOG_PROXY, "Error setting keepalive socket options: SO_REUSEADDR");
             ::close(socket);
             return;
         }
 
         if (bind(socket, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
-            SPDLOG_ERROR("Error binding keepalive socket");
+            LOG_ERROR(LOG_PROXY, "Error binding keepalive socket");
             ::close(socket);
             return;
         }
 
         if (listen(socket, 1) < 0) {
-            SPDLOG_ERROR("Error listening on keepalive socket");
+            LOG_ERROR(LOG_PROXY, "Error listening on keepalive socket");
             ::close(socket);
             return;
         }
 
-        SPDLOG_INFO("Keepalive socket listening on port {}", port);
+        LOG_INFO(LOG_PROXY, "Keepalive socket listening on port {}", port);
 
         while (!_shutdown) {
             int client = accept(socket, nullptr, nullptr);
@@ -174,7 +174,7 @@ namespace springtail::pg_proxy {
         }
 
         ::close(socket);
-        SPDLOG_INFO("Keepalive socket closed, keepalive thread exiting");
+        LOG_INFO(LOG_PROXY, "Keepalive socket closed, keepalive thread exiting");
     }
 
     void
@@ -237,7 +237,7 @@ namespace springtail::pg_proxy {
         // create the SSL context
         SSL_CTX *ssl_ctx = ::SSL_CTX_new(::TLS_method());
         if (!ssl_ctx) {
-            SPDLOG_ERROR("Error creating SSL context");
+            LOG_ERROR(LOG_PROXY, "Error creating SSL context");
             exit(1);
         }
 
@@ -255,17 +255,17 @@ namespace springtail::pg_proxy {
         /* Set the key and cert */
         if (!cert_file.empty() && !key_file.empty()) {
             if (::SSL_CTX_use_certificate_file(ssl_ctx, cert_file.c_str(), SSL_FILETYPE_PEM) <= 0) {
-                SPDLOG_ERROR("Error loading certificate file");
+                LOG_ERROR(LOG_PROXY, "Error loading certificate file");
                 exit(1);
             }
 
             if (::SSL_CTX_use_PrivateKey_file(ssl_ctx, key_file.c_str(), SSL_FILETYPE_PEM) <= 0 ) {
-                SPDLOG_ERROR("Error loading certificate file");
+                LOG_ERROR(LOG_PROXY, "Error loading certificate file");
                 exit(1);
             }
 
             if (::SSL_CTX_check_private_key(ssl_ctx) != 1) {
-                SPDLOG_ERROR("Private key does not match the certificate public key");
+                LOG_ERROR(LOG_PROXY, "Private key does not match the certificate public key");
                 exit(1);
             }
         }
@@ -386,7 +386,7 @@ namespace springtail::pg_proxy {
     void
     ProxyServer::_internal_shutdown()
     {
-        SPDLOG_INFO("Proxy server shutting down");
+        LOG_INFO(LOG_PROXY, "Proxy server shutting down");
     }
 
     void
@@ -421,7 +421,7 @@ namespace springtail::pg_proxy {
 
             int n = poll(fds, nfds, -1);
             if (n == -1) {
-                SPDLOG_ERROR("Error polling sockets: errno={}", strerror(errno));
+                LOG_ERROR(LOG_PROXY, "Error polling sockets: errno={}", strerror(errno));
                 if (errno == EINTR || errno == EAGAIN) {
                     // if interrupted or no data, continue
                     continue;
@@ -476,7 +476,7 @@ namespace springtail::pg_proxy {
                             }
                         }
                     } else {
-                        SPDLOG_WARN("Socket {} not found in sessions map", fd);
+                        LOG_WARN(LOG_PROXY, "Socket {} not found in sessions map", fd);
                         CHECK_EQ(_waiting_sessions.erase(fd), 1);
                     }
                     n--;
@@ -496,7 +496,7 @@ namespace springtail::pg_proxy {
             runnable_sessions.clear();
         }
 
-        SPDLOG_INFO("Proxy server shutting down");
+        LOG_INFO(LOG_PROXY, "Proxy server shutting down");
 
         // close socket
         ::close(_socket);
@@ -519,7 +519,7 @@ namespace springtail::pg_proxy {
         if (_logger) {
             _logger->flush();
         }
-        SPDLOG_INFO("Proxy server finished cleanup");
+        LOG_INFO(LOG_PROXY, "Proxy server finished cleanup");
     }
 
     void
@@ -666,7 +666,7 @@ namespace springtail::pg_proxy {
         }
 
         if (!enable_ssl) {
-            SPDLOG_INFO("SSL Disabled");
+            LOG_INFO(LOG_PROXY, "SSL Disabled");
         }
 
         // setup the log path
@@ -682,10 +682,10 @@ namespace springtail::pg_proxy {
                 throw Error(fmt::format("Error creating shadow log file {}: {}", log, e.what()));
             }
 
-            SPDLOG_INFO("Logging initialized to: {}", log.string());
+            LOG_INFO(LOG_PROXY, "Logging initialized to: {}", log.string());
             logger = std::make_shared<Logger>(log, 1024*1024*100, 5);
         } else {
-            SPDLOG_INFO("Shadow logging disabled: log={}", log.string());
+            LOG_INFO(LOG_PROXY, "Shadow logging disabled: log={}", log.string());
         }
 
         ProxyServer::MODE server_mode = ProxyServer::MODE::NORMAL;

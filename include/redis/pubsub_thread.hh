@@ -46,7 +46,7 @@ namespace springtail {
             assert(!_is_up);
             _channels.insert(std::pair(channel, std::pair(init_fn, consume_fn)));
             _subscriber_counter.increment();
-            SPDLOG_DEBUG("Added subscriber channel: {}", channel);
+            LOG_DEBUG(LOG_ALL, "Added subscriber channel: {}", channel);
         }
 
         /**
@@ -55,10 +55,10 @@ namespace springtail {
          *
          */
         void shutdown() {
-            SPDLOG_DEBUG("Stopping subscriber thread {}", _id);
+            LOG_DEBUG(LOG_ALL, "Stopping subscriber thread {}", _id);
             _shutdown = true;
             _subscriber_thread.join();
-            SPDLOG_DEBUG("Joined subscriber thread {}", _id);
+            LOG_DEBUG(LOG_ALL, "Joined subscriber thread {}", _id);
         }
 
         /**
@@ -101,7 +101,7 @@ namespace springtail {
                 SubscriberInitCBFn init_fn = _channel_pair.second.first;
                 _subscriber->subscribe(channel);
                 _subscriber->on_message([this](const std::string &channel, const std::string &msg) {
-                    SPDLOG_DEBUG("Received notification on channel: {}, thread: {}", channel, _id);
+                    LOG_DEBUG(LOG_ALL, "Received notification on channel: {}, thread: {}", channel, _id);
                     auto it = this->_channels.find(channel);
                     if (it == this->_channels.end()) {
                         return;
@@ -135,7 +135,7 @@ namespace springtail {
          */
         void _run() {
             _id = std::this_thread::get_id();
-            SPDLOG_DEBUG("Started subscriber thread {}", _id);
+            LOG_DEBUG(LOG_ALL, "Started subscriber thread {}", _id);
             _set_up();
             while (!_shutdown) {
                 try {
@@ -145,12 +145,12 @@ namespace springtail {
                     // timeout, check for shutdown
                     continue;
                 } catch (const sw::redis::Error &e) {
-                    SPDLOG_ERROR("Error consuming from redis: {} on thread {}\n", e.what(), _id);
+                    LOG_ERROR(LOG_ALL, "Error consuming from redis: {} on thread {}\n", e.what(), _id);
                     break;
                 }
             }
             _tear_down();
-            SPDLOG_DEBUG("Ended subscriber thread {}", _id);
+            LOG_DEBUG(LOG_ALL, "Ended subscriber thread {}", _id);
         }
     };
 };

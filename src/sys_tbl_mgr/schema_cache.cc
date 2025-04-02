@@ -8,7 +8,7 @@ SchemaCache::get(uint64_t db, uint64_t tid, const XidLsn &xid, PopulateFn popula
     std::unique_lock lock(_mutex);
     auto key = std::make_pair(db, tid);
 
-    SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "db {}, table {}, xid {}:{}", db, tid, xid.xid, xid.lsn);
+    LOG_DEBUG(LOG_SCHEMA, "db {}, table {}, xid {}:{}", db, tid, xid.xid, xid.lsn);
 
     while (true) {
         // check for the schema at the access key
@@ -74,7 +74,7 @@ SchemaCache::_fetch_locked(std::unique_lock<std::mutex> &lock,
                            const XidLsn &xid,
                            PopulateFn populate)
 {
-    SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "db {}, table {}, xid {}:{}", db, tid, xid.xid, xid.lsn);
+    LOG_DEBUG(LOG_SCHEMA, "db {}, table {}, xid {}:{}", db, tid, xid.xid, xid.lsn);
 
     // create a dummy entry in the fetching state
     auto key = std::make_pair(db, tid);
@@ -90,7 +90,7 @@ SchemaCache::_fetch_locked(std::unique_lock<std::mutex> &lock,
         // must release the lock while calling this potentially-blocking function
         metadata = populate(db, tid, xid);
 
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "db {}, table {}, start_xid {}:{}, end_xid {}:{}", db, tid,
+        LOG_DEBUG(LOG_SCHEMA, "db {}, table {}, start_xid {}:{}, end_xid {}:{}", db, tid,
                             metadata->access_range.start.xid, metadata->access_range.start.lsn,
                             metadata->access_range.end.xid, metadata->access_range.end.lsn);
 

@@ -8,7 +8,6 @@
 #include <common/json.hh>
 
 #include <grpcpp/server_builder.h>
-#include <spdlog/spdlog.h>
 
 namespace springtail {
 
@@ -61,7 +60,7 @@ GrpcServerManager::startup()
 
     // Configure resource quota
     grpc::ResourceQuota rq;
-    SPDLOG_INFO("Setting gRPC server max threads to {}", _worker_thread_count);
+    LOG_INFO(LOG_ALL, "Setting gRPC server max threads to {}", _worker_thread_count);
     rq.SetMaxThreads(_worker_thread_count);
     builder.SetResourceQuota(rq);
     builder.AddChannelArgument(GRPC_ARG_ALLOW_REUSEPORT, 0);

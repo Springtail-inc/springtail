@@ -4,7 +4,6 @@
 #include <utility>
 #include <functional>
 #include <string>
-#include <variant>
 #include <atomic>
 
 #include <common/logging.hh>
@@ -111,7 +110,7 @@ namespace springtail::pg_proxy {
         void operator()();
 
         /** Destruct a connection. */
-        virtual ~Session() { SPDLOG_DEBUG_MODULE(LOG_PROXY, "Session destructor"); };
+        virtual ~Session() { LOG_DEBUG(LOG_PROXY, "Session destructor"); };
 
         /** Virtual run to be overriden by child class */
         virtual void run(std::set<int> &fds) = 0;
@@ -380,13 +379,13 @@ namespace springtail::pg_proxy {
             try {
                 func(std::forward<Args>(args)...);
             } catch (ProxyError &e) {
-                SPDLOG_ERROR("Error in session: {}", e.what());
+                LOG_ERROR(LOG_PROXY, "Error in session: {}", e.what());
                 _state = ERROR;
             } catch (std::exception &e) {
-                SPDLOG_ERROR("Error in session: {}", e.what());
+                LOG_ERROR(LOG_PROXY, "Error in session: {}", e.what());
                 _state = ERROR;
             } catch (...) {
-                SPDLOG_ERROR("Unknown exception");
+                LOG_ERROR(LOG_PROXY, "Unknown exception");
                 _state = ERROR;
             }
 

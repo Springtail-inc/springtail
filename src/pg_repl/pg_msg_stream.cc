@@ -1,5 +1,4 @@
 #include <fcntl.h>
-#include <spdlog/spdlog.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -10,10 +9,10 @@
 #include <nlohmann/json.hpp>
 
 #include <common/common.hh>
-#include <pg_repl/pg_common.hh>
 #include <common/exception.hh>
 #include <common/logging.hh>
 
+#include <pg_repl/pg_common.hh>
 #include <pg_repl/pg_msg_stream.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/exception.hh>
@@ -86,20 +85,20 @@ namespace springtail {
         char buffer[PgMsgStreamHeader::SIZE];
         _header_offset = _current_offset;
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Reading header at offset: {}", _header_offset);
+        LOG_DEBUG(LOG_PG_REPL, "Reading header at offset: {}", _header_offset);
         if (!_read_buffer(buffer, PgMsgStreamHeader::SIZE)) {
-            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "End of file: {}", _current_path.c_str());
+            LOG_DEBUG(LOG_PG_REPL, "End of file: {}", _current_path.c_str());
             return false;
         }
 
         PgMsgStreamHeader header(buffer);
         if (header.magic != PgMsgStreamHeader::PG_LOG_MAGIC) {
-            SPDLOG_WARN("Invalid stream header magic number: {}, offset: {}",
+            LOG_WARN(LOG_ALL, "Invalid stream header magic number: {}, offset: {}",
                         header.magic, _current_offset);
             throw PgIOError();
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Reading header at offset: {}, msg_length: {}", _header_offset, header.msg_length);
+        LOG_DEBUG(LOG_PG_REPL, "Reading header at offset: {}, msg_length: {}", _header_offset, header.msg_length);
 
         _end_offset = header.msg_length + _current_offset;
         _proto_version = header.proto_version;
@@ -120,7 +119,7 @@ namespace springtail {
     PgMsgPtr
     PgMsgStreamReader::read_message(const std::vector<char> &filter)
     {
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Reading message, current_offset: {}, end_offset: {}\n", _current_offset, _end_offset);
+        LOG_DEBUG(LOG_PG_REPL, "Reading message, current_offset: {}, end_offset: {}\n", _current_offset, _end_offset);
         // check if we've already encountered the end of the file
         if (end_of_stream()) {
             return nullptr;
@@ -142,7 +141,7 @@ namespace springtail {
             bool skip_msg = !_is_message_filtered(msg_type, filter);
             PgMsgPtr msg = nullptr;
 
-            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Reading message type: {}, current_offset: {}, end_offset: {}, skip_msg: {}",
+            LOG_DEBUG(LOG_PG_REPL, "Reading message type: {}, current_offset: {}, end_offset: {}, skip_msg: {}",
                         msg_type, _current_offset, _end_offset, skip_msg);
 
             if (skip_msg) {
@@ -161,13 +160,13 @@ namespace springtail {
 
             // sanity check to make sure we didn't go past end of message block
             if (_current_offset > _end_offset) {
-                SPDLOG_WARN("Overran end of message block");
+                LOG_WARN(LOG_ALL, "Overran end of message block");
                 throw PgMessageTooSmallError();
             }
 
             return msg;
         } catch (PgMessageEOFError &e) {
-            SPDLOG_WARN("Unexpected EOF while reading message");
+            LOG_WARN(LOG_ALL, "Unexpected EOF while reading message");
             return nullptr;
         }
     }
@@ -205,7 +204,7 @@ namespace springtail {
             case pg_msg::MSG_STREAM_ABORT:
                 return _decode_stream_abort();
             default:
-                SPDLOG_WARN("Unknown message type: {}", msg_type);
+                LOG_WARN(LOG_ALL, "Unknown message type: {}", msg_type);
                 throw PgMessageError();
         }
     }
@@ -243,7 +242,7 @@ namespace springtail {
             case pg_msg::MSG_STREAM_ABORT:
                 return _skip_stream_abort();
             default:
-                SPDLOG_WARN("Unknown message type: {}", msg_type);
+                LOG_WARN(LOG_ALL, "Unknown message type: {}", msg_type);
                 throw PgMessageError();
         }
     }
@@ -878,7 +877,7 @@ namespace springtail {
         std::string object_type;
         json["obj"].get_to(object_type);
         if (object_type != "index") {
-            SPDLOG_INFO("Create index msg not for index object, for: {}\n", object_type);
+            LOG_INFO(LOG_ALL, "Create index msg not for index object, for: {}\n", object_type);
             CHECK_EQ(object_type, "index");
             return {};
         }
@@ -918,7 +917,7 @@ namespace springtail {
         std::string object_type;
         json["obj"].get_to(object_type);
         if (object_type != "index") {
-            SPDLOG_INFO("Create index msg not for index object, for: {}\n", object_type);
+            LOG_INFO(LOG_ALL, "Create index msg not for index object, for: {}\n", object_type);
             return {};
         }
 
@@ -949,7 +948,7 @@ namespace springtail {
         std::string object_type;
         json["obj"].get_to(object_type);
         if (object_type != "table") {
-            SPDLOG_INFO("Create/alter table msg not for table object, for: {}\n", object_type);
+            LOG_INFO(LOG_ALL, "Create/alter table msg not for table object, for: {}\n", object_type);
             return nullptr;
         }
 
@@ -961,7 +960,7 @@ namespace springtail {
 
         _decode_schema_columns(json["columns"], table_msg.columns);
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Decoded create table: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_REPL, "Decoded create table: json: {}", json.dump());
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_TABLE);
         msg->msg.emplace<PgMsgTable>(table_msg);
@@ -995,7 +994,7 @@ namespace springtail {
         std::string object_type;
         json["obj"].get_to(object_type);
         if (object_type != "table") {
-            SPDLOG_INFO("Drop table not for table object, for: {}\n", object_type);
+            LOG_INFO(LOG_ALL, "Drop table not for table object, for: {}\n", object_type);
             CHECK_EQ(object_type, "table");
             return nullptr;
         }
@@ -1027,7 +1026,7 @@ namespace springtail {
         std::string object_type;
         json["obj"].get_to(object_type);
         if (object_type != "schema") {
-            SPDLOG_ERROR("Create/alter namespace msg not for namespace object, for: {}\n", object_type);
+            LOG_ERROR(LOG_ALL, "Create/alter namespace msg not for namespace object, for: {}\n", object_type);
             return nullptr;
         }
 
@@ -1036,7 +1035,7 @@ namespace springtail {
         json["name"].get_to(ns_msg.name);
         json["oid"].get_to(ns_msg.oid);
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Decoded create/alter namespace: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_REPL, "Decoded create/alter namespace: json: {}", json.dump());
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_NAMESPACE);
         msg->msg.emplace<PgMsgNamespace>(ns_msg);
@@ -1072,7 +1071,7 @@ namespace springtail {
         std::string object_type;
         json["obj"].get_to(object_type);
         if (object_type != "schema") {
-            SPDLOG_ERROR("Create/alter namespace msg not for namespace object, for: {}\n", object_type);
+            LOG_ERROR(LOG_ALL, "Create/alter namespace msg not for namespace object, for: {}\n", object_type);
             return nullptr;
         }
 
@@ -1081,7 +1080,7 @@ namespace springtail {
         json["oid"].get_to(ns_msg.oid);
         json["name"].get_to(ns_msg.name);
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Decoded drop namespace: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_REPL, "Decoded drop namespace: json: {}", json.dump());
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_NAMESPACE);
         msg->msg.emplace<PgMsgNamespace>(ns_msg);
@@ -1167,7 +1166,7 @@ namespace springtail {
         } else if (msg.prefix_str == pg_msg::MSG_PREFIX_COPY_SYNC) {
             return _decode_copy_sync(msg, buffer.data(), data_len);
         } else {
-            SPDLOG_INFO("Unknown message prefix: {}", msg.prefix_str);
+            LOG_INFO(LOG_ALL, "Unknown message prefix: {}", msg.prefix_str);
             return nullptr;
         }
     }
@@ -1194,7 +1193,7 @@ namespace springtail {
 
             if (stream.gcount() != PgMsgStreamHeader::SIZE || stream.eof()) {
                 // we've read some of the header but failed to read it all
-                SPDLOG_WARN("Failed to read header from file: {}", file);
+                LOG_WARN(LOG_ALL, "Failed to read header from file: {}", file);
                 if (truncate) {
                     _truncate_file(file, hdr_offset);
                 } else {
@@ -1205,18 +1204,18 @@ namespace springtail {
 
             PgMsgStreamHeader header(buffer);
             if (header.magic != PgMsgStreamHeader::PG_LOG_MAGIC) {
-                SPDLOG_WARN("Invalid stream header magic number: {}", header.magic);
+                LOG_WARN(LOG_ALL, "Invalid stream header magic number: {}", header.magic);
                 throw PgIOError();
             }
 
             [[maybe_unused]] char c = stream.get(); // read the message type
 
-            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Header: start_lsn: {}, end_lsn: {}, msg_length: {}, msg_type: {}",
+            LOG_DEBUG(LOG_PG_REPL, "Header: start_lsn: {}, end_lsn: {}, msg_length: {}, msg_type: {}",
                                 header.start_lsn, header.end_lsn, header.msg_length, c);
 
             stream.seekg(header.msg_length-1, std::ios::cur);
             if (stream.eof()) {
-                SPDLOG_WARN("Failed to seek to end of message");
+                LOG_WARN(LOG_ALL, "Failed to seek to end of message");
                 if (truncate) {
                     _truncate_file(file, hdr_offset);
                 } else {

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <common/exception.hh>
-#include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/service_register.hh>
 #include <common/tracing.hh>
@@ -94,7 +93,7 @@ public:
 
     bool start() override
     {
-        init_logging(_logging_mask, _log_filename, _daemon_pid.has_value());
+        logging::Logger::get_instance()->init(_logging_mask, _log_filename, _daemon_pid.has_value());
         return true;
     }
 
@@ -108,7 +107,7 @@ class DefaultLoggingRunner : public ServiceRunner {
 public:
     DefaultLoggingRunner() : ServiceRunner("Default Logging") {}
 
-    void stop() override { shutdown_logging(); }
+    void stop() override { logging::Logger::get_instance()->shutdown(); }
 };
 
 // Tracing init

@@ -127,7 +127,7 @@ namespace springtail {
         _check_and_evict(uint64_t size = 0) {
             while (_cache_size + size > _cache_max) {
                 if (!_evict_next()) {
-                    SPDLOG_WARN("Object cache eviction, nothing evictable");
+                    LOG_WARN(LOG_ALL, "Object cache eviction, nothing evictable");
                     break; // nothing evictable
                 }
             }
@@ -257,7 +257,7 @@ namespace springtail {
             // find the entry
             auto &&i = _lookup.find(id);
             if (i == _lookup.end()) {
-                SPDLOG_WARN("Tried to update the size of a non-existant cache entry");
+                LOG_WARN(LOG_ALL, "Tried to update the size of a non-existant cache entry");
                 return;
             }
 

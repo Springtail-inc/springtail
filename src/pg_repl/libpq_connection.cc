@@ -1,5 +1,4 @@
 #include <string>
-#include <iostream>
 #include <climits>
 #include <optional>
 
@@ -190,13 +189,13 @@ namespace springtail {
         // clear old result if there was one
         clear();
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Executing query: {}", cmd);
+        LOG_DEBUG(LOG_PG_REPL, "Executing query: {}", cmd);
         PGresult *res = PQexec(_connection, cmd);
         if (PQresultStatus(res) != PGRES_COMMAND_OK &&
             PQresultStatus(res) != PGRES_TUPLES_OK &&
             PQresultStatus(res) != PGRES_COPY_OUT) {
             std::string error_message = fmt::format("msg={}, status={}", PQerrorMessage(_connection), PQresultErrorMessage(res));
-            SPDLOG_ERROR("Error executing query: {}", error_message);
+            LOG_ERROR(LOG_PG_REPL, "Error executing query: {}", error_message);
             PQclear(res);
             throw PgQueryError();
         }
@@ -426,7 +425,7 @@ namespace springtail {
                 DNSResolver *resolver = DNSResolver::get_instance();
                 std::optional<std::string> ip = resolver->resolve(db_host);
                 if (!ip.has_value()) {
-                    SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Failed to resolve hostname: {}", db_host);
+                    LOG_DEBUG(LOG_PG_REPL, "Failed to resolve hostname: {}", db_host);
                     throw PgConnectionError();
                 }
 
@@ -445,7 +444,7 @@ namespace springtail {
                 hosttype, host, db_port, name, user, pass,
                 (replication ? "replication=database ": ""), encoding);
 
-            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Attempting to connect: {}", conninfo);
+            LOG_DEBUG(LOG_PG_REPL, "Attempting to connect: {}", conninfo);
 
             // try connection
             connection = PQconnectdb(conninfo.c_str());
@@ -457,7 +456,7 @@ namespace springtail {
                     hosttype, host, db_port, name, user,
                     (replication ? "replication=database ": ""), encoding);
 
-                SPDLOG_ERROR("Error connecting: conninfo: {}, msg: {}", conninfo, PQerrorMessage(connection));
+                LOG_ERROR(LOG_PG_REPL, "Error connecting: conninfo: {}, msg: {}", conninfo, PQerrorMessage(connection));
                 PQfinish(connection);
 
                 // sleep and backoff
@@ -472,11 +471,11 @@ namespace springtail {
         }
 
         if (retries >= MAX_RETRY_COUNT) {
-            SPDLOG_ERROR("Failed to connect to database, too many retries: {}", db_name);
+            LOG_ERROR(LOG_PG_REPL, "Failed to connect to database, too many retries: {}", db_name);
             throw PgConnectionError();
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "PG connected, protocol version={}, server version={}",
+        LOG_DEBUG(LOG_PG_REPL, "PG connected, protocol version={}, server version={}",
                             PQprotocolVersion(connection), PQserverVersion(connection));
 
         // for safety set search path

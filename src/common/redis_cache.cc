@@ -8,7 +8,7 @@
 #include <vector>
 
 #include <absl/log/check.h>
-#include <fmt/core.h>
+// #include <fmt/core.h>
 
 #include <common/common.hh>
 #include <common/json.hh>
@@ -43,10 +43,10 @@ RedisCache::RedisCache(bool config_db)
 
 RedisCache::~RedisCache()
 {
-    SPDLOG_DEBUG("Stopping subscriber thread {}", _id);
+    LOG_DEBUG(LOG_ALL, "Stopping subscriber thread {}", _id);
     _shutdown = true;
     _subscriber_thread.join();
-    SPDLOG_DEBUG("Joined subscriber thread {}", _id);
+    LOG_DEBUG(LOG_ALL, "Joined subscriber thread {}", _id);
     _subscriber->punsubscribe(_subscribe_pattern);
 }
 
@@ -65,7 +65,7 @@ static std::map<sw::redis::Subscriber::MsgType, std::string> msg_type_to_str = {
 
 void RedisCache::_process_meta(sw::redis::Subscriber::MsgType type, sw::redis::OptionalString channel, long long num)
 {
-    SPDLOG_DEBUG("received meta notification: message type: {}; channel: {}; num = {}", msg_type_to_str[type], channel, num);
+    LOG_DEBUG(LOG_ALL, "received meta notification: message type: {}; channel: {}; num = {}", msg_type_to_str[type], channel, num);
     if (!_init_finished) {
         if (type == sw::redis::Subscriber::MsgType::PSUBSCRIBE &&
                     channel.has_value() && channel.value() == _subscribe_pattern) {
@@ -80,7 +80,7 @@ RedisCache::_process_notification(const std::string &pattern, const std::string 
 {
     // msg contains action performed on the data: hset, hdel, sadd, etc.
     // channel will contain the key that fits the pattern, it needs to be extracted
-    SPDLOG_DEBUG("received notification: pattern: {}; channel: {}; msg = {}", pattern, channel, msg);
+    LOG_DEBUG(LOG_ALL, "received notification: pattern: {}; channel: {}; msg = {}", pattern, channel, msg);
 
     // extract the key from the notification
     std::string key;
@@ -100,7 +100,7 @@ RedisCache::_process_notification(const std::string &pattern, const std::string 
     RedisType new_key_type;
     tie(new_key_value, new_key_type) = _read_key_value(key);
 
-    SPDLOG_DEBUG("key: {}, new_value: {}", key, new_key_value.dump(4));
+    LOG_DEBUG(LOG_ALL, "key: {}, new_value: {}", key, new_key_value.dump(4));
 
     // get the diff and update storage
     nlohmann::json key_value_diff = nullptr;
@@ -124,7 +124,7 @@ RedisCache::_process_notification(const std::string &pattern, const std::string 
 void
 RedisCache::_process_diff(const nlohmann::json &diff, const std::string &top_level_path, std::unique_lock<std::shared_mutex> &storage_lock)
 {
-    SPDLOG_DEBUG("key_value_diff: {}", diff.dump(4));
+    LOG_DEBUG(LOG_ALL, "key_value_diff: {}", diff.dump(4));
     std::string prefix = "/" + std::to_string(_instance_id) + ":";
     // lock callback storage
     std::shared_lock callback_lock(_callback_mutex);
@@ -259,7 +259,7 @@ RedisCache::_read_key_value(const std::string &key)
         {
             std::optional<std::string> key_stored_value = _client->get(key);
             if (!key_stored_value.has_value()) {
-                SPDLOG_ERROR("No value found for key {}", key);
+                LOG_ERROR(LOG_ALL, "No value found for key {}", key);
             } else {
                 key_value = _string_to_json(key_stored_value.value());
             }
@@ -293,7 +293,7 @@ RedisCache::_read_key_value(const std::string &key)
         case REDIS_TYPE_NONE:
             break;
         default:
-            SPDLOG_ERROR("Unsupported type {} for key {}", key_type_str, key);
+            LOG_ERROR(LOG_ALL, "Unsupported type {} for key {}", key_type_str, key);
     }
     return std::make_tuple(key_value, key_type);
 }
@@ -324,7 +324,7 @@ void
 RedisCache::_run()
 {
     _id = std::this_thread::get_id();
-    SPDLOG_DEBUG("Started RedisCache subscriber thread {}", _id);
+    LOG_DEBUG(LOG_ALL, "Started RedisCache subscriber thread {}", _id);
     while (!_shutdown) {
         try {
             // consume from subscriber, timeout is set above
@@ -333,18 +333,18 @@ RedisCache::_run()
             // timeout, check for shutdown
             continue;
         } catch (const sw::redis::Error &e) {
-            SPDLOG_ERROR("Error consuming from redis: {} on thread {}\n", e.what(), _id);
+            LOG_ERROR(LOG_ALL, "Error consuming from redis: {} on thread {}\n", e.what(), _id);
             break;
         }
     }
-    SPDLOG_DEBUG("Ended RedisCache subscriber thread {}", _id);
+    LOG_DEBUG(LOG_ALL, "Ended RedisCache subscriber thread {}", _id);
 }
 
 void
 RedisCache::dump()
 {
     std::shared_lock lock(_storage_mutex);
-    SPDLOG_INFO(_storage.dump(4));
+    LOG_INFO(LOG_ALL, "{}", _storage.dump(4));
 }
 
 nlohmann::json
@@ -448,10 +448,10 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
         }
         // creation of new redis keys is not supported
         case REDIS_TYPE_NONE:
-            SPDLOG_ERROR("Type {} for key {} is not found", key_type_str, redis_key);
+            LOG_ERROR(LOG_ALL, "Type {} for key {} is not found", key_type_str, redis_key);
             break;
         default:
-            SPDLOG_ERROR("Unsupported type {} for key {}", key_type_str, redis_key);
+            LOG_ERROR(LOG_ALL, "Unsupported type {} for key {}", key_type_str, redis_key);
     }
 
     if (ret) {
@@ -459,7 +459,7 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
         nlohmann::json key_value_diff = nlohmann::json::diff(_old_storage, _storage);
         _process_diff(key_value_diff, "", lock);
     } else {
-        SPDLOG_ERROR("Storage update failed: reverting the changes");
+        LOG_ERROR(LOG_ALL, "Storage update failed: reverting the changes");
         _storage = _old_storage;
     }
     return ret;
@@ -472,10 +472,10 @@ RedisCache::add_callback(const std::string &path, const RedisCacheChangeCallback
     if (!path.empty()) {
         // do not add leading "/" because we are going to use it as a delimiter
         std::string json_path = std::to_string(_instance_id) + ":" + path;
-        SPDLOG_DEBUG("adding callback for json_path = {}", json_path);
+        LOG_DEBUG(LOG_ALL, "adding callback for json_path = {}", json_path);
         common::split_string("/", json_path, json_path_queue);
     } else {
-        SPDLOG_DEBUG("adding callback for empty json_path");
+        LOG_DEBUG(LOG_ALL, "adding callback for empty json_path");
     }
 
     std::unique_lock lock(_callback_mutex);
@@ -489,10 +489,10 @@ RedisCache::remove_callback(const std::string &path, const RedisCacheChangeCallb
     if (!path.empty()) {
         // do not add leading "/" because we are going to use it as a delimiter
         std::string json_path = std::to_string(_instance_id) + ":" + path;
-        SPDLOG_DEBUG("removing callback for json_path = {}", json_path);
+        LOG_DEBUG(LOG_ALL, "removing callback for json_path = {}", json_path);
         common::split_string("/", json_path, json_path_queue);
     } else {
-        SPDLOG_DEBUG("removing callback for empty json_path");
+        LOG_DEBUG(LOG_ALL, "removing callback for empty json_path");
     }
 
     std::unique_lock lock(_callback_mutex);
@@ -568,7 +568,7 @@ RedisCache::_json_to_string(const nlohmann::json &json_value) {
         case nlohmann::json::value_t::null:
         case nlohmann::json::value_t::binary:
         case nlohmann::json::value_t::discarded:
-            SPDLOG_ERROR("Unsupported type {} for storing value {} in redis",
+            LOG_ERROR(LOG_ALL, "Unsupported type {} for storing value {} in redis",
                 json_value.type_name(), nlohmann::to_string(json_value));
     }
     return out_string;
