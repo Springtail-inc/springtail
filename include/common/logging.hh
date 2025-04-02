@@ -76,6 +76,8 @@ namespace springtail {
         LOG_ALL = 0xFFFFFFFF
     };
 
+    class OpenTelemetrySink;
+
     namespace logging {
         template <typename T>
         concept DerivedFromSink = std::derived_from<T, spdlog::sinks::sink>;
@@ -142,6 +144,8 @@ namespace springtail {
             static std::map<std::string, uint32_t> _log_module_map;
             static inline std::atomic<bool> _inited_flag{false};
             SpdlogSink _spdlog_sink;
+            std::shared_ptr<OpenTelemetrySink> _otel_sink{nullptr};
+
             uint32_t _log_mask{LOG_ALL};
 
             void _internal_shutdown() override;
@@ -150,25 +154,36 @@ namespace springtail {
             _set_level(std::shared_ptr<DerivedFromSink> &logger_sink, const std::string &level);
 
             template <typename... Args> static void
-            _log(spdlog::source_loc loc, spdlog::level::level_enum lvl, fmt::format_string<Args...> fmt, Args &&...args) {
-                std::unordered_map<std::string, std::string> context = springtail::logging::Logger::get_context_variables();
+            _log(spdlog::source_loc loc, spdlog::level::level_enum lvl, fmt::format_string<Args...> fmt, Args &&...args)
+            {
+                // create formatted message
+                std::string formatted_msg = fmt::vformat(fmt, fmt::make_format_args(args...));
+
+                // log to otel sink
+                if (_inited_flag && get_instance()->_otel_sink.get() != nullptr) {
+                    spdlog::details::log_msg message(loc, spdlog::default_logger()->name(), lvl, formatted_msg);
+                    _log_otel(message);
+                }
+
+                // put together the full message
+                std::string full_msg;
+
+                // extract baggage
                 auto ctx = opentelemetry::context::RuntimeContext::GetCurrent();
                 auto baggage = opentelemetry::baggage::GetBaggage(ctx);
-
-                std::string formatted_msg;
-
-                baggage->GetAllEntries([&formatted_msg](opentelemetry::nostd::string_view key, opentelemetry::nostd::string_view value) {
+                baggage->GetAllEntries([&full_msg](opentelemetry::nostd::string_view key, opentelemetry::nostd::string_view value) {
                     std::string_view key_sv{key.data(), key.size()};
                     std::string_view value_sv{value.data(), value.size()};
 
-                    fmt::format_to(std::back_inserter(formatted_msg), "[{}: {}] ", key_sv, value_sv);
+                    fmt::format_to(std::back_inserter(full_msg), "[{}: {}] ", key_sv, value_sv);
                     return true;
                 });
 
-                formatted_msg += fmt::vformat(fmt, fmt::make_format_args(args...));
-                spdlog::default_logger()->log(loc, lvl, formatted_msg);
+                full_msg += formatted_msg;
+                spdlog::default_logger()->log(loc, lvl, full_msg);
             }
 
+            static void _log_otel(const spdlog::details::log_msg &msg);
         };
     } // namespace logging
 

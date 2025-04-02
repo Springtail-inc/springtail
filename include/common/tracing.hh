@@ -123,6 +123,7 @@ private:
     void _internal_shutdown() override;
 
     opentelemetry::context::Context _context;
+    std::unordered_map<std::string, std::string> _default_attributes;
 
     std::optional<std::string> _host;
     std::optional<int> _port;
@@ -195,7 +196,6 @@ private:
      * @param unit The unit of the histogram
      */
     void _register_histogram(std::string_view name, std::string_view description, std::string_view unit);
-
 };
 
 inline void increment_counter(std::string_view name,

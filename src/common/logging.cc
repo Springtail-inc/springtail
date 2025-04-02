@@ -93,6 +93,12 @@ namespace springtail::logging {
     }
 
     void
+    Logger::_log_otel(const spdlog::details::log_msg &msg)
+    {
+        get_instance()->_otel_sink->log(msg);
+    }
+
+    void
     Logger::init(const std::optional<uint32_t> &module_mask_opt,
                  const std::optional<std::string> &log_name,
                  bool is_daemon)
@@ -198,9 +204,8 @@ namespace springtail::logging {
 
             if (host && port) {
                 std::string endpoint = fmt::format("{}:{}/v1/logs", *host, *port);
-                auto otel_sink = std::make_shared<OpenTelemetrySink>("springtail", endpoint);
-                _set_level(otel_sink, remote_log_level);
-                sinks.push_back(otel_sink);
+                _otel_sink = std::make_shared<OpenTelemetrySink>("springtail", endpoint);
+                _set_level(_otel_sink, remote_log_level);
                 SPDLOG_INFO("Enabling OTel logging sink with endpoint: {}", endpoint);
             }
         } else {

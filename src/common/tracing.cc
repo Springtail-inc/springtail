@@ -157,6 +157,14 @@ TracingAndMetrics::init(std::string_view component_name)
     _metrics_export_interval_millis = Json::get<int>(json, "metrics_export_interval_millis");
     _metrics_export_timeout_millis = Json::get<int>(json, "metrics_export_timeout_millis");
 
+    auto db_instance_id = Properties::get_db_instance_id();
+    auto organization_id = Properties::get_organization_id();
+    auto account_id = Properties::get_account_id();
+
+    _default_attributes["organization_id"] = organization_id;
+    _default_attributes["account_id"] = account_id;
+    _default_attributes["db_instance_id"] = std::to_string(db_instance_id);
+
     if (_otel_enabled) {
         auto resource = _create_default_otel_resource(component_name);
         _init_metrics(resource);
@@ -191,26 +199,6 @@ TracingAndMetrics::tracer(const std::string_view& name)
 }
 
 std::unordered_map<std::string, std::string>
-_set_default_attributes(const std::unordered_map<std::string, std::string>& input_attributes)
-{
-    auto attributes = input_attributes;
-
-    if (attributes.empty()) {
-        attributes = std::unordered_map<std::string, std::string>();
-    }
-
-    auto db_instance_id = Properties::get_db_instance_id();
-    auto organization_id = Properties::get_organization_id();
-    auto account_id = Properties::get_account_id();
-
-    attributes["organization_id"] = organization_id;
-    attributes["account_id"] = account_id;
-    attributes["db_instance_id"] = std::to_string(db_instance_id);
-
-    return attributes;
-}
-
-std::unordered_map<std::string, std::string>
 TracingAndMetrics::get_db_id_xid_map(uint64_t db_id, uint64_t xid)
 {
     return std::unordered_map<std::string, std::string>{
@@ -227,9 +215,11 @@ TracingAndMetrics::get_db_id_xid_map(uint64_t db_id, uint64_t xid)
 void
 TracingAndMetrics::increment_counter(std::string_view name, const std::unordered_map<std::string, std::string>& attributes)
 {
+    auto merged_attributes = attributes;
+    merged_attributes.insert(_default_attributes.begin(), _default_attributes.end());
     auto counter = _counters[name];
     if(counter){
-        counter->Add(1, _set_default_attributes(attributes), _context);
+        counter->Add(1, merged_attributes, _context);
     } else {
         LOG_ERROR(LOG_ALL, "Counter '{}' not found", name);
     }
@@ -244,9 +234,11 @@ TracingAndMetrics::increment_counter(std::string_view name, const std::unordered
 void
 TracingAndMetrics::record_histogram(std::string_view name, double value, const std::unordered_map<std::string, std::string>& attributes)
 {
+    auto merged_attributes = attributes;
+    merged_attributes.insert(_default_attributes.begin(), _default_attributes.end());
     auto histogram = _histograms[name];
     if(histogram){
-        histogram->Record(value, _set_default_attributes(attributes), _context);
+        histogram->Record(value, merged_attributes, _context);
     } else {
         LOG_ERROR(LOG_ALL, "Histogram '{}' not found", name);
     }
