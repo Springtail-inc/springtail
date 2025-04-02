@@ -25,6 +25,7 @@ from component_factory import ComponentFactory
 from scheduler import Scheduler, CoordinatorState
 from production import Production
 from postgres_helper import PostgresHelper
+from loader import Loader
 
 # import the xid_mgr_client
 from xid_mgr import XidMgrClient
@@ -103,8 +104,14 @@ class Coordinator:
             # Install binaries
             try:
                 if state == CoordinatorState.STARTUP:
+                    # Install binaries
                     self.logger.debug("Installing binaries")
                     self.production.install_binaries()
+                    self.logger.debug("Re-installing coordinator")
+                    Loader(self.install_path, project_root).start()
+                    # loader will restart the coordinator when ready
+                    signal.pause()
+                    sys.exit(0)
             except Exception as e:
                 raise ValueError("Failed to install binaries: " + str(e))
 
@@ -121,7 +128,7 @@ class Coordinator:
         stop_daemons(self.props.get_pid_path(), ALL_DAEMONS)
 
         # Create scheduler
-        self.logger.debug("Starting scheduler")
+        self.logger.info(f"Starting scheduler: state={state}")
         self.scheduler = Scheduler(self.props, self.service_name, self.production)
 
         # Create component factory

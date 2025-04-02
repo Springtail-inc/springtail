@@ -8,4 +8,3 @@ find python -name "*.py" -print0 | tar --null -cvf release.tar --exclude='benchm
 tar --append -f release.tar -C ./install/ . -C $CWD shared-lib/
 gzip release.tar
 mv release.tar.gz releases/"springtail-$(date +%Y%m%d).tgz"
-#tar cpvfz releases/"springtail-$(date +%Y%m%d).tgz" -C ./install/ . -C $CWD shared-lib/ -C python/shared python/shared -C python/coordinator python/coordinator
