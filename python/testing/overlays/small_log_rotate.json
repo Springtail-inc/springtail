@@ -1,5 +1,6 @@
 {
     "log_mgr": {
-	"log_size_rollover_threshold": 32768
+	"log_size_rollover_threshold": 32768,
+	"archive_logs": true
     }
 }

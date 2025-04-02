@@ -1,31 +1,26 @@
-#include <cassert>
-
 #include <common/filesystem.hh>
 #include <common/logging.hh>
 #include <common/tracing.hh>
+
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
-#include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/sync_tracker.hh>
-#include <pg_repl/pg_msg_stream.hh>
-#include <pg_repl/pg_repl_msg.hh>
-#include <pg_repl/pg_types.hh>
-#include <pg_repl/table_sync_request.hh>
-#include <storage/xid.hh>
+
+#include <redis/redis_ddl.hh>
 #include <sys_tbl_mgr/client.hh>
-#include <sys_tbl_mgr/schema_mgr.hh>
 #include <write_cache/write_cache_func.hh>
-#include <opentelemetry/metrics/meter.h>
-#include <opentelemetry/metrics/provider.h>
+#include <xid_mgr/xid_mgr_client.hh>
 
 namespace springtail::pg_log_mgr {
 
     PgLogReader::PgLogReader(uint64_t db_id, uint32_t queue_size,
                              const std::filesystem::path &repl_log_path,
                              const std::filesystem::path &xact_log_path,
-                             CommitterQueuePtr committer_queue,
-                             bool archive_logs)
+                             const CommitterQueuePtr committer_queue,
+                             const bool archive_logs)
         : _db_id(db_id),
+          // retrieve the most recently committed XID at startup
+          _committed_xid(XidMgrClient::get_instance()->get_committed_xid(db_id, 0)),
           _archive_logs(archive_logs),
           _repl_log_path(repl_log_path),
           _xact_log_path(xact_log_path),
@@ -34,8 +29,6 @@ namespace springtail::pg_log_mgr {
           _xact_log_writer(xact_log_path)
     {
         _xid_ts_tracker = std::make_shared<WalProgressTracker>();
-        // retrieve the most recently committed XID at startup
-        _committed_xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
 
         // add the metric for replication lag tracking
         auto meter = opentelemetry::metrics::Provider::GetMeterProvider()->GetMeter("pg_log_mgr");
