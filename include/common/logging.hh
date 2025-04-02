@@ -76,24 +76,67 @@ namespace springtail {
         LOG_ALL = 0xFFFFFFFF
     };
 
+    /**
+     * @brief Forward declaration for OpenTelemetrySink.
+     *
+     */
     class OpenTelemetrySink;
 
     namespace logging {
+        /**
+         * @brief Concept for a template class parameter to be derived from sink class.
+         *
+         * @tparam T
+         */
         template <typename T>
         concept DerivedFromSink = std::derived_from<T, spdlog::sinks::sink>;
 
+        /**
+         * @brief Logger singleton class
+         *
+         */
         class Logger final : public Singleton<Logger> {
             friend class Singleton<Logger>;
         public:
+            /**
+             * @brief Set the context variables object
+             *
+             * @param attributes - map of key/value pairs
+             * @return std::unique_ptr<opentelemetry::context::Token> - scope token
+             */
             static std::unique_ptr<opentelemetry::context::Token>
             set_context_variables(const std::unordered_map<std::string, std::string>& attributes);
 
+            /**
+             * @brief Set the context variable object
+             *
+             * @param attr_key - varaible key
+             * @param attr_value - variable value
+             * @return std::unique_ptr<opentelemetry::context::Token> - scope token
+             */
             static std::unique_ptr<opentelemetry::context::Token>
             set_context_variable(const std::string &attr_key, const std::string &attr_value);
 
+            /**
+             * @brief Get the context variables object
+             *
+             * @return std::unordered_map<std::string, std::string> - map of current key/value pairs for the given scope
+             */
             static std::unordered_map<std::string, std::string>
             get_context_variables();
 
+            /**
+             * @brief Main logging function
+             *
+             * @tparam Args - argument list
+             * @param log_id - identifier filtered by the log mask
+             * @param func - calling function name
+             * @param file - file name
+             * @param line - line number
+             * @param level - log level
+             * @param fmt - format string
+             * @param args - argument list
+             */
             template <typename... Args> static void
             log(int log_id, const char *func, const char *file, int line, spdlog::level::level_enum level, fmt::format_string<Args...> fmt, Args&&... args)
             {
@@ -105,11 +148,19 @@ namespace springtail {
                 _log(spdlog::source_loc{file, line, func}, level, fmt, std::forward<Args>(args)...);
             }
 
+            /**
+             * @brief Log object init function
+             *
+             * @param module_mask - mask for log id
+             * @param log_name - name of log file for log storage
+             * @param is_daemon - running as daemon flag, when it is on, does not turn on console sink
+             */
             void init(const std::optional<uint32_t> &module_mask = std::nullopt,
                       const std::optional<std::string> &log_name = std::nullopt,
                       bool is_daemon = false);
 
         protected:
+            /** Helper class for forwarding failed CHECKs and DCHECKs to the log */
             class SpdlogSink : public absl::LogSink {
             public:
                 void Send(const absl::LogEntry& entry) override {
@@ -141,18 +192,44 @@ namespace springtail {
                 }
             };
 
-            static std::map<std::string, uint32_t> _log_module_map;
+            static std::map<std::string, uint32_t> _log_module_map;    ///< mapping from log id name to value
+            /**
+             * @brief flag that indicates if logging was fully initialized, as it determins behavior of
+             *      the log function
+             *
+             */
             static inline std::atomic<bool> _inited_flag{false};
-            SpdlogSink _spdlog_sink;
-            std::shared_ptr<OpenTelemetrySink> _otel_sink{nullptr};
+            SpdlogSink _spdlog_sink;        ///< sink object for CHECKs and DCHECKs
+            std::shared_ptr<OpenTelemetrySink> _otel_sink{nullptr};     ///< OTEL sink
 
-            uint32_t _log_mask{LOG_ALL};
+            uint32_t _log_mask{LOG_ALL};    ///< current log mask
 
+            /**
+             * @brief function that performs logging shutdown
+             *
+             */
             void _internal_shutdown() override;
 
+            /**
+             * @brief This function sets log level of the sink by converting string to the
+             *      appropriate log level
+             *
+             * @tparam DerivedFromSink  - template parameter that should be a class derived from sink
+             * @param logger_sink       - sink class instnce
+             * @param level             - log level string
+             */
             template <typename DerivedFromSink> static void
             _set_level(std::shared_ptr<DerivedFromSink> &logger_sink, const std::string &level);
 
+            /**
+             * @brief Internal log function that logs to spdlog and depending on configuration to OTEL.
+             *
+             * @tparam Args - variagle number of arguments template parameter
+             * @param loc   - source location argument
+             * @param lvl   - log level
+             * @param fmt   - log format string
+             * @param args  - variable number of argumenst
+             */
             template <typename... Args> static void
             _log(spdlog::source_loc loc, spdlog::level::level_enum lvl, fmt::format_string<Args...> fmt, Args &&...args)
             {
@@ -183,6 +260,11 @@ namespace springtail {
                 spdlog::default_logger()->log(loc, lvl, full_msg);
             }
 
+            /**
+             * @brief Function that performs logging to OTEL.
+             *
+             * @param msg - spdlog message
+             */
             static void _log_otel(const spdlog::details::log_msg &msg);
         };
     } // namespace logging

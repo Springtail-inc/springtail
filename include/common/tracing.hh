@@ -118,19 +118,24 @@ public:
     std::unordered_map<std::string, std::string> get_db_id_xid_map(uint64_t db_id, uint64_t xid);
 
 private:
-    TracingAndMetrics() = default;
-    ~TracingAndMetrics() override = default;
+    TracingAndMetrics() = default;      ///< default constructor
+    ~TracingAndMetrics() override = default;    ///< default destructor
+
+    /**
+     * @brief class shutdown function
+     *
+     */
     void _internal_shutdown() override;
 
-    opentelemetry::context::Context _context;
-    std::unordered_map<std::string, std::string> _default_attributes;
+    opentelemetry::context::Context _context;   ///< metrics context
+    std::unordered_map<std::string, std::string> _default_attributes;   ///< default attributes derived from environemnt
 
-    std::optional<std::string> _host;
-    std::optional<int> _port;
-    std::optional<int> _metrics_export_interval_millis;
-    std::optional<int> _metrics_export_timeout_millis;
-    bool _otel_enabled{false};
-    bool _otel_remote{false};
+    std::optional<std::string> _host;   ///< OTEL host to send data
+    std::optional<int> _port;           ///< OTEL port to send data
+    std::optional<int> _metrics_export_interval_millis; ///< metrics export interval
+    std::optional<int> _metrics_export_timeout_millis;  ///< metrics export timeout
+    bool _otel_enabled{false};      ///< OTEL enabled flag
+    bool _otel_remote{false};       ///< OTEL remote enable flag
 
     /**
     * @brief Map of counter names to their corresponding counters
@@ -142,7 +147,12 @@ private:
     */
     std::map<std::string_view, opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Histogram<double>>> _histograms;
 
+    /**
+     * @brief Meter provider object
+     *
+     */
     std::shared_ptr<opentelemetry::sdk::metrics::MeterProvider> _meter_provider;
+
 
     void _init_metrics(const opentelemetry::sdk::resource::Resource& resource);
     void _init_tracing(const opentelemetry::sdk::resource::Resource& resource);
@@ -198,21 +208,29 @@ private:
     void _register_histogram(std::string_view name, std::string_view description, std::string_view unit);
 };
 
-inline void increment_counter(std::string_view name,
-    const std::unordered_map<std::string, std::string>& attributes = {}) {
+inline void
+increment_counter(std::string_view name,
+    const std::unordered_map<std::string, std::string>& attributes = {})
+{
     TracingAndMetrics::get_instance()->increment_counter(name, attributes);
 }
 
-inline void record_histogram(std::string_view name, double value,
-    const std::unordered_map<std::string, std::string>& attributes = {}) {
+inline void
+record_histogram(std::string_view name, double value,
+    const std::unordered_map<std::string, std::string>& attributes = {})
+{
     TracingAndMetrics::get_instance()->record_histogram(name, value, attributes);
 }
 
-inline std::unordered_map<std::string, std::string> get_db_id_xid_map(uint64_t db_id, uint64_t xid) {
+inline std::unordered_map<std::string, std::string>
+get_db_id_xid_map(uint64_t db_id, uint64_t xid)
+{
     return TracingAndMetrics::get_instance()->get_db_id_xid_map(db_id, xid);
 }
 
-inline opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer(const std::string_view& name) {
+inline opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer>
+tracer(const std::string_view& name)
+{
     return TracingAndMetrics::get_instance()->tracer(name);
 }
 

@@ -16,9 +16,19 @@
 #include <utility>
 
 namespace springtail {
+/**
+ * @brief Log sink for OTEL. Use for forwarding logs to OTEL.
+ *
+ */
 class OpenTelemetrySink : public spdlog::sinks::sink
 {
 public:
+    /**
+     * @brief Construct a new Open Telemetry Sink object
+     *
+     * @param logger_name - logger name
+     * @param endpoint - URL string
+     */
     OpenTelemetrySink(const std::string& logger_name, const std::string& endpoint) :
         _formatter(spdlog::details::make_unique<spdlog::pattern_formatter>())
     {
@@ -76,6 +86,7 @@ public:
     }
 
 private:
+    /** Log severity mapping from SPDLOG to OTEL */
     static inline opentelemetry::logs::Severity _severity_map[spdlog::level::n_levels] = {
         opentelemetry::logs::Severity::kTrace,
         opentelemetry::logs::Severity::kDebug,
@@ -88,6 +99,11 @@ private:
     };
 
 public:
+    /**
+     * @brief Function for forwarding the log to OTEL
+     *
+     * @param msg - log message
+     */
     void
     log(const spdlog::details::log_msg &msg) override
     {
@@ -117,6 +133,12 @@ public:
     }
 
 private:
+    /**
+     * @brief Function for extraction context attributes
+     *
+     * @param msg - log message
+     * @param attributes - list of key/value pairs
+     */
     void
     _get_context_attributes(const spdlog::details::log_msg &msg, std::vector<std::pair<std::string, std::string>> &attributes)
     {
@@ -133,21 +155,37 @@ private:
         return;
     }
 
+    /**
+     * @brief Internal function for setting sink formater
+     *
+     * @param sink_formatter - sink formater
+     */
     void inline _set_formatter(std::unique_ptr<spdlog::formatter> sink_formatter) {
         _formatter = std::move(sink_formatter);
     }
 
-
+    /**
+     * @brief Internal function for setting pattern formatter
+     *
+     * @param pattern - pattern
+     */
     void inline _set_pattern(const std::string &pattern) {
         _set_formatter(spdlog::details::make_unique<spdlog::pattern_formatter>(pattern));
     }
 
 public:
+
+    /** Mandatory override flush function. */
     void
     flush() override {
             // OpenTelemetry handles flushing internally
     }
 
+    /**
+     * @brief Set the pattern object
+     *
+     * @param pattern
+     */
     void
     set_pattern(const std::string &pattern) override
     {
@@ -155,6 +193,11 @@ public:
         _set_pattern(pattern);
     }
 
+    /**
+     * @brief Set the formatter object
+     *
+     * @param sink_formatter - sink formatter
+     */
     void
     set_formatter(std::unique_ptr<spdlog::formatter> sink_formatter) override
     {
@@ -163,9 +206,25 @@ public:
     }
 
 private:
+    /**
+     * @brief OTEL logger
+     *
+     */
     opentelemetry::nostd::shared_ptr<opentelemetry::logs::Logger> _logger;
+    /**
+     * @brief Formatter
+     *
+     */
     std::unique_ptr<spdlog::formatter> _formatter;
+    /**
+     * @brief list of attribute key/value pairs that are al
+     *
+     */
     std::vector<std::pair<std::string, std::string>> _attributes;
+    /**
+     * @brief Mutex for changing _formatter
+     *
+     */
     std::mutex _formatter_mutex;
 };
 
