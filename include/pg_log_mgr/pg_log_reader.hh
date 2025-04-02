@@ -1,33 +1,17 @@
 #pragma once
 
-#include <memory>
-#include <filesystem>
-#include <map>
-
-#include <opentelemetry/metrics/meter.h>
-#include <opentelemetry/metrics/provider.h>
-
-#include <common/concurrent_queue.hh>
-#include <common/redis_types.hh>
 #include <common/tracing.hh>
 #include <common/timestamp.hh>
 
-#include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_msg_stream.hh>
 #include <pg_repl/pg_copy_table.hh>
-
-#include <redis/redis_containers.hh>
-#include <redis/redis_ddl.hh>
 
 #include <pg_log_mgr/wal_progress_tracker.hh>
 #include <pg_log_mgr/xid_ready.hh>
 
-#include <storage/extent.hh>
 #include <storage/field.hh>
-#include <storage/xid.hh>
 
-#include <pg_log_mgr/pg_xact_log_writer.hh>
-#include <xid_mgr/xid_mgr_client.hh>
+#include <pg_log_mgr/pg_xact_log_writer_mmap.hh>
 
 namespace springtail::pg_log_mgr {
     /**
@@ -55,8 +39,8 @@ namespace springtail::pg_log_mgr {
         PgLogReader(uint64_t db_id, uint32_t queue_size,
                     const std::filesystem::path &repl_log_path,
                     const std::filesystem::path &xact_log_path,
-                    CommitterQueuePtr committer_queue,
-                    bool archive_logs);
+                    const CommitterQueuePtr committer_queue,
+                    const bool archive_logs);
 
         ~PgLogReader();
         /**
@@ -95,6 +79,8 @@ namespace springtail::pg_log_mgr {
         uint64_t get_next_xid() {
             return _next_xid.fetch_add(1, std::memory_order_relaxed);
         }
+
+        bool archive_logs() const { return _archive_logs; }
 
     private:
         class Batch {
@@ -253,7 +239,7 @@ namespace springtail::pg_log_mgr {
         ConcurrentQueue<PgMsg> _msg_queue; ///< Queue of PgMsg records to process
         std::thread _msg_thread; ///< Thread for processing messages using the _msg_worker()
 
-        PgXactLogWriter _xact_log_writer; ///< For logging the xact mapping of pgxid to springtail XID
+        PgXactLogWriterMmap _xact_log_writer; ///< For logging the xact mapping of pgxid to springtail XID
 
         /** Tracks mutation batches using a map of pgxid -> Extent.  The pgxid is always the
             top-most pgxid and never a subtxn, which are handled within the batch. */
