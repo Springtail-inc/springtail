@@ -117,10 +117,10 @@ namespace springtail::pg_log_mgr {
 
         // fetch latest xid from xid mgr
         XidMgrClient *xid_mgr = XidMgrClient::get_instance();
-        uint64_t next_xid = xid_mgr->get_committed_xid(_db_id, 0) + 1;
-        _pg_log_reader->set_next_xid(next_xid);
+        uint64_t committed_xid = xid_mgr->get_committed_xid(_db_id, 0);
+        _pg_log_reader->set_next_xid(committed_xid + 1);
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Last committed XID: {}", next_xid-1);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Last committed XID: {}", committed_xid);
 
         // Note: If we are in recovery then we need to start the copy and reader threads first so
         //       that we can perform log replay, then we can start streaming from the last LSN.  But
@@ -143,7 +143,7 @@ namespace springtail::pg_log_mgr {
         } else {
             // XXX currently we perform full recovery any time that the state is not INITIALIZE, but if
             //     we had a clean shutdown mechanism, we could start up without any recovery
-            PgLogRecovery recovery(_db_id, _repl_log_path, _xact_log_path, _pg_log_reader);
+            PgLogRecovery recovery(_db_id, _repl_log_path, _xact_log_path, _pg_log_reader, committed_xid);
             lsn = recovery.repair_logs();
             _startup_running();
 
