@@ -1,0 +1,18 @@
+pg_log_reader:process_log
+pg_msg_stream:_decode_message
+
+
+pg_log_reader:msg_worker
+pg_log_reader:_process_msg
+pg_log_reader:_process_ddl -> Added to current_batch->schema_change
+
+_process_commit -> _apply_schema_change -> _mark_table_resync
+    Pushed to _redis_sync_queue in pg_log_mgr
+    _do_table_copies -> process each table_id
+        PgCopyTable::copy_tables
+        _worker -> Adds the table copy information
+
+    committer_queue.push
+
+_decode_copy_sync
+    _check_sync_commit
