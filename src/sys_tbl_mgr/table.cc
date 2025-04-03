@@ -272,7 +272,7 @@ get_table_dir(const std::filesystem::path &base,
             if (i == btree->end()) {
                 return end(index_id);
             }
-            return Iterator(this, btree, std::move(i), index_schema);
+            return Iterator(this, btree, i, index_schema);
         }
 
         // find the extent that could contain the upper_bound() key
