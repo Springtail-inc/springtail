@@ -729,8 +729,6 @@ namespace springtail {
                     return false;
                 }
 
-                bool operator!=(const IteratorT &rhs) const { return !(*this == rhs); }
-
                 /** This will return the current extent id of the iterator.
                  */
                 uint64_t extent_id() const {
@@ -739,7 +737,7 @@ namespace springtail {
 
                 // this allows to go from Iterator to ConstIterator
                 explicit IteratorT(IteratorT<Page, std::vector<ExtentRef>::iterator>&& rhs)
-                    :_page{std::move(rhs._page)},
+                    :_page{rhs._page},
                     _extent_i{std::move(rhs._extent_i)},
                     _extent{std::move(rhs._extent)},
                     _row{std::move(rhs._row)}
@@ -748,7 +746,7 @@ namespace springtail {
                 // this allows to go from Iterator to ConstIterator
                 IteratorT& operator=(IteratorT<Page, std::vector<ExtentRef>::iterator>&& rhs)
                 {
-                    _page = std::move(rhs._page);
+                    _page = rhs._page;
                     _extent_i = std::move(rhs._extent_i);
                     _extent = std::move(rhs._extent);
                     _row = std::move(rhs._row);
@@ -787,7 +785,8 @@ namespace springtail {
                 { }
 
             private:
-                Pg* _page; ///< The associated page.  Used to check for the _extent_i end() condition.
+                ///< The associated page.  Used to check for the _extent_i end() condition.
+                Pg* _page; //NOSONAR reason: The object lifetime is managed the the caller
                 It _extent_i; ///< Iterator into the extents of the page.
                 SafeExtent _extent; ///< The current extent.
                 Extent::Iterator _row; ///< Iterator into the current extent.

@@ -37,9 +37,9 @@ namespace springtail {
                   row_i = page->cbegin();
 			}
 
-            Node(PagePtr page, StorageCache::Page::ConstIterator i, std::shared_ptr<Node> p)
+            Node(PagePtr page, const StorageCache::Page::ConstIterator& i, std::shared_ptr<Node> p)
                 : page(std::move(page)),
-                  row_i(std::move(i)),
+                  row_i(i),
                   parent(p)
             { }
 
@@ -119,7 +119,7 @@ namespace springtail {
 
                     --depth;
                     auto begin = child->cbegin();
-                    _node = std::make_shared<Node>(std::move(child), std::move(begin), _node);
+                    _node = std::make_shared<Node>(std::move(child), begin, _node);
                 }
 
                 // return the iterator
@@ -145,7 +145,7 @@ namespace springtail {
 
                     // create a node for the root
                     StorageCache::Page::ConstIterator last{root->last()};
-                    _node = std::make_shared<Node>(std::move(root), std::move(last), nullptr);
+                    _node = std::make_shared<Node>(std::move(root), last, nullptr);
 
                     // iterate down to the leaf
                     while (_node->page->header().type.is_branch()) {
@@ -157,7 +157,7 @@ namespace springtail {
 
                         // create a node for the child an move to it
                         StorageCache::Page::ConstIterator last{child->last()};
-                        _node = std::make_shared<Node>(std::move(child), std::move(last), _node);
+                        _node = std::make_shared<Node>(std::move(child), last, _node);
                     }
 
                     return *this;
@@ -196,7 +196,7 @@ namespace springtail {
 
                     --depth;
                     StorageCache::Page::ConstIterator last{child->last()};
-                    _node = std::make_shared<Node>(std::move(child), std::move(last), _node);
+                    _node = std::make_shared<Node>(std::move(child), last, _node);
                 }
 
                 return *this;

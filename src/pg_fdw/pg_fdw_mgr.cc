@@ -573,7 +573,7 @@ namespace springtail::pg_fdw {
             if (!state->target_columns.contains(attno)) {
                 nulls[i] = true;
                 values[i] = 0;
-//                SPDLOG_WARN("Skipping column: {}; not found in target column", attno);
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Skipping column: {}; not found in target column", attno);
                 continue;
             }
 

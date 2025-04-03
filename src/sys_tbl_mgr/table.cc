@@ -252,7 +252,7 @@ get_table_dir(const std::filesystem::path &base,
         // note: the primary index indicates that there is a value >= the search_key in this page
         assert(j != const_page->cend());
 
-        return Iterator(this, _primary_index, std::move(i), std::move(page), std::move(j));
+        return Iterator(this, _primary_index, i, std::move(page), j);
     }
 
     Table::Iterator
@@ -290,7 +290,7 @@ get_table_dir(const std::filesystem::path &base,
         // note: the primary index indicates that there is a value >= the search_key in this page
         assert(j != page->cend());
 
-        return Iterator(this, _primary_index, std::move(i), std::move(page), std::move(j));
+        return Iterator(this, _primary_index, i, std::move(page), j);
     }
 
     Table::Iterator
@@ -381,7 +381,7 @@ get_table_dir(const std::filesystem::path &base,
 
             auto page = _read_page_via_primary(index_i);
             auto begin = page->cbegin();
-            return Iterator(this, _primary_index, index_i, std::move(page), std::move(begin));
+            return Iterator(this, _primary_index, index_i, std::move(page), begin);
         } else {
             auto const& [btree, cols] = _secondary_indexes.at(index_id);
             auto index_schema = _create_index_schema(_schema, cols);
