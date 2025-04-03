@@ -86,11 +86,12 @@ namespace springtail {
         // iterate through the levels until we find a leaf node
         NodePtr node = nullptr;
         while (current->header().type.is_branch()) {
+            const StorageCache::SafePagePtr& const_page{current};
             // perform a lower-bound check to find the appropriate child branch
-            auto child_i = current->lower_bound(search_key, this->_branch_schema);
-            if (child_i == current->end()) {
+            auto child_i = const_page->lower_bound(search_key, this->_branch_schema);
+            if (child_i == const_page->cend()) {
                 if (for_update) {
-                    child_i = current->last();
+                    child_i = const_page->last();
                 } else {
                     return end();
                 }
@@ -103,21 +104,23 @@ namespace springtail {
             auto child = StorageCache::get_instance()->get(_file, extent_id, _xid);
 
             // recurse to the child
-            node = std::make_shared<Node>(std::move(current), std::move(child_i), node);
+            node = std::make_shared<Node>(std::move(current), child_i, node);
             current = std::move(child);
         }
 
+        const StorageCache::SafePagePtr& const_page{current};
+
         // now find the entry in the leaf node
-        auto leaf_i = current->lower_bound(search_key, this->_leaf_schema);
-        if (leaf_i == current->end()) {
+        auto leaf_i = const_page->lower_bound(search_key, this->_leaf_schema);
+        if (leaf_i == current->cend()) {
             if (for_update) {
-                leaf_i = current->last();
+                leaf_i = const_page->last();
             } else {
                 return end();
             }
         }
 
-        node = std::make_shared<Node>(std::move(current), std::move(leaf_i), node);
+        node = std::make_shared<Node>(std::move(current), leaf_i, node);
         return Iterator(this, node);
     }
 
@@ -143,7 +146,7 @@ namespace springtail {
         while (current->header().type.is_branch()) {
             // perform a lower-bound check to find the appropriate child branch
             auto child_i = current->upper_bound(search_key, this->_branch_schema);
-            if (child_i == current->end()) {
+            if (child_i == current->cend()) {
                 if (for_update) {
                     child_i = current->last();
                 } else {
@@ -164,7 +167,7 @@ namespace springtail {
 
         // now find the entry in the leaf node
         auto leaf_i = current->upper_bound(search_key, this->_leaf_schema);
-        if (leaf_i == current->end()) {
+        if (leaf_i == current->cend()) {
             if (for_update) {
                 leaf_i = current->last();
             } else {

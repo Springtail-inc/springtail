@@ -76,7 +76,7 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
                   _btree(btree),
                   _btree_i(btree_i),
                   _page(std::move(page)),
-                  _page_i(page_i)
+                  _page_i(std::move(page_i))
                 {}
 
                 const Extent::Row& row() const 
@@ -109,8 +109,8 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
                 Primary(const Table *table,
                         BTreePtr btree, const BTree::Iterator &btree_i,
                         StorageCache::SafePagePtr page,
-                        const StorageCache::Page::ConstIterator &page_i )
-                    : Tracker{table, btree, btree_i, std::move(page), page_i}
+                        StorageCache::Page::ConstIterator page_i )
+                    : Tracker{table, btree, btree_i, std::move(page), std::move(page_i)}
                 {
                     if (!_page.empty()) {
                         _begin_i = _page->cbegin();
@@ -276,9 +276,9 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
             Iterator(const Table *table,
                      BTreePtr btree, const BTree::Iterator &btree_i,
                      StorageCache::SafePagePtr page,
-                     const StorageCache::Page::ConstIterator &page_i)
+                     StorageCache::Page::ConstIterator page_i)
             { 
-                _tracker.emplace<Primary>(table, btree, btree_i, std::move(page), page_i);
+                _tracker.emplace<Primary>(table, btree, btree_i, std::move(page), std::move(page_i));
             }
 
             Iterator(const Table *table,

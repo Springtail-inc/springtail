@@ -714,7 +714,8 @@ namespace springtail {
             uint32_t row_count = (*extent)->row_count();
             if (index < row_count) {
                 // construct the iterator to the requested position and return it
-                return ConstIterator(this, extent_i, std::move(extent), (*extent)->at(index));
+                auto&& row = (*extent)->at(index);
+                return ConstIterator(this, extent_i, std::move(extent), row);
             }
 
             index -= row_count;

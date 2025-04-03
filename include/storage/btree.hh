@@ -119,7 +119,7 @@ namespace springtail {
 
                     --depth;
                     auto begin = child->cbegin();
-                    _node = std::make_shared<Node>(std::move(child), begin, _node);
+                    _node = std::make_shared<Node>(std::move(child), std::move(begin), _node);
                 }
 
                 // return the iterator
@@ -144,7 +144,8 @@ namespace springtail {
                     auto root = cache->get(_btree->_file, _btree->_root_offset, _btree->_xid);
 
                     // create a node for the root
-                    _node = std::make_shared<Node>(std::move(root), root->last(), nullptr);
+                    StorageCache::Page::ConstIterator last{root->last()};
+                    _node = std::make_shared<Node>(std::move(root), std::move(last), nullptr);
 
                     // iterate down to the leaf
                     while (_node->page->header().type.is_branch()) {
@@ -155,8 +156,8 @@ namespace springtail {
                         auto child = cache->get(_btree->_file, child_id, _btree->_xid);
 
                         // create a node for the child an move to it
-                        StorageCache::Page::ConstIterator i;
-                        _node = std::make_shared<Node>(std::move(child), child->last(), _node);
+                        StorageCache::Page::ConstIterator last{child->last()};
+                        _node = std::make_shared<Node>(std::move(child), std::move(last), _node);
                     }
 
                     return *this;
@@ -194,7 +195,8 @@ namespace springtail {
                     auto child = cache->get(_btree->_file, extent_id, _btree->_xid);
 
                     --depth;
-                    _node = std::make_shared<Node>(std::move(child), child->last(), _node);
+                    StorageCache::Page::ConstIterator last{child->last()};
+                    _node = std::make_shared<Node>(std::move(child), std::move(last), _node);
                 }
 
                 return *this;

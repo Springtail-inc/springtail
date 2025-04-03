@@ -654,6 +654,10 @@ namespace springtail {
                     : _page(nullptr)
                 { }
 
+                IteratorT(const IteratorT&) = default;
+
+                ~IteratorT() = default;
+
                 reference operator*() const {
                     return *_row;
                 }
@@ -733,16 +737,18 @@ namespace springtail {
                     return _extent.get_ref().id();
                 }
 
-                IteratorT(const IteratorT<Page, std::vector<ExtentRef>::iterator>&& rhs)
-                    :_page{rhs._page},
+                // this allows to go from Iterator to ConstIterator
+                explicit IteratorT(IteratorT<Page, std::vector<ExtentRef>::iterator>&& rhs)
+                    :_page{std::move(rhs._page)},
                     _extent_i{std::move(rhs._extent_i)},
                     _extent{std::move(rhs._extent)},
                     _row{std::move(rhs._row)}
                 {}
 
-                IteratorT& operator=(const IteratorT<Page, std::vector<ExtentRef>::iterator>&& rhs)
+                // this allows to go from Iterator to ConstIterator
+                IteratorT& operator=(IteratorT<Page, std::vector<ExtentRef>::iterator>&& rhs)
                 {
-                    _page = rhs._page;
+                    _page = std::move(rhs._page);
                     _extent_i = std::move(rhs._extent_i);
                     _extent = std::move(rhs._extent);
                     _row = std::move(rhs._row);
@@ -807,13 +813,13 @@ namespace springtail {
                 assert(!_extents.empty());
                 SafeExtent extent{ _extents.back().make_safe_extent(_file) };
                 auto row_i = (*extent)->last();
-                return Iterator(this, --_extents.end(), std::move(extent), row_i);
+                return Iterator(this, --_extents.end(), std::move(extent), std::move(row_i));
             }
             ConstIterator last() const {
                 assert(!_extents.empty());
                 SafeExtent extent{ _extents.back().make_safe_extent(_file) };
                 auto row_i = (*extent)->last();
-                return ConstIterator(this, --_extents.end(), std::move(extent), row_i);
+                return ConstIterator(this, --_extents.end(), std::move(extent), std::move(row_i));
             }
 
             /**

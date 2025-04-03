@@ -244,12 +244,13 @@ get_table_dir(const std::filesystem::path &base,
 
         // read the extent and find the lower_bound() of the key within it
         auto page = _read_page_via_primary(i);
+        const StorageCache::SafePagePtr& const_page{page};
 
         // find the lower_bound() of the key within the data extent
-        auto &&j = page->lower_bound(search_key, _schema);
+        auto &&j = const_page->lower_bound(search_key, _schema);
 
         // note: the primary index indicates that there is a value >= the search_key in this page
-        assert(j != page->end());
+        assert(j != const_page->cend());
 
         return Iterator(this, _primary_index, std::move(i), std::move(page), std::move(j));
     }
@@ -287,7 +288,7 @@ get_table_dir(const std::filesystem::path &base,
         auto &&j = page->upper_bound(search_key, _schema);
 
         // note: the primary index indicates that there is a value >= the search_key in this page
-        assert(j != page->end());
+        assert(j != page->cend());
 
         return Iterator(this, _primary_index, std::move(i), std::move(page), std::move(j));
     }
