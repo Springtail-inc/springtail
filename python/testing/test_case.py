@@ -427,26 +427,20 @@ class TestCase:
                 )
 
     def _get_ranking_sql(self, is_index_query: bool = False) -> str:
-        index_cond = 'AND i.index_id <> 0' if is_index_query is True else 'AND i.index_id = 0'
+        index_cond = 'AND n.index_id <> 0' if is_index_query is True else 'AND n.index_id = 0'
 
-        xid_sql = f"""SELECT i.xid, i.lsn
-            FROM "__pg_springtail_catalog"."indexes" i
-            JOIN "__pg_springtail_catalog"."index_names" n
-            ON i.xid = n.xid AND i.lsn = n.lsn
-            WHERE i.table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)
-            AND n.state = 1
+        xid_sql = f"""SELECT distinct on (n.index_id) index_id, n.xid, n.lsn,n.state
+            FROM "__pg_springtail_catalog"."index_names" n
+            WHERE n.table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)
             {index_cond}
-            ORDER BY i.xid DESC, i.lsn DESC
-            {"LIMIT 1" if not is_index_query else ""}"""
+            ORDER BY n.index_id, n.xid DESC, n.lsn DESC"""
 
         ranking_sql = f"""SELECT i.*
             FROM "__pg_springtail_catalog"."indexes" i
-            JOIN "__pg_springtail_catalog"."index_names" n
-            ON i.xid = n.xid AND i.lsn = n.lsn
+            JOIN ({xid_sql}) n
+            ON i.index_id=n.index_id AND i.xid = n.xid AND i.lsn = n.lsn
             WHERE i.table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)
-            AND n.state = 1
-            {index_cond}
-            AND (i.xid, i.lsn) IN ({xid_sql})"""
+            AND n.state = 1"""
 
         return ranking_sql
 

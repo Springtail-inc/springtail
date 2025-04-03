@@ -14,6 +14,13 @@ namespace springtail::constant {
     /** Represents the most recent LSN available. */
     static constexpr uint64_t MAX_LSN = std::numeric_limits<uint64_t>::max();
 
+    /** XXX: Represents some specific LSNs to maintain ordering within the XID */
+
+    static constexpr uint64_t INDEX_COMMIT_LSN = MAX_LSN - 3;
+    static constexpr uint64_t RESYNC_NAMESPACE_LSN = MAX_LSN - 2;
+    static constexpr uint64_t RESYNC_DROP_LSN = MAX_LSN - 2;
+    static constexpr uint64_t RESYNC_CREATE_LSN = MAX_LSN - 1;
+
     /** Represents an invalid table ID. */
     static constexpr uint64_t INVALID_TABLE = 0;
 

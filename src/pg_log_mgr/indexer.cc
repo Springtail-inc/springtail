@@ -7,7 +7,6 @@
 #include <common/properties.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <sys_tbl_mgr/client.hh>
-#include <storage/cache.hh>
 
 namespace springtail::committer {
 
@@ -263,7 +262,7 @@ namespace springtail::committer {
 
         auto [db_id, index_id] = key;
         auto tid = idx._ddl["table_id"];
-        XidLsn xid{end_xid};
+        XidLsn xid{end_xid, constant::INDEX_COMMIT_LSN};
 
         IndexParams work_item;
 

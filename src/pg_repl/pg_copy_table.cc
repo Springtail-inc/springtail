@@ -254,7 +254,7 @@ namespace springtail
             index_obj.is_unique = is_unique;
             index_obj.columns = std::move(columns);
             // set the index state to ready since its part of the initial table copy
-            index_obj.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
+            index_obj.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::NOT_READY);
 
             secondary_indexes[index_name] = std::move(index_obj);
         }

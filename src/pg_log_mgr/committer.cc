@@ -138,16 +138,16 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     //       up in the schema since it wouldn't get deleted by the DROP TABLE
                     auto *namespace_req = copy_info->mutable_namespace_req();
                     namespace_req->set_xid(completed_xid);
-                    namespace_req->set_lsn(constant::MAX_LSN - 2);
+                    namespace_req->set_lsn(constant::RESYNC_NAMESPACE_LSN);
                     auto *create = copy_info->mutable_table_req();
                     create->set_xid(completed_xid);
-                    create->set_lsn(constant::MAX_LSN - 1);
+                    create->set_lsn(constant::RESYNC_CREATE_LSN);
 
                     auto *indexes = copy_info->mutable_index_reqs();
                     std::vector<proto::IndexRequest> indexes_vec;
                     for (auto &index : *indexes) {
                         index.set_xid(completed_xid);
-                        index.set_lsn(constant::MAX_LSN - 1);
+                        index.set_lsn(constant::RESYNC_CREATE_LSN);
                         indexes_vec.push_back(index);
                     }
 

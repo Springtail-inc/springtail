@@ -1046,7 +1046,7 @@ Service::SwapSyncTable(grpc::ServerContext* context,
         drop.set_db_id(create_req.db_id());
         drop.set_table_id(create_req.table().id());
         drop.set_xid(create_req.xid());
-        drop.set_lsn(create_req.lsn() - 1);
+        drop.set_lsn(constant::RESYNC_DROP_LSN);
         drop.set_namespace_name(create_req.table().namespace_name());
         drop.set_name(create_req.table().name());
 
@@ -1061,7 +1061,7 @@ Service::SwapSyncTable(grpc::ServerContext* context,
     SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Create table: {}:{} @ {}:{}", create_req.db_id(),
                         create_req.table().id(), create_req.xid(), create_req.lsn());
 
-    assert(create_req.lsn() == constant::MAX_LSN - 1);
+    assert(create_req.lsn() == constant::RESYNC_CREATE_LSN);
     auto&& create_ddl = this->_create_table(create_req);
     ddls.push_back(create_ddl);
 
@@ -1069,7 +1069,7 @@ Service::SwapSyncTable(grpc::ServerContext* context,
         SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Create index: {}:{} @ {}:{}", index.db_id(),
                             index.index().id(), index.xid(), index.lsn());
 
-        CHECK_EQ(index.lsn(), constant::MAX_LSN - 1);
+        CHECK_EQ(index.lsn(), constant::RESYNC_CREATE_LSN);
         auto&& index_ddl = this->_create_index(index);
         ddls.push_back(index_ddl);
     }
