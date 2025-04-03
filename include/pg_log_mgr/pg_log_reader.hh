@@ -275,6 +275,19 @@ namespace springtail::pg_log_mgr {
              */
             bool _handle_validation(PgMsgPtr msg);
 
+            /**
+             * Check if the table exists within this batch.
+             */
+            bool _table_exists(uint32_t table_id, const XidLsn &xid) {
+                for (const auto &entry : _txns) {
+                    if (entry.second->table_map.contains(table_id)) {
+                        return true;
+                    }
+                }
+
+                return _exists_cache->exists(_db, table_id, xid);
+            }
+
 
             //// MEMBER VARIABLES
             std::map<int32_t, TxnEntryPtr> _txns; ///< Map of pgxid to txn details.
@@ -289,6 +302,7 @@ namespace springtail::pg_log_mgr {
 
             tracing::SpanPtr _span; ///< Timing for the txn processing.
             CommitterQueuePtr _committer_queue; ///< Reference to the committer queue
+
             ExistsCachePtr _exists_cache; ///< Reference to the exists cache
 
             /** Records changes in the table validation state based on supported columns.  A valid

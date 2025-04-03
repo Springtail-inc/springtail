@@ -212,8 +212,7 @@ namespace springtail::pg_log_mgr {
         auto txn = _get_txn(pg_xid);
 
         // check if the system is aware of this table -- if not, need to skip this mutation
-        if (!sync_skip.first && !txn->table_map.contains(tid) &&
-            !_exists_cache->exists(_db, tid, xidlsn)) {
+        if (!sync_skip.first && !_table_exists(tid, xidlsn)) {
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR,
                                 "Skip mutation due to unknown table: tid={} pg_xid={}\n", tid,
                                 pg_xid);
@@ -280,8 +279,7 @@ namespace springtail::pg_log_mgr {
             }
 
             // check if the system is aware of this table -- if not, need to skip this mutation
-            if (!sync_skip.first && !txn->table_map.contains(tid) &&
-                !_exists_cache->exists(_db, tid, XidLsn(current_xid))) {
+            if (!sync_skip.first && !_table_exists(tid, XidLsn(current_xid))) {
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR,
                                     "Skip truncate due to unknown table: tid={} pg_xid={} xid={}\n",
                                     tid, _pg_xid, current_xid);
@@ -448,8 +446,7 @@ namespace springtail::pg_log_mgr {
                 // check if the system is aware of this table -- if not, need to skip this mutation
                 // note: if there's an ongoing sync then we consider that as existence unless it's
                 //       overridden by a local mutation
-                if (!sync_skip.first && !txn->table_map.contains(tid) &&
-                    !_exists_cache->exists(_db, tid, XidLsn(current_xid))) {
+                if (!sync_skip.first && !_table_exists(tid, XidLsn(current_xid))) {
                     SPDLOG_DEBUG_MODULE(
                         LOG_PG_LOG_MGR,
                         "Skip schema change due to unknown table: tid={} pg_xid={}\n", tid, pg_xid);
