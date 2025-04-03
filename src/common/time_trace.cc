@@ -4,16 +4,26 @@
 
 namespace springtail::time_trace {
 
-void
+time_trace::FlatTraceSet traces; //NOSONAR reason: intended to be modified
+
+
+Trace&
 FlatTraceSet::init(std::string_view name)
 {
     auto it = std::ranges::find_if(traces, [&name](auto const& v) { return v.first == name; });
-    if (it == traces.end()) {
-        traces.emplace_back(Item(name, Trace()));
-    } else {
-        it->second.reset();
-    }
+    CHECK(it == traces.end());
+    List::value_type& a = traces.emplace_back(Item(name, Trace()));
+    return a.second;
 }
+
+Trace&
+FlatTraceSet::find(std::string_view name)
+{
+    auto it = std::ranges::find_if(traces, [&name](auto const& v) { return v.first == name; });
+    CHECK(it != traces.end());
+    return it->second;
+}
+
 
 void
 FlatTraceSet::update(std::string_view name, const Trace& trace)

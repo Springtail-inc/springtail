@@ -199,7 +199,7 @@ namespace springtail::pg_log_mgr {
         }
     }
 
-    bool
+    std::pair<bool, bool>
     SyncTracker::should_skip(uint64_t db_id,
                              uint64_t table_id,
                              uint32_t pg_xid) const
@@ -212,7 +212,7 @@ namespace springtail::pg_log_mgr {
         auto resync_i = _resync_map.find(db_id);
         if (resync_i != _resync_map.end()) {
             if (resync_i->second.contains(table_id)) {
-                return true; // if the table is present, skip
+                return { true, true }; // if the table is present, skip
             }
         }
 
@@ -220,22 +220,21 @@ namespace springtail::pg_log_mgr {
         auto inflight_i = _inflight_map.find(db_id);
         if (inflight_i != _inflight_map.end()) {
             if (inflight_i->second.contains(table_id)) {
-                return true; // if the table is present, skip
+                return { true, true }; // if the table is present, skip
             }
         }
 
         // then check the table map
         auto db_i = _table_map.find(db_id);
         if (db_i == _table_map.end()) {
-            return false;
+            return { false, false };
         }
 
         auto table_i = db_i->second.find(table_id);
         if (table_i == db_i->second.end()) {
-            return false;
+            return { false, false };
         }
 
-        return table_i->second->should_skip(pg_xid);
+        return { true, table_i->second->should_skip(pg_xid) };
     }
-
 }

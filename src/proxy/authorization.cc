@@ -45,7 +45,12 @@ ClientAuthorization::process_auth_data(uint64_t seq_id)
 
         default:
             // do nothing
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Client auth invalid state: {}", _id, (int8_t)_state);
             break;
+    }
+
+    if (_state == ERROR) {
+        throw ProxyAuthError();
     }
 
     return (_state == READY);
@@ -148,15 +153,16 @@ ClientAuthorization::_process_startup_msg(int32_t remaining, uint64_t seq_id)
     // get user info and store it
     _user = UserMgr::get_instance()->get_user(username, database);
     if (_user == nullptr) {
-        SPDLOG_ERROR("User {} not found", username);
+        SPDLOG_ERROR("User {} not found for database {}", username, database);
         _state = ERROR;
         _error_code = ProxyProtoError::INVALID_PASSWORD;
         return;
     }
+
     _database = database;
     auto optional_db_id = DatabaseMgr::get_instance()->get_database_id(_database);
     if (!optional_db_id.has_value()) {
-        SPDLOG_ERROR("Database {} not found", _database);
+        SPDLOG_ERROR("Database {} not found for user {}", _database, username);
         _state = ERROR;
         _error_code = ProxyProtoError::INVALID_DATABASE;
         return;
@@ -941,13 +947,8 @@ ServerAuthorization::_handle_auth_scram_continue(BufferPtr buffer, uint64_t seq_
         user.has_scram_keys = true;
     } else if (_login->type == TEXT) {
         user.has_scram_keys = false;
-
-        if (_login->password.size() >= sizeof(user.passwd)) {
-            SPDLOG_ERROR("Password too long for SCRAM");
-            throw ProxyAuthError();
-        }
-        // size check done above, don't remove it...
-        strncpy(user.passwd, _login->password.c_str(), std::min(_login->password.size(), sizeof(user.passwd)-1));
+        user.passwd = _login->password.c_str();
+        SPDLOG_DEBUG("Using TEXT password for SCRAM for password: {}", user.passwd);
     } else {
         SPDLOG_ERROR("Invalid password type for SCRAM");
         throw ProxyAuthError();

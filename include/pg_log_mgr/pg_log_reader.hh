@@ -14,6 +14,7 @@
 
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_msg_stream.hh>
+#include <pg_repl/pg_copy_table.hh>
 
 #include <redis/redis_containers.hh>
 #include <redis/redis_ddl.hh>
@@ -134,6 +135,12 @@ namespace springtail::pg_log_mgr {
         };
         using ExistsCachePtr = std::shared_ptr<ExistsCache>;
 
+        /**
+         * Maintains the state for a single top-level transaction and all sub-transactions.  Is
+         * responsible for batching together mutations and writing them in bulk to the write cache.
+         * Tracks schema state during the transaction and applies them once the transaction commits.
+         * Also handles subtransaction rollback.
+         */
         class Batch {
             // 4 MB
             static constexpr uint32_t MAX_BATCH_SIZE = 4 * 1024 * 1024;
@@ -181,7 +188,11 @@ namespace springtail::pg_log_mgr {
             /**
              * Records a schema change into the batch.
              */
-            void schema_change(uint64_t current_xid, int32_t tid, int32_t pg_xid, PgMsgPtr msg);
+            void schema_change(uint64_t current_xid,
+                               int32_t tid,
+                               uint32_t pg_xid,
+                               uint32_t pg_xid_txn,
+                               PgMsgPtr msg);
 
         private:
             //// INTERNAL STRUCTURES
@@ -249,6 +260,30 @@ namespace springtail::pg_log_mgr {
              */
             void _apply_schema_change(PgMsgPtr change, const XidLsn &xidlsn);
 
+            /**
+             * @brief Helper method to mark the table for resync. Internally calls sync_tracker->mark_resync
+             *
+             * @param table_oid Table OID
+             * @param xidlsn XID LSN
+             */
+            void _mark_table_resync(uint64_t table_oid, const XidLsn &xidlsn);
+
+            /**
+             * Helper to check if a given table is invalid as visible within this Batch.
+             *
+             * @param table_oid Table OID.
+             */
+            bool _check_invalid(uint32_t table_oid);
+
+            /**
+             * Helper to handle the table validation management.  Updates the Batch-local view of
+             * the invalid tables and also updates the msg object as needed.
+             * 
+             * @param msg The postgres message object.
+             */
+            bool _handle_validation(PgMsgPtr msg);
+
+
             //// MEMBER VARIABLES
             std::map<int32_t, TxnEntryPtr> _txns; ///< Map of pgxid to txn details.
 
@@ -263,6 +298,11 @@ namespace springtail::pg_log_mgr {
             tracing::SpanPtr _span; ///< Timing for the txn processing.
             CommitterQueuePtr _committer_queue; ///< Reference to the committer queue
             ExistsCachePtr _exists_cache; ///< Reference to the exists cache
+
+            /** Records changes in the table validation state based on supported columns.  A valid
+                table contains std::nullopt, while an invalid one contains a JSON describing the
+                invalid columns.  */
+            std::unordered_map<uint32_t, std::optional<nlohmann::json>> _table_validations;
         };
         using BatchPtr = std::shared_ptr<Batch>;
 

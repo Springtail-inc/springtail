@@ -72,7 +72,7 @@ _gen_table_request(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
 
     for (const auto &col : msg.columns) {
         auto *column = table->add_columns();
-        column->set_name(col.column_name);
+        column->set_name(col.name);
         column->set_type(col.type);
         column->set_pg_type(col.pg_type);
         column->set_position(col.position);
