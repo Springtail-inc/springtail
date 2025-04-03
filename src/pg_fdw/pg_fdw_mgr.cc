@@ -46,9 +46,6 @@ extern "C" {
     #include <tcop/utility.h>
 }
 
-//#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
-#include <common/time_trace.hh>
-
 namespace springtail::pg_fdw {
     using springtail::Index;
 
@@ -300,8 +297,6 @@ namespace springtail::pg_fdw {
 
         // set the iterators for the scan taking quals into consideration
         _set_scan_iterators(state);
-
-//        time_trace::traces.reset();
     }
 
 
@@ -478,33 +473,6 @@ namespace springtail::pg_fdw {
                                bool *nulls,
                                bool *eos)
     {
-        struct trace
-        {
-            bool* _eos;
-            TIME_TRACE(one);
-            std::string _n;
-            bool _s;
-
-            trace(bool *eos, std::string n, bool s) : _eos(eos), _n{std::move(n)}, _s{s} 
-            {
-                if (_s) {
-                    TIME_TRACE_START(one);
-                }
-            }
-
-            ~trace() {
-                if (_s) {
-                    TIME_TRACE_STOP(one);
-                    TIME_TRACESET_UPDATE(time_trace::traces, _n, one);
-                    if (*_eos) {
-                        TIME_TRACESET_LOG(time_trace::traces);
-                    }
-                }
-            }
-        };
-
-//        trace tr(eos, "fdw_trace_total", state->target_columns.empty());
-
         // Note: for now always scan up, so we don't need to check if we are scanning down
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_iterate_scan: tid: {}", state->tid);
 

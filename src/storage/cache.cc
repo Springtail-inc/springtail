@@ -9,9 +9,6 @@
 
 #include <sys_tbl_mgr/system_tables.hh>
 
-//#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
-#include <common/time_trace.hh>
-
 namespace springtail {
 
     /* static member initialization must happen outside of class */
@@ -60,8 +57,6 @@ namespace springtail {
                       bool do_rollforward,
                       SafePagePtr::FlushCb flush_cb )
     {
-        TIME_TRACE_SCOPED(time_trace::traces, storage_cache_get);
-
         SPDLOG_DEBUG_MODULE(LOG_CACHE, "GET file {} eid {} xid {} txid {}",
                             file, extent_id, access_xid, target_xid);
 
@@ -143,8 +138,6 @@ namespace springtail {
                                  uint64_t access_xid,
                                  uint64_t target_xid)
     {
-        TIME_TRACE_SCOPED(time_trace::traces, page_cache_get);
-
         DCHECK(extent_id != constant::UNKNOWN_EXTENT);
 
         SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, access_xid, target_xid);
@@ -485,7 +478,6 @@ namespace springtail {
                                       uint64_t extent_id,
                                       uint64_t xid)
     {
-        TIME_TRACE_SCOPED(time_trace::traces, page_try_get);
         CacheKey key(file, extent_id);
 
         // check for the key in the hash map

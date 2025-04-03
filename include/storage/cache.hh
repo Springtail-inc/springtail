@@ -9,9 +9,6 @@
 #include <storage/extent.hh>
 #include <storage/field.hh>
 
-//#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
-#include <common/time_trace.hh>
-
 namespace springtail {
     /**
      * A centralized cache of data extents wrapped by Page objects.  Pages can be acquired for read,
@@ -276,7 +273,6 @@ namespace springtail {
 
             // copy causes the use count to be incremented
             SafeExtent(const SafeExtent &other) {
-                TIME_TRACE_SCOPED(time_trace::traces, SafeExtent_time1);
                 if (other._extent != nullptr) {
                     StorageCache::get_instance()->_data_cache->use(other._extent);
                 }
@@ -285,12 +281,10 @@ namespace springtail {
 
             // create empty extent
             SafeExtent(const std::filesystem::path &file, ExtentHeader hdr) {
-                TIME_TRACE_SCOPED(time_trace::traces, SafeExtent_time2);
                 _extent = StorageCache::get_instance()->_data_cache->get_empty(file, hdr);
             }
 
             SafeExtent &operator=(const SafeExtent &other) {
-                TIME_TRACE_SCOPED(time_trace::traces, SafeExtent_time3);
                 if (_extent) {
                     StorageCache::get_instance()->_data_cache->put(_extent);
                 }
