@@ -7,7 +7,6 @@
 #include <common/properties.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <sys_tbl_mgr/client.hh>
-#include <storage/cache.hh>
 
 namespace springtail::committer {
 
