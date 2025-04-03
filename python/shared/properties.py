@@ -310,7 +310,8 @@ class Properties:
         sys_config_json['sys_tbl_mgr'] = system_json['sys_tbl_mgr']
         sys_config_json['proxy'] = system_json['proxy']
         sys_config_json['otel'] = system_json['otel']
-        sys_config_json['integration_test_config'] = system_json['integration_test_config']
+        # test only config
+        sys_config_json['integration_test_config'] = system_json['integration_test_config'] if 'integration_test_config' in system_json else {}
 
         self.redis.hset(db_instance_key, 'system_settings', json.dumps(sys_config_json))
 

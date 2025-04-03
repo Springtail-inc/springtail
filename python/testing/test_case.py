@@ -544,14 +544,14 @@ class TestCase:
 
         # construct a connection for each transaction in the test
         for txn in self._txns:
-            logging.debug(f'Connecting to database for txn "{txn}"')
-
             # Determine what config to use for the test phase
             integration_test_config = self._props.get_integration_test_config()
             use_proxy_for_test = integration_test_config["use_proxy_for_test"] if "use_proxy_for_test" in integration_test_config else False
             if use_proxy_for_test:
+                logging.debug(f'Connecting to proxy for txn "{txn}"')
                 self._connections[txn] = springtail.connect_proxy(self._props, self._primary_name)
             else:
+                logging.debug(f'Connecting to primary for txn "{txn}"')
                 self._connections[txn] = springtail.connect_db_instance(self._props, self._primary_name)
             self._connections[txn].autocommit = self._metadata['autocommit']
 
@@ -629,8 +629,10 @@ class TestCase:
             use_proxy_for_verify = integration_test_config["use_proxy_for_verify"] if "use_proxy_for_verify" in integration_test_config else False
 
             if use_proxy_for_verify:
+                logging.info(f'Using proxy to verify')
                 self._connections[command['txn']] = springtail.connect_proxy(self._props, self._primary_name)
             else:
+                logging.info(f'Using primary to verify')
                 self._connections[command['txn']] = springtail.connect_db_instance(self._props, self._primary_name)
 
             primary_result = self._execute_command(command, True)
