@@ -85,12 +85,16 @@ namespace springtail::pg_log_mgr {
         bool archive_logs() const { return _archive_logs; }
 
     private:
+        /**
+         * Local cache of whether a given table exists or not at the most recently processed XID.
+         */
         class ExistsCache {
         public:
             ExistsCache(uint32_t size)
                 : _cache(size)
             { }
 
+            /** Checks the cache if the table exists.  If not present, queries the SysTblMgr. */
             bool exists(uint64_t db_id, uint32_t table_id, const XidLsn &xid) {
                 Key key(db_id, table_id);
                 {
@@ -110,6 +114,7 @@ namespace springtail::pg_log_mgr {
                 return exists;
             }
 
+            /** Updates the local view of table existence. */
             void insert(uint64_t db_id, uint32_t table_id, bool exists) {
                 std::scoped_lock lock(_mutex);
                 _cache.insert(Key{db_id, table_id}, std::make_shared<bool>(exists));

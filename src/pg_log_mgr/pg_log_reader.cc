@@ -40,7 +40,7 @@ namespace springtail::pg_log_mgr {
                                         "ms")
                 .release());
 
-        // construct the table existance cache
+        // construct the table existence cache
         _exists_cache = std::make_shared<ExistsCache>(8192); // XXX make this size a property?
 
         // start the message processing thread
@@ -418,7 +418,7 @@ namespace springtail::pg_log_mgr {
 
             case PgMsgEnum::CREATE_INDEX:
             case PgMsgEnum::DROP_INDEX:
-                break;  // XXX we should check both sync tracker and table existance against the
+                break;  // XXX we should check both sync tracker and table existence against the
                         // table ID here
 
             case PgMsgEnum::CREATE_TABLE:
@@ -431,7 +431,7 @@ namespace springtail::pg_log_mgr {
                     return;
                 }
 
-                // note: we don't check for existance here since this is going to cause existance
+                // note: we don't check for existence here since this is going to cause existence
                 break;
             }
 
@@ -446,7 +446,7 @@ namespace springtail::pg_log_mgr {
                 }
 
                 // check if the system is aware of this table -- if not, need to skip this mutation
-                // note: if there's an ongoing sync then we consider that as existance unless it's
+                // note: if there's an ongoing sync then we consider that as existence unless it's
                 //       overridden by a local mutation
                 if (!sync_skip.first && !txn->table_map.contains(tid) &&
                     !_exists_cache->exists(_db, tid, XidLsn(current_xid))) {
@@ -830,7 +830,7 @@ namespace springtail::pg_log_mgr {
                 int32_t pg_xid = (msg->is_streaming) ? insert.xid : _current_xact->xid;
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "INSERT pg_xid={} tid={}", pg_xid, insert.rel_id);
 
-                // note: the current XID is only used to determine table existance
+                // note: the current XID is only used to determine table existence
                 _current_batch->add_mutation<PgMsgEnum::INSERT>(this->get_current_xid(), pg_xid,
                                                                 insert.rel_id, insert.new_tuple);
                 break;
@@ -841,7 +841,7 @@ namespace springtail::pg_log_mgr {
                 int32_t pg_xid = (msg->is_streaming) ? remove.xid : _current_xact->xid;
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "DELETE pg_xid={} tid={}", pg_xid, remove.rel_id);
 
-                // note: the current XID is only used to determine table existance
+                // note: the current XID is only used to determine table existence
                 _current_batch->add_mutation<PgMsgEnum::DELETE>(this->get_current_xid(), pg_xid,
                                                                 remove.rel_id, remove.tuple);
                 break;
@@ -852,7 +852,7 @@ namespace springtail::pg_log_mgr {
                 int32_t pg_xid = (msg->is_streaming) ? update.xid : _current_xact->xid;
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "UPDATE pg_xid={} tid={}", pg_xid, update.rel_id);
 
-                // note: the current XID is only used to determine table existance
+                // note: the current XID is only used to determine table existence
                 uint64_t current_xid = this->get_current_xid();
                 if (update.old_type == 0) {
                     _current_batch->add_mutation<PgMsgEnum::UPDATE>(current_xid, pg_xid,
@@ -871,7 +871,7 @@ namespace springtail::pg_log_mgr {
             {
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "TRUNCATE pg_xid={}", this->get_current_xid());
 
-                // note: the current XID is only used to determine table existance
+                // note: the current XID is only used to determine table existence
                 _current_batch->truncate(this->get_current_xid(),
                                          std::get<PgMsgTruncate>(msg->msg));
                 break;
@@ -941,7 +941,7 @@ namespace springtail::pg_log_mgr {
         auto xid_msg = SyncTracker::get_instance()->check_commit(db_id, pg_xid);
         if (xid_msg != nullptr) {
             // XXXXXX this is too late, we need to mark it as existing when we send it to the committer
-            // update the existance cache for the referenced tables
+            // update the existence cache for the referenced tables
             // note: do this here because SWAP happens in the committer, which can't update this
             for (const auto &info : xid_msg->swap().tids()) {
                 _exists_cache->insert(db_id, info.first, true);
@@ -1175,7 +1175,7 @@ namespace springtail::pg_log_mgr {
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Process DDL: oid={} pg_xid={}\n", oid, pg_xid_txn);
 
         // record the schema change into the batch
-        // note: the current XID is only used to determine table existance
+        // note: the current XID is only used to determine table existence
         _current_batch->schema_change(this->get_current_xid(), oid, pg_xid, pg_xid_txn, msg);
     }
 } // namespace springtail::pg_log_mgr
