@@ -9,6 +9,9 @@
 #include <storage/extent.hh>
 #include <storage/field.hh>
 
+//#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
+#include <common/time_trace.hh>
+
 namespace springtail {
     /**
      * A centralized cache of data extents wrapped by Page objects.  Pages can be acquired for read,
@@ -32,7 +35,7 @@ namespace springtail {
 
     private:
         static StorageCache *_instance; ///< static instance (singleton)
-        static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
+        static std::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
 
         /** Constructor.  Uses global properties to configure itself. */
         StorageCache();
@@ -160,7 +163,7 @@ namespace springtail {
             std::list<std::shared_ptr<CacheExtent>>::iterator _pos; ///< The position of this entry on it's global LRU list.  Invalid if use count is non-zero.
 
             State _state; ///< The current state of this extent.
-            std::shared_ptr<boost::condition_variable> _flush_cv; ///< A condition variable used to notify waiters when the extent is no longer FLUSHING.
+            std::shared_ptr<std::condition_variable> _flush_cv; ///< A condition variable used to notify waiters when the extent is no longer FLUSHING.
 
             uint64_t _cache_id; ///< A unique ID provided from the DataCache when the CacheExtent is MUTABLE / DIRTY and shouldn't be referenced by extent_id.
         };
@@ -273,6 +276,7 @@ namespace springtail {
 
             // copy causes the use count to be incremented
             SafeExtent(const SafeExtent &other) {
+                TIME_TRACE_SCOPED(time_trace::traces, SafeExtent_time1);
                 if (other._extent != nullptr) {
                     StorageCache::get_instance()->_data_cache->use(other._extent);
                 }
@@ -281,10 +285,12 @@ namespace springtail {
 
             // create empty extent
             SafeExtent(const std::filesystem::path &file, ExtentHeader hdr) {
+                TIME_TRACE_SCOPED(time_trace::traces, SafeExtent_time2);
                 _extent = StorageCache::get_instance()->_data_cache->get_empty(file, hdr);
             }
 
             SafeExtent &operator=(const SafeExtent &other) {
+                TIME_TRACE_SCOPED(time_trace::traces, SafeExtent_time3);
                 if (_extent) {
                     StorageCache::get_instance()->_data_cache->put(_extent);
                 }
@@ -409,7 +415,7 @@ namespace springtail {
              * Increment the use count on a cache extent.
              */
             void use(CacheExtentPtr extent) {
-                boost::unique_lock lock(_mutex);
+                std::unique_lock lock(_mutex);
                 ++(extent->_use_count);
             }
 
@@ -526,13 +532,13 @@ namespace springtail {
         private:
             /** Structure for tracking IO condition variables. */
             struct IoCv {
-                boost::condition_variable cv;
+                std::condition_variable cv;
                 uint32_t counter = 1;
                 bool signaled = false;
             };
 
         private:
-            boost::mutex _mutex; ///< Mutex on the cache object to maintain thread-safety.
+            std::mutex _mutex; ///< Mutex on the cache object to maintain thread-safety.
 
             CleanCache _clean_cache; ///< The lookup cache of clean extents.
             ExtentLru _clean_lru; ///< An LRU of the clean extents.
@@ -629,7 +635,6 @@ namespace springtail {
              * Registers an eviction callback.
              */
             void _register_flush(std::function<bool(std::shared_ptr<Page>)> callback) {
-                boost::unique_lock lock(_mutex);
                 _flush_callback = callback;
             }
 
@@ -640,7 +645,8 @@ namespace springtail {
             /**
              * A class to access the rows of the page via a bidirectional iterator interface.
              */
-            class Iterator {
+            template<typename Pg, typename It>
+            class IteratorT {
                 friend Page;
 
             public:
@@ -650,7 +656,7 @@ namespace springtail {
                 using pointer           = const Extent::Row *;  // or also value_type*
                 using reference         = const Extent::Row &;  // or also value_type&
 
-                Iterator()
+                IteratorT()
                     : _page(nullptr)
                 { }
 
@@ -664,7 +670,7 @@ namespace springtail {
                 /**
                  * Increment operator -- moves to point at the next row in the page.
                  */
-                Iterator &operator++() {
+                IteratorT &operator++() {
                     // move to the next row
                     ++_row;
 
@@ -693,7 +699,7 @@ namespace springtail {
                 /**
                  * Decrement operator -- moves to point at the previous row in the page.
                  */
-                Iterator &operator--() {
+                IteratorT &operator--() {
                     // try to move to the prev row
                     if (_row != (*_extent)->begin()) {
                         --_row;
@@ -718,14 +724,14 @@ namespace springtail {
                  * Equality operator -- compares if this iterator is at the same row position as the
                  * provided iterator.
                  */
-                bool operator==(const Iterator &rhs) const {
+                bool operator==(const IteratorT &rhs) const {
                     if (_page == rhs._page && _extent_i == rhs._extent_i) {
                         return (_extent_i == _page->_extents.end() || _row == rhs._row);
                     }
                     return false;
                 }
 
-                bool operator!=(const Iterator &rhs) { return !(*this == rhs); }
+                bool operator!=(const IteratorT &rhs) const { return !(*this == rhs); }
 
                 /** This will return the current extent id of the iterator.
                  */
@@ -733,11 +739,31 @@ namespace springtail {
                     return _extent.get_ref().id();
                 }
 
+                IteratorT(const IteratorT<Page, std::vector<ExtentRef>::iterator>&& rhs)
+                    :_page{rhs._page},
+                    _extent_i{std::move(rhs._extent_i)},
+                    _extent{std::move(rhs._extent)},
+                    _row{std::move(rhs._row)}
+                {}
+
+                IteratorT& operator=(const IteratorT<Page, std::vector<ExtentRef>::iterator>&& rhs)
+                {
+                    _page = rhs._page;
+                    _extent_i = std::move(rhs._extent_i);
+                    _extent = std::move(rhs._extent);
+                    _row = std::move(rhs._row);
+                    return *this;
+                }
+
             private:
-                Iterator(Page *page,
-                         std::vector<ExtentRef>::iterator extent_i)
+                explicit IteratorT(Pg *page)
                     : _page(page),
-                      _extent_i(extent_i)
+                      _extent_i(page->_extents.end())
+                {
+                }
+                IteratorT(Pg *page, It extent_i)
+                    : _page(page),
+                      _extent_i(std::move(extent_i))
                 {
                     // if at the end, do nothing
                     if (_extent_i == _page->_extents.end()) {
@@ -751,80 +777,93 @@ namespace springtail {
                     _row = (*_extent)->begin();
                 }
 
-                Iterator(Page *page,
-                         std::vector<ExtentRef>::iterator extent_i,
+                IteratorT(Pg *page, It extent_i,
                          SafeExtent &&extent,
                          Extent::Iterator row_i)
                     : _page(page),
-                      _extent_i(extent_i),
+                      _extent_i(std::move(extent_i)),
                       _extent(std::move(extent)),
                       _row(row_i)
                 { }
 
             private:
-                Page *_page; ///< The associated page.  Used to check for the _extent_i end() condition.
-                std::vector<ExtentRef>::iterator _extent_i; ///< Iterator into the extents of the page.
+                Pg* _page; ///< The associated page.  Used to check for the _extent_i end() condition.
+                It _extent_i; ///< Iterator into the extents of the page.
                 SafeExtent _extent; ///< The current extent.
                 Extent::Iterator _row; ///< Iterator into the current extent.
             };
+
+            using Iterator = IteratorT<Page, std::vector<ExtentRef>::iterator>;
+            using ConstIterator = IteratorT<const Page, std::vector<ExtentRef>::const_iterator>;
 
             /**
              * Returns an iterator to the first row of the page.
              */
             Iterator begin() {
-                boost::shared_lock lock(_mutex);
                 return Iterator(this, _extents.begin());
+            }
+            ConstIterator cbegin() const {
+                return ConstIterator(this, _extents.begin());
             }
 
             /**
              * Returns an iterator to the last row of the page.
              */
             Iterator last() {
-                boost::shared_lock lock(_mutex);
                 assert(!_extents.empty());
                 SafeExtent extent{ _extents.back().make_safe_extent(_file) };
                 auto row_i = (*extent)->last();
                 return Iterator(this, --_extents.end(), std::move(extent), row_i);
+            }
+            ConstIterator last() const {
+                assert(!_extents.empty());
+                SafeExtent extent{ _extents.back().make_safe_extent(_file) };
+                auto row_i = (*extent)->last();
+                return ConstIterator(this, --_extents.end(), std::move(extent), row_i);
             }
 
             /**
              * Returns an iterator past the last row of the page.
              */
             Iterator end() {
-                boost::shared_lock lock(_mutex);
-                return Iterator(this, _extents.end());
+                return Iterator(this);
+            }
+            ConstIterator cend() const {
+                return ConstIterator(this);
             }
 
             /**
              * Returns the first row of the page with columns >= the matching columns of the provided tuple.
              * @param tuple A tuple holding data that matches the sort columns of the extent.
              */
+            ConstIterator lower_bound(TuplePtr tuple, ExtentSchemaPtr schema) const;
             Iterator lower_bound(TuplePtr tuple, ExtentSchemaPtr schema);
+
 
             /**
              * Returns the first row of the page with columns > the matching columns of the provided tuple.
              * @param tuple A tuple holding data that matches the sort columns of the extent.
              */
-            Iterator upper_bound(TuplePtr tuple, ExtentSchemaPtr schema);
+            ConstIterator upper_bound(TuplePtr tuple, ExtentSchemaPtr schema) const;
 
             /**
              * Returns the first row of the page with columns <= the matching columns of the provided tuple.
              * @param tuple A tuple holding data that matches the sort columns of the extent.
              */
-            Iterator inverse_lower_bound(TuplePtr tuple, ExtentSchemaPtr schema);
+            ConstIterator inverse_lower_bound(TuplePtr tuple, ExtentSchemaPtr schema) const;
 
             /**
              * Returns an iterator to the row at the provided index within the page.
              * @param index The index within the page to retrieve the row.
              */
             Iterator at(uint32_t index);
+            ConstIterator at(uint32_t index) const;
 
             /**
              * Returns the Page object's extent header data.  It is based of the original extent the
              * Page is based on.
              */
             ExtentHeader header() const {
-                boost::shared_lock lock(_mutex);
                 return _header();
             }
 
@@ -833,7 +872,6 @@ namespace springtail {
              * with no rows.
              */
             bool empty() const {
-                boost::shared_lock lock(_mutex);
                 return _empty();
             }
 
@@ -841,7 +879,6 @@ namespace springtail {
              * Returns the number of extents that are backing the Page.
              */
             uint32_t extent_count() const {
-                boost::shared_lock lock(_mutex);
                 return _extents.size();
             }
 
@@ -920,7 +957,7 @@ namespace springtail {
                 }
 
                 // if one extent, and the extent is empty, then empty
-                SafeExtent extent{ _extents.front().make_safe_extent(_file) };
+                const SafeExtent extent{ _extents.front().make_safe_extent(_file) };
                 return (*extent)->empty();
             }
 
@@ -938,9 +975,6 @@ namespace springtail {
         private:
             /** A count of the number of users of this page. */
             std::atomic<uint16_t> _use_count;
-
-            /** A mutex to protect access. */
-            mutable boost::shared_mutex _mutex;
 
             // XXX we should utilize weak_ptr to provide direct access to in-memory extents when available
             /** The extents that make up this page. */
@@ -975,7 +1009,7 @@ namespace springtail {
             bool _is_flushing;
 
             /** Condition variable to wait on for flushing to complete. */
-            boost::condition_variable _flush_cond;
+            std::condition_variable _flush_cond;
         };
 
         using PagePtr = std::shared_ptr<Page>;
@@ -1016,11 +1050,18 @@ namespace springtail {
                 put();
             }
 
-            PagePtr::element_type* operator->() const {
+            PagePtr::element_type* operator->() {
+                return ptr();
+            }
+            const PagePtr::element_type* operator->() const {
                 return ptr();
             }
 
-            PagePtr::element_type& operator*() const {
+            const PagePtr::element_type& operator*() const {
+                assert(_p);
+                return *_p;
+            }
+            PagePtr::element_type& operator*() {
                 assert(_p);
                 return *_p;
             }
@@ -1167,7 +1208,7 @@ namespace springtail {
             using XidMap = std::map<uint64_t, PagePtr>;
             using CacheMap = std::unordered_map<CacheKey, XidMap, boost::hash<CacheKey>>;
 
-            boost::mutex _mutex; ///< Mutex to protect the cache members
+            std::mutex _mutex; ///< Mutex to protect the cache members
 
             CacheMap _cache; ///< The page cache, keyed by CacheKey and XID
             std::list<PagePtr> _lru; ///< LRU list of pages.
@@ -1239,7 +1280,7 @@ namespace springtail {
         /**
          * Mutex to protect access to the internal variables.
          */
-        boost::mutex _mutex;
+        std::mutex _mutex;
 
         /**
          * The lookup map for read-only CacheExtent objects.

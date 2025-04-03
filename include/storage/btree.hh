@@ -26,18 +26,18 @@ namespace springtail {
         class Node {
             using PagePtr=StorageCache::SafePagePtr;
         public:
-            PagePtr page; ///< A pointer to the extent.
-            StorageCache::Page::Iterator row_i; ///< An iterator to the entry in the parent that points to this extent.
+            const StorageCache::SafePagePtr page; ///< A pointer to the extent.
+            StorageCache::Page::ConstIterator row_i; ///< An iterator to the entry in the parent that points to this extent.
             std::shared_ptr<Node> parent; ///< A pointer to the Node representing the parent extent.
 
             Node(PagePtr p)
                 : page(std::move(p)),
                   parent(nullptr)
             { 
-                  row_i = page->begin();
+                  row_i = page->cbegin();
 			}
 
-            Node(PagePtr page, StorageCache::Page::Iterator i, std::shared_ptr<Node> p)
+            Node(PagePtr page, StorageCache::Page::ConstIterator i, std::shared_ptr<Node> p)
                 : page(std::move(page)),
                   row_i(std::move(i)),
                   parent(p)
@@ -85,7 +85,7 @@ namespace springtail {
 
                 // move to the next row in the leaf extent
                 ++_node->row_i;
-                if (_node->row_i != _node->page->end()) {
+                if (_node->row_i != _node->page->cend()) {
                     return *this;
                 }
 
@@ -93,7 +93,7 @@ namespace springtail {
                 uint32_t depth = 0;
 
                 // go up the tree
-                while (_node->row_i == _node->page->end()) {
+                while (_node->row_i == _node->page->cend()) {
                     // iterate up to the parent
                     ++depth;
                     _node = _node->parent;
@@ -118,7 +118,7 @@ namespace springtail {
                     auto child = cache->get(_btree->_file, extent_id, _btree->_xid);
 
                     --depth;
-                    auto begin = child->begin();
+                    auto begin = child->cbegin();
                     _node = std::make_shared<Node>(std::move(child), begin, _node);
                 }
 
@@ -144,8 +144,7 @@ namespace springtail {
                     auto root = cache->get(_btree->_file, _btree->_root_offset, _btree->_xid);
 
                     // create a node for the root
-                    auto last = root->last(); 
-                    _node = std::make_shared<Node>(std::move(root), last, nullptr);
+                    _node = std::make_shared<Node>(std::move(root), root->last(), nullptr);
 
                     // iterate down to the leaf
                     while (_node->page->header().type.is_branch()) {
@@ -156,22 +155,22 @@ namespace springtail {
                         auto child = cache->get(_btree->_file, child_id, _btree->_xid);
 
                         // create a node for the child an move to it
-                        auto last = child->last();
-                        _node = std::make_shared<Node>(std::move(child), last, _node);
+                        StorageCache::Page::ConstIterator i;
+                        _node = std::make_shared<Node>(std::move(child), child->last(), _node);
                     }
 
                     return *this;
                 }
 
                 // if this is not the first entry in the extent, go to the previous entry
-                if (_node->row_i != _node->page->begin()) {
+                if (_node->row_i != _node->page->cbegin()) {
                     --(_node->row_i);
                     return *this;
                 }
 
                 // iterate up until we are no longer at a begin()
                 uint32_t depth = 0;
-                while (_node->row_i == _node->page->begin()) {
+                while (_node->row_i == _node->page->cbegin()) {
                     // iterate up to the parent
                     ++depth;
                     _node = _node->parent;
@@ -195,8 +194,7 @@ namespace springtail {
                     auto child = cache->get(_btree->_file, extent_id, _btree->_xid);
 
                     --depth;
-                    auto last = child->last();
-                    _node = std::make_shared<Node>(std::move(child), last, _node);
+                    _node = std::make_shared<Node>(std::move(child), child->last(), _node);
                 }
 
                 return *this;
@@ -338,7 +336,7 @@ namespace springtail {
          *
          * @param extent_id The ID of the extent to read.
          */
-        StorageCache::PagePtr _read_extent(uint64_t extent_id) const;
+        const StorageCache::PagePtr _read_extent(uint64_t extent_id) const;
     };
 
     typedef std::shared_ptr<BTree> BTreePtr;

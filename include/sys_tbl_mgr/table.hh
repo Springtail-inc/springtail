@@ -69,14 +69,23 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
                 {}
 
                 Tracker(const Table *table,
-                         BTreePtr btree, const BTree::Iterator &btree_i)
+                         BTreePtr btree, const BTree::Iterator &btree_i,
+                         StorageCache::SafePagePtr page,
+                         StorageCache::Page::ConstIterator page_i)
                 : _table(table),
                   _btree(btree),
-                  _btree_i(btree_i)
+                  _btree_i(btree_i),
+                  _page(std::move(page)),
+                  _page_i(page_i)
                 {}
 
+                const Extent::Row& row() const 
+                {
+                    return *_page_i;
+                }
+
                 friend bool operator==(const Tracker& a, const Tracker& b) {
-                    CHECK_EQ(a._table, b._table);
+                    DCHECK_EQ(a._table, b._table);
                     if (a._btree == nullptr && b._btree == nullptr) {
                         return true;
                     } else if (a._btree == nullptr || b._btree == nullptr) {
@@ -88,6 +97,8 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
                 const Table *_table{}; ///< A pointer to the Table object this iterator is for.
                 BTreePtr _btree; ///< A pointer to the BTree of the primary index.
                 BTree::Iterator _btree_i; ///< An iterator into the BTree.
+                StorageCache::SafePagePtr _page; ///< A pointer to the data page currently being processed.
+                StorageCache::Page::ConstIterator _page_i; ///< An iterator into the Extent.
             };
 
             /**
@@ -98,11 +109,14 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
                 Primary(const Table *table,
                         BTreePtr btree, const BTree::Iterator &btree_i,
                         StorageCache::SafePagePtr page,
-                        const StorageCache::Page::Iterator &page_i )
-                    : Tracker{table, btree, btree_i},
-                    _page(std::move(page)),
-                    _page_i(page_i)
-                {}
+                        const StorageCache::Page::ConstIterator &page_i )
+                    : Tracker{table, btree, btree_i, std::move(page), page_i}
+                {
+                    if (!_page.empty()) {
+                        _begin_i = _page->cbegin();
+                        _end_i = _page->cend();
+                    }
+                }
 
                 explicit Primary(const Table *table) 
                     :Tracker{table}
@@ -114,11 +128,6 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
                 void next();
                 void prev();
 
-                const Extent::Row& row() const 
-                {
-                    return *_page_i;
-                }
-
                 friend bool operator==(const Primary& a, const Primary& b) {
                     const Tracker& ta = a;
                     const Tracker& tb = b;
@@ -129,8 +138,8 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
                     return false;
                 }
 
-                StorageCache::SafePagePtr _page; ///< A pointer to the data page currently being processed.
-                StorageCache::Page::Iterator _page_i; ///< An iterator into the Extent.
+                StorageCache::Page::ConstIterator _begin_i;
+                StorageCache::Page::ConstIterator _end_i;
             };
 
             /**
@@ -141,7 +150,7 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
                 Secondary(const Table *table,
                         BTreePtr btree, const BTree::Iterator &btree_i,
                         ExtentSchemaPtr schema )
-                    : Tracker{table, btree, btree_i}
+                    : Tracker{table, btree, btree_i, {}, {}}
                 {
                     _extent_id_f = schema->get_field(constant::INDEX_EID_FIELD);
                     _row_id_f = schema->get_field(constant::INDEX_RID_FIELD);
@@ -155,7 +164,6 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
 
                 void next();
                 void prev();
-                const Extent::Row& row() const;
 
                 friend bool operator==(const Secondary& a, const Secondary& b) {
                     const Tracker& ta = a;
@@ -167,8 +175,6 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
                 FieldPtr _row_id_f;
 
                 uint64_t _extent_id = 0;
-                StorageCache::SafePagePtr _page;
-                StorageCache::Page::Iterator _page_i;
 
                 void update_page();
             };
@@ -260,7 +266,7 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
                         BTreePtr{}, 
                         BTree::Iterator{}, 
                         StorageCache::SafePagePtr{}, 
-                        StorageCache::Page::Iterator{});
+                        StorageCache::Page::ConstIterator{});
             }
 
             /** Specifically for the end() iterator. */
@@ -270,7 +276,7 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
             Iterator(const Table *table,
                      BTreePtr btree, const BTree::Iterator &btree_i,
                      StorageCache::SafePagePtr page,
-                     const StorageCache::Page::Iterator &page_i)
+                     const StorageCache::Page::ConstIterator &page_i)
             { 
                 _tracker.emplace<Primary>(table, btree, btree_i, std::move(page), page_i);
             }
@@ -384,7 +390,7 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
          * @param extent_id The extent ID to read.
          * @return A pointer to the requested page.
          */
-        StorageCache::SafePagePtr read_page(uint64_t extent_id) const;
+        //StorageCache::SafePagePtr read_page(uint64_t extent_id) const;
 
         /**
          * @brief Get table stats

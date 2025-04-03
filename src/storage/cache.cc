@@ -9,16 +9,19 @@
 
 #include <sys_tbl_mgr/system_tables.hh>
 
+//#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
+#include <common/time_trace.hh>
+
 namespace springtail {
 
     /* static member initialization must happen outside of class */
     StorageCache* StorageCache::_instance = {nullptr};
-    boost::mutex StorageCache::_instance_mutex;
+    std::mutex StorageCache::_instance_mutex;
 
     StorageCache *
     StorageCache::get_instance()
     {
-        boost::unique_lock lock(_instance_mutex);
+        std::unique_lock lock(_instance_mutex);
 
         if (_instance == nullptr) {
             _instance = new StorageCache();
@@ -30,7 +33,7 @@ namespace springtail {
     void
     StorageCache::shutdown()
     {
-        boost::unique_lock lock(_instance_mutex);
+        std::unique_lock lock(_instance_mutex);
 
         if (_instance != nullptr) {
             delete _instance;
@@ -57,11 +60,13 @@ namespace springtail {
                       bool do_rollforward,
                       SafePagePtr::FlushCb flush_cb )
     {
+        TIME_TRACE_SCOPED(time_trace::traces, storage_cache_get);
+
         SPDLOG_DEBUG_MODULE(LOG_CACHE, "GET file {} eid {} xid {} txid {}",
                             file, extent_id, access_xid, target_xid);
 
         // note: target_xid must be at or beyond the access_xid
-        CHECK_GE(target_xid, access_xid);
+        DCHECK_GE(target_xid, access_xid);
         if (target_xid == constant::LATEST_XID) {
             target_xid = access_xid;
         }
@@ -138,11 +143,13 @@ namespace springtail {
                                  uint64_t access_xid,
                                  uint64_t target_xid)
     {
-        CHECK(extent_id != constant::UNKNOWN_EXTENT);
+        TIME_TRACE_SCOPED(time_trace::traces, page_cache_get);
+
+        DCHECK(extent_id != constant::UNKNOWN_EXTENT);
 
         SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, access_xid, target_xid);
 
-        boost::unique_lock lock(_mutex);
+        std::unique_lock lock(_mutex);
 
         // check if the page already exists in the cache for the given target XID
         PagePtr page = _try_get(file, extent_id, target_xid);
@@ -166,7 +173,7 @@ namespace springtail {
                                        uint64_t xid)
     {
         SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}, {}", file, xid);
-        boost::unique_lock lock(_mutex);
+        std::unique_lock lock(_mutex);
 
         _make_page_space(1);
         return std::make_shared<Page>(file, xid);
@@ -179,7 +186,7 @@ namespace springtail {
         SPDLOG_DEBUG_MODULE(LOG_CACHE, "PUT file {} eid {} s_xid {} e_xid {}",
                             page->_file, page->_extent_id, page->_start_xid, page->_end_xid);
 
-        boost::unique_lock lock(_mutex);
+        std::unique_lock lock(_mutex);
 
         tracing::increment_counter(STORAGE_CACHE_PUT_CALLS, tracing::get_db_id_xid_map(0, page->_end_xid));
 
@@ -207,7 +214,7 @@ namespace springtail {
     void
     StorageCache::PageCache::evict(PagePtr page)
     {
-        boost::unique_lock lock(_mutex);
+        std::unique_lock lock(_mutex);
         SPDLOG_DEBUG_MODULE(LOG_CACHE, "EVICT file {} eid {} s_xid {} e_xid {}",
                             page->_file, page->_extent_id, page->_start_xid, page->_end_xid);
 
@@ -222,7 +229,7 @@ namespace springtail {
     void
     StorageCache::PageCache::flush_file(const std::filesystem::path &file)
     {
-        boost::unique_lock lock(_mutex);
+        std::unique_lock lock(_mutex);
 
         tracing::increment_counter(STORAGE_CACHE_FLUSH_CALLS);
         const auto start_time = std::chrono::system_clock::now();
@@ -305,7 +312,7 @@ namespace springtail {
     void
     StorageCache::PageCache::drop_file(const std::filesystem::path &file)
     {
-        boost::unique_lock lock(_mutex);
+        std::unique_lock lock(_mutex);
 
         tracing::increment_counter(STORAGE_CACHE_DROP_CALLS);
         const auto start_time = std::chrono::system_clock::now();
@@ -399,7 +406,7 @@ namespace springtail {
         // issue the associated callback for the page's eviction
         bool success = true;
         if (page->_flush_callback && page->_is_dirty) {
-            boost::unique_lock lock(_mutex, boost::adopt_lock);
+            std::unique_lock lock(_mutex, std::adopt_lock);
 
             // check if the page is currently flushing
             if (page->_is_flushing) {
@@ -478,6 +485,7 @@ namespace springtail {
                                       uint64_t extent_id,
                                       uint64_t xid)
     {
+        TIME_TRACE_SCOPED(time_trace::traces, page_try_get);
         CacheKey key(file, extent_id);
 
         // check for the key in the hash map
@@ -545,7 +553,6 @@ namespace springtail {
     {
         auto cache = StorageCache::get_instance();
 
-        boost::unique_lock lock(_mutex);
         _is_dirty = false;
 
         // note: page must be empty
@@ -567,7 +574,6 @@ namespace springtail {
     std::vector<uint64_t>
     StorageCache::Page::flush(const ExtentHeader &header)
     {
-        boost::unique_lock lock(_mutex);
         _is_dirty = false;
 
         // note: if the page is empty, we should be calling flush_empty()
@@ -577,10 +583,18 @@ namespace springtail {
         return _flush(header);
     }
 
-    StorageCache::Page::Iterator
+    StorageCache::Page::Iterator 
     StorageCache::Page::lower_bound(TuplePtr tuple, ExtentSchemaPtr schema)
     {
-        boost::shared_lock lock(_mutex);
+        const StorageCache::Page& pg{*this};
+        auto cit =  pg.lower_bound(tuple, schema);
+        auto offset = std::distance(_extents.cbegin(), cit._extent_i);
+        return  Iterator(this, _extents.begin() + offset, std::move(cit._extent), cit._row);
+    }
+
+    StorageCache::Page::ConstIterator
+    StorageCache::Page::lower_bound(TuplePtr tuple, ExtentSchemaPtr schema) const
+    {
 
         // perform a lower-bound check to find the appropriate extent
         // note: we don't use std::ranges::lower_bound() here because the projection causes the
@@ -591,7 +605,7 @@ namespace springtail {
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         if (extent_i == _extents.end()) {
-            return end();
+            return cend();
         }
 
         auto extent = extent_i->make_safe_extent(_file);
@@ -608,13 +622,12 @@ namespace springtail {
         // note: shouldn't be possible to hit end() given the above lower_bound() check to find the extent
         CHECK(row_i != (*extent)->end());
 
-        return Iterator(this, extent_i, std::move(extent), row_i);
+        return ConstIterator(this, extent_i, std::move(extent), row_i);
     }
 
-    StorageCache::Page::Iterator
-    StorageCache::Page::upper_bound(TuplePtr tuple, ExtentSchemaPtr schema)
+    StorageCache::Page::ConstIterator
+    StorageCache::Page::upper_bound(TuplePtr tuple, ExtentSchemaPtr schema) const
     {
-        boost::shared_lock lock(_mutex);
 
         // perform a upper-bound check to find the appropriate extent
         // note: we don't use std::ranges::upper_bound() here because the projection causes the
@@ -627,7 +640,7 @@ namespace springtail {
                                  });
 
         if (extent_i == _extents.end()) {
-            return end();
+            return cend();
         }
 
         auto extent = extent_i->make_safe_extent(_file);
@@ -644,22 +657,21 @@ namespace springtail {
         // note: shouldn't be possible to hit end() given the above upper_bound() check to find the extent
         CHECK(row_i != (*extent)->end());
 
-        return Iterator(this, extent_i, std::move(extent), row_i);
+        return ConstIterator(this, extent_i, std::move(extent), row_i);
     }
 
-    StorageCache::Page::Iterator
-    StorageCache::Page::inverse_lower_bound(TuplePtr tuple, ExtentSchemaPtr schema)
+    StorageCache::Page::ConstIterator
+    StorageCache::Page::inverse_lower_bound(TuplePtr tuple, ExtentSchemaPtr schema) const
     {
-        boost::shared_lock lock(_mutex);
 
         // check if the page is empty
         if (_empty()) {
-            return end();
+            return cend();
         }
 
         // perform a lower-bound to find the row with a key <= the provided tuple
         auto i = lower_bound(tuple, schema);
-        if (i == end()) {
+        if (i == cend()) {
             --i;
             return i;
         }
@@ -671,8 +683,8 @@ namespace springtail {
         }
 
         // if we are at the first entry, nothing before it
-        if (i == begin()) {
-            return end();
+        if (i == cbegin()) {
+            return cend();
         }
 
         // go to the previous entry
@@ -700,11 +712,30 @@ namespace springtail {
         return end();
     }
 
+    StorageCache::Page::ConstIterator
+    StorageCache::Page::at(uint32_t index) const
+    {
+        // iterate through the extents to find the requested index in the page
+        for (auto extent_i = _extents.begin(); extent_i != _extents.end(); ++extent_i) {
+            auto extent = extent_i->make_safe_extent(_file);
+
+            uint32_t row_count = (*extent)->row_count();
+            if (index < row_count) {
+                // construct the iterator to the requested position and return it
+                return ConstIterator(this, extent_i, std::move(extent), (*extent)->at(index));
+            }
+
+            index -= row_count;
+        }
+
+        // index is beyond the end of the page
+        return cend();
+    }
+
     void
     StorageCache::Page::insert(TuplePtr tuple,
                                ExtentSchemaPtr schema)
     {
-        boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
         // if the page is empty, create an empty extent to back it
@@ -762,7 +793,6 @@ namespace springtail {
     StorageCache::Page::append(TuplePtr tuple,
                                ExtentSchemaPtr schema)
     {
-        boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
         // if the page is empty, create an empty extent to back it
@@ -797,7 +827,6 @@ namespace springtail {
     StorageCache::Page::upsert(TuplePtr tuple,
                                ExtentSchemaPtr schema)
     {
-        boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
         // if the page is empty, create an empty extent to back it
@@ -862,7 +891,6 @@ namespace springtail {
     StorageCache::Page::update(TuplePtr tuple,
                                ExtentSchemaPtr schema)
     {
-        boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
         // extract the key to find the insert position
@@ -904,7 +932,6 @@ namespace springtail {
     StorageCache::Page::remove(TuplePtr key,
                                ExtentSchemaPtr schema)
     {
-        boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
         // find the extent to modify via lower_bound
@@ -944,7 +971,6 @@ namespace springtail {
     void
     StorageCache::Page::remove(const Iterator &pos)
     {
-        boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
         // make sure that we've got a mutable version of the extent
@@ -965,7 +991,6 @@ namespace springtail {
                                 ExtentSchemaPtr target_schema,
                                 uint64_t target_xid)
     {
-        boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
         auto cache = StorageCache::get_instance();
@@ -1085,7 +1110,7 @@ namespace springtail {
                                  const ExtentRef &ref,
                                  bool mark_dirty)
     {
-        boost::unique_lock lock(_mutex);
+        std::unique_lock lock(_mutex);
 
         // check if the the reference is valid
         if (ref.is_direct()) {
@@ -1145,7 +1170,7 @@ namespace springtail {
                 ++(extent->_use_count);
 
                 // wait for the flush to complete and then return the extent
-                boost::unique_lock lock(_mutex, boost::adopt_lock);
+                std::unique_lock lock(_mutex, std::adopt_lock);
                 auto cv = extent->_flush_cv;
                 cv->wait(lock, [&extent](){ return extent->_state != CacheExtent::State::FLUSHING; });
                 lock.release();
@@ -1182,7 +1207,7 @@ namespace springtail {
     StorageCache::DataCache::get_empty(const std::filesystem::path &file,
                                        const ExtentHeader &header)
     {
-        boost::unique_lock lock(_mutex);
+        std::unique_lock lock(_mutex);
 
         // make space for the new extent
         _make_extent_space();
@@ -1200,7 +1225,7 @@ namespace springtail {
     void
     StorageCache::DataCache::put(CacheExtentPtr extent)
     {
-        boost::unique_lock lock(_mutex);
+        std::unique_lock lock(_mutex);
         // release the extent
         _release(extent);
     }
@@ -1249,7 +1274,7 @@ namespace springtail {
     void
     StorageCache::DataCache::reinsert(CacheExtentPtr extent)
     {
-        boost::unique_lock lock(_mutex);
+        std::unique_lock lock(_mutex);
 
         // note: the extent must be MUTABLE (not DIRTY) and not in-use by others when reinsert()'d
         CHECK_EQ(extent->_state, CacheExtent::State::MUTABLE);
@@ -1274,7 +1299,7 @@ namespace springtail {
     void
     StorageCache::DataCache::flush(CacheExtentPtr extent)
     {
-        boost::unique_lock lock(_mutex);
+        std::unique_lock lock(_mutex);
 
         // call the internal flush() helper
         _flush(extent);
@@ -1283,7 +1308,7 @@ namespace springtail {
     void
     StorageCache::DataCache::drop_dirty(CacheExtentPtr extent)
     {
-        boost::unique_lock lock(_mutex);
+        std::unique_lock lock(_mutex);
 
         // note: extent must be dirty for this to be a valid operation
         CHECK_EQ(extent->_state, CacheExtent::State::DIRTY);
@@ -1301,7 +1326,7 @@ namespace springtail {
     std::pair<StorageCache::ExtentRef, StorageCache::ExtentRef>
     StorageCache::DataCache::split(CacheExtentPtr extent, ExtentSchemaPtr schema)
     {
-        boost::unique_lock lock(_mutex);
+        std::unique_lock lock(_mutex);
 
         // note: extent must be DIRTY with a mutation that caused the split
         CHECK_EQ(extent->_state, CacheExtent::State::DIRTY);
@@ -1377,7 +1402,7 @@ namespace springtail {
     {
         // if already flushing, wait for completion
         if (extent->_state == CacheExtent::State::FLUSHING) {
-            boost::unique_lock lock(_mutex, boost::adopt_lock);
+            std::unique_lock lock(_mutex, std::adopt_lock);
 
             auto cv = extent->_flush_cv;
             cv->wait(lock, [&extent](){ return extent->_state != CacheExtent::State::FLUSHING; });
@@ -1394,11 +1419,11 @@ namespace springtail {
 
         // mark the extent as FLUSHING so that other callers will block until flush complete
         extent->_state = CacheExtent::State::FLUSHING;
-        extent->_flush_cv = std::make_shared<boost::condition_variable>();
+        extent->_flush_cv = std::make_shared<std::condition_variable>();
 
         // perform the flush
         {
-            boost::unique_lock lock(_mutex, boost::adopt_lock);
+            std::unique_lock lock(_mutex, std::adopt_lock);
             lock.unlock();
 
             auto handle = IOMgr::get_instance()->open(extent->_file, IOMgr::IO_MODE::APPEND, true);
@@ -1498,7 +1523,7 @@ namespace springtail {
         // extent not cached, check if someone is reading it from disk
         auto io_i = _io_map.find(key);
         if (io_i != _io_map.end()) {
-            boost::unique_lock lock(_mutex, boost::adopt_lock);
+            std::unique_lock lock(_mutex, std::adopt_lock);
 
             // wait for the read to complete
             auto entry = io_i->second;
@@ -1523,7 +1548,7 @@ namespace springtail {
         _make_extent_space();
 
         // unlock before IO
-        boost::unique_lock lock(_mutex, boost::adopt_lock);
+        std::unique_lock lock(_mutex, std::adopt_lock);
         lock.unlock();
 
         // read the extent
@@ -1572,7 +1597,7 @@ namespace springtail {
             ++(extent->_use_count);
 
             // wait for the flush to complete
-            boost::unique_lock lock(_mutex, boost::adopt_lock);
+            std::unique_lock lock(_mutex, std::adopt_lock);
             auto cv = extent->_flush_cv;
             cv->wait(lock, [&extent](){ return extent->_state != CacheExtent::State::FLUSHING; });
             lock.release();

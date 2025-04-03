@@ -1,6 +1,5 @@
 #include <common/constants.hh>
 #include <memory>
-#include <span>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table.hh>
@@ -252,7 +251,7 @@ get_table_dir(const std::filesystem::path &base,
         // note: the primary index indicates that there is a value >= the search_key in this page
         assert(j != page->end());
 
-        return Iterator(this, _primary_index, i, std::move(page), j);
+        return Iterator(this, _primary_index, std::move(i), std::move(page), std::move(j));
     }
 
     Table::Iterator
@@ -272,7 +271,7 @@ get_table_dir(const std::filesystem::path &base,
             if (i == btree->end()) {
                 return end(index_id);
             }
-            return Iterator(this, btree, i, index_schema);
+            return Iterator(this, btree, std::move(i), index_schema);
         }
 
         // find the extent that could contain the upper_bound() key
@@ -290,7 +289,7 @@ get_table_dir(const std::filesystem::path &base,
         // note: the primary index indicates that there is a value >= the search_key in this page
         assert(j != page->end());
 
-        return Iterator(this, _primary_index, i, std::move(page), j);
+        return Iterator(this, _primary_index, std::move(i), std::move(page), std::move(j));
     }
 
     Table::Iterator
@@ -336,11 +335,12 @@ get_table_dir(const std::filesystem::path &base,
         auto page = _read_page_via_primary(i);
 
         // find the inverse_lower_bound() of the key within the data extent
-        auto &&j = page->inverse_lower_bound(search_key, _schema);
+        StorageCache::Page::ConstIterator j;
+        j = page->inverse_lower_bound(search_key, _schema);
 
         // note: the index found this page, but if it's the first page in the table, the key may be
         //       less than the first entry, meaning no such inverse_lower_bound() exists
-        if (j == page->end()) {
+        if (j == page->cend()) {
             return end();
         }
 
@@ -379,8 +379,8 @@ get_table_dir(const std::filesystem::path &base,
             }
 
             auto page = _read_page_via_primary(index_i);
-            auto begin = page->begin();
-            return Iterator(this, _primary_index, index_i, std::move(page), begin);
+            auto begin = page->cbegin();
+            return Iterator(this, _primary_index, index_i, std::move(page), std::move(begin));
         } else {
             auto const& [btree, cols] = _secondary_indexes.at(index_id);
             auto index_schema = _create_index_schema(_schema, cols);
@@ -392,12 +392,6 @@ get_table_dir(const std::filesystem::path &base,
             }
             return Iterator(this, btree, i, index_schema);
         }
-    }
-
-    StorageCache::SafePagePtr
-    Table::read_page(uint64_t extent_id) const
-    {
-        return _read_page(extent_id);
     }
 
     StorageCache::SafePagePtr
@@ -1209,7 +1203,7 @@ get_table_dir(const std::filesystem::path &base,
     {
         // move to the next row in the data extent
         ++_page_i;
-        if (_page_i != _page->end()) {
+        if (_page_i != _end_i) {
             return;
         }
 
@@ -1221,7 +1215,9 @@ get_table_dir(const std::filesystem::path &base,
 
         // retrieve the data extent
         _page = _table->_read_page_via_primary(_btree_i);
-        _page_i = _page->begin();
+        _page_i = _page->cbegin();
+        _end_i = _page->cend();
+        _begin_i = _page->cbegin();
     }
 
     void Table::Iterator::Primary::prev()
@@ -1234,17 +1230,21 @@ get_table_dir(const std::filesystem::path &base,
 
             // read the page and reference the end() of that page
             _page = _table->_read_page_via_primary(_btree_i);
-            _page_i = _page->end();
+            _page_i = _page->cend();
+            _end_i = _page->cend();
+            _begin_i = _page->cbegin();
         }
 
         // check if we are on the first row
-        if (_page_i == _page->begin()) {
+        if (_page_i == _begin_i) {
             // need to move to the previous page
             --_btree_i;
 
             // read the page and reference the end() of that page
             _page = _table->_read_page_via_primary(_btree_i);
-            _page_i = _page->end();
+            _page_i = _page->cend();
+            _end_i = _page->cend();
+            _begin_i = _page->cbegin();
         }
 
         // move to the previous row
@@ -1276,12 +1276,8 @@ get_table_dir(const std::filesystem::path &base,
             _page = _table->_read_page(_extent_id);
         }
         uint64_t row_id = _row_id_f->get_uint32(*_btree_i);
-        _page_i = _page->at(row_id);
-    }
-
-    const Extent::Row& Table::Iterator::Secondary::row() const
-    {
-        return *_page_i;
+        const StorageCache::SafePagePtr& cp{_page};
+        _page_i = cp->at(row_id);
     }
 
     Table::Iterator::Iterator(const Table *table, uint32_t index_id)
@@ -1290,7 +1286,7 @@ get_table_dir(const std::filesystem::path &base,
             _tracker.emplace<Primary>(table, table->_primary_index, 
                     table->_primary_index->end(), 
                     StorageCache::SafePagePtr{}, 
-                    StorageCache::Page::Iterator{});
+                    StorageCache::Page::ConstIterator{});
         } else {
             auto const& [btree, cols] = table->_secondary_indexes.at(index_id);
             auto index_schema = _create_index_schema(table->_schema, cols);
