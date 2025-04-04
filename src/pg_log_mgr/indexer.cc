@@ -185,6 +185,9 @@ namespace springtail::committer {
         client->update_roots(db_id, info.table_id(), end_xid, *meta);
         client->set_index_state(db_id, xid, info.table_id(), index_id, sys_tbl::IndexNames::State::DELETED);
 
+        // Cleanup table-index map
+        _remove_index_key(db_id, info.table_id(), key);
+
         SPDLOG_INFO("Index dropped: {}:{} @ {}", db_id, index_id, end_xid);
     }
 
