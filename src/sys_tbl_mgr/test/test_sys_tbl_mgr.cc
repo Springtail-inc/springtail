@@ -332,8 +332,8 @@ namespace {
         //
         ASSERT_EQ(schema_meta->indexes.size(), 2);
 
-        auto it = std::find_if(schema_meta->indexes.begin(), schema_meta->indexes.end(),
-                        [&](const auto& index) { return index.id == index_id; });
+        auto it = std::ranges::find_if(schema_meta->indexes,
+                               [&](const auto& index) { return index.id == index_id; });
 
         ASSERT_TRUE(it != schema_meta->indexes.end());
         ASSERT_EQ(it->state, (uint8_t)sys_tbl::IndexNames::State::BEING_DELETED);
@@ -342,8 +342,8 @@ namespace {
 
         schema_meta = _client->get_schema(_db, tid, _xid);
         ASSERT_EQ(schema_meta->indexes.size(), 2);
-        it = std::find_if(schema_meta->indexes.begin(), schema_meta->indexes.end(),
-                        [&](const auto& index) { return index.id == index_id; });
+        it = std::ranges::find_if(schema_meta->indexes,
+                               [&](const auto& index) { return index.id == index_id; });
 
         ASSERT_TRUE(it != schema_meta->indexes.end());
         ASSERT_EQ(it->state, (uint8_t)sys_tbl::IndexNames::State::BEING_DELETED);
