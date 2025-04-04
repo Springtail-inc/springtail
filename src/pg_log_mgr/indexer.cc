@@ -22,6 +22,11 @@ namespace springtail::committer {
 
     void Indexer::process_ddls(uint64_t db_id, uint64_t xid, nlohmann::json const& ddls)
     {
+        {
+            std::scoped_lock lock(_xid_ddl_counter_map_mtx);
+            // Set counter for XID for ddls
+            _xid_ddl_counter_map[xid].store(ddls.size());
+        }
         for (auto const& ddl: ddls) {
             auto action = ddl["action"];
             if (action == "create_index") {
@@ -77,7 +82,7 @@ namespace springtail::committer {
 
     void Indexer::drop(uint64_t db_id, uint64_t index_id, uint64_t xid)
     {
-        std::scoped_lock g(_m);
+        std::scoped_lock g(_m, _xid_ddl_counter_map_mtx);
         Key key(db_id, index_id);
         auto it = _work_set.find(key);
         if (it == _work_set.end()) {
@@ -90,8 +95,13 @@ namespace springtail::committer {
             // mark the status as ABORTING, it will tell the worker to
             // cancel the index build / catchup
             // and proceed for dropping the index
-            it->second._xid = xid;
             it->second._status = IndexStatus::ABORTING;
+
+            // Decrement the counter as there is no separate processing
+            // needed for this drop as it is only updating existing work item
+            if (--_xid_ddl_counter_map[xid] == 0) {
+                _xid_ddl_counter_map.erase(xid);
+            }
         }
     }
 
@@ -316,7 +326,7 @@ namespace springtail::committer {
     void
     Indexer::_add_to_pending_reconciliation(IndexState&& idxState)
     {
-        std::scoped_lock lock(_pending_reconciliation_map_mtx);
+        std::scoped_lock lock(_pending_reconciliation_map_mtx, _xid_ddl_counter_map_mtx);
         auto [db_id, index_id] = idxState._key;
         _pending_idx_reconciliation_map
             .try_emplace(db_id)                  // Ensure db_id entry exists
@@ -325,7 +335,11 @@ namespace springtail::committer {
             .first->second.push_back(std::move(idxState)); // Add IndexState to the list
 
         // Push to index reconciliation reader to notify committer
-        _index_reconciliation_queue->push(std::make_shared<std::string>(fmt::format("{}:{}", db_id, index_id)));
+        // only after all the DDLs of XID are processed
+        if (--_xid_ddl_counter_map[idxState._idx._xid] == 0) {
+            _xid_ddl_counter_map.erase(idxState._idx._xid);
+            _index_reconciliation_queue->push(std::make_shared<std::string>(fmt::format("{}:{}", db_id, idxState._idx._xid)));
+        }
     }
 
     std::optional<uint64_t>

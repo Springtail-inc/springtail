@@ -145,11 +145,16 @@ namespace springtail::committer {
         using TableIndicesMap = std::unordered_map<uint64_t, std::unordered_map<uint64_t, std::list<Key>>>;
         TableIndicesMap _table_idx_map;
 
+        std::unordered_map<uint64_t, std::atomic<int>> _xid_ddl_counter_map;
+
         // Mutex to access pending reconciliation map
         std::mutex _pending_reconciliation_map_mtx;
 
         // Mutex to access table index map
         std::mutex _table_idx_map_mtx;
+
+        // Mutex to access ddl counter map
+        std::mutex _xid_ddl_counter_map_mtx;
 
         /**
          * @brief Adds an IndexState to the pending reconciliation map.
