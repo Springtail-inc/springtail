@@ -24,9 +24,6 @@
 #include <write_cache/write_cache_index.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 
-#include <opentelemetry/context/context.h>
-#include <opentelemetry/metrics/meter.h>
-
 namespace springtail::committer {
     namespace metrics = opentelemetry::metrics;
 
@@ -150,8 +147,5 @@ namespace springtail::committer {
         /** Indexer
          */
         std::unique_ptr<Indexer> _indexer;
-
-        std::shared_ptr<metrics::Histogram<double>> _btree_write_latencies;
-        opentelemetry::context::Context _context;
     };
 }

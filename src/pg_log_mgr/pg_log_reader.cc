@@ -30,16 +30,6 @@ namespace springtail::pg_log_mgr {
     {
         _xid_ts_tracker = std::make_shared<WalProgressTracker>();
 
-        // add the metric for replication lag tracking
-        auto meter = opentelemetry::metrics::Provider::GetMeterProvider()->GetMeter("pg_log_mgr");
-        _postgres_log_reader_latencies = std::shared_ptr<opentelemetry::metrics::Histogram<double>>(
-            meter
-                ->CreateDoubleHistogram("postgres_log_reader_latencies",
-                                        "Latency between when Postgres committed the transaction "
-                                        "and when we process it in the log reader",
-                                        "ms")
-                .release());
-
         // start the message processing thread
         _msg_thread = std::thread(&PgLogReader::_msg_worker, this);
     }
@@ -891,7 +881,7 @@ namespace springtail::pg_log_mgr {
             // Record latency between postgres commit time and when we process it
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - postgres_timestamp.to_system_time());
-            _postgres_log_reader_latencies->Record(duration.count(), _context);
+            tracing::record_histogram(POSTGRES_LOG_READER_LATENCIES, duration.count());
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR,
                                 "Commit processed {} milliseconds after postgres commit",
                                 duration.count());

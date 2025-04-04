@@ -23,6 +23,10 @@ namespace springtail {
     constexpr std::string_view STORAGE_CACHE_FLUSH_LATENCIES = "storage_cache_flush_latencies";
     constexpr std::string_view STORAGE_CACHE_DROP_LATENCIES = "storage_cache_drop_latencies";
 
+    // postgres log reader histogram metrics
+    constexpr std::string_view POSTGRES_LOG_READER_LATENCIES = "postgres_log_reader_latencies";
+    constexpr std::string_view BTREE_WRITE_LATENCIES = "btree_write_latencies";
+
     // sys_tbl_mgr counter metrics
     constexpr std::string_view SYS_TBL_MGR_CREATE_INDEX_CALLS = "sys_tbl_mgr_create_index_calls";
     constexpr std::string_view SYS_TBL_MGR_DROP_INDEX_CALLS = "sys_tbl_mgr_drop_index_calls";
@@ -49,7 +53,7 @@ namespace springtail {
             {XID_MGR_GET_PARTITION_CALLS, "Total number of XID get partition calls"},
             {XID_MGR_GET_COMMITTED_XID_CALLS, "Total number of XID get committed xid calls"},
             {XID_MGR_COMMIT_XID_CALLS, "Total number of XID commit xid calls"},
-            
+
             // storage cache counter metrics
             {STORAGE_CACHE_GET_CALLS, "Total number of storage cache get calls"},
             {STORAGE_CACHE_GET_CACHE_MISSES, "Total number of storage cache get cache misses"},
@@ -85,7 +89,12 @@ namespace springtail {
 
             // storage cache histogram metrics
             {STORAGE_CACHE_FLUSH_LATENCIES, "Latency of storage cache flush calls"},
-            {STORAGE_CACHE_DROP_LATENCIES, "Latency of storage cache drop calls"}
+            {STORAGE_CACHE_DROP_LATENCIES, "Latency of storage cache drop calls"},
+
+            // log reader histogram metrics
+            {POSTGRES_LOG_READER_LATENCIES, "Latency between when Postgres committed the transaction and when we process it in the log reader"},
+            {BTREE_WRITE_LATENCIES, "Latency between postgres commit and btree write completion"}
+
         };
     }
 }

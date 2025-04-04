@@ -29,13 +29,6 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         // perform cleanup for any Committer threads in a previous run
         cleanup();
         _create_indexer();
-        auto meter = metrics::Provider::GetMeterProvider()->GetMeter("committer");
-        _btree_write_latencies = std::shared_ptr<metrics::Histogram<double>>(
-            meter
-                ->CreateDoubleHistogram(
-                    "btree_write_latencies",
-                    "Latency between postgres commit and btree write completion", "ms")
-                .release());
 
         auto coordinator = Coordinator::get_instance();
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
@@ -539,7 +532,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             // log how long it took to process this table
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - min_commit_ts->to_system_time());
-            _btree_write_latencies->Record(duration.count(), _context);
+            tracing::record_histogram(BTREE_WRITE_LATENCIES, duration.count());
             SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Processed table {} in {} milliseconds", tid, duration.count());
             SPDLOG_ERROR("Processed table {} in {} milliseconds", tid, duration.count());
         }

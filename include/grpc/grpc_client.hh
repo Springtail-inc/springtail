@@ -18,6 +18,7 @@
 #include <boost/core/demangle.hpp>
 #include <common/json.hh>
 #include <common/logging.hh>
+#include <common/tracing.hh>
 #include <common/service_register.hh>
 #include <fmt/format.h>
 #include <grpcpp/grpcpp.h>
@@ -91,7 +92,7 @@ retry_rpc_status(std::string_view service, std::string_view operation, Func&& fu
         trace::StartSpanOptions options;
         options.kind = trace::SpanKind::kClient;
 
-        auto tracer = trace::Provider::GetTracerProvider()->GetTracer("grpc");
+        auto tracer = tracing::tracer("grpc");
         auto span = tracer->StartSpan(fmt::format("{}/{}", service, operation),
                                       {
                                           {semconv::rpc::kRpcSystem, "grpc"},

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <common/tracing.hh>
 #include <grpcpp/server_context.h>
 #include <opentelemetry/context/propagation/global_propagator.h>
 #include <opentelemetry/context/runtime_context.h>
@@ -61,7 +62,7 @@ public:
 
         // Create the span
         std::string span_name = service_name + "/" + method_name;
-        auto tracer = trace::Provider::GetTracerProvider()->GetTracer("grpc");
+        auto tracer = tracing::tracer("grpc");
 
         span_ = tracer->StartSpan(span_name,
                                   {{semconv::rpc::kRpcSystem, "grpc"},

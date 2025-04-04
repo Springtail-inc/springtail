@@ -277,8 +277,5 @@ namespace springtail::pg_log_mgr {
 
         /** Check if we need to perform a table swap / commit and notify the Committer if so. */
         void _check_sync_commit(uint64_t db_id, int32_t pg_xid, uint64_t xid);
-
-        std::shared_ptr<opentelemetry::metrics::Histogram<double>> _postgres_log_reader_latencies;
-        opentelemetry::context::Context _context;
     };
 } // namespace springtail::pg_log_mgr
