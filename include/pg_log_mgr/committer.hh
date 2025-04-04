@@ -45,8 +45,8 @@ namespace springtail::committer {
         Committer(uint32_t worker_count, std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
                 std::shared_ptr<ConcurrentQueue<std::string>> index_reconciliation_queue)
             : _worker_count(worker_count),
-              _committer_queue(committer_queue),
-              _index_reconciliation_queue(index_reconciliation_queue)
+              _committer_queue{std::move(committer_queue)},
+              _index_reconciliation_queue{std::move(index_reconciliation_queue)}
         {
             _xid_mgr = XidMgrClient::get_instance();
             _worker_id = fmt::format("{}_{}_0", THREAD_TYPE, THREAD_MAIN);
