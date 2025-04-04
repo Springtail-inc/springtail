@@ -58,7 +58,7 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
         class Iterator {
             friend Table;
 
-            /**
+            /** 
              * We use the same Iterator type for both primary and secondary indexes.
              * However the way the indexes move around isn't the same.
              * Tracker provides an abstraction for the various index types.
@@ -105,7 +105,7 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
                     _page_i(page_i)
                 {}
 
-                explicit Primary(const Table *table)
+                explicit Primary(const Table *table) 
                     :Tracker{table}
                 {}
 
@@ -115,7 +115,7 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
                 void next();
                 void prev();
 
-                const Extent::Row& row() const
+                const Extent::Row& row() const 
                 {
                     return *_page_i;
                 }
@@ -123,7 +123,7 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
                 friend bool operator==(const Primary& a, const Primary& b) {
                     const Tracker& ta = a;
                     const Tracker& tb = b;
-
+                    
                     if (ta == tb) {
                         return (a._btree_i == a._btree->end() || a._page_i == b._page_i);
                     }
@@ -183,7 +183,7 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
             using pointer           = const Extent::Row *;  // or also value_type*
             using reference         = const Extent::Row &;  // or also value_type&
 
-            reference operator*() {
+            reference operator*() { 
                 if (auto p = std::get_if<Primary>(&_tracker)) {
                     return p->row();
                 }
@@ -256,11 +256,11 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
         private:
             /** Specifically for the end() iterator of a vacant table. */
             Iterator(const Table *table)
-            {
-                _tracker.emplace<Primary>(table,
-                        BTreePtr{},
-                        BTree::Iterator{},
-                        StorageCache::SafePagePtr{},
+            { 
+                _tracker.emplace<Primary>(table, 
+                        BTreePtr{}, 
+                        BTree::Iterator{}, 
+                        StorageCache::SafePagePtr{}, 
                         StorageCache::Page::Iterator{});
             }
 
@@ -272,14 +272,14 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
                      BTreePtr btree, const BTree::Iterator &btree_i,
                      StorageCache::SafePagePtr page,
                      const StorageCache::Page::Iterator &page_i)
-            {
+            { 
                 _tracker.emplace<Primary>(table, btree, btree_i, std::move(page), page_i);
             }
 
             Iterator(const Table *table,
                      BTreePtr btree, const BTree::Iterator &btree_i,
                      ExtentSchemaPtr index_schema)
-            {
+            { 
                 _tracker.emplace<Secondary>(table, btree, btree_i, index_schema);
             }
         };
@@ -413,7 +413,7 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
         /**
          * Creates read-only index of the table.
          */
-        BTreePtr
+        BTreePtr 
         _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset);
 
     private:
