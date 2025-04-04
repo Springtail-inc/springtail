@@ -53,8 +53,8 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::commit(uint64_t xid, PostgresTimestamp commit_ts)
     {
-        auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
-        _span->AddEvent("commit", {{"pg_commit_time", commit_ts.to_unix_ns()}});
+        TRACE_SPAN("pg_log_reader", "commit");
+        span->AddEvent("commit", {{"pg_commit_time", commit_ts.to_unix_ns()}});
 
         // go through each subtxn and push it's outstanding batches to the WriteCache
         std::vector<uint64_t> pg_xids;
@@ -89,11 +89,11 @@ namespace springtail::pg_log_mgr {
         WriteCacheFuncImpl::commit(_db, xid, pg_xids, commit_ts);
 
         // stop timing for this transaction
-        if (_span->IsRecording()) {
-            _span->SetAttribute("xid", static_cast<int64_t>(xid));
-            _span->SetAttribute("pg_xids", fmt::format("{}", fmt::join(pg_xids, ",")));
+        if (span->IsRecording()) {
+            span->SetAttribute("xid", static_cast<int64_t>(xid));
+            span->SetAttribute("pg_xids", fmt::format("{}", fmt::join(pg_xids, ",")));
         }
-        _span->End();
+        span->End();
     }
 
     void
@@ -186,7 +186,7 @@ namespace springtail::pg_log_mgr {
             return;
         }
 
-        auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+        TRACE_SPAN("pg_log_reader", "add_mutation");
         auto txn = _get_txn(pg_xid);
 
         // get the Extent containing mutations
@@ -579,8 +579,13 @@ namespace springtail::pg_log_mgr {
                 continue;
             }
 
+            TRACE_SPAN("pg_log_reader", "_msg_worker");
+            span->SetAttribute("msg_type", msg->msg_type);
+
             // Process the message
             _process_msg(msg);
+
+            span->End();
         }
     }
 
@@ -590,6 +595,7 @@ namespace springtail::pg_log_mgr {
                              uint64_t start_offset,
                              int num_messages)
     {
+        TRACE_SPAN("pg_log_reader", "process_log");
         // init stream reader
         _reader.set_file(path, start_offset);
 
@@ -631,6 +637,8 @@ namespace springtail::pg_log_mgr {
                 num_messages--;
             }
         }
+
+        span->End();
     }
 
     void
@@ -645,6 +653,11 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::_process_msg(PgMsgPtr msg)
     {
+        TRACE_SPAN("pg_log_reader", "_process_msg");
+
+        span->SetAttribute("msg_type", msg->msg_type);
+        span->SetAttribute("xid", this->get_current_xid());
+
         if (_pg_log_timestamp < msg->pg_log_timestamp) {
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Logs rollover to the new log timestamp id: {}", msg->pg_log_timestamp);
             _pg_log_timestamp = msg->pg_log_timestamp;
@@ -662,6 +675,7 @@ namespace springtail::pg_log_mgr {
             break;
 
         case PgMsgEnum::COMMIT:
+            span->AddEvent("COMMIT");
             _process_commit(std::get<PgMsgCommit>(msg->msg));
             break;
 
@@ -682,6 +696,8 @@ namespace springtail::pg_log_mgr {
                 auto &insert = std::get<PgMsgInsert>(msg->msg);
                 int32_t pg_xid = (msg->is_streaming) ? insert.xid : _current_xact->xid;
 
+                span->AddEvent("INSERT", {{"pg_xid", pg_xid}, {"table_id", insert.rel_id}});
+
                 if (TableValidator::get_instance()->check_if_table_is_invalid_in_redis(insert.rel_id)){
                     SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Prevent DML for invalid table with tid {}", insert.rel_id);
                     break;
@@ -696,6 +712,8 @@ namespace springtail::pg_log_mgr {
                 auto &remove = std::get<PgMsgDelete>(msg->msg);
                 int32_t pg_xid = (msg->is_streaming) ? remove.xid : _current_xact->xid;
 
+                span->AddEvent("DELETE", {{"pg_xid", pg_xid}, {"table_id", remove.rel_id}});
+
                 if (TableValidator::get_instance()->check_if_table_is_invalid_in_redis(remove.rel_id)){
                     SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Prevent DML for invalid table with tid {}", remove.rel_id);
                     break;
@@ -709,6 +727,8 @@ namespace springtail::pg_log_mgr {
             {
                 auto &update = std::get<PgMsgUpdate>(msg->msg);
                 int32_t pg_xid = (msg->is_streaming) ? update.xid : _current_xact->xid;
+
+                span->AddEvent("UPDATE", {{"pg_xid", pg_xid}, {"table_id", update.rel_id}});
 
                 if (TableValidator::get_instance()->check_if_table_is_invalid_in_redis(update.rel_id)){
                     SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Prevent DML for invalid table with tid {}", update.rel_id);
@@ -788,6 +808,7 @@ namespace springtail::pg_log_mgr {
             SPDLOG_WARN("Unknown message type: {}", static_cast<uint8_t>(msg->msg_type));
             break;
         }
+        span->End();
     }
 
     void
@@ -1001,6 +1022,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::_process_ddl(uint32_t oid, int32_t pg_xid, bool is_streaming, PgMsgPtr msg)
     {
+        TRACE_SPAN("pg_log_reader", "_process_ddl");
         int32_t pg_xid_txn;
         PgTransactionPtr xact;
         if (!is_streaming) {
@@ -1022,13 +1044,16 @@ namespace springtail::pg_log_mgr {
 
         // check if we should ignore this message
         if (SyncTracker::get_instance()->should_skip(_db_id, oid, pg_xid_txn)) {
+            span->AddEvent("Skipping DDL");
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Skip DDL: oid={} pg_xid={}\n", oid, pg_xid_txn);
             return;
         }
 
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Process DDL: oid={} pg_xid={}\n", oid, pg_xid_txn);
 
+        span->AddEvent("Adding DDL to batch");
         // record the schema change into the batch
         _current_batch->schema_change(oid, pg_xid, msg);
+        span->End();
     }
 } // namespace springtail::pg_log_mgr

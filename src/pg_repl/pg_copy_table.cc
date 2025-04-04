@@ -216,6 +216,7 @@ namespace springtail
 
     void PgCopyTable::_get_secondary_indexes()
     {
+        TRACE_SPAN("pg_copy_table", "_get_secondary_indexes");
         _connection.exec(fmt::format(SECONDARY_INDEX_QUERY, _schema.table_oid));
         if (_connection.ntuples() == 0) {
             _connection.clear();
@@ -439,6 +440,12 @@ namespace springtail
                              uint64_t table_oid,
                              uint64_t schema_oid)
     {
+        TRACE_SPAN("pg_log_reader", "_copy_table");
+        span->SetAttribute("table_name", table_name);
+        span->SetAttribute("schema_name", schema_name);
+        span->SetAttribute("table_oid", table_oid);
+        span->SetAttribute("schema_oid", schema_oid);
+
         // set the schema
         _set_schema(table_name, schema_name, table_oid, schema_oid);
 
@@ -853,6 +860,7 @@ namespace springtail
                          CopyQueuePtr copy_queue,
                          PgCopyResultPtr result)
     {
+        TRACE_SPAN("pg_copy_table", "_worker");
         // create copy table object and connect to db
         PgCopyTable copy_table;
         copy_table.connect(db_id);
@@ -1017,6 +1025,7 @@ namespace springtail
                                 std::optional<std::set<uint32_t>> table_tids,
                                 std::optional<nlohmann::json> include_json)
     {
+        TRACE_SPAN("pg_copy_table", "_internal_copy");
         CopyQueuePtr copy_queue = std::make_shared<CopyQueue>();
 
         // create copy table object and connect to db

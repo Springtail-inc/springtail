@@ -55,6 +55,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
         // enter a loop polling for data from the write cache
         while (!_shutdown) {
+            TRACE_SPAN("pg_log_mgr", "committer");
             // update the coordinator
             coordinator->mark_alive(daemon_type, _worker_id);
 

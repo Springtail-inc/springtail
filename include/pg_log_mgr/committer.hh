@@ -12,6 +12,7 @@
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 #include <common/properties.hh>
+#include <common/tracing.hh>
 
 #include <redis/redis_ddl.hh>
 #include <redis/redis_containers.hh>

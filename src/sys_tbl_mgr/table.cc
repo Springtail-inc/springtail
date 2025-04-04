@@ -30,7 +30,7 @@ get_table_dir(const std::filesystem::path &base,
             { "index_id", 2, SchemaType::UINT64, 20, false },
         };
 
-        std::vector<std::string> 
+        std::vector<std::string>
         _get_column_names(ExtentSchemaPtr schema, const std::vector<uint32_t>& col_position)
         {
             std::vector<std::string> col_names;
@@ -43,7 +43,7 @@ get_table_dir(const std::filesystem::path &base,
             return col_names;
         }
 
-        std::shared_ptr<ExtentSchema> 
+        std::shared_ptr<ExtentSchema>
         _create_index_schema(ExtentSchemaPtr schema, const std::vector<uint32_t>& index_columns)
         {
 
@@ -170,7 +170,7 @@ get_table_dir(const std::filesystem::path &base,
         }
     }
 
-    std::vector<std::string> 
+    std::vector<std::string>
     Table::get_column_names(const std::vector<uint32_t>& col_position)
     {
         return _get_column_names(_schema, col_position);
@@ -413,7 +413,7 @@ get_table_dir(const std::filesystem::path &base,
         return StorageCache::get_instance()->get(_table_dir / constant::DATA_FILE, extent_id, _xid);
     }
 
-    BTreePtr 
+    BTreePtr
     Table::_create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset)
     {
         auto index_schema = _create_index_schema(_schema, index_columns);
@@ -491,7 +491,7 @@ get_table_dir(const std::filesystem::path &base,
         SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
         SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, 0, false);
 
-        
+
         ExtentSchemaPtr primary_schema;
         if (primary_key.empty()) {
             std::vector<std::string> non_primary_key = { constant::INDEX_EID_FIELD };
@@ -802,6 +802,7 @@ get_table_dir(const std::filesystem::path &base,
     TableMetadata
     MutableTable::finalize()
     {
+        TRACE_SPAN("sys_tbl_mgr", "finalize");
         // in the case of having an (initially) empty table, there are no invalidations... we can
         // flush the single Page and update the indexes
         if (_empty_page) {
@@ -849,13 +850,13 @@ get_table_dir(const std::filesystem::path &base,
         return metadata;
     }
 
-    std::vector<std::string> 
+    std::vector<std::string>
     MutableTable::get_column_names(const std::vector<uint32_t>& col_position)
     {
         return _get_column_names(_schema, col_position);
     }
 
-    MutableBTreePtr 
+    MutableBTreePtr
     MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns)
     {
         // get the column names in the order they appear in the index
@@ -882,7 +883,7 @@ get_table_dir(const std::filesystem::path &base,
                                  uint64_t extent_id)
     {
         // get the page from the cache
-        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false, 
+        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false,
                                                       [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
         // check if we need to convert the page contents to a new schema
@@ -999,7 +1000,7 @@ get_table_dir(const std::filesystem::path &base,
     {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
-            _empty_page = std::make_unique<StorageCache::SafePagePtr>( 
+            _empty_page = std::make_unique<StorageCache::SafePagePtr>(
                     StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid));
         }
 
@@ -1285,16 +1286,16 @@ get_table_dir(const std::filesystem::path &base,
     }
 
     Table::Iterator::Iterator(const Table *table, uint32_t index_id)
-    { 
+    {
         if (index_id == constant::INDEX_PRIMARY) {
-            _tracker.emplace<Primary>(table, table->_primary_index, 
-                    table->_primary_index->end(), 
-                    StorageCache::SafePagePtr{}, 
+            _tracker.emplace<Primary>(table, table->_primary_index,
+                    table->_primary_index->end(),
+                    StorageCache::SafePagePtr{},
                     StorageCache::Page::Iterator{});
         } else {
             auto const& [btree, cols] = table->_secondary_indexes.at(index_id);
             auto index_schema = _create_index_schema(table->_schema, cols);
-            _tracker.emplace<Secondary>(table, btree, 
+            _tracker.emplace<Secondary>(table, btree,
                     btree->end(), index_schema );
         }
     }

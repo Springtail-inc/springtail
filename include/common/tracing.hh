@@ -15,13 +15,18 @@
 #include <common/metric_constants.hh>
 #include <common/logging.hh>
 
+#define TRACE_SPAN(component, span_name) \
+auto tracer = tracing::tracer(component); \
+auto span = tracer->StartSpan(span_name); \
+auto scope = tracer->WithActiveSpan(span);
+
 namespace springtail::tracing {
 /** Convenience name */
 using SpanPtr = opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>;
 
 /**
  * @brief A custom span exporter that logs OpenTelemetry spans using spdlog
- * 
+ *
  * This exporter implements the OpenTelemetry SpanExporter interface to export
  * tracing spans by logging them through spdlog. It processes each span's name,
  * attributes, and other properties and outputs them as structured log messages.

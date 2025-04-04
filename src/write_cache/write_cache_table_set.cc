@@ -25,6 +25,7 @@ namespace springtail
                                    uint64_t lsn,
                                    const ExtentPtr data)
     {
+        TRACE_SPAN("write_cache_table_set", "add_extent");
         SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Inserting: extent for TID: {}, PG XID: {}, LSN: {}\n", tid, pg_xid, lsn);
 
         // find the xid node, if not exists, create a node with given ID and return it
@@ -42,6 +43,7 @@ namespace springtail
                                  uint64_t start_offset, uint64_t &cursor,
                                  std::vector<uint64_t> &result)
     {
+        TRACE_SPAN("write_cache_table_set", "get_tids");
         SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Searching for TIDS in XID: {}\n", xid);
 
         int result_cnt = 0;
@@ -94,6 +96,7 @@ namespace springtail
                                     uint64_t start_offset, uint64_t &cursor,
                                     std::vector<WriteCacheIndexExtentPtr> &result, PostgresTimestamp &commit_ts)
     {
+        TRACE_SPAN("write_cache_table_set", "get_extents");
         SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Searching for extents for XID: {}, TID: {}\n", xid, tid);
 
         int result_cnt = 0;
@@ -188,6 +191,7 @@ namespace springtail
     void
     WriteCacheTableSet::commit(uint64_t pg_xid, uint64_t xid, PostgresTimestamp commit_ts)
     {
+        TRACE_SPAN("write_cache_table_set", "commit");
         SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Committing PG XID: {} -> XID: {}\n", pg_xid, xid);
 
         // insert xid into xid map
@@ -200,6 +204,7 @@ namespace springtail
     void
     WriteCacheTableSet::commit(std::vector<uint64_t> pg_xids, uint64_t xid, PostgresTimestamp commit_ts)
     {
+        TRACE_SPAN("write_cache_table_set", "commit");
         // insert xid into xid map
         // XXX should we check if there is an existing pg_xid with data and skip if not?
         std::unique_lock<std::shared_mutex> lock(_xid_map_mutex);

@@ -9,6 +9,7 @@ namespace springtail
     void
     WriteCacheIndex::add_extent(uint64_t tid, uint64_t pg_xid, uint64_t lsn, const ExtentPtr data)
     {
+        TRACE_SPAN("write_cache_index", "add_extent");
         WriteCacheTableSetPtr partition = _get_partition(tid);
         partition->add_extent(tid, pg_xid, lsn, data);
     }
@@ -16,6 +17,7 @@ namespace springtail
     void
     WriteCacheIndex::commit(uint64_t pg_xid, uint64_t xid, PostgresTimestamp commit_ts)
     {
+        TRACE_SPAN("write_cache_index", "commit");
         for (auto &p: _partitions) {
             p->commit(pg_xid, xid, commit_ts);
         }
@@ -24,6 +26,7 @@ namespace springtail
     void
     WriteCacheIndex::commit(std::vector<uint64_t> pg_xids, uint64_t xid, PostgresTimestamp commit_ts)
     {
+        TRACE_SPAN("write_cache_index", "commit");
         for (auto &p: _partitions) {
             p->commit(pg_xids, xid, commit_ts);
         }
@@ -57,6 +60,7 @@ namespace springtail
     std::vector<uint64_t>
     WriteCacheIndex::get_tids(uint64_t xid, uint32_t count, uint64_t &cursor)
     {
+        TRACE_SPAN("write_cache_index", "get_tids");
         std::vector<uint64_t> tids;
         uint32_t target_size = count;
         uint64_t start_offset = cursor;

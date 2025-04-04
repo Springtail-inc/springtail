@@ -241,6 +241,7 @@ namespace springtail::pg_log_mgr {
             }
 
             do {
+                TRACE_SPAN("pg_log_mgr", "_copy_thread");
                 // populate the tables to copy; check for more work
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Table sync queue: {}@{}:{}", request->table_id(),
                                     request->xid().xid, request->xid().lsn);
@@ -248,6 +249,7 @@ namespace springtail::pg_log_mgr {
                 SyncTracker::get_instance()->mark_inflight(_db_id, request->table_id(), request->xid()); // shift from resyncing to inflight
 
                 request = _redis_sync_queue.try_pop(REDIS_WORKER_ID);
+                span->End();
             } while (request != nullptr);
 
             CHECK(!table_ids.empty());
@@ -265,6 +267,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_do_table_copies(std::optional<std::set<uint32_t>> table_ids)
     {
+        TRACE_SPAN("pg_log_mgr", "_do_table_copies");
         // set state to sync stall, make sure we are in the running or startup sync state first
         // XXX blocked here if we get a second table sync while one is in-flight
         _internal_state.wait_and_set({STATE_RUNNING, STATE_STARTUP_SYNC, STATE_REPLAYING},
@@ -288,6 +291,7 @@ namespace springtail::pg_log_mgr {
         auto token = logging::set_context_variables({{"xid", std::to_string(xid)}});
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Copying tables; target xid={}", xid);
         if (table_ids.has_value()) {
+            span->SetAttribute("table_ids", fmt::format("{}", fmt::join(table_ids.value(), ",")));
             res = PgCopyTable::copy_tables(_db_id, xid, table_ids.value());
         } else {
             res = PgCopyTable::copy_db(_db_id, xid);
@@ -319,6 +323,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_process_copy_results(const std::vector<PgCopyResultPtr> &res)
     {
+        TRACE_SPAN("pg_log_mgr", "_process_copy_results");
         assert(_internal_state.is(STATE_SYNCING));
 
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Pushing copy results to sync tracker");

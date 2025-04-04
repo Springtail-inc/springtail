@@ -1,6 +1,7 @@
 #pragma once
 
 #include <common/timestamp.hh>
+#include <common/tracing.hh>
 #include <write_cache/write_cache_index.hh>
 #include <write_cache/write_cache_client.hh>
 #include <write_cache/write_cache_server.hh>
@@ -32,6 +33,7 @@ namespace springtail {
          */
         static void add_extent(uint64_t db_id, uint64_t tid, uint64_t pg_xid, uint64_t lsn, const ExtentPtr data)
         {
+            TRACE_SPAN("write_cache_func", "add_extent");
             WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
             index->add_extent(tid, pg_xid, lsn, data);
         }
@@ -56,6 +58,7 @@ namespace springtail {
          */
         static void commit(uint64_t db_id, uint64_t xid, std::vector<uint64_t> pg_xids, PostgresTimestamp commit_ts)
         {
+            TRACE_SPAN("write_cache_func", "commit");
             WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
             index->commit(pg_xids, xid, commit_ts);
         }
@@ -69,6 +72,7 @@ namespace springtail {
          */
         static void commit(uint64_t db_id, uint64_t xid, uint64_t pg_xid, PostgresTimestamp commit_ts)
         {
+            TRACE_SPAN("write_cache_func", "commit");
             WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
             index->commit(pg_xid, xid, commit_ts);
         }

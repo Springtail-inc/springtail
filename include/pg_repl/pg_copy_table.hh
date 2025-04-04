@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 
 #include <common/common.hh>
+#include <common/tracing.hh>
 #include <pg_repl/pg_table_validator.hh>
 #include <pg_repl/libpq_connection.hh>
 #include <proto/pg_copy_table.pb.h>

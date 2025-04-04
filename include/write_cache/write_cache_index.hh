@@ -8,6 +8,7 @@
 #include <fmt/core.h>
 
 #include <common/timestamp.hh>
+#include <common/tracing.hh>
 
 #include <write_cache/write_cache_index_common.hh>
 #include <write_cache/write_cache_table_set.hh>
