@@ -94,9 +94,14 @@ jobs:
           cd ../../debug
           
           set +e
+          _LOG_FLAG="succeeded"
           # Per SPR-501: break upon test failures - "--gtest_break_on_failure"
           make test ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose --stop-on-failure" 2>&1 | tee tmplog
-          
+          # Grab the success/failure status of the unit tests
+          if [ $? -ne 0 ] || !  grep -qE "100% tests passed" tmplog
+          then 
+            _LOG_FLAG="failed"
+          fi
           # List the open listening ports and processes info after tests are done
           echo "==== Listening Ports ===="
           netstat -tulnp
@@ -105,13 +110,7 @@ jobs:
             cmd=$(ps -p $pid -o args=)
             echo "$pid - $cmd"
           done
-          
-          # Grab the success/failure status of the unit tests
-          _LOG_FLAG="succeeded"
-          if !  grep -qE "100% tests passed" tmplog
-          then 
-            _LOG_FLAG="failed"
-          fi
+
           # Grab the current PR ID
           _LOG_PR_ID="${GITHUB_EVENT_PULL_REQUEST_NUMBER}"
           # Grab the short SHA
@@ -125,6 +124,11 @@ jobs:
           
           aws s3 cp "$log_file" "$unit_test_log_s3key"
           echo "*** Unit Test Log S3 Key: $unit_test_log_s3key"
+          
+          # Fail eventually
+          if [ "$_LOG_FLAG" = "failed" ]; then
+            exit 1
+          fi
 
       - name: Cleanup Unit Test
         if: success() || failure()      # run this step even if previous step failed
@@ -165,11 +169,10 @@ jobs:
           ./startup.sh -s data_init.sql
 
           set +e
+          _LOG_FLAG="succeeded"          
           python3 test_runner.py -c config.yaml -j /__w/springtail/springtail/integration-test-report.xml 2>&1 | tee tmplog
-          
           # Grab the success/failure status of the integration tests
-          _LOG_FLAG="succeeded"
-          if grep -qE "Tests failed: [1-9][0-9]*" tmplog
+          if [ $? -ne 0 ] || grep -qE "Tests failed: [1-9][0-9]*" tmplog
           then 
             _LOG_FLAG="failed"
           fi
@@ -201,6 +204,11 @@ jobs:
             echo "*** Springtail Log S3 Key: $springtail_log_s3key"
           fi
           
+          # Fail eventually
+          if [ "$_LOG_FLAG" = "failed" ]; then
+            exit 1
+          fi
+
       - name: Integration Test Report
         uses: dorny/test-reporter@v1
         if: success() || failure()                         # run this step even if previous step failed
