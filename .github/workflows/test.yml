@@ -93,6 +93,7 @@ jobs:
           python3 springtail.py -f ../../system.json.test --load-redis --build-dir ../../debug
           cd ../../debug
           
+          set +e
           # Per SPR-501: break upon test failures - "--gtest_break_on_failure"
           make test ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose --stop-on-failure" 2>&1 | tee tmplog
           
@@ -163,7 +164,7 @@ jobs:
           service postgresql start
           ./startup.sh -s data_init.sql
 
-          
+          set +e
           python3 test_runner.py -c config.yaml -j /__w/springtail/springtail/integration-test-report.xml 2>&1 | tee tmplog
           
           # Grab the success/failure status of the integration tests
