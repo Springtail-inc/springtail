@@ -344,7 +344,9 @@ OpenTelemetry::_internal_shutdown()
 {
 
     opentelemetry::trace::Provider::SetTracerProvider({});
-    _meter_provider->ForceFlush();
+    if (_otel_enabled) {
+        _meter_provider->ForceFlush();
+    }
     opentelemetry::metrics::Provider::SetMeterProvider({});
     _meter_provider.reset();
     _shutdown_flag = true;
