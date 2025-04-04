@@ -141,7 +141,7 @@ namespace springtail::committer {
             _work_set.erase(key);
         }
 
-        XidLsn xid{end_xid};
+        XidLsn xid{end_xid, constant::INDEX_COMMIT_LSN};
 
         proto::IndexInfo info = client->get_index_info(db_id, index_id, xid);
         if (info.id() == 0) {
@@ -302,6 +302,7 @@ namespace springtail::committer {
             // may have got finalized while we were building.
             root->truncate();
             root->finalize();
+            client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
         }
 
         // Cleanup table-index map
