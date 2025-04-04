@@ -311,7 +311,7 @@ class Properties:
         sys_config_json['proxy'] = system_json['proxy']
         sys_config_json['otel'] = system_json['otel']
         # test only config
-        sys_config_json['integration_test_config'] = system_json['integration_test_config'] if 'integration_test_config' in system_json else {}
+        sys_config_json['integration_test_config'] = system_json.get('integration_test_config', {})
 
         self.redis.hset(db_instance_key, 'system_settings', json.dumps(sys_config_json))
 

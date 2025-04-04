@@ -543,7 +543,7 @@ class TestCase:
         for txn in self._txns:
             # Determine what config to use for the test phase
             integration_test_config = self._props.get_integration_test_config()
-            use_proxy_for_test = integration_test_config["use_proxy_for_test"] if "use_proxy_for_test" in integration_test_config else False
+            use_proxy_for_test = integration_test_config.get("use_proxy_for_test", False)
             if use_proxy_for_test:
                 logging.debug(f'Connecting to proxy for txn "{txn}"')
                 self._connections[txn] = springtail.connect_proxy(self._props, self._primary_name)
@@ -623,7 +623,7 @@ class TestCase:
         for command in self._sections['verify'][0]['sequential']:
             # Determine what config to use for verify phase
             integration_test_config = self._props.get_integration_test_config()
-            use_proxy_for_verify = integration_test_config["use_proxy_for_verify"] if "use_proxy_for_verify" in integration_test_config else False
+            use_proxy_for_verify = integration_test_config.get("use_proxy_for_verify", False)
 
             if use_proxy_for_verify:
                 logging.info(f'Using proxy to verify')
