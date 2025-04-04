@@ -90,7 +90,7 @@ namespace springtail::pg_log_mgr {
          */
         class ExistsCache {
         public:
-            ExistsCache(uint32_t size)
+            explicit ExistsCache(uint32_t size)
                 : _cache(size)
             { }
 
