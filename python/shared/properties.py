@@ -201,6 +201,18 @@ class Properties:
 
         return proxy_config
 
+    def get_postgres_config(self) -> dict:
+        """Return the postgres configuration as an object."""
+        key = str(self.db_instance_id) + ':instance_config'
+        if 'postgres_config' in self.cache:
+            return self.cache['postgres_config']
+
+        config = json.loads(self.redis.hget(key, 'system_settings'))
+        postgres_config = config['postgres_config']
+        self.cache['postgres_config'] = postgres_config
+
+        return postgres_config
+
     def get_integration_test_config(self) -> dict:
         """Return the integration test configuration as an object."""
         key = str(self.db_instance_id) + ':instance_config'
@@ -311,6 +323,7 @@ class Properties:
         sys_config_json['proxy'] = system_json['proxy']
         sys_config_json['otel'] = system_json['otel']
         sys_config_json['integration_test_config'] = system_json['integration_test_config']
+        sys_config_json['postgres_config'] = system_json['postgres_config'] if 'postgres_config' in system_json else {}
 
         self.redis.hset(db_instance_key, 'system_settings', json.dumps(sys_config_json))
 

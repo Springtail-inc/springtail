@@ -117,6 +117,9 @@ class TestSet:
         # apply the REPLICA IDENTITY FULL to any tables without primary keys
         self._apply_replica_full()
 
+        # update postgres config to apply props for the test
+        springtail.update_postgres_config(self._props)
+
         # start Springtail
         logging.debug('Starting the Springtail instance')
         springtail.start(self._config_file, self._build_dir, do_cleanup=False, do_init=True)
@@ -177,6 +180,9 @@ class TestSet:
         # perform the primary db cleanup
         logging.debug('Perform the global cleanup()')
         self._config.cleanup()
+
+        # cleanup custom postgres config
+        springtail.cleanup_postgres_config()
 
         return not test_failed
 

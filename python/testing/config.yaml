@@ -18,3 +18,5 @@ overlays:
   # uses a small data cache size to force more frequent eviction
   small_cache_size:
     test_sets: ['basic']
+  streaming_postgres_config:
+    test_sets: ['basic']
