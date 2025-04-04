@@ -325,13 +325,28 @@ namespace {
         _drop_index(index_id);
 
         schema_meta = _client->get_schema(_db, tid, _xid);
-        // must have a primary index
-        ASSERT_EQ(schema_meta->indexes.size(), 1);
+
+        // must have a primary index and deleted index
+        // as the deleted index will still be present with
+        // the state BEING_DELETED
+        //
+        ASSERT_EQ(schema_meta->indexes.size(), 2);
+
+        auto it = std::find_if(schema_meta->indexes.begin(), schema_meta->indexes.end(),
+                        [&](const auto& index) { return index.id == index_id; });
+
+        ASSERT_TRUE(it != schema_meta->indexes.end());
+        ASSERT_EQ(it->state, (uint8_t)sys_tbl::IndexNames::State::BEING_DELETED);
 
         _finalize();
 
         schema_meta = _client->get_schema(_db, tid, _xid);
-        ASSERT_EQ(schema_meta->indexes.size(), 1);
+        ASSERT_EQ(schema_meta->indexes.size(), 2);
+        it = std::find_if(schema_meta->indexes.begin(), schema_meta->indexes.end(),
+                        [&](const auto& index) { return index.id == index_id; });
+
+        ASSERT_TRUE(it != schema_meta->indexes.end());
+        ASSERT_EQ(it->state, (uint8_t)sys_tbl::IndexNames::State::BEING_DELETED);
     }
 
     // Tests table create / alter / drop
