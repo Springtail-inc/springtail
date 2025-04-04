@@ -190,6 +190,14 @@ class TestCase:
                             'count': int(directive[1])
                         }, section, is_threaded, cur_txn, line_num)
 
+                    elif directive[0] == 'streaming':
+                        if section != 'test':
+                            self._raise_error(f'{line_num}: "streaming" must be part of the "test" section')
+                        self._append_command({
+                            'type': 'streaming',
+                            'enable': directive[1] == 'true'
+                        }, section, is_threaded, cur_txn, line_num)
+
                     elif directive[0] == 'schema_check':
                         if section != 'verify':
                             self._raise_error(f'{line_num}: "schema_check" must be part of the "verify" section')
@@ -325,6 +333,19 @@ class TestCase:
                 self._fdw = springtail.connect_fdw_instance(self._props, self._replica_name)
 
             return None
+
+        if command['type'] == 'streaming':
+            is_enabling = command['enable']
+            with self._connections[command['txn']].cursor() as cursor:
+                if is_enabling:
+                    logging.debug(f'Enabling streaming')
+                    # set to lower value to enable streaming
+                    self._execute_sql(cursor, f"ALTER SYSTEM SET logical_decoding_work_mem = '64kB'", False)
+                    self._execute_sql(cursor, f"SELECT pg_reload_conf()", False)
+                else:
+                    # reset to default value
+                    self._execute_sql(cursor, f"ALTER SYSTEM SET logical_decoding_work_mem = '64MB'", False)
+                    self._execute_sql(cursor, f"SELECT pg_reload_conf()", False)
 
         # handle SQL statements
         with self._connections[command['txn']].cursor() as cursor:

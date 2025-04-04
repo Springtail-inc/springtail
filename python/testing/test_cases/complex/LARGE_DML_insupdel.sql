@@ -2,6 +2,8 @@
 ### sync_timeout 60
 
 ## test
+### streaming true
+
 -- Create tables with SERIAL primary keys
 CREATE TABLE table1 (
     id SERIAL PRIMARY KEY,
