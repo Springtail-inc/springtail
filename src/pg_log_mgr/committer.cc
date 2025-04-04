@@ -1,16 +1,17 @@
-#include <memory>
-
-#include <common/constants.hh>
-#include <pg_log_mgr/committer.hh>
-#include <common/coordinator.hh>
 #include <opentelemetry/metrics/meter.h>
 #include <opentelemetry/metrics/provider.h>
+
+#include <common/constants.hh>
+#include <common/coordinator.hh>
+#include <common/open_telemetry.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <proto/pg_copy_table.pb.h>
 #include <redis/db_state_change.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_func.hh>
+
+#include <pg_log_mgr/committer.hh>
 
 namespace springtail::committer {
 
@@ -66,7 +67,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             }
             uint64_t db_id = result->db();
 
-            auto token_1 = logging::Logger::set_context_variables({{"db_id", std::to_string(db_id)}});
+            auto token_1 = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
 
             // handle a TABLE_SYNC_START
             if (result->type() == XidReady::Type::TABLE_SYNC_START) {
@@ -87,8 +88,8 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 completed_xid = itr->second;
             }
 
-            auto token_2 = logging::Logger::set_context_variables({{"xid", std::to_string(completed_xid)}});
-            LOG_INFO(LOG_COMMITTER, "Last completed XID: {}@{}", db_id, completed_xid);
+            auto token_2 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(completed_xid)}});
+            LOG_INFO("Last completed XID: {}@{}", db_id, completed_xid);
 
             // handle a TABLE_SYNC_COMMIT
             if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT ||
@@ -105,7 +106,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     completed_xid = result->swap().xid();
                 }
 
-                auto token_3 = logging::Logger::set_context_variables({{"xid", std::to_string(completed_xid)}});
+                auto token_3 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(completed_xid)}});
 
                 // for operations at the SysTblMgr
                 auto client = sys_tbl_mgr::Client::get_instance();
@@ -156,7 +157,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     assert(ddls.is_array());
                 }
 
-                LOG_INFO(LOG_COMMITTER, "Swapped synced tables: {}@{}", db_id, completed_xid);
+                LOG_INFO("Swapped synced tables: {}@{}", db_id, completed_xid);
 
                 // pre-commit the DDLs in case there's a failure
                 _redis_ddl.precommit_ddl(db_id, completed_xid, ddls);
@@ -196,8 +197,8 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             // note: from here we know we have an XACT_MSG
             assert(result->type() == XidReady::Type::XACT_MSG);
             uint64_t xid = result->xact().xid();
-            auto token_4 = logging::Logger::set_context_variables({{"xid", std::to_string(xid)}});
-            LOG_INFO(LOG_COMMITTER, "Process XID: {}@{}", db_id, xid);
+            auto token_4 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(xid)}});
+            LOG_INFO("Process XID: {}@{}", db_id, xid);
             assert(xid > completed_xid);
 
             // check if there were DDL mutations as part of this txn, invalidate the schema cache
@@ -540,7 +541,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 std::chrono::system_clock::now() - min_commit_ts->to_system_time());
             _btree_write_latencies->Record(duration.count(), _context);
             LOG_DEBUG(LOG_COMMITTER, "Processed table {} in {} milliseconds", tid, duration.count());
-            LOG_ERROR(LOG_COMMITTER, "Processed table {} in {} milliseconds", tid, duration.count());
+            LOG_ERROR("Processed table {} in {} milliseconds", tid, duration.count());
         }
         // update the system table roots
         TableMgr::get_instance()->update_roots(table->db(), table->id(), xid, metadata);

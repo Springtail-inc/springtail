@@ -30,7 +30,7 @@ create_channel(std::string_view service,
         std::string cert_file_path;
         Json::get_to<std::string>(rpc_json, "server_cert", cert_file_path);
         if (cert_file_path.empty() || !std::filesystem::exists(cert_file_path)) {
-            LOG_ERROR(LOG_ALL, "{}: Invalid configuration for certificate file {}", service,
+            LOG_ERROR("{}: Invalid configuration for certificate file {}", service,
                          cert_file_path);
             throw Error("Certificate file path is misconfigured");
         }
@@ -38,14 +38,14 @@ create_channel(std::string_view service,
         std::string key_file_path;
         Json::get_to<std::string>(rpc_json, "server_key", key_file_path);
         if (key_file_path.empty() || !std::filesystem::exists(key_file_path)) {
-            LOG_ERROR(LOG_ALL, "{}: Invalid configuration for key file {}", service, key_file_path);
+            LOG_ERROR("{}: Invalid configuration for key file {}", service, key_file_path);
             throw Error("Key file path is misconfigured");
         }
 
         std::string trusted_file_path;
         Json::get_to<std::string>(rpc_json, "server_trusted", trusted_file_path);
         if (trusted_file_path.empty() || !std::filesystem::exists(trusted_file_path)) {
-            LOG_ERROR(LOG_ALL, "{}: Invalid configuration for trusted certificates file {}", service,
+            LOG_ERROR("{}: Invalid configuration for trusted certificates file {}", service,
                          trusted_file_path);
             throw Error("Trusted certificates file path is misconfigured");
         }

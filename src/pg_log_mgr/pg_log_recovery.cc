@@ -193,7 +193,7 @@ PgLogRecovery::_process_msg(PgMsgPtr msg,
         }
         default: {
             int type = static_cast<int>(msg->msg_type);
-            LOG_ERROR(LOG_PG_LOG_MGR, "Received invalid message type: {}", type);
+            LOG_ERROR("Received invalid message type: {}", type);
             throw Error(fmt::format("Received invalid message type: {}", type));
         }
     }

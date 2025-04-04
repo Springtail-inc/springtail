@@ -259,7 +259,7 @@ RedisCache::_read_key_value(const std::string &key)
         {
             std::optional<std::string> key_stored_value = _client->get(key);
             if (!key_stored_value.has_value()) {
-                LOG_ERROR(LOG_ALL, "No value found for key {}", key);
+                LOG_ERROR("No value found for key {}", key);
             } else {
                 key_value = _string_to_json(key_stored_value.value());
             }
@@ -293,7 +293,7 @@ RedisCache::_read_key_value(const std::string &key)
         case REDIS_TYPE_NONE:
             break;
         default:
-            LOG_ERROR(LOG_ALL, "Unsupported type {} for key {}", key_type_str, key);
+            LOG_ERROR("Unsupported type {} for key {}", key_type_str, key);
     }
     return std::make_tuple(key_value, key_type);
 }
@@ -333,7 +333,7 @@ RedisCache::_run()
             // timeout, check for shutdown
             continue;
         } catch (const sw::redis::Error &e) {
-            LOG_ERROR(LOG_ALL, "Error consuming from redis: {} on thread {}\n", e.what(), _id);
+            LOG_ERROR("Error consuming from redis: {} on thread {}\n", e.what(), _id);
             break;
         }
     }
@@ -344,7 +344,7 @@ void
 RedisCache::dump()
 {
     std::shared_lock lock(_storage_mutex);
-    LOG_INFO(LOG_ALL, "{}", _storage.dump(4));
+    LOG_INFO("{}", _storage.dump(4));
 }
 
 nlohmann::json
@@ -448,10 +448,10 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
         }
         // creation of new redis keys is not supported
         case REDIS_TYPE_NONE:
-            LOG_ERROR(LOG_ALL, "Type {} for key {} is not found", key_type_str, redis_key);
+            LOG_ERROR("Type {} for key {} is not found", key_type_str, redis_key);
             break;
         default:
-            LOG_ERROR(LOG_ALL, "Unsupported type {} for key {}", key_type_str, redis_key);
+            LOG_ERROR("Unsupported type {} for key {}", key_type_str, redis_key);
     }
 
     if (ret) {
@@ -459,7 +459,7 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
         nlohmann::json key_value_diff = nlohmann::json::diff(_old_storage, _storage);
         _process_diff(key_value_diff, "", lock);
     } else {
-        LOG_ERROR(LOG_ALL, "Storage update failed: reverting the changes");
+        LOG_ERROR("Storage update failed: reverting the changes");
         _storage = _old_storage;
     }
     return ret;
@@ -568,7 +568,7 @@ RedisCache::_json_to_string(const nlohmann::json &json_value) {
         case nlohmann::json::value_t::null:
         case nlohmann::json::value_t::binary:
         case nlohmann::json::value_t::discarded:
-            LOG_ERROR(LOG_ALL, "Unsupported type {} for storing value {} in redis",
+            LOG_ERROR("Unsupported type {} for storing value {} in redis",
                 json_value.type_name(), nlohmann::to_string(json_value));
     }
     return out_string;

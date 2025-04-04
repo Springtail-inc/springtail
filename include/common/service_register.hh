@@ -13,10 +13,10 @@ public:
     virtual ~ServiceRunner() = default;
     virtual bool start()
     {
-        LOG_INFO(LOG_ALL, "Default start for service {}", _name);
+        LOG_INFO("Default start for service {}", _name);
         return true;
     }
-    virtual void stop() { LOG_INFO(LOG_ALL,"Default stop for service {}", _name); }
+    virtual void stop() { LOG_INFO("Default stop for service {}", _name); }
     const std::string &get_name() const { return _name; };
 
 private:
@@ -32,9 +32,9 @@ public:
         std::move(service_list.begin(), service_list.end(), std::back_inserter(_service_list));
         auto reverse_iter = _service_list.rend();
         for (auto iter = _service_list.begin(); iter != _service_list.end(); iter++) {
-            LOG_INFO(LOG_ALL,"Starting service {}", (*iter)->get_name());
+            LOG_INFO("Starting service {}", (*iter)->get_name());
             if (!(*iter)->start()) {
-                LOG_INFO(LOG_ALL,"Service {} failed to start", (*iter)->get_name());
+                LOG_INFO("Service {} failed to start", (*iter)->get_name());
                 // set reverse iterator
                 reverse_iter = std::make_reverse_iterator(iter);
                 break;
@@ -43,7 +43,7 @@ public:
         // check reverse iterator
         if (reverse_iter != _service_list.rend()) {
             while (reverse_iter != _service_list.rend()) {
-                LOG_INFO(LOG_ALL,"Stopping service {}", (*reverse_iter)->get_name());
+                LOG_INFO("Stopping service {}", (*reverse_iter)->get_name());
                 (*reverse_iter)->stop();
                 ++reverse_iter;
             }
@@ -62,7 +62,7 @@ private:
     {
         for (auto reverse_iter = _service_list.rbegin(); reverse_iter != _service_list.rend();
              reverse_iter++) {
-            LOG_INFO(LOG_ALL,"Stoping service {}", (*reverse_iter)->get_name());
+            LOG_INFO("Stoping service {}", (*reverse_iter)->get_name());
             (*reverse_iter)->stop();
         }
         _service_list.clear();

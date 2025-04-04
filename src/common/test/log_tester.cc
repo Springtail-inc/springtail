@@ -1,8 +1,10 @@
-#include <common/logging.hh>
 #include <common/init.hh>
+#include <common/logging.hh>
+#include <common/open_telemetry.hh>
 
 using namespace springtail;
 using namespace springtail::logging;
+using namespace springtail::open_telemetry;
 
 void
 log_stuff()
@@ -10,40 +12,40 @@ log_stuff()
     // basic functionality
     LOG_TRACE(LOG_ALL, "My trace log");
     LOG_DEBUG(LOG_ALL, "My debug log");
-    LOG_INFO(LOG_ALL, "My info log");
-    LOG_WARN(LOG_ALL, "My warning log");
-    LOG_ERROR(LOG_ALL, "My error log");
-    LOG_CRITICAL(LOG_ALL, "My critical log");
+    LOG_INFO("My info log");
+    LOG_WARN("My warning log");
+    LOG_ERROR("My error log");
+    LOG_CRITICAL("My critical log");
 
     // basic functionality with thread id
     LOG_TRACE(LOG_COMMON, "Current: {}\n", std::this_thread::get_id());
     LOG_DEBUG(LOG_COMMON, "Current: {}\n", std::this_thread::get_id());
-    LOG_INFO(LOG_COMMON, "Current: {}\n", std::this_thread::get_id());
-    LOG_WARN(LOG_COMMON, "Current: {}\n", std::this_thread::get_id());
-    LOG_ERROR(LOG_COMMON, "Current: {}\n", std::this_thread::get_id());
-    LOG_CRITICAL(LOG_COMMON, "Current: {}\n", std::this_thread::get_id());
+    LOG_INFO("Current: {}\n", std::this_thread::get_id());
+    LOG_WARN("Current: {}\n", std::this_thread::get_id());
+    LOG_ERROR("Current: {}\n", std::this_thread::get_id());
+    LOG_CRITICAL("Current: {}\n", std::this_thread::get_id());
 
     spdlog::set_level(spdlog::level::trace);
 
     // basic functionality with thread id
     LOG_TRACE(LOG_COMMON, "One more time current: {}\n", std::this_thread::get_id());
     LOG_DEBUG(LOG_COMMON, "One more time current: {}\n", std::this_thread::get_id());
-    LOG_INFO(LOG_COMMON, "One more time current: {}\n", std::this_thread::get_id());
-    LOG_WARN(LOG_COMMON, "One more time current: {}\n", std::this_thread::get_id());
-    LOG_ERROR(LOG_COMMON, "One more time current: {}\n", std::this_thread::get_id());
-    LOG_CRITICAL(LOG_COMMON, "One more time current: {}\n", std::this_thread::get_id());
+    LOG_INFO("One more time current: {}\n", std::this_thread::get_id());
+    LOG_WARN("One more time current: {}\n", std::this_thread::get_id());
+    LOG_ERROR("One more time current: {}\n", std::this_thread::get_id());
+    LOG_CRITICAL("One more time current: {}\n", std::this_thread::get_id());
 
     {
-        auto token1 = Logger::set_context_variable("db_id", "1");
-        LOG_INFO(LOG_ALL, "Log something with token1");
+        auto token1 = OpenTelemetry::set_context_variable("db_id", "1");
+        LOG_INFO("Log something with token1");
         {
-            auto token2 = Logger::set_context_variable("xact_id", "2");
-            LOG_INFO(LOG_ALL, "Log something with token1 and token2");
+            auto token2 = OpenTelemetry::set_context_variable("xact_id", "2");
+            LOG_INFO("Log something with token1 and token2");
         }
-        LOG_INFO(LOG_ALL, "Log something with token1 again");
+        LOG_INFO("Log something with token1 again");
     }
 
-    LOG_INFO(LOG_ALL, "Log something without token");
+    LOG_INFO("Log something without token");
 }
 
 int
@@ -55,11 +57,26 @@ main(int argc, char *argv[])
     service_runners.emplace_back(std::make_unique<DefaultLoggingRunner>());
     service_runners.emplace_back(std::make_unique<ExceptionRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesRunner>(true));
-    service_runners.emplace_back(std::make_unique<LoggingRunner>(std::nullopt, std::nullopt, LOG_ALL));
+    service_runners.emplace_back(std::make_unique<LoggingRunner>("test", std::nullopt, LOG_ALL));
+    service_runners.emplace_back(std::make_unique<OpenTelemetryRunner>("test"));
 
     springtail_init_custom(service_runners);
 
     log_stuff();
+
+    // increment without context
+    OpenTelemetry::get_instance()->increment_counter(XID_MGR_COMMIT_XID_CALLS);
+
+    // increment with context
+    {
+        auto token1 = OpenTelemetry::set_context_variable("db_id", "1");
+        OpenTelemetry::get_instance()->increment_counter(XID_MGR_COMMIT_XID_CALLS);
+        {
+            auto token2 = OpenTelemetry::set_context_variable("xact_id", "2");
+            OpenTelemetry::get_instance()->increment_counter(XID_MGR_COMMIT_XID_CALLS);
+        }
+        OpenTelemetry::get_instance()->increment_counter(XID_MGR_COMMIT_XID_CALLS);
+    }
 
     springtail_shutdown();
     return 0;

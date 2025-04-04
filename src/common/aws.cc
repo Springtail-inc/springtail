@@ -23,7 +23,7 @@ namespace springtail {
         Aws::Client::ClientConfiguration config;
         // if using a mocking service like localstack, override the endpoint
         if (aws_mock_override) {
-            LOG_INFO(LOG_ALL, "Using AWS mock override");
+            LOG_INFO("Using AWS mock override");
             config.endpointOverride = "http://localhost:4566";
             config.region = "us-east-1"; // doesn't matter
             config.scheme = Aws::Http::Scheme::HTTP;
@@ -45,7 +45,7 @@ namespace springtail {
 
         auto outcome = _client->GetSecretValue(request);
         if (!outcome.IsSuccess()) {
-            LOG_ERROR(LOG_ALL, "Error fetching secret: {}", outcome.GetError().GetMessage());
+            LOG_ERROR("Error fetching secret: {}", outcome.GetError().GetMessage());
             throw Error("Error fetching secret: " + outcome.GetError().GetMessage());
         }
 
@@ -54,7 +54,7 @@ namespace springtail {
         if (result.GetSecretString().length() > 0) {
             secret_value = result.GetSecretString();
         } else {
-            LOG_ERROR(LOG_ALL, "Secret is stored in binary format, which is unsupported");
+            LOG_ERROR("Secret is stored in binary format, which is unsupported");
             throw Error("Secret is stored in binary format, which is unsupported");
         }
 

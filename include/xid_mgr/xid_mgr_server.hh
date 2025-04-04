@@ -84,7 +84,7 @@ public:
 
     bool start() override {
         if (_commit_starting_xid) {
-            LOG_INFO(LOG_ALL, "Starting XidMgr with _db_id = {} and _starting_xid = {}", _db_id, _starting_xid);
+            LOG_INFO("Starting XidMgr with _db_id = {} and _starting_xid = {}", _db_id, _starting_xid);
             xid_mgr::XidMgrServer::get_instance()->commit_xid(_db_id, _starting_xid, false);
         }
         xid_mgr::XidMgrServer::get_instance()->startup();

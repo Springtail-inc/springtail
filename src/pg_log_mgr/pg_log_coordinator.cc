@@ -82,7 +82,7 @@ namespace springtail::pg_log_mgr {
             _repl_log = optional_repl_log.value();
             _trans_log = optional_trans_log.value();
         } else {
-            LOG_ERROR(LOG_PG_LOG_MGR, "Error when reading pg_log_mgr config");
+            LOG_ERROR("Error when reading pg_log_mgr config");
         }
 
         // Start the committer thread

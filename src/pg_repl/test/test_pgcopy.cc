@@ -61,7 +61,7 @@ namespace {
             Properties::get_primary_db_config(host, port, user, password);
 
             std::string conn_cmd = fmt::format("psql postgresql://{}:{}@{}:{}/{} -f sample.sql", user, password, host, port, db_name);
-            LOG_INFO(LOG_ALL, "Connecting to: {}", conn_cmd);
+            LOG_INFO("Connecting to: {}", conn_cmd);
             int err = std::system(conn_cmd.c_str());
             if (err) {
                 GTEST_SKIP() << "Postgres load failure, skipping test";

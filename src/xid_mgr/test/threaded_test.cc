@@ -97,7 +97,7 @@ namespace {
 
         void run_clients(int thread_id, int iterations)
         {
-            LOG_INFO(LOG_ALL, "Thread: {}, running {} iterations", thread_id, iterations);
+            LOG_INFO("Thread: {}, running {} iterations", thread_id, iterations);
 
             for (int i = 0; i < iterations; i++) {
                 XidMgrClient *client = XidMgrClient::get_instance();
@@ -105,7 +105,7 @@ namespace {
                 client->commit_xid(1, xid + 1, false);
             }
 
-            LOG_INFO(LOG_ALL, "Thread: {}, finished", thread_id);
+            LOG_INFO("Thread: {}, finished", thread_id);
         }
 
         std::vector<std::jthread> _threads;

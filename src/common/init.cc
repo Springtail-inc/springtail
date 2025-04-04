@@ -73,7 +73,7 @@ springtail_init(const std::optional<std::vector<std::unique_ptr<ServiceRunner>>>
     service_runners.emplace_back(std::make_unique<ExceptionRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesRunner>(load_redis));
     service_runners.emplace_back(std::make_unique<LoggingRunner>(log_filename, std::nullopt, logging_mask));
-    service_runners.emplace_back(std::make_unique<TracingRunner>(log_filename));
+    service_runners.emplace_back(std::make_unique<OpenTelemetryRunner>(log_filename));
     service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesCacheRunner>());
 
@@ -100,7 +100,7 @@ void springtail_init_daemon(const std::optional<std::vector<std::unique_ptr<Serv
         service_runners.emplace_back(std::make_unique<DaemonRunner>(daemon_pid.value()));
     }
     service_runners.emplace_back(std::make_unique<LoggingRunner>(log_filename, daemon_pid, logging_mask));
-    service_runners.emplace_back(std::make_unique<TracingRunner>(log_filename));
+    service_runners.emplace_back(std::make_unique<OpenTelemetryRunner>(log_filename));
     service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesCacheRunner>());
 
@@ -123,7 +123,7 @@ springtail_init_test(const std::optional<std::vector<std::unique_ptr<ServiceRunn
     service_runners.emplace_back(std::make_unique<ExceptionRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesRunner>(true));
     service_runners.emplace_back(std::make_unique<LoggingRunner>(std::nullopt, std::nullopt, logging_mask));
-    service_runners.emplace_back(std::make_unique<TracingRunner>(std::nullopt));
+    service_runners.emplace_back(std::make_unique<OpenTelemetryRunner>(std::nullopt));
     service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesCacheRunner>());
 

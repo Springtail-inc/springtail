@@ -304,7 +304,7 @@ namespace springtail {
                                                   tbl_meta, schema);
         }
         default:
-            LOG_ERROR(LOG_ALL, "Unable to find the requested system table: {}", table_id);
+            LOG_ERROR("Unable to find the requested system table: {}", table_id);
             throw SchemaError();
         }
     }

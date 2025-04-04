@@ -28,7 +28,7 @@ Service::CreateIndex(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "CreateIndex");
 
-    LOG_INFO(LOG_SCHEMA, "got CreateIndex(): db {}, table {}, index {}, xid {}:{}", request->db_id(),
+    LOG_INFO("got CreateIndex(): db {}, table {}, index {}, xid {}:{}", request->db_id(),
                 request->index().table_id(), request->index().id(), request->xid(), request->lsn());
 
     // acquire a shared lock to ensure no one is doing a finalize
@@ -43,7 +43,7 @@ Service::CreateIndex(grpc::ServerContext* context,
         span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
         return grpc::Status::OK;
     } catch (const std::exception& e) {
-        LOG_ERROR(LOG_SCHEMA, "CreateIndex() failed: {}", e.what());
+        LOG_ERROR("CreateIndex() failed: {}", e.what());
         span.span()->SetStatus(opentelemetry::trace::StatusCode::kError, e.what());
         return grpc::Status(grpc::StatusCode::INTERNAL, e.what());
     }
@@ -148,7 +148,7 @@ Service::SetIndexState(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "SetIndexState");
 
-    LOG_INFO(LOG_SCHEMA, "got SetIndexState()");
+    LOG_INFO("got SetIndexState()");
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
@@ -170,7 +170,7 @@ Service::GetIndexInfo(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "GetIndexInfo");
 
-    LOG_INFO(LOG_SCHEMA, "got GetIndexInfo()");
+    LOG_INFO("got GetIndexInfo()");
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_read_mutex);
@@ -243,7 +243,7 @@ Service::DropIndex(grpc::ServerContext* context,
                    const proto::DropIndexRequest* request,
                    proto::DDLStatement* response)
 {
-    LOG_INFO(LOG_SCHEMA, "got DropIndex(): db {}, index {}, xid {}:{}", request->db_id(),
+    LOG_INFO("got DropIndex(): db {}, index {}, xid {}:{}", request->db_id(),
                 request->index_id(), request->xid(), request->lsn());
 
     // acquire a shared lock to ensure no one is doing a finalize
@@ -409,7 +409,7 @@ Service::CreateTable(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "CreateTable");
 
-    LOG_INFO(LOG_SCHEMA, "got CreateTable() -- db {} table {} xid {} lsn {}", request->db_id(),
+    LOG_INFO("got CreateTable() -- db {} table {} xid {} lsn {}", request->db_id(),
                 request->table().id(), request->xid(), request->lsn());
 
     // acquire a shared lock to ensure no one is doing a finalize
@@ -496,7 +496,7 @@ Service::AlterTable(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "AlterTable");
 
-    LOG_INFO(LOG_SCHEMA, "got AlterTable()");
+    LOG_INFO("got AlterTable()");
 
     // retrieve the id of the namespace
     auto ns_info = _get_namespace_info(request->db_id(), request->table().namespace_name(),
@@ -589,7 +589,7 @@ Service::DropTable(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "DropTable");
 
-    LOG_INFO(LOG_SCHEMA, "got DropTable() {}@{}:{}", request->table_id(), request->xid(), request->lsn());
+    LOG_INFO("got DropTable() {}@{}:{}", request->table_id(), request->xid(), request->lsn());
 
     // hold a shared lock to prevent a concurrent finalize()
     boost::shared_lock lock(_write_mutex);
@@ -665,7 +665,7 @@ Service::CreateNamespace(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "CreateNamespace");
 
-    LOG_INFO(LOG_SCHEMA, "got CreateNamespace() -- db {} namespace_id {} name {} xid {} lsn {}",
+    LOG_INFO("got CreateNamespace() -- db {} namespace_id {} name {} xid {} lsn {}",
                 request->db_id(), request->namespace_id(), request->name(), request->xid(),
                 request->lsn());
 
@@ -691,7 +691,7 @@ Service::AlterNamespace(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "AlterNamespace");
 
-    LOG_INFO(LOG_SCHEMA, "got AlterNamespace() -- db {} namespace_id {} name {} xid {} lsn {}",
+    LOG_INFO("got AlterNamespace() -- db {} namespace_id {} name {} xid {} lsn {}",
                 request->db_id(), request->namespace_id(), request->name(), request->xid(),
                 request->lsn());
 
@@ -722,7 +722,7 @@ Service::DropNamespace(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "DropNamespace");
 
-    LOG_INFO(LOG_SCHEMA, "got DropNamespace() -- db {} namespace_id {} xid {} lsn {}", request->db_id(),
+    LOG_INFO("got DropNamespace() -- db {} namespace_id {} xid {} lsn {}", request->db_id(),
                 request->namespace_id(), request->xid(), request->lsn());
 
     // acquire a shared lock to ensure no one is doing a finalize
@@ -783,7 +783,7 @@ Service::UpdateRoots(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "UpdateRoots");
 
-    LOG_INFO(LOG_SCHEMA, "got UpdateRoots()");
+    LOG_INFO("got UpdateRoots()");
 
     // hold a shared lock to prevent a concurrent finalize()
     boost::shared_lock lock(_write_mutex);
@@ -858,7 +858,7 @@ Service::Finalize(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "Finalize");
 
-    LOG_INFO(LOG_SCHEMA, "got Finalize()");
+    LOG_INFO("got Finalize()");
 
     // block all mutations
     boost::unique_lock wlock(_write_mutex);
@@ -873,11 +873,11 @@ Service::Finalize(grpc::ServerContext* context,
     // XXX we currently don't store the metadata, but re-read it from the roots file each time
     std::map<uint64_t, TableMetadata> md_map;
     for (const auto& entry : _write[request->db_id()]) {
-        LOG_INFO(LOG_SCHEMA, "Finalize table {}@{}", entry.first, request->xid());
+        LOG_INFO("Finalize table {}@{}", entry.first, request->xid());
         md_map[entry.first] = entry.second->finalize();
     }
     if (md_map.empty()) {
-        LOG_INFO(LOG_SCHEMA, "Nothing to finalize: {}@{} >= {}", request->db_id(), request->xid(),
+        LOG_INFO("Nothing to finalize: {}@{} >= {}", request->db_id(), request->xid(),
                     write_xid);
         // NOTE TO REVIEWER: is OK right here?
         span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk, "Nothing to finalize");
@@ -910,7 +910,7 @@ Service::GetRoots(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "GetRoots");
 
-    LOG_INFO(LOG_SCHEMA, "got GetRoots()");
+    LOG_INFO("got GetRoots()");
 
     boost::shared_lock lock(_read_mutex);
 
@@ -939,7 +939,7 @@ Service::GetSchema(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "GetSchema");
 
-    LOG_INFO(LOG_SCHEMA, "got GetSchema()");
+    LOG_INFO("got GetSchema()");
 
     boost::shared_lock lock(_read_mutex);
 
@@ -962,7 +962,7 @@ Service::GetTargetSchema(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "GetTargetSchema");
 
-    LOG_INFO(LOG_SCHEMA, "got GetTargetSchema() -- {}, {}", request->access_xid(), request->target_xid());
+    LOG_INFO("got GetTargetSchema() -- {}, {}", request->access_xid(), request->target_xid());
 
     boost::shared_lock lock(_read_mutex);
 
@@ -983,7 +983,7 @@ Service::Exists(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "Exists");
 
-    LOG_INFO(LOG_SCHEMA, "got Exists()");
+    LOG_INFO("got Exists()");
 
     boost::shared_lock lock(_read_mutex);
 
@@ -1004,7 +1004,7 @@ Service::SwapSyncTable(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "SwapSyncTable");
 
-    LOG_INFO(LOG_SCHEMA, "got SwapSyncTable()");
+    LOG_INFO("got SwapSyncTable()");
     const auto& namespace_req = request->namespace_req();
     const auto& create_req = request->create_req();
     const auto& index_reqs = request->index_reqs();
@@ -1112,14 +1112,14 @@ Service::_get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     // make sure table ID exists at this XID/LSN
     if (row_i == table_names_t->end() ||
         fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(*row_i) != table_id) {
-        LOG_WARN(LOG_SCHEMA, "No table info at xid {}:{}", xid.xid, xid.lsn);
+        LOG_WARN("No table info at xid {}:{}", xid.xid, xid.lsn);
         return nullptr;
     }
 
     // make sure that the table is marked as existing at this XID/LSN
     bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(*row_i);
     if (!exists) {
-        LOG_WARN(LOG_SCHEMA, "Table marked non-existant at xid {}:{}", xid.xid, xid.lsn);
+        LOG_WARN("Table marked non-existant at xid {}:{}", xid.xid, xid.lsn);
         return nullptr;
     }
 
@@ -1165,14 +1165,14 @@ Service::_get_namespace_info(uint64_t db_id, uint64_t namespace_id, const XidLsn
     // make sure table ID exists at this XID/LSN
     auto id_field = fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID);
     if (row_i == table->end() || id_field->get_uint64(*row_i) != namespace_id) {
-        LOG_WARN(LOG_SCHEMA, "No namespace info at xid {}:{}", xid.xid, xid.lsn);
+        LOG_WARN("No namespace info at xid {}:{}", xid.xid, xid.lsn);
         return nullptr;
     }
 
     // make sure that the table is marked as existing at this XID/LSN
     bool exists = fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*row_i);
     if (!exists) {
-        LOG_WARN(LOG_SCHEMA, "Namespace marked non-existant at xid {}:{}", xid.xid, xid.lsn);
+        LOG_WARN("Namespace marked non-existant at xid {}:{}", xid.xid, xid.lsn);
         return nullptr;
     }
 
@@ -1219,16 +1219,16 @@ Service::_get_namespace_info(uint64_t db_id, const std::string& name, const XidL
 
     // verify that the name is present and exists
     if (row_i == table->end(1)) {
-        LOG_WARN(LOG_SCHEMA, "Couldn't find entry for namespace {} @ {}:{}", name, xid.xid, xid.lsn);
+        LOG_WARN("Couldn't find entry for namespace {} @ {}:{}", name, xid.xid, xid.lsn);
         return nullptr;
     }
 
     if (name != fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(*row_i)) {
-        LOG_WARN(LOG_SCHEMA, "Couldn't find entry for namespace {} @ {}:{}", name, xid.xid, xid.lsn);
+        LOG_WARN("Couldn't find entry for namespace {} @ {}:{}", name, xid.xid, xid.lsn);
         return nullptr;
     }
     if (!fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*row_i)) {
-        LOG_WARN(LOG_SCHEMA, "Namespace marked as not-exists {} @ {}:{}", name, xid.xid, xid.lsn);
+        LOG_WARN("Namespace marked as not-exists {} @ {}:{}", name, xid.xid, xid.lsn);
         return nullptr;
     }
 
@@ -1326,7 +1326,7 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     }
 
     if (roots_info->roots().empty()) {
-        LOG_WARN(LOG_SCHEMA, "Couldn't find table_roots entry for {}@{}:{} -- {}", table_id, xid.xid,
+        LOG_WARN("Couldn't find table_roots entry for {}@{}:{} -- {}", table_id, xid.xid,
                     xid.lsn, search_key->to_string());
         assert(0);
     }
@@ -1344,7 +1344,7 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     table_id_f = stats_t->extent_schema()->get_field("table_id");
     if (srow_i == stats_t->end() || table_id_f->get_uint64(*srow_i) != table_id) {
         // no stats for this table?  seems like a potential error
-        LOG_WARN(LOG_SCHEMA, "Couldn't find table_stats entry for {}@{}:{}", table_id, xid.xid, xid.lsn);
+        LOG_WARN("Couldn't find table_stats entry for {}@{}:{}", table_id, xid.xid, xid.lsn);
         return roots_info;
     }
 
@@ -1684,7 +1684,7 @@ Service::_read_schema_columns(SchemaInfoPtr info,
 
     auto index_i = indexes_t->inverse_lower_bound(search_key);
     if (index_i == indexes_t->end()) {
-        LOG_WARN(LOG_SCHEMA, "Didn't find a primary index for the table: {}@{}:{}", table_id, access_xid.xid,
+        LOG_WARN("Didn't find a primary index for the table: {}@{}:{}", table_id, access_xid.xid,
                     access_xid.lsn);
         return;
     }
@@ -2184,7 +2184,7 @@ Service::_write_index(const XidLsn& xid,
                       const std::map<uint32_t, uint32_t>& keys)
 {
     if (keys.empty()) {
-        LOG_INFO(LOG_SCHEMA, "The index has no keys: {}:{} - {}", db_id, tab_id, index_id);
+        LOG_INFO("The index has no keys: {}:{} - {}", db_id, tab_id, index_id);
         return;
     }
     auto write_xid = _get_write_xid(db_id);

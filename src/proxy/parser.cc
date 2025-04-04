@@ -63,15 +63,15 @@ namespace springtail::pg_proxy {
     void
     Parser::dump_context(const StmtContext &context)
     {
-        LOG_INFO(LOG_PROXY, "Context: location={}, type={}, name={}, is_read_safe={}\n  has_select_query={}, has_unsupported_query={}, has_locking={}, has_into={}, has_declare_hold={}, has_error={}, has_is_local={}",
+        LOG_INFO("Context: location={}, type={}, name={}, is_read_safe={}\n  has_select_query={}, has_unsupported_query={}, has_locking={}, has_into={}, has_declare_hold={}, has_error={}, has_is_local={}",
             context.stmt_location, _stmt_names[(int8_t)context.type], context.name, context.is_read_safe, context.has_select_query, context.has_unsupported_query, context.has_locking, context.has_into, context.has_declare_hold, context.has_error, context.has_is_local);
 
         for (auto &func : context.functions) {
-            LOG_INFO(LOG_PROXY, "Function: {}", func);
+            LOG_INFO("Function: {}", func);
         }
 
         for (auto &table : context.tables) {
-            LOG_INFO(LOG_PROXY, "Table: schema={}, table={}", table.first, table.second);
+            LOG_INFO("Table: schema={}, table={}", table.first, table.second);
         }
     }
 
@@ -80,11 +80,11 @@ namespace springtail::pg_proxy {
     {
         PgQueryParseResult result = pg_query_parse(query.c_str());
 
-        LOG_INFO(LOG_PROXY, "{}", query);
+        LOG_INFO("{}", query);
         if (result.error) {
-            LOG_ERROR(LOG_PROXY, "error: {} at {}", result.error->message, result.error->cursorpos);
+            LOG_ERROR("error: {} at {}", result.error->message, result.error->cursorpos);
         } else {
-            LOG_INFO(LOG_PROXY, "{}", result.parse_tree);
+            LOG_INFO("{}", result.parse_tree);
         }
 
         pg_query_free_parse_result(result);
@@ -101,7 +101,7 @@ namespace springtail::pg_proxy {
         // if we have a parse error, return false
         if (context.has_error && context.stmts.empty()) {
             // make empty context
-            LOG_WARN(LOG_PROXY, "Parse error in query: {}", query);
+            LOG_WARN("Parse error in query: {}", query);
             StmtContextPtr res = std::make_shared<StmtContext>(0, 0);
             res->has_error = true;
             res->is_read_safe = false;
@@ -196,7 +196,7 @@ namespace springtail::pg_proxy {
             return true;
         }
 
-        LOG_WARN(LOG_PROXY, "Didn't find function {} in safe or unsafe list", funcname);
+        LOG_WARN("Didn't find function {} in safe or unsafe list", funcname);
 
         return false;
     }
@@ -210,7 +210,7 @@ namespace springtail::pg_proxy {
 
         PgQueryInternalParsetreeAndError tree = pg_query_raw_parse(query.data(), PG_QUERY_PARSE_DEFAULT);
         if (tree.error) {
-            LOG_ERROR(LOG_PROXY, "Query parse error {} at {}, for query {}", tree.error->message, tree.error->cursorpos, query);
+            LOG_ERROR("Query parse error {} at {}, for query {}", tree.error->message, tree.error->cursorpos, query);
             context.has_error = true;
             return;
         }
@@ -582,7 +582,7 @@ namespace springtail::pg_proxy {
         try {
             return raw_expression_tree_walker_impl(node, _node_walker, ctx);
         } catch (const std::exception &e) {
-            LOG_ERROR(LOG_PROXY, "Parser node: exception: {}", e.what());
+            LOG_ERROR("Parser node: exception: {}", e.what());
             context->has_error = true;
             return false;
         }

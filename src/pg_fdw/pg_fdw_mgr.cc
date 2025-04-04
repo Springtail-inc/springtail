@@ -7,12 +7,13 @@
 #include <nlohmann/json.hpp>
 
 #include <common/constants.hh>
-#include <common/init.hh>
 #include <common/exception.hh>
+#include <common/init.hh>
+#include <common/json.hh>
 #include <common/logging.hh>
+#include <common/open_telemetry.hh>
 #include <common/properties.hh>
 #include <common/redis.hh>
-#include <common/json.hh>
 #include <common/redis_types.hh>
 
 #include <redis/redis_ddl.hh>
@@ -23,7 +24,7 @@
 #include <pg_fdw/pg_fdw_mgr.hh>
 
 #include <sys_tbl_mgr/client.hh>
-#include "sys_tbl_mgr/shm_cache.hh"
+#include <sys_tbl_mgr/shm_cache.hh>
 
 extern "C" {
     #include <postgres.h>
@@ -152,9 +153,9 @@ namespace springtail::pg_fdw {
         } catch (const boost::interprocess::bad_alloc&) {
             // the cache hasn't been created
             // this could happen if xid_mgr_subscriber isn't running
-            LOG_ERROR(LOG_FDW, "fdw_create_state unable to open the roots cache");
+            LOG_ERROR("fdw_create_state unable to open the roots cache");
         } catch (const std::exception& e) {
-            LOG_ERROR(LOG_FDW, "fdw_create_state exception:{} ", e.what());
+            LOG_ERROR("fdw_create_state exception:{} ", e.what());
             throw;
         }
         return {};
@@ -203,7 +204,7 @@ namespace springtail::pg_fdw {
                     // the advantages of push notifications.
                     // If xid_subscriber comes online, we'll try to
                     // open the new (live) IPC cache the next time we come here.
-                    LOG_WARN(LOG_FDW, "The IPC roots cache is dead.");
+                    LOG_WARN("The IPC roots cache is dead.");
                 }
 
                 rd_lock.lock();
@@ -573,7 +574,7 @@ namespace springtail::pg_fdw {
             if (!state->target_columns.contains(attno)) {
                 nulls[i] = true;
                 values[i] = 0;
-                LOG_WARN(LOG_FDW, "Skipping column: {}; not found in target column", attno);
+                LOG_WARN("Skipping column: {}; not found in target column", attno);
                 continue;
             }
 
@@ -803,7 +804,7 @@ namespace springtail::pg_fdw {
     PgFdwMgr::_handle_exception(const Error &error)
     {
         error.log_backtrace();
-        LOG_ERROR(LOG_FDW, "Exception: {}", error.what());
+        LOG_ERROR("Exception: {}", error.what());
         elog(ERROR, "Springtail exception: %s", error.what());
     }
 
@@ -990,7 +991,7 @@ namespace springtail::pg_fdw {
                                         const std::string &db_name,
                                         uint64_t schema_xid)
     {
-        auto token = logging::Logger::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
+        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
         List                 *commands = NIL;
         std::set<std::string> table_set;
 
@@ -1017,19 +1018,19 @@ namespace springtail::pg_fdw {
 
         // verify that the name is present and exists
         if (ns_i == ns_table->end(1)) {
-            LOG_WARN(LOG_FDW, "Couldn't find entry for namespace {} @ {}:{}",
+            LOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
                         schema, schema_xid, constant::MAX_LSN);
             return commands;
         }
 
         auto ns_fields = ns_table->extent_schema()->get_fields();
         if (schema != ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(*ns_i)) {
-            LOG_WARN(LOG_FDW, "Couldn't find entry for namespace {} @ {}:{}",
+            LOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
                         schema, schema_xid, constant::MAX_LSN);
             return commands;
         }
         if (!ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*ns_i)) {
-            LOG_WARN(LOG_FDW, "Namespace marked as not-exists {} @ {}:{}",
+            LOG_WARN("Namespace marked as not-exists {} @ {}:{}",
                         schema, schema_xid, constant::MAX_LSN);
             return commands;
         }

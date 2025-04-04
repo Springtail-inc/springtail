@@ -182,7 +182,7 @@ namespace springtail {
 
         _fd = ::open(path.c_str(), fmode, owner);
         if (_fd == -1) {
-            LOG_ERROR(LOG_ALL, "Error opening file: path={}, errno={}", path.c_str(), errno);
+            LOG_ERROR("Error opening file: path={}, errno={}", path.c_str(), errno);
             throw StorageError("Error opening file");
         }
     }
@@ -388,7 +388,7 @@ namespace springtail {
                     decompressor->decompress_raw(compressed_data[i], response->data[i], 0);
                 }
             } catch (ValidationError &exc) {
-                LOG_ERROR(LOG_ALL, "Exception while decompressing data");
+                LOG_ERROR("Exception while decompressing data");
                 request->complete(response, IOStatus::ERR_DECODE);
                 return;
             }
@@ -397,7 +397,7 @@ namespace springtail {
         // verify data hash; compute hash over response compare to hash in header
         uint64_t computed_hash = _compute_hash(response->data);
         if (computed_hash != hash) {
-            LOG_ERROR(LOG_ALL, "Checksum hash computation mismatch");
+            LOG_ERROR("Checksum hash computation mismatch");
             request->complete(response, IOStatus::ERR_CKSUM);
             return;
         }
@@ -440,8 +440,8 @@ namespace springtail {
                 }
 
             } catch (ValidationError &exc) {
-                LOG_ERROR(LOG_ALL, "Exception while compressing data");
-                LOG_ERROR(LOG_ALL, "Exception: {}", exc.what());
+                LOG_ERROR("Exception while compressing data");
+                LOG_ERROR("Exception: {}", exc.what());
 
                 return -2; // decode error
             }
@@ -505,7 +505,7 @@ namespace springtail {
         if (bytes_written > 0) {
             CHECK_EQ(bytes_written, total_size);
         } else if (bytes_written < 0) {
-            LOG_ERROR(LOG_ALL, "Recevied write error: errno={}", errno);
+            LOG_ERROR("Recevied write error: errno={}", errno);
         }
 
         return bytes_written;  // either > 0 on success, or -1 on error with errno set

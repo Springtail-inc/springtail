@@ -3,6 +3,7 @@
 #include <absl/log/check.h>
 #include <common/common.hh>
 #include <common/logging.hh>
+#include <common/open_telemetry.hh>
 
 namespace springtail::xid_mgr {
 
@@ -30,7 +31,7 @@ namespace springtail::xid_mgr {
     void
     Partition::_sync_thread_func()
     {
-        auto token = logging::Logger::set_context_variables({{"partition_id", std::to_string(_id)}});
+        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"partition_id", std::to_string(_id)}});
         RedisDDL redis_ddl;
         while (!_shutdown) {
             std::unique_lock<std::mutex> _shutdown_lock(_shutdown_mutex);
@@ -186,7 +187,7 @@ namespace springtail::xid_mgr {
             _committed_xids[db_id] = xid;
             _dirty = true;
         } else {
-            LOG_WARN(LOG_XID_MGR, "Partition: commit xid: db_id={}, xid={}, was already committed at {}", db_id, xid, it->second);
+            LOG_WARN("Partition: commit xid: db_id={}, xid={}, was already committed at {}", db_id, xid, it->second);
             it->second = xid;
             _dirty = true;
         }

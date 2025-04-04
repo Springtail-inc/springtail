@@ -122,7 +122,7 @@ namespace springtail
         // process results; sanity checks first
         if (_connection->status() != PGRES_TUPLES_OK ||
             _connection->ntuples() < 1 || _connection->nfields() < 2) {
-            LOG_ERROR(LOG_PG_REPL, "Error querying confirmed_flush_lsn\n");
+            LOG_ERROR("Error querying confirmed_flush_lsn\n");
             _connection->clear();
             throw PgQueryError();
         }
@@ -135,7 +135,7 @@ namespace springtail
 
         if (wal_status != nullptr && std::strcmp(wal_status, "lost") == 0) {
             // if we have a 'lost' status, we need to recreate the slot or hard fail
-            LOG_ERROR(LOG_PG_REPL, "Replication slot is lost");
+            LOG_ERROR("Replication slot is lost");
             _connection->clear();
 
             if (do_init) {
@@ -145,7 +145,7 @@ namespace springtail
                     LSN = create_replication_slot();
                     confirmed_flush_lsn = LSN;
                 } catch (const std::exception& e) {
-                    LOG_ERROR(LOG_PG_REPL, "Failed to recreate replication slot: {}", e.what());
+                    LOG_ERROR("Failed to recreate replication slot: {}", e.what());
                     throw PgReplicationSlotError();
                 }
             } else {
@@ -164,7 +164,7 @@ namespace springtail
         if (LSN < confirmed_flush_lsn) {
             // this is possible if we've ack'ed (fast forwarded), the LSN
             // due to an idle DB; use the value returned from the DB
-            LOG_WARN(LOG_PG_REPL, "LSN {} is less than confirmed_flush_lsn {}", LSN, confirmed_flush_lsn);
+            LOG_WARN("LSN {} is less than confirmed_flush_lsn {}", LSN, confirmed_flush_lsn);
             LSN = confirmed_flush_lsn;
         }
 
@@ -195,7 +195,7 @@ namespace springtail
         // read message header for response; msg type placed in _msg_type
         _read_msg_header();
         if (_msg_type != MSG_COPY_BOTH) {
-            LOG_ERROR(LOG_PG_REPL, "Error could not start WAL streaming: msg type={}", _msg_type);
+            LOG_ERROR("Error could not start WAL streaming: msg type={}", _msg_type);
             _stream_connection.reset(nullptr);
             throw PgQueryError();
         }
@@ -231,7 +231,7 @@ namespace springtail
         // see libpqwalreceiver.c libpqrcv_endstreaming() for detailed way to shutdown cleanly
         // send copy end message
         if (_stream_connection->put_copy_end(nullptr) <= 0 || _stream_connection->flush()) {
-            LOG_ERROR(LOG_PG_REPL, "Error could not send end-of-streaming message to primary\n");
+            LOG_ERROR("Error could not send end-of-streaming message to primary\n");
             _stream_connection.reset(nullptr);
             return;
         }
@@ -303,16 +303,16 @@ namespace springtail
         // send the header and then the operation
         int r = _stream_connection->write(msg_header, COPY_MSG_HDR_SIZE);
         if (r != 5) {
-            LOG_ERROR(LOG_PG_REPL, "Failed to write copy data header: bytes={}", r);
-            LOG_ERROR(LOG_PG_REPL, "errno: {}", errno);
+            LOG_ERROR("Failed to write copy data header: bytes={}", r);
+            LOG_ERROR("errno: {}", errno);
             throw PgIOError();
         }
 
         r = _stream_connection->write(buffer, length);
         if (r < length) {
             // error
-            LOG_ERROR(LOG_PG_REPL, "Failed to write copy data body: bytes={}", r);
-            LOG_ERROR(LOG_PG_REPL, "errno: {}", errno);
+            LOG_ERROR("Failed to write copy data body: bytes={}", r);
+            LOG_ERROR("errno: {}", errno);
             throw PgIOError();
         }
     }
@@ -340,11 +340,11 @@ namespace springtail
 
             if (r < 0) {
                 if (err_no == ECONNRESET) {
-                    LOG_ERROR(LOG_PG_REPL, "Error recv got ECONNRESET\n");
+                    LOG_ERROR("Error recv got ECONNRESET\n");
                     throw PgNotConnectedError();
                 }
 
-                LOG_ERROR(LOG_PG_REPL, "Error recv return < 0; errno={}\n", err_no);
+                LOG_ERROR("Error recv return < 0; errno={}\n", err_no);
                 throw PgIOError();
             }
 
@@ -408,7 +408,7 @@ namespace springtail
             char *str = &_copy_buffer[offset];
             int str_len = strnlen(str, _copy_buffer_length - offset);
             if (str_len < _copy_buffer_length - offset - 1) {
-                LOG_ERROR(LOG_PG_REPL, "Code: {}, Msg: {}\n", code, str);
+                LOG_ERROR("Code: {}, Msg: {}\n", code, str);
                 offset += str_len + 1;
             } else {
                 break;
@@ -479,12 +479,12 @@ namespace springtail
                 return;
 
             case MSG_COPY_DONE:
-                LOG_WARN(LOG_PG_REPL, "Got COPY DONE message\n");
+                LOG_WARN("Got COPY DONE message\n");
                 throw PgCopyDoneError();
 
             case MSG_ERROR_RESPONSE:
                 // message is decoded in readMsgHeader
-                LOG_ERROR(LOG_PG_REPL, "Got error response\n");
+                LOG_ERROR("Got error response\n");
                 throw PgIOError();
 
             case MSG_NOTIFICATION_RESPONSE:
@@ -519,7 +519,7 @@ namespace springtail
 
                     // there shouldn't be more data
                     if (offset != _copy_msg_length) {
-                        LOG_WARN(LOG_PG_REPL, "Found unexpected data after keep alive message\n");
+                        LOG_WARN("Found unexpected data after keep alive message\n");
                         throw PgUnexpectedDataError();
                     }
 
@@ -542,7 +542,7 @@ namespace springtail
                     break;
 
                 default:
-                    LOG_WARN(LOG_PG_REPL, "Unknown copy data command: {}", _copy_buffer[0]);
+                    LOG_WARN("Unknown copy data command: {}", _copy_buffer[0]);
                     throw PgUnknownMessageError();
             }
         }
@@ -607,7 +607,7 @@ namespace springtail
     {
         // handle keep alive
         if (length < (1 + 8 + 8)) {
-            LOG_WARN(LOG_PG_REPL, "Error keep alive msg too small: len={}\n", length);
+            LOG_WARN("Error keep alive msg too small: len={}\n", length);
             throw PgMessageTooSmallError();
         }
 
@@ -649,7 +649,7 @@ namespace springtail
     {
         // handle log data
         if (length < (1 + 8 + 8 + 8)) {
-            LOG_ERROR(LOG_PG_REPL, "Error xlog data message too small: len={}\n", length);
+            LOG_ERROR("Error xlog data message too small: len={}\n", length);
             throw PgMessageTooSmallError();
         }
 
@@ -693,7 +693,7 @@ namespace springtail
         // process results; sanity checks first
         if (_connection->status() != PGRES_TUPLES_OK ||
             _connection->ntuples() <= 0 || _connection->length(0, 0) < 3) {
-            LOG_ERROR(LOG_PG_REPL, "Error querying current LSN\n");
+            LOG_ERROR("Error querying current LSN\n");
             throw PgQueryError();
         }
 
@@ -807,7 +807,7 @@ namespace springtail
         // process results
         if (_connection->status() != PGRES_COMMAND_OK &&
             _connection->status() != PGRES_TUPLES_OK) {
-            LOG_ERROR(LOG_PG_REPL, "Error executing query: msg={}\n", _connection->error_message());
+            LOG_ERROR("Error executing query: msg={}\n", _connection->error_message());
             _connection->clear();
 
             throw PgQueryError();
@@ -850,7 +850,7 @@ namespace springtail
         // process results
         if (_connection->status() != PGRES_TUPLES_OK &&
             _connection->status() != PGRES_COMMAND_OK) {
-            LOG_ERROR(LOG_PG_REPL, "Error dropping replication slot: {}\n", slot_name);
+            LOG_ERROR("Error dropping replication slot: {}\n", slot_name);
             _connection->clear();
             throw PgQueryError();
         }
@@ -877,7 +877,7 @@ namespace springtail
         // process results
         if (_connection->status() != PGRES_COMMAND_OK &&
             _connection->status() != PGRES_TUPLES_OK) {
-            LOG_ERROR(LOG_PG_REPL, "Error creating replication slot: {}", slot_name);
+            LOG_ERROR("Error creating replication slot: {}", slot_name);
             _connection->clear();
             throw PgQueryError();
         }
@@ -885,7 +885,7 @@ namespace springtail
         LOG_DEBUG(LOG_PG_REPL, "Replication slot created successfully: {}", slot_name);
 
         if (_connection->ntuples() < 1 && _connection->nfields() != 2) {
-            LOG_ERROR(LOG_PG_REPL, "Replication slot creation did not return expected number of tuples for slot: {}", slot_name);
+            LOG_ERROR("Replication slot creation did not return expected number of tuples for slot: {}", slot_name);
             _connection->clear();
             throw PgQueryError();
         }

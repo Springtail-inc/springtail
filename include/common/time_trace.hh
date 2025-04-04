@@ -4,8 +4,8 @@
 #include <list>
 
 #include <common/logging.hh>
+#include <common/open_telemetry.hh>
 #include <common/timer.hh>
-#include <common/tracing.hh>
 
 namespace springtail::time_trace {
 
@@ -74,7 +74,7 @@ struct ScopedTrace
     ScopedTrace(const ScopedTrace&) = delete;
 };
 
-/** 
+/**
  * This is a place for sharing traces across translation units.
  * The variable is instantiated in time_trace.cc of the common lib.
  */
@@ -97,7 +97,7 @@ inline time_trace::Trace& create_trace(FlatTraceSet& set, std::string_view n)
 #define TIME_TRACESET_INIT(trace_set, name) trace_set.init(name)
 #define TIME_TRACESET_UPDATE(trace_set, name, trace) trace_set.update(name, trace)
 #define TIME_TRACESET_RESET(trace_set) trace_set.reset()
-#define TIME_TRACESET_LOG(trace_set) LOG_INFO(LOG_ALL, "{}", trace_set.format())
+#define TIME_TRACESET_LOG(trace_set) LOG_INFO("{}", trace_set.format())
 
 #define TIME_TRACE(trace) time_trace::Trace trace
 #define TIME_TRACE_START(trace) trace.start()

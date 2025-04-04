@@ -13,13 +13,13 @@ set(COMMON_LIB_SOURCES
   dns_resolver.cc
   exception.cc
   logging.cc
+  open_telemetry.cc
   properties.cc
   redis.cc
   redis_cache.cc
   multi_queue_thread_manager.cc
   timestamp.cc
   time_trace.cc
-  tracing.cc
   tracking_allocator.cc
   aws.cc
 )

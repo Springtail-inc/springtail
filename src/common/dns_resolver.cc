@@ -22,7 +22,7 @@ namespace springtail {
         ares_library_init(ARES_LIB_INIT_ALL);
 
         if (!ares_threadsafety()) {
-            LOG_ERROR(LOG_ALL, "c-ares is not thread safe");
+            LOG_ERROR("c-ares is not thread safe");
             throw Error("c-ares is not thread safe");
         }
 
@@ -42,7 +42,7 @@ namespace springtail {
         // Initialize channel to run queries;
         // a single channel can accept unlimited queries
         if (ares_init_options(&_channel, &options, optmask) != ARES_SUCCESS) {
-            LOG_ERROR(LOG_ALL, "Failed to initialize c-ares channel");
+            LOG_ERROR("Failed to initialize c-ares channel");
             throw Error("Failed to initialize c-ares channel");
         }
     }
@@ -65,7 +65,7 @@ namespace springtail {
         options.timeout = DNS_TIMEOUT_SECS; // timeout for query
 
         if (ares_init_options(&_channel, &options, optmask) != ARES_SUCCESS) {
-            LOG_ERROR(LOG_ALL, "Failed to set DNS cache TTL");
+            LOG_ERROR("Failed to set DNS cache TTL");
             throw Error("Failed to set DNS cache TTL");
         }
     }
@@ -126,7 +126,7 @@ namespace springtail {
         request.cv.wait(lock, [&request] { return request.completed; });
 
         if (request.status != ARES_SUCCESS || request.ip.empty()) {
-            LOG_ERROR(LOG_ALL, "Failed to resolve hostname: {}", hostname);
+            LOG_ERROR("Failed to resolve hostname: {}", hostname);
             return std::nullopt;
         }
 
@@ -146,7 +146,7 @@ namespace springtail {
 
         // check for error, if so cleanup and mark as completed
         if (status != ARES_SUCCESS || result == nullptr) {
-            LOG_ERROR(LOG_ALL, "Failed to resolve hostname: status: {}", status);
+            LOG_ERROR("Failed to resolve hostname: status: {}", status);
             if (result != nullptr) {
                 ares_freeaddrinfo(result);
             }

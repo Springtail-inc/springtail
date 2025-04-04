@@ -145,7 +145,7 @@ namespace springtail {
                     // timeout, check for shutdown
                     continue;
                 } catch (const sw::redis::Error &e) {
-                    LOG_ERROR(LOG_ALL, "Error consuming from redis: {} on thread {}\n", e.what(), _id);
+                    LOG_ERROR("Error consuming from redis: {} on thread {}\n", e.what(), _id);
                     break;
                 }
             }

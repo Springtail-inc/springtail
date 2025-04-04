@@ -162,7 +162,7 @@ PgXidSubscriberRunner::start()
     LOG_DEBUG(LOG_XID_MGR, "PgXidSubscriberRunner starting with cache size {}", roots_cache_size);
 
     if (!roots_cache_size) {
-        LOG_ERROR(LOG_XID_MGR, "Bad cache size, terminating PgXidSubscriberRunner");
+        LOG_ERROR("Bad cache size, terminating PgXidSubscriberRunner");
         return false;
     }
 
@@ -171,7 +171,7 @@ PgXidSubscriberRunner::start()
 
     // fetch RPC properties for the sys_tbl_mgr server
     if (!Json::get_to(json, "rpc_config", rpc_json)) {
-        LOG_ERROR(LOG_XID_MGR, "SysTblMgr RPC settings are not found, terminating PgXidSubscriberRunner");
+        LOG_ERROR("SysTblMgr RPC settings are not found, terminating PgXidSubscriberRunner");
         return false;
     }
 

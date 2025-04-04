@@ -577,7 +577,7 @@ namespace springtail::pg_proxy
                 }
                 add_replica(std::make_shared<DatabaseInstance>(Session::Type::REPLICA, host.value(), db_prefix.value(), port.value()));
             } else {
-                LOG_ERROR(LOG_PROXY, "Could not find the value for replica database {} either host or port", fdw_id);
+                LOG_ERROR("Could not find the value for replica database {} either host or port", fdw_id);
                 throw ProxyServerError();
             }
         }

@@ -1,6 +1,6 @@
 #include <common/filesystem.hh>
 #include <common/logging.hh>
-#include <common/tracing.hh>
+#include <common/open_telemetry.hh>
 
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
@@ -55,7 +55,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::commit(uint64_t xid, PostgresTimestamp commit_ts)
     {
-        auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::tracer_static("PgLogReader")->WithActiveSpan(_span);
         _span->AddEvent("commit", {{"pg_commit_time", commit_ts.to_unix_ns()}});
 
         // go through each subtxn and push it's outstanding batches to the WriteCache
@@ -101,7 +101,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::abort(PostgresTimestamp abort_ts)
     {
-        auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::tracer_static("PgLogReader")->WithActiveSpan(_span);
         _span->AddEvent("aborted", {{"pg_abort_time", abort_ts.to_unix_ns()}});
 
         // drop any batches for all active txns
@@ -117,7 +117,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::abort_subtxn(int32_t pg_xid, PostgresTimestamp abort_ts)
     {
-        auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::tracer_static("PgLogReader")->WithActiveSpan(_span);
 
         // Add subtransaction abort event with the provided timestamp
         _span->AddEvent("subtransaction_abort", {
@@ -188,7 +188,7 @@ namespace springtail::pg_log_mgr {
             return;
         }
 
-        auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::tracer_static("PgLogReader")->WithActiveSpan(_span);
         auto txn = _get_txn(pg_xid);
 
         // get the Extent containing mutations
@@ -229,7 +229,7 @@ namespace springtail::pg_log_mgr {
     PgLogReader::Batch::truncate(uint64_t current_xid,
                                  const PgMsgTruncate &msg)
     {
-        auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::tracer_static("PgLogReader")->WithActiveSpan(_span);
 
         // get the current txn
         auto txn = _get_txn(msg.xid);
@@ -269,7 +269,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::schema_change(int32_t tid, int32_t pg_xid, PgMsgPtr msg)
     {
-        auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::tracer_static("PgLogReader")->WithActiveSpan(_span);
 
         // get the table entry
         auto txn = _get_txn(pg_xid);
@@ -560,7 +560,7 @@ namespace springtail::pg_log_mgr {
             }
 
         default:
-            LOG_ERROR(LOG_PG_LOG_MGR, "Message type {} not handled", static_cast<uint8_t>(change->msg_type));
+            LOG_ERROR("Message type {} not handled", static_cast<uint8_t>(change->msg_type));
             throw Error();
         }
     }
@@ -787,7 +787,7 @@ namespace springtail::pg_log_mgr {
             }
 
         default:
-            LOG_WARN(LOG_PG_LOG_MGR, "Unknown message type: {}", static_cast<uint8_t>(msg->msg_type));
+            LOG_WARN("Unknown message type: {}", static_cast<uint8_t>(msg->msg_type));
             break;
         }
     }
@@ -834,7 +834,7 @@ namespace springtail::pg_log_mgr {
         PgTransactionPtr xact = _current_xact;
         if (_current_xact == nullptr || commit_msg.commit_lsn != _current_xact->xact_lsn) {
             // we don't have the start of the transaction...
-            LOG_WARN(LOG_PG_LOG_MGR, "No matching xact for commit: commit_lsn={}\n", commit_msg.commit_lsn);
+            LOG_WARN("No matching xact for commit: commit_lsn={}\n", commit_msg.commit_lsn);
             return;
         }
 
@@ -921,7 +921,7 @@ namespace springtail::pg_log_mgr {
         auto itr = _xact_map.find(commit_msg.xid);
         if (itr == _xact_map.end()) {
             // no start streaming xact found...
-            LOG_WARN(LOG_PG_LOG_MGR, "No matching xact for stream commit: xid={}, xact_lsn={}",
+            LOG_WARN("No matching xact for stream commit: xid={}, xact_lsn={}",
                         commit_msg.xid, commit_msg.xact_lsn);
             return;
         }
@@ -977,7 +977,7 @@ namespace springtail::pg_log_mgr {
         auto itr = _xact_map.find(abort_msg.xid);
         if (itr == _xact_map.end()) {
             // no start streaming xact found...
-            LOG_WARN(LOG_PG_LOG_MGR, "No matching xact for stream abort: xid={}, xact_lsn={}",
+            LOG_WARN("No matching xact for stream abort: xid={}, xact_lsn={}",
                         abort_msg.xid, abort_msg.abort_lsn);
             return;
         }
@@ -1014,7 +1014,7 @@ namespace springtail::pg_log_mgr {
             auto itr = _xact_map.find(pg_xid);
             if (itr == _xact_map.end()) {
                 // no start streaming xact found...
-                LOG_WARN(LOG_PG_LOG_MGR, "PG_XID not found for message: pg_xid={}\n", pg_xid);
+                LOG_WARN("PG_XID not found for message: pg_xid={}\n", pg_xid);
                 return;
             }
 

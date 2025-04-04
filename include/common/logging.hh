@@ -1,57 +1,51 @@
 #pragma once
 
-#include <concepts>
 #include <map>
 #include <optional>
-
 #include <string>
 
 #include <fmt/format.h>
-#include <fmt/ostream.h>
 #include <fmt/std.h>
-#include <fmt/ranges.h>
-
-#include <opentelemetry/context/runtime_context.h>
-#include <opentelemetry/baggage/baggage_context.h>
 
 #include <spdlog/spdlog.h>
 
+#include <common/open_telemetry.hh>
 #include <common/singleton.hh>
 
 #if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_TRACE
-    #define LOG_TRACE(module,fmt, ...) springtail::logging::Logger::log(module, __func__, __FILE__, __LINE__, spdlog::level::trace, fmt, ##__VA_ARGS__)
+    #define LOG_TRACE(module,fmt, ...) springtail::logging::Logger::debug(module, __func__, __FILE__, __LINE__, spdlog::level::trace, fmt, ##__VA_ARGS__)
 #else
-    #define LOG_TRACE(module, ...) (void)0
+    #define LOG_TRACE(module, fmt, ...) (void)0
 #endif
 
 #if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG
-    #define LOG_DEBUG(module,fmt, ...) springtail::logging::Logger::log(module, __func__, __FILE__, __LINE__, spdlog::level::debug, fmt, ##__VA_ARGS__)
+    #define LOG_DEBUG(module, fmt, ...) springtail::logging::Logger::debug(module, __func__, __FILE__, __LINE__, spdlog::level::debug, fmt, ##__VA_ARGS__)
 #else
-    #define LOG_DEBUG(module, ...) (void)0
+    #define LOG_DEBUG(module, fmt, ...) (void)0
 #endif
 
 #if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_INFO
-    #define LOG_INFO(module,fmt, ...) springtail::logging::Logger::log(module, __func__, __FILE__, __LINE__, spdlog::level::info, fmt, ##__VA_ARGS__)
+    #define LOG_INFO(fmt, ...) springtail::logging::Logger::log(__func__, __FILE__, __LINE__, spdlog::level::info, fmt, ##__VA_ARGS__)
 #else
-    #define LOG_INFO(module, ...) (void)0
+    #define LOG_INFO(fmt, ...) (void)0
 #endif
 
 #if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_WARN
-    #define LOG_WARN(module,fmt, ...) springtail::logging::Logger::log(module, __func__, __FILE__, __LINE__, spdlog::level::warn, fmt, ##__VA_ARGS__)
+    #define LOG_WARN(fmt, ...) springtail::logging::Logger::log(__func__, __FILE__, __LINE__, spdlog::level::warn, fmt, ##__VA_ARGS__)
 #else
-    #define LOG_WARN(module, ...) (void)0
+    #define LOG_WARN(fmt, ...) (void)0
 #endif
 
 #if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_ERROR
-    #define LOG_ERROR(module,fmt, ...) springtail::logging::Logger::log(module, __func__, __FILE__, __LINE__, spdlog::level::err, fmt, ##__VA_ARGS__)
+    #define LOG_ERROR(fmt, ...) springtail::logging::Logger::log(__func__, __FILE__, __LINE__, spdlog::level::err, fmt, ##__VA_ARGS__)
 #else
-    #define LOG_ERROR(module, ...) (void)0
+    #define LOG_ERROR(fmt, ...) (void)0
 #endif
 
 #if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_CRITICAL
-    #define LOG_CRITICAL(module,fmt, ...) springtail::logging::Logger::log(module, __func__, __FILE__, __LINE__, spdlog::level::critical, fmt, ##__VA_ARGS__)
+    #define LOG_CRITICAL(fmt, ...) springtail::logging::Logger::log( __func__, __FILE__, __LINE__, spdlog::level::critical, fmt, ##__VA_ARGS__)
 #else
-    #define LOG_CRITICAL(module, ...) (void)0
+    #define LOG_CRITICAL(fmt, ...) (void)0
 #endif
 
 namespace springtail {
@@ -80,17 +74,9 @@ namespace springtail {
      * @brief Forward declaration for OpenTelemetrySink.
      *
      */
-    class OpenTelemetrySink;
+    // class OpenTelemetrySink;
 
     namespace logging {
-        /**
-         * @brief Concept for a template class parameter to be derived from sink class.
-         *
-         * @tparam T
-         */
-        template <typename T>
-        concept DerivedFromSink = std::derived_from<T, spdlog::sinks::sink>;
-
         /**
          * @brief Logger singleton class
          *
@@ -99,34 +85,7 @@ namespace springtail {
             friend class Singleton<Logger>;
         public:
             /**
-             * @brief Set the context variables object
-             *
-             * @param attributes - map of key/value pairs
-             * @return std::unique_ptr<opentelemetry::context::Token> - scope token
-             */
-            static std::unique_ptr<opentelemetry::context::Token>
-            set_context_variables(const std::unordered_map<std::string, std::string>& attributes);
-
-            /**
-             * @brief Set the context variable object
-             *
-             * @param attr_key - varaible key
-             * @param attr_value - variable value
-             * @return std::unique_ptr<opentelemetry::context::Token> - scope token
-             */
-            static std::unique_ptr<opentelemetry::context::Token>
-            set_context_variable(const std::string &attr_key, const std::string &attr_value);
-
-            /**
-             * @brief Get the context variables object
-             *
-             * @return std::unordered_map<std::string, std::string> - map of current key/value pairs for the given scope
-             */
-            static std::unordered_map<std::string, std::string>
-            get_context_variables();
-
-            /**
-             * @brief Main logging function
+             * @brief Debug logging function
              *
              * @tparam Args - argument list
              * @param log_id - identifier filtered by the log mask
@@ -138,13 +97,30 @@ namespace springtail {
              * @param args - argument list
              */
             template <typename... Args> static void
-            log(int log_id, const char *func, const char *file, int line, spdlog::level::level_enum level, fmt::format_string<Args...> fmt, Args&&... args)
+            debug(int log_id, const char *func, const char *file, int line, spdlog::level::level_enum level, fmt::format_string<Args...> fmt, Args&&... args)
             {
                 if (_inited_flag) {
                     if ((log_id & get_instance()->_log_mask) == 0) {
                         return;
                     }
                 }
+                _log(spdlog::source_loc{file, line, func}, level, fmt, std::forward<Args>(args)...);
+            }
+
+            /**
+             * @brief Debug logging function
+             *
+             * @tparam Args - argument list
+             * @param func - calling function name
+             * @param file - file name
+             * @param line - line number
+             * @param level - log level
+             * @param fmt - format string
+             * @param args - argument list
+             */
+             template <typename... Args> static void
+            log(const char *func, const char *file, int line, spdlog::level::level_enum level, fmt::format_string<Args...> fmt, Args&&... args)
+            {
                 _log(spdlog::source_loc{file, line, func}, level, fmt, std::forward<Args>(args)...);
             }
 
@@ -158,6 +134,8 @@ namespace springtail {
             void init(const std::optional<uint32_t> &module_mask = std::nullopt,
                       const std::optional<std::string> &log_name = std::nullopt,
                       bool is_daemon = false);
+
+            static spdlog::level::level_enum get_log_level_from_string(const std::string &level);
 
         protected:
             /** Helper class for forwarding failed CHECKs and DCHECKs to the log */
@@ -200,7 +178,7 @@ namespace springtail {
              */
             static inline std::atomic<bool> _inited_flag{false};
             SpdlogSink _spdlog_sink;        ///< sink object for CHECKs and DCHECKs
-            std::shared_ptr<OpenTelemetrySink> _otel_sink{nullptr};     ///< OTEL sink
+            // std::shared_ptr<OpenTelemetrySink> _otel_sink{nullptr};     ///< OTEL sink
 
             uint32_t _log_mask{LOG_ALL};    ///< current log mask
 
@@ -209,17 +187,6 @@ namespace springtail {
              *
              */
             void _internal_shutdown() override;
-
-            /**
-             * @brief This function sets log level of the sink by converting string to the
-             *      appropriate log level
-             *
-             * @tparam DerivedFromSink  - template parameter that should be a class derived from sink
-             * @param logger_sink       - sink class instnce
-             * @param level             - log level string
-             */
-            template <typename DerivedFromSink> static void
-            _set_level(std::shared_ptr<DerivedFromSink> &logger_sink, const std::string &level);
 
             /**
              * @brief Internal log function that logs to spdlog and depending on configuration to OTEL.
@@ -237,18 +204,13 @@ namespace springtail {
                 std::string formatted_msg = fmt::vformat(fmt, fmt::make_format_args(args...));
 
                 // log to otel sink
-                if (_inited_flag && get_instance()->_otel_sink.get() != nullptr) {
-                    spdlog::details::log_msg message(loc, spdlog::default_logger()->name(), lvl, formatted_msg);
-                    _log_otel(message);
-                }
+                open_telemetry::OpenTelemetry::log(loc, spdlog::default_logger()->name(), lvl, formatted_msg);
 
                 // put together the full message
                 std::string full_msg;
 
                 // extract baggage
-                auto ctx = opentelemetry::context::RuntimeContext::GetCurrent();
-                auto baggage = opentelemetry::baggage::GetBaggage(ctx);
-                baggage->GetAllEntries([&full_msg](opentelemetry::nostd::string_view key, opentelemetry::nostd::string_view value) {
+                open_telemetry::OpenTelemetry::get_context_variables([&full_msg](opentelemetry::nostd::string_view key, opentelemetry::nostd::string_view value) {
                     std::string_view key_sv{key.data(), key.size()};
                     std::string_view value_sv{value.data(), value.size()};
 
@@ -259,13 +221,6 @@ namespace springtail {
                 full_msg += formatted_msg;
                 spdlog::default_logger()->log(loc, lvl, full_msg);
             }
-
-            /**
-             * @brief Function that performs logging to OTEL.
-             *
-             * @param msg - spdlog message
-             */
-            static void _log_otel(const spdlog::details::log_msg &msg);
         };
     } // namespace logging
 

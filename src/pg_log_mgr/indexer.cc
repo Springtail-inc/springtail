@@ -15,7 +15,7 @@ namespace springtail::committer {
         for (auto i = 0; i != worker_count; ++i) {
             _workers.emplace_back([this](std::stop_token st) { task(st); });
         }
-        LOG_INFO(LOG_ALL, "Indexer created: {}", worker_count);
+        LOG_INFO("Indexer created: {}", worker_count);
     }
 
     void Indexer::process_ddls(uint64_t db_id, uint64_t xid, nlohmann::json const& ddls)
@@ -130,7 +130,7 @@ namespace springtail::committer {
                 _drop(st, key, params);
             }
         }
-        LOG_INFO(LOG_ALL, "Indexer thread joined");
+        LOG_INFO("Indexer thread joined");
     }
 
     void Indexer::_drop(std::stop_token st, const Key& key, const IndexParams& idx)
@@ -138,7 +138,7 @@ namespace springtail::committer {
         assert(idx._ddl.is_null());
 
         auto [db_id, index_id] = key;
-        LOG_INFO(LOG_ALL, "Drop index {}, {}, {}", db_id, index_id, idx._xid);
+        LOG_INFO("Drop index {}, {}, {}", db_id, index_id, idx._xid);
 
         auto client = sys_tbl_mgr::Client::get_instance();
 
@@ -160,7 +160,7 @@ namespace springtail::committer {
         if (info.id() == 0) {
             //TODO: it seems like PG generates DROP INDEX with table ids, need
             //to investigate it more.
-            LOG_INFO(LOG_ALL, "The index is not valid: {}", index_id);
+            LOG_INFO("The index is not valid: {}", index_id);
             return;
         }
 
@@ -168,7 +168,7 @@ namespace springtail::committer {
         if (!exists) {
             // when dropping a table, PG generates DROP TABLE first
             // following by DROP INDEX. We ignore DROP INDEX after DROP TABLE.
-            LOG_INFO(LOG_ALL, "Table doesn't exists: {}, {}", info.table_id(), index_id);
+            LOG_INFO("Table doesn't exists: {}, {}", info.table_id(), index_id);
             return;
         }
 
@@ -197,7 +197,7 @@ namespace springtail::committer {
         meta->roots.erase(it);
         client->update_roots(db_id, info.table_id(), idx._xid, *meta);
 
-        LOG_INFO(LOG_ALL, "Index dropped: {}:{}", db_id, index_id);
+        LOG_INFO("Index dropped: {}:{}", db_id, index_id);
     }
 
     MutableBTreePtr

@@ -379,13 +379,13 @@ namespace springtail::pg_proxy {
             try {
                 func(std::forward<Args>(args)...);
             } catch (ProxyError &e) {
-                LOG_ERROR(LOG_PROXY, "Error in session: {}", e.what());
+                LOG_ERROR("Error in session: {}", e.what());
                 _state = ERROR;
             } catch (std::exception &e) {
-                LOG_ERROR(LOG_PROXY, "Error in session: {}", e.what());
+                LOG_ERROR("Error in session: {}", e.what());
                 _state = ERROR;
             } catch (...) {
-                LOG_ERROR(LOG_PROXY, "Unknown exception");
+                LOG_ERROR("Unknown exception");
                 _state = ERROR;
             }
 

@@ -226,7 +226,7 @@ namespace springtail::pg_proxy {
                     break;
 
                 default:
-                    LOG_WARN(LOG_PROXY, "Unknown message: {}", (int8_t)msg->type());
+                    LOG_WARN("Unknown message: {}", (int8_t)msg->type());
                     break;
             }
         });
@@ -277,7 +277,7 @@ namespace springtail::pg_proxy {
 
             // if not in ready state, we do a hard shutdown and close the connection
             // this will return us through Session::_handle_error() and to shutdown_session()
-            LOG_WARN(LOG_PROXY, "[S:{}] Server session shutting down, state not ready {}", _id, (int8_t)_state);
+            LOG_WARN("[S:{}] Server session shutting down, state not ready {}", _id, (int8_t)_state);
             _send_shutdown();
             _state = ERROR;
 
@@ -338,7 +338,7 @@ namespace springtail::pg_proxy {
                     break;
 
                 default:
-                    LOG_ERROR(LOG_PROXY, "Unknown state: {:d}", (int8_t)_state);
+                    LOG_ERROR("Unknown state: {:d}", (int8_t)_state);
                     _state = ERROR;
                     break;
             }
@@ -388,7 +388,7 @@ namespace springtail::pg_proxy {
 
                 if (status == 'E') {
                     // error in transaction, need to reset session
-                    LOG_WARN(LOG_PROXY, "[S:{}] Error in transaction while resetting session", _id);
+                    LOG_WARN("[S:{}] Error in transaction while resetting session", _id);
                     _state = ERROR;
                     return;
                 }
@@ -602,7 +602,7 @@ namespace springtail::pg_proxy {
                 break;
             }
             default:
-                LOG_ERROR(LOG_PROXY, "Unknown message: {}", code);
+                LOG_ERROR("Unknown message: {}", code);
                 _state = ERROR;
                 break;
         }
@@ -633,12 +633,12 @@ namespace springtail::pg_proxy {
 
         ProxyProtoError::decode_error(buffer, severity, text, code, message);
 
-        LOG_ERROR(LOG_PROXY, "Error response from server: seq_id: {}, {}, {}, {}", seq_id, text, code, message);
+        LOG_ERROR("Error response from server: seq_id: {}, {}, {}, {}", seq_id, text, code, message);
 
         // depending on error, behavior is different
         // if text is "FATAL" or "PANIC" we should stop, sever connection
         if (text == "FATAL" || text == "PANIC") {
-            LOG_ERROR(LOG_PROXY, "Got fatal error from server: {}", message);
+            LOG_ERROR("Got fatal error from server: {}", message);
             _state = ERROR;
         }
 
@@ -955,7 +955,7 @@ namespace springtail::pg_proxy {
             }
 
             default:
-                LOG_WARN(LOG_PROXY, "Query not cached");
+                LOG_WARN("Query not cached");
                 assert(0); // shouldn't be set as a dependency it should reside on the primary
         }
     }
@@ -1085,7 +1085,7 @@ namespace springtail::pg_proxy {
 
         auto connection = instance->create_connection();
         if (connection == nullptr) {
-            LOG_ERROR(LOG_PROXY, "Failed to create connection for server db");
+            LOG_ERROR("Failed to create connection for server db");
             throw ProxyIOConnectionError();
         }
 

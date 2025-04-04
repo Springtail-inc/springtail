@@ -1,17 +1,13 @@
-#include <xid_mgr/xid_mgr_server.hh>
-
-#include <fcntl.h>
-#include <sys/stat.h>
-
 #include <common/common.hh>
 #include <common/json.hh>
 #include <common/logging.hh>
+#include <common/open_telemetry.hh>
 #include <common/properties.hh>
 #include <grpcpp/grpcpp.h>
 #include <nlohmann/json.hpp>
 #include <proto/xid_manager.grpc.pb.h>
-#include <memory>
 
+#include <xid_mgr/xid_mgr_server.hh>
 #include <xid_mgr/xid_mgr_service.hh>
 
 
@@ -148,7 +144,7 @@ PartitionPtr XidMgrServer::_get_partition(uint64_t db_id, bool create)
 uint64_t XidMgrServer::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
 {
     PartitionPtr partition;
-    auto token = logging::Logger::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
+    auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
     // first try to get partition without write lock
     std::shared_lock lock(_mutex);
     partition = _get_partition(db_id, false);
@@ -165,7 +161,7 @@ uint64_t XidMgrServer::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
 void XidMgrServer::commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_changes)
 {
     PartitionPtr partition;
-    auto token = logging::Logger::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(xid)}});
+    auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(xid)}});
     // first try to get partition without write lock
     std::shared_lock rd_lock(_mutex);
     partition = _get_partition(db_id, false);
@@ -193,7 +189,7 @@ void XidMgrServer::record_ddl_change(uint64_t db_id, uint64_t xid)
 {
     // note: code is nearly identical to commit_xid()... make sure they stay in sync
 
-    auto token = logging::Logger::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(xid)}});
+    auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(xid)}});
     PartitionPtr partition;
 
     // first try to get partition without write lock

@@ -15,7 +15,7 @@ std::optional<std::string> resolve(const std::string &hostname) {
     // use gethostbyname to resolve the hostname
     struct hostent *he = gethostbyname(hostname.c_str());
     if (he == nullptr) {
-        LOG_ERROR(LOG_ALL, "Failed to resolve hostname {}", hostname);
+        LOG_ERROR("Failed to resolve hostname {}", hostname);
         return std::nullopt;
     }
     return std::string(inet_ntoa(*((struct in_addr *)he->h_addr)));
@@ -30,7 +30,7 @@ TEST(DNSTest, SingleThread) {
         std::string hostname = "www.google.com";
         std::optional<std::string> ip = dns->resolve(hostname);
         //std::optional<std::string> ip = resolve(hostname);
-        LOG_INFO(LOG_ALL, "{}: Resolved hostname {} to IP {}", i, hostname, ip);
+        LOG_INFO("{}: Resolved hostname {} to IP {}", i, hostname, ip);
     }
 }
 
@@ -43,7 +43,7 @@ TEST(DNSTest, MultithreadTest) {
         threads.push_back(std::thread([i, dns]() {
             std::string hostname = "www.google.com";
             std::optional<std::string> ip = dns->resolve(hostname);
-            LOG_INFO(LOG_ALL, "{}: Resolved hostname {} to IP {}", i, hostname, ip);
+            LOG_INFO("{}: Resolved hostname {} to IP {}", i, hostname, ip);
         }));
     }
 

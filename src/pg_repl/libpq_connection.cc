@@ -195,7 +195,7 @@ namespace springtail {
             PQresultStatus(res) != PGRES_TUPLES_OK &&
             PQresultStatus(res) != PGRES_COPY_OUT) {
             std::string error_message = fmt::format("msg={}, status={}", PQerrorMessage(_connection), PQresultErrorMessage(res));
-            LOG_ERROR(LOG_PG_REPL, "Error executing query: {}", error_message);
+            LOG_ERROR("Error executing query: {}", error_message);
             PQclear(res);
             throw PgQueryError();
         }
@@ -456,7 +456,7 @@ namespace springtail {
                     hosttype, host, db_port, name, user,
                     (replication ? "replication=database ": ""), encoding);
 
-                LOG_ERROR(LOG_PG_REPL, "Error connecting: conninfo: {}, msg: {}", conninfo, PQerrorMessage(connection));
+                LOG_ERROR("Error connecting: conninfo: {}, msg: {}", conninfo, PQerrorMessage(connection));
                 PQfinish(connection);
 
                 // sleep and backoff
@@ -471,7 +471,7 @@ namespace springtail {
         }
 
         if (retries >= MAX_RETRY_COUNT) {
-            LOG_ERROR(LOG_PG_REPL, "Failed to connect to database, too many retries: {}", db_name);
+            LOG_ERROR("Failed to connect to database, too many retries: {}", db_name);
             throw PgConnectionError();
         }
 

@@ -8,7 +8,6 @@
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/json.hh>
-#include <common/opentelemetry_sink.hh>
 
 namespace springtail::logging {
 
@@ -30,72 +29,24 @@ namespace springtail::logging {
         {"all", LOG_ALL}
     };
 
-    std::unique_ptr<opentelemetry::context::Token>
-    Logger::set_context_variables(const std::unordered_map<std::string, std::string>& attributes)
+    spdlog::level::level_enum
+    Logger::get_log_level_from_string(const std::string &level_str)
     {
-        auto ctx = opentelemetry::context::RuntimeContext::GetCurrent();
-
-        auto baggage = opentelemetry::baggage::GetBaggage(ctx);
-
-        // Iterate over attributes and set baggage values
-        for (const auto& attribute : attributes) {
-            baggage = baggage->Set(attribute.first, attribute.second);
-        }
-
-        auto updated_context = opentelemetry::baggage::SetBaggage(ctx, baggage);
-        return opentelemetry::context::RuntimeContext::Attach(updated_context);
-    }
-
-    std::unique_ptr<opentelemetry::context::Token>
-    Logger::set_context_variable(const std::string &attr_key, const std::string &attr_value)
-    {
-        auto ctx = opentelemetry::context::RuntimeContext::GetCurrent();
-
-        auto baggage = opentelemetry::baggage::GetBaggage(ctx);
-        baggage = baggage->Set(attr_key, attr_value);
-
-        auto updated_context = opentelemetry::baggage::SetBaggage(ctx, baggage);
-        return opentelemetry::context::RuntimeContext::Attach(updated_context);
-    }
-
-    std::unordered_map<std::string, std::string>
-    Logger::get_context_variables()
-    {
-        auto ctx = opentelemetry::context::RuntimeContext::GetCurrent();
-        auto baggage = opentelemetry::baggage::GetBaggage(ctx);
-        std::unordered_map<std::string, std::string> attributes;
-
-        // Iterate over all the baggage entries and populate the attributes object
-        baggage->GetAllEntries([&attributes](opentelemetry::nostd::string_view key, opentelemetry::nostd::string_view value) {
-            attributes[std::string(key)] = std::string(value);
-            return true;
-        });
-
-        return attributes;
-    }
-
-    template <typename DerivedFromSink> void
-    Logger::_set_level(std::shared_ptr<DerivedFromSink> &logger_sink, const std::string &level)
-    {
-        if (level == "debug") {
-            logger_sink->set_level(spdlog::level::debug);
-        } else if (level == "info") {
-            logger_sink->set_level(spdlog::level::info);
-        } else if (level == "warn") {
-            logger_sink->set_level(spdlog::level::warn);
-        } else if (level == "error") {
-            logger_sink->set_level(spdlog::level::err);
-        } else if (level == "critical") {
-            logger_sink->set_level(spdlog::level::critical);
+        spdlog::level::level_enum log_level = spdlog::level::off;
+        if (level_str == "debug") {
+            log_level = spdlog::level::debug;
+        } else if (level_str == "info") {
+            log_level = spdlog::level::info;
+        } else if (level_str == "warn") {
+            log_level = spdlog::level::warn;
+        } else if (level_str == "error") {
+            log_level = spdlog::level::err;
+        } else if (level_str == "critical") {
+            log_level = spdlog::level::critical;
         } else {
-            logger_sink->set_level(spdlog::level::trace);
+            log_level = spdlog::level::trace;
         }
-    }
-
-    void
-    Logger::_log_otel(const spdlog::details::log_msg &msg)
-    {
-        get_instance()->_otel_sink->log(msg);
+        return log_level;
     }
 
     void
@@ -114,6 +65,7 @@ namespace springtail::logging {
         std::string log_level = Json::get_or<std::string>(props, "log_level", "trace");
         std::string pattern = Json::get_or<std::string>(props, "log_pattern", "[%Y-%m-%d %T.%e %z] [%^%l%$] [%s:%#:%!] [thread %t] %v");
         bool log_rotation_enabled = Json::get_or<bool>(props, "log_rotation_enabled", true);
+        spdlog::level::level_enum log_level_value = get_log_level_from_string(log_level);
 
         // if the mask wasn't passed in then check if log_module is set in properties
         if (!module_mask_opt && props.contains("log_modules")) {
@@ -166,7 +118,7 @@ namespace springtail::logging {
         if (!is_daemon) {
             auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
             console_sink->set_pattern(pattern);
-            _set_level(console_sink, log_level);
+            console_sink->set_level(log_level_value);
             sinks.push_back(console_sink);
         }
 
@@ -183,40 +135,19 @@ namespace springtail::logging {
         // file sink
         if (log_rotation_enabled) {
             auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(log_path_str, max_size, max_files);
-            _set_level(file_sink, log_level);
+            file_sink->set_level(log_level_value);
             sinks.push_back(file_sink);
         } else {
             auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_path_str);
-            _set_level(file_sink, log_level);
+            file_sink->set_level(log_level_value);
             sinks.push_back(file_sink);
-        }
-
-        // Check OpenTelemetry configuration
-        auto otel_config = Properties::get(Properties::OTEL_CONFIG);
-        bool otel_enabled = Json::get_or<bool>(otel_config, "enabled", false);
-        bool otel_remote = Json::get_or<bool>(otel_config, "remote", false);
-
-        if (otel_enabled && otel_remote) {
-            // host ex: http://otel_collector, port ex: 4318
-            auto host = Json::get<std::string>(otel_config, "host");
-            auto port = Json::get<int>(otel_config, "port");
-            auto remote_log_level = Json::get_or<std::string>(otel_config, "remote_log_level", "info");
-
-            if (host && port) {
-                std::string endpoint = fmt::format("{}:{}/v1/logs", *host, *port);
-                _otel_sink = std::make_shared<OpenTelemetrySink>("springtail", endpoint);
-                _set_level(_otel_sink, remote_log_level);
-                SPDLOG_INFO("Enabling OTel logging sink with endpoint: {}", endpoint);
-            }
-        } else {
-            SPDLOG_INFO("OpenTelemetry logging sink disabled via configuration");
         }
 
         // create the logger with all sinks
         auto logger = std::make_shared<spdlog::logger>("springtail",
                                                        std::begin(sinks), std::end(sinks));
         logger->set_pattern(pattern);
-        _set_level(logger, log_level);
+        logger->set_level(log_level_value);
         logger->flush_on(spdlog::level::err);
 
         spdlog::set_default_logger(logger);

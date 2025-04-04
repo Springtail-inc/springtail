@@ -1,13 +1,11 @@
-#include <thread>
-#include <sys/time.h>
-
 #include <fmt/core.h>
 
 #include <common/common.hh>
-#include <common/properties.hh>
-#include <common/logging.hh>
-#include <common/redis.hh>
 #include <common/coordinator.hh>
+#include <common/logging.hh>
+#include <common/open_telemetry.hh>
+#include <common/properties.hh>
+#include <common/redis.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
 
@@ -99,7 +97,7 @@ namespace springtail::pg_log_mgr {
             state = redis::db_state_change::REDIS_STATE_INITIALIZE;
             Properties::set_db_state(_db_id, state);
         } else if (state == redis::db_state_change::REDIS_STATE_FAILED) {
-            LOG_ERROR(LOG_PG_LOG_MGR, "Database in failed state, cannot start up, db_id={}", _db_id);
+            LOG_ERROR("Database in failed state, cannot start up, db_id={}", _db_id);
             return;
         }
 
@@ -154,7 +152,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_startup_running()
     {
-        LOG_INFO(LOG_PG_LOG_MGR, "Starting up from the RUNNING state.");
+        LOG_INFO("Starting up from the RUNNING state.");
 
         // clear out any incomplete table syncs
         _redis_sync_queue.abort(REDIS_WORKER_ID);
@@ -223,7 +221,7 @@ namespace springtail::pg_log_mgr {
         if (_internal_state.is(STATE_STARTUP_SYNC)) {
             // Create the namespaces before starting the copy thread
             auto xid = _pg_log_reader->get_next_xid();
-            auto token_init = logging::Logger::set_context_variables({{"db_id", std::to_string(_db_id)}, {"xid", std::to_string(xid)}});
+            auto token_init = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(_db_id)}, {"xid", std::to_string(xid)}});
 
             PgCopyTable::create_namespaces(_db_id, xid);
 
@@ -252,7 +250,7 @@ namespace springtail::pg_log_mgr {
 
             CHECK(!table_ids.empty());
 
-            auto token_commit_worker = logging::Logger::set_context_variables({{"db_id", std::to_string(_db_id)}});
+            auto token_commit_worker = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(_db_id)}});
             // copy tables
             _do_table_copies(table_ids);
 
@@ -285,7 +283,7 @@ namespace springtail::pg_log_mgr {
         std::vector<PgCopyResultPtr> res;
         auto xid = _pg_log_reader->get_next_xid();
 
-        auto token = logging::Logger::set_context_variables({{"xid", std::to_string(xid)}});
+        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(xid)}});
         LOG_DEBUG(LOG_PG_LOG_MGR, "Copying tables; target xid={}", xid);
         if (table_ids.has_value()) {
             res = PgCopyTable::copy_tables(_db_id, xid, table_ids.value());
@@ -363,7 +361,7 @@ namespace springtail::pg_log_mgr {
                     LOG_DEBUG(LOG_PG_LOG_MGR, "Creating replication slot: {}\n", _slot_name);
                     lsn = _pg_conn.create_replication_slot();
                 } else {
-                    LOG_ERROR(LOG_PG_LOG_MGR, "Replication slot does not exist: db_id={}, slot={}", _db_id, _slot_name);
+                    LOG_ERROR("Replication slot does not exist: db_id={}, slot={}", _db_id, _slot_name);
                     // shutdown
                     Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
                     return;
@@ -378,13 +376,13 @@ namespace springtail::pg_log_mgr {
             _pg_conn.start_streaming(lsn, do_init);
         } catch (const PgConnectionError &e) {
             // this may be recoverable if we can reconnect, but not handled right now
-            LOG_ERROR(LOG_PG_LOG_MGR, "Connection error starting streaming in db_id={}: {}, setting state to failed",
+            LOG_ERROR("Connection error starting streaming in db_id={}: {}, setting state to failed",
                          _db_id, e.what());
             // shutdown
             Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
             return;
         } catch (const PgUnrecoverableError &e) {
-            LOG_ERROR(LOG_PG_LOG_MGR, "Unrecoverable Error starting streaming in db_id={}: {}, setting state to failed",
+            LOG_ERROR("Unrecoverable Error starting streaming in db_id={}: {}, setting state to failed",
                          _db_id, e.what());
             // shutdown
             Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
@@ -430,12 +428,12 @@ namespace springtail::pg_log_mgr {
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Received shutdown signal");
                 break;
             } catch (const PgConnectionError &e) {
-                LOG_ERROR(LOG_PG_LOG_MGR, "Error reading data from pg: {}", e.what());
+                LOG_ERROR("Error reading data from pg: {}", e.what());
                 // try reconnecting
                 try {
                     _pg_conn.reconnect();
                 } catch (const PgConnectionError &e) {
-                    LOG_ERROR(LOG_PG_LOG_MGR, "Error reconnecting to pg: {}", e.what());
+                    LOG_ERROR("Error reconnecting to pg: {}", e.what());
                     // shutdown
                     PgLogCoordinator::get_instance()->shutdown();
                     break;

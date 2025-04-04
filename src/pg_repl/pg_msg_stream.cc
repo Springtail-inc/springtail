@@ -93,7 +93,7 @@ namespace springtail {
 
         PgMsgStreamHeader header(buffer);
         if (header.magic != PgMsgStreamHeader::PG_LOG_MAGIC) {
-            LOG_WARN(LOG_ALL, "Invalid stream header magic number: {}, offset: {}",
+            LOG_WARN("Invalid stream header magic number: {}, offset: {}",
                         header.magic, _current_offset);
             throw PgIOError();
         }
@@ -160,13 +160,13 @@ namespace springtail {
 
             // sanity check to make sure we didn't go past end of message block
             if (_current_offset > _end_offset) {
-                LOG_WARN(LOG_ALL, "Overran end of message block");
+                LOG_WARN("Overran end of message block");
                 throw PgMessageTooSmallError();
             }
 
             return msg;
         } catch (PgMessageEOFError &e) {
-            LOG_WARN(LOG_ALL, "Unexpected EOF while reading message");
+            LOG_WARN("Unexpected EOF while reading message");
             return nullptr;
         }
     }
@@ -204,7 +204,7 @@ namespace springtail {
             case pg_msg::MSG_STREAM_ABORT:
                 return _decode_stream_abort();
             default:
-                LOG_WARN(LOG_ALL, "Unknown message type: {}", msg_type);
+                LOG_WARN("Unknown message type: {}", msg_type);
                 throw PgMessageError();
         }
     }
@@ -242,7 +242,7 @@ namespace springtail {
             case pg_msg::MSG_STREAM_ABORT:
                 return _skip_stream_abort();
             default:
-                LOG_WARN(LOG_ALL, "Unknown message type: {}", msg_type);
+                LOG_WARN("Unknown message type: {}", msg_type);
                 throw PgMessageError();
         }
     }
@@ -885,7 +885,7 @@ namespace springtail {
         std::string object_type;
         json["obj"].get_to(object_type);
         if (object_type != "index") {
-            LOG_INFO(LOG_ALL, "Create index msg not for index object, for: {}\n", object_type);
+            LOG_INFO("Create index msg not for index object, for: {}\n", object_type);
             CHECK_EQ(object_type, "index");
             return {};
         }
@@ -925,7 +925,7 @@ namespace springtail {
         std::string object_type;
         json["obj"].get_to(object_type);
         if (object_type != "index") {
-            LOG_INFO(LOG_ALL, "Create index msg not for index object, for: {}\n", object_type);
+            LOG_INFO("Create index msg not for index object, for: {}\n", object_type);
             return {};
         }
 
@@ -956,7 +956,7 @@ namespace springtail {
         std::string object_type;
         json["obj"].get_to(object_type);
         if (object_type != "table") {
-            LOG_INFO(LOG_ALL, "Create/alter table msg not for table object, for: {}\n", object_type);
+            LOG_INFO("Create/alter table msg not for table object, for: {}\n", object_type);
             return nullptr;
         }
 
@@ -1004,7 +1004,7 @@ namespace springtail {
         std::string object_type;
         json["obj"].get_to(object_type);
         if (object_type != "table") {
-            LOG_INFO(LOG_ALL, "Drop table not for table object, for: {}\n", object_type);
+            LOG_INFO("Drop table not for table object, for: {}\n", object_type);
             CHECK_EQ(object_type, "table");
             return nullptr;
         }
@@ -1036,7 +1036,7 @@ namespace springtail {
         std::string object_type;
         json["obj"].get_to(object_type);
         if (object_type != "schema") {
-            LOG_ERROR(LOG_ALL, "Create/alter namespace msg not for namespace object, for: {}\n", object_type);
+            LOG_ERROR("Create/alter namespace msg not for namespace object, for: {}\n", object_type);
             return nullptr;
         }
 
@@ -1081,7 +1081,7 @@ namespace springtail {
         std::string object_type;
         json["obj"].get_to(object_type);
         if (object_type != "schema") {
-            LOG_ERROR(LOG_ALL, "Create/alter namespace msg not for namespace object, for: {}\n", object_type);
+            LOG_ERROR("Create/alter namespace msg not for namespace object, for: {}\n", object_type);
             return nullptr;
         }
 
@@ -1176,7 +1176,7 @@ namespace springtail {
         } else if (msg.prefix_str == pg_msg::MSG_PREFIX_COPY_SYNC) {
             return _decode_copy_sync(msg, buffer.data(), data_len);
         } else {
-            LOG_INFO(LOG_ALL, "Unknown message prefix: {}", msg.prefix_str);
+            LOG_INFO("Unknown message prefix: {}", msg.prefix_str);
             return nullptr;
         }
     }
@@ -1203,7 +1203,7 @@ namespace springtail {
 
             if (stream.gcount() != PgMsgStreamHeader::SIZE || stream.eof()) {
                 // we've read some of the header but failed to read it all
-                LOG_WARN(LOG_ALL, "Failed to read header from file: {}", file);
+                LOG_WARN("Failed to read header from file: {}", file);
                 if (truncate) {
                     _truncate_file(file, hdr_offset);
                 } else {
@@ -1214,7 +1214,7 @@ namespace springtail {
 
             PgMsgStreamHeader header(buffer);
             if (header.magic != PgMsgStreamHeader::PG_LOG_MAGIC) {
-                LOG_WARN(LOG_ALL, "Invalid stream header magic number: {}", header.magic);
+                LOG_WARN("Invalid stream header magic number: {}", header.magic);
                 throw PgIOError();
             }
 
@@ -1225,7 +1225,7 @@ namespace springtail {
 
             stream.seekg(header.msg_length-1, std::ios::cur);
             if (stream.eof()) {
-                LOG_WARN(LOG_ALL, "Failed to seek to end of message");
+                LOG_WARN("Failed to seek to end of message");
                 if (truncate) {
                     _truncate_file(file, hdr_offset);
                 } else {
