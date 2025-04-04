@@ -319,7 +319,7 @@ public:
  */
 class IndexNames {
 public:
-    enum class State { NOT_READY, READY, DELETED };
+    enum class State { NOT_READY, READY, DELETED, BEING_DELETED };
     static constexpr uint32_t ID = 6;
 
     struct Data {

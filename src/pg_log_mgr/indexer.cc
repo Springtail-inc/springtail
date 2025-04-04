@@ -121,12 +121,12 @@ namespace springtail::committer {
         SPDLOG_INFO("Indexer thread joined");
     }
 
-    void Indexer::_drop(const Key& key, const IndexParams& idx)
+    void Indexer::_drop(const Key& key, const IndexParams& idx, uint64_t end_xid)
     {
         assert(idx._ddl.is_null());
 
         auto [db_id, index_id] = key;
-        SPDLOG_INFO("Drop index {}, {}, {}", db_id, index_id, idx._xid);
+        SPDLOG_INFO("Drop index {}, {}, {}", db_id, index_id, end_xid);
 
         auto client = sys_tbl_mgr::Client::get_instance();
 
@@ -141,7 +141,7 @@ namespace springtail::committer {
             _work_set.erase(key);
         }
 
-        XidLsn xid{idx._xid};
+        XidLsn xid{end_xid};
 
         proto::IndexInfo info = client->get_index_info(db_id, index_id, xid);
         if (info.id() == 0) {
@@ -159,17 +159,33 @@ namespace springtail::committer {
             return;
         }
 
-        // Construct the index file to drop the cache
-        std::filesystem::path table_base;
-        auto json = Properties::get(Properties::STORAGE_CONFIG);
-        Json::get_to<std::filesystem::path>(json, "table_dir", table_base);
-        table_base = Properties::make_absolute_path(table_base);
-        std::filesystem::path index_file = table_base / std::to_string(db_id) / fmt::format("{}-{}", info.table_id(), xid.xid) / fmt::format(constant::INDEX_FILE, index_id);
+        // index column positions
+        std::vector<uint32_t> idx_cols;
+        for (auto const& col : info.columns()) {
+            idx_cols.push_back(col.position());
+        }
 
-        // remove any dirty cached pages for this index since they don't need to be written
-        StorageCache::get_instance()->drop_for_truncate(index_file);
+        auto meta = client->get_roots(db_id, info.table_id(), end_xid);
+        auto it = std::ranges::find_if(meta->roots,
+                [&](auto const& v) { return index_id == v.index_id; });
+        CHECK(it != meta->roots.end());
 
-        SPDLOG_INFO("Index dropped: {}:{}", db_id, index_id);
+        auto table =
+            TableMgr::get_instance()->get_mutable_table(db_id, info.table_id(), end_xid, end_xid);
+        auto root = table->create_index_root(index_id, idx_cols);
+        if (it->extent_id != constant::UNKNOWN_EXTENT) {
+            root->init(it->extent_id);
+        } else {
+            root->init_empty();
+        }
+        root->truncate();
+        root->finalize();
+
+        meta->roots.erase(it);
+        client->update_roots(db_id, info.table_id(), end_xid, *meta);
+        client->set_index_state(db_id, xid, info.table_id(), index_id, sys_tbl::IndexNames::State::DELETED);
+
+        SPDLOG_INFO("Index dropped: {}:{} @ {}", db_id, index_id, end_xid);
     }
 
     Indexer::IndexState
@@ -367,7 +383,7 @@ namespace springtail::committer {
 
         if (is_fresh_drop) {
             // Do clear drop index
-            _drop(idxState._key, idxState._idx);
+            _drop(idxState._key, idxState._idx, end_xid);
         } else if (is_drop_while_processing) {
             // since btree inserts have a possibility of partial flush,
             // we will do full flush of root once at whichever stage it is in,

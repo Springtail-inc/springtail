@@ -95,7 +95,7 @@ namespace springtail::committer {
 
         IndexState _build(std::stop_token st, const Key& key, const IndexParams& idx);
 
-        void _drop(const Key& key, const IndexParams& idx);
+        void _drop(const Key& key, const IndexParams& idx, uint64_t end_xid);
 
         bool _was_dropped(const Key& key);
         void _commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx, uint64_t end_xid);

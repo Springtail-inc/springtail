@@ -5,6 +5,7 @@
 
 #include <common/logging.hh>
 #include <common/singleton.hh>
+#include <sys_tbl_mgr/system_tables.hh>
 #include <grpcpp/grpcpp.h>
 #include <proto/sys_tbl_mgr.grpc.pb.h>
 #include <sys_tbl_mgr/table.hh>
@@ -424,11 +425,13 @@ private:
      * optional. There is a special case when tid is required. We construct primary indexes in
      * create table using the column attributes and assign the same index ID=constant::PRIMARY_INDEX
      * to all primary indexes and so tid is required for PRIMARY_INDEX.
+     * @param index_state Accepts BEING_DELETED or DELETED
      */
     void _drop_index(const XidLsn& xid,
                      uint64_t db_id,
                      uint64_t index_id,
-                     std::optional<uint64_t> tid = std::nullopt);
+                     std::optional<uint64_t> tid = std::nullopt,
+                     sys_tbl::IndexNames::State index_state = sys_tbl::IndexNames::State::DELETED);
 
     /**
      * Performs a create_table() assuming that the correct locks are already held.

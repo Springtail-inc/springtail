@@ -8,7 +8,6 @@
 #include <sys_tbl_mgr/exception.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/service.hh>
-#include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 
@@ -259,8 +258,8 @@ Service::DropIndex(grpc::ServerContext* context,
 
     XidLsn xid(request->xid(), request->lsn());
 
-    // perform the CREATE INDEX
-    _drop_index(xid, request->db_id(), request->index_id());
+    // perform the DROP INDEX
+    _drop_index(xid, request->db_id(), request->index_id(), std::nullopt, sys_tbl::IndexNames::State::BEING_DELETED);
 
     // serialize the JSON and return
     response->set_statement(nlohmann::to_string(ddl));
@@ -354,8 +353,10 @@ void
 Service::_drop_index(const XidLsn& xid,
                      uint64_t db_id,
                      uint64_t index_id,
-                     std::optional<uint64_t> tid)
+                     std::optional<uint64_t> tid,
+                     sys_tbl::IndexNames::State index_state)
 {
+    assert(index_state == sys_tbl::IndexNames::State::DELETED || index_state == sys_tbl::IndexNames::State::BEING_DELETED);
     auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
     auto names_schema = names_t->extent_schema();
     auto names_fields = names_schema->get_fields();
@@ -371,9 +372,11 @@ Service::_drop_index(const XidLsn& xid,
     auto& index_info = std::get<0>(*info);
 
     if (static_cast<sys_tbl::IndexNames::State>(index_info.state()) ==
-        sys_tbl::IndexNames::State::DELETED) {
+            sys_tbl::IndexNames::State::DELETED ||
+            static_cast<sys_tbl::IndexNames::State>(index_info.state()) ==
+            sys_tbl::IndexNames::State::BEING_DELETED) {
         SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index already deleted: {}@{} - {}", db_id, xid.xid,
-                            index_id);
+                index_id);
         return;
     }
 
@@ -385,7 +388,7 @@ Service::_drop_index(const XidLsn& xid,
     auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);
     auto tuple = sys_tbl::IndexNames::Data::tuple(
         std::get<1>(*info), index_info.name(), index_info.table_id(), index_id, xid.xid, xid.lsn,
-        sys_tbl::IndexNames::State::DELETED, index_info.is_unique());
+        index_state, index_info.is_unique());
     index_names_t->upsert(tuple, xid.xid, constant::UNKNOWN_EXTENT);
 
     std::map<uint32_t, uint32_t> keys;
@@ -399,7 +402,7 @@ Service::_drop_index(const XidLsn& xid,
 
     {
         boost::unique_lock lock(_mutex);
-        index_info.set_state(static_cast<int8_t>(sys_tbl::IndexNames::State::DELETED));
+        index_info.set_state(static_cast<int8_t>(index_state));
         _index_cache[db_id][index_info.table_id()][index_info.id()].emplace_back(xid, index_info);
     }
 }
@@ -1323,7 +1326,8 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
             index_info_request.set_index_id(index_id_f->get_uint64(*rrow_i));
             auto index_info = _get_index_info(index_info_request);
 
-            if (static_cast<sys_tbl::IndexNames::State>(index_info.state()) != sys_tbl::IndexNames::State::READY) {
+            if (static_cast<sys_tbl::IndexNames::State>(index_info.state()) != sys_tbl::IndexNames::State::READY &&
+                    static_cast<sys_tbl::IndexNames::State>(index_info.state()) != sys_tbl::IndexNames::State::BEING_DELETED) {
                 SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index deleted or not-ready, so skipping the root {} -- {}",
                         table_id, index_id_f->get_uint64(*rrow_i));
                 continue;
