@@ -169,6 +169,7 @@ jobs:
           ./startup.sh -s data_init.sql
           
           # Run integration tests
+          set +e
           for i in $(seq 1 ${INTEGRATION_TEST_ITERATIONS}) ; 
           do
             # Note: there might be discrepancies between the _LOG_TIMESTAMP and the _LOG_DATE due to the time it takes to run the integration tests
@@ -188,14 +189,14 @@ jobs:
             _TIMESTAMP=$(date +%s)
           
             # Test logs
-            log_file="integration-test-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log" 
+            log_file="integration-test-${GITHUB_SHORT_SHA}-${i}-${_LOG_FLAG}-${_TIMESTAMP}.log" 
             log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${log_file}"
             aws s3 cp tmplog $log_s3_key
             echo "*** Integration Test Log S3 Key: $log_s3_key"
             rm -f tmplog
           
             # Springtail service logs
-            springtail_log_file="springtail-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.tar.gz"
+            springtail_log_file="springtail-${GITHUB_SHORT_SHA}-${i}-${_LOG_FLAG}-${_TIMESTAMP}.tar.gz"
             output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../debug)
             fname=$(echo $output  | cut -f2 -d':' | xargs | head -1)
             springtail_log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${springtail_log_file}"
