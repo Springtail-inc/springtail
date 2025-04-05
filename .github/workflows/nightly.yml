@@ -15,7 +15,7 @@ permissions:
 jobs:
   nightly_job:
     name: Nightly Job
-    runs-on: warp-ubuntu-latest-arm64-4x
+    runs-on: image-builder
     timeout-minutes: 90
     container:
       image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
@@ -228,6 +228,7 @@ jobs:
           set +e
           _LOG_FLAG="succeeded"
           python3 test_runner.py -t -s postgres_all
+          sleep infinity
           # set Failure flag is the above command exits non-zero exit code
           if [ $? -ne 0 ]; then
               _LOG_FLAG="failed"
