@@ -362,6 +362,9 @@ OpenTelemetry::tracer(const std::string_view& name)
 void
 OpenTelemetry::increment_counter(std::string_view name)
 {
+    if (!_otel_enabled) {
+        return;
+    }
     std::vector<std::pair<std::string, std::string>> attributes;
     get_context_variables([&attributes](opentelemetry::nostd::string_view key, opentelemetry::nostd::string_view value) {
         attributes.push_back(std::make_pair(std::string(key), std::string(value)));
@@ -380,6 +383,9 @@ OpenTelemetry::increment_counter(std::string_view name)
 void
 OpenTelemetry::record_histogram(std::string_view name, double value)
 {
+    if (!_otel_enabled) {
+        return;
+    }
     std::vector<std::pair<std::string, std::string>> attributes;
     get_context_variables([&attributes](opentelemetry::nostd::string_view key, opentelemetry::nostd::string_view value) {
         attributes.push_back(std::make_pair(std::string(key), std::string(value)));
