@@ -5,6 +5,6 @@ if [ ! -e './install' ]; then
 fi
 CWD=`pwd`
 find python -name "*.py" -print0 | tar --null -cvf release.tar --exclude='benchmarks' --exclude='testing' --files-from=-
-tar --append -f release.tar -C ./install/ . -C $CWD shared-lib/
+tar --append -vf release.tar -C ./install/ . -C $CWD shared-lib/
 gzip release.tar
 mv release.tar.gz releases/"springtail-$(date +%Y%m%d).tgz"

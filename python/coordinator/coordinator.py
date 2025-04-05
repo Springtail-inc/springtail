@@ -110,7 +110,6 @@ class Coordinator:
                     self.logger.debug("Re-installing coordinator")
                     Loader(self.install_path, project_root).start()
                     # loader will restart the coordinator when ready
-                    signal.pause()
                     sys.exit(0)
             except Exception as e:
                 raise ValueError("Failed to install binaries: " + str(e))
