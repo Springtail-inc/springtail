@@ -342,28 +342,21 @@ namespace springtail::committer {
         }
     }
 
-    std::optional<uint64_t>
-    Indexer::process_next_reconciliation(uint64_t db_id, uint64_t end_xid) {
+    void
+    Indexer::process_index_reconciliation(uint64_t db_id, uint64_t reconcile_xid, uint64_t end_xid) {
         std::scoped_lock lock(_pending_reconciliation_map_mtx);
+
         auto db_it = _pending_idx_reconciliation_map.find(db_id);
-        if (db_it == _pending_idx_reconciliation_map.end()) {
-            return std::nullopt; // No pending entries for this db_id
-        }
-        return _process_next_reconciliation(db_it, end_xid);
-    }
+        assert(db_it != _pending_idx_reconciliation_map.end());
 
-    std::optional<uint64_t>
-    Indexer::_process_next_reconciliation(PendingReconMap::iterator db_it, uint64_t end_xid) {
         auto& xid_map = db_it->second;
-        if (xid_map.empty()) {
-            _pending_idx_reconciliation_map.erase(db_it); // Clean up empty db_id entry
-            return std::nullopt;
-        }
+        assert(!xid_map.empty());
 
-        // Get iterator to the first xid entry
-        auto xid_it = xid_map.begin();
+        // Get the entry for the reconcile_xid
+        auto xid_it = xid_map.find(reconcile_xid);
+        assert((xid_it != xid_map.end()));
+
         auto& idx_list = xid_it->second;
-
         // Process each entry in the list
         for (auto& idxState : idx_list) {
             _reconcile_index(idxState, end_xid);
@@ -374,7 +367,6 @@ namespace springtail::committer {
         if (xid_map.empty()) {
             _pending_idx_reconciliation_map.erase(db_it); // Remove empty db_id entry
         }
-        return xid_it->first;
     }
 
     void

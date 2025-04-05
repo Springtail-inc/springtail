@@ -228,6 +228,10 @@ namespace springtail
         int32_t pg_xid;
     };
 
+    struct PgMsgReconcileIndex{
+        uint64_t reconcile_xid;
+    };
+
     /** Message types */
     enum PgMsgEnum {
         INVALID=-1, COPY_HDR, KEEP_ALIVE, BEGIN, COMMIT, RELATION, INSERT, DELETE, UPDATE, TRUNCATE,
@@ -270,7 +274,8 @@ namespace springtail
          PgMsgIndex,
          PgMsgDropIndex,
          PgMsgNamespace,
-         PgMsgCopySync
+         PgMsgCopySync,
+         PgMsgReconcileIndex
         > msg;                 ///< message data
 
         uint64_t pg_log_timestamp;  ///< timestamp id of the current Postgres log file

@@ -61,16 +61,16 @@ namespace springtail::committer {
         void drop(uint64_t db_id, uint64_t index_id, uint64_t xid);
 
         /**
-         * @brief Processes the first pending xid's entries for the given db_id.
+         * @brief Processes the given db_id/xid's entries for index reconciliation.
          * 
-         * Iterates through the first xid's entries, calling reconcile_index() for each.
+         * Iterates through the xid's entries, calling reconcile_index() for each.
          * Cleans up empty entries from the map.
          * 
          * @param db_id The database ID to process.
+         * @param reconcile_xid XID for which index reconciliation to be done
          * @param end_xid XID at which index will be committed
-         * @return std::optional<uint64_t> The XID that got reconciled or nullopt if none
          */
-        std::optional<uint64_t> process_next_reconciliation(uint64_t db_id, uint64_t end_xid);
+        void process_index_reconciliation(uint64_t db_id, uint64_t reconcile_xid, uint64_t end_xid);
 
         /**
          * @brief Set ABORTING state for the indices of a given db_id and table_id.
@@ -179,15 +179,6 @@ namespace springtail::committer {
          * @param key Index key to remove.
          */
         void _remove_index_key(uint64_t db_id, uint64_t table_id, const Key& key);
-
-        /*
-         * Pick the XIDs for the given db_id and reconcile indexes 
-         * belonging to the the XIDs
-         * @param db_it Iterator to the XID map for a database
-         * @param end_xid XID at which index will be committed
-         * @return std::optional<uint64_t> The XID that got reconciled or nullopt if none
-         */
-        std::optional<uint64_t> _process_next_reconciliation(PendingReconMap::iterator db_it, uint64_t end_xid);
 
         /*
          * @brief A queue for indexer to notify committer to trigger index reconciliation

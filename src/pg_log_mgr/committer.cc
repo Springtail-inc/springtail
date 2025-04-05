@@ -263,12 +263,8 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             nlohmann::json index_ddls = _redis_ddl.get_index_ddls_xid(db_id, xid);
 
             // Trigger index reconciliation for the earliest pending XID
-            uint64_t idx_reconciled_xid = 0;
             if (result->type() == XidReady::Type::RECONCILE_INDEX) {
-                const auto& idx_reconciled_xid_opt = _indexer->process_next_reconciliation(db_id, xid);
-                if (idx_reconciled_xid_opt) {
-                    idx_reconciled_xid = *idx_reconciled_xid_opt;
-                }
+                _indexer->process_index_reconciliation(db_id, result->reconcile().reconcile_xid(), xid);
             }
 
             if (!index_ddls.is_null()) {
@@ -307,9 +303,9 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             }
             _completed_xids[db_id] = xid;
 
-            // Commit index XID as they complete reconciliation
-            if (result->type() == XidReady::Type::RECONCILE_INDEX && idx_reconciled_xid != 0) {
-                _redis_ddl.commit_index_ddl(db_id, idx_reconciled_xid);
+            if (result->type() == XidReady::Type::RECONCILE_INDEX) {
+                // Commit index XID as they complete reconciliation
+                _redis_ddl.commit_index_ddl(db_id, result->reconcile().reconcile_xid());
             } else if (result->type() == XidReady::Type::XACT_MSG) {
                 result->notify_tracker(xid);
             }
