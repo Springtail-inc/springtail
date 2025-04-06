@@ -785,7 +785,8 @@ namespace springtail::pg_log_mgr {
             }
         case PgMsgEnum::RECONCILE_INDEX:
             {
-                _process_index_reconciliation(msg);
+                const auto &idx_reconcile_msg = std::get<PgMsgReconcileIndex>(msg->msg);
+                _process_index_reconciliation(idx_reconcile_msg.reconcile_xid);
                 break;
             }
         default:
@@ -812,13 +813,11 @@ namespace springtail::pg_log_mgr {
         }
     }
 
-    // msg is unused as we want to only trigger
-    // index reconciliation via committer
     void
-    PgLogReader::_process_index_reconciliation([[maybe_unused]] const PgMsgPtr &msg)
+    PgLogReader::_process_index_reconciliation(const uint64_t reconcile_xid)
     {
         uint64_t xid = this->get_next_xid();
-        _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::ReconcileMsg(xid)));
+        _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::ReconcileMsg(xid, reconcile_xid)));
     }
 
     void
@@ -1035,7 +1034,7 @@ namespace springtail::pg_log_mgr {
 
         // check if we should ignore this message
         if (table_oid && SyncTracker::get_instance()->should_skip(_db_id, table_oid.value(), pg_xid_txn)) {
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Skip DDL: oid={} pg_xid={}\n", oid, pg_xid_txn);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Skip DDL: oid={} pg_xid={}\n", table_oid.value(), pg_xid_txn);
             return;
         }
 

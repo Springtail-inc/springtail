@@ -225,13 +225,19 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_index_reconciliation_thread()
     {
+        PgMsgReconcileIndex reconcile_index_msg;
         while (!_shutdown) {
             // block on index reconciliation queue w/timeout for shutdown
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Waiting for index reconciliation request");
             if (auto request = _index_reconciliation_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT); request) {
                 //Pass it to log reader to notify committer
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Request received for index reconciliation for {}", *request);
+                std::vector<std::string> split;
+                common::split_string(":", *request, split);
+                CHECK_EQ(split.size(), 2);
+                reconcile_index_msg.reconcile_xid = std::stoull(split[1]);
                 auto msg = std::make_shared<PgMsg>(PgMsgEnum::RECONCILE_INDEX);
+                msg->msg.emplace<PgMsgReconcileIndex>(reconcile_index_msg);
                 _pg_log_reader->enqueue_msg(msg);
             }
         }

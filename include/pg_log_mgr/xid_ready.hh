@@ -61,16 +61,22 @@ namespace springtail::committer {
          */
         class ReconcileMsg {
         public:
-            explicit ReconcileMsg(uint64_t xid)
-                : _xid(xid)
+            ReconcileMsg(uint64_t xid, uint64_t reconcile_xid)
+                : _xid(xid),
+                _reconcile_xid(reconcile_xid)
             { }
 
             uint64_t xid() const {
                 return _xid;
             }
 
+            uint64_t reconcile_xid() const {
+                return _reconcile_xid;
+            }
+
         private:
             uint64_t _xid;
+            uint64_t _reconcile_xid;
         };
 
         /**
