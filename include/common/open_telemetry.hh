@@ -50,7 +50,7 @@ public:
     static inline void
     log(const spdlog::source_loc &loc, const std::string &logger_name, spdlog::level::level_enum lvl, const std::string &formatted_msg)
     {
-        if (!_inited_flag || _shutdown_flag || !get_instance()->_otel_enabled) {
+        if (!_inited_flag || _shutdown_flag || !(get_instance()->_otel_enabled && get_instance()->_otel_remote)) {
             return;
         }
         spdlog::details::log_msg message(loc, logger_name, lvl, formatted_msg);
