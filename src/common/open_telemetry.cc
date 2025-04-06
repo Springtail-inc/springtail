@@ -212,6 +212,11 @@ OpenTelemetry::_init_tracing(const opentelemetry::sdk::resource::Resource& resou
 void
 OpenTelemetry::_init_logging(const opentelemetry::sdk::resource::Resource& resource)
 {
+    // Source properties
+    _log_attributes.emplace_back("source_file", "");
+    _log_attributes.emplace_back("source_line", "");
+    _log_attributes.emplace_back("source_func", "");
+
     // Check OpenTelemetry configuration
     if (_otel_remote) {
         std::string log_endpoint = fmt::format("{}:{}/v1/logs", *_host, *_port);
@@ -243,11 +248,6 @@ OpenTelemetry::_init_logging(const opentelemetry::sdk::resource::Resource& resou
         );
 
         _remote_log_level_value = logging::Logger::get_log_level_from_string(_remote_log_level);
-
-        // Source properties
-        _log_attributes.emplace_back("source_file", "");
-        _log_attributes.emplace_back("source_line", "");
-        _log_attributes.emplace_back("source_func", "");
 
         SPDLOG_INFO("Enabling OTel logging sink with endpoint: {}", log_endpoint);
     } else {
