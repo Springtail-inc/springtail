@@ -7,6 +7,16 @@
 
 namespace springtail {
 
+namespace table_helpers {
+
+/** Helper for constructing table paths. */
+std::filesystem::path get_table_dir(const std::filesystem::path &base,
+                                    uint64_t db_id,
+                                    uint64_t table_id,
+                                    uint64_t snapshot_xid);
+
+}
+
     /**
      * Singleton for managing the table metadata.  Handles table metadata mutations and provides
      * interfaces for retrieving a table object at a given XID as well as a mutable table object for

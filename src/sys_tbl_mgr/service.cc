@@ -873,6 +873,7 @@ Service::Finalize(grpc::ServerContext* context,
     auto write_xid = _get_write_xid(request->db_id());
     SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Finalize system tables: {}@{} >= {}", request->db_id(),
                         request->xid(), write_xid);
+    CHECK_GE(request->xid(), write_xid);
 
     // finalize the mutated tables at the write_xid
     // XXX we currently don't store the metadata, but re-read it from the roots file each time
@@ -944,7 +945,8 @@ Service::GetSchema(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "GetSchema");
 
-    SPDLOG_INFO("got GetSchema()");
+    SPDLOG_INFO("got GetSchema(): db {} tid {} xid {} lsn {}", request->db_id(),
+                request->table_id(), request->xid(), request->lsn());
 
     boost::shared_lock lock(_read_mutex);
 

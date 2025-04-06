@@ -447,4 +447,14 @@ public:
     };
 };
 
+static constexpr std::array<uint32_t, 7> TABLE_IDS = {
+    TableNames::ID,
+    TableRoots::ID,
+    Indexes::ID,
+    Schemas::ID,
+    TableStats::ID,
+    IndexNames::ID,
+    NamespaceNames::ID
+};
+
 }  // namespace springtail::sys_tbl

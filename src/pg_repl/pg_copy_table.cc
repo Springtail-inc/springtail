@@ -1006,8 +1006,6 @@ namespace springtail
             // create the namespace
             client->create_namespace(ns_req);
         }
-        // flush to disk
-        client->finalize(db_id, xid);
     }
 
     std::vector<PgCopyResultPtr>

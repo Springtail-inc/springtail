@@ -100,15 +100,16 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             // handle a TABLE_SYNC_COMMIT
             if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT ||
                 result->type() == XidReady::Type::TABLE_SYNC_SWAP) {
-                SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Handle a TABLE_SYNC_SWAP/COMMIT: {}, {}, completed xid @{}",
-                                    static_cast<char>(result->type()), db_id, completed_xid);
+                SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Handle a TABLE_SYNC_SWAP/COMMIT: {}, {}, completed xid @{}, request xid @{}",
+                                    static_cast<char>(result->type()), db_id, completed_xid, result->swap().xid());
 
                 nlohmann::json ddls;
 
                 // note: Need to check the completed XID against the most recent committed XID.  If
                 //       it is ahead, then we commit at the completed XID.  If it is the same then
                 //       we commit at the provided XID.
-                if (completed_xid == _committed_xids[db_id]) {
+                auto committed_i = _committed_xids.find(db_id);
+                if (committed_i == _committed_xids.end() || completed_xid == committed_i->second) {
                     completed_xid = result->swap().xid();
                 }
 

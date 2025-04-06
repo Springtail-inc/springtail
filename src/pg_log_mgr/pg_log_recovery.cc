@@ -2,6 +2,8 @@
 #include <common/filesystem.hh>
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_log_recovery.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
+#include <sys_tbl_mgr/system_tables.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -33,6 +35,9 @@ PgLogRecovery::replay_logs()
 {
     SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Start log replay");
 
+    // revert the system tables to the committed XID
+    _revert_system_tables();
+
     // scan the replication log to skip any already committed records
     bool has_more = _skip_committed();
 
@@ -45,6 +50,83 @@ PgLogRecovery::replay_logs()
     // replay any messages fully after the most recently committed transaction's commit
     if (has_more) {
         _replay_uncommitted();
+    }
+}
+
+void
+PgLogRecovery::_revert_system_tables()
+{
+    // get the base directory for table data
+    std::filesystem::path table_base;
+    nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
+    Json::get_to<std::filesystem::path>(json, "table_dir", table_base);
+    table_base = Properties::make_absolute_path(table_base);
+
+    // go through each system table and adjust it's roots symlink to point to the correct file for
+    // the committed XID
+    for (auto table_id : sys_tbl::TABLE_IDS) {
+        // get the table directory path
+        auto table_dir = table_helpers::get_table_dir(table_base, _db_id, table_id, 1);
+
+        // find all roots files and extract their XIDs
+        std::map<uint64_t, std::filesystem::path> roots_files;
+        for (const auto& entry : std::filesystem::directory_iterator(table_dir)) {
+            // only process files
+            if (!entry.is_regular_file()) {
+                continue;
+            }
+
+            // only process "roots.xid" files
+            auto filename = entry.path().filename().string();
+            if (!filename.starts_with("roots.")) {
+                continue;
+            }
+
+            try {
+                uint64_t xid = std::stoull(filename.substr(6)); // skip "roots."
+                roots_files.try_emplace(xid, entry.path());
+            } catch (...) {
+                // Skip files with invalid numbers
+                continue;
+            }
+        }
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Found {} root files for system table {}",
+                            roots_files.size(), table_id);
+
+        // find the largest valid XID
+        if (!roots_files.empty()) {
+            // find the first XID beyond the committed XID
+            auto del_i = roots_files.upper_bound(_committed_xid);
+            auto root_i = std::make_reverse_iterator(del_i);
+
+            if (root_i == roots_files.rend()) {
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Clear system table {}",
+                                    root_i->second, table_id);
+                // there's no valid roots, clear *all* of the system table data
+                for (const auto& entry : std::filesystem::directory_iterator(table_dir)) {
+                    std::filesystem::remove_all(entry.path());
+                }
+            } else {
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Picked root file {} for system table {}",
+                                    root_i->second, table_id);
+
+                // update the symlink
+                auto symlink_path = table_dir / "roots";
+
+                std::filesystem::create_symlink(root_i->second,
+                                                table_dir / constant::ROOTS_TMP_FILE);
+                std::filesystem::rename(table_dir / constant::ROOTS_TMP_FILE,
+                                        table_dir / constant::ROOTS_FILE);
+
+                // remove any roots files with larger XIDs
+                for (; del_i != roots_files.end(); ++del_i) {
+                    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Delete root file {} for system table {}",
+                                        del_i->second, table_id);
+                    std::filesystem::remove(del_i->second);
+                }
+            }
+        }
     }
 }
 
@@ -61,6 +143,7 @@ PgLogRecovery::_skip_committed()
     _repl_log = fs::find_earliest_modified_file(_repl_path, PgLogMgr::LOG_PREFIX_REPL,
                                                 PgLogMgr::LOG_SUFFIX);
     if (!_repl_log) {
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "No repl log found");
         return false;
     }
 
@@ -76,6 +159,7 @@ PgLogRecovery::_skip_committed()
     // Open the xact log
     PgXactLogReaderMmap xact_reader(_xact_path, _committed_xid, _pg_log_reader->archive_logs());
     if (!xact_reader.begin()) {
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "No xact log found");
         return true;
     }
 
@@ -170,6 +254,7 @@ PgLogRecovery::_process_msg(PgMsgPtr msg,
                 auto &commit_msg = std::get<PgMsgStreamCommit>(msg->msg);
                 pgxid = commit_msg.xid;
             }
+            CHECK_EQ(pgxid, xact_reader.get_pg_xid());
 
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Found COMMIT for pgxid {} with xact_xid {}", pgxid, xact_reader.get_xid());
 
