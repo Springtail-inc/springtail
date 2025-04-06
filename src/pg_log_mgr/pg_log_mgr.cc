@@ -236,7 +236,7 @@ namespace springtail::pg_log_mgr {
                 common::split_string(":", *request, split);
                 CHECK_EQ(split.size(), 2);
                 reconcile_index_msg.reconcile_xid = std::stoull(split[1]);
-                PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::RECONCILE_INDEX);
+                auto msg = std::make_shared<PgMsg>(PgMsgEnum::RECONCILE_INDEX);
                 msg->msg.emplace<PgMsgReconcileIndex>(reconcile_index_msg);
                 _pg_log_reader->enqueue_msg(msg);
             }

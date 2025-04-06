@@ -1034,7 +1034,7 @@ namespace springtail::pg_log_mgr {
 
         // check if we should ignore this message
         if (table_oid && SyncTracker::get_instance()->should_skip(_db_id, table_oid.value(), pg_xid_txn)) {
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Skip DDL: oid={} pg_xid={}\n", oid, pg_xid_txn);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Skip DDL: oid={} pg_xid={}\n", table_oid.value(), pg_xid_txn);
             return;
         }
 
