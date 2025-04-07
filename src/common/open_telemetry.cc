@@ -348,14 +348,20 @@ OpenTelemetry::init(std::string_view component_name)
 }
 
 void
-OpenTelemetry::_internal_shutdown()
+OpenTelemetry::flush()
 {
-    if (_otel_enabled) {
-        _meter_provider->ForceFlush();
+    if (_inited_flag && !_shutdown_flag && get_instance()->_otel_enabled) {
+        get_instance()->_meter_provider->ForceFlush();
         opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider> provider =
             opentelemetry::trace::Provider::GetTracerProvider();
         dynamic_cast<opentelemetry::sdk::trace::TracerProvider *>(provider.get())->ForceFlush();
     }
+}
+
+void
+OpenTelemetry::_internal_shutdown()
+{
+    flush();
     opentelemetry::trace::Provider::SetTracerProvider({});
     opentelemetry::metrics::Provider::SetMeterProvider({});
     _meter_provider.reset();
