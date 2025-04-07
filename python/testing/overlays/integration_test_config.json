@@ -1,6 +1,1 @@
-{
-    "integration_test_config": {
-        "use_proxy_for_test": true,
-        "use_proxy_for_verify": true
-    }
-}
+{}

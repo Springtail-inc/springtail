@@ -19,6 +19,7 @@ class TestCase:
                  filename: str,
                  props: springtail.Properties,
                  build_dir: str,
+                 test_params: dict = {},
                  valid_sections: list = ['test', 'verify', 'cleanup']) -> None:
         """Initialize the test case"""
         self._filename = os.path.abspath(filename)
@@ -26,6 +27,7 @@ class TestCase:
         self._directory = os.path.dirname(self._filename)
         self._props = props
         self._build_dir = build_dir
+        self._test_params = test_params
         self._status = 'INIT'
         self._result = 'UNKNOWN'
         self._duration = 0
@@ -542,8 +544,7 @@ class TestCase:
         # construct a connection for each transaction in the test
         for txn in self._txns:
             # Determine what config to use for the test phase
-            integration_test_config = self._props.get_integration_test_config()
-            use_proxy_for_test = integration_test_config.get("use_proxy_for_test", False)
+            use_proxy_for_test = self._test_params.get('use_proxy_for_test', False)
             if use_proxy_for_test:
                 logging.debug(f'Connecting to proxy for txn "{txn}"')
                 self._connections[txn] = springtail.connect_proxy(self._props, self._primary_name)
@@ -622,9 +623,7 @@ class TestCase:
         # execute the verification commands against both databases, compare the results
         for command in self._sections['verify'][0]['sequential']:
             # Determine what config to use for verify phase
-            integration_test_config = self._props.get_integration_test_config()
-            use_proxy_for_verify = integration_test_config.get("use_proxy_for_verify", False)
-
+            use_proxy_for_verify = self._test_params.get('use_proxy_for_verify', False)
             if use_proxy_for_verify:
                 logging.info(f'Using proxy to verify')
                 self._connections[command['txn']] = springtail.connect_proxy(self._props, self._primary_name)
