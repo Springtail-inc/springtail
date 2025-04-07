@@ -114,7 +114,7 @@ namespace springtail {
                     uint64_t extent_id = _btree->_branch_child_f->get_uint64(*(_node->row_i));
 
                     // read the child extent
-                    SPDLOG_DEBUG_MODULE(LOG_BTREE, "Get page {}", extent_id);
+                    LOG_DEBUG(LOG_BTREE, "Get page {}", extent_id);
                     auto child = cache->get(_btree->_file, extent_id, _btree->_xid);
 
                     --depth;

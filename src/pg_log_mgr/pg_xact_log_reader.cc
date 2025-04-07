@@ -65,7 +65,7 @@ PgXactLogReader::begin()
         return false;
     }
 
-    SPDLOG_INFO("Current file: {}", _current_file->string());
+    LOG_INFO("Current file: {}", _current_file->string());
     // Open the file and load first extent
     if (!_open_next_file()) {
         return false;
@@ -109,7 +109,7 @@ PgXactLogReader::_open_next_file()
             _current_handle = nullptr;
             return false;
         }
-        SPDLOG_INFO("Current file: {}", _current_file->string());
+        LOG_INFO("Current file: {}", _current_file->string());
     }
 
     // Open the file and read the first extent

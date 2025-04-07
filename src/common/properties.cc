@@ -34,7 +34,7 @@ namespace springtail {
             std::string env_var_name = std::get<0>(variable);
             std::string env_var_value = env_var == nullptr ? "null" : env_var;
 
-            SPDLOG_INFO("Reading environment variable: {}={}", env_var_name, env_var_value);
+            LOG_INFO("Reading environment variable: {}={}", env_var_name, env_var_value);
 
             if (env_var != nullptr) {
                 switch (type) {
@@ -62,7 +62,7 @@ namespace springtail {
     {
         // verify we have the redis config
         if (_json.contains(REDIS_CONFIG) == false) {
-            SPDLOG_ERROR("Error creating redis client, config not found");
+            LOG_ERROR("Error creating redis client, config not found");
             throw Error("Error missing redis config in environment\nTry setting SPRINGTAIL_PROPERTIES_FILE to settings.json");
         }
 
@@ -75,7 +75,7 @@ namespace springtail {
             redis_config["config_db"].is_null() ||
             redis_config.contains("db") == false ||
             redis_config["db"].is_null()) {
-                SPDLOG_ERROR("Error creating redis, config: {}", _json[REDIS_CONFIG].dump());
+                LOG_ERROR("Error creating redis, config: {}", _json[REDIS_CONFIG].dump());
                 throw Error("Error missing redis config in environment\nTry setting SPRINGTAIL_PROPERTIES_FILE to settings.json");            throw Error("Error missing redis config in environment");
         }
 
@@ -278,7 +278,7 @@ namespace springtail {
         // if it exists use it rather than reading the config from redis
         const char *file = std::getenv(environment::PROPERTIES_FILE_OVERRIDE);
         if (file != nullptr) {
-            SPDLOG_INFO("Properties override file: {}", file);
+            LOG_INFO("Properties override file: {}", file);
 
             const char *load_override = std::getenv(environment::LOAD_OVERRIDE);
             if (load_override != nullptr) {
@@ -295,7 +295,7 @@ namespace springtail {
         }
 
         if (!load_redis || file == nullptr) {
-            SPDLOG_INFO("Loading properties from environment/redis");
+            LOG_INFO("Loading properties from environment/redis");
             // read the base config from the environment
             _read_environment();
 
@@ -504,7 +504,7 @@ namespace springtail {
             user = optional_user.value();
             password = optional_password.value();
         } else {
-            SPDLOG_ERROR("Could not find the value for primary database either host, port, user, or password");
+            LOG_ERROR("Could not find the value for primary database either host, port, user, or password");
             throw Error();
         }
     }

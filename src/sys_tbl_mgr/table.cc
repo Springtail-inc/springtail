@@ -784,13 +784,13 @@ get_table_dir(const std::filesystem::path &base,
                     auto key_fields = _schema->get_fields(keys);
                     auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
                     // note: uncomment if you need to debug the entries being populated into the secondary indexes
-                    // SPDLOG_DEBUG_MODULE(LOG_BTREE, "Secondary populate {}", svalue->to_string());
+                    // LOG_DEBUG(LOG_BTREE, "Secondary populate {}", svalue->to_string());
                     secondary->insert(svalue);
                 }
                 ++row_id;
             }
 
-            SPDLOG_DEBUG_MODULE(LOG_BTREE, "Populated {} secondary rows", row_id);
+            LOG_DEBUG(LOG_BTREE, "Populated {} secondary rows", row_id);
         }
     }
 

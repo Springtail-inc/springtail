@@ -109,11 +109,11 @@ namespace springtail {
         auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY; });
         std::vector<Index> secondary_indexes(filtered.begin(), filtered.end());
 
-        SPDLOG_DEBUG_MODULE(LOG_BTREE, "Get mutable table: table {}, access_xid {}", table_id, access_xid);
+        LOG_DEBUG(LOG_BTREE, "Get mutable table: table {}, access_xid {}", table_id, access_xid);
 
 #ifdef DEBUG
         for (auto &root : tbl_meta->roots) {
-            SPDLOG_DEBUG_MODULE(LOG_BTREE, "Get mutable table: index {}, root {}", root.index_id, root.extent_id);
+            LOG_DEBUG(LOG_BTREE, "Get mutable table: index {}, root {}", root.index_id, root.extent_id);
         }
 #endif
 
@@ -304,7 +304,7 @@ namespace springtail {
                                                   tbl_meta, schema);
         }
         default:
-            SPDLOG_ERROR("Unable to find the requested system table: {}", table_id);
+            LOG_ERROR("Unable to find the requested system table: {}", table_id);
             throw SchemaError();
         }
     }

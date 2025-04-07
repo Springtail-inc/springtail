@@ -61,7 +61,7 @@ namespace springtail::pg_proxy {
 
                 // extract server key
                 if (!parse_scram_secret(_password.c_str(), &iters, &saltp, stored_key, _scram_keys->server_key)) {
-                    SPDLOG_ERROR("Failed to parse SCRAM secret for user: {}", _username);
+                    LOG_ERROR("Failed to parse SCRAM secret for user: {}", _username);
                     _password_type = INVALID;
                     return;
                 }
@@ -134,7 +134,7 @@ namespace springtail::pg_proxy {
         nlohmann::json json = Properties::get(Properties::PROXY_CONFIG);
         _use_pg_shadow = Json::get_or<bool>(json, "use_pg_shadow", false);
 
-        SPDLOG_INFO("UserMgr setup to use {}", _use_pg_shadow ? "pg_shadow" : "AWS secrets");
+        LOG_INFO("UserMgr setup to use {}", _use_pg_shadow ? "pg_shadow" : "AWS secrets");
 
         start_thread();
     }
@@ -195,7 +195,7 @@ namespace springtail::pg_proxy {
                     } else if (type == PASSWORD_STRING_SCRAM) {
                         password_type = SCRAM;
                     } else {
-                        SPDLOG_WARN("Unknown password type: {}", type);
+                        LOG_WARN("Unknown password type: {}", type);
                         continue;
                     }
 
@@ -206,7 +206,7 @@ namespace springtail::pg_proxy {
                 }
 
                 if (user_password_map.empty()) {
-                    SPDLOG_WARN("No users found in AWS secrets manager");
+                    LOG_WARN("No users found in AWS secrets manager");
                     continue;
                 }
 
@@ -243,9 +243,9 @@ namespace springtail::pg_proxy {
                 _modify_users(users);
 
             } catch (Error &e) {
-                SPDLOG_ERROR("Failed to get users from AWS secrets manager; will retry in {} seconds", _sleep_interval);
+                LOG_ERROR("Failed to get users from AWS secrets manager; will retry in {} seconds", _sleep_interval);
             } catch (std::exception &e) {
-                SPDLOG_ERROR("Error: {}. Failed to execute the query; will try to reconnect", e.what());
+                LOG_ERROR("Error: {}. Failed to execute the query; will try to reconnect", e.what());
             }
 
             {
@@ -269,12 +269,12 @@ namespace springtail::pg_proxy {
                 if (db_name.has_value()) {
                     conn.connect(host, db_name.value(), user, password, port, false);
                 } else {
-                    SPDLOG_ERROR("No replicated database name is found");
+                    LOG_ERROR("No replicated database name is found");
                     throw ProxyError("No replicated database name found");
                 }
             } catch (Error &e) {
-                SPDLOG_ERROR("Failed to connect to primary database; will retry in {} seconds", _sleep_interval);
-                SPDLOG_ERROR("error message: {}", conn.error_message());
+                LOG_ERROR("Failed to connect to primary database; will retry in {} seconds", _sleep_interval);
+                LOG_ERROR("error message: {}", conn.error_message());
                 std::unique_lock sleep_lock(_sleep_mutex);
                 _sleep_cv.wait_for(sleep_lock, std::chrono::seconds(_sleep_interval));
             }
@@ -291,7 +291,7 @@ namespace springtail::pg_proxy {
             try {
                 conn.exec(USER_SELECT);
             } catch (Error &e) {
-                SPDLOG_ERROR(fmt::format("Error: {}. Failed to execute the query; will try to reconnect", e.what()));
+                LOG_ERROR("Error: {}. Failed to execute the query; will try to reconnect", e.what());
                 conn.disconnect();
                 std::unique_lock sleep_lock(_sleep_mutex);
                 _sleep_cv.wait_for(sleep_lock, std::chrono::seconds(_sleep_interval));

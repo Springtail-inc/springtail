@@ -4,8 +4,8 @@
 #include <absl/log/check.h>
 
 #include <common/json.hh>
+#include <common/open_telemetry.hh>
 #include <common/properties.hh>
-#include <common/tracing.hh>
 
 #include <sys_tbl_mgr/system_tables.hh>
 
@@ -57,7 +57,8 @@ namespace springtail {
                       bool do_rollforward,
                       SafePagePtr::FlushCb flush_cb )
     {
-        SPDLOG_DEBUG_MODULE(LOG_CACHE, "GET file {} eid {} xid {} txid {}",
+        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(target_xid)}});
+        LOG_DEBUG(LOG_CACHE, "GET file {} eid {} xid {} txid {}",
                             file, extent_id, access_xid, target_xid);
 
         // note: target_xid must be at or beyond the access_xid
@@ -66,7 +67,7 @@ namespace springtail {
             target_xid = access_xid;
         }
 
-        tracing::increment_counter(STORAGE_CACHE_GET_CALLS, tracing::get_db_id_xid_map(0, target_xid));
+        open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_GET_CALLS);
 
         // if the extent ID is UNKNOWN, then we will get an empty page for the file
         if (extent_id == constant::UNKNOWN_EXTENT) {
@@ -121,14 +122,14 @@ namespace springtail {
     StorageCache::flush(const std::filesystem::path &file)
     {
         _page_cache->flush_file(file);
-        tracing::increment_counter(STORAGE_CACHE_FLUSH_CALLS);
+        open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_FLUSH_CALLS);
     }
 
     void
     StorageCache::drop_for_truncate(const std::filesystem::path &file)
     {
         _page_cache->drop_file(file);
-        tracing::increment_counter(STORAGE_CACHE_DROP_CALLS);
+        open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_DROP_CALLS);
     }
 
 
@@ -140,15 +141,17 @@ namespace springtail {
     {
         DCHECK(extent_id != constant::UNKNOWN_EXTENT);
 
-        SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, access_xid, target_xid);
+        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(target_xid)}});
+
+        LOG_DEBUG(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, access_xid, target_xid);
 
         std::unique_lock lock(_mutex);
 
         // check if the page already exists in the cache for the given target XID
         PagePtr page = _try_get(file, extent_id, target_xid);
         if (page != nullptr) {
-            tracing::increment_counter(STORAGE_CACHE_GET_CALLS, tracing::get_db_id_xid_map(0, target_xid));
-            SPDLOG_DEBUG_MODULE(LOG_CACHE, "Found in cache");
+            open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_GET_CALLS);
+            LOG_DEBUG(LOG_CACHE, "Found in cache");
             return page;
         }
 
@@ -156,7 +159,7 @@ namespace springtail {
         //     from; for now we assume that the single extent_id *is* the full list of extents for
         //     the access XID and that the query nodes won't perform any roll-forward on their own.
 
-        tracing::increment_counter(STORAGE_CACHE_GET_CACHE_MISSES, tracing::get_db_id_xid_map(0, target_xid));
+        open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_GET_CACHE_MISSES);
         // note: not in the cache, need to create a new Page
         return _create(file, extent_id, target_xid, { extent_id });
     }
@@ -165,7 +168,7 @@ namespace springtail {
     StorageCache::PageCache::get_empty(const std::filesystem::path &file,
                                        uint64_t xid)
     {
-        SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}, {}", file, xid);
+        LOG_DEBUG(LOG_CACHE, "{}, {}", file, xid);
         std::unique_lock lock(_mutex);
 
         _make_page_space(1);
@@ -176,12 +179,14 @@ namespace springtail {
     StorageCache::PageCache::put(PagePtr page,
                                  std::function<bool(std::shared_ptr<Page>)> flush_callback)
     {
-        SPDLOG_DEBUG_MODULE(LOG_CACHE, "PUT file {} eid {} s_xid {} e_xid {}",
+        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(page->_end_xid)}});
+
+        LOG_DEBUG(LOG_CACHE, "PUT file {} eid {} s_xid {} e_xid {}",
                             page->_file, page->_extent_id, page->_start_xid, page->_end_xid);
 
         std::unique_lock lock(_mutex);
+        open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_PUT_CALLS);
 
-        tracing::increment_counter(STORAGE_CACHE_PUT_CALLS, tracing::get_db_id_xid_map(0, page->_end_xid));
 
         // set the flush callback for the page if it doesn't have one yet
         if (flush_callback && !page->_flush_callback) {
@@ -208,7 +213,7 @@ namespace springtail {
     StorageCache::PageCache::evict(PagePtr page)
     {
         std::unique_lock lock(_mutex);
-        SPDLOG_DEBUG_MODULE(LOG_CACHE, "EVICT file {} eid {} s_xid {} e_xid {}",
+        LOG_DEBUG(LOG_CACHE, "EVICT file {} eid {} s_xid {} e_xid {}",
                             page->_file, page->_extent_id, page->_start_xid, page->_end_xid);
 
         // page must be an unwritten dirty page
@@ -224,7 +229,7 @@ namespace springtail {
     {
         std::unique_lock lock(_mutex);
 
-        tracing::increment_counter(STORAGE_CACHE_FLUSH_CALLS);
+        open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_FLUSH_CALLS);
         const auto start_time = std::chrono::system_clock::now();
 
         // go through the dirty page list for the file
@@ -295,7 +300,7 @@ namespace springtail {
         }
 
         auto duration = std::chrono::system_clock::now() - start_time;
-        tracing::record_histogram(STORAGE_CACHE_FLUSH_LATENCIES,
+        open_telemetry::OpenTelemetry::record_histogram_static(STORAGE_CACHE_FLUSH_LATENCIES,
             std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
 
         // flush list for the file must be empty, so remove it
@@ -307,7 +312,7 @@ namespace springtail {
     {
         std::unique_lock lock(_mutex);
 
-        tracing::increment_counter(STORAGE_CACHE_DROP_CALLS);
+        open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_DROP_CALLS);
         const auto start_time = std::chrono::system_clock::now();
 
         // go through the dirty page list for the file
@@ -351,7 +356,7 @@ namespace springtail {
         }
 
         const auto duration = std::chrono::system_clock::now() - start_time;
-        tracing::record_histogram(STORAGE_CACHE_DROP_LATENCIES,
+        open_telemetry::OpenTelemetry::record_histogram_static(STORAGE_CACHE_DROP_LATENCIES,
             std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
 
         // flush list for the file must be empty, so remove it
@@ -376,7 +381,7 @@ namespace springtail {
                                      uint64_t xid,
                                      const std::vector<uint64_t> &offsets)
     {
-        SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, xid, offsets.size());
+        LOG_DEBUG(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, xid, offsets.size());
 
         // create the page object with the given <file, extent_id> valid at the requested XID
         auto page = std::make_shared<Page>(file, extent_id, xid, xid, offsets);
@@ -433,7 +438,7 @@ namespace springtail {
         }
 
         // remove the page from the cache
-        SPDLOG_DEBUG_MODULE(LOG_CACHE, "Page evict file {} eid {} xid {}",
+        LOG_DEBUG(LOG_CACHE, "Page evict file {} eid {} xid {}",
                             page->key().first, page->key().second, page->xid());
         auto cache_i = _cache.find(page->key());
         cache_i->second.erase(page->xid());
@@ -1001,7 +1006,7 @@ namespace springtail {
             // get the old extent
             auto old_extent = ref.make_safe_extent(_file);
 
-            SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}@{} (size: {}) to {}@{} (size: {})",
+            LOG_DEBUG(LOG_CACHE, "{}@{} (size: {}) to {}@{} (size: {})",
                                 (*old_extent)->extent_id(),
                                 (*old_extent)->header().xid,
                                 (*old_extent)->header().row_size,
@@ -1081,7 +1086,7 @@ namespace springtail {
 
                 // update the reference with the details of the new extent
                 ref = e.get_ref();
-                SPDLOG_DEBUG_MODULE(LOG_CACHE, "Flushing extent {} -- new extent {}", _extent_id, ref.id());
+                LOG_DEBUG(LOG_CACHE, "Flushing extent {} -- new extent {}", _extent_id, ref.id());
             }
 
             // extent should always be clean at this point

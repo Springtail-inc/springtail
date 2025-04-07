@@ -67,14 +67,14 @@ find_namespace_id(uint64_t db_id, const std::string &name, const XidLsn &xid)
     // make sure table ID exists at this XID/LSN
     auto name_f = fields->at(sys_tbl::NamespaceNames::Data::NAME);
     if (row_i == table->end() || name_f->get_text(*row_i) != name) {
-        SPDLOG_ERROR("No namespace name '{}' at xid {}:{}", name, xid.xid, xid.lsn);
+        LOG_ERROR("No namespace name '{}' at xid {}:{}", name, xid.xid, xid.lsn);
         throw FdwError(fmt::format("No namespace name '{}' at xid {}:{}", name, xid.xid, xid.lsn));
     }
 
     // make sure that the table is marked as existing at this XID/LSN
     bool exists = fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*row_i);
     if (!exists) {
-        SPDLOG_WARN("Namespace marked non-existant at xid {}:{}", xid.xid, xid.lsn);
+        LOG_WARN("Namespace marked non-existant at xid {}:{}", xid.xid, xid.lsn);
         throw FdwError(fmt::format("Namespace '{}' marked non-existant at xid {}:{}",
                                    name, xid.xid, xid.lsn));
     }

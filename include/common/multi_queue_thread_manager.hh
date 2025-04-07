@@ -1,5 +1,7 @@
 #pragma once
 
+#include <map>
+
 #include <common/thread_pool.hh>
 
 namespace springtail::common {
