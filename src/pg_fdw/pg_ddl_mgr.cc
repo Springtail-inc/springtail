@@ -566,7 +566,7 @@ namespace springtail::pg_fdw {
 
         // can't currently support other kinds of DDL mutations
         LOG_ERROR("Bad DDL statement: {}", action.get<std::string>());
-        assert(0);
+        CHECK(false);
     }
 
     std::set<uint32_t>
