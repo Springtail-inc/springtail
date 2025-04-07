@@ -31,7 +31,7 @@ namespace springtail {
         CHECK_EQ(_root, nullptr);
 
         // construct an empty extent
-        auto cache_page = StorageCache::get_instance()->get(_file, constant::UNKNOWN_EXTENT, _xid);
+        auto cache_page = StorageCache::get_instance()->get(_file, constant::UNKNOWN_EXTENT, _xid, _xid);
 
         // create an empty root
         _root = std::make_shared<Page>(this, std::move(cache_page), _leaf_schema);

@@ -1135,6 +1135,8 @@ namespace springtail {
              */
             PagePtr get(const std::filesystem::path &file, uint64_t extent_id,
                         uint64_t access_xid, uint64_t target_xid);
+            const PagePtr get(const std::filesystem::path &file, uint64_t extent_id,
+                        uint64_t access_xid);
 
             /**
              * Retrieve an empty Page object from the cache for a given file, operating at the
@@ -1251,9 +1253,13 @@ namespace springtail {
         SafePagePtr get(const std::filesystem::path &file,
                         uint64_t extent_id,
                         uint64_t access_xid,
-                        uint64_t target_xid = constant::LATEST_XID,
+                        uint64_t target_xid,
                         bool do_rollforward = false,
                         SafePagePtr::FlushCb flush_cb={} );
+
+        const SafePagePtr get(const std::filesystem::path &file,
+                        uint64_t extent_id,
+                        uint64_t access_xid);
 
         /**
          * Flush all of the pages associated with a given file to disk.  Waits for all of the pages

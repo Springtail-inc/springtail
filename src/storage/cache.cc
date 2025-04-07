@@ -49,6 +49,19 @@ namespace springtail {
         _page_cache = std::make_shared<PageCache>(page_size);
     }
 
+    const StorageCache::SafePagePtr StorageCache::get(const std::filesystem::path &file,
+                        uint64_t extent_id,
+                        uint64_t access_xid)
+    {
+        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(access_xid)}});
+        LOG_DEBUG(LOG_CACHE, "GET file {} eid {} xid {}",
+                            file, extent_id, access_xid);
+
+        open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_GET_CALLS);
+
+        return {_page_cache.get(), _page_cache->get(file, extent_id, access_xid), {}};
+    }
+
     StorageCache::SafePagePtr
     StorageCache::get(const std::filesystem::path &file,
                       uint64_t extent_id,
@@ -133,6 +146,27 @@ namespace springtail {
     }
 
 
+    const StorageCache::PagePtr StorageCache::PageCache::get(const std::filesystem::path &file, uint64_t extent_id,
+                        uint64_t access_xid)
+    {
+        DCHECK(extent_id != constant::UNKNOWN_EXTENT);
+        LOG_DEBUG(LOG_CACHE, "read only page: {}, {}, {}", file, extent_id, access_xid);
+
+        std::unique_lock lock(_mutex);
+
+        // check if the page already exists in the cache for the given target XID
+        PagePtr page = _try_get(file, extent_id, access_xid);
+        if (page != nullptr) {
+            open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_GET_CALLS);
+            LOG_DEBUG(LOG_CACHE, "Found in cache");
+            return page;
+        }
+
+        open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_GET_CACHE_MISSES);
+
+        return _create(file, extent_id, access_xid, { extent_id });
+    }
+
     StorageCache::PagePtr
     StorageCache::PageCache::get(const std::filesystem::path &file,
                                  uint64_t extent_id,
@@ -143,7 +177,7 @@ namespace springtail {
 
         auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(target_xid)}});
 
-        LOG_DEBUG(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, access_xid, target_xid);
+        LOG_DEBUG(LOG_CACHE, "mutable page: {}, {}, {}, {}", file, extent_id, access_xid, target_xid);
 
         std::unique_lock lock(_mutex);
 
@@ -159,7 +193,6 @@ namespace springtail {
         //     from; for now we assume that the single extent_id *is* the full list of extents for
         //     the access XID and that the query nodes won't perform any roll-forward on their own.
 
-        open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_GET_CACHE_MISSES);
         // note: not in the cache, need to create a new Page
         return _create(file, extent_id, target_xid, { extent_id });
     }

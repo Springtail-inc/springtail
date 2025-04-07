@@ -99,9 +99,9 @@ namespace {
         int count = 0;
         std::string prev = "";
         for (auto offset : offsets) {
-            page = cache->get(file, offset, xid);
+            auto read_page = cache->get(file, offset, xid);
 
-            for (auto row : *page.ptr()) {
+            for (auto row : *read_page.ptr()) {
                 if (prev != "") {
                     ASSERT_GT(_fields->at(1)->get_text(row), prev);
                 }
