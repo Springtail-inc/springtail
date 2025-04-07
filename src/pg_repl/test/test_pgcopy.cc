@@ -61,7 +61,7 @@ namespace {
             Properties::get_primary_db_config(host, port, user, password);
 
             std::string conn_cmd = fmt::format("psql postgresql://{}:{}@{}:{}/{} -f sample.sql", user, password, host, port, db_name);
-            SPDLOG_INFO("Connecting to: {}", conn_cmd);
+            LOG_INFO("Connecting to: {}", conn_cmd);
             int err = std::system(conn_cmd.c_str());
             if (err) {
                 GTEST_SKIP() << "Postgres load failure, skipping test";
@@ -80,7 +80,7 @@ namespace {
 
         // perform the table copy
         std::vector<PgCopyResultPtr> res = PgCopyTable::copy_table(db_id, xid+1, schema_name, table_name);
-        SPDLOG_DEBUG("Doing copy at: {}", xid+1);
+        LOG_DEBUG(LOG_ALL, "Doing copy at: {}", xid+1);
         ASSERT_EQ(res.size(), 1);
         ASSERT_EQ(res[0]->tids.size(), 1);
 
@@ -122,7 +122,7 @@ namespace {
         client->finalize(db_id, xid);
 
         // commit the xid
-        SPDLOG_DEBUG("Committing xid: {}", xid);
+        LOG_DEBUG(LOG_ALL, "Committing xid: {}", xid);
         XidMgrClient::get_instance()->commit_xid(db_id, xid, false);
 
         // create an access table

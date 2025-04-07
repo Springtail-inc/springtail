@@ -1,6 +1,6 @@
 #pragma once
 
-#include <common/tracing.hh>
+#include <common/open_telemetry.hh>
 #include <common/timestamp.hh>
 
 #include <pg_repl/pg_msg_stream.hh>
@@ -142,7 +142,7 @@ namespace springtail::pg_log_mgr {
                   ExistsCachePtr exists_cache)
                 : _db(db_id), _pg_xid(pg_xid), _committer_queue(committer_queue), _exists_cache(exists_cache)
             {
-                auto tracer = tracing::tracer("PgLogReader");
+                auto tracer = open_telemetry::OpenTelemetry::tracer_static("PgLogReader");
                 _span = tracer->StartSpan("Transaction");
                 _span->SetAttribute("pg_xid", pg_xid);
             }
@@ -300,7 +300,7 @@ namespace springtail::pg_log_mgr {
 
             uint64_t _lsn = 0; ///< The LSN counter
 
-            tracing::SpanPtr _span; ///< Timing for the txn processing.
+            open_telemetry::SpanPtr _span; ///< Timing for the txn processing.
             CommitterQueuePtr _committer_queue; ///< Reference to the committer queue
 
             ExistsCachePtr _exists_cache; ///< Reference to the exists cache

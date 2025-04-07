@@ -17,6 +17,7 @@
 #include <sys_tbl_mgr/table_mgr.hh>
 
 #include <pg_repl/libpq_connection.hh>
+#include "common/logging.hh"
 
 namespace springtail::pg_fdw {
 
@@ -233,7 +234,7 @@ namespace springtail::pg_fdw {
             // start the ddl main thread
             std::string fdw_id = Properties::get_fdw_id();
 
-            SPDLOG_DEBUG("Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}",
+            LOG_DEBUG(LOG_FDW, "Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}",
                         fdw_id, _username, _password, _hostname.value_or(""));
             PgDDLMgr::get_instance()->init(fdw_id, _username, _password, _hostname);
             _pg_ddl_mgr_thread = std::thread(&PgDDLMgr::run, PgDDLMgr::get_instance());

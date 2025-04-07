@@ -38,7 +38,7 @@ namespace {
         while (fgets(buffer, sizeof(buffer), pipe.get()) != nullptr) {
             result += buffer;
         }
-        SPDLOG_INFO("exec_popen: {}", result);
+        LOG_INFO("exec_popen: {}", result);
 
         // remove new line
         std::erase_if(result, [](char c) { return c == '\n'; });
@@ -64,7 +64,7 @@ namespace {
                     return true;
                 }
             } catch (...) {
-                SPDLOG_ERROR("Failed to find postgres config files for springtail");
+                LOG_ERROR("Failed to find postgres config files for springtail");
             }
 
             return false;

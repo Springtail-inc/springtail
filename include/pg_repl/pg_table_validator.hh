@@ -125,13 +125,11 @@ namespace springtail
                 for (const auto& column : columns) {
                     if (column.is_generated || column.is_non_standard_collation ||
                         !column.is_user_defined_type) {
-                        // store the invalid column information
                         invalid_columns.push_back({{"name", column.name},
                                                    {"type_name", column.type_name},
                                                    {"collation", column.collation}});
-
-                        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "VALIDATE_DDL: Invalid column: name={}",
-                                            column.name);
+                        LOG_DEBUG(LOG_PG_REPL, "VALIDATE_DDL: Invalid column: name={}, tid={}",
+                                  column.name, table_oid);
                     }
                 }
 

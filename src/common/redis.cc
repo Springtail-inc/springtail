@@ -40,7 +40,7 @@ namespace springtail {
         pool_options.connection_lifetime = std::chrono::seconds(max_connection_lifetime_secs);
 
         RedisClientPtr client = std::make_shared<RedisClient>(connect_options, pool_options);
-        SPDLOG_INFO("Connected to redis server: {}", connect_options.host);
+        LOG_INFO("Connected to redis server: {}", connect_options.host);
         return std::make_tuple(connect_options.db, client);
     }
 

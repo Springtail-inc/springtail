@@ -106,7 +106,7 @@ namespace springtail {
                                            src.size(), dst->size() - offset);
 
         if (size < 0) {
-            SPDLOG_ERROR("Error decompressing: err={}", size);
+            LOG_ERROR("Error decompressing: err={}", size);
             throw ValidationError("Error decompressing data");
         }
 

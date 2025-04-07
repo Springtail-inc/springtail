@@ -13,13 +13,13 @@ set(COMMON_LIB_SOURCES
   dns_resolver.cc
   exception.cc
   logging.cc
+  open_telemetry.cc
   properties.cc
   redis.cc
   redis_cache.cc
   multi_queue_thread_manager.cc
   timestamp.cc
   time_trace.cc
-  tracing.cc
   tracking_allocator.cc
   aws.cc
 )
@@ -46,6 +46,13 @@ target_link_libraries(springtail_common
         opentelemetry-cpp::otlp_http_log_record_exporter
         ${AWSSDK_LIBRARIES}
 )
+
+add_executable(log_tester test/log_tester.cc)
+target_include_directories(log_tester
+     PUBLIC ${PROJECT_SOURCE_DIR}/include
+)
+target_link_libraries(log_tester PRIVATE springtail_common)
+add_dsymutil_command(log_tester)
 
 add_executable(test_thread test/test_thread.cc)
 target_include_directories(test_thread PRIVATE ${CMAKE_SOURCE_DIR}/include)

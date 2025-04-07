@@ -16,7 +16,7 @@ namespace {
         std::stringstream ss;
         trace.print(ss);
 
-        SPDLOG_ERROR("Backtrace from signal {}:\n{}", signo, ss.str());
+        LOG_ERROR("Backtrace from signal {}:\n{}", signo, ss.str());
         signal(signo, SIG_DFL);
         raise(signo);
     }
@@ -60,6 +60,6 @@ namespace springtail {
         std::stringstream ss;
         _trace.print(ss);
 
-        SPDLOG_ERROR("Backtrace:\n{}", ss.str());
+        LOG_ERROR("Backtrace:\n{}", ss.str());
     }
 }

@@ -7,7 +7,7 @@ namespace springtail::pg_log_mgr {
                              uint64_t table_id,
                              const XidLsn &xid)
     {
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "db {} table {} xid {}:{}",
+        LOG_DEBUG(LOG_PG_LOG_MGR, "db {} table {} xid {}:{}",
                             db_id, table_id, xid.xid, xid.lsn);
         boost::unique_lock lock(_mutex);
 
@@ -26,7 +26,7 @@ namespace springtail::pg_log_mgr {
                                uint64_t table_id,
                                const XidLsn &xid)
     {
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "db {} table {} xid {}:{}",
+        LOG_DEBUG(LOG_PG_LOG_MGR, "db {} table {} xid {}:{}",
                             db_id, table_id, xid.xid, xid.lsn);
         boost::unique_lock lock(_mutex);
 
@@ -54,7 +54,7 @@ namespace springtail::pg_log_mgr {
     bool
     SyncTracker::add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
     {
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "db {} xid {}", sync_msg.db_id, sync_msg.target_xid);
+        LOG_DEBUG(LOG_PG_LOG_MGR, "db {} xid {}", sync_msg.db_id, sync_msg.target_xid);
         boost::unique_lock lock(_mutex);
 
         // clear the inflight map for the provided tables in the db
@@ -81,14 +81,8 @@ namespace springtail::pg_log_mgr {
 
         // make a record of the table mapping(s)
         auto record = std::make_shared<XidRecord>(sync_msg);
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "XidRecord: pg_xid={} xmax={} xmin={}",
-                            sync_msg.pg_xid, sync_msg.xmax, sync_msg.xmin);
-        for (auto entry : sync_msg.xips) {
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "XidRecord: inflight={}", entry);
-        }
-        for (const auto &entry : sync_msg.tids) {
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "XidRecord: tid={}", entry.first);
-        }
+        LOG_DEBUG(LOG_PG_LOG_MGR, "XidRecord: pg_xid={} xmax={} xmin={}", sync_msg.pg_xid,
+                  sync_msg.xmax, sync_msg.xmin);
 
         // make sure that the database has entries in the maps
         auto &db_map = (db_i == _sync_map.end()) ? _sync_map[sync_msg.db_id] : db_i->second;
@@ -123,13 +117,13 @@ namespace springtail::pg_log_mgr {
     SyncTracker::check_commit(uint64_t db_id,
                               uint32_t pg_xid)
     {
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "db {} pg_xid {}", db_id, pg_xid);
+        LOG_DEBUG(LOG_PG_LOG_MGR, "db {} pg_xid {}", db_id, pg_xid);
         boost::unique_lock lock(_mutex);
 
         // get the map for this database
         auto db_i = _sync_map.find(db_id);
         if (db_i == _sync_map.end()) {
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "didn't find db {} pg_xid {}", db_id, pg_xid);
+            LOG_DEBUG(LOG_PG_LOG_MGR, "didn't find db {} pg_xid {}", db_id, pg_xid);
             return {}; // no ongoing sync
         }
 
@@ -152,7 +146,7 @@ namespace springtail::pg_log_mgr {
 
         // if nothing is completed, then we have to wait to swap/commit
         if (completed.empty()) {
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "no completed db {} pg_xid {}", db_id, pg_xid);
+            LOG_DEBUG(LOG_PG_LOG_MGR, "no completed db {} pg_xid {}", db_id, pg_xid);
             return {};
         }
 
@@ -177,7 +171,7 @@ namespace springtail::pg_log_mgr {
         for (auto record : completed) {
             tids.insert(tids.end(), record->tids().begin(), record->tids().end());
         }
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Found {} tables", tids.size());
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Found {} tables", tids.size());
 
         return std::make_shared<committer::XidReady>(type, db_id, committer::XidReady::SwapMsg(xid, std::move(tids)));
     }
@@ -186,7 +180,7 @@ namespace springtail::pg_log_mgr {
     SyncTracker::clear_tables(uint64_t db_id,
                               const committer::XidReady &commit_msg)
     {
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "db {}", db_id);
+        LOG_DEBUG(LOG_PG_LOG_MGR, "db {}", db_id);
         boost::unique_lock lock(_mutex);
 
         // get the table map for this database
@@ -206,7 +200,7 @@ namespace springtail::pg_log_mgr {
     {
         boost::shared_lock lock(_mutex);
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "db {} table_id {} pg_xid {}", db_id, table_id, pg_xid);
+        LOG_DEBUG(LOG_PG_LOG_MGR, "db {} table_id {} pg_xid {}", db_id, table_id, pg_xid);
 
         // first check the resync map
         auto resync_i = _resync_map.find(db_id);

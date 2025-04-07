@@ -41,7 +41,7 @@ PgXactLogWriterMmap::rotate(uint64_t timestamp)
 
     // create log path
     _file = fs::create_log_file_with_timestamp(_base_dir, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX, timestamp);
-    SPDLOG_INFO("Next Xact file: {}", _file.string());
+    LOG_INFO("Next Xact file: {}", _file.string());
 
     // if the file already exists, we are in recovery mode
     if (std::filesystem::exists(_file) && _first_file) {

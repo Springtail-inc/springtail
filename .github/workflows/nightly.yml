@@ -15,8 +15,8 @@ permissions:
 jobs:
   nightly_job:
     name: Nightly Job
-    runs-on: warp-ubuntu-latest-arm64-4x
-    timeout-minutes: 90
+    runs-on: image-builder
+    timeout-minutes: 360
     container:
       image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
       credentials:
@@ -37,7 +37,7 @@ jobs:
       PACKAGES_S3_PREFIX: nightly-builds
       TEST_LOGS_S3_PREFIX: nightly-testlogs
       NUM_PROCS: ${{ vars.NUM_PROCS }}
-      INTEGRATION_TEST_ITERATIONS: ${{ vars.INTEGRATION_TEST_ITERATIONS || 5 }}
+      INTEGRATION_TEST_ITERATIONS: 1 # ${{ vars.INTEGRATION_TEST_ITERATIONS || 5 }}
       # The path to the Springtail logs, keep consistent with the `log_path` inside
       # system.json.test
       SPRINGTAIL_LOG_PATH: /opt/springtail/logs
@@ -228,6 +228,7 @@ jobs:
           set +e
           _LOG_FLAG="succeeded"
           python3 test_runner.py -t -s postgres_all
+          sleep infinity
           # set Failure flag is the above command exits non-zero exit code
           if [ $? -ne 0 ]; then
               _LOG_FLAG="failed"

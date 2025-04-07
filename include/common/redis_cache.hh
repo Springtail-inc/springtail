@@ -97,7 +97,7 @@ namespace springtail {
              * @param new_value - new json value
              */
             void change_callback(const std::string &path, const nlohmann::json &new_value) override {
-                SPDLOG_DEBUG("!!! Received notification; path: \"{}\"; new value: {}", path, new_value.dump(4));
+                LOG_DEBUG(LOG_ALL, "!!! Received notification; path: \"{}\"; new value: {}", path, new_value.dump(4));
                 _cb(path, new_value);
             }
 
