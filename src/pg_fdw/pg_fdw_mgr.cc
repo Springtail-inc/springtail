@@ -574,7 +574,7 @@ namespace springtail::pg_fdw {
             if (!state->target_columns.contains(attno)) {
                 nulls[i] = true;
                 values[i] = 0;
-                LOG_DEBUG("Skipping column: {}; not found in target column", attno);
+                LOG_DEBUG(LOG_FDW, "Skipping column: {}; not found in target column", attno);
                 continue;
             }
 
