@@ -11,6 +11,7 @@
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 
+#include <common/logging.hh>
 #include <proxy/buffer_pool.hh>
 
 namespace springtail::pg_proxy {
@@ -77,7 +78,7 @@ namespace springtail::pg_proxy {
             auto ts = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
             int64_t timestamp = ts.count();
 
-            SPDLOG_DEBUG("Logging data: proxy_id={} session_id={} seq_id={} code={} data_length={} final={}",
+            LOG_DEBUG(LOG_PROXY, "Logging data: proxy_id={} session_id={} seq_id={} code={} data_length={} final={}",
                          proxy_id, session_id, seq_id, code, data_length, final);
 
             // generate header:

@@ -735,7 +735,7 @@ namespace {
         stored_array_values = _cache->get_value("top_level_array");
         EXPECT_NE(array_values, stored_array_values);
 
-        SPDLOG_INFO("started cleanup");
+        LOG_INFO("started cleanup");
         counter_value = _notification_counter;
         _test_client->del(string_key);
         wait_for_increment(counter_value, 1);

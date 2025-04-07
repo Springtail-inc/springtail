@@ -500,7 +500,7 @@ namespace springtail::pg_proxy
     {
         _cache_watcher_db_ids = std::make_shared<RedisCache::RedisChangeWatcher>(
             [this](const std::string &path, const nlohmann::json &new_value) -> void {
-                SPDLOG_DEBUG_MODULE(LOG_PROXY,"Replicated databases: {}", new_value.dump(4));
+                LOG_DEBUG(LOG_PROXY,"Replicated databases: {}", new_value.dump(4));
                 CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
                 // get a vector of old database ids from _log_mgrs
                 std::shared_lock<std::shared_mutex> lock(_db_mutex);
@@ -523,7 +523,7 @@ namespace springtail::pg_proxy
         );
         _cache_watcher_db_states = std::make_shared<RedisCache::RedisChangeWatcher>(
             [this](const std::string &path, const nlohmann::json &new_value) -> void {
-                SPDLOG_DEBUG_MODULE(LOG_PROXY,"Replicated database state change; path: {}, state: {}",
+                LOG_DEBUG(LOG_PROXY,"Replicated database state change; path: {}, state: {}",
                     path, new_value.dump(4));
                 CHECK(path.starts_with(Properties::DATABASE_STATE_PATH));
                 // extract database id
@@ -577,7 +577,7 @@ namespace springtail::pg_proxy
                 }
                 add_replica(std::make_shared<DatabaseInstance>(Session::Type::REPLICA, host.value(), db_prefix.value(), port.value()));
             } else {
-                SPDLOG_ERROR("Could not find the value for replica database {} either host or port", fdw_id);
+                LOG_ERROR("Could not find the value for replica database {} either host or port", fdw_id);
                 throw ProxyServerError();
             }
         }
@@ -602,7 +602,7 @@ namespace springtail::pg_proxy
 
     void DatabaseMgr::_handle_db_table_change(const std::string &msg)
     {
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Received DB table change: {}", msg);
+        LOG_DEBUG(LOG_PROXY, "Received DB table change: {}", msg);
         uint64_t db_id;
         std::string action;
         std::string schema;
@@ -619,12 +619,12 @@ namespace springtail::pg_proxy
         // update the schema table map in the database object
         if (action == "add") {
             iter->second->add_schema_table(schema, table);
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Added schema: {}, table: {} to database {}", schema, table, db_id);
+            LOG_DEBUG(LOG_PROXY, "Added schema: {}, table: {} to database {}", schema, table, db_id);
         } else if (action == "remove") {
             iter->second->remove_schema_table(schema, table);
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Removed schema: {}, table: {} from database {}", schema, table, db_id);
+            LOG_DEBUG(LOG_PROXY, "Removed schema: {}, table: {} from database {}", schema, table, db_id);
         } else {
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Unsupported action: {}", action);
+            LOG_DEBUG(LOG_PROXY, "Unsupported action: {}", action);
         }
     }
 
@@ -651,7 +651,7 @@ namespace springtail::pg_proxy
         for (const auto& [db_id, db_name]: db_list) {
             // create database object and insert it into the maps
             DatabasePtr db_object = std::make_shared<Database>(db_id, db_name);
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Added database (id, name): ({}, {})", db_id, db_name);
+            LOG_DEBUG(LOG_PROXY, "Added database (id, name): ({}, {})", db_id, db_name);
             _db_name_rep_dbs.insert(std::pair<std::string, DatabasePtr>(db_name, db_object));
             _db_id_rep_dbs.insert(std::pair<uint64_t, DatabasePtr>(db_id, db_object));
 
@@ -697,7 +697,7 @@ namespace springtail::pg_proxy
         _db_id_rep_dbs.insert(std::pair<uint64_t, DatabasePtr>(db_id, db_object));
         db_lock.unlock();
 
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Added database (id, name): ({}, {})", db_id, db_name);
+        LOG_DEBUG(LOG_PROXY, "Added database (id, name): ({}, {})", db_id, db_name);
 
         // update database schemas and tables
         std::vector<std::pair<std::string, std::string>> schema_table_pairs;

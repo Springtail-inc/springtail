@@ -69,7 +69,7 @@ namespace springtail::pg_proxy {
     Session::operator()()
     {
         if (_running.test_and_set()) {
-            SPDLOG_ERROR("{} Session already running", name());
+            LOG_ERROR("{} Session already running", name());
             assert(0);
             return;
         }
@@ -250,7 +250,7 @@ namespace springtail::pg_proxy {
             return;
         }
 
-        SPDLOG_WARN("Error state, closing connection: type={} for session id={}\n",
+        LOG_WARN("Error state, closing connection: type={} for session id={}\n",
                      _type == Type::PRIMARY ? "PRIMARY" : "CLIENT", _id);
 
         // shutdown the session, calls into child class

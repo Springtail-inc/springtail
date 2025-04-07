@@ -1,16 +1,17 @@
-#include <memory>
-
-#include <common/constants.hh>
-#include <pg_log_mgr/committer.hh>
-#include <common/coordinator.hh>
 #include <opentelemetry/metrics/meter.h>
 #include <opentelemetry/metrics/provider.h>
+
+#include <common/constants.hh>
+#include <common/coordinator.hh>
+#include <common/open_telemetry.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <proto/pg_copy_table.pb.h>
 #include <redis/db_state_change.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_func.hh>
+
+#include <pg_log_mgr/committer.hh>
 
 namespace springtail::committer {
 
@@ -66,11 +67,11 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             }
             uint64_t db_id = result->db();
 
-            auto token_1 = logging::set_context_variables({{"db_id", std::to_string(db_id)}});
+            auto token_1 = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
 
             // handle a TABLE_SYNC_START
             if (result->type() == XidReady::Type::TABLE_SYNC_START) {
-                SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Stop committing due to table sync: {}", db_id);
+                LOG_DEBUG(LOG_COMMITTER, "Stop committing due to table sync: {}", db_id);
                 // stop performing commits on this db until the table syncs are complete and aligned
                 _block_commit.insert(db_id);
 
@@ -87,13 +88,13 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 completed_xid = itr->second;
             }
 
-            auto token_2 = logging::set_context_variables({{"xid", std::to_string(completed_xid)}});
-            SPDLOG_INFO("Last completed XID: {}@{}", db_id, completed_xid);
+            auto token_2 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(completed_xid)}});
+            LOG_INFO("Last completed XID: {}@{}", db_id, completed_xid);
 
             // handle a TABLE_SYNC_COMMIT
             if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT ||
                 result->type() == XidReady::Type::TABLE_SYNC_SWAP) {
-                SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Handle a TABLE_SYNC_SWAP/COMMIT: {}, {}, completed xid @{}",
+                LOG_DEBUG(LOG_COMMITTER, "Handle a TABLE_SYNC_SWAP/COMMIT: {}, {}, completed xid @{}",
                                     static_cast<char>(result->type()), db_id, completed_xid);
 
                 nlohmann::json ddls;
@@ -105,7 +106,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     completed_xid = result->swap().xid();
                 }
 
-                auto token_3 = logging::set_context_variables({{"xid", std::to_string(completed_xid)}});
+                auto token_3 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(completed_xid)}});
 
                 // for operations at the SysTblMgr
                 auto client = sys_tbl_mgr::Client::get_instance();
@@ -118,11 +119,11 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                         // During resync if the table is found to be invalid as part of the copy flow, the table
                         // becomes invalidated the copy_ptr becomes null, in those cases we don't need to
                         // perform any operaion and just skip
-                        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Copy info not present for table {}", entry.first);
+                        LOG_DEBUG(LOG_COMMITTER, "Copy info not present for table {}", entry.first);
                         continue;
                     }
 
-                    SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "table_id {}", entry.first);
+                    LOG_DEBUG(LOG_COMMITTER, "table_id {}", entry.first);
 
                     // perform the table swap
                     // note: we wait to perform this operation in the GC-2 to ensure that all system
@@ -156,7 +157,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     assert(ddls.is_array());
                 }
 
-                SPDLOG_INFO("Swapped synced tables: {}@{}", db_id, completed_xid);
+                LOG_INFO("Swapped synced tables: {}@{}", db_id, completed_xid);
 
                 // pre-commit the DDLs in case there's a failure
                 _redis_ddl.precommit_ddl(db_id, completed_xid, ddls);
@@ -170,7 +171,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     _xid_mgr->commit_xid(db_id, completed_xid, true);
                     _committed_xids[db_id] = completed_xid;
 
-                    SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, completed_xid);
+                    LOG_DEBUG(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, completed_xid);
                     // notify the FDW of the schema changes
                     if (_has_ddl_precommit) {
                         _redis_ddl.commit_ddl(db_id, completed_xid);
@@ -196,8 +197,8 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             // note: from here we know we have an XACT_MSG
             assert(result->type() == XidReady::Type::XACT_MSG);
             uint64_t xid = result->xact().xid();
-            auto token_4 = logging::set_context_variables({{"xid", std::to_string(xid)}});
-            SPDLOG_INFO("Process XID: {}@{}", db_id, xid);
+            auto token_4 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(xid)}});
+            LOG_INFO("Process XID: {}@{}", db_id, xid);
             assert(xid > completed_xid);
 
             // check if there were DDL mutations as part of this txn, invalidate the schema cache
@@ -214,7 +215,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 // query the write cache for the tables modified through this XID
                 auto table_list = WriteCacheFuncImpl::list_tables(db_id, xid, 100, table_cursor);
 
-                SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Got {} tables from the write cache", table_list.size());
+                LOG_DEBUG(LOG_COMMITTER, "Got {} tables from the write cache", table_list.size());
 
                 // check if we are done processing this XID
                 if (table_list.empty()) {
@@ -223,7 +224,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 }
 
                 for (auto tid : table_list) {
-                    SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Pass table {} to a worker", tid);
+                    LOG_DEBUG(LOG_COMMITTER, "Pass table {} to a worker", tid);
                     // mark this table as in-flight
                     {
                         boost::unique_lock lock(_mutex);
@@ -239,12 +240,12 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             // wait for tables to complete their processing
             // XXX ideally we could start working on the next XID while the finalize() operations
             //     are being completed.
-            SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Wait for {} tables to complete", _tid_set.size());
+            LOG_DEBUG(LOG_COMMITTER, "Wait for {} tables to complete", _tid_set.size());
             {
                 boost::unique_lock lock(_mutex);
                 _cv.wait(lock, [this]() { return _tid_set.empty(); });
             }
-            SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "All table processing complete for XID {}", xid);
+            LOG_DEBUG(LOG_COMMITTER, "All table processing complete for XID {}", xid);
 
             nlohmann::json index_ddls = _redis_ddl.get_index_ddls_xid(db_id, xid);
 
@@ -275,7 +276,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
                 // push completed DDL changes to the FDWs
                 if (_has_ddl_precommit) {
-                    SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, xid);
+                    LOG_DEBUG(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, xid);
                     _redis_ddl.commit_ddl(db_id, xid);
                     _has_ddl_precommit = false;
                 }
@@ -291,7 +292,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
             result->notify_tracker(xid);
 
-            SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "XID completed: {}@{}", db_id, xid);
+            LOG_DEBUG(LOG_COMMITTER, "XID completed: {}@{}", db_id, xid);
         }
 
         // join all of the worker threads
@@ -303,7 +304,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         coordinator->unregister_thread(daemon_type, _worker_id);
 
         _indexer.reset();
-        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Committer shutdown");
+        LOG_DEBUG(LOG_COMMITTER, "Committer shutdown");
     }
 
     void
@@ -410,7 +411,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                         // this is very unlikely. It would mean that the system went down
                         // after the index build was finalized but before it had a chance
                         // to commit the DDL to redis.
-                        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "* Uncommitted index {}@{} -- {} {}", db_id, xid, tid, index_id);
+                        LOG_DEBUG(LOG_COMMITTER, "* Uncommitted index {}@{} -- {} {}", db_id, xid, tid, index_id);
                     } else {
                         // reconstruct the log message
                         PgMsgIndex msg;
@@ -539,8 +540,8 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - min_commit_ts->to_system_time());
             _btree_write_latencies->Record(duration.count(), _context);
-            SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Processed table {} in {} milliseconds", tid, duration.count());
-            SPDLOG_ERROR("Processed table {} in {} milliseconds", tid, duration.count());
+            LOG_DEBUG(LOG_COMMITTER, "Processed table {} in {} milliseconds", tid, duration.count());
+            LOG_ERROR("Processed table {} in {} milliseconds", tid, duration.count());
         }
         // update the system table roots
         TableMgr::get_instance()->update_roots(table->db(), table->id(), xid, metadata);
@@ -561,7 +562,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         sort_keys.push_back("__springtail_lsn");
 
         auto columns = schema->column_order();
-        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "xid={}:{}, columns={}",
+        LOG_DEBUG(LOG_COMMITTER, "xid={}:{}, columns={}",
                             xid.xid, xid.lsn,
                             common::join_string(",", columns.begin(), columns.end()));
 
@@ -590,7 +591,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             case INSERT:
                 {
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
-                    SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "INSERT value={}", tuple->to_string());
+                    LOG_DEBUG(LOG_COMMITTER, "INSERT value={}", tuple->to_string());
                     table->insert(tuple, wc_extent->xid, constant::UNKNOWN_EXTENT);
                     break;
                 }
