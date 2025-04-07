@@ -164,7 +164,7 @@ namespace {
             std::map<std::string, int> counts;
             for (auto row : *tree) {
                 if (_name_f->get_text(row) < prev) {
-                    SPDLOG_ERROR("{} < {}", _name_f->get_text(row), prev);
+                    LOG_ERROR("{} < {}", _name_f->get_text(row), prev);
                 }
 
                 if (prev != "") {
@@ -178,7 +178,7 @@ namespace {
 
             for (auto &&entry : counts) {
                 if (entry.second > 1) {
-                    SPDLOG_INFO("{} = {}", entry.first, entry.second);
+                    LOG_INFO("{} = {}", entry.first, entry.second);
                 }
             }
 

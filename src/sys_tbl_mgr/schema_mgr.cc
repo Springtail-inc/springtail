@@ -42,8 +42,8 @@ namespace springtail {
     {
         std::map<uint32_t, SchemaColumn> column_map;
         for (auto &&column : columns) {
-            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "col_pos={} col_name={}",
-                                column.position, column.name);
+            LOG_DEBUG(LOG_SCHEMA, "col_pos={} col_name={}",
+                        column.position, column.name);
             column_map.insert({column.position, column});
         }
         return column_map;

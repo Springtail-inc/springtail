@@ -263,7 +263,7 @@ namespace springtail {
         for (auto &&i = new_pages.rbegin(); i != new_pages.rend(); i++) {
             auto &page = *i;
 
-            SPDLOG_DEBUG_MODULE(LOG_BTREE, "Adding branch entry to child extent_id: {}", page->extent_id);
+            LOG_DEBUG(LOG_BTREE, "Adding branch entry to child extent_id: {}", page->extent_id);
 
             // XXX need a better way to create a combined tuple
             auto value = std::make_shared<FieldArray>();
@@ -354,7 +354,7 @@ namespace springtail {
 
             auto page = std::make_shared<Page>(_btree, id, value_key, std::move(cache_page), _schema);
 
-            SPDLOG_DEBUG_MODULE(LOG_BTREE, "Creating MutableBTree Page: {} {}", id, page->extent_id);
+            LOG_DEBUG(LOG_BTREE, "Creating MutableBTree Page: {} {}", id, page->extent_id);
 
             new_pages.push_back(page);
         }
@@ -851,7 +851,7 @@ namespace springtail {
             for (PagePtr child : new_pages) {
                 auto key = child->index_key();
 
-                SPDLOG_DEBUG_MODULE(LOG_BTREE, "Adding root entry to child extent_id: {}", child->extent_id);
+                LOG_DEBUG(LOG_BTREE, "Adding root entry to child extent_id: {}", child->extent_id);
 
                 // XXX need a better way to populate this data
                 auto value = std::make_shared<FieldArray>();

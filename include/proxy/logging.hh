@@ -29,6 +29,6 @@ namespace springtail::pg_proxy {
         if (level > proxy_log_level) {
             return;
         }
-        springtail::logging::debug(LOG_PROXY, fmt, func, file, line, std::forward<Args>(args)...);
+        springtail::logging::Logger::debug(LOG_PROXY, func, file, line, spdlog::level::debug, fmt, std::forward<Args>(args)...);
     }
 }

@@ -132,7 +132,7 @@ namespace springtail
                             {"type_name", column.type_name},
                             {"collation", column.collation}
                         });
-                        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "VALIDATE_DDL: Invalid column: name={}, tid={}", column.name, table_oid);
+                        LOG_DEBUG(LOG_PG_REPL, "VALIDATE_DDL: Invalid column: name={}, tid={}", column.name, table_oid);
                     }
                 }
 

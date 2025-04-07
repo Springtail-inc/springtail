@@ -32,8 +32,8 @@ namespace springtail {
             fh->write(this);
         } catch (const std::exception &exc) {
             // log exception
-            SPDLOG_ERROR("Caught exception for IO type={}", get_type());
-            SPDLOG_ERROR("Exception: {}", exc.what());
+            LOG_ERROR("Caught exception for IO type={}", get_type());
+            LOG_ERROR("Exception: {}", exc.what());
 
             complete(std::make_shared<IOResponseWrite>(this, IOStatus::ERROR));
         }
@@ -48,8 +48,8 @@ namespace springtail {
             fh->append(this, compressor);
         } catch (const std::exception &exc) {
             // log exception
-            SPDLOG_ERROR("Caught exception for IO type={}", get_type());
-            SPDLOG_ERROR("Exception: {}", exc.what());
+            LOG_ERROR("Caught exception for IO type={}", get_type());
+            LOG_ERROR("Exception: {}", exc.what());
 
             complete(std::make_shared<IOResponseAppend>(this, IOStatus::ERROR));
         }
@@ -68,8 +68,8 @@ namespace springtail {
             fh->read(this, decompressor);
         } catch (const std::exception &exc) {
             // log exception
-            SPDLOG_ERROR("Caught exception for IO type={}", get_type());
-            SPDLOG_ERROR("Exception: {}", exc.what());
+            LOG_ERROR("Caught exception for IO type={}", get_type());
+            LOG_ERROR("Exception: {}", exc.what());
 
             complete(std::make_shared<IOResponseRead>(this, IOStatus::ERROR));
         }
@@ -86,8 +86,8 @@ namespace springtail {
             fh->sync(this);
         } catch (const std::exception &exc) {
             // log exception
-            SPDLOG_ERROR("Caught exception for IO type={}", get_type());
-            SPDLOG_ERROR("Exception: {}", exc.what());
+            LOG_ERROR("Caught exception for IO type={}", get_type());
+            LOG_ERROR("Exception: {}", exc.what());
 
             complete(std::make_shared<IOResponse>(this, IOStatus::ERROR));
         }
@@ -106,7 +106,7 @@ namespace springtail {
 
         // lookup path for file object; creates new one if not present
         // marks file object as in use
-        SPDLOG_DEBUG_MODULE(LOG_STORAGE, "IOWorker got request for path: {}", path.c_str());
+        LOG_DEBUG(LOG_STORAGE, "IOWorker got request for path: {}", path.c_str());
 
         std::shared_ptr<IOFile> io_file = mgr->lookup(path, compressed);
 
