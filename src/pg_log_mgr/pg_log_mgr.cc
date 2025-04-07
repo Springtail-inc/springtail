@@ -542,7 +542,9 @@ namespace springtail::pg_log_mgr {
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Processing log entry: path={}, start_offset={}, num_messages={}",
                                 log_entry->path, log_entry->start_offset, log_entry->num_messages);
 
-            _pg_log_reader->process_log(log_entry->path, _logger_file_timestamp.load(),
+            auto file_timestamp = fs::extract_timestamp_from_file(log_entry->path, LOG_PREFIX_REPL, LOG_SUFFIX);
+            CHECK(file_timestamp);
+            _pg_log_reader->process_log(log_entry->path, *file_timestamp,
                                         log_entry->start_offset, log_entry->num_messages);
         }
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Exiting log reader thread");
@@ -552,10 +554,6 @@ namespace springtail::pg_log_mgr {
     PgLogMgr::_create_repl_logger()
     {
         std::filesystem::path file = fs::create_log_file(_repl_log_path, LOG_PREFIX_REPL, LOG_SUFFIX);
-        auto file_timestamp = fs::extract_timestamp_from_file(file, LOG_PREFIX_REPL, LOG_SUFFIX);
-        DCHECK(file_timestamp.has_value());
-        _logger_file_timestamp.store(file_timestamp.value());
-
         return std::make_shared<PgLogWriter>(file,
             [this](LSN_t lsn) { _pg_conn.set_last_flushed_LSN(lsn); });
     }

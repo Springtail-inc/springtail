@@ -645,6 +645,8 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::_process_msg(PgMsgPtr msg)
     {
+        // note: it would probably be cheaper to send the rotate as an explicit one-time message
+        //       rather than packing the log-timestamp into every message
         if (_pg_log_timestamp < msg->pg_log_timestamp) {
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Logs rollover to the new log timestamp id: {}", msg->pg_log_timestamp);
             _pg_log_timestamp = msg->pg_log_timestamp;
@@ -964,8 +966,6 @@ namespace springtail::pg_log_mgr {
         // write the pg_xid -> xid mapping
         // note: we do this even if the xact isn't being committed since it is needed for recovery
         //       in the case of a crash
-        // XXX I'm not sure we should do this in the case where the xact log is ahead of the most
-        //     recently committed XID?  Do we need to truncate it first somehow?
         _xact_log_writer.log(commit_msg.xid, xid);
 
         if (xid > _committed_xid) {

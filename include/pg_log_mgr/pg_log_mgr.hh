@@ -212,7 +212,6 @@ namespace springtail::pg_log_mgr {
         std::filesystem::path _xact_log_path;      ///< xact log base path
 
         LSN_t _last_pushed_lsn = INVALID_LSN;      ///< last pushed lsn to redis queue for GC
-        std::atomic<uint64_t> _logger_file_timestamp;
 
         /** notify xact handler to start sync */
         void _notify_xact_start_sync();
