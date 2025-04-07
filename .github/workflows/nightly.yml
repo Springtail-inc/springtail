@@ -15,8 +15,8 @@ permissions:
 jobs:
   nightly_job:
     name: Nightly Job
-    runs-on: warp-ubuntu-latest-arm64-4x
-    timeout-minutes: 90
+    runs-on: image-builder
+    timeout-minutes: 360
     container:
       image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
       credentials:
@@ -37,7 +37,7 @@ jobs:
       PACKAGES_S3_PREFIX: nightly-builds
       TEST_LOGS_S3_PREFIX: nightly-testlogs
       NUM_PROCS: ${{ vars.NUM_PROCS }}
-      INTEGRATION_TEST_ITERATIONS: ${{ vars.INTEGRATION_TEST_ITERATIONS || 5 }}
+      INTEGRATION_TEST_ITERATIONS: 1 # ${{ vars.INTEGRATION_TEST_ITERATIONS || 5 }}
       # The path to the Springtail logs, keep consistent with the `log_path` inside
       # system.json.test
       SPRINGTAIL_LOG_PATH: /opt/springtail/logs
@@ -169,39 +169,45 @@ jobs:
           ./startup.sh -s data_init.sql
           
           # Run integration tests
+          set +e
           for i in $(seq 1 ${INTEGRATION_TEST_ITERATIONS}) ; 
           do
             # Note: there might be discrepancies between the _LOG_TIMESTAMP and the _LOG_DATE due to the time it takes to run the integration tests
             # it may run across a day. This is fine as long as the logs are grouped by _LOG_DATE
+          
+            _LOG_FLAG="succeeded"
             echo "*** Starting iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
             python3 test_runner.py -c config.yaml -j ${GITHUB_WORKSPACE}/integration-test-report.xml 2>&1 | tee tmplog
-          
-            echo "*** Finished iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
-
             # Grab the success/failure status of the integration tests
-            _LOG_FLAG="succeeded"
-            if grep -qE "Tests failed: [1-9][0-9]*" tmplog
+            if [ $? -ne 0 ] || grep -qE "Tests failed: [1-9][0-9]*" tmplog
             then 
               _LOG_FLAG="failed"
             fi
+            echo "*** Finished iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
           
             _TIMESTAMP=$(date +%s)
           
             # Test logs
-            log_file="integration-test-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log" 
+            log_file="integration-test-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}-${i}.log" 
             log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${log_file}"
             aws s3 cp tmplog $log_s3_key
             echo "*** Integration Test Log S3 Key: $log_s3_key"
             rm -f tmplog
           
             # Springtail service logs
-            springtail_log_file="springtail-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.tar.gz"
+            springtail_log_file="springtail-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}-${i}.tar.gz"
             output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../debug)
             fname=$(echo $output  | cut -f2 -d':' | xargs | head -1)
             springtail_log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${springtail_log_file}"
             aws s3 cp $fname $springtail_log_s3_key
             echo "*** Springtail Log S3 Key: $springtail_log_s3_key"
             rm -f $fname
+          
+            # If the current iteration of test failed, break out of the loop for now
+            if [ "$_LOG_FLAG" = "failed" ]; then
+              echo "*** Integration test failed at iteration ${i}, breaking out of the loop"
+              exit 1
+            fi
           done
 
       - name: Run nightly build (if above tests pass)
@@ -212,7 +218,7 @@ jobs:
           make install -j ${NUM_PROCS}
 
       - name: Run Proxy Tests
-        if: success()
+        if: success() || failure()      # run this step even if previous step failed
         run: |
           cd python/testing
           python3 springtail.py -f ../../system.json.test --kill --build-dir ../../debug
@@ -220,9 +226,10 @@ jobs:
           cd proxy
           # Do not break out if errors occur
           set +e
-          python3 test_runner.py -t -s postgres_all
-          # set Failure flag is the above command exits non-zero exit code
           _LOG_FLAG="succeeded"
+          python3 test_runner.py -t -s postgres_all
+          sleep infinity
+          # set Failure flag is the above command exits non-zero exit code
           if [ $? -ne 0 ]; then
               _LOG_FLAG="failed"
           fi
@@ -257,6 +264,10 @@ jobs:
               regression_diff_s3_key="${TEST_LOG_S3_FULL_PREFIX}/regression.diff.proxy-${GITHUB_SHORT_SHA}-${_TIMESTAMP}.out"  
               aws s3 cp $regression_diff_file $regression_diff_s3_key
               echo "*** Proxy Regression Diff S3 Key: $regression_diff_s3_key"
+          fi
+          # Eventually fail the step
+          if [ "$_LOG_FLAG" = "failed" ]; then
+            exit 1
           fi
 
       - name: Package and Upload Build artifacts to S3

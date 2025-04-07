@@ -3,6 +3,7 @@
 #include <absl/log/check.h>
 #include <common/common.hh>
 #include <common/logging.hh>
+#include <common/open_telemetry.hh>
 
 namespace springtail::xid_mgr {
 
@@ -17,7 +18,7 @@ namespace springtail::xid_mgr {
             throw Error("Failed to open xid_mgr file");
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Partition: opened file: {}, dirty={}", _path, _dirty);
+        LOG_DEBUG(LOG_XID_MGR, "Partition: opened file: {}, dirty={}", _path, _dirty);
 
         _sync_thread = std::thread(&Partition::_sync_thread_func, this);
     }
@@ -30,7 +31,7 @@ namespace springtail::xid_mgr {
     void
     Partition::_sync_thread_func()
     {
-        auto token = logging::set_context_variables({{"partition_id", std::to_string(_id)}});
+        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"partition_id", std::to_string(_id)}});
         RedisDDL redis_ddl;
         while (!_shutdown) {
             std::unique_lock<std::mutex> _shutdown_lock(_shutdown_mutex);
@@ -49,7 +50,7 @@ namespace springtail::xid_mgr {
             _write_committed_xids();
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Partition: sync thread exiting");
+        LOG_DEBUG(LOG_XID_MGR, "Partition: sync thread exiting");
     }
 
     void
@@ -82,7 +83,7 @@ namespace springtail::xid_mgr {
             len += sizeof(db_id) + sizeof(xid);
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Partition: writing committed xids for {}", _path);
+        LOG_DEBUG(LOG_XID_MGR, "Partition: writing committed xids for {}", _path);
 
         lock.unlock();
 
@@ -128,7 +129,7 @@ namespace springtail::xid_mgr {
             std::copy_n(buffer + off, sizeof(xid), reinterpret_cast<char*>(&xid));
             off += sizeof(xid);
             _committed_xids[db_id] = xid;
-            SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Partition: read committed xids: db_id={}, xid={}", db_id, xid);
+            LOG_DEBUG(LOG_XID_MGR, "Partition: read committed xids: db_id={}, xid={}", db_id, xid);
         }
     }
 
@@ -164,9 +165,9 @@ namespace springtail::xid_mgr {
                     auto it = std::ranges::lower_bound(_history[db_id].begin(), _history[db_id].end(), min_schema_xid);
                     _history[db_id].erase(_history[db_id].begin(), it);
                     if (_history[db_id].empty()) {
-                        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Partition: the history for db_id={} is now empty", db_id);
+                        LOG_DEBUG(LOG_XID_MGR, "Partition: the history for db_id={} is now empty", db_id);
                     } else {
-                        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Partition: the history for db_id={} now starts with xid={}", db_id, _history[db_id].front());
+                        LOG_DEBUG(LOG_XID_MGR, "Partition: the history for db_id={} now starts with xid={}", db_id, _history[db_id].front());
                     }
                 }
             }
@@ -181,12 +182,12 @@ namespace springtail::xid_mgr {
         // lookup and see if it is latest
         auto it = _committed_xids.find(db_id);
         if (it == _committed_xids.end() || xid > it->second) {
-            SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Partition: commit xid: db_id={}, xid={}", db_id, xid);
+            LOG_DEBUG(LOG_XID_MGR, "Partition: commit xid: db_id={}, xid={}", db_id, xid);
 
             _committed_xids[db_id] = xid;
             _dirty = true;
         } else {
-            SPDLOG_WARN("Partition: commit xid: db_id={}, xid={}, was already committed at {}", db_id, xid, it->second);
+            LOG_WARN("Partition: commit xid: db_id={}, xid={}, was already committed at {}", db_id, xid, it->second);
             it->second = xid;
             _dirty = true;
         }
@@ -223,7 +224,7 @@ namespace springtail::xid_mgr {
 
         // if schema XID is zero then we always return the most recent committed XID
         if (schema_xid == 0) {
-            SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Partition: get committed xid: {}", committed_xid);
+            LOG_DEBUG(LOG_XID_MGR, "Partition: get committed xid: {}", committed_xid);
             return committed_xid;
         }
 
@@ -231,7 +232,7 @@ namespace springtail::xid_mgr {
         auto ith = _history.find(db_id);
         if (ith == _history.end()) {
             // if there is no history for this database, return the most recent commited XID
-            SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Partition: get committed xid: {}", committed_xid);
+            LOG_DEBUG(LOG_XID_MGR, "Partition: get committed xid: {}", committed_xid);
             return committed_xid;
         }
 
@@ -239,19 +240,19 @@ namespace springtail::xid_mgr {
         auto pos_i = std::ranges::upper_bound(history, schema_xid);
         if (pos_i == history.end()) {
             // if the schema XID is ahead of the history, return the most recent commited XID
-            SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Partition: get committed xid: {}", committed_xid);
+            LOG_DEBUG(LOG_XID_MGR, "Partition: get committed xid: {}", committed_xid);
             return committed_xid;
         }
 
         // if the history is ahead of the commit, return the committed xid
         auto target_xid = (*pos_i) - 1;
         if (target_xid > committed_xid) {
-            SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Partition: get committed xid: {}; ahead of history {}", committed_xid, target_xid);
+            LOG_DEBUG(LOG_XID_MGR, "Partition: get committed xid: {}; ahead of history {}", committed_xid, target_xid);
             return committed_xid;
         }
 
         // if we found an entry in the history, return the XID directly before that
-        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Partition: xid limited by schema_xid: {} -> {}", schema_xid, target_xid);
+        LOG_DEBUG(LOG_XID_MGR, "Partition: xid limited by schema_xid: {} -> {}", schema_xid, target_xid);
         return target_xid;
     }
 

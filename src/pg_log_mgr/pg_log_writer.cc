@@ -113,7 +113,7 @@ namespace springtail::pg_log_mgr {
             // add LSN data to queue for fsync thread
             _add_lsn_to_queue(current_offset, data.starting_lsn);
 
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Write repl message start: start lsn={}, length={}, msg_length={}",
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Write repl message start: start lsn={}, length={}, msg_length={}",
                                 data.starting_lsn, data.length, data.msg_length);
         }
 
@@ -124,7 +124,7 @@ namespace springtail::pg_log_mgr {
             // full message written
             _add_lsn_to_queue(_msg_end_offset, data.ending_lsn);
 
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Write repl message end: start lsn={}, length={}, msg_length={}",
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Write repl message end: start lsn={}, length={}, msg_length={}",
                                 data.ending_lsn, data.length, data.msg_length);
 
             return true;

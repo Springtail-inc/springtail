@@ -151,7 +151,7 @@ namespace {
 
             // decode header
             PgMsgStreamHeader header(buffer);
-            SPDLOG_DEBUG("{}\n", header.to_string());
+            LOG_DEBUG("{}\n", header.to_string());
             EXPECT_EQ(header.magic, PgMsgStreamHeader::PG_LOG_MAGIC);
 
             offset = ::ftell(_fp) - PgMsgStreamHeader::SIZE;

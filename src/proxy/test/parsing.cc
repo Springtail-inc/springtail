@@ -1,8 +1,10 @@
+#include <optional>
 #include <vector>
 #include <iostream>
 
 #include <gtest/gtest.h>
 
+#include <common/init.hh>
 #include <common/logging.hh>
 #include <proxy/parser.hh>
 
@@ -45,7 +47,13 @@ static const std::vector<std::string> tests = {
 
 int main(void)
 {
-    init_logging(LOG_ALL);
+    // init_logging(LOG_ALL);
+    std::vector<std::unique_ptr<ServiceRunner>> service_runners;
+    service_runners.emplace_back(std::make_unique<DefaultLoggingRunner>());
+    service_runners.emplace_back(std::make_unique<ExceptionRunner>());
+    service_runners.emplace_back(std::make_unique<LoggingRunner>(std::nullopt, std::nullopt, LOG_ALL));
+
+    springtail_init_custom(service_runners);
 
     for (int i = 0; i < tests.size(); i++) {
         std::cout << "\nQuery: " << tests[i] << std::endl;
@@ -57,5 +65,8 @@ int main(void)
             std::cout << "IS: " << (r->is_read_safe ? "readable\n" : "NOT readable\n") << std::endl;
         }
     }
+
+    springtail_shutdown();
+
     return 0;
 }
