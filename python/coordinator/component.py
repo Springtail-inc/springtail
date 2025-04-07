@@ -96,12 +96,21 @@ class Component:
         # next check if a pid file exists and pid is running
         pid = self._pid_from_file()
         if pid and psutil.pid_exists(pid):
-            return pid
+            try:
+                process = psutil.Process(pid)
+                if process.status() == psutil.STATUS_ZOMBIE:
+                    return None
+                return pid
+            except Exception as e:
+                return None
 
         # finally check if the process is running without a pidfile
         for proc in psutil.process_iter(['pid', 'name']):
             if proc.info['name'] == self.name:
                 pid = proc.info['pid']
+                process = psutil.Process(pid)
+                if not process.is_running() or process.status() == psutil.STATUS_ZOMBIE:
+                    return None
 
                 # create pid file
                 with open(self.pid_path, 'w') as f:
@@ -126,9 +135,12 @@ class Component:
             with open(self.pid_path, 'r') as f:
                 pid = int(f.read().strip())
                 if psutil.pid_exists(pid):
-                    # process is running, mark it as such
-                    self.logger.info(f"Found running PID for component {self.name}: {pid}")
-                    return pid
+                    # check if the process is running
+                    process = psutil.Process(pid)
+                    if process.is_running() and process.status() != psutil.STATUS_ZOMBIE:
+                        # process is running, mark it as such
+                        self.logger.info(f"Found running PID for component {self.name}: {pid}")
+                        return pid
         except Exception as e:
             pass
 
