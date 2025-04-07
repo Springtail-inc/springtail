@@ -28,25 +28,6 @@ public:
     */
     void init(std::string_view component_name);
 
-    /**
-     * @brief Increment a counter
-     * @param name The name of the counter
-     */
-    void increment_counter(std::string_view name);
-
-    /**
-     * @brief Record a value in the histogram
-     * @param name The name of the histogram
-     * @param value The value to record
-     * @param attributes The attributes to record
-     */
-    void record_histogram(std::string_view name, double value);
-
-    /**
-    * @brief Retrieve the otel Tracer by name.
-    */
-    opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer(const std::string_view& name);
-
     static inline void
     log(const spdlog::source_loc &loc, const std::string &logger_name, spdlog::level::level_enum lvl, const std::string &formatted_msg)
     {
@@ -86,24 +67,24 @@ public:
     set_context_variable(const std::string &attr_key, const std::string &attr_value);
 
     static inline void
-    increment_counter_static(std::string_view name)
+    increment_counter(std::string_view name)
     {
         _assert_instance();
-        get_instance()->increment_counter(name);
+        get_instance()->_increment_counter(name);
     }
 
     static inline void
-    record_histogram_static(std::string_view name, double value)
+    record_histogram(std::string_view name, double value)
     {
         _assert_instance();
-        get_instance()->record_histogram(name, value);
+        get_instance()->_record_histogram(name, value);
     }
 
     static inline opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer>
-    tracer_static(const std::string_view& name)
+    tracer(const std::string_view& name)
     {
         _assert_instance();
-        return get_instance()->tracer(name);
+        return get_instance()->_tracer(name);
     }
 
 private:
@@ -234,5 +215,25 @@ private:
     void _register_histogram(std::string_view name, std::string_view description, std::string_view unit);
 
     void _log(const spdlog::details::log_msg &msg);
+
+    /**
+     * @brief Increment a counter
+     * @param name The name of the counter
+     */
+     void _increment_counter(std::string_view name);
+
+     /**
+      * @brief Record a value in the histogram
+      * @param name The name of the histogram
+      * @param value The value to record
+      * @param attributes The attributes to record
+      */
+     void _record_histogram(std::string_view name, double value);
+
+     /**
+     * @brief Retrieve the otel Tracer by name.
+     */
+     opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> _tracer(const std::string_view& name);
+
 };
 }  // namespace springtail::open_telemetry

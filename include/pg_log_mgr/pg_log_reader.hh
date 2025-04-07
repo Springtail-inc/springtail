@@ -91,9 +91,16 @@ namespace springtail::pg_log_mgr {
             Batch(uint64_t db_id, int32_t pg_xid, const CommitterQueuePtr committer_queue)
                 : _db(db_id), _pg_xid(pg_xid), _committer_queue(committer_queue)
             {
-                auto tracer = open_telemetry::OpenTelemetry::tracer_static("PgLogReader");
+                auto tracer = open_telemetry::OpenTelemetry::tracer("PgLogReader");
                 _span = tracer->StartSpan("Transaction");
                 _span->SetAttribute("pg_xid", pg_xid);
+            }
+
+            ~Batch()
+            {
+                if (_span->IsRecording()) {
+                    _span->End();
+                }
             }
 
             /**
