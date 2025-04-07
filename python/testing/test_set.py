@@ -120,7 +120,7 @@ class TestSet:
         self._apply_replica_full()
 
         # update postgres config to apply props for the test
-        springtail.update_postgres_config(self._props)
+        springtail.update_postgres_config(self._test_params)
 
         # start Springtail
         logging.debug('Starting the Springtail instance')

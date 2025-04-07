@@ -18,8 +18,12 @@ overlays:
   # uses a small data cache size to force more frequent eviction
   small_cache_size:
     test_sets: ['basic']
+  # uses a small worker mem size to ensure streaming mode
   streaming_postgres_config:
-    test_sets: ['basic']
+    test_sets: ['complex']
+    params:
+      postgres_config:
+        logical_decoding_work_mem: 64
   # set the test config to run the test and verify steps against the proxy
   integration_test_config:
     test_sets: ['basic', 'framework', 'recovery']

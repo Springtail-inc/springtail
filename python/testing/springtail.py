@@ -194,8 +194,11 @@ def cleanup_db_instance(props : Properties) -> None:
     # Close the database connection
     conn.close()
 
-def update_postgres_config(props: Properties):
-    postgres_config = props.get_postgres_config()
+def update_postgres_config(test_params: dict = {}, do_cleanup = True):
+    if do_cleanup:
+        cleanup_postgres_config()
+
+    postgres_config = test_params.get('postgres_config', {})
 
     # if there is no override config for test, skip doing anything
     if not postgres_config:

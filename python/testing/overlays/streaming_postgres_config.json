@@ -1,5 +1,1 @@
-{
-    "postgres_config":{
-        "logical_decoding_work_mem":"64kB"
-    }
-}
+{}
