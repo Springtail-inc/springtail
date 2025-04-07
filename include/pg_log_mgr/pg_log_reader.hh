@@ -12,6 +12,8 @@
 #include <storage/field.hh>
 
 #include <pg_log_mgr/pg_xact_log_writer_mmap.hh>
+#include <sys_tbl_mgr/client.hh>
+#include <xid_mgr/xid_mgr_client.hh>
 
 namespace springtail::pg_log_mgr {
     /**
@@ -83,13 +85,62 @@ namespace springtail::pg_log_mgr {
         bool archive_logs() const { return _archive_logs; }
 
     private:
+        /**
+         * Local cache of whether a given table exists or not at the most recently processed XID.
+         */
+        class ExistsCache {
+        public:
+            explicit ExistsCache(uint32_t size)
+                : _cache(size)
+            { }
+
+            /** Checks the cache if the table exists.  If not present, queries the SysTblMgr. */
+            bool exists(uint64_t db_id, uint32_t table_id, const XidLsn &xid) {
+                Key key(db_id, table_id);
+                {
+                    std::scoped_lock lock(_mutex);
+                    auto entry = _cache.get(key);
+                    if (entry) {
+                        return *entry;
+                    }
+                }
+
+                bool exists = sys_tbl_mgr::Client::get_instance()->exists(key.first, key.second, xid);
+
+                {
+                    std::scoped_lock lock(_mutex);
+                    _cache.insert(key, std::make_shared<bool>(exists));
+                }
+                return exists;
+            }
+
+            /** Updates the local view of table existence. */
+            void insert(uint64_t db_id, uint32_t table_id, bool exists) {
+                std::scoped_lock lock(_mutex);
+                _cache.insert(Key{db_id, table_id}, std::make_shared<bool>(exists));
+            }
+
+        private:
+            using Key = std::pair<uint64_t, uint32_t>; ///< Pair of (db_id, table_id).
+            LruObjectCache<Key, bool> _cache; ///< Cache of exists flags for tables.
+            std::mutex _mutex; ///< Mutex to protect the cache.
+        };
+        using ExistsCachePtr = std::shared_ptr<ExistsCache>;
+
+        /**
+         * Maintains the state for a single top-level transaction and all sub-transactions.  Is
+         * responsible for batching together mutations and writing them in bulk to the write cache.
+         * Tracks schema state during the transaction and applies them once the transaction commits.
+         * Also handles subtransaction rollback.
+         */
         class Batch {
             // 4 MB
             static constexpr uint32_t MAX_BATCH_SIZE = 4 * 1024 * 1024;
 
         public:
-            Batch(uint64_t db_id, int32_t pg_xid, const CommitterQueuePtr committer_queue)
-                : _db(db_id), _pg_xid(pg_xid), _committer_queue(committer_queue)
+            Batch(uint64_t db_id, int32_t pg_xid, const CommitterQueuePtr committer_queue,
+                  ExistsCachePtr exists_cache)
+                : _db(db_id), _pg_xid(pg_xid), _committer_queue(committer_queue), _exists_cache(exists_cache)
             {
                 auto tracer = open_telemetry::OpenTelemetry::tracer("PgLogReader");
                 _span = tracer->StartSpan("Transaction");
@@ -136,7 +187,11 @@ namespace springtail::pg_log_mgr {
             /**
              * Records a schema change into the batch.
              */
-            void schema_change(int32_t tid, int32_t pg_xid, PgMsgPtr msg);
+            void schema_change(uint64_t current_xid,
+                               int32_t tid,
+                               uint32_t pg_xid,
+                               uint32_t pg_xid_txn,
+                               PgMsgPtr msg);
 
         private:
             //// INTERNAL STRUCTURES
@@ -212,6 +267,35 @@ namespace springtail::pg_log_mgr {
              */
             void _mark_table_resync(uint64_t table_oid, const XidLsn &xidlsn);
 
+            /**
+             * Helper to check if a given table is invalid as visible within this Batch.
+             *
+             * @param table_oid Table OID.
+             */
+            bool _check_invalid(uint32_t table_oid);
+
+            /**
+             * Helper to handle the table validation management.  Updates the Batch-local view of
+             * the invalid tables and also updates the msg object as needed.
+             * 
+             * @param msg The postgres message object.
+             */
+            bool _handle_validation(PgMsgPtr msg);
+
+            /**
+             * Check if the table exists within this batch.
+             */
+            bool _table_exists(uint32_t table_id, const XidLsn &xid) {
+                for (const auto &entry : _txns) {
+                    if (entry.second->table_map.contains(table_id)) {
+                        return true;
+                    }
+                }
+
+                return _exists_cache->exists(_db, table_id, xid);
+            }
+
+
             //// MEMBER VARIABLES
             std::map<int32_t, TxnEntryPtr> _txns; ///< Map of pgxid to txn details.
 
@@ -225,6 +309,13 @@ namespace springtail::pg_log_mgr {
 
             open_telemetry::SpanPtr _span; ///< Timing for the txn processing.
             CommitterQueuePtr _committer_queue; ///< Reference to the committer queue
+
+            ExistsCachePtr _exists_cache; ///< Reference to the exists cache
+
+            /** Records changes in the table validation state based on supported columns.  A valid
+                table contains std::nullopt, while an invalid one contains a JSON describing the
+                invalid columns.  */
+            std::unordered_map<uint32_t, std::optional<nlohmann::json>> _table_validations;
         };
         using BatchPtr = std::shared_ptr<Batch>;
 
@@ -254,6 +345,9 @@ namespace springtail::pg_log_mgr {
         BatchPtr _current_batch; ///< The batch matching the current pg xid
 
         WalProgressTrackerPtr _xid_ts_tracker;      ///< Timestamps and Xids tracker object
+
+        /** Cache indicating if a table exists at the latest XID seen committed by the log reader. */
+        ExistsCachePtr _exists_cache;
 
         /** Function for cleaning up old log files. */
         void _remove_old_log_files();

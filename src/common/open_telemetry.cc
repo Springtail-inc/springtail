@@ -257,9 +257,9 @@ OpenTelemetry::_init_logging(const opentelemetry::sdk::resource::Resource& resou
         _log_attributes.emplace_back("source_line", "");
         _log_attributes.emplace_back("source_func", "");
 
-        SPDLOG_INFO("Enabling OTel logging sink with endpoint: {}", log_endpoint);
+        LOG_INFO("Enabling OTel logging sink with endpoint: {}", log_endpoint);
     } else {
-        SPDLOG_INFO("OpenTelemetry logging sink disabled via configuration");
+        LOG_INFO("OpenTelemetry logging sink disabled via configuration");
     }
 }
 

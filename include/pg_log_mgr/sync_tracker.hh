@@ -65,8 +65,12 @@ namespace springtail::pg_log_mgr {
 
         /**
          * Checks if mutations at the given table + xid should be skipped due to an ongoing table sync.
+         *
+         * @return A pair of booleans.  The first indiciates if their is a sync ongoing for the
+         *         requested table.  The second indicates if mutations should be skipped for that
+         *         table given the pg_xid.
          */
-        bool should_skip(uint64_t db_id, uint64_t table_id, uint32_t pg_xid) const;
+        std::pair<bool, bool> should_skip(uint64_t db_id, uint64_t table_id, uint32_t pg_xid) const;
 
     private:
         using TablePair = std::pair<int32_t, std::shared_ptr<proto::CopyTableInfo>>;

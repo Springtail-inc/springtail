@@ -237,7 +237,9 @@ namespace springtail
         // decoded messages
         CREATE_TABLE, ALTER_TABLE, DROP_TABLE,
         CREATE_NAMESPACE, ALTER_NAMESPACE, DROP_NAMESPACE,
-        CREATE_INDEX, DROP_INDEX, COPY_SYNC
+        CREATE_INDEX, DROP_INDEX, COPY_SYNC,
+        // special message generated in the log reader
+        ALTER_RESYNC
     };
 
     /**
