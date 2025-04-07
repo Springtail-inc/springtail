@@ -201,32 +201,6 @@ class Properties:
 
         return proxy_config
 
-    def get_postgres_config(self) -> dict:
-        """Return the postgres configuration as an object."""
-        key = str(self.db_instance_id) + ':instance_config'
-        if 'postgres_config' in self.cache:
-            return self.cache['postgres_config']
-
-        config = json.loads(self.redis.hget(key, 'system_settings'))
-        postgres_config = config['postgres_config']
-        self.cache['postgres_config'] = postgres_config
-
-        return postgres_config
-
-    def get_integration_test_config(self) -> dict:
-        """Return the integration test configuration as an object."""
-        key = str(self.db_instance_id) + ':instance_config'
-        if 'integration_test_config' in self.cache:
-            return self.cache['integration_test_config']
-
-        config = json.loads(self.redis.hget(key, 'system_settings'))
-        if 'integration_test_config' not in config:
-            return {}
-        integration_test_config = config['integration_test_config']
-        self.cache['integration_test_config'] = integration_test_config
-
-        return integration_test_config
-
     def get_system_config(self) -> dict:
         """Return the system configuration as an object."""
         key = str(self.db_instance_id) + ':instance_config'
@@ -322,8 +296,6 @@ class Properties:
         sys_config_json['sys_tbl_mgr'] = system_json['sys_tbl_mgr']
         sys_config_json['proxy'] = system_json['proxy']
         sys_config_json['otel'] = system_json['otel']
-        sys_config_json['integration_test_config'] = system_json['integration_test_config']
-        sys_config_json['postgres_config'] = system_json['postgres_config'] if 'postgres_config' in system_json else {}
 
         self.redis.hset(db_instance_key, 'system_settings', json.dumps(sys_config_json))
 
@@ -506,7 +478,6 @@ def main():
     print(f"ingest_host: {props.get_hostname('ingestion')}")
     print(f"proxy_host: {props.get_hostname('proxy')}")
     print(f"coordinator_state: {props.get_coordinator_state()}")
-    print(f"test_proxy_config: {props.get_integration_test_config()}")
     print(f"otel_config: {props.get_otel_config()}")
 
     env_vars = [

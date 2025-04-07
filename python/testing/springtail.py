@@ -102,16 +102,6 @@ def cleanup_filesystem(props : Properties) -> None:
     # Check that the pid path exists; if not try to create it
     makedir(pid_path, '755')
 
-def connect_instance(props : Properties, db_name : str ='postgres') -> psycopg2.extensions.connection:
-    integration_test_config = props.get_integration_test_config()
-    use_proxy = integration_test_config["use_proxy"]
-    if use_proxy:
-        logging.info("Connecting to proxy")
-        return connect_proxy(props, db_name)
-    else:
-        logging.info("Connecting to primary")
-        return connect_db_instance(props, db_name)
-
 def connect_db_instance(props : Properties, db_name : str ='postgres') -> psycopg2.extensions.connection:
     """Connect to the database instance and return connection."""
     # Get the database instance configuration

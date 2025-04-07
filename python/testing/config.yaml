@@ -20,3 +20,9 @@ overlays:
     test_sets: ['basic']
   streaming_postgres_config:
     test_sets: ['basic']
+  # set the test config to run the test and verify steps against the proxy
+  integration_test_config:
+    test_sets: ['basic', 'framework', 'recovery']
+    params:
+      use_proxy_for_test: true
+      use_proxy_for_verify: true
