@@ -1,11 +1,12 @@
 #pragma once
 
+#include <string>
+
 #include <grpcpp/server_context.h>
 #include <opentelemetry/context/propagation/global_propagator.h>
 #include <opentelemetry/semconv/incubating/rpc_attributes.h>
-#include <opentelemetry/trace/provider.h>
 
-#include <string>
+#include <common/logging.hh>
 
 namespace springtail {
 
@@ -38,11 +39,12 @@ public:
 template<typename T>
 class ServerSpan {
 public:
-    ServerSpan(T* context,
+    ServerSpan(T* server_context,
                const std::string& service_name,
                const std::string& method_name)
     {
         namespace trace = opentelemetry::trace;
+        namespace context = opentelemetry::context;
         namespace semconv = opentelemetry::semconv;
 
         // Set up span options
@@ -50,15 +52,15 @@ public:
         options.kind = trace::SpanKind::kServer;
 
         // Extract context from gRPC metadata
-        GrpcServerCarrier carrier(context);
+        GrpcServerCarrier carrier(server_context);
         auto prop =
-            opentelemetry::context::propagation::GlobalTextMapPropagator::GetGlobalPropagator();
-        auto current_ctx = opentelemetry::context::RuntimeContext::GetCurrent();
+            context::propagation::GlobalTextMapPropagator::GetGlobalPropagator();
+        auto current_ctx = context::RuntimeContext::GetCurrent();
         auto new_context = prop->Extract(carrier, current_ctx);
 
         // Create the span
         std::string span_name = service_name + "/" + method_name;
-        auto tracer = trace::Provider::GetTracerProvider()->GetTracer("grpc");
+        auto tracer = open_telemetry::OpenTelemetry::tracer("grpc");
 
         span_ = tracer->StartSpan(span_name,
                                   {{semconv::rpc::kRpcSystem, "grpc"},
