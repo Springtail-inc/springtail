@@ -67,7 +67,7 @@ namespace springtail {
             target_xid = access_xid;
         }
 
-        open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_GET_CALLS);
+        open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_GET_CALLS);
 
         // if the extent ID is UNKNOWN, then we will get an empty page for the file
         if (extent_id == constant::UNKNOWN_EXTENT) {
@@ -122,14 +122,14 @@ namespace springtail {
     StorageCache::flush(const std::filesystem::path &file)
     {
         _page_cache->flush_file(file);
-        open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_FLUSH_CALLS);
+        open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_FLUSH_CALLS);
     }
 
     void
     StorageCache::drop_for_truncate(const std::filesystem::path &file)
     {
         _page_cache->drop_file(file);
-        open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_DROP_CALLS);
+        open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_DROP_CALLS);
     }
 
 
@@ -150,7 +150,7 @@ namespace springtail {
         // check if the page already exists in the cache for the given target XID
         PagePtr page = _try_get(file, extent_id, target_xid);
         if (page != nullptr) {
-            open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_GET_CALLS);
+            open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_GET_CALLS);
             LOG_DEBUG(LOG_CACHE, "Found in cache");
             return page;
         }
@@ -159,7 +159,7 @@ namespace springtail {
         //     from; for now we assume that the single extent_id *is* the full list of extents for
         //     the access XID and that the query nodes won't perform any roll-forward on their own.
 
-        open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_GET_CACHE_MISSES);
+        open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_GET_CACHE_MISSES);
         // note: not in the cache, need to create a new Page
         return _create(file, extent_id, target_xid, { extent_id });
     }
@@ -184,7 +184,7 @@ namespace springtail {
         LOG_DEBUG(LOG_CACHE, "PUT file {} eid {} s_xid {} e_xid {}",
                             page->_file, page->_extent_id, page->_start_xid, page->_end_xid);
 
-        open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_PUT_CALLS);
+        open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_PUT_CALLS);
 
         boost::unique_lock lock(_mutex);
 
@@ -229,7 +229,7 @@ namespace springtail {
     {
         boost::unique_lock lock(_mutex);
 
-        open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_FLUSH_CALLS);
+        open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_FLUSH_CALLS);
         const auto start_time = std::chrono::system_clock::now();
 
         // go through the dirty page list for the file
@@ -300,7 +300,7 @@ namespace springtail {
         }
 
         auto duration = std::chrono::system_clock::now() - start_time;
-        open_telemetry::OpenTelemetry::record_histogram_static(STORAGE_CACHE_FLUSH_LATENCIES,
+        open_telemetry::OpenTelemetry::record_histogram(STORAGE_CACHE_FLUSH_LATENCIES,
             std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
 
         // flush list for the file must be empty, so remove it
@@ -312,7 +312,7 @@ namespace springtail {
     {
         boost::unique_lock lock(_mutex);
 
-        open_telemetry::OpenTelemetry::increment_counter_static(STORAGE_CACHE_DROP_CALLS);
+        open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_DROP_CALLS);
         const auto start_time = std::chrono::system_clock::now();
 
         // go through the dirty page list for the file
@@ -356,7 +356,7 @@ namespace springtail {
         }
 
         const auto duration = std::chrono::system_clock::now() - start_time;
-        open_telemetry::OpenTelemetry::record_histogram_static(STORAGE_CACHE_DROP_LATENCIES,
+        open_telemetry::OpenTelemetry::record_histogram(STORAGE_CACHE_DROP_LATENCIES,
             std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
 
         // flush list for the file must be empty, so remove it

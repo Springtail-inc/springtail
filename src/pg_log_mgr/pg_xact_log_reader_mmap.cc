@@ -67,7 +67,7 @@ PgXactLogReaderMmap::_open_next_file()
         if (!_current_file.has_value()) {
             return false;
         }
-        SPDLOG_INFO("Current file: {}", _current_file->string());
+        LOG_INFO("Current file: {}", _current_file->string());
 
         // open file
         _fd = ::open(_current_file.value().c_str(), O_RDWR, 0660);

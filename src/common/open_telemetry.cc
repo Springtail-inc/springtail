@@ -12,6 +12,8 @@
 #include <opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_factory.h>
 #include <opentelemetry/sdk/metrics/meter_context_factory.h>
 #include <opentelemetry/sdk/metrics/meter_provider_factory.h>
+#include <opentelemetry/sdk/trace/batch_span_processor.h>
+#include <opentelemetry/sdk/trace/batch_span_processor_options.h>
 #include <opentelemetry/sdk/trace/multi_span_processor.h>
 #include <opentelemetry/sdk/trace/simple_processor.h>
 #include <opentelemetry/sdk/trace/tracer_provider.h>
@@ -194,9 +196,15 @@ OpenTelemetry::_init_tracing(const opentelemetry::sdk::resource::Resource& resou
 
         std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> otlp_exporter =
             std::make_unique<opentelemetry::exporter::otlp::OtlpHttpExporter>(options);
+
+        opentelemetry::sdk::trace::BatchSpanProcessorOptions batch_options;
+        batch_options.max_queue_size = 2048;
+        batch_options.schedule_delay_millis = std::chrono::milliseconds(5000);
+        batch_options.max_export_batch_size = 512;
+
         std::unique_ptr<opentelemetry::sdk::trace::SpanProcessor> otlp_processor =
-            std::make_unique<opentelemetry::sdk::trace::SimpleSpanProcessor>(
-                std::move(otlp_exporter));
+            std::make_unique<opentelemetry::sdk::trace::BatchSpanProcessor>(
+                std::move(otlp_exporter), batch_options);
 
         LOG_INFO("Enabling OTel over HTTP: {}", options.url);
         multi_processor->AddProcessor(std::move(otlp_processor));
@@ -249,9 +257,9 @@ OpenTelemetry::_init_logging(const opentelemetry::sdk::resource::Resource& resou
         _log_attributes.emplace_back("source_line", "");
         _log_attributes.emplace_back("source_func", "");
 
-        SPDLOG_INFO("Enabling OTel logging sink with endpoint: {}", log_endpoint);
+        LOG_INFO("Enabling OTel logging sink with endpoint: {}", log_endpoint);
     } else {
-        SPDLOG_INFO("OpenTelemetry logging sink disabled via configuration");
+        LOG_INFO("OpenTelemetry logging sink disabled via configuration");
     }
 }
 
@@ -340,27 +348,37 @@ OpenTelemetry::init(std::string_view component_name)
 }
 
 void
+OpenTelemetry::flush()
+{
+    if (_inited_flag && !_shutdown_flag && get_instance()->_otel_enabled) {
+        get_instance()->_meter_provider->ForceFlush();
+        opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider> trace_provider =
+            opentelemetry::trace::Provider::GetTracerProvider();
+        dynamic_cast<opentelemetry::sdk::trace::TracerProvider *>(trace_provider.get())->ForceFlush();
+        auto logger_provider = opentelemetry::logs::Provider::GetLoggerProvider();
+        dynamic_cast<opentelemetry::sdk::logs::LoggerProvider *>(logger_provider.get())->ForceFlush();
+    }
+}
+
+void
 OpenTelemetry::_internal_shutdown()
 {
-
+    flush();
     opentelemetry::trace::Provider::SetTracerProvider({});
-    if (_otel_enabled) {
-        _meter_provider->ForceFlush();
-    }
     opentelemetry::metrics::Provider::SetMeterProvider({});
     _meter_provider.reset();
     _shutdown_flag = true;
 }
 
 opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer>
-OpenTelemetry::tracer(const std::string_view& name)
+OpenTelemetry::_tracer(const std::string_view& name)
 {
     auto provider = opentelemetry::trace::Provider::GetTracerProvider();
     return provider->GetTracer(name.data());
 }
 
 void
-OpenTelemetry::increment_counter(std::string_view name)
+OpenTelemetry::_increment_counter(std::string_view name)
 {
     if (!_otel_enabled) {
         return;
@@ -381,7 +399,7 @@ OpenTelemetry::increment_counter(std::string_view name)
 }
 
 void
-OpenTelemetry::record_histogram(std::string_view name, double value)
+OpenTelemetry::_record_histogram(std::string_view name, double value)
 {
     if (!_otel_enabled) {
         return;

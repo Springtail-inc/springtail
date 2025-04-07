@@ -2,10 +2,10 @@
 
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 #include <stdexcept>
 
 #include <common/json.hh>
+#include <common/logging.hh>
 
 #include <grpcpp/server_builder.h>
 
@@ -88,7 +88,7 @@ GrpcServerManager::startup()
     if (!_server) {
         throw std::runtime_error("Failed to start GRPC server");
     }
-    std::cout << "Server listening on " << address << std::endl;
+    LOG_INFO("Server listening on {}", address);
 }
 
 void

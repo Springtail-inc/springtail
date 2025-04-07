@@ -262,7 +262,7 @@ namespace springtail::pg_fdw {
 
             auto col_i = state->columns.find(state->attr_map.at(attno));
             if (col_i == state->columns.end()) {
-                SPDLOG_WARN("Couldn't find FDW attribute number: {}", attno);
+                LOG_WARN("Couldn't find FDW attribute number: {}", attno);
                 continue;
             }
 
@@ -748,14 +748,14 @@ namespace springtail::pg_fdw {
 
             auto name_i = state->name_map.find(strVal(column->attname));
             if (name_i == state->name_map.end()) {
-                SPDLOG_WARN("Couldn't find column: {}", strVal(column->attname));
+                LOG_WARN("Couldn't find column: {}", strVal(column->attname));
                 continue;
             }
             state->attr_map.try_emplace(column->attnum, name_i->second);
 
             auto col_i = state->columns.find(name_i->second);
             if (col_i == state->columns.end()) {
-                SPDLOG_ERROR("Couldn't find column position: {}", name_i->second);
+                LOG_ERROR("Couldn't find column position: {}", name_i->second);
                 continue;
             }
 

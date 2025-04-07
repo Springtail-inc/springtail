@@ -75,47 +75,47 @@ retry_rpc_status(std::string_view service, std::string_view operation, Func&& fu
     namespace context = opentelemetry::context;
     namespace semconv = opentelemetry::semconv;
 
+    auto tracer = open_telemetry::OpenTelemetry::tracer("grpc");
+    // Create span for this RPC attempt
+    trace::StartSpanOptions options;
+    options.kind = trace::SpanKind::kClient;
+
+    auto span = tracer->StartSpan(
+        fmt::format("{}/{}", service, operation),
+        {
+            {semconv::rpc::kRpcSystem, "grpc"},
+            {semconv::rpc::kRpcService, std::string(service)},
+            {semconv::rpc::kRpcMethod, std::string(operation)},
+        },
+        options);
+
+    grpc::ClientContext client_context;
+    auto current_ctx = context::RuntimeContext::GetCurrent();
+    GrpcClientCarrier carrier(&client_context);
+    auto propagator = context::propagation::GlobalTextMapPropagator::GetGlobalPropagator();
+    propagator->Inject(carrier, current_ctx);
+
     int attempts = 0;
     milliseconds backoff(100);             // Start with 100ms
     const milliseconds max_backoff(5000);  // Max 5 seconds
     const int max_attempts = 50;
 
     while (true) {
-        grpc::ClientContext context;
-
-        // Create span for this RPC attempt
-        trace::StartSpanOptions options;
-        options.kind = trace::SpanKind::kClient;
-
-        auto tracer = trace::Provider::GetTracerProvider()->GetTracer("grpc");
-        auto span = tracer->StartSpan(fmt::format("{}/{}", service, operation),
-                                      {
-                                          {semconv::rpc::kRpcSystem, "grpc"},
-                                          {semconv::rpc::kRpcService, std::string(service)},
-                                          {semconv::rpc::kRpcMethod, std::string(operation)},
-                                      },
-                                      options);
 
         // Inject context into gRPC metadata
         auto scope = tracer->WithActiveSpan(span);
-        auto current_ctx = context::RuntimeContext::GetCurrent();
-        GrpcClientCarrier carrier(&context);
-        auto propagator = context::propagation::GlobalTextMapPropagator::GetGlobalPropagator();
-        propagator->Inject(carrier, current_ctx);
 
         // Make the RPC call
-        auto status = func(&context);
+        auto status = func(&client_context);
+
+        span->SetAttribute(semconv::rpc::kRpcGrpcStatusCode,
+            static_cast<int32_t>(status.error_code()));
 
         if (status.ok()) {
             span->SetStatus(trace::StatusCode::kOk);
-            span->SetAttribute(semconv::rpc::kRpcGrpcStatusCode,
-                               static_cast<int32_t>(status.error_code()));
             span->End();
             return status;
         }
-
-        span->SetAttribute(semconv::rpc::kRpcGrpcStatusCode,
-                           static_cast<int32_t>(status.error_code()));
 
         attempts++;
         if (!should_retry(status) || attempts >= max_attempts) {
@@ -131,8 +131,6 @@ retry_rpc_status(std::string_view service, std::string_view operation, Func&& fu
 
         span->SetStatus(trace::StatusCode::kError, fmt::format("Attempt {} failed, retrying: {}",
                                                                attempts, status.error_message()));
-        span->End();
-
         std::this_thread::sleep_for(backoff);
         backoff = std::min(backoff * 2, max_backoff);
     }
