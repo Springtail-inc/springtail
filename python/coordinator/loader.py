@@ -1,9 +1,10 @@
 import os
 import sys
 import logging
-import multiprocessing
 import shutil
 import tempfile
+import argparse
+import subprocess
 from typing import Optional
 
 # Get the parent directory of the current script (i.e., the project root directory)
@@ -24,7 +25,7 @@ from otel_logger import init_logging
 BACKUP_FILE = 'stc_py_backup.tgz'
 NEW_FILE = 'stc_py_new.tgz'
 
-class Loader(multiprocessing.Process):
+class Loader():
     """
     This class is responsible for reloading the coordinator python files and restaring the coordinator.
     """
@@ -37,11 +38,14 @@ class Loader(multiprocessing.Process):
             install_path (str): Path to the installation directory.
             project_root (str): Path to the project root directory.
         """
-        super().__init__()
-        self.daemon = False
         self.project_root = project_root
         self.install_path = install_path
         print(f"Loader initialized with install path: {self.install_path}, pid: {os.getpid()}")
+
+        self.props = Properties()
+        init_logging(self.props.get_otel_config(), self.props.get_log_path());
+        self.logger = logging.getLogger('springtail')
+        self.prod = Production(self.install_path)
 
 
     def find_and_copy_file(self, src_dir: str, file_name: str, dest_dir: str) -> Optional[tuple[str, str]]:
@@ -71,105 +75,142 @@ class Loader(multiprocessing.Process):
         return None  # Return None if file not found
 
 
-    def run(self):
+    def run(self) -> None:
         """
         Reload the coordinator and restart the coordinator, called from start().
         """
-        print(f"In run {os.getpid()}")
-        # re-init properties and logging
-        props = Properties()
-        init_logging(props.get_otel_config(), props.get_log_path());
-        logger = logging.getLogger('springtail')
-        prod = Production(self.install_path)
-
-        logger.info("Re-installing coordinator")
+        self.logger.info("Re-installing coordinator")
 
         # set state to reload
-        props.set_coordinator_state(CoordinatorState.RELOADING)
+        if (self.props.get_coordinator_state() != CoordinatorState.RELOADING):
+            self.logger.info("Setting coordinator state to RELOADING")
 
         # make sure that python code exists in the install dir
         if not os.path.exists(os.path.join(self.install_path, 'python')):
-            logger.error("Python code does not exist in the install directory.")
-            prod.send_sns('coordinator_reload_failed')
+            self.logger.error("Python code does not exist in the install directory.")
+            self.prod.send_sns('coordinator_reload_failed')
             return
 
         # try to reload the coordinator, recovery[] is a list of commands to run in case of failure
         recovery = []
         try:
             # make a temp directory to copy the python code to
-            logger.info("Creating temporary directory for python code...")
+            self.logger.info("Creating temporary directory for python code...")
             temp_dir = tempfile.mkdtemp()
             recovery.append(["sudo", ["rm", "-rf", temp_dir]])
 
             # archive new python code
-            logger.info("Archiving new python code...")
+            self.logger.info("Archiving new python code...")
             new_file = os.path.join(temp_dir, NEW_FILE)
             run_command("sudo", ["tar", "cfz", new_file, "-C", os.path.join(self.install_path, 'python'), "."])
 
             # find config.yaml and copy it to tmp
-            logger.info("Finding and copying config.yaml...")
+            self.logger.info("Finding and copying config.yaml...")
             config_files = self.find_and_copy_file(self.project_root, 'config.yaml', temp_dir)
 
             if not config_files:
                 raise FileNotFoundError("config.yaml not found in the project root.")
 
-            logger.info("Stopping coordinator...")
+            self.logger.info("Stopping coordinator...")
             run_command("sudo", ["systemctl", "stop", "springtail-coordinator"])
             recovery.append(["sudo", ["systemctl", "start", "springtail-coordinator"]])
 
-            logger.info("Backing up coordinator files...")
+            self.logger.info("Backing up coordinator files...")
             backup_file = os.path.join(temp_dir, BACKUP_FILE)
             run_command("sudo", ["tar", "cfz", backup_file, self.project_root])
 
-            logger.info("Deleting old coordinator files...")
+            self.logger.info("Deleting old coordinator files...")
             run_command("sudo", ["rm", "-rf", self.project_root])
             recovery.append(["sudo", ["tar", "xfz", backup_file, '-C', '/']])
 
-            logger.info("Copying coordinator files...")
+            self.logger.info("Copying coordinator files...")
             run_command("sudo", ["mkdir", "-p", self.project_root])
             run_command("sudo", ["tar", "xfz", new_file, "-C", self.project_root])
             recovery.append(["sudo", ["rm", "-rf", self.project_root]])
 
-            logger.info("Copying config.yaml back to the coordinator directory...")
+            self.logger.info("Copying config.yaml back to the coordinator directory...")
             run_command("sudo", ["cp", config_files[1], config_files[0]])
 
-            logger.info("Restarting coordinator...")
+            self.logger.info("Restarting coordinator...")
             run_command("sudo", ["systemctl", "start", "springtail-coordinator"])
 
-            logger.info("Coordinator reloaded successfully. Cleaning up...")
+            self.logger.info("Coordinator reloaded successfully. Cleaning up...")
             run_command("sudo", ["rm", "-rf", temp_dir])
 
-            logger.info("Cleanup completed successfully.")
+            self.logger.info("Cleanup completed successfully.")
 
         except Exception as e:
-            logger.error(f"Error during reloading coordinator: {e}")
-            prod.send_sns('coordinator_reload_failed')
+            self.logger.error(f"Error during reloading coordinator: {e}")
+            self.prod.send_sns('coordinator_reload_failed')
 
             # try and recover from the error
             for command in reversed(recovery):
                 try:
-                    logger.info(f"Recovering from error: {command}")
+                    self.logger.info(f"Recovering from error: {command}")
                     run_command(*command)
                 except Exception as e:
-                    logger.error(f"Error during recovery: {e}")
+                    self.logger.error(f"Error during recovery: {e}")
 
         try:
-            props.wait_for_coordinator_state(CoordinatorState.RUNNING)
-            logger.info("Coordinator started successfully.")
+            self.props.wait_for_coordinator_state(CoordinatorState.RUNNING)
+            self.logger.info("Coordinator started successfully.")
         except Exception as e:
-            logger.error(f"Error waiting for coordinator to start: {e}")
-            prod.send_sns('coordinator_reload_failed')
+            self.logger.error(f"Error waiting for coordinator to start: {e}")
+            self.prod.send_sns('coordinator_reload_failed')
+
+
+def startup(install_path : str, project_root: str) -> None:
+    """
+    'Static' function to start the loader process.
+    """
+    script_path = os.path.join(project_root, 'coordinator', 'loader.py')
+    if not os.path.exists(script_path):
+        raise FileNotFoundError(f"Install path does not exist: {install_path}")
+
+    subprocess.Popen(
+        [sys.executable, script_path, '-i', install_path, '-p', project_root],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True
+    )
+    return
+
+
+def parse_args():
+    """
+    Parse command line arguments.
+    """
+    parser = argparse.ArgumentParser(description="Springtail Loader")
+    parser.add_argument(
+        "-i", "--install_path",
+        type=str,
+        default='/opt/springtail',
+        help="Path to the installation directory."
+    )
+    parser.add_argument(
+        "-p", "--project_root",
+        type=str,
+        default='/home/ubuntu/stc',
+        help="Path to the project root directory."
+    )
+
+    return parser.parse_args()
 
 
 def main():
     """
     Main function to start the Loader process.
     """
-    install_path = '/opt/springtail'
-    project_root = '/home/ubuntu/stc'
+    args = parse_args()
 
-    loader = Loader(install_path, project_root)
-    loader.start()
+    log_path = os.path.join(args.install_path, 'logs')
+    if os.path.exists(log_path):
+        sys.stderr = open(os.path.join(log_path, 'loader_stderr.log'), 'a+')
+        sys.stdout = open(os.path.join(log_path, 'loader_stdout.log'), 'a+')
+
+    print(f"Loader started with pid: {os.getpid()}")
+    loader = Loader(args.install_path, args.project_root)
+    loader.run()
 
 
 if __name__ == "__main__":

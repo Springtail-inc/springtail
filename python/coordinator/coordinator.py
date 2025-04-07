@@ -25,7 +25,7 @@ from component_factory import ComponentFactory
 from scheduler import Scheduler, CoordinatorState
 from production import Production
 from postgres_helper import PostgresHelper
-from loader import Loader
+import loader
 
 # import the xid_mgr_client
 from xid_mgr import XidMgrClient
@@ -108,7 +108,9 @@ class Coordinator:
                     self.logger.debug("Installing binaries")
                     self.production.install_binaries()
                     self.logger.debug("Re-installing coordinator")
-                    Loader(self.install_path, project_root).start()
+                    loader.startup(self.install_path, project_root)
+                    self.props.set_coordinator_state(CoordinatorState.RELOADING)
+
                     # loader will restart the coordinator when ready
                     sys.exit(0)
             except Exception as e:
