@@ -352,9 +352,11 @@ OpenTelemetry::flush()
 {
     if (_inited_flag && !_shutdown_flag && get_instance()->_otel_enabled) {
         get_instance()->_meter_provider->ForceFlush();
-        opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider> provider =
+        opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider> trace_provider =
             opentelemetry::trace::Provider::GetTracerProvider();
-        dynamic_cast<opentelemetry::sdk::trace::TracerProvider *>(provider.get())->ForceFlush();
+        dynamic_cast<opentelemetry::sdk::trace::TracerProvider *>(trace_provider.get())->ForceFlush();
+        auto logger_provider = opentelemetry::logs::Provider::GetLoggerProvider();
+        dynamic_cast<opentelemetry::sdk::logs::LoggerProvider *>(logger_provider.get())->ForceFlush();
     }
 }
 
