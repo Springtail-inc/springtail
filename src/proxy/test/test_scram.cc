@@ -123,7 +123,7 @@ protected:
         } else if (ss_login->type == TEXT) {
             pg_user.has_scram_keys = false;
             pg_user.passwd = ss_login->password.c_str();
-            LOG_DEBUG("Using TEXT password for SCRAM for password: {}", pg_user.passwd);
+            LOG_INFO("Using TEXT password for SCRAM for password: {}", pg_user.passwd);
         } else {
             LOG_ERROR("Invalid password type for SCRAM");
             throw ProxyAuthError();

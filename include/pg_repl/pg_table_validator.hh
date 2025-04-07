@@ -128,8 +128,8 @@ namespace springtail
                         invalid_columns.push_back({{"name", column.name},
                                                    {"type_name", column.type_name},
                                                    {"collation", column.collation}});
-                        LOG_DEBUG(LOG_PG_REPL, "VALIDATE_DDL: Invalid column: name={}, tid={}",
-                                  column.name, table_oid);
+                        LOG_DEBUG(LOG_PG_REPL, "VALIDATE_DDL: Invalid column: name={}",
+                                  column.name);
                     }
                 }
 
