@@ -199,7 +199,7 @@ GrpcXidMgrService::Notifier::OnDone()
 void
 GrpcXidMgrService::Notifier::OnCancel()
 {
-    SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "OnCancel");
+    LOG_DEBUG(LOG_XID_MGR, "OnCancel");
     // Will OnDone still be called if OnCancel is called? Yes.
 }
 

@@ -4,12 +4,8 @@
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/security/credentials.h>
 #include <opentelemetry/context/propagation/global_propagator.h>
-#include <opentelemetry/context/propagation/text_map_propagator.h>
-#include <opentelemetry/context/runtime_context.h>
 #include <opentelemetry/semconv/incubating/rpc_attributes.h>
-#include <opentelemetry/semconv/network_attributes.h>
 #include <opentelemetry/trace/provider.h>
-#include <opentelemetry/trace/span.h>
 
 #include <chrono>
 #include <string_view>
@@ -123,14 +119,14 @@ retry_rpc_status(std::string_view service, std::string_view operation, Func&& fu
 
         attempts++;
         if (!should_retry(status) || attempts >= max_attempts) {
-            SPDLOG_WARN("{}: {} failed after {} attempts: {}", service, operation, attempts,
+            LOG_WARN("{}: {} failed after {} attempts: {}", service, operation, attempts,
                         status.error_message());
             span->SetStatus(trace::StatusCode::kError, status.error_message());
             span->End();
             return status;
         }
 
-        SPDLOG_WARN("{}: {} attempt {} failed, retrying in {}ms: {}", service, operation, attempts,
+        LOG_WARN("{}: {} attempt {} failed, retrying in {}ms: {}", service, operation, attempts,
                     backoff.count(), status.error_message());
 
         span->SetStatus(trace::StatusCode::kError, fmt::format("Attempt {} failed, retrying: {}",

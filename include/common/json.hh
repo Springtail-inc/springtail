@@ -72,7 +72,7 @@ namespace springtail {
             try {
                 return json[key].get<T>();
             } catch (const nlohmann::json::type_error& e) {
-                SPDLOG_WARN("Bad conversion for key '{}' - {}", key, e.what());
+                LOG_WARN("Bad conversion for key '{}' - {}", key, e.what());
                 return std::nullopt;  // Return nullopt on failed conversion
             }
         }

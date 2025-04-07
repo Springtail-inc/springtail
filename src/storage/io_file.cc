@@ -182,7 +182,7 @@ namespace springtail {
 
         _fd = ::open(path.c_str(), fmode, owner);
         if (_fd == -1) {
-            SPDLOG_ERROR("Error opening file: path={}, errno={}", path.c_str(), errno);
+            LOG_ERROR("Error opening file: path={}, errno={}", path.c_str(), errno);
             throw StorageError("Error opening file");
         }
     }
@@ -274,7 +274,7 @@ namespace springtail {
         // default error response
         std::shared_ptr<IOResponseRead> response = std::make_shared<IOResponseRead>(request);
 
-        SPDLOG_DEBUG_MODULE(LOG_STORAGE, "IOSysFH::read offset={}", request->offset);
+        LOG_DEBUG(LOG_STORAGE, "IOSysFH::read offset={}", request->offset);
 
         // prefetch 36 bytes to try to avoid multiple reads
         // this may read past the end of file, so must handle that case
@@ -320,7 +320,7 @@ namespace springtail {
 
         int hdr_off = 12;
 
-        SPDLOG_DEBUG_MODULE(LOG_STORAGE, "IOSysFH::read vector count={}", (0xFF & count));
+        LOG_DEBUG(LOG_STORAGE, "IOSysFH::read vector count={}", (0xFF & count));
 
         // output vector
         response->data.resize(count);
@@ -362,7 +362,7 @@ namespace springtail {
                 iov[i].iov_len = size;
             }
 
-            SPDLOG_DEBUG_MODULE(LOG_STORAGE, "IOSysFH::read ({}) Vector {}: size={} csize={}",
+            LOG_DEBUG(LOG_STORAGE, "IOSysFH::read ({}) Vector {}: size={} csize={}",
                          (is_compressed ? "compressed" : "uncompressed") , i, size, csize);
 
             total_size += iov[i].iov_len;
@@ -376,7 +376,7 @@ namespace springtail {
         }
         CHECK_EQ(bytes_read, total_size);
 
-        SPDLOG_DEBUG_MODULE(LOG_STORAGE, "IOSysFH::read bytes read={}, hdr_off={}", bytes_read, hdr_off);
+        LOG_DEBUG(LOG_STORAGE, "IOSysFH::read bytes read={}, hdr_off={}", bytes_read, hdr_off);
 
         // if data was compressed we need to decompress it into final location,
         // otherwise we are done
@@ -388,7 +388,7 @@ namespace springtail {
                     decompressor->decompress_raw(compressed_data[i], response->data[i], 0);
                 }
             } catch (ValidationError &exc) {
-                SPDLOG_ERROR("Exception while decompressing data");
+                LOG_ERROR("Exception while decompressing data");
                 request->complete(response, IOStatus::ERR_DECODE);
                 return;
             }
@@ -397,12 +397,12 @@ namespace springtail {
         // verify data hash; compute hash over response compare to hash in header
         uint64_t computed_hash = _compute_hash(response->data);
         if (computed_hash != hash) {
-            SPDLOG_ERROR("Checksum hash computation mismatch");
+            LOG_ERROR("Checksum hash computation mismatch");
             request->complete(response, IOStatus::ERR_CKSUM);
             return;
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_STORAGE, "Read {} vectors", response->data.size());
+        LOG_DEBUG(LOG_STORAGE, "Read {} vectors", response->data.size());
 
         response->next_offset = request->offset + hdr_off + total_size;
         request->complete(response, IOStatus::SUCCESS);
@@ -433,15 +433,15 @@ namespace springtail {
                 for (int i = 0; i < count; i++) {
                     compressor->compress_raw(data[i], compressed_data[i]);
 
-                    SPDLOG_DEBUG_MODULE(LOG_STORAGE, "IOSysFH::_internal_write: compressing vector: {}", i);
+                    LOG_DEBUG(LOG_STORAGE, "IOSysFH::_internal_write: compressing vector: {}", i);
 
                     compressed_size += compressed_data[i].size();
                     size += data[i]->size();
                 }
 
             } catch (ValidationError &exc) {
-                SPDLOG_ERROR("Exception while compressing data");
-                SPDLOG_ERROR("Exception: {}", exc.what());
+                LOG_ERROR("Exception while compressing data");
+                LOG_ERROR("Exception: {}", exc.what());
 
                 return -2; // decode error
             }
@@ -451,7 +451,7 @@ namespace springtail {
                 // don't compress
                 is_compressed = false;
 
-                SPDLOG_DEBUG_MODULE(LOG_STORAGE, "IOSys::internal_write: Not compressing data, compressed size too big: {} vs {}",
+                LOG_DEBUG(LOG_STORAGE, "IOSys::internal_write: Not compressing data, compressed size too big: {} vs {}",
                              compressed_size, size);
             }
         }
@@ -484,13 +484,13 @@ namespace springtail {
                 iov[i+1].iov_base = compressed_data[i].data();
                 iov[i+1].iov_len = csize;
 
-                SPDLOG_DEBUG_MODULE(LOG_STORAGE, "IOSysFH::internal_write (compressed); idx={}, size={}, csize={}", i, size, csize);
+                LOG_DEBUG(LOG_STORAGE, "IOSysFH::internal_write (compressed); idx={}, size={}, csize={}", i, size, csize);
             } else {
                 std::copy_n(reinterpret_cast<char *>(&size), sizeof(int32_t), &hdr[hdr_off + 4]);
                 iov[i+1].iov_base = data[i]->data();
                 iov[i+1].iov_len = size;
 
-                SPDLOG_DEBUG_MODULE(LOG_STORAGE, "IOSysFH::internal_write (uncompressed); idx={}, size={}", i, size);
+                LOG_DEBUG(LOG_STORAGE, "IOSysFH::internal_write (uncompressed); idx={}, size={}", i, size);
             }
 
             total_size += iov[i+1].iov_len;
@@ -505,7 +505,7 @@ namespace springtail {
         if (bytes_written > 0) {
             CHECK_EQ(bytes_written, total_size);
         } else if (bytes_written < 0) {
-            SPDLOG_ERROR("Recevied write error: errno={}", errno);
+            LOG_ERROR("Recevied write error: errno={}", errno);
         }
 
         return bytes_written;  // either > 0 on success, or -1 on error with errno set
@@ -544,7 +544,7 @@ namespace springtail {
             return;
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_STORAGE, "Append at offset={}, written={}", offset, bytes_written);
+        LOG_DEBUG(LOG_STORAGE, "Append at offset={}, written={}", offset, bytes_written);
 
         _is_dirty = true;
 

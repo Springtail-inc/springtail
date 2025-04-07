@@ -8,7 +8,6 @@
 #include <memory>
 #include <stop_token>
 #include <thread>
-#include <queue>
 #include <unordered_set>
 
 namespace springtail {
@@ -45,7 +44,7 @@ namespace xid_mgr {
                                     const proto::GetCommittedXidRequest* request,
                                     proto::GetCommittedXidResponse* response) override;
 
-        grpc::ServerWriteReactor<proto::XidPushResponse>* Subscribe( 
+        grpc::ServerWriteReactor<proto::XidPushResponse>* Subscribe(
                 grpc::CallbackServerContext* context,
                 const proto::SubscribeRequest* request) override;
 
@@ -53,10 +52,10 @@ namespace xid_mgr {
         xid_mgr::XidMgrServer& _srv;
 
         /**
-         * Notifier is a subscription notifier. Each Notifier instance 
+         * Notifier is a subscription notifier. Each Notifier instance
          * represents a single subscription or server-side
-         * stream of push notifications to one client. 
-         * Mainly it impelments async GRPC callbacks 
+         * stream of push notifications to one client.
+         * Mainly it impelments async GRPC callbacks
          * to manage the streaming process.
          */
         struct Notifier : grpc::ServerWriteReactor<proto::XidPushResponse>
@@ -68,7 +67,7 @@ namespace xid_mgr {
             {}
             ~Notifier() = default;
 
-            
+
             /**
              * This will push the message to the client.
              */
@@ -105,9 +104,9 @@ namespace xid_mgr {
         {
             GrpcXidMgrService& _service;
 
-            explicit NotificationThread(GrpcXidMgrService& s) : 
+            explicit NotificationThread(GrpcXidMgrService& s) :
                 _service{s},
-                _t{[this](std::stop_token st) { task(st); }} 
+                _t{[this](std::stop_token st) { task(st); }}
             {}
 
             void notify(const proto::XidPushResponse& xid);
