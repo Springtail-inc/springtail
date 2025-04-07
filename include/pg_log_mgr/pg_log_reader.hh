@@ -142,9 +142,16 @@ namespace springtail::pg_log_mgr {
                   ExistsCachePtr exists_cache)
                 : _db(db_id), _pg_xid(pg_xid), _committer_queue(committer_queue), _exists_cache(exists_cache)
             {
-                auto tracer = open_telemetry::OpenTelemetry::tracer_static("PgLogReader");
+                auto tracer = open_telemetry::OpenTelemetry::tracer("PgLogReader");
                 _span = tracer->StartSpan("Transaction");
                 _span->SetAttribute("pg_xid", pg_xid);
+            }
+
+            ~Batch()
+            {
+                if (_span->IsRecording()) {
+                    _span->End();
+                }
             }
 
             /**
