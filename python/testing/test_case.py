@@ -422,9 +422,8 @@ class TestCase:
 
             # If wait_for is 0 or time is exceeded, raise TimeoutError
             if wait_for == 0 or (time.time() - start_time) >= wait_for:
-                raise TimeoutError(
-                    f"Secondary indexes not in sync within {wait_for}s"
-                )
+                self._raise_error(f'Secondary indexes not in sync within {wait_for}s.')
+
 
     def _get_ranking_sql(self, is_index_query: bool = False) -> str:
         index_cond = 'AND n.index_id <> 0' if is_index_query is True else 'AND n.index_id = 0'

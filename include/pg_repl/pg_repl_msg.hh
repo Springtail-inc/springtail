@@ -278,7 +278,8 @@ namespace springtail
          PgMsgReconcileIndex
         > msg;                 ///< message data
 
-        uint64_t pg_log_timestamp;  ///< timestamp id of the current Postgres log file
+        /** timestamp id of the current Postgres log file -- will be zero for internal messages */
+        uint64_t pg_log_timestamp{0};
         PgMsgEnum msg_type;    ///< type defining union member
         int proto_version;     ///< which protocol version
         bool is_streaming;     ///< is this a streaming message

@@ -556,7 +556,7 @@ namespace springtail::pg_log_mgr {
             }
 
             LOG_DEBUG(LOG_PG_LOG_MGR, "Processing log entry: path={}, start_offset={}, num_messages={}",
-                                log_entry->path, log_entry->start_offset, log_entry->num_messages);
+                      log_entry->path, log_entry->start_offset, log_entry->num_messages);
 
             auto file_timestamp = fs::extract_timestamp_from_file(log_entry->path, LOG_PREFIX_REPL, LOG_SUFFIX);
             CHECK(file_timestamp);

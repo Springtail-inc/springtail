@@ -788,7 +788,9 @@ namespace springtail::pg_log_mgr {
     PgLogReader::_process_msg(PgMsgPtr msg)
     {
         // note: it would probably be cheaper to send the rotate as an explicit one-time message
-        //       rather than packing the log-timestamp into every message
+        //       rather than packing the log-timestamp into every message -- alternately we could
+        //       only send it with the commit messages, since those are the only ones that affect
+        //       the xact_log
         if (_pg_log_timestamp < msg->pg_log_timestamp) {
             LOG_DEBUG(LOG_PG_LOG_MGR, "Logs rollover to the new log timestamp id: {}", msg->pg_log_timestamp);
             _pg_log_timestamp = msg->pg_log_timestamp;
