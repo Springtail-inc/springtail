@@ -40,7 +40,9 @@ namespace springtail::committer {
             }
         };
 
-        Indexer(uint32_t worker_count, std::shared_ptr<ConcurrentQueue<std::string>> index_reconciliation_queue);
+        using ReconciliationQueuePtr = std::shared_ptr<ConcurrentQueue<std::string>>;
+
+        Indexer(uint32_t worker_count, ReconciliationQueuePtr index_reconciliation_queue);
 
         Indexer(const Indexer&) = delete;
         Indexer& operator=(const Indexer&) = delete;

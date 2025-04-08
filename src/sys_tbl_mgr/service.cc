@@ -1131,8 +1131,8 @@ Service::Revert(grpc::ServerContext* context,
             }
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Found {} root files for system table {}",
-                            roots_files.size(), table_id);
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Found {} root files for system table {}",
+                  roots_files.size(), table_id);
 
         // find the largest valid XID
         if (!roots_files.empty()) {
@@ -1141,15 +1141,14 @@ Service::Revert(grpc::ServerContext* context,
             auto root_i = std::make_reverse_iterator(del_i);
 
             if (root_i == roots_files.rend()) {
-                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Clear system table {}",
-                                    root_i->second, table_id);
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Clear system table {}", root_i->second, table_id);
                 // there's no valid roots, clear *all* of the system table data
                 for (const auto& entry : std::filesystem::directory_iterator(table_dir)) {
                     std::filesystem::remove_all(entry.path());
                 }
             } else {
-                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Picked root file {} for system table {}",
-                                    root_i->second, table_id);
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Picked root file {} for system table {}", root_i->second,
+                          table_id);
 
                 // update the symlink
                 auto symlink_path = table_dir / "roots";
@@ -1161,8 +1160,8 @@ Service::Revert(grpc::ServerContext* context,
 
                 // remove any roots files with larger XIDs
                 for (; del_i != roots_files.end(); ++del_i) {
-                    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Delete root file {} for system table {}",
-                                        del_i->second, table_id);
+                    LOG_DEBUG(LOG_PG_LOG_MGR, "Delete root file {} for system table {}",
+                              del_i->second, table_id);
                     std::filesystem::remove(del_i->second);
                 }
             }
@@ -1424,8 +1423,8 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
 
             if (static_cast<sys_tbl::IndexNames::State>(index_info.state()) != sys_tbl::IndexNames::State::READY &&
                     static_cast<sys_tbl::IndexNames::State>(index_info.state()) != sys_tbl::IndexNames::State::BEING_DELETED) {
-                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index deleted or not-ready, so skipping the root {} -- {}",
-                        table_id, index_id_f->get_uint64(*rrow_i));
+                LOG_DEBUG(LOG_SCHEMA, "Index deleted or not-ready, so skipping the root {} -- {}",
+                          table_id, index_id_f->get_uint64(*rrow_i));
                 continue;
             }
         }

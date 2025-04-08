@@ -76,7 +76,7 @@ PgLogRecovery::_skip_committed()
     _repl_log = fs::find_earliest_modified_file(_repl_path, PgLogMgr::LOG_PREFIX_REPL,
                                                 PgLogMgr::LOG_SUFFIX);
     if (!_repl_log) {
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "No repl log found");
+        LOG_DEBUG(LOG_PG_LOG_MGR, "No repl log found");
         return false;
     }
 
@@ -92,7 +92,7 @@ PgLogRecovery::_skip_committed()
     // Open the xact log
     PgXactLogReaderMmap xact_reader(_xact_path, _committed_xid, _pg_log_reader->archive_logs());
     if (!xact_reader.begin()) {
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "No xact log found");
+        LOG_DEBUG(LOG_PG_LOG_MGR, "No xact log found");
         return true;
     }
 
@@ -187,9 +187,8 @@ PgLogRecovery::_process_msg(PgMsgPtr msg,
                 auto &commit_msg = std::get<PgMsgStreamCommit>(msg->msg);
                 pgxid = commit_msg.xid;
             }
-            CHECK_EQ(pgxid, xact_reader.get_pg_xid());
-
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Found COMMIT for pgxid {} with xact_xid {}", pgxid, xact_reader.get_xid());
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Found COMMIT for pgxid {} == {} with xact_xid {}", pgxid, xact_reader.get_pg_xid(), xact_reader.get_xid());
+            CHECK(pgxid == xact_reader.get_pg_xid() || pgxid == 0);
 
             bool done = false;
             CHECK_LE(xact_reader.get_xid(), _committed_xid);

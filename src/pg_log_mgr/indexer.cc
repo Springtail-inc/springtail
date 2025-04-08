@@ -10,12 +10,8 @@
 
 namespace springtail::committer {
 
-<<<<<<< HEAD
-    Indexer::Indexer(uint32_t worker_count, std::shared_ptr<ConcurrentQueue<std::string>> index_reconciliation_queue)
+    Indexer::Indexer(uint32_t worker_count, ReconciliationQueuePtr index_reconciliation_queue)
         : _index_reconciliation_queue(index_reconciliation_queue)
-=======
-    Indexer::Indexer(uint32_t worker_count)
->>>>>>> origin/main
     {
         assert(worker_count);
         for (auto i = 0; i != worker_count; ++i) {
@@ -96,7 +92,6 @@ namespace springtail::committer {
             _queue.push(key);
             _cv.notify_one();
         } else {
-<<<<<<< HEAD
             // mark the status as ABORTING, it will tell the worker to
             // cancel the index build / catchup
             // and proceed for dropping the index
@@ -107,53 +102,6 @@ namespace springtail::committer {
             if (--_xid_ddl_counter_map[xid] == 0) {
                 _xid_ddl_counter_map.erase(xid);
             }
-=======
-            // TODO: we catch the case when the index is dropped in the middle b/c
-            // the case isn't fully supported. The main problem is with managing
-            // XID (finalize) updates.
-            // The issues with XID will need to be resolved anyway for supporting
-            // asynchronous index updates.
-            // Basically it would assert here if a single XID action contains
-            // DDL's to create an index with index_id=1234.
-            assert(false);
-            // clear DDL, it will tell the worker to cancel the index build
-            it->second._ddl = {};
-        }
-    }
-
-    void Indexer::wait_for_completion(uint64_t db_id)
-    {
-        auto find_work = [&]() {
-            auto it = std::ranges::find_if(_work_set,
-                    [&](auto const& v) {
-                        return v.first.first == db_id;
-                    });
-            return it != _work_set.end();
-        };
-
-        // wait for the key {db, tid} to be removed from the working set
-        std::unique_lock g(_m);
-        _cv_done.wait(g, [&find_work]{return !find_work();});
-    }
-
-    void Indexer::wait_for_completion(uint64_t db_id, uint64_t tid)
-    {
-        auto find_work = [&]() {
-            auto it = std::ranges::find_if(_work_set,
-                    [&](auto const& v) {
-                        if (v.first.first == db_id && !v.second._ddl.is_null()) {
-                            return v.second._ddl["table_id"] == tid;
-                        }
-                        return false;
-                    });
-            return it != _work_set.end();
-        };
-
-        // wait for the key {db, tid} to be removed from the working set
-        std::unique_lock g(_m);
-        while( find_work()  ) {
-            _cv_done.wait(g, [&find_work]{return !find_work();});
->>>>>>> origin/main
         }
     }
 
@@ -287,7 +235,7 @@ namespace springtail::committer {
         uint64_t current_extent_id = 0;
         uint32_t current_row_id = 0;
 
-        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Indexing build in progress: {}:{}", db_id, index_id);
+        LOG_DEBUG(LOG_COMMITTER, "Indexing build in progress: {}:{}", db_id, index_id);
         auto table = TableMgr::get_instance()->get_table(db_id, tid, idx._xid);
         for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
             if (st.stop_requested()) {
@@ -452,7 +400,7 @@ namespace springtail::committer {
             // truncate and flush again
             _commit_build(idxState._root, idxState._key, idxState._idx, end_xid);
         } else {
-            SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Index reconciliation in progress: {}:{}", db_id, index_id);
+            LOG_DEBUG(LOG_COMMITTER, "Index reconciliation in progress: {}:{}", db_id, index_id);
 
             // index column positions
             std::vector<uint32_t> idx_cols;
@@ -488,7 +436,7 @@ namespace springtail::committer {
                 next_page = table->read_page_from_disk(next_eid);
             }
             // Commit the index
-            SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Initiating Index commit: {}:{}", db_id, index_id);
+            LOG_DEBUG(LOG_COMMITTER, "Initiating Index commit: {}:{}", db_id, index_id);
             _commit_build(idxState._root, idxState._key, idxState._idx, end_xid);
         }
     }

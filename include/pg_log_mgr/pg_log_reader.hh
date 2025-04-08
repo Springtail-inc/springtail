@@ -187,11 +187,8 @@ namespace springtail::pg_log_mgr {
             /**
              * Records a schema change into the batch.
              */
-            void schema_change(uint64_t current_xid,
-                               int32_t tid,
-                               uint32_t pg_xid,
-                               uint32_t pg_xid_txn,
-                               PgMsgPtr msg);
+            void schema_change(uint64_t current_xid, std::optional<uint32_t> tid,
+                               int32_t oid, uint32_t pg_xid, uint32_t pg_xid_txn, PgMsgPtr msg);
 
         private:
             //// INTERNAL STRUCTURES

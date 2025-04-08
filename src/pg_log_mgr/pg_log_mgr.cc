@@ -244,10 +244,10 @@ namespace springtail::pg_log_mgr {
         PgMsgReconcileIndex reconcile_index_msg;
         while (!_shutdown) {
             // block on index reconciliation queue w/timeout for shutdown
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Waiting for index reconciliation request");
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Waiting for index reconciliation request");
             if (auto request = _index_reconciliation_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT); request) {
                 //Pass it to log reader to notify committer
-                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Request received for index reconciliation for {}", *request);
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Request received for index reconciliation for {}", *request);
                 std::vector<std::string> split;
                 common::split_string(":", *request, split);
                 CHECK_EQ(split.size(), 2);
