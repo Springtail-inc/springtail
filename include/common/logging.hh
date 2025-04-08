@@ -49,6 +49,7 @@
 #endif
 
 namespace springtail {
+
     /**
      * @brief Enum for log module ids, add to end as hex bit value
      */

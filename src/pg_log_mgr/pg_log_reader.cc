@@ -42,6 +42,9 @@ namespace springtail::pg_log_mgr {
                                         "ms")
                 .release());
 
+        // construct the table existence cache
+        _exists_cache = std::make_shared<ExistsCache>(8192); // XXX make this size a property?
+
         // start the message processing thread
         _msg_thread = std::thread(&PgLogReader::_msg_worker, this);
     }
@@ -55,8 +58,17 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::commit(uint64_t xid, PostgresTimestamp commit_ts)
     {
-        auto scope = open_telemetry::OpenTelemetry::tracer_static("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
         _span->AddEvent("commit", {{"pg_commit_time", commit_ts.to_unix_ns()}});
+
+        // update any changes in the table invalidation state
+        for (const auto &entry : _table_validations) {
+            if (entry.second) {
+                TableValidator::get_instance()->mark_invalid(entry.first, *entry.second);
+            } else {
+                TableValidator::get_instance()->mark_valid(entry.first);
+            }
+        }
 
         // go through each subtxn and push it's outstanding batches to the WriteCache
         std::vector<uint64_t> pg_xids;
@@ -101,7 +113,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::abort(PostgresTimestamp abort_ts)
     {
-        auto scope = open_telemetry::OpenTelemetry::tracer_static("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
         _span->AddEvent("aborted", {{"pg_abort_time", abort_ts.to_unix_ns()}});
 
         // drop any batches for all active txns
@@ -117,7 +129,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::abort_subtxn(int32_t pg_xid, PostgresTimestamp abort_ts)
     {
-        auto scope = open_telemetry::OpenTelemetry::tracer_static("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
 
         // Add subtransaction abort event with the provided timestamp
         _span->AddEvent("subtransaction_abort", {
@@ -182,21 +194,38 @@ namespace springtail::pg_log_mgr {
                                      int32_t tid,
                                      const PgMsgTupleData &data)
     {
-        // check if we should skip the mutation due to ongoing table sync
-        if (SyncTracker::get_instance()->should_skip(_db, tid, _pg_xid)) {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Skip mutation: oid={} pg_xid={}\n", tid, pg_xid);
+        XidLsn xidlsn(current_xid);
+
+        // check if we should skip the mutation due to an invalid table
+        if (_check_invalid(tid)) {
+            LOG_DEBUG(LOG_PG_REPL, "Skip mutation for invalid table with tid {}", tid);
             return;
         }
 
-        auto scope = open_telemetry::OpenTelemetry::tracer_static("PgLogReader")->WithActiveSpan(_span);
+        // check if we should skip the mutation due to ongoing table sync
+        auto sync_skip = SyncTracker::get_instance()->should_skip(_db, tid, _pg_xid);
+        if (sync_skip.second) {
+            LOG_DEBUG(LOG_PG_LOG_MGR,
+                      "Skip mutation due to ongoing sync: oid={} pg_xid={}\n", tid,
+                      pg_xid);
+            return;
+        }
+
+        // check if the system is aware of this table -- if not, need to skip this mutation
+        if (!sync_skip.first && !_table_exists(tid, xidlsn)) {
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Skip mutation due to unknown table: tid={} pg_xid={}\n", tid,
+                      pg_xid);
+            return;
+        }
+
+        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
         auto txn = _get_txn(pg_xid);
 
         // get the Extent containing mutations
         auto &entry = txn->table_map[tid];
         if (entry.extent == nullptr) {
             if (entry.schema == nullptr) {
-                XidLsn current(current_xid);
-                entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, current);
+                entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, xidlsn);
                 entry.update_schema();
             }
 
@@ -229,17 +258,32 @@ namespace springtail::pg_log_mgr {
     PgLogReader::Batch::truncate(uint64_t current_xid,
                                  const PgMsgTruncate &msg)
     {
-        auto scope = open_telemetry::OpenTelemetry::tracer_static("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
 
         // get the current txn
         auto txn = _get_txn(msg.xid);
 
         // note: there may be multiple truncates due to CASCADE
         for (auto tid : msg.rel_ids) {
+            // check if the table is invalid
+            if (_check_invalid(tid)) {
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Skip truncate due to invalid table: tid={} pg_xid={} xid={}\n", tid, _pg_xid, current_xid);
+                return;
+            }
+
             // check if we should skip this table due to ongoing table sync
-            if (SyncTracker::get_instance()->should_skip(_db, tid, _pg_xid)) {
+            auto sync_skip = SyncTracker::get_instance()->should_skip(_db, tid, _pg_xid);
+            if (sync_skip.second) {
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Skip truncate: oid={} pg_xid={}\n", tid, _pg_xid);
                 continue;
+            }
+
+            // check if the system is aware of this table -- if not, need to skip this mutation
+            if (!sync_skip.first && !_table_exists(tid, XidLsn(current_xid))) {
+                LOG_DEBUG(LOG_PG_LOG_MGR,
+                          "Skip truncate due to unknown table: tid={} pg_xid={} xid={}\n", tid,
+                          _pg_xid, current_xid);
+                return;
             }
 
             // if we sent any batches to the WriteCache, evict them
@@ -266,13 +310,154 @@ namespace springtail::pg_log_mgr {
         }
     }
 
-    void
-    PgLogReader::Batch::schema_change(int32_t tid, int32_t pg_xid, PgMsgPtr msg)
+    bool
+    PgLogReader::Batch::_check_invalid(uint32_t table_oid)
     {
-        auto scope = open_telemetry::OpenTelemetry::tracer_static("PgLogReader")->WithActiveSpan(_span);
+        bool was_invalid;
+        auto valid_i = _table_validations.find(table_oid);
+        if (valid_i != _table_validations.end()) {
+            was_invalid = valid_i->second.has_value();
+        } else {
+            was_invalid = TableValidator::get_instance()->check_invalid(table_oid);
+        }
+        return was_invalid;
+    }
+
+    bool
+    PgLogReader::Batch::_handle_validation(PgMsgPtr msg)
+    {
+        // check for DROP_TABLE to clear any existing invalidation
+        if (msg->msg_type == PgMsgEnum::DROP_TABLE) {
+            PgMsgDropTable &drop_msg = std::get<PgMsgDropTable>(msg->msg);
+            _table_validations[drop_msg.oid] = std::nullopt;  // marked as valid
+            return true;
+        }
+
+        // if not CREATE_TABLE or ALTER_TABLE at this point, can process the message
+        if (msg->msg_type != PgMsgEnum::CREATE_TABLE && msg->msg_type != PgMsgEnum::ALTER_TABLE) {
+            return true;
+        }
+        PgMsgTable &table_msg = std::get<PgMsgTable>(msg->msg);
+
+        // check if the table contains invalid columns -- if so we need to ignore this table
+        auto invalid_columns =
+            TableValidator::get_instance()->validate_columns<PgMsgSchemaColumn>(table_msg.columns);
+
+        if (invalid_columns.size() > 0) {
+            // mark the table as invalid in this batch
+            nlohmann::json table_info = {{"schema", table_msg.namespace_name},
+                                         {"table", table_msg.oid},
+                                         {"columns", invalid_columns}};
+            _table_validations[table_msg.oid] = table_info;
+
+            // if this was an ALTER then we need to drop the table
+            if (msg->msg_type == PgMsgEnum::ALTER_TABLE) {
+                LOG_DEBUG(LOG_PG_LOG_MGR,
+                          "Dropping invalid table as part of alter: pg_xid={}, tid={}",
+                          table_msg.xid, table_msg.oid);
+                PgMsgDropTable drop_msg;
+                drop_msg.xid = table_msg.xid;
+                drop_msg.lsn = table_msg.lsn;
+                drop_msg.oid = table_msg.oid;
+                drop_msg.table = table_msg.table;
+                drop_msg.namespace_name = table_msg.namespace_name;
+
+                msg->msg_type = PgMsgEnum::DROP_TABLE;
+                msg->msg = drop_msg;
+            } else {
+                return false;  // don't perform the CREATE_TABLE in this case
+            }
+        } else {
+            // Check if the table was previously in an invalid state
+            bool was_invalid = _check_invalid(table_msg.oid);
+
+            if (was_invalid) {
+                // The table is no longer invalid, remove the redis entry for the table
+                _table_validations[table_msg.oid] = std::nullopt;  // marked as valid
+
+                // if an ALTER_TABLE made the table valid, then we need to resync it
+                if (msg->msg_type == PgMsgEnum::ALTER_TABLE) {
+                    LOG_DEBUG(LOG_PG_LOG_MGR,
+                              "Recreating invalid table as part of ALTER: pg_xid={}, tid={}",
+                              table_msg.xid, table_msg.oid);
+                    msg->msg_type = PgMsgEnum::ALTER_RESYNC;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    void
+    PgLogReader::Batch::schema_change(uint64_t current_xid,
+                                      int32_t tid,
+                                      uint32_t pg_xid,
+                                      uint32_t pg_xid_txn,
+                                      PgMsgPtr msg)
+    {
+        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
+
+        // perform the table column validations and update the message accordingly
+        if (!_handle_validation(msg)) {
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Skip CREATE_TABLE due to invalid table: tid={} pg_xid={}\n", tid, pg_xid);
+            return;
+        }
+
+        // find the transaction
+        auto txn = _get_txn(pg_xid);
+
+        // check if we need to skip this message
+        switch (msg->msg_type) {
+            case PgMsgEnum::CREATE_NAMESPACE:
+            case PgMsgEnum::ALTER_NAMESPACE:
+            case PgMsgEnum::DROP_NAMESPACE:
+                break;  // nothing to check for these
+
+            case PgMsgEnum::CREATE_INDEX:
+            case PgMsgEnum::DROP_INDEX:
+                break;  // XXX we should check both sync tracker and table existence against the
+                        // table ID here
+
+            case PgMsgEnum::CREATE_TABLE:
+            case PgMsgEnum::ALTER_RESYNC: {
+                // check if there's an ongoing sync for this table
+                auto sync_skip = SyncTracker::get_instance()->should_skip(_db, tid, pg_xid_txn);
+                if (sync_skip.second) {
+                    LOG_DEBUG(LOG_PG_LOG_MGR, "Skip DDL: tid={} pg_xid={}\n", tid, pg_xid_txn);
+                    return;
+                }
+
+                // note: we don't check for existence here since this is going to cause existence
+                break;
+            }
+
+            case PgMsgEnum::ALTER_TABLE:
+            case PgMsgEnum::DROP_TABLE: {
+                // check if there's an ongoing sync for this table
+                auto sync_skip = SyncTracker::get_instance()->should_skip(_db, tid, pg_xid_txn);
+                if (sync_skip.second) {
+                    LOG_DEBUG(LOG_PG_LOG_MGR, "Skip DDL: tid={} pg_xid={}\n", tid, pg_xid_txn);
+                    return;
+                }
+
+                // check if the system is aware of this table -- if not, need to skip this mutation
+                // note: if there's an ongoing sync then we consider that as existence unless it's
+                //       overridden by a local mutation
+                if (!sync_skip.first && !_table_exists(tid, XidLsn(current_xid))) {
+                    LOG_DEBUG(LOG_PG_LOG_MGR,
+                              "Skip schema change due to unknown table: tid={} pg_xid={}\n", tid,
+                              pg_xid);
+                    return;
+                }
+                break;
+            }
+
+            default:
+                LOG_ERROR("Message type {} not handled", static_cast<uint8_t>(msg->msg_type));
+                throw Error();
+        }
 
         // get the table entry
-        auto txn = _get_txn(pg_xid);
         auto &entry = txn->table_map[tid];
 
         // push any data mutations into the write cache since the schema is going to change
@@ -428,77 +613,19 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::CREATE_TABLE:
             {
                 auto &table_msg = std::get<PgMsgTable>(change->msg);
-
-                auto invalid_columns = TableValidator::get_instance()->validate_ddl_and_get_invalid_columns<PgMsgSchemaColumn>(
-                    table_msg.namespace_name, table_msg.oid, table_msg.columns);
-                if ( invalid_columns.size() > 0 ){
-                    nlohmann::json table_info = {
-                        {"schema", table_msg.namespace_name},
-                        {"table", table_msg.oid},
-                        {"columns", invalid_columns}
-                    };
-
-                    TableValidator::get_instance()->populate_invalid_tables_in_redis(table_msg.oid, table_info);
-                    break;
-                }
+                LOG_DEBUG(LOG_PG_LOG_MGR, "CREATE TABLE: xid={}, pg_xid={}, tid={}", xidlsn.xid,
+                          table_msg.xid, table_msg.oid);
 
                 std::string &&ddl_stmt = client->create_table(_db, xidlsn, table_msg);
                 redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
-
-                if (TableValidator::get_instance()->check_if_table_is_invalid_in_redis(table_msg.oid)){
-                    LOG_DEBUG(LOG_PG_REPL, "Altering invalid table to valid with tid {}", table_msg.oid);
-                    // The table is no longer invalid, remove the redis entry for the table
-                    TableValidator::get_instance()->clear_invalid_table_in_redis(table_msg.oid);
-                    // Trigger a resync to ensure the data is pulled for the table
-                    _mark_table_resync(table_msg.oid, xidlsn);
-                }
+                _exists_cache->insert(_db, table_msg.oid, true);
                 break;
             }
         case PgMsgEnum::ALTER_TABLE:
             {
                 auto &table_msg = std::get<PgMsgTable>(change->msg);
-                LOG_DEBUG(LOG_PG_LOG_MGR, "ALTER TABLE: xid={}, pg_xid={}, tid={}",
-                                    xidlsn.xid, table_msg.xid, table_msg.oid);
-
-                auto invalid_columns = TableValidator::get_instance()->validate_ddl_and_get_invalid_columns<PgMsgSchemaColumn>(
-                    table_msg.namespace_name, table_msg.oid, table_msg.columns);
-                if ( invalid_columns.size() > 0 ){
-                    // There are invalid columns present as part of the alter
-                    nlohmann::json table_info = {
-                        {"schema", table_msg.namespace_name},
-                        {"table", table_msg.oid},
-                        {"columns", invalid_columns}
-                    };
-
-                    TableValidator::get_instance()->populate_invalid_tables_in_redis(table_msg.oid, table_info);
-
-                    // Drop the table in FDW
-                    LOG_DEBUG(LOG_PG_LOG_MGR, "Dropping invalid table as part of alter: xid={}, pg_xid={}, tid={}",
-                                    xidlsn.xid, table_msg.xid, table_msg.oid);
-                    PgMsgDropTable drop_table_msg;
-                    drop_table_msg.xid = table_msg.xid;
-                    drop_table_msg.lsn = table_msg.lsn;
-                    drop_table_msg.oid = table_msg.oid;
-                    drop_table_msg.table = table_msg.table;
-                    drop_table_msg.namespace_name = table_msg.namespace_name;
-
-                    // Drop the system table
-                    std::string &&ddl_stmt = client->drop_table(_db, xidlsn, drop_table_msg);
-                    redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
-                    break;
-                } else {
-                    // Table is valid, but check if the table is previously invalid.
-                    // If the table was invalid before then switch the type to a CREATE instead of an ALTER
-                    if (TableValidator::get_instance()->check_if_table_is_invalid_in_redis(table_msg.oid)){
-                        LOG_DEBUG(LOG_PG_LOG_MGR, "Recreating invalid table as part of ALTER: xid={}, pg_xid={}, tid={}",
-                                    xidlsn.xid, table_msg.xid, table_msg.oid);
-                        // The table is no longer invalid, remove the redis entry for the table
-                        TableValidator::get_instance()->clear_invalid_table_in_redis(table_msg.oid);
-
-                        _mark_table_resync(table_msg.oid, xidlsn);
-                        break;
-                    }
-                }
+                LOG_DEBUG(LOG_PG_LOG_MGR, "ALTER TABLE: xid={}, pg_xid={}, tid={}", xidlsn.xid,
+                          table_msg.xid, table_msg.oid);
 
                 std::string &&ddl_stmt = client->alter_table(_db, xidlsn, table_msg);
 
@@ -514,8 +641,12 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::DROP_TABLE:
             {
                 auto &drop_msg = std::get<PgMsgDropTable>(change->msg);
+                LOG_DEBUG(LOG_PG_LOG_MGR, "DROP TABLE: xid={}, pg_xid={}, tid={}", xidlsn.xid,
+                          drop_msg.xid, drop_msg.oid);
+
                 std::string &&ddl_stmt = client->drop_table(_db, xidlsn, drop_msg);
                 redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                _exists_cache->insert(_db, drop_msg.oid, false);
                 break;
             }
         case PgMsgEnum::CREATE_NAMESPACE:
@@ -556,6 +687,13 @@ namespace springtail::pg_log_mgr {
 
                 // Store the DDL statement for the Committer
                 redis_ddl.add_index_ddl(_db, xidlsn.xid, ddl_stmt);
+                break;
+            }
+        case PgMsgEnum::ALTER_RESYNC:
+            {
+                // process the resync caused by an ALTER_TABLE 
+                auto &table_msg = std::get<PgMsgTable>(change->msg);
+                _mark_table_resync(table_msg.oid, xidlsn);
                 break;
             }
 
@@ -683,12 +821,9 @@ namespace springtail::pg_log_mgr {
             {
                 auto &insert = std::get<PgMsgInsert>(msg->msg);
                 int32_t pg_xid = (msg->is_streaming) ? insert.xid : _current_xact->xid;
+                LOG_DEBUG(LOG_PG_LOG_MGR, "INSERT pg_xid={} tid={}", pg_xid, insert.rel_id);
 
-                if (TableValidator::get_instance()->check_if_table_is_invalid_in_redis(insert.rel_id)){
-                    LOG_DEBUG(LOG_PG_REPL, "Prevent DML for invalid table with tid {}", insert.rel_id);
-                    break;
-                }
-
+                // note: the current XID is only used to determine table existence
                 _current_batch->add_mutation<PgMsgEnum::INSERT>(this->get_current_xid(), pg_xid,
                                                                 insert.rel_id, insert.new_tuple);
                 break;
@@ -697,12 +832,9 @@ namespace springtail::pg_log_mgr {
             {
                 auto &remove = std::get<PgMsgDelete>(msg->msg);
                 int32_t pg_xid = (msg->is_streaming) ? remove.xid : _current_xact->xid;
+                LOG_DEBUG(LOG_PG_LOG_MGR, "DELETE pg_xid={} tid={}", pg_xid, remove.rel_id);
 
-                if (TableValidator::get_instance()->check_if_table_is_invalid_in_redis(remove.rel_id)){
-                    LOG_DEBUG(LOG_PG_REPL, "Prevent DML for invalid table with tid {}", remove.rel_id);
-                    break;
-                }
-
+                // note: the current XID is only used to determine table existence
                 _current_batch->add_mutation<PgMsgEnum::DELETE>(this->get_current_xid(), pg_xid,
                                                                 remove.rel_id, remove.tuple);
                 break;
@@ -711,19 +843,17 @@ namespace springtail::pg_log_mgr {
             {
                 auto &update = std::get<PgMsgUpdate>(msg->msg);
                 int32_t pg_xid = (msg->is_streaming) ? update.xid : _current_xact->xid;
+                LOG_DEBUG(LOG_PG_LOG_MGR, "UPDATE pg_xid={} tid={}", pg_xid, update.rel_id);
 
-                if (TableValidator::get_instance()->check_if_table_is_invalid_in_redis(update.rel_id)){
-                    LOG_DEBUG(LOG_PG_REPL, "Prevent DML for invalid table with tid {}", update.rel_id);
-                    break;
-                }
-
+                // note: the current XID is only used to determine table existence
+                uint64_t current_xid = this->get_current_xid();
                 if (update.old_type == 0) {
-                    _current_batch->add_mutation<PgMsgEnum::UPDATE>(this->get_current_xid(), pg_xid,
+                    _current_batch->add_mutation<PgMsgEnum::UPDATE>(current_xid, pg_xid,
                                                                     update.rel_id, update.new_tuple);
                 } else {
-                    _current_batch->add_mutation<PgMsgEnum::DELETE>(this->get_current_xid(), pg_xid,
+                    _current_batch->add_mutation<PgMsgEnum::DELETE>(current_xid, pg_xid,
                                                                     update.rel_id, update.old_tuple);
-                    _current_batch->add_mutation<PgMsgEnum::INSERT>(this->get_current_xid(), pg_xid,
+                    _current_batch->add_mutation<PgMsgEnum::INSERT>(current_xid, pg_xid,
                                                                     update.rel_id, update.new_tuple);
                 }
                 break;
@@ -732,6 +862,9 @@ namespace springtail::pg_log_mgr {
 
         case PgMsgEnum::TRUNCATE:
             {
+                LOG_DEBUG(LOG_PG_LOG_MGR, "TRUNCATE pg_xid={}", this->get_current_xid());
+
+                // note: the current XID is only used to determine table existence
                 _current_batch->truncate(this->get_current_xid(),
                                          std::get<PgMsgTruncate>(msg->msg));
                 break;
@@ -800,13 +933,18 @@ namespace springtail::pg_log_mgr {
         // check if we need to perform a table swap / commit before proceeding
         auto xid_msg = SyncTracker::get_instance()->check_commit(db_id, pg_xid);
         if (xid_msg != nullptr) {
-            // synchronously issue the swap/commit at the GC-2 prior to processing this xid
+            // update the existence cache for the referenced tables
+            // note: do this here because SWAP happens in the committer, which can't update this
+            for (const auto &info : xid_msg->swap().tids()) {
+                _exists_cache->insert(db_id, info.first, true);
+            }
+
+            // once the swap/commit is ready, we can clear the entries from the sync tracker
+            SyncTracker::get_instance()->clear_tables(db_id, *xid_msg);
+
+            // issue the swap/commit at the GC-2 prior to processing this xid
             LOG_DEBUG(LOG_PG_LOG_MGR, "Issue TABLE_SYNC_COMMIT on {} @ {}", db_id, xid);
             _committer_queue->push(xid_msg);
-
-            // once the swap/commit is complete, we can clear the entry from the sync
-            // tracker and continue processing
-            SyncTracker::get_instance()->clear_tables(db_id, *xid_msg);
         }
     }
 
@@ -821,7 +959,7 @@ namespace springtail::pg_log_mgr {
         _current_xact = xact;
 
         // prepare a batch for processing
-        _current_batch = std::make_shared<Batch>(_db_id, begin_msg.xid, _committer_queue);
+        _current_batch = std::make_shared<Batch>(_db_id, begin_msg.xid, _committer_queue, _exists_cache);
         _batch_map.try_emplace(begin_msg.xid, _current_batch);
         _xid_ts_tracker->add_pg_xid(_current_xact->xid, _pg_log_timestamp);
     }
@@ -868,14 +1006,14 @@ namespace springtail::pg_log_mgr {
         // write the pg_xid -> xid mapping
         _xact_log_writer.log(xact->xid, xid);
 
+        // note: this check should only be false when re-processing records during recovery
         if (xid > _committed_xid) {
             // Record latency between postgres commit time and when we process it
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - postgres_timestamp.to_system_time());
             _postgres_log_reader_latencies->Record(duration.count(), _context);
-            LOG_DEBUG(LOG_PG_LOG_MGR,
-                                "Commit processed {} milliseconds after postgres commit",
-                                duration.count());
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Commit processed {} milliseconds after postgres commit",
+                      duration.count());
 
             // message the Committer
             LOG_DEBUG(LOG_PG_LOG_MGR, "Issue XID to committer on {} @ {}", _db_id, xid);
@@ -906,7 +1044,7 @@ namespace springtail::pg_log_mgr {
         _xact_map.insert({xact->xid, xact});
 
         // prepare a batch for processing
-        _current_batch = std::make_shared<Batch>(_db_id, start_msg.xid, _committer_queue);
+        _current_batch = std::make_shared<Batch>(_db_id, start_msg.xid, _committer_queue, _exists_cache);
         _batch_map.try_emplace(start_msg.xid, _current_batch);
         _xid_ts_tracker->add_pg_xid(xact->xid, _pg_log_timestamp);
     }
@@ -950,6 +1088,9 @@ namespace springtail::pg_log_mgr {
 
         // free the batch
         _batch_map.erase(commit_msg.xid);
+
+        // check if we need to perform a table swap / commit before proceeding
+        _check_sync_commit(_db_id, xact->xid, xid);
 
         // write the pg_xid -> xid mapping
         // note: we do this even if the xact isn't being committed since it is needed for recovery
@@ -1019,18 +1160,13 @@ namespace springtail::pg_log_mgr {
             }
 
             xact = itr->second;
-            pg_xid_txn = xact->xid;
-        }
-
-        // check if we should ignore this message
-        if (SyncTracker::get_instance()->should_skip(_db_id, oid, pg_xid_txn)) {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Skip DDL: oid={} pg_xid={}\n", oid, pg_xid_txn);
-            return;
+            pg_xid_txn = xact->xid; // the parent pgxid for this txn
         }
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Process DDL: oid={} pg_xid={}\n", oid, pg_xid_txn);
 
         // record the schema change into the batch
-        _current_batch->schema_change(oid, pg_xid, msg);
+        // note: the current XID is only used to determine table existence
+        _current_batch->schema_change(this->get_current_xid(), oid, pg_xid, pg_xid_txn, msg);
     }
 } // namespace springtail::pg_log_mgr

@@ -443,8 +443,7 @@ namespace springtail
         _set_schema(table_name, schema_name, table_oid, schema_oid);
 
         // validate the columns to see if there are invalid columns
-        auto invalid_columns = TableValidator::get_instance()->validate_ddl_and_get_invalid_columns<SchemaColumn>(
-                schema_name, table_oid, _schema.columns);
+        auto invalid_columns = TableValidator::get_instance()->validate_columns<SchemaColumn>(_schema.columns);
         if ( invalid_columns.size() > 0 ){
             LOG_DEBUG(LOG_PG_REPL, "Invalid columns found as part of _copy_table for table_oid {}", table_oid);
             nlohmann::json table_info = {
@@ -453,11 +452,11 @@ namespace springtail
                 {"columns", invalid_columns}
             };
 
-            TableValidator::get_instance()->populate_invalid_tables_in_redis(table_oid, table_info);
+            TableValidator::get_instance()->mark_invalid(table_oid, table_info);
             return nullptr;
         }
 
-        // get secondary indexes XXX not fully supported yet
+        // get secondary indexes
         _get_secondary_indexes();
 
         auto copy_info = std::make_shared<proto::CopyTableInfo>();

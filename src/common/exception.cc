@@ -2,11 +2,15 @@
 
 #include <common/exception.hh>
 #include <common/logging.hh>
+#include "common/open_telemetry.hh"
 
 namespace {
     void
     backtrace_handler(int signo)
     {
+        // flush open telemetry data
+        springtail::open_telemetry::OpenTelemetry::flush();
+
         // attempt to flush the log before we try to capture the backtrace in case something goes wrong
         spdlog::default_logger()->flush();
 

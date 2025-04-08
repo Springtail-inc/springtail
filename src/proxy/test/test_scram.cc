@@ -45,7 +45,7 @@ protected:
         // sets client_nonce and client_first_message_bare in scram_state
         char *client_first_message = build_client_first_message(&ss_login->scram_state);
         if (client_first_message == nullptr) {
-            SPDLOG_ERROR("Failed to build client first message");
+            LOG_ERROR("Failed to build client first message");
             throw ProxyAuthError();
         }
 
@@ -63,7 +63,7 @@ protected:
         if (!read_client_first_message(raw.data(), &cs_login->scram_state.cbind_flag,
                                        &cs_login->scram_state.client_first_message_bare,
                                        &cs_login->scram_state.client_nonce)) {
-            SPDLOG_ERROR("Failed to read client first message");
+            LOG_ERROR("Failed to read client first message");
             throw ProxyAuthError();
         }
 
@@ -76,13 +76,13 @@ protected:
                 type = PASSWORD_TYPE_PLAINTEXT;
                 break;
             default:
-                SPDLOG_ERROR("Invalid password type for SCRAM authentication");
+                LOG_ERROR("Invalid password type for SCRAM authentication");
                 throw ProxyAuthError();
         }
 
         if (!build_server_first_message(&cs_login->scram_state, user->username().c_str(),
                                         cs_login->password.c_str(), type)) {
-            SPDLOG_ERROR("Failed to build server first message");
+            LOG_ERROR("Failed to build server first message");
             throw ProxyAuthError();
         }
 
@@ -95,12 +95,12 @@ protected:
     {
         // ServerSession _handle_auth_scram_continue()
         if (ss_login->scram_state.client_nonce == nullptr) {
-            SPDLOG_ERROR("No client nonce set");
+            LOG_ERROR("No client nonce set");
             throw ProxyAuthError();
         }
 
         if (ss_login->scram_state.server_first_message != nullptr) {
-            SPDLOG_ERROR("Received second SCRAM-SHA-256 continue message");
+            LOG_ERROR("Received second SCRAM-SHA-256 continue message");
             throw ProxyAuthError();
         }
 
@@ -111,7 +111,7 @@ protected:
         if (!read_server_first_message(&ss_login->scram_state, input.data(),
                                        &ss_login->scram_state.server_nonce, &ss_login->scram_state.salt,
                                        &salt_len, &ss_login->scram_state.iterations)) {
-            SPDLOG_ERROR("Failed to read server first message");
+            LOG_ERROR("Failed to read server first message");
             throw ProxyAuthError();
         }
 
@@ -123,9 +123,9 @@ protected:
         } else if (ss_login->type == TEXT) {
             pg_user.has_scram_keys = false;
             pg_user.passwd = ss_login->password.c_str();
-            SPDLOG_DEBUG("Using TEXT password for SCRAM for password: {}", pg_user.passwd);
+            LOG_INFO("Using TEXT password for SCRAM for password: {}", pg_user.passwd);
         } else {
-            SPDLOG_ERROR("Invalid password type for SCRAM");
+            LOG_ERROR("Invalid password type for SCRAM");
             throw ProxyAuthError();
         }
 
@@ -134,7 +134,7 @@ protected:
             salt_len, ss_login->scram_state.iterations);
 
         if (client_final_message == nullptr) {
-            SPDLOG_ERROR("Failed to build client final message");
+            LOG_ERROR("Failed to build client final message");
             throw ProxyAuthError();
         }
 
@@ -155,7 +155,7 @@ protected:
         if (!read_client_final_message(&cs_login->scram_state,
                                        reinterpret_cast<const uint8_t *>(data.data()), raw.data(),
                                        &client_final_nonce, &proof)) {
-            SPDLOG_ERROR("Failed to read client final message");
+            LOG_ERROR("Failed to read client final message");
             throw ProxyAuthError();
         }
 
@@ -163,7 +163,7 @@ protected:
         // verify_client_proof sets client key in scram state
         if (!verify_final_nonce(&cs_login->scram_state, client_final_nonce) ||
             !verify_client_proof(&cs_login->scram_state, proof)) {
-            SPDLOG_ERROR("Invalid SCRAM response (nonce or proof does not match)");
+            LOG_ERROR("Invalid SCRAM response (nonce or proof does not match)");
             free(proof);
             throw ProxyAuthError();
         }
@@ -175,7 +175,7 @@ protected:
         // finally send the final message to the client
         char *server_final_message = build_server_final_message(&cs_login->scram_state);
         if (server_final_message == nullptr) {
-            SPDLOG_ERROR("Failed to build server final message");
+            LOG_ERROR("Failed to build server final message");
             throw ProxyAuthError();
         }
         std::string result = std::string(server_final_message);
@@ -190,7 +190,7 @@ protected:
         // ServerSession _handle_auth_scram_complete()
         // make sure we are in right flow
         if (ss_login->scram_state.server_first_message == nullptr) {
-            SPDLOG_ERROR("No server first message set");
+            LOG_ERROR("No server first message set");
             throw ProxyAuthError();
         }
 
@@ -199,7 +199,7 @@ protected:
 
         // decode the final message from server
         if (!read_server_final_message(input.data(), ServerSignature)) {
-            SPDLOG_ERROR("Failed to read server final message");
+            LOG_ERROR("Failed to read server final message");
             throw ProxyAuthError();
         }
 
@@ -214,7 +214,7 @@ protected:
 
         // last step, verify the server signature
         if (!verify_server_signature(&ss_login->scram_state, &pg_user, ServerSignature)) {
-            SPDLOG_ERROR("Failed to verify server signature");
+            LOG_ERROR("Failed to verify server signature");
             throw ProxyAuthError();
         }
 
