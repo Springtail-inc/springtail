@@ -93,13 +93,13 @@ static char *read_attr_value(char **input, char attr)
 	char *end;
 
 	if (*begin != attr) {
-		SPDLOG_ERROR("malformed SCRAM message (attribute \"{}\" expected", attr);
+		LOG_ERROR("malformed SCRAM message (attribute \"{}\" expected", attr);
 		return NULL;
 	}
 	begin++;
 
 	if (*begin != '=') {
-		SPDLOG_ERROR("malformed SCRAM message (expected \"=\" after attribute \"{}\")", attr);
+		LOG_ERROR("malformed SCRAM message (expected \"=\" after attribute \"{}\")", attr);
 		return NULL;
 	}
 	begin++;
@@ -131,7 +131,7 @@ static char *read_any_attr(char **input, char *attr_p)
 
 	if (!((attr >= 'A' && attr <= 'Z') ||
 	      (attr >= 'a' && attr <= 'z'))) {
-		SPDLOG_ERROR("malformed SCRAM message (attribute expected, but found invalid character \"{}\")",
+		LOG_ERROR("malformed SCRAM message (attribute expected, but found invalid character \"{}\")",
 				     sanitize_char(attr));
 		return NULL;
 	}
@@ -140,7 +140,7 @@ static char *read_any_attr(char **input, char *attr_p)
 	begin++;
 
 	if (*begin != '=') {
-		SPDLOG_ERROR("malformed SCRAM message (expected character \"=\" after attribute \"{}\")",
+		LOG_ERROR("malformed SCRAM message (expected character \"=\" after attribute \"{}\")",
 				     attr);
 		return NULL;
 	}
@@ -383,7 +383,7 @@ bool read_server_first_message(ScramState *scram_state, char *input,
 
 	if (strlen(server_nonce) < strlen(scram_state->client_nonce) ||
 	    memcmp(server_nonce, scram_state->client_nonce, strlen(scram_state->client_nonce)) != 0) {
-		SPDLOG_ERROR("invalid SCRAM response (nonce mismatch)");
+		LOG_ERROR("invalid SCRAM response (nonce mismatch)");
 		goto failed;
 	}
 
@@ -398,7 +398,7 @@ bool read_server_first_message(ScramState *scram_state, char *input,
 				strlen(encoded_salt),
 				salt, saltlen);
 	if (saltlen < 0) {
-		SPDLOG_ERROR("malformed SCRAM message (invalid salt)");
+		LOG_ERROR("malformed SCRAM message (invalid salt)");
 		goto failed;
 	}
 
@@ -408,12 +408,12 @@ bool read_server_first_message(ScramState *scram_state, char *input,
 
 	iterations = strtol(iterations_str, &endptr, 10);
 	if (*endptr != '\0' || iterations < 1) {
-		SPDLOG_ERROR("malformed SCRAM message (invalid iteration count)");
+		LOG_ERROR("malformed SCRAM message (invalid iteration count)");
 		goto failed;
 	}
 
 	if (*input != '\0') {
-		SPDLOG_ERROR("malformed SCRAM message (garbage at end of server-first-message)");
+		LOG_ERROR("malformed SCRAM message (garbage at end of server-first-message)");
 		goto failed;
 	}
 
@@ -439,7 +439,7 @@ bool read_server_final_message(char *input, char *ServerSignature)
 
 	if (*input == 'e') {
 		char *errmsg = read_attr_value(&input, 'e');
-		SPDLOG_ERROR("error received from server in SCRAM exchange: {}", errmsg);
+		LOG_ERROR("error received from server in SCRAM exchange: {}", errmsg);
 		goto failed;
 	}
 
@@ -449,7 +449,7 @@ bool read_server_final_message(char *input, char *ServerSignature)
 	}
 
 	if (*input != '\0') {
-		SPDLOG_ERROR("malformed SCRAM message (garbage at end of server-final-message)");
+		LOG_ERROR("malformed SCRAM message (garbage at end of server-final-message)");
     }
 
 	server_signature_len = pg_b64_dec_len(strlen(encoded_server_signature));
@@ -462,7 +462,7 @@ bool read_server_final_message(char *input, char *ServerSignature)
 					     decoded_server_signature,
 					     server_signature_len);
 	if (server_signature_len != SCRAM_KEY_LEN) {
-		SPDLOG_ERROR("malformed SCRAM message (malformed server signature)");
+		LOG_ERROR("malformed SCRAM message (malformed server signature)");
 		goto failed;
 	}
 	memcpy(ServerSignature, decoded_server_signature, SCRAM_KEY_LEN);
@@ -597,27 +597,27 @@ bool read_client_first_message(char *input,
 		break;
 	case 'p':
 		/* Client requires channel binding.  We don't support it. */
-		SPDLOG_ERROR("client requires SCRAM channel binding, but it is not supported");
+		LOG_ERROR("client requires SCRAM channel binding, but it is not supported");
 		goto failed;
 	default:
-		SPDLOG_ERROR("malformed SCRAM message (unexpected channel-binding flag \"{}\")",
+		LOG_ERROR("malformed SCRAM message (unexpected channel-binding flag \"{}\")",
 			     sanitize_char(*input));
 		goto failed;
 	}
 
 	if (*input != ',') {
-		SPDLOG_ERROR("malformed SCRAM message (comma expected, but found character \"{}\")",
+		LOG_ERROR("malformed SCRAM message (comma expected, but found character \"{}\")",
 			     sanitize_char(*input));
 		goto failed;
 	}
 	input++;
 
 	if (*input == 'a') {
-		SPDLOG_ERROR("client uses authorization identity, but it is not supported");
+		LOG_ERROR("client uses authorization identity, but it is not supported");
 		goto failed;
 	}
 	if (*input != ',') {
-		SPDLOG_ERROR("malformed SCRAM message (comma expected, but found character \"{}\")",
+		LOG_ERROR("malformed SCRAM message (comma expected, but found character \"{}\")",
 			     sanitize_char(*input));
 		goto failed;
 	}
@@ -628,7 +628,7 @@ bool read_client_first_message(char *input,
 		goto failed;
 
 	if (*input == 'm') {
-		SPDLOG_ERROR("client requires an unsupported SCRAM extension");
+		LOG_ERROR("client requires an unsupported SCRAM extension");
 		goto failed;
 	}
 
@@ -639,7 +639,7 @@ bool read_client_first_message(char *input,
 	if (client_nonce == NULL)
 		goto failed;
 	if (!is_scram_printable(client_nonce)) {
-		SPDLOG_ERROR("non-printable characters in SCRAM nonce");
+		LOG_ERROR("non-printable characters in SCRAM nonce");
 		goto failed;
 	}
 	client_nonce_copy = strdup(client_nonce);
@@ -690,7 +690,7 @@ bool read_client_final_message(ScramState *scram_state, const uint8_t *raw_input
 		goto failed;
 	if (!(strcmp(channel_binding, "biws") == 0 && scram_state->cbind_flag == 'n') &&
 	    !(strcmp(channel_binding, "eSws") == 0 && scram_state->cbind_flag == 'y')) {
-		SPDLOG_ERROR("unexpected SCRAM channel-binding attribute in client-final-message");
+		LOG_ERROR("unexpected SCRAM channel-binding attribute in client-final-message");
 		goto failed;
 	}
 
@@ -703,7 +703,7 @@ bool read_client_final_message(ScramState *scram_state, const uint8_t *raw_input
 	} while (value && attr != 'p');
 
 	if (!value) {
-		SPDLOG_ERROR("could not read proof");
+		LOG_ERROR("could not read proof");
 		goto failed;
 	}
 
@@ -712,19 +712,19 @@ bool read_client_final_message(ScramState *scram_state, const uint8_t *raw_input
 	prooflen = pg_b64_dec_len(strlen(encoded_proof));
 	proof = (char*)malloc(prooflen);
 	if (proof == NULL) {
-		SPDLOG_ERROR("could not decode proof");
+		LOG_ERROR("could not decode proof");
 		goto failed;
 	}
 	prooflen = pg_b64_decode(encoded_proof,
 				 strlen(encoded_proof),
 				 proof, prooflen);
 	if (prooflen != SCRAM_KEY_LEN) {
-		SPDLOG_ERROR("malformed SCRAM message (malformed proof in client-final-message)");
+		LOG_ERROR("malformed SCRAM message (malformed proof in client-final-message)");
 		goto failed;
 	}
 
 	if (*input != '\0') {
-		SPDLOG_ERROR("malformed SCRAM message (garbage at the end of client-final-message)");
+		LOG_ERROR( "malformed SCRAM message (garbage at the end of client-final-message)");
 		goto failed;
 	}
 
@@ -1002,7 +1002,7 @@ bool scram_verify_plain_password(
 	if (!parse_scram_secret(secret, &iterations, &encoded_salt,
 				stored_key, server_key)) {
 		/* The password looked like a SCRAM secret, but could not be parsed. */
-		SPDLOG_WARN("invalid SCRAM secret for user \"{}\"", username);
+		LOG_WARN("invalid SCRAM secret for user \"{}\"", username);
 		goto failed;
 	}
 
@@ -1012,7 +1012,7 @@ bool scram_verify_plain_password(
 		goto failed;
 	saltlen = pg_b64_decode(encoded_salt, strlen(encoded_salt), salt, saltlen);
 	if (saltlen < 0) {
-		SPDLOG_WARN("malformed SCRAM secret for user \"{}\"", username);
+		LOG_WARN("malformed SCRAM secret for user \"{}\"", username);
 		goto failed;
 	}
 

@@ -65,13 +65,13 @@ int main(int argc, char* argv[])
     PgReplConnection pg_conn(port, host, db_name, user_name, password, pub_name, slot_name);
 
     pg_conn.connect();
-    SPDLOG_INFO("Connecting to postgres server: host={}\n", host);
+    LOG_INFO("Connecting to postgres server: host={}\n", host);
 
     // create slot if need be; retrieve restart LSN and last flushed lsn
     create_slot = !pg_conn.check_slot_exists(restart_lsn, lsn);
 
     if (create_slot) {
-        SPDLOG_INFO("Creating replication slot: name={}\n", slot_name);
+        LOG_INFO("Creating replication slot: name={}\n", slot_name);
         pg_conn.create_replication_slot();
     }
 
@@ -82,16 +82,16 @@ int main(int argc, char* argv[])
     PgMsgStreamWriter writer(outfile);
 
     // loop through reading data and writing it to disk
-    SPDLOG_INFO("Connection and streaming have started @ LSN={}.  Dumping data.\n", lsn);
+    LOG_INFO("Connection and streaming have started @ LSN={}.  Dumping data.\n", lsn);
     PgCopyData data;
     bool skip = true;
 
     while (true) {
         pg_conn.read_data(data);
 
-        SPDLOG_INFO("Recevied data: data len={}, msg len={}, msg offset={}\n",
+        LOG_INFO("Recevied data: data len={}, msg len={}, msg offset={}\n",
                      data.length, data.msg_length, data.msg_offset);
-        SPDLOG_INFO("  - start LSN={}, end LSN={}\n",
+        LOG_INFO("  - start LSN={}, end LSN={}\n",
                     data.starting_lsn, data.ending_lsn);
 
         writer.write_message(data);
@@ -99,7 +99,7 @@ int main(int argc, char* argv[])
         // update LSNs
         if (data.msg_offset + data.length == data.msg_length) {
             if (true || !skip) {
-                SPDLOG_INFO("Setting last flushed LSN: {}\n", data.ending_lsn);
+                LOG_INFO("Setting last flushed LSN: {}\n", data.ending_lsn);
                 pg_conn.set_last_flushed_LSN(data.ending_lsn);
             }
             skip = !skip;

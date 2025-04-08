@@ -2,11 +2,15 @@
 
 #include <common/exception.hh>
 #include <common/logging.hh>
+#include "common/open_telemetry.hh"
 
 namespace {
     void
     backtrace_handler(int signo)
     {
+        // flush open telemetry data
+        springtail::open_telemetry::OpenTelemetry::flush();
+
         // attempt to flush the log before we try to capture the backtrace in case something goes wrong
         spdlog::default_logger()->flush();
 
@@ -16,7 +20,7 @@ namespace {
         std::stringstream ss;
         trace.print(ss);
 
-        SPDLOG_ERROR("Backtrace from signal {}:\n{}", signo, ss.str());
+        LOG_ERROR("Backtrace from signal {}:\n{}", signo, ss.str());
         signal(signo, SIG_DFL);
         raise(signo);
     }
@@ -60,6 +64,6 @@ namespace springtail {
         std::stringstream ss;
         _trace.print(ss);
 
-        SPDLOG_ERROR("Backtrace:\n{}", ss.str());
+        LOG_ERROR("Backtrace:\n{}", ss.str());
     }
 }

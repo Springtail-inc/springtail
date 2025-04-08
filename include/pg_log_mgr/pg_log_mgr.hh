@@ -124,20 +124,20 @@ namespace springtail::pg_log_mgr {
             redis_cache->remove_callback(
                 std::string(Properties::DATABASE_STATE_PATH) + "/" + std::to_string(_db_id),
                 _cache_watcher_db_states);
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "joining threads");
+            LOG_DEBUG(LOG_PG_LOG_MGR, "joining threads");
             _writer_thread.join();
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "writer thread joined");
+            LOG_DEBUG(LOG_PG_LOG_MGR, "writer thread joined");
             _reader_thread.join();
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "reader thread joined");
+            LOG_DEBUG(LOG_PG_LOG_MGR, "reader thread joined");
             _table_copy_thread.join();
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "copy thread joined");
+            LOG_DEBUG(LOG_PG_LOG_MGR, "copy thread joined");
             _reconciliation_thread.join();
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Index reconciliation thread joined");
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Index reconciliation thread joined");
         }
 
         /** Set shutdown flag */
         void shutdown() {
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "shutting down");
+            LOG_DEBUG(LOG_PG_LOG_MGR, "shutting down");
             _shutdown = true;
 
             // set shutdown flag in pg connection repl class

@@ -1,3 +1,5 @@
+## metadata
+### sync_timeout 20
 ## test
 -- Create a table with a large dataset.
 CREATE TABLE IF NOT EXISTS truncate_test (

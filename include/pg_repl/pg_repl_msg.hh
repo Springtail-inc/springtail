@@ -242,8 +242,8 @@ namespace springtail
         CREATE_TABLE, ALTER_TABLE, DROP_TABLE,
         CREATE_NAMESPACE, ALTER_NAMESPACE, DROP_NAMESPACE,
         CREATE_INDEX, DROP_INDEX, COPY_SYNC,
-        // Custom committer notifiers
-        RECONCILE_INDEX
+        RECONCILE_INDEX, // Custom committer notifiers
+        ALTER_RESYNC // generated when an invalid table becomes valid due to an ALTER TABLE
     };
 
     /**

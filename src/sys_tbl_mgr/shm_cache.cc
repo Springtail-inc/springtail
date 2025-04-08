@@ -16,7 +16,7 @@ ShmCache::ShmCache(std::string name, size_t size)
     _string_alloc{_shm.get_segment_manager()}
 {
 
-    SPDLOG_DEBUG_MODULE(LOG_CACHE, "ShmCache open: {} - {}", _name, size);
+    LOG_DEBUG(LOG_CACHE, "ShmCache open: {} - {}", _name, size);
     auto free_size = _shm.get_free_memory();
     CHECK(free_size <=  size);
     _init();
@@ -30,13 +30,13 @@ ShmCache::ShmCache(std::string name)
     _messages_alloc{_shm.get_segment_manager()},
     _string_alloc{_shm.get_segment_manager()}
 {
-    SPDLOG_DEBUG_MODULE(LOG_CACHE, "ShmCache open: {}", _name);
+    LOG_DEBUG(LOG_CACHE, "ShmCache open: {}", _name);
     _init();
 }
 
 ShmCache::~ShmCache() 
 {
-    SPDLOG_DEBUG_MODULE(LOG_CACHE, "ShmCache deleted: {} - {}", _name, _created);
+    LOG_DEBUG(LOG_CACHE, "ShmCache deleted: {} - {}", _name, _created);
     if (_created) {
         remove(_name);
     }

@@ -1,8 +1,6 @@
 #include <google/protobuf/empty.pb.h>
 #include <grpcpp/grpcpp.h>
 
-#include <limits>
-
 #include <common/constants.hh>
 #include <common/properties.hh>
 #include <grpc/grpc_server.hh>
@@ -30,7 +28,7 @@ Service::CreateIndex(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "CreateIndex");
 
-    SPDLOG_INFO("got CreateIndex(): db {}, table {}, index {}, xid {}:{}", request->db_id(),
+    LOG_INFO("got CreateIndex(): db {}, table {}, index {}, xid {}:{}", request->db_id(),
                 request->index().table_id(), request->index().id(), request->xid(), request->lsn());
 
     // acquire a shared lock to ensure no one is doing a finalize
@@ -45,7 +43,7 @@ Service::CreateIndex(grpc::ServerContext* context,
         span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
         return grpc::Status::OK;
     } catch (const std::exception& e) {
-        SPDLOG_ERROR("CreateIndex() failed: {}", e.what());
+        LOG_ERROR("CreateIndex() failed: {}", e.what());
         span.span()->SetStatus(opentelemetry::trace::StatusCode::kError, e.what());
         return grpc::Status(grpc::StatusCode::INTERNAL, e.what());
     }
@@ -69,7 +67,7 @@ Service::_get_index_info(const proto::GetIndexInfoRequest& request)
     // read from disk
     auto info = _find_index(request.db_id(), request.index_id(), xid, tid);
     if (!info) {
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index not found: {}@{} - {}", request.db_id(),
+        LOG_DEBUG(LOG_SCHEMA, "Index not found: {}@{} - {}", request.db_id(),
                             request.xid(), request.index_id());
         proto::IndexInfo dummy;
         dummy.set_id(0);
@@ -97,7 +95,7 @@ Service::_set_index_state(const proto::SetIndexStateRequest& request)
         info->indexes(), [&](const auto& v) { return request.index_id() == v.id(); });
 
     if (index_i == info->mutable_indexes()->end()) {
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index not found for table {} -- {}", request.table_id(),
+        LOG_DEBUG(LOG_SCHEMA, "Index not found for table {} -- {}", request.table_id(),
                             request.index_id());
         return false;
     }
@@ -150,7 +148,7 @@ Service::SetIndexState(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "SetIndexState");
 
-    SPDLOG_INFO("got SetIndexState()");
+    LOG_INFO("got SetIndexState()");
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
@@ -172,7 +170,7 @@ Service::GetIndexInfo(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "GetIndexInfo");
 
-    SPDLOG_INFO("got GetIndexInfo()");
+    LOG_INFO("got GetIndexInfo()");
 
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_read_mutex);
@@ -245,7 +243,7 @@ Service::DropIndex(grpc::ServerContext* context,
                    const proto::DropIndexRequest* request,
                    proto::DDLStatement* response)
 {
-    SPDLOG_INFO("got DropIndex(): db {}, index {}, xid {}:{}", request->db_id(),
+    LOG_INFO("got DropIndex(): db {}, index {}, xid {}:{}", request->db_id(),
                 request->index_id(), request->xid(), request->lsn());
 
     // acquire a shared lock to ensure no one is doing a finalize
@@ -304,7 +302,7 @@ Service::_find_index(uint64_t db_id,
             continue;
         }
         if (index_id != id) {
-            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No data found for index {} -- {}", db_id, index_id);
+            LOG_DEBUG(LOG_SCHEMA, "No data found for index {} -- {}", db_id, index_id);
             break;
         }
 
@@ -318,7 +316,7 @@ Service::_find_index(uint64_t db_id,
         }
         auto found_tid = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(row);
         if (tid && tid != found_tid) {
-            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Found a dupoicate index id {} -- {}, {}/{}", db_id,
+            LOG_DEBUG(LOG_SCHEMA, "Found a dupoicate index id {} -- {}, {}/{}", db_id,
                                 index_id, tid, found_tid);
             break;
         }
@@ -366,25 +364,23 @@ Service::_drop_index(const XidLsn& xid,
     auto info = _find_index(db_id, index_id, xid, tid);
 
     if (!info) {
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop index not found: {}@{} - {}", db_id, xid.xid,
+        LOG_DEBUG(LOG_SCHEMA, "Drop index not found: {}@{} - {}", db_id, xid.xid,
                             index_id);
         return;
     }
     auto& index_info = std::get<0>(*info);
 
-    if (static_cast<sys_tbl::IndexNames::State>(index_info.state()) ==
-            sys_tbl::IndexNames::State::DELETED ||
-            static_cast<sys_tbl::IndexNames::State>(index_info.state()) ==
-            sys_tbl::IndexNames::State::BEING_DELETED) {
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index already deleted: {}@{} - {}", db_id, xid.xid,
-                index_id);
+    auto state = static_cast<sys_tbl::IndexNames::State>(index_info.state());
+    if (state == sys_tbl::IndexNames::State::DELETED ||
+        state == sys_tbl::IndexNames::State::BEING_DELETED) {
+        LOG_DEBUG(LOG_SCHEMA, "Index already deleted: {}@{} - {}", db_id, xid.xid, index_id);
         return;
     }
 
     // note: this might not be true during recovery
     // assert(xid > std::get<2>(*info));
 
-    SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop index found {}:{} -- {}", db_id, index_info.table_id(),
+    LOG_DEBUG(LOG_SCHEMA, "Drop index found {}:{} -- {}", db_id, index_info.table_id(),
                         index_id);
     auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);
     auto tuple = sys_tbl::IndexNames::Data::tuple(
@@ -415,7 +411,7 @@ Service::CreateTable(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "CreateTable");
 
-    SPDLOG_INFO("got CreateTable() -- db {} table {} xid {} lsn {}", request->db_id(),
+    LOG_INFO("got CreateTable() -- db {} table {} xid {} lsn {}", request->db_id(),
                 request->table().id(), request->xid(), request->lsn());
 
     // acquire a shared lock to ensure no one is doing a finalize
@@ -502,7 +498,7 @@ Service::AlterTable(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "AlterTable");
 
-    SPDLOG_INFO("got AlterTable()");
+    LOG_INFO("got AlterTable()");
 
     // retrieve the id of the namespace
     auto ns_info = _get_namespace_info(request->db_id(), request->table().namespace_name(),
@@ -595,7 +591,7 @@ Service::DropTable(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "DropTable");
 
-    SPDLOG_INFO("got DropTable() {}@{}:{}", request->table_id(), request->xid(), request->lsn());
+    LOG_INFO("got DropTable() {}@{}:{}", request->table_id(), request->xid(), request->lsn());
 
     // hold a shared lock to prevent a concurrent finalize()
     boost::shared_lock lock(_write_mutex);
@@ -671,7 +667,7 @@ Service::CreateNamespace(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "CreateNamespace");
 
-    SPDLOG_INFO("got CreateNamespace() -- db {} namespace_id {} name {} xid {} lsn {}",
+    LOG_INFO("got CreateNamespace() -- db {} namespace_id {} name {} xid {} lsn {}",
                 request->db_id(), request->namespace_id(), request->name(), request->xid(),
                 request->lsn());
 
@@ -697,7 +693,7 @@ Service::AlterNamespace(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "AlterNamespace");
 
-    SPDLOG_INFO("got AlterNamespace() -- db {} namespace_id {} name {} xid {} lsn {}",
+    LOG_INFO("got AlterNamespace() -- db {} namespace_id {} name {} xid {} lsn {}",
                 request->db_id(), request->namespace_id(), request->name(), request->xid(),
                 request->lsn());
 
@@ -728,7 +724,7 @@ Service::DropNamespace(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "DropNamespace");
 
-    SPDLOG_INFO("got DropNamespace() -- db {} namespace_id {} xid {} lsn {}", request->db_id(),
+    LOG_INFO("got DropNamespace() -- db {} namespace_id {} xid {} lsn {}", request->db_id(),
                 request->namespace_id(), request->xid(), request->lsn());
 
     // acquire a shared lock to ensure no one is doing a finalize
@@ -789,7 +785,7 @@ Service::UpdateRoots(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "UpdateRoots");
 
-    SPDLOG_INFO("got UpdateRoots()");
+    LOG_INFO("got UpdateRoots()");
 
     // hold a shared lock to prevent a concurrent finalize()
     boost::shared_lock lock(_write_mutex);
@@ -864,7 +860,7 @@ Service::Finalize(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "Finalize");
 
-    SPDLOG_INFO("got Finalize()");
+    LOG_INFO("got Finalize()");
 
     // block all mutations
     boost::unique_lock wlock(_write_mutex);
@@ -872,7 +868,7 @@ Service::Finalize(grpc::ServerContext* context,
     // note: it is safe to pre-write data from later XIDs into the system tables during a finalize
     //       since if there is a failure they will simply be overwritten during recovery
     auto write_xid = _get_write_xid(request->db_id());
-    SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Finalize system tables: {}@{} >= {}", request->db_id(),
+    LOG_DEBUG(LOG_SCHEMA, "Finalize system tables: {}@{} >= {}", request->db_id(),
                         request->xid(), write_xid);
     CHECK_GE(request->xid(), write_xid);
 
@@ -880,11 +876,11 @@ Service::Finalize(grpc::ServerContext* context,
     // XXX we currently don't store the metadata, but re-read it from the roots file each time
     std::map<uint64_t, TableMetadata> md_map;
     for (const auto& entry : _write[request->db_id()]) {
-        SPDLOG_INFO("Finalize table {}@{}", entry.first, request->xid());
+        LOG_INFO("Finalize table {}@{}", entry.first, request->xid());
         md_map[entry.first] = entry.second->finalize();
     }
     if (md_map.empty()) {
-        SPDLOG_INFO("Nothing to finalize: {}@{} >= {}", request->db_id(), request->xid(),
+        LOG_INFO("Nothing to finalize: {}@{} >= {}", request->db_id(), request->xid(),
                     write_xid);
         // NOTE TO REVIEWER: is OK right here?
         span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk, "Nothing to finalize");
@@ -917,7 +913,7 @@ Service::GetRoots(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "GetRoots");
 
-    SPDLOG_INFO("got GetRoots()");
+    LOG_INFO("got GetRoots()");
 
     boost::shared_lock lock(_read_mutex);
 
@@ -946,15 +942,15 @@ Service::GetSchema(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "GetSchema");
 
-    SPDLOG_INFO("got GetSchema(): db {} tid {} xid {} lsn {}", request->db_id(),
-                request->table_id(), request->xid(), request->lsn());
+    LOG_INFO("got GetSchema(): db {} tid {} xid {} lsn {}", request->db_id(),
+             request->table_id(), request->xid(), request->lsn());
 
     boost::shared_lock lock(_read_mutex);
 
     XidLsn xid(request->xid(), request->lsn());
     auto info = _get_schema_info(request->db_id(), request->table_id(), xid, xid);
 
-    SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Returning start_xid {}:{}, end_xid {}:{}",
+    LOG_DEBUG(LOG_SCHEMA, "Returning start_xid {}:{}, end_xid {}:{}",
                         info->access_xid_start(), info->access_lsn_start(), info->access_xid_end(),
                         info->access_lsn_end());
 
@@ -970,7 +966,7 @@ Service::GetTargetSchema(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "GetTargetSchema");
 
-    SPDLOG_INFO("got GetTargetSchema() -- {}, {}", request->access_xid(), request->target_xid());
+    LOG_INFO("got GetTargetSchema() -- {}, {}", request->access_xid(), request->target_xid());
 
     boost::shared_lock lock(_read_mutex);
 
@@ -991,7 +987,7 @@ Service::Exists(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "Exists");
 
-    SPDLOG_INFO("got Exists()");
+    LOG_INFO("got Exists()");
 
     boost::shared_lock lock(_read_mutex);
 
@@ -1012,7 +1008,7 @@ Service::SwapSyncTable(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "SwapSyncTable");
 
-    SPDLOG_INFO("got SwapSyncTable()");
+    LOG_INFO("got SwapSyncTable()");
     const auto& namespace_req = request->namespace_req();
     const auto& create_req = request->create_req();
     const auto& index_reqs = request->index_reqs();
@@ -1027,7 +1023,7 @@ Service::SwapSyncTable(grpc::ServerContext* context,
     XidLsn ns_xid(namespace_req.xid(), namespace_req.lsn());
     auto ns_info = _get_namespace_info(namespace_req.db_id(), namespace_req.name(), ns_xid);
     if (!ns_info) {
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Create namespace; db {}, name {}, id {}, xid {}:{}",
+        LOG_DEBUG(LOG_SCHEMA, "Create namespace; db {}, name {}, id {}, xid {}:{}",
                             namespace_req.db_id(), namespace_req.name(),
                             namespace_req.namespace_id(), ns_xid.xid, ns_xid.lsn);
 
@@ -1035,10 +1031,10 @@ Service::SwapSyncTable(grpc::ServerContext* context,
                                           namespace_req.name(), ns_xid, true);
         ns_ddl["action"] = "ns_create";
         ddls.push_back(ns_ddl);
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Create namespace name {}, id {}", namespace_req.name(),
+        LOG_DEBUG(LOG_SCHEMA, "Create namespace name {}, id {}", namespace_req.name(),
                             namespace_req.namespace_id());
     } else {
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Skip create namespace name {}, id {}",
+        LOG_DEBUG(LOG_SCHEMA, "Skip create namespace name {}, id {}",
                             namespace_req.name(), namespace_req.namespace_id());
     }
 
@@ -1056,7 +1052,7 @@ Service::SwapSyncTable(grpc::ServerContext* context,
         drop.set_namespace_name(create_req.table().namespace_name());
         drop.set_name(create_req.table().name());
 
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop table: {}:{} @ {}:{}", drop.db_id(), drop.table_id(),
+        LOG_DEBUG(LOG_SCHEMA, "Drop table: {}:{} @ {}:{}", drop.db_id(), drop.table_id(),
                             drop.xid(), drop.lsn());
 
         auto&& drop_ddl = this->_drop_table(drop);
@@ -1064,7 +1060,7 @@ Service::SwapSyncTable(grpc::ServerContext* context,
     }
 
     // 5. perform a create table
-    SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Create table: {}:{} @ {}:{}", create_req.db_id(),
+    LOG_DEBUG(LOG_SCHEMA, "Create table: {}:{} @ {}:{}", create_req.db_id(),
                         create_req.table().id(), create_req.xid(), create_req.lsn());
 
     assert(create_req.lsn() == constant::RESYNC_CREATE_LSN);
@@ -1072,7 +1068,7 @@ Service::SwapSyncTable(grpc::ServerContext* context,
     ddls.push_back(create_ddl);
 
     for (const proto::IndexRequest& index : index_reqs) {
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Create index: {}:{} @ {}:{}", index.db_id(),
+        LOG_DEBUG(LOG_SCHEMA, "Create index: {}:{} @ {}:{}", index.db_id(),
                             index.index().id(), index.xid(), index.lsn());
 
         CHECK_EQ(index.lsn(), constant::RESYNC_CREATE_LSN);
@@ -1081,12 +1077,12 @@ Service::SwapSyncTable(grpc::ServerContext* context,
     }
 
     // 6. update the metadata of the table
-    SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Update roots: {}:{} @ {}:{}", create_req.db_id(),
+    LOG_DEBUG(LOG_SCHEMA, "Update roots: {}:{} @ {}:{}", create_req.db_id(),
                         create_req.table().id(), create_req.xid(), create_req.lsn());
     this->_update_roots(roots_req);
 
     // 7. serialize the ddl json and return
-    SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Response: {}", nlohmann::to_string(ddls));
+    LOG_DEBUG(LOG_SCHEMA, "Response: {}", nlohmann::to_string(ddls));
     response->set_statement(nlohmann::to_string(ddls));
     span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
@@ -1216,14 +1212,14 @@ Service::_get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     // make sure table ID exists at this XID/LSN
     if (row_i == table_names_t->end() ||
         fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(*row_i) != table_id) {
-        SPDLOG_WARN("No table info at xid {}:{}", xid.xid, xid.lsn);
+        LOG_WARN("No table info at xid {}:{}", xid.xid, xid.lsn);
         return nullptr;
     }
 
     // make sure that the table is marked as existing at this XID/LSN
     bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(*row_i);
     if (!exists) {
-        SPDLOG_WARN("Table marked non-existant at xid {}:{}", xid.xid, xid.lsn);
+        LOG_WARN("Table marked non-existant at xid {}:{}", xid.xid, xid.lsn);
         return nullptr;
     }
 
@@ -1269,14 +1265,14 @@ Service::_get_namespace_info(uint64_t db_id, uint64_t namespace_id, const XidLsn
     // make sure table ID exists at this XID/LSN
     auto id_field = fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID);
     if (row_i == table->end() || id_field->get_uint64(*row_i) != namespace_id) {
-        SPDLOG_WARN("No namespace info at xid {}:{}", xid.xid, xid.lsn);
+        LOG_WARN("No namespace info at xid {}:{}", xid.xid, xid.lsn);
         return nullptr;
     }
 
     // make sure that the table is marked as existing at this XID/LSN
     bool exists = fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*row_i);
     if (!exists) {
-        SPDLOG_WARN("Namespace marked non-existant at xid {}:{}", xid.xid, xid.lsn);
+        LOG_WARN("Namespace marked non-existant at xid {}:{}", xid.xid, xid.lsn);
         return nullptr;
     }
 
@@ -1310,6 +1306,7 @@ Service::_get_namespace_info(uint64_t db_id, const std::string& name, const XidL
     //       vacant table is broken right now, otherwise we could follow the main path.  See
     //       ticket SPR-520.
     if (table->empty()) {
+        LOG_WARN("Namespace names table empty at xid {}:{}", xid.xid, xid.lsn);
         return nullptr;
     }
 
@@ -1323,16 +1320,16 @@ Service::_get_namespace_info(uint64_t db_id, const std::string& name, const XidL
 
     // verify that the name is present and exists
     if (row_i == table->end(1)) {
-        SPDLOG_WARN("Couldn't find entry for namespace {} @ {}:{}", name, xid.xid, xid.lsn);
+        LOG_WARN("Couldn't find entry for namespace {} @ {}:{}", name, xid.xid, xid.lsn);
         return nullptr;
     }
 
     if (name != fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(*row_i)) {
-        SPDLOG_WARN("Couldn't find entry for namespace {} @ {}:{}", name, xid.xid, xid.lsn);
+        LOG_WARN("Couldn't find entry for namespace {} @ {}:{}", name, xid.xid, xid.lsn);
         return nullptr;
     }
     if (!fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*row_i)) {
-        SPDLOG_WARN("Namespace marked as not-exists {} @ {}:{}", name, xid.xid, xid.lsn);
+        LOG_WARN("Namespace marked as not-exists {} @ {}:{}", name, xid.xid, xid.lsn);
         return nullptr;
     }
 
@@ -1450,7 +1447,7 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     }
 
     if (roots_info->roots().empty()) {
-        SPDLOG_WARN("Couldn't find table_roots entry for {}@{}:{} -- {}", table_id, xid.xid,
+        LOG_WARN("Couldn't find table_roots entry for {}@{}:{} -- {}", table_id, xid.xid,
                     xid.lsn, search_key->to_string());
         assert(0);
     }
@@ -1468,7 +1465,7 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     table_id_f = stats_t->extent_schema()->get_field("table_id");
     if (srow_i == stats_t->end() || table_id_f->get_uint64(*srow_i) != table_id) {
         // no stats for this table?  seems like a potential error
-        SPDLOG_WARN("Couldn't find table_stats entry for {}@{}:{}", table_id, xid.xid, xid.lsn);
+        LOG_WARN("Couldn't find table_stats entry for {}@{}:{}", table_id, xid.xid, xid.lsn);
         return roots_info;
     }
 
@@ -1500,7 +1497,7 @@ Service::_set_roots_info(uint64_t db_id,
                                                       r.extent_id(), roots_info->snapshot_xid());
         table_roots_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
 
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Updated root {}@{}:{} {} - {}", table_id, xid.xid, xid.lsn,
+        LOG_DEBUG(LOG_SCHEMA, "Updated root {}@{}:{} {} - {}", table_id, xid.xid, xid.lsn,
                             r.index_id(), r.extent_id());
     }
 
@@ -1510,7 +1507,7 @@ Service::_set_roots_info(uint64_t db_id,
         sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats().row_count(), roots_info->stats().end_offset());
     table_stats_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
 
-    SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Updated stats {}@{}:{} - {}", table_id, xid.xid, xid.lsn,
+    LOG_DEBUG(LOG_SCHEMA, "Updated stats {}@{}:{} - {}", table_id, xid.xid, xid.lsn,
                         roots_info->stats().row_count());
 }
 
@@ -1536,7 +1533,7 @@ Service::_get_schema_info(uint64_t db_id,
 
     // first read the columns from the schemas table
     XidLsn&& read_xid = _get_read_xid(db_id);
-    SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Read schema info {}@{}:{} for @{}:{}", table_id,
+    LOG_DEBUG(LOG_SCHEMA, "Read schema info {}@{}:{} for @{}:{}", table_id,
                         access_xid.xid, access_xid.lsn, target_xid.xid, target_xid.lsn);
 
     // note: we always try to read data from disk up to the access_xid in case some of the data
@@ -1564,7 +1561,7 @@ Service::_get_schema_info(uint64_t db_id,
     //       on disk if the on-disk data is ahead of the read_xid
     _read_schema_history(info, db_id, table_id, access_xid, target_xid);
 
-    SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Tried to read history from disk: {}", info->history().size());
+    LOG_DEBUG(LOG_SCHEMA, "Tried to read history from disk: {}", info->history().size());
 
     // if the target is ahead of the guaranteed on-disk data then don't need to check the in-memory
     // data
@@ -1573,7 +1570,7 @@ Service::_get_schema_info(uint64_t db_id,
         // read any history from the cache
         _get_schema_cache_history(info, db_id, table_id, xid, target_xid);
 
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Tried to read history from memory: {}",
+        LOG_DEBUG(LOG_SCHEMA, "Tried to read history from memory: {}",
                             info->history().size());
     }
 
@@ -1601,7 +1598,7 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
         uint64_t tid = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(row);
 
         if (tid != table_id) {
-            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No more indexes for table {} -- {}", table_id, tid);
+            LOG_DEBUG(LOG_SCHEMA, "No more indexes for table {} -- {}", table_id, tid);
             break;
         }
 
@@ -1609,7 +1606,7 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
                          names_fields->at(sys_tbl::IndexNames::Data::LSN)->get_uint64(row));
 
         if (access_xid < index_xid) {
-            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No more data for table indexes {}@{}:{}", tid,
+            LOG_DEBUG(LOG_SCHEMA, "No more data for table indexes {}@{}:{}", tid,
                                 index_xid.xid, index_xid.lsn);
             continue;
         }
@@ -1620,7 +1617,7 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
 
         if (static_cast<sys_tbl::IndexNames::State>(info.state()) ==
             sys_tbl::IndexNames::State::DELETED) {
-            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Found deleted index {}@{}:{} - {}", tid, index_xid.xid,
+            LOG_DEBUG(LOG_SCHEMA, "Found deleted index {}@{}:{} - {}", tid, index_xid.xid,
                                 index_xid.lsn, info.id());
             // make sure to delete it from the result vector
             // note: DELETED will always come after or at the same XID of other states
@@ -1634,7 +1631,7 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
 
         if (static_cast<sys_tbl::IndexNames::State>(info.state()) ==
             sys_tbl::IndexNames::State::NOT_READY) {
-            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Found not-ready index {}@{}:{} - {}", tid,
+            LOG_DEBUG(LOG_SCHEMA, "Found not-ready index {}@{}:{} - {}", tid,
                                 index_xid.xid, index_xid.lsn, info.id());
         }
 
@@ -1657,7 +1654,7 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
                 indexes_fields->at(sys_tbl::Indexes::Data::INDEX_ID)->get_uint64(row);
 
             if (tid != table_id || index_id != info.id()) {
-                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No more indexes for table {} -- {}, {} -- {}",
+                LOG_DEBUG(LOG_SCHEMA, "No more indexes for table {} -- {}, {} -- {}",
                                     table_id, tid, index_id, info.id());
                 break;
             }
@@ -1715,7 +1712,7 @@ Service::_read_schema_columns(SchemaInfoPtr info,
         // get the table_id from the entry
         uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(row);
         if (tid != table_id) {
-            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No more data for table {} -- {}", table_id, tid);
+            LOG_DEBUG(LOG_SCHEMA, "No more data for table {} -- {}", table_id, tid);
             // if we have read all of the entries for this table ID, stop processing
             // note: this means that the last schema column we've constructed so far is current
             break;
@@ -1727,7 +1724,7 @@ Service::_read_schema_columns(SchemaInfoPtr info,
         const XidLsn row_xid(xid, lsn);
         if (access_xid < row_xid) {
             const XidLsn end_xid(info->access_xid_end(), info->access_lsn_end());
-            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No more data for table column {}@{}:{}", tid, xid,
+            LOG_DEBUG(LOG_SCHEMA, "No more data for table column {}@{}:{}", tid, xid,
                                 lsn);
             // note: this means the schema column is valid up to the found xid/lsn
             if (row_xid < end_xid) {
@@ -1793,7 +1790,7 @@ Service::_read_schema_columns(SchemaInfoPtr info,
 
     // if no schema (e.g., due to DROP TABLE) then return empty schema info
     if (info->columns().empty()) {
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Found no columns for table {}@{}:{}", table_id,
+        LOG_DEBUG(LOG_SCHEMA, "Found no columns for table {}@{}:{}", table_id,
                             access_xid.xid, access_xid.lsn);
         return;
     }
@@ -1810,7 +1807,7 @@ Service::_read_schema_columns(SchemaInfoPtr info,
 
     auto index_i = indexes_t->inverse_lower_bound(search_key);
     if (index_i == indexes_t->end()) {
-        SPDLOG_WARN("Didn't find a primary index for the table: {}@{}:{}", table_id, access_xid.xid,
+        LOG_WARN("Didn't find a primary index for the table: {}@{}:{}", table_id, access_xid.xid,
                     access_xid.lsn);
         return;
     }
@@ -1851,7 +1848,7 @@ Service::_read_schema_columns(SchemaInfoPtr info,
         }
         CHECK(found) << "Failed to find matching column for primary key";
 
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Found index row {} for table {}@{}:{}", column_id,
+        LOG_DEBUG(LOG_SCHEMA, "Found index row {} for table {}@{}:{}", column_id,
                             table_id, access_xid.xid, access_xid.lsn);
 
         done = (index_pos == 0);
@@ -1886,7 +1883,7 @@ Service::_apply_schema_cache_history(SchemaInfoPtr info,
                 const XidLsn end_xid(info->access_xid_end(), info->access_lsn_end());
 
                 // note: the schema's validity must end at least at this point
-                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Checking end {}:{} < {}:{}", history.xid(),
+                LOG_DEBUG(LOG_SCHEMA, "Checking end {}:{} < {}:{}", history.xid(),
                                     history.lsn(), end_xid.xid, end_xid.lsn);
                 if (history_xid < end_xid) {
                     info->set_access_xid_end(history.xid());
@@ -1897,7 +1894,7 @@ Service::_apply_schema_cache_history(SchemaInfoPtr info,
 
             // note: the schema's validity must start at least at this point
             const XidLsn start_xid(info->access_xid_start(), info->access_lsn_start());
-            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Checking start {}:{} < {}:{}", start_xid.xid,
+            LOG_DEBUG(LOG_SCHEMA, "Checking start {}:{} < {}:{}", start_xid.xid,
                                 start_xid.lsn, history.xid(), history.lsn());
 
             if (start_xid < history_xid) {
@@ -1908,7 +1905,7 @@ Service::_apply_schema_cache_history(SchemaInfoPtr info,
             // Apply the recorded change, ensuring the columns remain sorted by column.position()
             auto* columns = info->mutable_columns();
             int target_position = history.column().position();
-            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Applying schema change: {}",
+            LOG_DEBUG(LOG_SCHEMA, "Applying schema change: {}",
                                 history.ShortDebugString());
 
             // Find index of column with position >= target_position
@@ -2310,7 +2307,7 @@ Service::_write_index(const XidLsn& xid,
                       const std::map<uint32_t, uint32_t>& keys)
 {
     if (keys.empty()) {
-        SPDLOG_INFO("The index has no keys: {}:{} - {}", db_id, tab_id, index_id);
+        LOG_INFO("The index has no keys: {}:{} - {}", db_id, tab_id, index_id);
         return;
     }
     auto write_xid = _get_write_xid(db_id);

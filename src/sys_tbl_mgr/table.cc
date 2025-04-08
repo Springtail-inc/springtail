@@ -42,8 +42,7 @@ namespace indexer_helpers {
             root->remove(skey);
             ++row_id;
         }
-        SPDLOG_DEBUG_MODULE(LOG_BTREE, "Invalidated {} secondary rows", row_id);
-
+        LOG_DEBUG(LOG_BTREE, "Invalidated {} secondary rows", row_id);
     }
 
     void populate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
@@ -62,8 +61,7 @@ namespace indexer_helpers {
             root->insert(svalue);
             ++row_id;
         }
-        SPDLOG_DEBUG_MODULE(LOG_BTREE, "Populated {} secondary rows", row_id);
-
+        LOG_DEBUG(LOG_BTREE, "Populated {} secondary rows", row_id);
     }
 } // namespace indexer_helpers
 
@@ -803,7 +801,6 @@ namespace indexer_helpers {
             _primary_index->insert(pkey);
 
             // POPULATE SECONDARY INDEXES
-
             for (auto const& [index_id, idx]: _secondary_indexes) {
                 indexer_helpers::populate_index_for_page(extent_id, new_page, idx.first, idx.second, _schema);
             }

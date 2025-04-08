@@ -182,7 +182,7 @@ namespace springtail
             _connection.start_transaction();
         } catch (PgQueryError &e) {
             _connection.disconnect();
-            SPDLOG_ERROR("Error starting transaction failed");
+            LOG_ERROR("Error starting transaction failed");
             throw e;
         }
     }
@@ -202,7 +202,7 @@ namespace springtail
         _connection.exec(XID_QUERY);
         if (_connection.ntuples() == 0) {
             _connection.clear();
-            SPDLOG_ERROR("Unexpected results from query: {}", XID_QUERY);
+            LOG_ERROR("Unexpected results from query: {}", XID_QUERY);
             throw PgQueryError();
         }
 
@@ -222,7 +222,7 @@ namespace springtail
             return;  // there are no secondary indexes
         }
 
-        SPDLOG_INFO("Secondary indexes found for table with oid {}", _schema.table_oid);
+        LOG_INFO("Secondary indexes found for table with oid {}", _schema.table_oid);
 
         // iterate through results and generate vector of secondary indexes
         std::map<std::string, Index> secondary_indexes;
@@ -261,7 +261,7 @@ namespace springtail
 
         for (const auto &index : secondary_indexes) {
             _schema.secondary_keys.push_back(index.second);
-            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Adding to secondary keys {} {}", index.second.id, index.second.name);
+            LOG_DEBUG(LOG_PG_REPL, "Adding to secondary keys {} {}", index.second.id, index.second.name);
         }
 
         _connection.clear();
@@ -279,14 +279,14 @@ namespace springtail
         _connection.exec(fmt::format(SCHEMA_QUERY, table_oid, schema_name, table_name));
 
         if (_connection.ntuples() == 0) {
-            SPDLOG_ERROR("Table not found: {}.{}", schema_name, table_name);
+            LOG_ERROR("Table not found: {}.{}", schema_name, table_name);
             _connection.clear();
             throw PgTableNotFoundError();
         }
 
         if (_connection.nfields() != 10) {
-            SPDLOG_ERROR("Error: unexpected data from schema query or table not found");
-            SPDLOG_ERROR("fields: {}, tuples: {}", _connection.nfields(), _connection.ntuples());
+            LOG_ERROR("Error: unexpected data from schema query or table not found");
+            LOG_ERROR("fields: {}, tuples: {}", _connection.nfields(), _connection.ntuples());
             _connection.clear();
             throw PgQueryError();
         }
@@ -344,7 +344,7 @@ namespace springtail
                     column.pkey_position = (*pkey_pos);
                 }
 
-                SPDLOG_DEBUG_MODULE(LOG_PG_REPL,
+                LOG_DEBUG(LOG_PG_REPL,
                                     "Column: {} type={} position={} nullable={} default_value={} pkey={} is_generated={} is_non_standard_collation={} is_user_defined_type={}",
                                     column.name, column.pg_type, column.position, column.nullable,
                                     column.default_value.value_or("NULL"), column.pkey_position, column.is_generated, column.is_non_standard_collation, column.is_user_defined_type);
@@ -373,20 +373,20 @@ namespace springtail
         _connection.exec(fmt::format(COPY_QUERY, schema_name, table_name));
 
         if (_connection.status() != PGRES_COPY_OUT) {
-            SPDLOG_ERROR("Copy command did not receive PGRES_COPY_OUT");
+            LOG_ERROR("Copy command did not receive PGRES_COPY_OUT");
             _connection.clear();
             throw PgQueryError();
         }
 
         // some sanity checks
         if (_connection.binary_tuples() != 1) {
-            SPDLOG_ERROR("Copy command not outputting binary");
+            LOG_ERROR("Copy command not outputting binary");
             _connection.clear();
             throw PgQueryError();
         }
 
         if (static_cast<std::size_t>(_connection.nfields()) != _schema.columns.size()) {
-            SPDLOG_ERROR("Mismatch in copy fields");
+            LOG_ERROR("Mismatch in copy fields");
             _connection.clear();
             throw PgQueryError();
         }
@@ -404,7 +404,7 @@ namespace springtail
             if (r == -1) {
                 // end of copy, get final result
                 if (_connection.status() != PGRES_COMMAND_OK) {
-                    SPDLOG_ERROR("Finished copy, got not-ok status: {}",
+                    LOG_ERROR("Finished copy, got not-ok status: {}",
                                  static_cast<int>(_connection.status()));
                     _connection.clear();
                     throw PgQueryError();
@@ -414,7 +414,7 @@ namespace springtail
                 return std::nullopt; // no return value means we are at the end of the COPY
             } else if (r == -2) {
                 // an error occured
-                SPDLOG_ERROR("Copy command error: {}", _connection.error_message());
+                LOG_ERROR("Copy command error: {}", _connection.error_message());
                 throw PgQueryError();
             } else if (r == 0 || buffer == nullptr) {
                 continue;
@@ -443,21 +443,20 @@ namespace springtail
         _set_schema(table_name, schema_name, table_oid, schema_oid);
 
         // validate the columns to see if there are invalid columns
-        auto invalid_columns = TableValidator::get_instance()->validate_ddl_and_get_invalid_columns<SchemaColumn>(
-                schema_name, table_oid, _schema.columns);
+        auto invalid_columns = TableValidator::get_instance()->validate_columns<SchemaColumn>(_schema.columns);
         if ( invalid_columns.size() > 0 ){
-            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Invalid columns found as part of _copy_table for table_oid {}", table_oid);
+            LOG_DEBUG(LOG_PG_REPL, "Invalid columns found as part of _copy_table for table_oid {}", table_oid);
             nlohmann::json table_info = {
                 {"schema", schema_name},
                 {"table", table_oid},
                 {"columns", invalid_columns}
             };
 
-            TableValidator::get_instance()->populate_invalid_tables_in_redis(table_oid, table_info);
+            TableValidator::get_instance()->mark_invalid(table_oid, table_info);
             return nullptr;
         }
 
-        // get secondary indexes XXX not fully supported yet
+        // get secondary indexes
         _get_secondary_indexes();
 
         auto copy_info = std::make_shared<proto::CopyTableInfo>();
@@ -590,12 +589,12 @@ namespace springtail
         // verify signature
         int r = std::memcmp(header.data(), COPY_SIGNATURE, 11);
         if (r != 0) {
-            SPDLOG_ERROR("Signature doesn't match");
+            LOG_ERROR("Signature doesn't match");
             throw PgUnknownMessageError();
         }
 
         int32_t flags = recvint32(header.data() + 11);
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "header flags: 0x{:X}", flags);
+        LOG_DEBUG(LOG_PG_REPL, "header flags: 0x{:X}", flags);
         if ((flags >> 16) & 0x1) {
             // bit 16 tells us if oids are present
             _oid_flag = true;
@@ -695,7 +694,7 @@ namespace springtail
             case (SchemaType::BINARY): {
                 std::string_view tmp(row.data() + pos, length);
 
-                SPDLOG_WARN("Converting unsupported type '{}' into BINARY -- {}",
+                LOG_WARN("Converting unsupported type '{}' into BINARY -- {}",
                             pg_type, tmp);
                 // XXX print out the binary data here
                 std::vector<char> data(tmp.begin(), tmp.end());
@@ -735,7 +734,7 @@ namespace springtail
         // do the tables query
         _connection.exec(query);
         if (_connection.ntuples() == 0) {
-            SPDLOG_ERROR("No tables found in database");
+            LOG_ERROR("No tables found in database");
             _connection.clear();
             return;
         }
@@ -888,9 +887,9 @@ namespace springtail
                 result->add_table(request->table_oid, info);
 
             } catch (PgTableNotFoundError &e) {
-                SPDLOG_ERROR("Table not found: {}.{}", request->schema_name, request->table_name);
+                LOG_ERROR("Table not found: {}.{}", request->schema_name, request->table_name);
             } catch (PgQueryError &e) {
-                SPDLOG_ERROR("Error copying table: {}.{}", request->schema_name, request->table_name);
+                LOG_ERROR("Error copying table: {}.{}", request->schema_name, request->table_name);
                 assert(false);
             }
         }
@@ -912,7 +911,7 @@ namespace springtail
 
         _connection.exec(query);
         if (_connection.status() != PGRES_TUPLES_OK) {
-            SPDLOG_ERROR("Error sending sync message");
+            LOG_ERROR("Error sending sync message");
             _connection.clear();
             throw PgQueryError();
         }
@@ -961,7 +960,7 @@ namespace springtail
         if (_connection.ntuples() == 0) {
             // Technically this should never happen, but keep this here just in case
             _connection.clear();
-            SPDLOG_ERROR("Error while getting namespaces");
+            LOG_ERROR("Error while getting namespaces");
             return {};
         }
 
@@ -994,7 +993,7 @@ namespace springtail
         auto client = sys_tbl_mgr::Client::get_instance();
         // create the namespaces
         for (const auto &namespace_info : namespaces) {
-            SPDLOG_DEBUG("Creating namespace: {}", namespace_info.second);
+            LOG_DEBUG(LOG_ALL, "Creating namespace: {}", namespace_info.second);
 
             proto::NamespaceRequest ns_req;
             ns_req.set_db_id(db_id);
@@ -1063,7 +1062,7 @@ namespace springtail
 
         // iterate through the tables and copy them
         for (const auto &table_md : table_oids) {
-            SPDLOG_DEBUG("Dumping table {}", table_md.table_name);
+            LOG_DEBUG(LOG_ALL, "Dumping table {}", table_md.table_name);
 
             // add the table to the copy queue
             copy_queue->push(std::make_shared<CopyRequest>(table_md.table_name,

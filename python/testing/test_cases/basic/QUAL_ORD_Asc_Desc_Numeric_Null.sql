@@ -53,10 +53,10 @@ SELECT col3, col4 FROM asc_desc_numeric_null WHERE col3 = '2025-02-05';
 SELECT col3, col4 FROM asc_desc_numeric_null WHERE col3 > '2025-02-05' ORDER BY col4 DESC NULLS FIRST;
 
 -- col3 < Specific Date
-SELECT col3, col4 FROM asc_desc_numeric_null WHERE col3 < '2025-02-05' ORDER BY col3 ASC NULLS LAST;
+SELECT col3, col4 FROM asc_desc_numeric_null WHERE col3 < '2025-02-05' ORDER BY col3, col4 ASC NULLS LAST;
 
 -- col3 < Between Dates
-SELECT col3, col4 FROM asc_desc_numeric_null WHERE col3 BETWEEN '2025-02-05' AND '2025-02-15' ORDER BY col3 ASC;
+SELECT col3, col4 FROM asc_desc_numeric_null WHERE col3 BETWEEN '2025-02-05' AND '2025-02-15' ORDER BY col3, col4 ASC;
 
 -- col3 IS NULL
 SELECT col3, col4 FROM asc_desc_numeric_null WHERE col3 IS NULL ORDER BY col4 ASC NULLS LAST;

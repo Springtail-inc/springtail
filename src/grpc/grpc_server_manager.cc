@@ -2,13 +2,12 @@
 
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 #include <stdexcept>
 
 #include <common/json.hh>
+#include <common/logging.hh>
 
 #include <grpcpp/server_builder.h>
-#include <spdlog/spdlog.h>
 
 namespace springtail {
 
@@ -61,7 +60,7 @@ GrpcServerManager::startup()
 
     // Configure resource quota
     grpc::ResourceQuota rq;
-    SPDLOG_INFO("Setting gRPC server max threads to {}", _worker_thread_count);
+    LOG_INFO("Setting gRPC server max threads to {}", _worker_thread_count);
     rq.SetMaxThreads(_worker_thread_count);
     builder.SetResourceQuota(rq);
     builder.AddChannelArgument(GRPC_ARG_ALLOW_REUSEPORT, 0);
@@ -89,7 +88,7 @@ GrpcServerManager::startup()
     if (!_server) {
         throw std::runtime_error("Failed to start GRPC server");
     }
-    std::cout << "Server listening on " << address << std::endl;
+    LOG_INFO("Server listening on {}", address);
 }
 
 void

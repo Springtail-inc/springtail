@@ -2,12 +2,13 @@
 #include <libpq-fe.h>
 
 #include <common/counter.hh>
+#include <common/common.hh>
+#include <common/json.hh>
+#include <common/logging.hh>
+#include <common/open_telemetry.hh>
+#include <common/properties.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
-#include <common/common.hh>
-#include <common/logging.hh>
-#include <common/properties.hh>
-#include <common/json.hh>
 
 #include <redis/db_state_change.hh>
 #include <redis/redis_ddl.hh>
@@ -49,7 +50,7 @@ namespace springtail::pg_fdw {
     {
         _cache_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [this](const std::string &path, const nlohmann::json &new_value) -> void {
-                SPDLOG_DEBUG("Replicated databases: {}", new_value.dump(4));
+                LOG_DEBUG(LOG_FDW, "Replicated databases: {}", new_value.dump(4));
                 CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
                 // get a vector of old database ids from _log_mgrs
                 std::shared_lock<std::shared_mutex> lock(_db_mutex);
@@ -115,7 +116,7 @@ namespace springtail::pg_fdw {
             _db_prefix = fdw_config.at("db_prefix").get<std::string>();
         }
 
-        SPDLOG_DEBUG("FDW ID: {}, Host: {}, Port: {}, Username: {}, FDW Username: {}",
+        LOG_DEBUG(LOG_FDW, "FDW ID: {}, Host: {}, Port: {}, Username: {}, FDW Username: {}",
                      _fdw_id, _hostname, _port, _username, fdw_username);
 
         // add subscribers to pubsub threads
@@ -264,14 +265,14 @@ namespace springtail::pg_fdw {
                     auto ddls = entry.at("ddls");
 
                     if (_db_xid_map.contains(db_id) && _db_xid_map[db_id] >= schema_xid) {
-                        SPDLOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
+                        LOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
                                     db_id, _db_xid_map[db_id], schema_xid);
                     } else {
                         db_map[db_id][schema_xid] = ddls;
                     }
                 }
                 if (db_map.empty()) {
-                    SPDLOG_WARN("All schemas have already been applied");
+                    LOG_WARN("All schemas have already been applied");
                     db_lock.unlock();
                     redis_ddl.commit_fdw_no_update(_fdw_id);
                     continue;
@@ -287,7 +288,7 @@ namespace springtail::pg_fdw {
                                 bool status = _update_schemas(db_id, xid_map);
                                 if (!status) {
                                     // error occured, abort the DDL
-                                    SPDLOG_ERROR("Failed to apply DDL statements");
+                                    LOG_ERROR("Failed to apply DDL statements");
                                     redis_ddl.abort_fdw(_fdw_id);
                                     DCHECK(false);
                                     return;
@@ -296,7 +297,7 @@ namespace springtail::pg_fdw {
                                 // success, update schema XID if applied, otherwise they may be
                                 // queued
                                 uint64_t schema_xid = xid_map.rbegin()->first;
-                                SPDLOG_DEBUG_MODULE(
+                                LOG_DEBUG(
                                     LOG_FDW, "Updating redis ddl @ through schema XID: {}, db_id: {}",
                                     schema_xid, db_id);
                                 redis_ddl.update_schema_xid(_fdw_id, db_id, schema_xid);
@@ -306,24 +307,24 @@ namespace springtail::pg_fdw {
                                 db_lock_unique.unlock();
 
                             } catch (Error &e) {
-                                SPDLOG_ERROR("Springtail exception in thread manager task");
+                                LOG_ERROR("Springtail exception in thread manager task");
                                 DCHECK(false);  // assert in debug
                                 e.log_backtrace();
                             } catch (...) {
                                 // handle exception
-                                SPDLOG_ERROR("Exception in thread manager task");
+                                LOG_ERROR("Exception in thread manager task");
                                 DCHECK(false);  // assert in debug
                             }
                         }));
                 }
 
             } catch (Error &e) {
-                SPDLOG_ERROR("Springtail exception in DDL thread");
+                LOG_ERROR("Springtail exception in DDL thread");
                 DCHECK(false); // assert in debug
                 e.log_backtrace();
             } catch (...) {
                 // handle exception
-                SPDLOG_ERROR("Exception in DDL thread");
+                LOG_ERROR("Exception in DDL thread");
                 DCHECK(false); // assert in debug
             }
         }
@@ -349,13 +350,13 @@ namespace springtail::pg_fdw {
         // check if the connection is still valid
         if (conn != nullptr) {
             if (conn->is_connected()) {
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Reusing connection for db_id: {}", db_id);
+                LOG_DEBUG(LOG_FDW, "Reusing connection for db_id: {}", db_id);
                 return conn;
             }
             _fdw_conn_cache.evict(db_id);
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "Establishing connection for db_id: {}", db_id);
+        LOG_DEBUG(LOG_FDW, "Establishing connection for db_id: {}", db_id);
 
         // use libpq to connect to the database
         conn = std::make_shared<LibPqConnection>();
@@ -414,7 +415,7 @@ namespace springtail::pg_fdw {
 
         // exectute each DDL statement
         for (const auto &sql : txn) {
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Executing DDL: {}", sql);
+            LOG_DEBUG(LOG_FDW, "Executing DDL: {}", sql);
             conn->exec(sql);
             conn->clear();
         }
@@ -528,33 +529,33 @@ namespace springtail::pg_fdw {
 
         else if (action == "create_index") {
             // TODO: do something?
-            SPDLOG_ERROR("CREATE INDEX");
+            LOG_ERROR("CREATE INDEX");
             return "";
         }
         else if (action == "drop_index") {
             // TODO: do something?
-            SPDLOG_ERROR("DROP INDEX");
+            LOG_ERROR("DROP INDEX");
             return "";
         }
         else if (action == "ns_create") {
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Creating schema with JSON: {}", ddl.dump());
+            LOG_DEBUG(LOG_FDW, "Creating schema with JSON: {}", ddl.dump());
             const auto escaped_schema = conn->escape_identifier(ddl.at("name").get<std::string>());
             return _get_create_schema_with_grants_query(escaped_schema);
         }
         else if (action == "ns_alter") {
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Altering schema with JSON: {}", ddl.dump());
+            LOG_DEBUG(LOG_FDW, "Altering schema with JSON: {}", ddl.dump());
             const auto old_schema = conn->escape_identifier(ddl.at("old_name").get<std::string>());
             const auto new_schema = conn->escape_identifier(ddl.at("name").get<std::string>());
 
             return _get_alter_schema_with_grants_query(old_schema, new_schema);
         }
         else if (action == "ns_drop") {
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Dropping schema with JSON: {}", ddl.dump());
+            LOG_DEBUG(LOG_FDW, "Dropping schema with JSON: {}", ddl.dump());
             const auto escaped_schema = conn->escape_identifier(ddl.at("name").get<std::string>());
             return fmt::format("DROP SCHEMA IF EXISTS {} CASCADE", escaped_schema);
         }
         else if (action == "set_namespace") {
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Set namespace with JSON: {}", ddl.dump());
+            LOG_DEBUG(LOG_FDW, "Set namespace with JSON: {}", ddl.dump());
             const auto schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
             const auto table = conn->escape_identifier(ddl.at("table").get<std::string>());
             const auto old_schema = conn->escape_identifier(ddl.at("old_schema").get<std::string>());
@@ -564,8 +565,8 @@ namespace springtail::pg_fdw {
         }
 
         // can't currently support other kinds of DDL mutations
-        SPDLOG_ERROR("Bad DDL statement: {}", action.get<std::string>());
-        assert(0);
+        LOG_ERROR("Bad DDL statement: {}", action.get<std::string>());
+        CHECK(false);
     }
 
     std::set<uint32_t>
@@ -664,7 +665,7 @@ namespace springtail::pg_fdw {
 
         create += fmt::format("\n) SERVER {} OPTIONS (tid '{}');", server_name, tid);
 
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "Generated SQL: {}", create);
+        LOG_DEBUG(LOG_FDW, "Generated SQL: {}", create);
 
         return create;
     }
@@ -674,8 +675,8 @@ namespace springtail::pg_fdw {
                      const uint64_t db_id,
                      const std::string &db_name)
     {
-        auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}});
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "Creating DB ID: {}, DB Name: {}", db_id, db_name);
+        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
+        LOG_DEBUG(LOG_FDW, "Creating DB ID: {}, DB Name: {}", db_id, db_name);
 
         // drop and create database on fdw
         std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
@@ -699,7 +700,7 @@ namespace springtail::pg_fdw {
                     const std::string &db_name)
     {
 
-        auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}});
+        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
         RedisDDL redis_ddl;
 
         uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
@@ -771,7 +772,7 @@ namespace springtail::pg_fdw {
     void
     PgDDLMgr::_add_replicated_database(uint64_t db_id)
     {
-        auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}});
+        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
         nlohmann::json db_config = Properties::get_db_config(db_id);
         std::string db_name = db_config["name"];
 
@@ -802,7 +803,7 @@ namespace springtail::pg_fdw {
     void
     PgDDLMgr::_remove_replicated_database(uint64_t db_id)
     {
-        auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}});
+        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
         std::shared_lock shared_lock(_db_mutex);
         if (!_db_xid_map.contains(db_id)) {
             return;

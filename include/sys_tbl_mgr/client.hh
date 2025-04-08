@@ -72,6 +72,9 @@ public:
      */
     void invalidate_db(uint64_t db_id, const XidLsn &xid);
 
+    /**
+     * Provide the shared memory cache of roots for this client to use.
+     */
     void use_roots_cache(std::shared_ptr<ShmCache> c);
 
 private:

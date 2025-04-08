@@ -1,10 +1,9 @@
 #pragma once
 
 #include <common/exception.hh>
-#include <common/logging.hh>
+#include <common/open_telemetry.hh>
 #include <common/properties.hh>
 #include <common/service_register.hh>
-#include <common/tracing.hh>
 
 namespace springtail {
 
@@ -94,7 +93,7 @@ public:
 
     bool start() override
     {
-        init_logging(_logging_mask, _log_filename, _daemon_pid.has_value());
+        logging::Logger::get_instance()->init(_logging_mask, _log_filename, _daemon_pid.has_value());
         return true;
     }
 
@@ -108,21 +107,21 @@ class DefaultLoggingRunner : public ServiceRunner {
 public:
     DefaultLoggingRunner() : ServiceRunner("Default Logging") {}
 
-    void stop() override { shutdown_logging(); }
+    void stop() override { logging::Logger::get_instance()->shutdown(); }
 };
 
-// Tracing init
-class TracingRunner : public ServiceRunner {
+// Open Telemetry init
+class OpenTelemetryRunner : public ServiceRunner {
 public:
-    explicit TracingRunner(const std::optional<std::string> &name) : ServiceRunner("Tracing"), _name(name) {}
+    explicit OpenTelemetryRunner(const std::optional<std::string> &name) : ServiceRunner("Tracing"), _name(name) {}
 
     bool start() override
     {
-        tracing::TracingAndMetrics::get_instance()->init(_name.value_or(""));
+        open_telemetry::OpenTelemetry::get_instance()->init(_name.value_or(""));
         return true;
     }
 
-    void stop() override { tracing::TracingAndMetrics::shutdown(); }
+    void stop() override { open_telemetry::OpenTelemetry::shutdown(); }
 
 private:
     const std::optional<std::string> &_name;

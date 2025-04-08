@@ -7,12 +7,13 @@
 #include <nlohmann/json.hpp>
 
 #include <common/constants.hh>
-#include <common/init.hh>
 #include <common/exception.hh>
+#include <common/init.hh>
+#include <common/json.hh>
 #include <common/logging.hh>
+#include <common/open_telemetry.hh>
 #include <common/properties.hh>
 #include <common/redis.hh>
-#include <common/json.hh>
 #include <common/redis_types.hh>
 
 #include <redis/redis_ddl.hh>
@@ -23,7 +24,7 @@
 #include <pg_fdw/pg_fdw_mgr.hh>
 
 #include <sys_tbl_mgr/client.hh>
-#include "sys_tbl_mgr/shm_cache.hh"
+#include <sys_tbl_mgr/shm_cache.hh>
 
 extern "C" {
     #include <postgres.h>
@@ -131,10 +132,10 @@ namespace springtail::pg_fdw {
             runners->emplace_back(std::make_unique<SchemaMgrRunner>());
             runners->emplace_back(std::make_unique<TableMgrRunner>());
 
-            springtail_init(runners, false, PG_FDW_LOG_FILE_PREFIX, LOG_ALL);
+            springtail_init(runners, false, PG_FDW_LOG_FILE_PREFIX, LOG_FDW);
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing PgFdwMgr");
+        LOG_DEBUG(LOG_FDW, "Initializing PgFdwMgr");
 
         // initialize the singleton
         std::call_once(_init_flag, _init);
@@ -143,18 +144,18 @@ namespace springtail::pg_fdw {
 
 
     std::shared_ptr<sys_tbl_mgr::ShmCache>
-    PgFdwMgr::_try_create_cache() 
+    PgFdwMgr::_try_create_cache()
     {
         std::unique_lock<std::shared_mutex> lock(_mutex);
         try {
             auto cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS);
-            return cache; 
+            return cache;
         } catch (const boost::interprocess::bad_alloc&) {
             // the cache hasn't been created
             // this could happen if xid_mgr_subscriber isn't running
-            SPDLOG_ERROR("fdw_create_state unable to open the roots cache");
+            LOG_ERROR("fdw_create_state unable to open the roots cache");
         } catch (const std::exception& e) {
-            SPDLOG_ERROR("fdw_create_state exception:{} ", e.what());
+            LOG_ERROR("fdw_create_state exception:{} ", e.what());
             throw;
         }
         return {};
@@ -199,11 +200,11 @@ namespace springtail::pg_fdw {
                     sys_tbl_mgr::Client::get_instance()->use_roots_cache(_roots_cache);
                 } else {
                     // If (!cache) continue with the existing cache anyway.
-                    // It'll still work as a cache but without 
+                    // It'll still work as a cache but without
                     // the advantages of push notifications.
-                    // If xid_subscriber comes online, we'll try to 
+                    // If xid_subscriber comes online, we'll try to
                     // open the new (live) IPC cache the next time we come here.
-                    SPDLOG_WARN("The IPC roots cache is dead.");
+                    LOG_WARN("The IPC roots cache is dead.");
                 }
 
                 rd_lock.lock();
@@ -232,7 +233,7 @@ namespace springtail::pg_fdw {
             rd_lock.unlock();
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state: db_id: {}, tid: {}, xid: {}, pg_xid: {}, schema_xid: {}",
+        LOG_DEBUG(LOG_FDW, "fdw_create_state: db_id: {}, tid: {}, xid: {}, pg_xid: {}, schema_xid: {}",
                             db_id, tid, xid, pg_xid, schema_xid);
 
         TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid);
@@ -244,7 +245,7 @@ namespace springtail::pg_fdw {
     void
     PgFdwMgr::fdw_begin_scan(PgFdwState *state, List *target_list, List *qual_list, List *sortgroup)
     {
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_begin_scan: tid: {}", state->tid);
+        LOG_DEBUG(LOG_FDW, "fdw_begin_scan: tid: {}", state->tid);
 
         // copy lists into state structure in a more CPP friendly way
 
@@ -261,13 +262,13 @@ namespace springtail::pg_fdw {
 
             auto col_i = state->columns.find(state->attr_map.at(attno));
             if (col_i == state->columns.end()) {
-                SPDLOG_WARN("Couldn't find FDW attribute number: {}", attno);
+                LOG_WARN("Couldn't find FDW attribute number: {}", attno);
                 continue;
             }
 
             target_colnames.push_back(col_i->second.name);
             state->target_columns.insert({attno,i++});
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Target list column: {}:{}",
+            LOG_DEBUG(LOG_FDW, "Target list column: {}:{}",
                                 attno, col_i->second.name);
         }
 
@@ -335,7 +336,7 @@ namespace springtail::pg_fdw {
         // for DESC order, scan from iter_end to iter_end with (iter_end--)
         // make sure to handle the special case for NOT_EQUALS while scanning
         if (!state->index.has_value()) {
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full table scan: tid={}, ASC={}",
+            LOG_DEBUG(LOG_FDW, "Setting up iterators for full table scan: tid={}, ASC={}",
                     state->tid, state->scan_asc);
             state->iter_start.emplace(state->table->begin());
             state->iter_end.emplace(state->table->end());
@@ -344,7 +345,7 @@ namespace springtail::pg_fdw {
 
         if (state->filtered_quals.empty()) {
             // Usually the index is defined by sortgroup in this case.
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full index scan: tid={}, index={}, ASC={}",
+            LOG_DEBUG(LOG_FDW, "Setting up iterators for full index scan: tid={}, index={}, ASC={}",
                     state->tid ,state->index->id, state->scan_asc);
             state->iter_start.emplace(state->table->begin(state->index->id));
             state->iter_end.emplace(state->table->end(state->index->id));
@@ -358,7 +359,7 @@ namespace springtail::pg_fdw {
         FieldTuplePtr tuple = _gen_qual_tuple(state->filtered_quals, state->qual_fields);
         QualOpName op = qual->base.op;
 
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for qual scan: tid: {}, index: {}, op: {}, fields: {}",
+        LOG_DEBUG(LOG_FDW, "Setting up iterators for qual scan: tid: {}, index: {}, op: {}, fields: {}",
                             state->tid, state->index->id, qual->base.opname, tuple->to_string());
 
         switch (op) {
@@ -453,7 +454,7 @@ namespace springtail::pg_fdw {
     void
     PgFdwMgr::fdw_end_scan(PgFdwState *state)
     {
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_end: tid: {}, rows fetched: {}, rows skipped: {}",
+        LOG_DEBUG(LOG_FDW, "fdw_end: tid: {}, rows fetched: {}, rows skipped: {}",
                             state->tid, state->rows_fetched, state->rows_skipped);
         delete state;
     }
@@ -461,7 +462,7 @@ namespace springtail::pg_fdw {
     void
     PgFdwMgr::fdw_reset_scan(PgFdwState *state)
     {
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_reset_scan: tid: {}", state->tid);
+        LOG_DEBUG(LOG_FDW, "fdw_reset_scan: tid: {}", state->tid);
         _set_scan_iterators(state);
     }
 
@@ -474,7 +475,7 @@ namespace springtail::pg_fdw {
                                bool *eos)
     {
         // Note: for now always scan up, so we don't need to check if we are scanning down
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_iterate_scan: tid: {}", state->tid);
+        LOG_DEBUG(LOG_FDW, "fdw_iterate_scan: tid: {}", state->tid);
 
         // default to not end of scan
         *eos = false;
@@ -488,7 +489,7 @@ namespace springtail::pg_fdw {
         // check if we are scanning up and iterator is at the end
         if (*state->iter_start == *state->iter_end) {
 
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_iterate_scan: iter_start == iter_end, done");
+            LOG_DEBUG(LOG_FDW, "fdw_iterate_scan: iter_start == iter_end, done");
             if (state->filtered_quals.empty() || state->filtered_quals[0]->base.op != NOT_EQUALS) {
                 *eos = true;
                 return false;
@@ -555,7 +556,7 @@ namespace springtail::pg_fdw {
 
                 // qual doesn't match, so this row must be skipped
                 // since it isn't the first qual, we can skip to the next row
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Qual not equal, skipping row");
+                LOG_DEBUG(LOG_FDW, "Qual not equal, skipping row");
                 state->rows_skipped++;
                 // increment iterator if scanning up
                 if (state->scan_asc) {
@@ -573,11 +574,11 @@ namespace springtail::pg_fdw {
             if (!state->target_columns.contains(attno)) {
                 nulls[i] = true;
                 values[i] = 0;
-                SPDLOG_WARN("Skipping column: {}; not found in target column", attno);
+                LOG_WARN("Skipping column: {}; not found in target column", attno);
                 continue;
             }
 
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Fetching column: {}", attno);
+            LOG_DEBUG(LOG_FDW, "Fetching column: {}", attno);
 
             // get field idx that matches this attrno, then fetch the field and data
             int field_idx = state->target_columns[attno];
@@ -609,7 +610,7 @@ namespace springtail::pg_fdw {
     {
         PgFdwState *pg_state = static_cast<PgFdwState *>(state->pg_fdw_state);
 
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_can_sort");
+        LOG_DEBUG(LOG_FDW, "fdw_can_sort");
 
         // verify that the sort order is the same for all attributes
         // and null_first/reverse combination is supported
@@ -623,12 +624,12 @@ namespace springtail::pg_fdw {
                 if (i == 0) {
                     reversed = pathkey->reversed;
                 } else if (reversed != pathkey->reversed) {
-                    SPDLOG_DEBUG_MODULE(LOG_FDW, "The sort order must be the same for all attributes: {}!={}", reversed, pathkey->reversed);
+                    LOG_DEBUG(LOG_FDW, "The sort order must be the same for all attributes: {}!={}", reversed, pathkey->reversed);
                     return {};
                 }
 
                 if (!(pathkey->nulls_first? pathkey->reversed: !pathkey->reversed)) {
-                    SPDLOG_DEBUG_MODULE(LOG_FDW, "This combination isn't supported: null_first={}, reversed={}",
+                    LOG_DEBUG(LOG_FDW, "This combination isn't supported: null_first={}, reversed={}",
                             pathkey->nulls_first, pathkey->reversed);
                     return {};
                 }
@@ -660,7 +661,7 @@ namespace springtail::pg_fdw {
             }
 
             if (!keys.empty()) {
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Matching sortgroup index found: {}", idx.id);
+                LOG_DEBUG(LOG_FDW, "Matching sortgroup index found: {}", idx.id);
             }
 
             List *r = nullptr;
@@ -705,7 +706,7 @@ namespace springtail::pg_fdw {
 
         PgFdwState *pg_state = static_cast<PgFdwState *>(state->pg_fdw_state);
 
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_get_path_keys");
+        LOG_DEBUG(LOG_FDW, "fdw_get_path_keys");
 
         // generate list of elements, each element is: list of attnums, followed by row count
         // [(('id',),1)]
@@ -713,9 +714,9 @@ namespace springtail::pg_fdw {
         for (auto const& idx: pg_state->indexes) {
             List      *attnums = NULL;
             List      *item = NULL;
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "adding index path: {}", idx.id);
+            LOG_DEBUG(LOG_FDW, "adding index path: {}", idx.id);
             for (const auto col: idx.columns) {
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "adding pathkey attnum: {}", col.position);
+                LOG_DEBUG(LOG_FDW, "adding pathkey attnum: {}", col.position);
                 attnums = list_append_unique_int(attnums, col.position);
             }
             item = lappend(item, attnums);
@@ -747,14 +748,14 @@ namespace springtail::pg_fdw {
 
             auto name_i = state->name_map.find(strVal(column->attname));
             if (name_i == state->name_map.end()) {
-                SPDLOG_WARN("Couldn't find column: {}", strVal(column->attname));
+                LOG_WARN("Couldn't find column: {}", strVal(column->attname));
                 continue;
             }
             state->attr_map.try_emplace(column->attnum, name_i->second);
 
             auto col_i = state->columns.find(name_i->second);
             if (col_i == state->columns.end()) {
-                SPDLOG_ERROR("Couldn't find column position: {}", name_i->second);
+                LOG_ERROR("Couldn't find column position: {}", name_i->second);
                 continue;
             }
 
@@ -795,7 +796,7 @@ namespace springtail::pg_fdw {
     PgFdwMgr::fdw_commit_rollback(uint64_t pg_xid, bool commit)
     {
         // remove transaction ID mapping on a commit or rollback
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_commit_rollback: pg_xid: {}, commit: {}", pg_xid, commit);
+        LOG_DEBUG(LOG_FDW, "fdw_commit_rollback: pg_xid: {}, commit: {}", pg_xid, commit);
         _xid_map.erase(pg_xid);
     }
 
@@ -803,7 +804,7 @@ namespace springtail::pg_fdw {
     PgFdwMgr::_handle_exception(const Error &error)
     {
         error.log_backtrace();
-        SPDLOG_ERROR("Exception: {}", error.what());
+        LOG_ERROR("Exception: {}", error.what());
         elog(ERROR, "Springtail exception: %s", error.what());
     }
 
@@ -932,7 +933,7 @@ namespace springtail::pg_fdw {
 
         create += fmt::format("\n) SERVER {} OPTIONS (tid '{}');", quote_identifier(server_name.c_str()), tid);
 
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "Generated SQL: {}", create);
+        LOG_DEBUG(LOG_FDW, "Generated SQL: {}", create);
 
         return create;
     }
@@ -990,7 +991,7 @@ namespace springtail::pg_fdw {
                                         const std::string &db_name,
                                         uint64_t schema_xid)
     {
-        auto token = logging::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
+        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
         List                 *commands = NIL;
         std::set<std::string> table_set;
 
@@ -1003,7 +1004,7 @@ namespace springtail::pg_fdw {
             }
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "Importing schema: {} <=> {}\n", schema, CATALOG_SCHEMA_NAME);
+        LOG_DEBUG(LOG_FDW, "Importing schema: {} <=> {}\n", schema, CATALOG_SCHEMA_NAME);
 
         // if we are importing the catalog schema, handle it separately
         if (schema == std::string(CATALOG_SCHEMA_NAME)) {
@@ -1017,19 +1018,19 @@ namespace springtail::pg_fdw {
 
         // verify that the name is present and exists
         if (ns_i == ns_table->end(1)) {
-            SPDLOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
+            LOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
                         schema, schema_xid, constant::MAX_LSN);
             return commands;
         }
 
         auto ns_fields = ns_table->extent_schema()->get_fields();
         if (schema != ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(*ns_i)) {
-            SPDLOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
+            LOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
                         schema, schema_xid, constant::MAX_LSN);
             return commands;
         }
         if (!ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*ns_i)) {
-            SPDLOG_WARN("Namespace marked as not-exists {} @ {}:{}",
+            LOG_WARN("Namespace marked as not-exists {} @ {}:{}",
                         schema, schema_xid, constant::MAX_LSN);
             return commands;
         }
@@ -1052,7 +1053,7 @@ namespace springtail::pg_fdw {
 
             // check for schema-namespace match
             if (table_ns_id != namespace_id) {
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Skipping row due to namespace mismatch {}, {}",
+                LOG_DEBUG(LOG_FDW, "Skipping row due to namespace mismatch {}, {}",
                                     table_ns_id, namespace_id);
                 continue;
             }
@@ -1060,13 +1061,13 @@ namespace springtail::pg_fdw {
             std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row));
             // handle limit and exclude
             if (exclude && table_set.contains(table_name)) {
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Excluding table {}.{}", schema, table_name);
+                LOG_DEBUG(LOG_FDW, "Excluding table {}.{}", schema, table_name);
                 continue;
             }
 
             // XXX should really stop after we have found all tables in limit
             if (limit && !table_set.contains(table_name)) {
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Limit, skipping table {}.{}", schema, table_name);
+                LOG_DEBUG(LOG_FDW, "Limit, skipping table {}.{}", schema, table_name);
                 continue;
             }
 
@@ -1083,17 +1084,17 @@ namespace springtail::pg_fdw {
                         table_map.erase(entry);
                     }
                 }
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Removed non-existant table {}.{} tid={}, xid={}",
+                LOG_DEBUG(LOG_FDW, "Removed non-existant table {}.{} tid={}, xid={}",
                                     schema, table_name, tid, xid);
                 continue;
             }
 
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Found table {}.{} tid={}, xid={}", schema, table_name, tid, xid);
+            LOG_DEBUG(LOG_FDW, "Found table {}.{} tid={}, xid={}", schema, table_name, tid, xid);
 
             // lookup table in map, if found the xid if it is newer
             auto entry = table_map.insert({table_name, {tid, xid}});
             if (entry.second == false) {
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Table {} already exists in schema {}", table_name, schema);
+                LOG_DEBUG(LOG_FDW, "Table {} already exists in schema {}", table_name, schema);
                 // update if xid is newer
                 if (xid > entry.first->second.second) {
                     entry.first->second = {tid, xid};
@@ -1129,7 +1130,7 @@ namespace springtail::pg_fdw {
         for (auto row : (*table)) {
             uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(row);
 
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Found table in schemas table: {}", tid);
+            LOG_DEBUG(LOG_FDW, "Found table in schemas table: {}", tid);
 
             // check if we have moved to next tid
             if (tid != current_tid) {
@@ -1149,7 +1150,7 @@ namespace springtail::pg_fdw {
                 auto it = tid_map.find(tid);
                 if (it == tid_map.end()) {
                     // not found skip it
-                    SPDLOG_DEBUG_MODULE(LOG_FDW, "Table {} not found in table map, skipping", tid);
+                    LOG_DEBUG(LOG_FDW, "Table {} not found in table map, skipping", tid);
                     continue;
                 }
 

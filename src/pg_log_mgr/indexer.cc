@@ -10,14 +10,18 @@
 
 namespace springtail::committer {
 
+<<<<<<< HEAD
     Indexer::Indexer(uint32_t worker_count, std::shared_ptr<ConcurrentQueue<std::string>> index_reconciliation_queue)
         : _index_reconciliation_queue(index_reconciliation_queue)
+=======
+    Indexer::Indexer(uint32_t worker_count)
+>>>>>>> origin/main
     {
         assert(worker_count);
         for (auto i = 0; i != worker_count; ++i) {
             _workers.emplace_back([this](std::stop_token st) { task(st); });
         }
-        SPDLOG_INFO("Indexer created: {}", worker_count);
+        LOG_INFO("Indexer created: {}", worker_count);
     }
 
     void Indexer::process_ddls(uint64_t db_id, uint64_t xid, nlohmann::json const& ddls)
@@ -92,6 +96,7 @@ namespace springtail::committer {
             _queue.push(key);
             _cv.notify_one();
         } else {
+<<<<<<< HEAD
             // mark the status as ABORTING, it will tell the worker to
             // cancel the index build / catchup
             // and proceed for dropping the index
@@ -102,10 +107,57 @@ namespace springtail::committer {
             if (--_xid_ddl_counter_map[xid] == 0) {
                 _xid_ddl_counter_map.erase(xid);
             }
+=======
+            // TODO: we catch the case when the index is dropped in the middle b/c
+            // the case isn't fully supported. The main problem is with managing
+            // XID (finalize) updates.
+            // The issues with XID will need to be resolved anyway for supporting
+            // asynchronous index updates.
+            // Basically it would assert here if a single XID action contains
+            // DDL's to create an index with index_id=1234.
+            assert(false);
+            // clear DDL, it will tell the worker to cancel the index build
+            it->second._ddl = {};
         }
     }
 
-    void Indexer::task(std::stop_token st) 
+    void Indexer::wait_for_completion(uint64_t db_id)
+    {
+        auto find_work = [&]() {
+            auto it = std::ranges::find_if(_work_set,
+                    [&](auto const& v) {
+                        return v.first.first == db_id;
+                    });
+            return it != _work_set.end();
+        };
+
+        // wait for the key {db, tid} to be removed from the working set
+        std::unique_lock g(_m);
+        _cv_done.wait(g, [&find_work]{return !find_work();});
+    }
+
+    void Indexer::wait_for_completion(uint64_t db_id, uint64_t tid)
+    {
+        auto find_work = [&]() {
+            auto it = std::ranges::find_if(_work_set,
+                    [&](auto const& v) {
+                        if (v.first.first == db_id && !v.second._ddl.is_null()) {
+                            return v.second._ddl["table_id"] == tid;
+                        }
+                        return false;
+                    });
+            return it != _work_set.end();
+        };
+
+        // wait for the key {db, tid} to be removed from the working set
+        std::unique_lock g(_m);
+        while( find_work()  ) {
+            _cv_done.wait(g, [&find_work]{return !find_work();});
+>>>>>>> origin/main
+        }
+    }
+
+    void Indexer::task(std::stop_token st)
     {
         while(!st.stop_requested()) {
             Key key;
@@ -128,7 +180,7 @@ namespace springtail::committer {
                 _add_to_pending_reconciliation(IndexState{nullptr, key, params, std::numeric_limits<uint64_t>::max()});
             }
         }
-        SPDLOG_INFO("Indexer thread joined");
+        LOG_INFO("Indexer thread joined");
     }
 
     void Indexer::_drop(const Key& key, const IndexParams& idx, uint64_t end_xid)
@@ -136,7 +188,7 @@ namespace springtail::committer {
         assert(idx._ddl.is_null());
 
         auto [db_id, index_id] = key;
-        SPDLOG_INFO("Drop index {}, {}, {}", db_id, index_id, end_xid);
+        LOG_INFO("Drop index {}, {}, {}", db_id, index_id, end_xid);
 
         auto client = sys_tbl_mgr::Client::get_instance();
 
@@ -157,7 +209,7 @@ namespace springtail::committer {
         if (info.id() == 0) {
             //TODO: it seems like PG generates DROP INDEX with table ids, need
             //to investigate it more.
-            SPDLOG_INFO("The index is not valid: {}", index_id);
+            LOG_INFO("The index is not valid: {}", index_id);
             return;
         }
 
@@ -165,7 +217,7 @@ namespace springtail::committer {
         if (!exists) {
             // when dropping a table, PG generates DROP TABLE first
             // following by DROP INDEX. We ignore DROP INDEX after DROP TABLE.
-            SPDLOG_INFO("Table doesn't exists: {}, {}", info.table_id(), index_id);
+            LOG_INFO("Table doesn't exists: {}, {}", info.table_id(), index_id);
             return;
         }
 
@@ -198,7 +250,7 @@ namespace springtail::committer {
         // Cleanup table-index map
         _remove_index_key(db_id, info.table_id(), key);
 
-        SPDLOG_INFO("Index dropped: {}:{} @ {}", db_id, index_id, end_xid);
+        LOG_INFO("Index dropped: {}:{} @ {}", db_id, index_id, end_xid);
     }
 
     Indexer::IndexState
@@ -206,7 +258,7 @@ namespace springtail::committer {
     {
         constexpr int DROP_CHECK_PERIOD = 1000;
 
-        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Build index: {}:{} - {}", key.first, key.second, idx._ddl.dump());
+        LOG_DEBUG(LOG_COMMITTER, "Build index: {}:{} - {}", key.first, key.second, idx._ddl.dump());
 
         auto [db_id, index_id] = key;
         auto tid = idx._ddl["table_id"];
@@ -266,7 +318,7 @@ namespace springtail::committer {
             ++current_row_id;
             ++row_cnt;
         }
-        SPDLOG_DEBUG_MODULE(LOG_COMMITTER, "Index build finished: {}:{}, rows={}", db_id, index_id, row_cnt);
+        LOG_DEBUG(LOG_COMMITTER, "Index build finished: {}:{}, rows={}", db_id, index_id, row_cnt);
         return {root, key, idx, tid};
     }
 

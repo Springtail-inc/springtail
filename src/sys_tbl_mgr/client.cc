@@ -123,7 +123,6 @@ Client::create_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
     if (response.statement().empty()) {
         throw SysTblMgrError();
     }
-
     return response.statement();
 }
 
@@ -169,7 +168,6 @@ Client::drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg)
 
     // Automatically invalidate the schema cache from the provided XID
     invalidate_table(db_id, msg.oid, xid);
-
     return response.statement();
 }
 
@@ -530,6 +528,7 @@ Client::get_target_schema(uint64_t db_id,
 bool
 Client::exists(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
 {
+    // prepare the request
     proto::ExistsRequest request;
     _set_request_common(request, db_id, xid);
     request.set_table_id(table_id);
@@ -545,6 +544,7 @@ Client::exists(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
     } else if (!status.ok()) {
         throw SysTblMgrError(status.error_message());
     }
+
     return true;
 }
 
