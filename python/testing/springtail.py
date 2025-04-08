@@ -194,9 +194,9 @@ def cleanup_db_instance(props : Properties) -> None:
     # Close the database connection
     conn.close()
 
-def update_postgres_config(test_params: dict = {}, do_cleanup = True):
-    if do_cleanup:
-        cleanup_postgres_config()
+def update_postgres_config(test_params: dict = {}):
+    # cleanup the config to ensure during restarts/crashes we always use the proper config
+    cleanup_postgres_config()
 
     postgres_config = test_params.get('postgres_config', {})
 
