@@ -190,6 +190,11 @@ message SwapSyncTableRequest {
   UpdateRootsRequest roots_req = 4;
 }
 
+message RevertRequest {
+  int64 db_id = 1;
+  int64 xid = 2;
+}
+
 // Service for managing system tables
 service SysTblMgr {
   // Health check
@@ -245,4 +250,7 @@ service SysTblMgr {
 
   // Swap sync table operation
   rpc SwapSyncTable(SwapSyncTableRequest) returns (DDLStatement) {}
+
+  // Revert the system tables to a given XID
+  rpc Revert(RevertRequest) returns (google.protobuf.Empty) {}
 }

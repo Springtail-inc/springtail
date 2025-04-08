@@ -354,6 +354,20 @@ Client::finalize(uint64_t db_id, uint64_t xid)
                            });
 }
 
+void
+Client::revert(uint64_t db_id, uint64_t xid)
+{
+    proto::RevertRequest request;
+    request.set_db_id(db_id);
+    request.set_xid(xid);
+
+    google::protobuf::Empty response;
+    grpc_client::retry_rpc("SysTblMgr", "Revert",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->Revert(context, request, &response);
+                           });
+}
+
 void Client::use_roots_cache(std::shared_ptr<ShmCache> c)
 {
     _roots_cache.store(std::move(c));

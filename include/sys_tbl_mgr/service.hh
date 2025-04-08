@@ -122,6 +122,16 @@ public:
                                const proto::SwapSyncTableRequest* request,
                                proto::DDLStatement* response) override;
 
+    /** Reverts the system tables of the provided db to the provided XID.  To avoid trying to write
+        data at an already committed XID, this causes the removal of rows with an XID beyond the
+        committed XID to be applied into the in-memory mutable tables, which will be committed with
+        the next finalize.  This should be safe because the other operations won't return data for
+        XIDs beyond the requested XID, and nothing should be requested beyond the committed XID. */
+    grpc::Status Revert(grpc::ServerContext* context,
+                        const proto::RevertRequest* request,
+                        google::protobuf::Empty* response) override;
+
+
 private:
     Service() = default;
     ~Service() override = default;

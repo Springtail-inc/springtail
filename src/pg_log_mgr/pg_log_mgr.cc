@@ -121,7 +121,7 @@ namespace springtail::pg_log_mgr {
 
         // fetch latest xid from xid mgr
         XidMgrClient *xid_mgr = XidMgrClient::get_instance();
-        uint64_t next_xid = xid_mgr->get_committed_xid(_db_id, 0) + 1;
+        uint64_t next_xid = xid_mgr->get_committed_xid(_db_id, 0) + 2; // skip one XID for the recovery commit
         _pg_log_reader->set_next_xid(next_xid);
 
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Last committed XID: {}", next_xid-1);
@@ -130,7 +130,7 @@ namespace springtail::pg_log_mgr {
         //     we had a clean shutdown mechanism, we could start up without any recovery
         uint64_t lsn = INVALID_LSN;
         bool do_init = (state == redis::db_state_change::REDIS_STATE_INITIALIZE);
-        PgLogRecovery recovery(_db_id, _repl_log_path, _xact_log_path, _pg_log_reader, next_xid - 1);
+        PgLogRecovery recovery(_db_id, _repl_log_path, _xact_log_path, _pg_log_reader, next_xid - 2);
         if (do_init) {
             _startup_init();
         } else {

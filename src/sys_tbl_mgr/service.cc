@@ -4,6 +4,7 @@
 #include <limits>
 
 #include <common/constants.hh>
+#include <common/properties.hh>
 #include <grpc/grpc_server.hh>
 #include <sys_tbl_mgr/exception.hh>
 #include <sys_tbl_mgr/server.hh>
@@ -1088,6 +1089,102 @@ Service::SwapSyncTable(grpc::ServerContext* context,
     SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Response: {}", nlohmann::to_string(ddls));
     response->set_statement(nlohmann::to_string(ddls));
     span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
+    return grpc::Status::OK;
+}
+
+grpc::Status
+Service::Revert(grpc::ServerContext* context,
+                const proto::RevertRequest* request,
+                google::protobuf::Empty* response)
+{
+    // ensure that we don't have a partially committed XID currently in-memory
+    CHECK(_write[request->db_id()].empty());
+
+    // get the base directory for table data
+    std::filesystem::path table_base;
+    nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
+    Json::get_to<std::filesystem::path>(json, "table_dir", table_base);
+    table_base = Properties::make_absolute_path(table_base);
+
+    // go through each system table and adjust it's roots symlink to point to the correct file for
+    // the committed XID
+    for (auto table_id : sys_tbl::TABLE_IDS) {
+        // get the table directory path
+        auto table_dir = table_helpers::get_table_dir(table_base, request->db_id(), table_id, 1);
+
+        // find all roots files and extract their XIDs
+        std::map<uint64_t, std::filesystem::path> roots_files;
+        for (const auto& entry : std::filesystem::directory_iterator(table_dir)) {
+            // only process files
+            if (!entry.is_regular_file()) {
+                continue;
+            }
+
+            // only process "roots.xid" files
+            auto filename = entry.path().filename().string();
+            if (!filename.starts_with("roots.")) {
+                continue;
+            }
+
+            try {
+                uint64_t xid = std::stoull(filename.substr(6)); // skip "roots."
+                roots_files.try_emplace(xid, entry.path());
+            } catch (...) {
+                // Skip files with invalid numbers
+                continue;
+            }
+        }
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Found {} root files for system table {}",
+                            roots_files.size(), table_id);
+
+        // find the largest valid XID
+        if (!roots_files.empty()) {
+            // find the first XID beyond the committed XID
+            auto del_i = roots_files.upper_bound(request->xid());
+            auto root_i = std::make_reverse_iterator(del_i);
+
+            if (root_i == roots_files.rend()) {
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Clear system table {}",
+                                    root_i->second, table_id);
+                // there's no valid roots, clear *all* of the system table data
+                for (const auto& entry : std::filesystem::directory_iterator(table_dir)) {
+                    std::filesystem::remove_all(entry.path());
+                }
+            } else {
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Picked root file {} for system table {}",
+                                    root_i->second, table_id);
+
+                // update the symlink
+                auto symlink_path = table_dir / "roots";
+
+                std::filesystem::create_symlink(root_i->second,
+                                                table_dir / constant::ROOTS_TMP_FILE);
+                std::filesystem::rename(table_dir / constant::ROOTS_TMP_FILE,
+                                        table_dir / constant::ROOTS_FILE);
+
+                // remove any roots files with larger XIDs
+                for (; del_i != roots_files.end(); ++del_i) {
+                    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Delete root file {} for system table {}",
+                                        del_i->second, table_id);
+                    std::filesystem::remove(del_i->second);
+                }
+            }
+        }
+
+        // remove rows from the table that are beyond the committed XID
+        auto mtable = _get_mutable_system_table(request->db_id(), table_id);
+        auto table = _get_system_table(request->db_id(), table_id);
+        FieldPtr xid_f = table->extent_schema()->get_field("xid");
+        auto primary_fields = table->extent_schema()->get_fields(table->primary_key());
+        for (auto row : *table) {
+            if (xid_f->get_uint64(row) > request->xid()) {
+                mtable->remove(std::make_shared<FieldTuple>(primary_fields, row),
+                               request->xid(), constant::UNKNOWN_EXTENT);
+            }
+        }
+    }
+
     return grpc::Status::OK;
 }
 
