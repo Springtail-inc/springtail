@@ -201,7 +201,7 @@ class TestCase:
                             'type': 'schema_check',
                             'schema': directive[1],
                             'table': directive[2],
-                            'wait_for': int(directive[3]) if len(directive) > 3 else 0
+                            'wait_for': int(directive[3]) if len(directive) > 3 else 5
                         }, section, is_threaded, cur_txn, line_num)
 
                     # Usage - table_exists <schema> <table> <replica_exists>
@@ -404,17 +404,17 @@ class TestCase:
                 return results
 
 
-    def _wait_for_index_reconciliation(self, cursor, wait_for: int = 0) -> bool:
-        base_sql = """select index_id
-            FROM "__pg_springtail_catalog"."index_names"
-            WHERE state = {} AND index_id <> 0"""
+    def _wait_for_index_reconciliation(self, cursor, wait_for: int = 5) -> bool:
+        base_sql = """SELECT DISTINCT(index_id)
+                        FROM "__pg_springtail_catalog"."index_names"
+                       WHERE state in ({}) AND index_id <> 0"""
 
         start_time = time.time()
 
         while True:
             # Convert list of tuples into a set of integers
             not_ready_result = {row[0] for row in self._execute_sql(cursor, base_sql.format(0), True)}
-            ready_result = {row[0] for row in self._execute_sql(cursor, base_sql.format(1), True)}
+            ready_result = {row[0] for row in self._execute_sql(cursor, base_sql.format('1,2'), True)}
 
             # If results match, return immediately
             if not_ready_result == ready_result:
@@ -422,7 +422,7 @@ class TestCase:
 
             # If wait_for is 0 or time is exceeded, raise TimeoutError
             if wait_for == 0 or (time.time() - start_time) >= wait_for:
-                self._raise_error(f'Secondary indexes not in sync within {wait_for}s.')
+                self._raise_failure(f'Secondary indexes not in sync within {wait_for}s.')
 
 
     def _get_ranking_sql(self, is_index_query: bool = False) -> str:
