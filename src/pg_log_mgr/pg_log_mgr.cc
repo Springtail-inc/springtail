@@ -529,6 +529,7 @@ namespace springtail::pg_log_mgr {
         _coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
 
         bool done = false;
+        // while we are in recovery mode, append all entries to the vector
         if (_recovery_flag) {
             while (!_shutdown && _recovery_flag) {
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Recevied data in recovery mode");
@@ -549,6 +550,7 @@ namespace springtail::pg_log_mgr {
                     break;
                 }
             }
+            // once recovery is done, move all the entries to the _logger_queue
             if (!done && !_shutdown) {
                 // copy queue from
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Moving data to _logger_queue");
@@ -558,6 +560,7 @@ namespace springtail::pg_log_mgr {
 
         // if something failed, do not continue
         if (!done) {
+            // in normal mode, append entries to the _logger_queue
             while (!_shutdown) {
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Recevied data in normal mode");
                 if (!_writer_read_data(coordinator_id, data, logger, start_offset,
