@@ -1,7 +1,9 @@
 #include <fmt/core.h>
+#include <memory>
+#include <vector>
 
 #include <common/common.hh>
-#include <common/coordinator.hh>
+// #include <common/coordinator.hh>
 #include <common/logging.hh>
 #include <common/open_telemetry.hh>
 #include <common/properties.hh>
@@ -37,6 +39,7 @@ namespace springtail::pg_log_mgr {
       _host(host), _db_name(db_name), _user_name(user_name),
       _password(password), _pub_name(pub_name), _slot_name(slot_name),
       _log_size_rollover_threshold(log_size_rollover_threshold), _port(port),
+      _coordinator(Coordinator::get_instance()),
       _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
       _repl_log_path(repl_log_path),
       _committer_queue(committer_queue),
@@ -134,6 +137,7 @@ namespace springtail::pg_log_mgr {
         uint64_t lsn = INVALID_LSN;
         bool do_init = (state == redis::db_state_change::REDIS_STATE_INITIALIZE);
         if (do_init) {
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Started in init state");
             _startup_init();
 
             // start streaming immediately so that we can't miss any mutations to copied tables
@@ -149,6 +153,12 @@ namespace springtail::pg_log_mgr {
             _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
 
         } else {
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Started in recovery state");
+            _recovery_flag = true;
+
+            // system is ready to start streaming
+            _start_streaming(lsn, false);
+
             // XXX currently we perform full recovery any time that the state is not INITIALIZE, but if
             //     we had a clean shutdown mechanism, we could start up without any recovery
             PgLogRecovery recovery(_db_id, _repl_log_path, _xact_log_path, _pg_log_reader, committed_xid);
@@ -164,13 +174,15 @@ namespace springtail::pg_log_mgr {
 
             // start the log reader thread since it is also used to process recovery messages
             _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
-            
+
             // note: we wait to perform these actions until the log reader has been started
             // perform the any required log recovery here
             recovery.replay_logs();
+            _recovery_flag = false;
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Done with recovery");
 
             // system is ready to start streaming
-            _start_streaming(lsn, false);
+            // _start_streaming(lsn, false);
         }
     }
 
@@ -440,73 +452,122 @@ namespace springtail::pg_log_mgr {
         _writer_thread = std::thread(&PgLogMgr::_log_writer_thread, this);
     }
 
+    bool
+    PgLogMgr::_writer_read_data(
+        const std::string &coordinator_id,
+        PgCopyData &data,
+        PgLogWriterPtr &logger,
+        uint64_t &start_offset,
+        std::function<void (uint64_t, const std::filesystem::path &)> queue_append_func)
+    {
+        // mark alive with coordinator
+        _coordinator->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
+        // read data from pg replication connection (blocks)
+        try {
+            // wait for data from pg; true if data is available
+            if (!_pg_conn.wait_for_data(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT)) {
+                return true;
+            }
+
+            // read data from pg, length will be 0 if no data (timeout)
+            _pg_conn.read_data(data);
+            if (data.length == 0) {
+                return true;
+            }
+        } catch (const PgIOShutdown &e) {
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Received shutdown signal");
+            return false;
+        } catch (const PgConnectionError &e) {
+            LOG_ERROR("Error reading data from pg: {}", e.what());
+            // try reconnecting
+            try {
+                _pg_conn.reconnect();
+            } catch (const PgConnectionError &e) {
+                LOG_ERROR("Error reconnecting to pg: {}", e.what());
+                // shutdown
+                PgLogCoordinator::get_instance()->shutdown();
+                return false;
+            }
+        }
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Recevied data: length={}, msg_length={}, msg_offset={}",
+            data.length, data.msg_length, data.msg_offset);
+
+        if (!logger->log_data(data)) {
+            // data has been consumed by keep alive or not full message
+            return true;
+        }
+
+        // push data to queue, if data message is complete then record start/end offsets
+        uint64_t end_offset = logger->offset();
+
+        // record start/end offsets for this message
+        queue_append_func(end_offset, logger->filename());
+        // logger_queue.push(start_offset, end_offset, logger->filename());
+        start_offset = end_offset;
+
+        // check to see if we should rollover log
+        if (end_offset > _log_size_rollover_threshold) {
+            logger->close();
+            logger = _create_repl_logger();
+            start_offset = 0;
+        }
+        return true;
+    }
+
     /** Thread for writing log data */
     void
     PgLogMgr::_log_writer_thread()
     {
         PgLogWriterPtr logger = _create_repl_logger();
+        std::vector<PgLogQueueEntry> post_recovery_queue;
 
         PgCopyData data;
         uint64_t start_offset = logger->offset();
 
-        auto coordinator = Coordinator::get_instance();
         std::string coordinator_id = fmt::format(WRITER_WORKER_ID, _db_id);
 
-        coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+        _coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
 
-        while (!_shutdown) {
-            // mark alive with coordinator
-            coordinator->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
-
-            // read data from pg replication connection (blocks)
-            try {
-                // wait for data from pg; true if data is available
-                if (!_pg_conn.wait_for_data(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT)) {
-                    continue;
-                }
-
-                // read data from pg, length will be 0 if no data (timeout)
-                _pg_conn.read_data(data);
-                if (data.length == 0) {
-                    continue;
-                }
-
-            } catch (const PgIOShutdown &e) {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Received shutdown signal");
-                break;
-            } catch (const PgConnectionError &e) {
-                LOG_ERROR("Error reading data from pg: {}", e.what());
-                // try reconnecting
-                try {
-                    _pg_conn.reconnect();
-                } catch (const PgConnectionError &e) {
-                    LOG_ERROR("Error reconnecting to pg: {}", e.what());
-                    // shutdown
-                    PgLogCoordinator::get_instance()->shutdown();
+        bool done = false;
+        if (_recovery_flag) {
+            while (!_shutdown && _recovery_flag) {
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Recevied data in recovery mode");
+                if (!_writer_read_data(coordinator_id, data, logger, start_offset,
+                    [&post_recovery_queue, &start_offset](uint64_t end_offset, const std::filesystem::path &file_path) {
+                        if (!post_recovery_queue.empty()) {
+                            PgLogQueueEntry &entry = post_recovery_queue.back();
+                            if (entry.path == file_path && entry.end_offset == start_offset) {
+                                entry.end_offset = end_offset;
+                                entry.num_messages++;
+                                return;
+                            }
+                        }
+                        post_recovery_queue.emplace_back(PgLogQueueEntry(start_offset, end_offset, file_path));
+                    }
+                )) {
+                    done = true;
                     break;
                 }
             }
-
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Recevied data: length={}, msg_length={}, msg_offset={}",
-                         data.length, data.msg_length, data.msg_offset);
-
-            if (!logger->log_data(data)) {
-                // data has been consumed by keep alive or not full message
-                continue;
+            if (!done && !_shutdown) {
+                // copy queue from
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Moving data to _logger_queue");
+                _logger_queue.push(post_recovery_queue);
             }
+        }
 
-            // push data to queue, if data message is complete then record start/end offsets
-            uint64_t end_offset = logger->offset();
-
-            // record start/end offsets for this message
-            _logger_queue.push(start_offset, end_offset, logger->filename());
-            start_offset = end_offset;
-
-            // check to see if we should rollover log
-            if (end_offset > _log_size_rollover_threshold) {
-                logger->close();
-                logger = _create_repl_logger();
-                start_offset = 0;
+        // if something failed, do not continue
+        if (!done) {
+            while (!_shutdown) {
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Recevied data in normal mode");
+                if (!_writer_read_data(coordinator_id, data, logger, start_offset,
+                    [this, &start_offset](uint64_t end_offset, const std::filesystem::path &file_path) {
+                        _logger_queue.push(start_offset, end_offset, file_path);
+                    }
+                )) {
+                    break;
+                }
             }
         }
 
@@ -524,14 +585,13 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_log_reader_thread()
     {
-        auto coordinator = Coordinator::get_instance();
         std::string coordinator_id = fmt::format(READER_WORKER_ID, _db_id);
 
-        coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+        _coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
 
         while (!_shutdown) {
             // mark alive with coordinator
-            coordinator->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+            _coordinator->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
 
             // get log entry from queue
             PgLogQueueEntryPtr log_entry = this->_logger_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);

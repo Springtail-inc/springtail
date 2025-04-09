@@ -9,6 +9,7 @@
 #include <fmt/format.h>
 
 #include <common/concurrent_queue.hh>
+#include <common/coordinator.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 #include <common/filesystem.hh>
@@ -174,10 +175,12 @@ namespace springtail::pg_log_mgr {
         std::string _slot_name;
         uint64_t _log_size_rollover_threshold;
         int _port;
+        std::atomic<bool> _recovery_flag{false};
 
         /** Internal state synchronizer */
         common::StateSynchronizer<StateEnum> _internal_state{STATE_STARTUP};
 
+        Coordinator *_coordinator{nullptr};
         PgReplConnection _pg_conn;            ///< postgres replication connection
         int _proto_version;                   ///< postgres protocol version
         std::atomic<bool> _shutdown{false};   ///< shutdown flag
@@ -245,7 +248,7 @@ namespace springtail::pg_log_mgr {
          */
         void _index_reconciliation_thread();
 
-
+        bool _writer_read_data(const std::string &coordinator_id, PgCopyData &data, PgLogWriterPtr &logger, uint64_t &start_offset, std::function<void (uint64_t, const std::filesystem::path &)> queue_append_func);
     };
     using PgLogMgrPtr = std::shared_ptr<PgLogMgr>;
 
