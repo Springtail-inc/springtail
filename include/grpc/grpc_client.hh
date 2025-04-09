@@ -62,6 +62,9 @@ inline bool
 should_retry(const grpc::Status& status)
 {
     return status.error_code() == grpc::StatusCode::RESOURCE_EXHAUSTED ||
+           status.error_code() == grpc::StatusCode::INTERNAL ||
+           status.error_code() == grpc::StatusCode::ABORTED ||
+           status.error_code() == grpc::StatusCode::DEADLINE_EXCEEDED ||
            status.error_code() == grpc::StatusCode::UNAVAILABLE;
 }
 
@@ -89,18 +92,27 @@ retry_rpc_status(std::string_view service, std::string_view operation, Func&& fu
         },
         options);
 
+    /*
     grpc::ClientContext client_context;
     auto current_ctx = context::RuntimeContext::GetCurrent();
     GrpcClientCarrier carrier(&client_context);
     auto propagator = context::propagation::GlobalTextMapPropagator::GetGlobalPropagator();
     propagator->Inject(carrier, current_ctx);
+    */
 
     int attempts = 0;
     milliseconds backoff(100);             // Start with 100ms
     const milliseconds max_backoff(5000);  // Max 5 seconds
     const int max_attempts = 50;
 
+    auto current_ctx = context::RuntimeContext::GetCurrent();
+
     while (true) {
+
+        grpc::ClientContext client_context;
+        GrpcClientCarrier carrier(&client_context);
+        auto propagator = context::propagation::GlobalTextMapPropagator::GetGlobalPropagator();
+        propagator->Inject(carrier, current_ctx);
 
         // Inject context into gRPC metadata
         auto scope = tracer->WithActiveSpan(span);
