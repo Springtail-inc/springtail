@@ -1,6 +1,5 @@
 #include <common/constants.hh>
 #include <memory>
-#include <span>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table.hh>
@@ -560,17 +559,16 @@ get_table_dir(const std::filesystem::path &base,
 
     void
     MutableTable::insert(TuplePtr value,
-                         uint64_t xid,
                          uint64_t extent_id)
     {
         if (extent_id == constant::UNKNOWN_EXTENT) {
             if (_primary_key.empty()) {
-                _insert_append(value, xid);
+                _insert_append(value);
             } else {
-                _insert_by_lookup(value, xid);
+                _insert_by_lookup(value);
             }
         } else {
-            _insert_direct(value, xid, extent_id);
+            _insert_direct(value, extent_id);
         }
 
         // update the stats
@@ -581,7 +579,6 @@ get_table_dir(const std::filesystem::path &base,
 
     void
     MutableTable::upsert(TuplePtr value,
-                         uint64_t xid,
                          uint64_t extent_id)
     {
         bool did_insert = false;
@@ -589,13 +586,13 @@ get_table_dir(const std::filesystem::path &base,
         if (extent_id == constant::UNKNOWN_EXTENT) {
             if (_primary_key.empty()) {
                 // with no primary key, we just resort to a separate removal and insert
-                _remove_by_scan(value, xid);
-                _insert_append(value, xid);
+                _remove_by_scan(value);
+                _insert_append(value);
             } else {
-                did_insert = _upsert_by_lookup(value, xid);
+                did_insert = _upsert_by_lookup(value);
             }
         } else {
-            did_insert = _upsert_direct(value, xid, extent_id);
+            did_insert = _upsert_direct(value, extent_id);
         }
 
         // update the stats
@@ -606,19 +603,18 @@ get_table_dir(const std::filesystem::path &base,
 
     void
     MutableTable::remove(TuplePtr key,
-                         uint64_t xid,
                          uint64_t extent_id)
     {
         // perform the removal
         if (extent_id == constant::UNKNOWN_EXTENT) {
             if (_primary_key.empty()) {
                 // note: in this case the key will actually be the full row
-                _remove_by_scan(key, xid);
+                _remove_by_scan(key);
             } else {
-                _remove_by_lookup(key, xid);
+                _remove_by_lookup(key);
             }
         } else {
-            _remove_direct(key, xid, extent_id);
+            _remove_direct(key, extent_id);
         }
 
         // update the stats
@@ -629,16 +625,15 @@ get_table_dir(const std::filesystem::path &base,
 
     void
     MutableTable::update(TuplePtr value,
-                         uint64_t xid,
                          uint64_t extent_id)
     {
         if (extent_id == constant::UNKNOWN_EXTENT) {
             // note: cannot perform an update() with no primary key, should be split into a remove() and insert()
             assert(!_primary_key.empty());
 
-            _update_by_lookup(value, xid);
+            _update_by_lookup(value);
         } else {
-            _update_direct(value, xid, extent_id);
+            _update_direct(value, extent_id);
         }
 
         // note: no change in the stats.row_count
@@ -878,7 +873,6 @@ get_table_dir(const std::filesystem::path &base,
 
     void
     MutableTable::_insert_direct(TuplePtr value,
-                                 uint64_t xid,
                                  uint64_t extent_id)
     {
         // get the page from the cache
@@ -893,8 +887,7 @@ get_table_dir(const std::filesystem::path &base,
     }
 
     void
-    MutableTable::_insert_empty(TuplePtr value,
-                                uint64_t xid)
+    MutableTable::_insert_empty(TuplePtr value)
     {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
@@ -907,8 +900,7 @@ get_table_dir(const std::filesystem::path &base,
     }
 
     void
-    MutableTable::_append_empty(TuplePtr value,
-                                uint64_t xid)
+    MutableTable::_append_empty(TuplePtr value)
     {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
@@ -921,13 +913,12 @@ get_table_dir(const std::filesystem::path &base,
     }
 
     void
-    MutableTable::_insert_append(TuplePtr value,
-                                 uint64_t xid)
+    MutableTable::_insert_append(TuplePtr value)
     {
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
         if (_primary_lookup->empty()) {
-            _append_empty(value, xid);
+            _append_empty(value);
             return;
         }
 
@@ -949,15 +940,14 @@ get_table_dir(const std::filesystem::path &base,
     }
 
     void
-    MutableTable::_insert_by_lookup(TuplePtr value,
-                                    uint64_t xid)
+    MutableTable::_insert_by_lookup(TuplePtr value)
     {
         assert(!_primary_key.empty());
 
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
         if (_primary_lookup->empty()) {
-            _insert_empty(value, xid);
+            _insert_empty(value);
             return;
         }
 
@@ -972,13 +962,11 @@ get_table_dir(const std::filesystem::path &base,
         }
 
         // then we can do a direct insert
-        _insert_direct(value, xid, extent_id);
+        _insert_direct(value, extent_id);
     }
 
     bool
-    MutableTable::_upsert_direct(TuplePtr value,
-                                 uint64_t xid,
-                                 uint64_t extent_id)
+    MutableTable::_upsert_direct(TuplePtr value, uint64_t extent_id)
     {
         // get the page from the cache
         auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false,
@@ -994,8 +982,7 @@ get_table_dir(const std::filesystem::path &base,
     }
 
     bool
-    MutableTable::_upsert_empty(TuplePtr value,
-                                uint64_t xid)
+    MutableTable::_upsert_empty(TuplePtr value)
     {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
@@ -1008,15 +995,14 @@ get_table_dir(const std::filesystem::path &base,
     }
 
     bool
-    MutableTable::_upsert_by_lookup(TuplePtr value,
-                                    uint64_t xid)
+    MutableTable::_upsert_by_lookup(TuplePtr value)
     {
         assert(!_primary_key.empty());
 
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
         if (_primary_lookup->empty()) {
-            return _upsert_empty(value, xid);
+            return _upsert_empty(value);
         }
 
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
@@ -1030,13 +1016,11 @@ get_table_dir(const std::filesystem::path &base,
         }
 
         // then we can do a direct insert
-        return _upsert_direct(value, xid, extent_id);
+        return _upsert_direct(value, extent_id);
     }
 
     void
-    MutableTable::_remove_direct(TuplePtr value,
-                                 uint64_t xid,
-                                 uint64_t extent_id)
+    MutableTable::_remove_direct(TuplePtr value, uint64_t extent_id)
     {
         // get the page from the cache
         auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false,
@@ -1051,8 +1035,7 @@ get_table_dir(const std::filesystem::path &base,
     }
 
     void
-    MutableTable::_remove_empty(TuplePtr value,
-                                uint64_t xid)
+    MutableTable::_remove_empty(TuplePtr value)
     {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
@@ -1065,13 +1048,12 @@ get_table_dir(const std::filesystem::path &base,
     }
 
     void
-    MutableTable::_remove_by_lookup(TuplePtr key,
-                                    uint64_t xid)
+    MutableTable::_remove_by_lookup(TuplePtr key)
     {
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
         if (_primary_lookup->empty()) {
-            _remove_empty(key, xid);
+            _remove_empty(key);
             return;
         }
 
@@ -1086,12 +1068,11 @@ get_table_dir(const std::filesystem::path &base,
         }
 
         // then we can do a direct removal
-        _remove_direct(key, xid, extent_id);
+        _remove_direct(key, extent_id);
     }
 
     void
-    MutableTable::_remove_by_scan(TuplePtr value,
-                                  uint64_t xid)
+    MutableTable::_remove_by_scan(TuplePtr value)
     {
         // we didn't receive an extent_id, and there is no primary index, so we must scan the
         // file to find the row to remove
@@ -1131,9 +1112,7 @@ get_table_dir(const std::filesystem::path &base,
     }
 
     void
-    MutableTable::_update_direct(TuplePtr value,
-                                 uint64_t xid,
-                                 uint64_t extent_id)
+    MutableTable::_update_direct(TuplePtr value, uint64_t extent_id)
     {
         // get the page from the cache
         auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
@@ -1149,8 +1128,7 @@ get_table_dir(const std::filesystem::path &base,
     }
 
     void
-    MutableTable::_update_empty(TuplePtr value,
-                                uint64_t xid)
+    MutableTable::_update_empty(TuplePtr value)
     {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
@@ -1163,15 +1141,14 @@ get_table_dir(const std::filesystem::path &base,
     }
 
     void
-    MutableTable::_update_by_lookup(TuplePtr value,
-                                    uint64_t xid)
+    MutableTable::_update_by_lookup(TuplePtr value)
     {
         assert(!_primary_key.empty());
 
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
         if (_primary_lookup->empty()) {
-            _update_empty(value, xid);
+            _update_empty(value);
             return;
         }
 
@@ -1186,7 +1163,7 @@ get_table_dir(const std::filesystem::path &base,
         }
 
         // then we can do a direct update
-        _update_direct(value, xid, extent_id);
+        _update_direct(value, extent_id);
     }
 
     void
