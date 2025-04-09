@@ -156,13 +156,15 @@ namespace springtail::pg_log_mgr {
             LOG_DEBUG(LOG_PG_LOG_MGR, "Started in recovery state");
             _recovery_flag = true;
 
-            // system is ready to start streaming
-            _start_streaming(lsn, false);
-
             // XXX currently we perform full recovery any time that the state is not INITIALIZE, but if
             //     we had a clean shutdown mechanism, we could start up without any recovery
             PgLogRecovery recovery(_db_id, _repl_log_path, _xact_log_path, _pg_log_reader, committed_xid);
             lsn = recovery.repair_logs();
+
+            // once we have the target LSN the system is ready to start streaming
+            _start_streaming(lsn, false);
+
+            // set the system into the running state
             _startup_running();
 
             // initiate table copy thread; do this before we start replaying the log since it's needed
@@ -180,9 +182,6 @@ namespace springtail::pg_log_mgr {
             recovery.replay_logs();
             _recovery_flag = false;
             LOG_DEBUG(LOG_PG_LOG_MGR, "Done with recovery");
-
-            // system is ready to start streaming
-            // _start_streaming(lsn, false);
         }
     }
 
