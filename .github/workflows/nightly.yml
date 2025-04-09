@@ -16,7 +16,7 @@ jobs:
   nightly_job:
     name: Nightly Job
     runs-on: warp-ubuntu-latest-arm64-4x
-    timeout-minutes: 90 
+    timeout-minutes: 90
     container:
       image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
       credentials:
@@ -65,9 +65,19 @@ jobs:
       - name: Prepare Tests
         run: |
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
+          # Turns off the OTEL in the system.json.settings
+          jq '.otel.enabled = false' system.json.settings > tmp.json && mv tmp.json system.json.settings
+          # Replace the correct `springtail` code directory
+          sed -i -e "s|/home/dev/springtail|${GITHUB_WORKSPACE}|g" system.json.settings
           cp system.json.settings system.json.test
           mkdir -p /opt/springtail/pids
           service redis-server start
+          
+          # Copies over the fdw_config file to the designated location
+          conf_file=/etc/postgresql/16/main/postgresql.conf
+          fdw_config_file_path=$(grep -E "^springtail_fdw.config_file_path" $conf_file | awk '{print $3}' | tr -d "'")
+          mkdir -p $(dirname $fdw_config_file_path)
+          cp system.json.settings $fdw_config_file_path
 
       - name: Build
         run: |
@@ -220,6 +230,9 @@ jobs:
       - name: Run Proxy Tests
         if: success() || failure()      # run this step even if previous step failed
         run: |
+          # Make sure Proxy `enable_ssl` is on 
+          sed -i 's/enable_ssl": false/enable_ssl": true/g' system.json.test
+          
           cd python/testing
           python3 springtail.py -f ../../system.json.test --kill --build-dir ../../debug
           
