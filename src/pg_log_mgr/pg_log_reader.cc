@@ -411,6 +411,9 @@ namespace springtail::pg_log_mgr {
             case PgMsgEnum::CREATE_NAMESPACE:
             case PgMsgEnum::ALTER_NAMESPACE:
             case PgMsgEnum::DROP_NAMESPACE:
+            case PgMsgEnum::CREATE_TYPE:
+            case PgMsgEnum::ALTER_TYPE:
+            case PgMsgEnum::DROP_TYPE:
                 break;  // nothing to check for these
 
             case PgMsgEnum::CREATE_INDEX:
@@ -670,6 +673,27 @@ namespace springtail::pg_log_mgr {
                 redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 break;
             }
+        case PgMsgEnum::CREATE_TYPE:
+            {
+                auto &type_msg = std::get<PgMsgUserType>(change->msg);
+                std::string &&ddl_stmt = client->create_usertype(_db, xidlsn, type_msg);
+                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                break;
+            }
+        case PgMsgEnum::ALTER_TYPE:
+            {
+                auto &type_msg = std::get<PgMsgUserType>(change->msg);
+                std::string &&ddl_stmt = client->alter_usertype(_db, xidlsn, type_msg);
+                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                break;
+            }
+        case PgMsgEnum::DROP_TYPE:
+            {
+                auto &type_msg = std::get<PgMsgUserType>(change->msg);
+                std::string &&ddl_stmt = client->drop_usertype(_db, xidlsn, type_msg);
+                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                break;
+            }
         case PgMsgEnum::CREATE_INDEX:
             {
                 auto &index_msg = std::get<PgMsgIndex>(change->msg);
@@ -691,7 +715,7 @@ namespace springtail::pg_log_mgr {
             }
         case PgMsgEnum::ALTER_RESYNC:
             {
-                // process the resync caused by an ALTER_TABLE 
+                // process the resync caused by an ALTER_TABLE
                 auto &table_msg = std::get<PgMsgTable>(change->msg);
                 _mark_table_resync(table_msg.oid, xidlsn);
                 break;
@@ -898,6 +922,24 @@ namespace springtail::pg_log_mgr {
             {
                 PgMsgNamespace &namespace_msg = std::get<PgMsgNamespace>(msg->msg);
                 _process_ddl(namespace_msg.oid, namespace_msg.xid, msg->is_streaming, msg);
+                break;
+            }
+        case PgMsgEnum::CREATE_TYPE:
+            {
+                PgMsgUserType &usertype_msg = std::get<PgMsgUserType>(msg->msg);
+                _process_ddl(usertype_msg.oid, usertype_msg.xid, msg->is_streaming, msg);
+                break;
+            }
+        case PgMsgEnum::ALTER_TYPE:
+            {
+                PgMsgUserType &usertype_msg = std::get<PgMsgUserType>(msg->msg);
+                _process_ddl(usertype_msg.oid, usertype_msg.xid, msg->is_streaming, msg);
+                break;
+            }
+        case PgMsgEnum::DROP_TYPE:
+            {
+                PgMsgUserType &usertype_msg = std::get<PgMsgUserType>(msg->msg);
+                _process_ddl(usertype_msg.oid, usertype_msg.xid, msg->is_streaming, msg);
                 break;
             }
         case PgMsgEnum::CREATE_INDEX:

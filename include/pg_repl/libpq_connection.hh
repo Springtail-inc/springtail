@@ -173,6 +173,15 @@ namespace springtail {
         bool get_boolean(int row, int col);
 
         /**
+         * @brief Get char value from query result
+         *
+         * @param row row index
+         * @param col col index
+         * @return char value for row/col; null is mapped to '\0'
+         */
+        char get_char(int row, int col);
+
+        /**
          * @brief escape a string; a literal not for identifiers
          *
          * @param str string to escape

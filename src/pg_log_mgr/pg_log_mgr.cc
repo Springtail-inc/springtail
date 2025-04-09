@@ -151,7 +151,7 @@ namespace springtail::pg_log_mgr {
 
             // start the log reader thread since it is also used to process recovery messages
             _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
-            
+
             // note: we wait to perform these actions until the log reader has been started
             // perform the any required log recovery here
             recovery.replay_logs();
@@ -236,6 +236,7 @@ namespace springtail::pg_log_mgr {
             auto token_init = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(_db_id)}, {"xid", std::to_string(xid)}});
 
             PgCopyTable::create_namespaces(_db_id, xid);
+            PgCopyTable::create_usertypes(_db_id, xid);
 
             _do_table_copies();
         }

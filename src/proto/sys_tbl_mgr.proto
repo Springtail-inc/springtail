@@ -51,6 +51,18 @@ message NamespaceRequest {
   int64 lsn = 5;
 }
 
+message UserTypeRequest {
+  int64 db_id = 1;
+  int64 xid = 2;
+  int64 lsn = 3;
+  int64 namespace_id = 4;
+  int64 type_id = 5;
+  string namespace_name = 6;
+  string name = 7;
+  string value_json = 8;
+  int32 type = 9;
+}
+
 message TableStats {
   int64 row_count = 1;
 }
@@ -244,4 +256,13 @@ service SysTblMgr {
 
   // Swap sync table operation
   rpc SwapSyncTable(SwapSyncTableRequest) returns (DDLStatement) {}
+
+  // Create user defined type
+  rpc CreateUserType(UserTypeRequest) returns (DDLStatement) {}
+
+  // Alter user defined type
+  rpc AlterUserType(UserTypeRequest) returns (DDLStatement) {}
+
+  // Drop user defined type
+  rpc DropUserType(UserTypeRequest) returns (DDLStatement) {}
 }

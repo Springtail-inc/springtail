@@ -98,11 +98,21 @@ namespace springtail::pg_fdw {
          */
         std::string _get_alter_schema_with_grants_query(std::string_view old_schema, std::string_view new_schema);
 
+        /**
+         * @brief Helper to generate a create type query
+         * @param escaped_schema schema name
+         * @param escaped_name type name
+         * @param value_json_str json array of value strings
+         * @param conn connection
+         * @return std::string create type query string
+         */
+        std::string _get_create_type_query(std::string_view escaped_schema,
+                                           std::string_view escaped_name,
+                                           std::string_view value_json_str,
+                                           LibPqConnectionPtr conn);
+
         /** Helper to connect to fdw db */
         LibPqConnectionPtr _connect_fdw(std::optional<uint64_t> db_id, const std::string &db_name);
-
-        /** Helper to connect to primary db */
-        LibPqConnectionPtr _connect_primary(uint64_t db_id, const std::string &db_name);
 
         /**
          * @brief Helper to apply outstanding DDL changes to the FDW tables.
@@ -129,13 +139,20 @@ namespace springtail::pg_fdw {
                           const std::vector<std::string> &sql);
 
         /**
-         * @brief Helper to get schemas from db config
+         * @brief Helper to get schemas from the system tables
          * @param db_id db id
-         * @param db_name db name
          * @param xid transaction id
-         * @return set of schemas
+         * @return map of schemas <ns_id, schema name>
          */
-        std::set<std::string> _get_schemas(uint64_t db_id, const std::string &db_name, uint64_t xid);
+        std::map<uint64_t, std::string> _get_schemas(uint64_t db_id, uint64_t xid);
+
+        /**
+         * @brief Helper to get user defined types from the system tables
+         * @param db_id db id
+         * @param xid transaction id
+         * @return map of namespace id to set of type tuples <type_name, value_json>
+         */
+        std::map<uint64_t, std::set<std::pair<std::string, std::string>>> _get_usertypes(uint64_t db_id, uint64_t xid);
 
         /**
          * @brief Helper to diff oid type set with keys from _type_map

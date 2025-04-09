@@ -29,6 +29,11 @@ public:
     std::string alter_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg);
     std::string drop_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg);
 
+
+    std::string create_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
+    std::string alter_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
+    std::string drop_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
+
     std::string create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, sys_tbl::IndexNames::State state);
 
     /**
@@ -60,6 +65,13 @@ public:
                                const proto::TableRequest &create_req,
                                const std::vector<proto::IndexRequest> &index_reqs,
                                const proto::UpdateRootsRequest &roots_req);
+
+    /** Create user defined type stub */
+    std::string create_usertype(const proto::UserTypeRequest &request);
+    /** Alter user defined type stub */
+    std::string alter_usertype(const proto::UserTypeRequest &request);
+    /** Drop user defined type stub */
+    std::string drop_usertype(const proto::UserTypeRequest &request);
 
     /**
      * Invalidates the schema entry for a given table from a given XID/LSN

@@ -9,6 +9,7 @@
 #include <common/properties.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
+#include <common/constants.hh>
 
 #include <redis/db_state_change.hh>
 #include <redis/redis_ddl.hh>
@@ -131,14 +132,44 @@ namespace springtail::pg_fdw {
         _thread_manager->start();
     }
 
-    std::set<std::string>
-    PgDDLMgr::_get_schemas(uint64_t db_id, const std::string &db_name, uint64_t xid)
+    std::map<uint64_t, std::set<std::pair<std::string, std::string>>>
+    PgDDLMgr::_get_usertypes(uint64_t db_id, uint64_t xid)
+    {
+        std::map<uint64_t, std::set<std::pair<std::string, std::string>>> usertype_map;
+
+        // iterate through the user types and add them to the map
+        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::UserTypes::ID, xid);
+        auto fields = table->extent_schema()->get_fields();
+        for (auto row : (*table)) {
+            // make sure entry exists at this xid
+            bool exists = fields->at(sys_tbl::UserTypes::Data::EXISTS)->get_bool(row);
+            if (!exists) {
+                continue;
+            }
+
+            uint64_t namespace_id = fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID)->get_uint64(row);
+            std::string type_name(fields->at(sys_tbl::UserTypes::Data::NAME)->get_text(row));
+            std::string value_json(fields->at(sys_tbl::UserTypes::Data::VALUE)->get_text(row));
+
+            // only enums supported
+            DCHECK(fields->at(sys_tbl::UserTypes::Data::TYPE)->get_int8(row) == constant::USER_TYPE_ENUM);
+
+            // insert into map by namespace_id
+            usertype_map[namespace_id].insert({type_name, value_json});
+        }
+
+        return usertype_map;
+    }
+
+    std::map<uint64_t, std::string>
+    PgDDLMgr::_get_schemas(uint64_t db_id, uint64_t xid)
     {
         // get the db config and parse out the included schemas
         auto db_config = Properties::get_db_config(db_id);
 
         bool all_schemas = false;
         std::set<std::string> schemas;
+        std::map<uint64_t, std::string> schema_map;
 
         // scan through includes
         auto includes = db_config["include"];
@@ -161,21 +192,28 @@ namespace springtail::pg_fdw {
             }
         }
 
-        if (!all_schemas) {
-            return schemas;
+        if (!all_schemas && schemas.empty()) {
+            return {};
         }
 
-        // otherwise all schemas, need to query the primary
-        // use libpq to connect to the database
+        // iterate through the schemas and get the schema ids
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, xid);
         auto fields = table->extent_schema()->get_fields();
-
         for (auto row : (*table)) {
+            // make sure entry exists at this xid
+            bool exists = fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(row);
+            if (!exists) {
+                continue;
+            }
+            // check if we have a schema name match, if so add it to the map
             std::string namespace_name(fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(row));
-            schemas.insert(namespace_name);
+            if (all_schemas || schemas.contains(namespace_name)) {
+                uint64_t namespace_id = fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(row);
+                schema_map[namespace_id] = namespace_name;
+            }
         }
 
-        return schemas;
+        return schema_map;
     }
 
     void
@@ -237,6 +275,29 @@ namespace springtail::pg_fdw {
                 new_schema, _fdw_username,
                 new_schema, _fdw_username,
                 new_schema, _fdw_username);
+    }
+
+    std::string
+    PgDDLMgr::_get_create_type_query(std::string_view escaped_schema,
+                                     std::string_view escaped_name,
+                                     std::string_view value_json_str,
+                                     LibPqConnectionPtr conn)
+    {
+        // iterate through json array and convert to string of form 'val1', 'val2', 'val3'
+        nlohmann::json value_json = nlohmann::json::parse(value_json_str);
+        CHECK(value_json.is_array());
+
+        std::stringstream value_ss;
+        for (size_t i = 0; i < value_json.size(); i++) {
+            if (i > 0) {
+                value_ss << ", ";
+            }
+            value_ss << "'" << conn->escape_string(value_json[i].get<std::string>()) << "'";
+        }
+        std::string enum_options = value_ss.str();
+
+        return fmt::format("CREATE TYPE {}.{} AS ENUM ({})",
+                           escaped_schema, escaped_name, enum_options);
     }
 
     void
@@ -563,6 +624,45 @@ namespace springtail::pg_fdw {
             return fmt::format("ALTER FOREIGN TABLE {}.{} SET SCHEMA {};",
                                old_schema, table, schema);
         }
+        else if (action == "ut_create") {
+            LOG_DEBUG(LOG_FDW, "Creating user type with JSON: {}", ddl.dump());
+            const auto escaped_schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
+            const auto escaped_name = conn->escape_identifier(ddl.at("name").get<std::string>());
+            const auto value_json_str = ddl.at("value").get<std::string>();
+
+            return _get_create_type_query(escaped_schema, escaped_name, value_json_str, conn);
+        }
+        else if (action == "ut_drop") {
+            LOG_DEBUG(LOG_FDW, "Dropping user type with JSON: {}", ddl.dump());
+            const auto escaped_schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
+            const auto escaped_name = conn->escape_identifier(ddl.at("name").get<std::string>());
+
+            return fmt::format("DROP TYPE IF EXISTS {}.{} CASCADE", escaped_schema, escaped_name);
+        } else if (action == "ut_alter") {
+            LOG_DEBUG(LOG_FDW, "Altering user type with JSON: {}", ddl.dump());
+
+            // need to check if it is renamed
+            const auto old_name = conn->escape_identifier(ddl.at("old_name").get<std::string>());
+            const auto new_name = conn->escape_identifier(ddl.at("name").get<std::string>());
+            const auto escaped_schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
+            if (old_name != new_name) {
+                return fmt::format("ALTER TYPE {}.{} RENAME TO {}", escaped_schema, old_name, new_name);
+            }
+
+            // need to check if schema has changed
+            const auto old_schema = conn->escape_identifier(ddl.at("old_namespace").get<std::string>());
+            const auto new_schema = conn->escape_identifier(ddl.at("namespace").get<std::string>());
+            if (old_schema != new_schema) {
+                return fmt::format("ALTER TYPE {}.{} SET SCHEMA {};",
+                                   old_schema, new_name, new_schema);
+            }
+
+            // need to check if value has changed
+            const auto value_json_str = ddl.at("value").get<std::string>();
+            if (value_json_str != ddl.at("old_value").get<std::string>()) {
+                // NOT SUPPORTED YET
+            }
+        }
 
         // can't currently support other kinds of DDL mutations
         LOG_ERROR("Bad DDL statement: {}", action.get<std::string>());
@@ -706,7 +806,10 @@ namespace springtail::pg_fdw {
         uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
 
         // get schemas, parse include, fetch from primary db if necessary
-        auto &&schemas = _get_schemas(db_id, db_name, xid);
+        auto &&schemas = _get_schemas(db_id, xid);
+
+        // get user types from system tables
+        auto &&user_types = _get_usertypes(db_id, xid);
 
         // connect to the database on the fdw
         conn = _connect_fdw(db_id, _db_prefix + db_name);
@@ -730,9 +833,18 @@ namespace springtail::pg_fdw {
 
         for (const auto &schema: schemas) {
             // create schema if not exists
-            std::string escaped_schema = conn->escape_identifier(schema);
+            std::string escaped_schema = conn->escape_identifier(schema.second);
             conn->exec(fmt::format("CREATE SCHEMA IF NOT EXISTS {}", escaped_schema));
             conn->clear();
+
+            // create the user defined types (enums)
+            if (user_types.contains(schema.first)) {
+                for (const auto &[type_name, value_json_str] : user_types.at(schema.first)) {
+                    std::string create_type_query = _get_create_type_query(escaped_schema, conn->escape_identifier(type_name), value_json_str, conn);
+                    conn->exec(create_type_query);
+                    conn->clear();
+                }
+            }
 
             // import foreign schema
             conn->exec(fmt::format("IMPORT FOREIGN SCHEMA {} FROM SERVER {} INTO {}",

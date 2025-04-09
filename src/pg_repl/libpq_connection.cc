@@ -307,6 +307,24 @@ namespace springtail {
     }
 
     /**
+     * @brief Get char value from query result
+     *
+     * @param res query result
+     * @param row row index
+     * @param col col index
+     * @return char value for row/col; null is mapped to '\0'
+     */
+    char LibPqConnection::get_char(int row, int col)
+    {
+        char *value = PQgetvalue(_result, row, col);
+        if (value == nullptr) {
+            throw PgQueryError();
+        }
+
+        return value[0];
+    }
+
+    /**
      * @brief escape a string; a literal not for identifiers
      *        when a connection is available it uses connection encoding
      *

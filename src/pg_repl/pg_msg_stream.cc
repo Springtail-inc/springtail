@@ -857,6 +857,7 @@ namespace springtail {
             }
             json["is_non_standard_collation"].get_to(column.is_non_standard_collation);
             json["is_user_defined_type"].get_to(column.is_user_defined_type);
+            json["type_category"].get_to(column.type_category);
 
             if (!json["pkey_pos"].is_null()) {
                 json["pkey_pos"].get_to(column.pk_position);
@@ -1099,6 +1100,80 @@ namespace springtail {
     }
 
     PgMsgPtr
+    PgMsgStreamReader::_decode_create_usertype(const PgMsgMessage &message, char *buffer, int len)
+    {
+        PgMsgUserType usertype_msg;
+
+        // convert msg data to string (it is not null terminated)
+        // and convert string to json
+        std::string_view data_str(buffer, len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        usertype_msg.xid = message.xid; // only valid in streaming mode
+        usertype_msg.lsn = message.lsn;
+        usertype_msg.type = 'E'; // pg_type.typcategory = 'E' for enum
+
+        json["name"].get_to(usertype_msg.name);
+        json["oid"].get_to(usertype_msg.oid);
+        json["schema"].get_to(usertype_msg.namespace_name);
+        json["ns_oid"].get_to(usertype_msg.namespace_id);
+        json["labels"].get_to(usertype_msg.value_json);
+
+        LOG_DEBUG(LOG_PG_REPL, "Decoded create/alter usertype: json: {}", json.dump());
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_TYPE);
+        msg->msg.emplace<PgMsgUserType>(usertype_msg);
+
+        return msg;
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_alter_usertype(const PgMsgMessage &message, char *buffer, int len)
+    {
+        // same data as in create usertype, call that to do the decode and then just switch the
+        // type so we know it is an alter usertype
+        PgMsgPtr msg = _decode_create_usertype(message, buffer, len);
+        if (msg == nullptr) {
+            return msg;
+        }
+
+        msg->msg_type = PgMsgEnum::ALTER_TYPE;
+        return msg;
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_drop_usertype(const PgMsgMessage &message, char *buffer, int len)
+    {
+        PgMsgUserType usertype_msg;
+
+        // convert msg data to string (it is not null terminated)
+        // and convert string to json
+        std::string data_str(buffer, len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        // check object type, should be of type namespace
+        std::string object_type;
+        json["obj"].get_to(object_type);
+        if (object_type != "schema") {
+            LOG_ERROR("Create/alter namespace msg not for namespace object, for: {}\n", object_type);
+            return nullptr;
+        }
+
+        usertype_msg.xid = message.xid; // only valid in streaming mode
+        usertype_msg.lsn = message.lsn;
+        json["oid"].get_to(usertype_msg.oid);
+        json["name"].get_to(usertype_msg.name);
+
+        LOG_DEBUG(LOG_PG_REPL, "Decoded drop usertype: json: {}", json.dump());
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_TYPE);
+        msg->msg.emplace<PgMsgUserType>(usertype_msg);
+
+        return msg;
+    }
+
+
+    PgMsgPtr
     PgMsgStreamReader::_decode_copy_sync(const PgMsgMessage &message, char *buffer, int len)
     {
         PgMsgCopySync copy_sync_msg;
@@ -1175,6 +1250,12 @@ namespace springtail {
             return _decode_drop_index(msg, buffer.data(), data_len);
         } else if (msg.prefix_str == pg_msg::MSG_PREFIX_COPY_SYNC) {
             return _decode_copy_sync(msg, buffer.data(), data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_CREATE_TYPE) {
+            return _decode_create_usertype(msg, buffer.data(), data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_ALTER_TYPE) {
+            return _decode_alter_usertype(msg, buffer.data(), data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_DROP_TYPE) {
+            return _decode_drop_usertype(msg, buffer.data(), data_len);
         } else {
             LOG_INFO("Unknown message prefix: {}", msg.prefix_str);
             return nullptr;

@@ -35,6 +35,9 @@ namespace springtail {
 
         // NamespaceNames
         _system_cache[{ sys_tbl::NamespaceNames::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::NamespaceNames::Data::SCHEMA);
+
+        // UserTypes
+        _system_cache[{ sys_tbl::UserTypes::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::UserTypes::Data::SCHEMA);
     }
 
     std::map<uint32_t, SchemaColumn>
@@ -69,6 +72,8 @@ namespace springtail {
                     return _convert_columns(sys_tbl::IndexNames::Data::SCHEMA);
                 case sys_tbl::NamespaceNames::ID:
                     return _convert_columns(sys_tbl::NamespaceNames::Data::SCHEMA);
+                case sys_tbl::UserTypes::ID:
+                    return _convert_columns(sys_tbl::UserTypes::Data::SCHEMA);
                 default:
                     assert(false);
                     break;

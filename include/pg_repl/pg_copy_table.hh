@@ -266,6 +266,9 @@ namespace springtail
                      CopyQueuePtr copy_queue,
                      PgCopyResultPtr result);
 
+        /** Get where clause condition for inclusion of schemas */
+       static std::string _get_schema_condition(LibPqConnection &connection, uint64_t db_id);
+
         /**
          * @brief Get namespaces, returns a pair of namespace name and oid
          * @param db_id database id
@@ -345,6 +348,13 @@ namespace springtail
          * @param xid xid
          */
         static void create_namespaces(uint64_t db_id, uint64_t xid);
+
+        /**
+         * @brief Create user defined types
+         * @param db_id database id
+         * @param xid xid
+         */
+        static void create_usertypes(uint64_t db_id, uint64_t xid);
 
         /**
          * @brief Copy all tables in single schema from remote system

@@ -54,4 +54,6 @@ namespace springtail::constant {
     /** Coordinator keep alive timeout seconds */
     static constexpr uint32_t COORDINATOR_KEEP_ALIVE_TIMEOUT = 5;
 
+    /** User defined types */
+    static constexpr int8_t USER_TYPE_ENUM = 'E';
 }

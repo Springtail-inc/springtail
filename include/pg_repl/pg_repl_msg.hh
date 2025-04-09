@@ -166,6 +166,7 @@ namespace springtail
         bool is_generated;  // is this a generated column
         bool is_non_standard_collation;
         bool is_user_defined_type;
+        char type_category;  // type category of 'E' represents enum
         std::string type_name;
         std::string collation;
     };
@@ -223,6 +224,17 @@ namespace springtail
         std::string name;
     };
 
+    struct PgMsgUserType {
+        LSN_t lsn;
+        uint32_t oid;
+        int32_t xid; // pg xid; proto vers 2+ only if streaming
+        uint32_t namespace_id;
+        int32_t type; // pg_type.typcategory = 'E' for enum
+        std::string name;
+        std::string namespace_name;
+        std::string value_json;
+    };
+
     struct PgMsgCopySync {
         int64_t target_xid;
         int32_t pg_xid;
@@ -238,6 +250,7 @@ namespace springtail
         CREATE_TABLE, ALTER_TABLE, DROP_TABLE,
         CREATE_NAMESPACE, ALTER_NAMESPACE, DROP_NAMESPACE,
         CREATE_INDEX, DROP_INDEX, COPY_SYNC,
+        CREATE_TYPE, DROP_TYPE, ALTER_TYPE,
         // special message generated in the log reader
         ALTER_RESYNC
     };
@@ -270,6 +283,7 @@ namespace springtail
          PgMsgIndex,
          PgMsgDropIndex,
          PgMsgNamespace,
+         PgMsgUserType,
          PgMsgCopySync
         > msg;                 ///< message data
 
@@ -340,6 +354,9 @@ namespace springtail
         static inline constexpr char MSG_PREFIX_CREATE_NAMESPACE[] = "springtail:CREATE SCHEMA";
         static inline constexpr char MSG_PREFIX_ALTER_NAMESPACE[] = "springtail:ALTER SCHEMA";
         static inline constexpr char MSG_PREFIX_DROP_NAMESPACE[] = "springtail:DROP SCHEMA";
+        static inline constexpr char MSG_PREFIX_CREATE_TYPE[] = "springtail:CREATE TYPE";
+        static inline constexpr char MSG_PREFIX_ALTER_TYPE[] = "springtail:ALTER TYPE";
+        static inline constexpr char MSG_PREFIX_DROP_TYPE[] = "springtail:DROP TYPE";
 
         /**
          * @brief convert a message to a printable string

@@ -95,9 +95,9 @@ namespace springtail::pg_fdw {
         static constexpr char CATALOG_TABLE_SCHEMAS[] = "schemas";        ///< Table name for system table schemas
         static constexpr char CATALOG_TABLE_STATS[] = "table_stats";      ///< Table name for system table stats
         static constexpr char CATALOG_INDEX_NAMES[] = "index_names";      ///< Table name for system index names
-        static constexpr char CATALOG_NAMESPACE_NAMES[] = "namespace_names";      ///< Table name for system index names
-
-        static constexpr char PG_FDW_LOG_FILE_PREFIX[] = "pg_fdw";         ///< Log file prefix
+        static constexpr char CATALOG_NAMESPACE_NAMES[] = "namespace_names";      ///< Table name for namespace schema names
+        static constexpr char CATALOG_USER_TYPES[] = "user_types";        ///< Table name for system user defined types
+        static constexpr char PG_FDW_LOG_FILE_PREFIX[] = "pg_fdw";        ///< Log file prefix
 
         /** Get singleton instance */
         static PgFdwMgr* get_instance() {

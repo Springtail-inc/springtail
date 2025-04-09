@@ -189,6 +189,9 @@ namespace springtail {
         PgMsgPtr _decode_drop_namespace(PgMsgMessage &message, char *buffer, int len);
         PgMsgPtr _decode_create_index(const PgMsgMessage &message, char *buffer, int len);
         PgMsgPtr _decode_drop_index(const PgMsgMessage &message, char *buffer, int len);
+        PgMsgPtr _decode_create_usertype(const PgMsgMessage &message, char *buffer, int len);
+        PgMsgPtr _decode_alter_usertype(const PgMsgMessage &message, char *buffer, int len);
+        PgMsgPtr _decode_drop_usertype(const PgMsgMessage &message, char *buffer, int len);
         PgMsgPtr _decode_copy_sync(const PgMsgMessage &message, char *buffer, int len);
 
         // helpers

@@ -46,6 +46,7 @@ namespace springtail {
         bool is_generated;
         bool is_non_standard_collation;
         bool is_user_defined_type;
+        char type_category;  ///< type category of 'E' represents enum
         std::string type_name;
         std::string collation;
         std::optional<uint32_t> pkey_position; ///< position in primary key, if any, 0 based no holes
