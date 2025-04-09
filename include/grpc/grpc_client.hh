@@ -92,14 +92,6 @@ retry_rpc_status(std::string_view service, std::string_view operation, Func&& fu
         },
         options);
 
-    /*
-    grpc::ClientContext client_context;
-    auto current_ctx = context::RuntimeContext::GetCurrent();
-    GrpcClientCarrier carrier(&client_context);
-    auto propagator = context::propagation::GlobalTextMapPropagator::GetGlobalPropagator();
-    propagator->Inject(carrier, current_ctx);
-    */
-
     int attempts = 0;
     milliseconds backoff(100);             // Start with 100ms
     const milliseconds max_backoff(5000);  // Max 5 seconds

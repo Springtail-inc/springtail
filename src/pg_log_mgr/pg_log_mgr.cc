@@ -3,7 +3,6 @@
 #include <vector>
 
 #include <common/common.hh>
-// #include <common/coordinator.hh>
 #include <common/logging.hh>
 #include <common/open_telemetry.hh>
 #include <common/properties.hh>
