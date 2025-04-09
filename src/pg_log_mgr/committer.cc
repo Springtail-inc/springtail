@@ -593,13 +593,13 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 {
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
                     LOG_DEBUG(LOG_COMMITTER, "INSERT value={}", tuple->to_string());
-                    table->insert(tuple, wc_extent->xid, constant::UNKNOWN_EXTENT);
+                    table->insert(tuple, constant::UNKNOWN_EXTENT);
                     break;
                 }
             case UPDATE:
                 {
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
-                    table->update(tuple, wc_extent->xid, constant::UNKNOWN_EXTENT);
+                    table->update(tuple, constant::UNKNOWN_EXTENT);
                     break;
                 }
             case DELETE:
@@ -607,10 +607,10 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     if (wc_key_fields->empty()) {
                         // no sort key, so need to handle non-primary key by using the entire row
                         auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
-                        table->remove(tuple, wc_extent->xid, constant::UNKNOWN_EXTENT);
+                        table->remove(tuple, constant::UNKNOWN_EXTENT);
                     } else {
                         auto tuple = std::make_shared<FieldTuple>(wc_key_fields, row);
-                        table->remove(tuple, wc_extent->xid, constant::UNKNOWN_EXTENT);
+                        table->remove(tuple, constant::UNKNOWN_EXTENT);
                     }
                     break;
                 }

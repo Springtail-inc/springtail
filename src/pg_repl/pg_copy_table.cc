@@ -558,7 +558,7 @@ namespace springtail
             auto tuple = std::make_shared<FieldTuple>(fields, nullptr);
 
             // add the row to the table
-            table->insert(tuple, xid.xid, constant::UNKNOWN_EXTENT);
+            table->insert(tuple, constant::UNKNOWN_EXTENT);
         }
 
         // flush the table data to disk

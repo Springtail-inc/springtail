@@ -119,8 +119,7 @@ Service::_set_index_state(const proto::SetIndexStateRequest& request)
         static_cast<sys_tbl::IndexNames::State>(index_info.state()), index_info.is_unique());
 
     // update the index state
-    auto write_xid = _get_write_xid(request.db_id());
-    index_names_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
+    index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     std::map<uint32_t, uint32_t> keys;
     for (const auto& column : index_info.columns()) {
@@ -219,14 +218,13 @@ Service::_create_index(const proto::IndexRequest& request)
         auto ns_info = _get_namespace_info(request.db_id(), request.index().namespace_name(), xid);
         namespace_id = ns_info->id;
 
-        auto write_xid = _get_write_xid(request.db_id());
         auto index_names_t = _get_mutable_system_table(request.db_id(), sys_tbl::IndexNames::ID);
         auto tuple = sys_tbl::IndexNames::Data::tuple(
             namespace_id, request.index().name(), request.index().table_id(), request.index().id(),
             xid.xid, xid.lsn, static_cast<sys_tbl::IndexNames::State>(request.index().state()),
             request.index().is_unique());
 
-        index_names_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
+        index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
     }
 
     _write_index(xid, request.db_id(), request.index().table_id(), request.index().id(), keys);
@@ -405,7 +403,7 @@ Service::_drop_index(const XidLsn& xid,
     auto tuple = sys_tbl::IndexNames::Data::tuple(
         index_info.namespace_id(), index_info.name(), index_info.table_id(), index_id, xid.xid, xid.lsn,
         index_state, index_info.is_unique());
-    index_names_t->upsert(tuple, xid.xid, constant::UNKNOWN_EXTENT);
+    index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     std::map<uint32_t, uint32_t> keys;
     for (const auto& column : index_info.columns()) {
@@ -788,11 +786,10 @@ Service::_mutate_namespace(
     }
 
     // add the namespace to the namespace_names table
-    auto write_xid = _get_write_xid(db_id);
     auto table = _get_mutable_system_table(db_id, sys_tbl::NamespaceNames::ID);
     auto tuple =
         sys_tbl::NamespaceNames::Data::tuple(ns_id, (name) ? *name : "", xid.xid, xid.lsn, exists);
-    table->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
+    table->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     return ddl;
 }
@@ -1194,7 +1191,7 @@ Service::Revert(grpc::ServerContext* context,
         for (auto row : *table) {
             if (xid_f->get_uint64(row) > request->xid()) {
                 mtable->remove(std::make_shared<FieldTuple>(primary_fields, row),
-                               request->xid(), constant::UNKNOWN_EXTENT);
+                               constant::UNKNOWN_EXTENT);
             }
         }
     }
@@ -1368,12 +1365,11 @@ Service::_set_table_info(uint64_t db_id, TableCacheRecordPtr table_info)
     lock.unlock();
 
     // record the change to the system table
-    auto write_xid = _get_write_xid(db_id);
     auto table_names_t = _get_mutable_system_table(db_id, sys_tbl::TableNames::ID);
     auto tuple =
         sys_tbl::TableNames::Data::tuple(table_info->namespace_id, table_info->name, table_info->id,
                                          table_info->xid, table_info->lsn, table_info->exists);
-    table_names_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
+    table_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 }
 
 void
@@ -1508,12 +1504,11 @@ Service::_set_roots_info(uint64_t db_id,
     lock.unlock();
 
     // update the table_roots
-    auto write_xid = _get_write_xid(db_id);
     auto table_roots_t = _get_mutable_system_table(db_id, sys_tbl::TableRoots::ID);
     for (auto const& r : roots_info->roots()) {
         auto tuple = sys_tbl::TableRoots::Data::tuple(table_id, r.index_id(), xid.xid,
                                                       r.extent_id(), roots_info->snapshot_xid());
-        table_roots_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
+        table_roots_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
         LOG_DEBUG(LOG_SCHEMA, "Updated root {}@{}:{} {} - {}", table_id, xid.xid, xid.lsn,
                             r.index_id(), r.extent_id());
@@ -1523,7 +1518,7 @@ Service::_set_roots_info(uint64_t db_id,
     auto table_stats_t = _get_mutable_system_table(db_id, sys_tbl::TableStats::ID);
     auto tuple =
         sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats().row_count(), roots_info->stats().end_offset());
-    table_stats_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
+    table_stats_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     LOG_DEBUG(LOG_SCHEMA, "Updated stats {}@{}:{} - {}", table_id, xid.xid, xid.lsn,
                         roots_info->stats().row_count());
@@ -2183,7 +2178,6 @@ Service::_set_schema_info(uint64_t db_id,
                           const std::vector<proto::ColumnHistory>& columns)
 {
     auto schemas_t = _get_mutable_system_table(db_id, sys_tbl::Schemas::ID);
-    auto write_xid = _get_write_xid(db_id);
 
     // add the column change history to the cache
     for (auto& history : columns) {
@@ -2206,7 +2200,7 @@ Service::_set_schema_info(uint64_t db_id,
             history.column().name(), history.column().type(),
             history.column().pg_type(),  // pg type oid
             history.column().is_nullable(), value, history.update_type());
-        schemas_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
+        schemas_t->upsert(tuple, constant::UNKNOWN_EXTENT);
     }
 }
 
@@ -2252,8 +2246,7 @@ Service::_set_primary_index(uint64_t db_id,
     auto tuple = sys_tbl::IndexNames::Data::tuple(
         namespace_id, index.name(), index.table_id(), index.id(), xid.xid, xid.lsn,
         static_cast<sys_tbl::IndexNames::State>(index.state()), true);
-    auto write_xid = _get_write_xid(db_id);
-    index_names_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
+    index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     if (!primary_keys.empty()) {
         _write_index(xid, db_id, table_id, constant::INDEX_PRIMARY, primary_keys);
@@ -2329,7 +2322,6 @@ Service::_write_index(const XidLsn& xid,
         LOG_INFO("The index has no keys: {}:{} - {}", db_id, tab_id, index_id);
         return;
     }
-    auto write_xid = _get_write_xid(db_id);
 
     auto indexes_t = _get_mutable_system_table(db_id, sys_tbl::Indexes::ID);
     auto fields = sys_tbl::Indexes::Data::fields(tab_id, index_id, xid.xid, xid.lsn,
@@ -2342,7 +2334,7 @@ Service::_write_index(const XidLsn& xid,
         fields->at(sys_tbl::Indexes::Data::COLUMN_ID) =
             std::make_shared<ConstTypeField<uint32_t>>(entry.second);
 
-        indexes_t->upsert(std::make_shared<FieldTuple>(fields, nullptr), write_xid,
+        indexes_t->upsert(std::make_shared<FieldTuple>(fields, nullptr),
                           constant::UNKNOWN_EXTENT);
     }
 }
