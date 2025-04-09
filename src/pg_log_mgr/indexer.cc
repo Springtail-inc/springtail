@@ -33,15 +33,20 @@ namespace springtail::committer {
                 build({db_id, xid, ddl});
             } else if (action == "drop_index") {
                 drop(db_id, ddl["id"], xid);
+            } else if (action == "skip_index") {
+                skip_indexes(db_id, ddl["table_id"], xid);
             } else {
                 assert(false);
             }
         }
     }
 
-    void Indexer::abort_indices(uint64_t db_id, uint64_t table_id)
+    void Indexer::skip_indexes(uint64_t db_id, uint64_t table_id, uint64_t xid)
     {
-        std::scoped_lock g(_m, _table_idx_map_mtx);
+        std::scoped_lock g(_m, _table_idx_map_mtx, _xid_ddl_counter_map_mtx);
+        if (--_xid_ddl_counter_map[xid] == 0) {
+            _xid_ddl_counter_map.erase(xid);
+        }
         auto db_it = _table_idx_map.find(db_id);
         if (db_it == _table_idx_map.end()) {
             return; // No entries for this db_id
@@ -52,11 +57,11 @@ namespace springtail::committer {
             return; // No entries for this table_id
         }
 
-        // Iterate through all keys and set work_item as ABORTING
+        // Iterate through all keys and set work_item as SKIPPING
         for (const Key& key : table_it->second) {
             auto work_it = _work_set.find(key);
             if (work_it != _work_set.end()) {
-                work_it->second._status = IndexStatus::ABORTING;
+                work_it->second._status = IndexStatus::SKIPPING;
             }
         }
     }
@@ -282,13 +287,6 @@ namespace springtail::committer {
     void
     Indexer::_commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx, uint64_t end_xid)
     {
-        if (!root) {
-            // The build was cancelled as due to a shutdown.
-            // When the system restarts it will check the redis precommit hash
-            // and restart the build process.
-            return;
-        }
-
         auto [db_id, index_id] = key;
         auto tid = idx._ddl["table_id"];
         XidLsn xid{end_xid, constant::INDEX_COMMIT_LSN};
@@ -301,21 +299,48 @@ namespace springtail::committer {
         work_item = _work_set.at(key);
 
         _work_set.erase(key);
-
         auto client = sys_tbl_mgr::Client::get_instance();
-        auto extent_id = root->finalize();
-        if (work_item.is_status(IndexStatus::BUILDING)) {
-            auto meta = client->get_roots(db_id, tid, end_xid);
-            meta->roots.emplace_back(key.second, extent_id);
-            client->update_roots(db_id, tid, end_xid, *meta);
-            client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::READY);
+
+
+        if (!root) {
+            // if IndexStatus is BUILDING - stop could have got requested, so the index
+            //                              will be rebuilt during restart
+            // If IndexStatus is SKIPPING - nothing to do here as root also doesnt exist
+            // If IndexStatus is ABORTING - Drop came before build was even picked,
+            //                              mark the state as DELETED
+
+            if (work_item.is_status(IndexStatus::ABORTING)) {
+                auto table_exists = TableMgr::get_instance()->exists(db_id, tid, xid.xid, xid.lsn);
+                if (table_exists) {
+                    // when dropping a table, PG generates DROP TABLE first
+                    // following by DROP INDEX. We ignore DROP INDEX after DROP TABLE, because
+                    // indexes will be set as DELETED directly as part of sys_tbl_mgr DROP TABLE
+                    client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
+                }
+            }
         } else {
-            // the index was deleted while we were building it
-            // lets also finalize here as part of the tree
-            // may have got finalized while we were building.
-            root->truncate();
-            root->finalize();
-            client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
+            // Index building was attempted, finalize and process build/abort
+            auto extent_id = root->finalize();
+            if (work_item.is_status(IndexStatus::BUILDING)) {
+                auto meta = client->get_roots(db_id, tid, end_xid);
+                meta->roots.emplace_back(key.second, extent_id);
+                client->update_roots(db_id, tid, end_xid, *meta);
+                LOG_INFO("SETTING STATE {}", end_xid);
+                client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::READY);
+            } else if (work_item.is_status(IndexStatus::ABORTING)) {
+                // the index was deleted while we were building it
+                // lets also finalize here as part of the tree
+                // may have got finalized while we were building.
+                root->truncate();
+                root->finalize();
+                LOG_INFO("SETTING STATE {}", index_id);
+                client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
+            } else if (work_item.is_status(IndexStatus::SKIPPING)) {
+                // Index is being skipped as the table is in resync state,
+                // clear the root and finalize
+                root->truncate();
+                root->finalize();
+            }
         }
 
         // Cleanup table-index map
@@ -384,11 +409,10 @@ namespace springtail::committer {
             // there wont be any DDL
             is_fresh_drop = work_item.is_status(IndexStatus::DELETING);
 
-            // When drop index request comes in while
+            // When drop/skip index request comes in while
             // we are in the process of building/catching-up,
-            // ABORTING status will denote that, to proceed for abort
-            // in the commit phase
-            is_drop_while_processing = work_item.is_status(IndexStatus::ABORTING);
+            // Proceed for commit phase to decide on abort or skip
+            is_drop_while_processing = work_item.is_status(IndexStatus::ABORTING) || work_item.is_status(IndexStatus::SKIPPING);
         }
 
         if (is_fresh_drop) {

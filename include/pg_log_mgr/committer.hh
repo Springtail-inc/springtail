@@ -61,9 +61,6 @@ namespace springtail::committer {
         /** Perform cleanup on a failed thread. */
         void cleanup();
 
-        /** Perform actions once the table resync is in progress */
-        void execute_on_resync(uint64_t db_id, uint64_t table_id);
-
         // constants for the coordinator thread IDs
         constexpr static const std::string_view THREAD_TYPE = "commit";
         constexpr static const std::string_view THREAD_MAIN = "m";

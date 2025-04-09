@@ -94,8 +94,7 @@ namespace springtail::pg_log_mgr {
                  int port,
                  bool archive_logs,
                  std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
-                 std::shared_ptr<ConcurrentQueue<std::string>> index_reconciliation_queue,
-                 std::shared_ptr<committer::Committer> committer);
+                 std::shared_ptr<ConcurrentQueue<std::string>> index_reconciliation_queue);
 
         /**
          * @brief Construct a new Pg Log Mgr object (for testing only)
@@ -238,7 +237,6 @@ namespace springtail::pg_log_mgr {
         // Index reconciliation
 
         std::shared_ptr<ConcurrentQueue<std::string>> _index_reconciliation_queue; ///< Queue where index reconciliation requests are received
-        std::shared_ptr<committer::Committer> _committer;
         std::thread _reconciliation_thread;            ///< Index reconciliation thread
         /*
          * Index reconciliation thread; waits on index reconciliation requests

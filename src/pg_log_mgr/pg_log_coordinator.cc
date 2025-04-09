@@ -129,7 +129,7 @@ namespace springtail::pg_log_mgr {
         // create log mgr
         auto log_mgr = std::make_shared<PgLogMgr>(db_id, repl_log_path, xact_log_path, _host, db_name, _user_name,
                                                          _password, pub_name, slot_name, _log_size_rollover_threshold,
-                                                         _port, _archive_logs, _committer_queue, _index_reconciliation_queue, _committer);
+                                                         _port, _archive_logs, _committer_queue, _index_reconciliation_queue);
         _log_mgrs[db_id] = log_mgr;
 
         lock.unlock();

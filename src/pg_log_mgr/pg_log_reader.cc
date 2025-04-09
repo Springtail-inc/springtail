@@ -598,6 +598,15 @@ namespace springtail::pg_log_mgr {
         TableSyncRequest request(table_oid, xidlsn);
         table_sync_queue.push(request);
 
+        // Add a message to skip indexes for this table
+        // for the currently building indexes and the ones
+        // belonging to this transaction
+        nlohmann::json ddl;
+        RedisDDL redis_ddl;
+        ddl["action"] = "skip_index";
+        ddl["table_id"] = table_oid;
+        redis_ddl.add_index_ddl(_db, xidlsn.xid, ddl.dump());
+
         // notify the Committer to stop committing XIDs
         if (is_first) {
             _committer_queue->push(std::make_shared<committer::XidReady>(_db));

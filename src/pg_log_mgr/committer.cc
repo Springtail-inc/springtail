@@ -25,13 +25,6 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 }
 
     void
-    Committer::execute_on_resync(uint64_t db_id, uint64_t table_id)
-    {
-        // Abort index builds for the table
-        _indexer->abort_indices(db_id, table_id);
-    }
-
-    void
     Committer::run()
     {
         // perform cleanup for any Committer threads in a previous run
