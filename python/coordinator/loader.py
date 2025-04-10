@@ -139,24 +139,28 @@ class Loader():
 
             self.logger.info("Cleanup completed successfully.")
 
+            # wait for the coordinator to start; throws an exception if it fails
+            self.props.wait_for_coordinator_state(CoordinatorState.RUNNING)
+            self.logger.info("Coordinator started successfully.")
+
+            return
         except Exception as e:
             self.logger.error(f"Error during reloading coordinator: {e}")
             self.prod.send_sns('coordinator_reload_failed')
 
             # try and recover from the error
-            for command in reversed(recovery):
-                try:
+            try:
+                for command in reversed(recovery):
                     self.logger.info(f"Recovering from error: {command}")
                     run_command(*command)
-                except Exception as e:
-                    self.logger.error(f"Error during recovery: {e}")
 
-        try:
-            self.props.wait_for_coordinator_state(CoordinatorState.RUNNING)
-            self.logger.info("Coordinator started successfully.")
-        except Exception as e:
-            self.logger.error(f"Error waiting for coordinator to start: {e}")
-            self.prod.send_sns('coordinator_reload_failed')
+                self.props.wait_for_coordinator_state(CoordinatorState.RUNNING)
+                self.logger.info("Coordinator started successfully.")
+
+                return
+            except Exception as e:
+                self.logger.error(f"Error during recovery: {e}")
+                self.prod.send_sns('coordinator_reload_failed')
 
 
 def startup(install_path : str, project_root: str) -> None:
