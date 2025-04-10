@@ -11,3 +11,8 @@ docker
 .github
 .githooks
 .scannerwork
+.git
+.idea
+.scannerwork
+.vscode
+build_scripts
