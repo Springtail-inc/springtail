@@ -338,6 +338,25 @@ class Properties:
         if timeout != 0:
             raise TimeoutError('Timed out waiting for state')
 
+    def wait_for_coordinator_state(self, state : str, timeout : int = 600) -> None:
+        """Wait for the coordinator state to reach the desired state.
+        :param state: the state to wait for
+        :param timeout: the maximum time to wait in seconds (0 wait forever)
+        """
+        key = self.db_instance_id + ':coordinator_state'
+        field_key = self.service_name + ':' + self.instance_key
+        start = time.time()
+        while True:
+            current_state = self.redis.hget(key, field_key)
+            if current_state == state:
+                return
+            time.sleep(1)
+            if time.time() - start > timeout:
+                break
+
+        if timeout != 0:
+            raise TimeoutError('Timed out waiting for state')
+
     def get_pid_path(self) -> str:
         """Return the path to the pid file."""
         system_config = self.get_system_config()
