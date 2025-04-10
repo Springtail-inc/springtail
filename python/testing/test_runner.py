@@ -20,23 +20,26 @@ from common import merge_json
 def gen_test_cases(test_set: str,
                    test_files: list,
                    config_file: str,
-                   build_dir: str) -> list[TestSet]:
+                   build_dir: str,
+                   test_params: dict) -> list[TestSet]:
     """Generate a test set with specific test cases."""
-    test = TestSet(test_set, config_file, build_dir, test_files)
+    test = TestSet(test_set, config_file, build_dir, test_params, test_files)
     return [ test ]
 
 
 def gen_test_set(test_set: str,
                  config_file: str,
-                 build_dir: str) -> list[TestSet]:
+                 build_dir: str,
+                 test_params: dict) -> list[TestSet]:
     """Generate all of the test cases in a specific test set."""
-    test = TestSet(test_set, config_file, build_dir)
+    test = TestSet(test_set, config_file, build_dir, test_params)
     return [ test ]
 
 
 def gen_all_tests(test_folder: str,
                   config_file: str,
                   build_dir: str,
+                  test_params: dict,
                   test_dirs: list[str]) -> list[TestSet]:
     """Generate all test sets in the test folder.
 
@@ -57,7 +60,7 @@ def gen_all_tests(test_folder: str,
         if not os.path.isfile(os.path.join(test_folder, test_set, '__config.sql')):
             print(f'Skipping test set {test_set} -- missing __config.sql')
             continue
-        test_sets.append(TestSet(os.path.join(test_folder, test_set), config_file, build_dir))
+        test_sets.append(TestSet(os.path.join(test_folder, test_set), config_file, build_dir, test_params))
 
     return test_sets
 
@@ -256,36 +259,39 @@ if __name__ == "__main__":
             raise ValueError(f'overlay "{args.overlay}" does not exist in the configuration')
         overlay_config_file = os.path.join(tmp_config_dir, f'{args.overlay}.json')
 
+        # Extract the overlay configuration and the params specific to the current overlay
+        overlay_config = yaml_config['overlays'][args.overlay]
+        overlay_test_params = overlay_config.get('params', {})
         # build the test sets for the requested overlay
         if args.test_set is None:
-            overlay_test_sets = yaml_config['overlays'][args.overlay]['test_sets']
-            tests = gen_all_tests(test_folder, overlay_config_file, build_dir, overlay_test_sets)
+            overlay_test_sets = overlay_config['test_sets']
+            tests = gen_all_tests(test_folder, overlay_config_file, build_dir, overlay_test_params, overlay_test_sets)
         else:
             if args.test_case is None:
                 tests = gen_test_set(os.path.join(test_folder, args.test_set),
-                                     overlay_config_file, build_dir)
+                                     overlay_config_file, build_dir, overlay_test_params)
             else:
                 tests = gen_test_cases(os.path.join(test_folder, args.test_set), args.test_case,
-                                       overlay_config_file, build_dir)
+                                       overlay_config_file, build_dir, overlay_test_params)
 
     else:
         default_config_file = os.path.join(tmp_config_dir, 'default.json')
         if args.test_set is None:
-            tests = gen_all_tests(test_folder, default_config_file, build_dir, default_test_sets)
+            tests = gen_all_tests(test_folder, default_config_file, build_dir, {}, default_test_sets)
 
             if yaml_config.get('overlays'):
                 for overlay_name in yaml_config['overlays']:
                     overlay_config_file = os.path.join(tmp_config_dir, f'{overlay_name}.json')
                     overlay_test_sets = yaml_config['overlays'][overlay_name]['test_sets']
                     tests += gen_all_tests(test_folder, overlay_config_file,
-                                           build_dir, overlay_test_sets)
+                                           build_dir, {}, overlay_test_sets)
         else:
             if args.test_case is None:
                 tests = gen_test_set(os.path.join(test_folder, args.test_set),
-                                     default_config_file, build_dir)
+                                     default_config_file, build_dir, {})
             else:
                 tests = gen_test_cases(os.path.join(test_folder, args.test_set), args.test_case,
-                                       default_config_file, build_dir)
+                                       default_config_file, build_dir, {})
 
     # run the tests
     for test in tests:

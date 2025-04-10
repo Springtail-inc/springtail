@@ -19,6 +19,7 @@ class TestCase:
                  filename: str,
                  props: springtail.Properties,
                  build_dir: str,
+                 test_params: dict = {},
                  valid_sections: list = ['test', 'verify', 'cleanup']) -> None:
         """Initialize the test case"""
         self._filename = os.path.abspath(filename)
@@ -26,6 +27,7 @@ class TestCase:
         self._directory = os.path.dirname(self._filename)
         self._props = props
         self._build_dir = build_dir
+        self._test_params = test_params
         self._status = 'INIT'
         self._result = 'UNKNOWN'
         self._duration = 0
@@ -190,6 +192,14 @@ class TestCase:
                             'count': int(directive[1])
                         }, section, is_threaded, cur_txn, line_num)
 
+                    elif directive[0] == 'streaming':
+                        if section != 'test':
+                            self._raise_error(f'{line_num}: "streaming" must be part of the "test" section')
+                        self._append_command({
+                            'type': 'streaming',
+                            'enable': directive[1] == 'true'
+                        }, section, is_threaded, cur_txn, line_num)
+
                     elif directive[0] == 'schema_check':
                         if section != 'verify':
                             self._raise_error(f'{line_num}: "schema_check" must be part of the "verify" section')
@@ -325,6 +335,19 @@ class TestCase:
                 self._fdw = springtail.connect_fdw_instance(self._props, self._replica_name)
 
             return None
+
+        if command['type'] == 'streaming':
+            is_enabling = command['enable']
+            with self._connections[command['txn']].cursor() as cursor:
+                if is_enabling:
+                    logging.debug(f'Enabling streaming')
+                    # set to lower value to enable streaming
+                    self._execute_sql(cursor, f"ALTER SYSTEM SET logical_decoding_work_mem = '64kB'", False)
+                    self._execute_sql(cursor, f"SELECT pg_reload_conf()", False)
+                else:
+                    # reset to default value
+                    self._execute_sql(cursor, f"ALTER SYSTEM SET logical_decoding_work_mem = '64MB'", False)
+                    self._execute_sql(cursor, f"SELECT pg_reload_conf()", False)
 
         # handle SQL statements
         with self._connections[command['txn']].cursor() as cursor:
@@ -541,8 +564,14 @@ class TestCase:
 
         # construct a connection for each transaction in the test
         for txn in self._txns:
-            logging.debug(f'Connecting to database for txn "{txn}"')
-            self._connections[txn] = springtail.connect_instance(self._props, self._primary_name)
+            # Determine what config to use for the test phase
+            use_proxy_for_test = self._test_params.get('use_proxy_for_test', False)
+            if use_proxy_for_test:
+                logging.debug(f'Connecting to proxy for txn "{txn}"')
+                self._connections[txn] = springtail.connect_proxy(self._props, self._primary_name)
+            else:
+                logging.debug(f'Connecting to primary for txn "{txn}"')
+                self._connections[txn] = springtail.connect_db_instance(self._props, self._primary_name)
             self._connections[txn].autocommit = self._metadata['autocommit']
 
         # connect to the replica database -- used to perform any 'sync' directives
@@ -614,6 +643,15 @@ class TestCase:
 
         # execute the verification commands against both databases, compare the results
         for command in self._sections['verify'][0]['sequential']:
+            # Determine what config to use for verify phase
+            use_proxy_for_verify = self._test_params.get('use_proxy_for_verify', False)
+            if use_proxy_for_verify:
+                logging.info(f'Using proxy to verify')
+                self._connections[command['txn']] = springtail.connect_proxy(self._props, self._primary_name)
+            else:
+                logging.info(f'Using primary to verify')
+                self._connections[command['txn']] = springtail.connect_db_instance(self._props, self._primary_name)
+
             primary_result = self._execute_command(command, True)
             replica_result = self._replica_command(command)
 

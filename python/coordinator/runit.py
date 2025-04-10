@@ -186,6 +186,8 @@ if __name__ == "__main__":
         component = factory.create_postgres()
     elif component_name == 'ddl_daemon':
         component = factory.create_ddl_daemon('test_user', 'test_password')
+    elif component_name == 'proxy':
+        component = factory.create_proxy()
     else:
         raise ValueError(f"Invalid component name: {component_name}")
 
