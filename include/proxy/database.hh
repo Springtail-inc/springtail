@@ -413,13 +413,13 @@ namespace springtail::pg_proxy {
         void remove_schema_table(const std::string &db_schema, const std::string &db_table);
 
         /**
-         * @brief Verify that the table for the given schema is replicated
-         * @param db_schema - schema
+         * @brief Verify that the table is replicated
          * @param db_table - table
+         * @param db_schema - schema optional
          * @return true - replicated
          * @return false - not replicated
          */
-        bool has_schema_table(const std::string &db_schema, const std::string &db_table) const;
+        bool has_table(const std::string &db_table, std::optional<std::string> db_schema) const;
 
         /**
          * @brief Set database state
@@ -455,7 +455,7 @@ namespace springtail::pg_proxy {
             return _db_name;
         }
     private:
-        std::map<std::string, std::set<std::string>> _schema_tables_map; ///< maps schema to a set of table names
+        std::unordered_multimap<std::string, std::string> _table_map;  ///< maps table name to schema
         mutable std::shared_mutex _db_mutex;            ///< mutex for accessing and modifying database data
         std::string _db_name;                           ///< database name
         uint64_t _db_id;                                ///< database id
@@ -597,29 +597,30 @@ namespace springtail::pg_proxy {
         ServerSessionPtr allocate_session(const Session::Type type,
                                           const uint64_t db_id,
                                           UserPtr user,
-                                          const std::unordered_map<std::string, std::string> &parameters) {
+                                          const std::unordered_map<std::string, std::string> &parameters)
+        {
             if (type == Session::Type::PRIMARY) {
-                assert(_primary_set != nullptr);
+                CHECK_NE(_primary_set, nullptr);
                 return _primary_set->allocate_session(user, db_id, parameters);
             } else if (type == Session::Type::REPLICA) {
-                assert(_replica_set != nullptr);
+                CHECK_NE(_replica_set, nullptr);
+                CHECK_NE(db_id, INVALID_DB_ID);
                 return _replica_set->allocate_session(user, db_id, parameters);
             }
-            assert (0);
+
+            DCHECK(false);
             return nullptr;
         }
 
         /**
          * @brief Verify if the table is replicated for give database and schema
          * @param db_id - database id
-         * @param default_schema - default schema name to use in case schema is empty
          * @param schema - schema name
          * @param table - table name
          * @return true - table is replicated
          * @return false - table is not replicated
          */
         bool is_table_replicated(const uint64_t db_id,
-            const std::string &default_schema,
             const std::string &schema,
             const std::string &table) const;
 

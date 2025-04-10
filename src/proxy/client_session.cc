@@ -4,6 +4,7 @@
 
 #include <common/logging.hh>
 #include <common/common.hh>
+#include <common/constants.hh>
 
 #include <pg_repl/pg_types.hh>
 
@@ -177,6 +178,11 @@ namespace springtail::pg_proxy {
             _database = _auth->database();
             _user = _auth->user();
             _parameters = _auth->parameters();
+
+            if (_db_id == INVALID_DB_ID) {
+                // not connecting to a replicated database, force primary only mode
+                _primary_mode = true;
+            }
 
             PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session auth done, db={}, user={}", _id, _database, _user->username());
             _primary_session = _create_server_session(Session::Type::PRIMARY, seq_id);
@@ -520,7 +526,7 @@ namespace springtail::pg_proxy {
 
         // parse the query
         std::vector<Parser::StmtContextPtr> &&parse_contexts = Parser::parse_query(query, [this](const std::string &schema, const std::string &table) {
-            return DatabaseMgr::get_instance()->is_table_replicated(this->_db_id, this->_default_schema, schema, table);
+            return DatabaseMgr::get_instance()->is_table_replicated(this->_db_id, schema, table);
         });
 
         // Create a query statement object
@@ -827,7 +833,15 @@ namespace springtail::pg_proxy {
 
         // get a session from the pool or allocate a new one
         bool from_pool = true;
-        ServerSessionPtr session = db_mgr->get_pooled_session(type, _db_id, _user->username());
+        ServerSessionPtr session = nullptr;
+
+        if (_db_id != INVALID_DB_ID) {
+            // currently don't use pooling for non-replicated databases
+            session = db_mgr->get_pooled_session(type, _db_id, _user->username());
+        } else {
+            // with no db_id we must be in primary mode
+            CHECK_EQ(type, PRIMARY);
+        }
 
         if (session == nullptr) {
             // need to allocate a new session

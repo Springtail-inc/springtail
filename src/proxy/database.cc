@@ -7,6 +7,7 @@
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
+#include <common/constants.hh>
 
 #include <proxy/database.hh>
 #include <proxy/exception.hh>
@@ -223,8 +224,8 @@ namespace springtail::pg_proxy
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Session being released: [S:{:d}]", session->id());
 
-        // deallocate if connection is closed
-        if (session->is_connection_closed()) {
+        // deallocate if connection is closed or database id is invalid
+        if (session->is_connection_closed() || session->database_id() == INVALID_DB_ID) {
             deallocate = true;
         }
 
@@ -438,18 +439,7 @@ namespace springtail::pg_proxy
     Database::_internal_add_schema_table(const std::string &db_schema, const std::string &db_table)
     {
         // lock must be held
-
-        // lookup schema in schema_tables map
-        auto schema_it = _schema_tables_map.find(db_schema);
-        if (schema_it == _schema_tables_map.end()) {
-            // doesn't exist, create new entry
-            std::set<std::string> empty_schema;
-            _schema_tables_map.insert(std::pair(db_schema, empty_schema));
-            schema_it = _schema_tables_map.find(db_schema);
-        }
-
-        auto &schema = schema_it->second;
-        schema.insert(db_table);
+        _table_map[db_table] = db_schema;
     }
 
     void
@@ -457,35 +447,32 @@ namespace springtail::pg_proxy
     {
         std::unique_lock lock(_db_mutex);
 
-        auto schema_it = _schema_tables_map.find(db_schema);
-        if (schema_it == _schema_tables_map.end()) {
-            // doesn't exist
-            return;
-        }
-
-        auto &schema = schema_it->second;
-        schema.erase(db_table);
-        if (schema.empty()) {
-            // remove schema if schema is now empty
-            _schema_tables_map.erase(db_schema);
+        auto range = _table_map.equal_range(db_table);
+        for (auto it = range.first; it != range.second; ++it) {
+            if (it->second == db_schema) {
+                _table_map.erase(it);
+                return;
+            }
         }
     }
 
     bool
-    Database::has_schema_table(const std::string &db_schema, const std::string &db_table) const
+    Database::has_table(const std::string &db_table,
+                        std::optional<std::string> db_schema) const
     {
         std::shared_lock lock(_db_mutex);
 
-        // lookup schema
-        auto schema_it = _schema_tables_map.find(db_schema);
-        if (schema_it == _schema_tables_map.end()) {
-            return false;
-        }
+        auto range = _table_map.equal_range(db_table);
+        for (auto it = range.first; it != range.second; ++it) {
+            // if no schema is provided, check if the table exists
+            if (!db_schema.has_value()) {
+                return true;
+            }
 
-        // lookup table
-        auto &schema = schema_it->second;
-        if (schema.contains(db_table)) {
-            return true;
+            // if we have a schema then use it
+            if (it->second == db_schema.value()) {
+                return true;
+            }
         }
 
         return false;
@@ -774,10 +761,14 @@ namespace springtail::pg_proxy
 
     bool
     DatabaseMgr::is_table_replicated(const uint64_t db_id,
-                                     const std::string &default_schema,
                                      const std::string &schema,
                                      const std::string &table) const
     {
+        // if invalid db id, db is not replicated, so return false
+        if (db_id == INVALID_DB_ID) {
+            return false;
+        }
+
         // get the database object by db_id
         std::shared_lock lock(_db_mutex);
         auto iter = _db_id_rep_dbs.find(db_id);
@@ -787,12 +778,16 @@ namespace springtail::pg_proxy
         DatabasePtr db_object = iter->second;
         lock.unlock();
 
-        return db_object->has_schema_table((schema.empty()) ? default_schema : schema, table);
+        return db_object->has_table(table, schema.empty() ? nullopt : {schema});
     }
 
     bool
     DatabaseMgr::is_database_ready(uint64_t db_id) const
     {
+        if (db_id == INVALID_DB_ID) {
+            return false;
+        }
+
         std::shared_lock lock(_db_mutex);
         auto iter = _db_id_rep_dbs.find(db_id);
         if (iter == _db_id_rep_dbs.end()) {
