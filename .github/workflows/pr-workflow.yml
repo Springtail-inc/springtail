@@ -18,6 +18,7 @@ permissions:
 
 jobs:
   test:
+    if: ${{ github.event.pull_request.draft == false }}
     uses: ./.github/workflows/test.yml
     with:
       builder_image_version_tag: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
