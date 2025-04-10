@@ -2,6 +2,7 @@
 #include <atomic>
 
 #include <common/logging.hh>
+#include <common/constants.hh>
 
 #include <proxy/database.hh>
 #include <proxy/session.hh>
@@ -61,7 +62,7 @@ namespace springtail::pg_proxy {
         if (optional_db_id.has_value()) {
             _db_id = optional_db_id.value();
         } else {
-            _state = ERROR;
+            _db_id = constant::INVALID_DB_ID;
         }
     }
 
