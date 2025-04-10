@@ -409,18 +409,10 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 });
 
         for (auto [db_id, xid, ddls] : precommit) {
-            uint64_t commit_xid = _xid_mgr->get_committed_xid(db_id, 0);
-            if (xid <= commit_xid) {
-                //TODO: In the synchronized version this should not be possible.
-                // We should figure out how to deal with it eventually.
-                assert(false);
-                _redis_ddl.abort_index_ddl(db_id, xid);
-                continue;
-            }
-            for (auto const &ddl: ddls) {
+            for (auto const &ddl: ddls["ddls"]) {
                 auto action = ddl["action"];
-                uint32_t index_id = ddl["id"];
                 if (action == "create_index") {
+                    uint32_t index_id = ddl["id"];
                     uint64_t tid = ddl["table_id"];
                     if (_index_exists(db_id, tid, index_id, xid)) {
                         // this is very unlikely. It would mean that the system went down
@@ -449,7 +441,9 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                         _indexer->build({db_id, xid, ddl});
                     }
                 } else if (action == "drop_index") {
-                    _indexer->drop(db_id, index_id, xid);
+                    _indexer->drop(db_id, ddl["id"], xid);
+                } else if (action == "abort_index") {
+                    _indexer->abort_indexes(db_id, ddl["table_id"], xid);
                 } else {
                     assert(false);
                 }
