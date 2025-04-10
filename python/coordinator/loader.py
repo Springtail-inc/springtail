@@ -155,12 +155,11 @@ class Loader():
                     run_command(*command)
 
                 self.props.wait_for_coordinator_state(CoordinatorState.RUNNING)
-                self.logger.info("Coordinator started successfully.")
+                self.logger.info("Coordinator started successfully after rollback.")
 
                 return
             except Exception as e:
                 self.logger.error(f"Error during recovery: {e}")
-                self.prod.send_sns('coordinator_reload_failed')
 
 
 def startup(install_path : str, project_root: str) -> None:
