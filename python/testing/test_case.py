@@ -420,8 +420,8 @@ class TestCase:
             if not_ready_result == ready_result:
                 return True
 
-            # If wait_for is 0 or time is exceeded, raise TimeoutError
-            if wait_for == 0 or (time.time() - start_time) >= wait_for:
+            # If wait_for time is exceeded, raise failure
+            if (time.time() - start_time) >= wait_for:
                 self._raise_failure(f'Secondary indexes not in sync within {wait_for}s.')
 
 

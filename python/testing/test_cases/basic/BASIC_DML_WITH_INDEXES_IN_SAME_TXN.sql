@@ -21,7 +21,7 @@ BEGIN;
 COMMIT;
 
 ## verify
-### schema_check public ddl_test_same_txn 5
+### schema_check public ddl_test_same_txn
 SELECT * FROM ddl_test_same_txn ORDER BY id;
 
 ## cleanup
