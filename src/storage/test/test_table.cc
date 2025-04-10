@@ -203,12 +203,12 @@ namespace {
         };
 
         void
-        _populate_table(MutableTablePtr mtable, uint64_t xid)
+        _populate_table(MutableTablePtr mtable)
         {
             csv::CSVReader reader("test_btree_simple.csv");
             for (auto &&r : reader) {
                 // insert data to the tree
-                mtable->insert(std::make_shared<FieldTuple>(_csv_fields, r), xid, constant::UNKNOWN_EXTENT);
+                mtable->insert(std::make_shared<FieldTuple>(_csv_fields, r), constant::UNKNOWN_EXTENT);
             }
         }
 
@@ -223,7 +223,6 @@ namespace {
                     uint64_t extent_id,
                     std::vector<TuplePtr> &&tuples)
                 : _table(table),
-                  _xid(xid),
                   _extent_id(extent_id),
                   _tuples(tuples)
             { }
@@ -234,13 +233,12 @@ namespace {
              */
             void operator()() {
                 for (auto &tuple : _tuples) {
-                    _table->update(tuple, _xid, _extent_id);
+                    _table->update(tuple, _extent_id);
                 }
             }
 
         private:
             MutableTablePtr _table;
-            uint64_t _xid;
             uint64_t _extent_id;
             std::vector<TuplePtr> _tuples;
         };
@@ -298,7 +296,7 @@ namespace {
         auto mtable = _create_mtable(1001, target_xid, metadata.roots);
 
         // insert a number of rows
-        _populate_table(mtable, target_xid);
+        _populate_table(mtable);
 
         // finalize the table
         metadata = mtable->finalize();
@@ -352,7 +350,7 @@ namespace {
         auto mtable = _create_mtable(1002, target_xid, metadata.roots);
 
         // insert a number of rows
-        _populate_table(mtable, target_xid);
+        _populate_table(mtable);
 
         // remove rows with unknown positions
         // note: rows with table_id == 1
@@ -364,7 +362,7 @@ namespace {
             "sfrankland0"
         };
         for (auto &key : keys) {
-            mtable->remove(_create_key(key), target_xid, constant::UNKNOWN_EXTENT);
+            mtable->remove(_create_key(key), constant::UNKNOWN_EXTENT);
         }
 
         // update some row data with unknown positions
@@ -377,7 +375,7 @@ namespace {
             _create_value(6, "gnatte5", 100)
         };
         for (auto &value : update_values) {
-            mtable->update(value, target_xid, constant::UNKNOWN_EXTENT);
+            mtable->update(value, constant::UNKNOWN_EXTENT);
         }
 
         // upsert some missing rows with unknown positions
@@ -389,7 +387,7 @@ namespace {
             _create_value(1500, "sfrankland0", 1)
         };
         for (auto &value : upsert_values) {
-            mtable->upsert(value, target_xid, constant::UNKNOWN_EXTENT);
+            mtable->upsert(value, constant::UNKNOWN_EXTENT);
         }
 
         // upsert some existing rows with unknown positions
@@ -401,7 +399,7 @@ namespace {
             _create_value(3, "dhaggleton2", 103)
         };
         for (auto &value : upsert_values) {
-            mtable->upsert(value, target_xid, constant::UNKNOWN_EXTENT);
+            mtable->upsert(value, constant::UNKNOWN_EXTENT);
         }
 
         // finalize the table
@@ -468,7 +466,7 @@ namespace {
         auto mtable = _create_mtable(1003, target_xid, metadata.roots);
 
         // insert a number of rows
-        _populate_table(mtable, target_xid);
+        _populate_table(mtable);
 
         // finalize the table
         metadata = mtable->finalize();
@@ -493,7 +491,7 @@ namespace {
             "sfrankland0"
         };
         for (auto &key : keys) {
-            mtable->remove(_create_key(key), target_xid, constant::UNKNOWN_EXTENT);
+            mtable->remove(_create_key(key), constant::UNKNOWN_EXTENT);
         }
 
         // remove rows with known positions
@@ -508,7 +506,7 @@ namespace {
         for (auto &key : keys) {
             auto &&search_key = _create_key(key);
             uint64_t extent_id = table->primary_lookup(search_key);
-            mtable->remove(search_key, target_xid, extent_id);
+            mtable->remove(search_key, extent_id);
         }
 
         // finalize the table
@@ -565,7 +563,7 @@ namespace {
             _create_value(6, "gnatte5", 100)
         };
         for (auto &value : update_values) {
-            mtable->update(value, target_xid, constant::UNKNOWN_EXTENT);
+            mtable->update(value, constant::UNKNOWN_EXTENT);
         }
 
         // update some row data with known positions
@@ -587,7 +585,7 @@ namespace {
         for (int i = 0; i < update_keys.size(); i++) {
             auto &&search_key = _create_key(update_keys[i]);
             uint64_t extent_id = table->primary_lookup(search_key);
-            mtable->update(update_values[i], target_xid, extent_id);
+            mtable->update(update_values[i], extent_id);
         }
 
         // finalize the table
@@ -649,7 +647,7 @@ namespace {
             _create_value(1500, "sfrankland0", 1)
         };
         for (auto &value : upsert_values) {
-            mtable->upsert(value, target_xid, constant::UNKNOWN_EXTENT);
+            mtable->upsert(value, constant::UNKNOWN_EXTENT);
         }
 
         // upsert some missing rows with known positions
@@ -671,7 +669,7 @@ namespace {
         for (int i = 0; i < upsert_keys.size(); i++) {
             auto &&search_key = _create_key(upsert_keys[i]);
             uint64_t extent_id = table->primary_lookup(search_key);
-            mtable->upsert(upsert_values[i], target_xid, extent_id);
+            mtable->upsert(upsert_values[i], extent_id);
         }
 
         // finalize the table
@@ -738,7 +736,7 @@ namespace {
             _create_value(3, "dhaggleton2", 103)
         };
         for (auto &value : upsert_values) {
-            mtable->upsert(value, target_xid, constant::UNKNOWN_EXTENT);
+            mtable->upsert(value, constant::UNKNOWN_EXTENT);
         }
 
         // upsert some existing rows with known positions
@@ -760,7 +758,7 @@ namespace {
         for (int i = 0; i < upsert_keys.size(); i++) {
             auto &&search_key = _create_key(upsert_keys[i]);
             uint64_t extent_id = table->primary_lookup(search_key);
-            mtable->upsert(upsert_values[i], target_xid, extent_id);
+            mtable->upsert(upsert_values[i], extent_id);
         }
 
         // finalize the table
@@ -837,7 +835,7 @@ namespace {
         auto mtable = _create_mtable(1004, target_xid, metadata.roots);
 
         // insert a number of rows
-        _populate_table(mtable, target_xid);
+        _populate_table(mtable);
 
         // finalize the table
         metadata = mtable->finalize();
@@ -939,7 +937,7 @@ namespace {
         auto mtable = _create_mtable(1005, target_xid, metadata.roots);
 
         // insert a number of rows
-        _populate_table(mtable, target_xid);
+        _populate_table(mtable);
 
         // finalize the table
         metadata = mtable->finalize();
