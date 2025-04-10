@@ -154,8 +154,5 @@
             "metrics_export_interval_millis": 60000,
             "metrics_export_timeout_millis": 30000,
             "remote_log_level": "info"
-    },
-    "integration_test_config": {
-	    "use_proxy": false
     }
 }
