@@ -1206,12 +1206,11 @@ Service::_mutate_usertype(uint64_t db_id,
         _usertype_id_cache[db_id][type_id][xid] = entry;
     }
 
-    // add the namespace to the namespace_names table
-    auto write_xid = _get_write_xid(db_id);
+    // add the type to the user types table
     auto table = _get_mutable_system_table(db_id, sys_tbl::UserTypes::ID);
     auto tuple =
         sys_tbl::UserTypes::Data::tuple(type_id, ns_id, name, value_json, xid.xid, xid.lsn, type, exists);
-    table->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
+    table->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     return ddl;
 }

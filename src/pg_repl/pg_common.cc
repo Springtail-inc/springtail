@@ -5,9 +5,9 @@ extern "C" {
     #include <catalog/pg_type.h>
 }
 
-namespace springtail 
+namespace springtail
 {
-    SchemaType 
+    SchemaType
     convert_pg_type(int32_t pg_type)
     {
         switch (pg_type) {

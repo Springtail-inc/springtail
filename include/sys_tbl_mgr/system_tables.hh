@@ -388,7 +388,7 @@ public:
         static const std::vector<SchemaColumn> SCHEMA;
 
         static TuplePtr tuple(
-            uint32_t namespace_id, const std::string &name, uint64_t xid, uint64_t lsn, bool exists)
+            uint64_t namespace_id, const std::string &name, uint64_t xid, uint64_t lsn, bool exists)
         {
             auto fields = std::make_shared<FieldArray>(5);
             fields->at(NAMESPACE_ID) = std::make_shared<ConstTypeField<uint64_t>>(namespace_id);
@@ -460,23 +460,23 @@ public:
         static const std::vector<SchemaColumn> SCHEMA;
 
         static TuplePtr tuple(
-            uint32_t type_id,
-            uint32_t namespace_id,
+            uint64_t type_id,
+            uint64_t namespace_id,
             const std::string &name,
             const std::string &value,
             uint64_t xid,
             uint64_t lsn,
-            int8_t type,
+            uint8_t type,
             bool exists)
         {
-            auto fields = std::make_shared<FieldArray>(7);
+            auto fields = std::make_shared<FieldArray>(8);
             fields->at(TYPE_ID) = std::make_shared<ConstTypeField<uint64_t>>(type_id);
             fields->at(NAMESPACE_ID) = std::make_shared<ConstTypeField<uint64_t>>(namespace_id);
             fields->at(NAME) = std::make_shared<ConstTypeField<std::string>>(name);
             fields->at(VALUE) = std::make_shared<ConstTypeField<std::string>>(value);
             fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
             fields->at(LSN) = std::make_shared<ConstTypeField<uint64_t>>(lsn);
-            fields->at(TYPE) = std::make_shared<ConstTypeField<int8_t>>(type);
+            fields->at(TYPE) = std::make_shared<ConstTypeField<uint8_t>>(type);
             fields->at(EXISTS) = std::make_shared<ConstTypeField<bool>>(exists);
             return std::make_shared<FieldTuple>(fields, nullptr);
         }

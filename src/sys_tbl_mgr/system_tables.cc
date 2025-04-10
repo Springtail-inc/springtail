@@ -160,14 +160,14 @@ const std::vector<std::string> NamespaceNames::Secondary::KEY = {"name", "xid", 
 
 // User defined types
 const std::vector<SchemaColumn> UserTypes::Data::SCHEMA = {
-    {"type_id", 0, SchemaType::UINT32, INT8OID, false, 0},
-    {"namespace_id", 1, SchemaType::UINT64, INT8OID, false},
-    {"name", 2, SchemaType::TEXT, TEXTOID, false},
-    {"value", 2, SchemaType::TEXT, TEXTOID, false},
-    {"xid", 3, SchemaType::UINT64, INT8OID, false, 1},
-    {"lsn", 4, SchemaType::UINT64, INT8OID, false, 2},
-    {"type", 5, SchemaType::UINT8, CHAROID, false},
-    {"exists", 6, SchemaType::BOOLEAN, BOOLOID, false}};
+    {"type_id", 1, SchemaType::UINT64, INT8OID, false, 0},
+    {"namespace_id", 2, SchemaType::UINT64, INT8OID, false},
+    {"name", 3, SchemaType::TEXT, TEXTOID, false},
+    {"value", 4, SchemaType::TEXT, TEXTOID, false},
+    {"xid", 5, SchemaType::UINT64, INT8OID, false, 1},
+    {"lsn", 6, SchemaType::UINT64, INT8OID, false, 2},
+    {"type", 7, SchemaType::UINT8, CHAROID, false},
+    {"exists", 8, SchemaType::BOOLEAN, BOOLOID, false}};
 
 const std::vector<SchemaColumn> UserTypes::Primary::SCHEMA = {
     {"type_id", 1, SchemaType::UINT64, INT8OID, false},

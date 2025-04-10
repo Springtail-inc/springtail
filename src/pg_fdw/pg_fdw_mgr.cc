@@ -64,7 +64,8 @@ namespace springtail::pg_fdw {
             foreach(lc, qual_list) {
                 ConstQualPtr qual = static_cast<ConstQualPtr>(lfirst(lc));
 
-                //must be of the same internal type
+                // must be of the same internal type
+                // XXX must handle user defined enum, the types won't match
                 if (convert_pg_type(state->columns.at(pos).pg_type) != convert_pg_type(qual->base.typeoid)) {
                     continue;
                 }
