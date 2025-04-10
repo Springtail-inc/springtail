@@ -418,45 +418,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 });
 
         for (auto [db_id, xid, ddls] : precommit) {
-            for (auto const &ddl: ddls["ddls"]) {
-                auto action = ddl["action"];
-                if (action == "create_index") {
-                    uint32_t index_id = ddl["id"];
-                    uint64_t tid = ddl["table_id"];
-                    if (_index_exists(db_id, tid, index_id, xid)) {
-                        // this is very unlikely. It would mean that the system went down
-                        // after the index build was finalized but before it had a chance
-                        // to commit the DDL to redis.
-                        LOG_DEBUG(LOG_COMMITTER, "* Uncommitted index {}@{} -- {} {}", db_id, xid, tid, index_id);
-                    } else {
-                        // reconstruct the log message
-                        PgMsgIndex msg;
-                        msg.oid = index_id;
-                        msg.xid = xid;
-                        msg.namespace_name = ddl["schema"];
-                        msg.index = ddl["index"];
-                        msg.is_unique = ddl["is_unique"];
-                        msg.table_oid = tid;
-                        for (auto const& c: ddl["columns"]) {
-                            PgMsgSchemaIndexColumn col;
-                            col.idx_position = c["idx_position"];
-                            col.position = c["position"];
-                            col.name = c["name"];
-                            msg.columns.push_back(col);
-                        }
-                        XidLsn xid_c(xid);
-                        sys_tbl_mgr::Client::get_instance()->create_index(db_id, xid_c,
-                                msg, sys_tbl::IndexNames::State::NOT_READY);
-                        _indexer->build({db_id, xid, ddl});
-                    }
-                } else if (action == "drop_index") {
-                    _indexer->drop(db_id, ddl["id"], xid);
-                } else if (action == "abort_index") {
-                    _indexer->abort_indexes(db_id, ddl["table_id"], xid);
-                } else {
-                    assert(false);
-                }
-            }
+            _indexer->process_ddls(db_id, xid, ddls["ddls"]);
         }
     }
 

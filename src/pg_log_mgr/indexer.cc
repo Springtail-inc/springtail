@@ -22,6 +22,9 @@ namespace springtail::committer {
 
     void Indexer::process_ddls(uint64_t db_id, uint64_t xid, nlohmann::json const& ddls)
     {
+        std::scoped_lock lock(_xid_ddl_counter_map_mtx);
+        // Set counter for XID for ddls
+        _xid_ddl_counter_map[xid].store(ddls.size());
         for (auto const& ddl: ddls) {
             auto action = ddl["action"];
             if (action == "create_index") {
@@ -39,6 +42,9 @@ namespace springtail::committer {
     void Indexer::abort_indexes(uint64_t db_id, uint64_t table_id, uint64_t xid)
     {
         std::scoped_lock g(_m, _table_idx_map_mtx);
+        if (--_xid_ddl_counter_map[xid] == 0) {
+            _xid_ddl_counter_map.erase(xid);
+        }
         auto db_it = _table_idx_map.find(db_id);
         if (db_it == _table_idx_map.end()) {
             return; // No entries for this db_id
@@ -60,28 +66,34 @@ namespace springtail::committer {
 
     void Indexer::build(IndexParams idx)
     {
-        {
-            std::scoped_lock g(_m, _table_idx_map_mtx, _xid_ddl_counter_map_mtx);
-            Key key(idx._db_id, idx._ddl["id"]);
-            // I don't think PG will issue two creates with the same index ID.
-            assert(_work_set.find(key) == _work_set.end());
+        std::scoped_lock g(_m, _table_idx_map_mtx);
+        Key key(idx._db_id, idx._ddl["id"]);
+        // I don't think PG will issue two creates with the same index ID.
+        assert(_work_set.find(key) == _work_set.end());
+        auto client = sys_tbl_mgr::Client::get_instance();
+        proto::IndexInfo info = client->get_index_info(idx._db_id, idx._ddl["id"], {idx._xid, constant::MAX_LSN});
+        if (info.id() != 0 && static_cast<sys_tbl::IndexNames::State>(info.state()) == sys_tbl::IndexNames::State::READY) {
+            // Decrement the counter as we are not going to process the create request
+            // as the index already exists
+            if (--_xid_ddl_counter_map[idx._xid] == 0) {
+                _xid_ddl_counter_map.erase(idx._xid);
+            }
+        } else {
             // Insert into table-indices map
             _table_idx_map.try_emplace(idx._db_id)
                 .first->second
                 .try_emplace(idx._ddl["table_id"])
                 .first->second.push_back(key);
-            // Increment ddl counter
-            _xid_ddl_counter_map[idx._xid]++;
             _work_set[key] = std::move(idx);
             _queue.push(key);
+            // notify workers about new items
+            _cv.notify_one();
         }
-        // notify workers about new items
-        _cv.notify_one();
     }
 
     void Indexer::drop(uint64_t db_id, uint64_t index_id, uint64_t xid)
     {
-        std::scoped_lock g(_m, _xid_ddl_counter_map_mtx);
+        std::scoped_lock g(_m);
         Key key(db_id, index_id);
         auto it = _work_set.find(key);
         if (it == _work_set.end()) {
@@ -89,14 +101,18 @@ namespace springtail::committer {
             // it means to drop the index right away
             _work_set[key] = {db_id, xid, {}, IndexStatus::DELETING};
             _queue.push(key);
-            // Increment ddl counter
-            _xid_ddl_counter_map[xid]++;
             _cv.notify_one();
         } else {
             // mark the status as ABORTING, it will tell the worker to
             // cancel the index build / catchup
             // and proceed for dropping the index
             it->second._status = IndexStatus::ABORTING;
+
+            // Decrement the counter as there is no separate processing
+            // needed for this drop as it is only updating existing work item
+            if (--_xid_ddl_counter_map[xid] == 0) {
+                _xid_ddl_counter_map.erase(xid);
+            }
         }
     }
 
