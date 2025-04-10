@@ -166,7 +166,7 @@ ClientAuthorization::_process_startup_msg(int32_t remaining, uint64_t seq_id)
     auto optional_db_id = DatabaseMgr::get_instance()->get_database_id(_database);
     if (!optional_db_id.has_value()) {
         LOG_WARN("Database {} not found for user {}", _database, username);
-        _db_id = INVALID_DB_ID;
+        _db_id = constant::INVALID_DB_ID;
     } else {
         _db_id = optional_db_id.value();
     }

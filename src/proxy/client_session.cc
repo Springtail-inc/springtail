@@ -179,8 +179,9 @@ namespace springtail::pg_proxy {
             _user = _auth->user();
             _parameters = _auth->parameters();
 
-            if (_db_id == INVALID_DB_ID) {
+            if (_db_id == constant::INVALID_DB_ID) {
                 // not connecting to a replicated database, force primary only mode
+                LOG_INFO("[C:{}] Client session forcing primary mode", _id);
                 _primary_mode = true;
             }
 
@@ -835,7 +836,7 @@ namespace springtail::pg_proxy {
         bool from_pool = true;
         ServerSessionPtr session = nullptr;
 
-        if (_db_id != INVALID_DB_ID) {
+        if (_db_id != constant::INVALID_DB_ID) {
             // currently don't use pooling for non-replicated databases
             session = db_mgr->get_pooled_session(type, _db_id, _user->username());
         } else {
@@ -849,7 +850,7 @@ namespace springtail::pg_proxy {
 
             from_pool = false;
 
-            if ((session = db_mgr->allocate_session(type, _db_id, _user, _parameters)) == nullptr) {
+            if ((session = db_mgr->allocate_session(type, _db_id, _user, _parameters, _database)) == nullptr) {
                 LOG_ERROR("Failed to allocate server session for user {}, database {}", _user->username(), _database);
                 assert(0);
                 return nullptr;
@@ -941,13 +942,13 @@ namespace springtail::pg_proxy {
             case Parser::StmtContext::Type::UNLISTEN_STMT:
                 return QueryStmt::UNLISTEN;
 
-            case Parser::StmtContext::SAVEPOINT_STMT:
+            case Parser::StmtContext::Type::SAVEPOINT_STMT:
                 return QueryStmt::SAVEPOINT;
 
-            case Parser::StmtContext::ROLLBACK_TO_SAVEPOINT_STMT:
+            case Parser::StmtContext::Type::ROLLBACK_TO_SAVEPOINT_STMT:
                 return QueryStmt::ROLLBACK_TO_SAVEPOINT;
 
-            case Parser::StmtContext::RELEASE_SAVEPOINT_STMT:
+            case Parser::StmtContext::Type::RELEASE_SAVEPOINT_STMT:
                 return QueryStmt::RELEASE_SAVEPOINT;
 
             case Parser::StmtContext::Type::TRANSACTION_BEGIN_STMT:
@@ -996,7 +997,7 @@ namespace springtail::pg_proxy {
         bool is_read_safe = true;
         // first parse the query to determine the type of statement(s)
         std::vector<Parser::StmtContextPtr> &&parse_contexts = Parser::parse_query(query, [this](const std::string &schema, const std::string &table) {
-            return DatabaseMgr::get_instance()->is_table_replicated(this->_db_id, this->_default_schema, schema, table);
+            return DatabaseMgr::get_instance()->is_table_replicated(this->_db_id, schema, table);
         });
 
         // iterate through the parse contexts (one per query within multi-statement block)

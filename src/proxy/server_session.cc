@@ -5,6 +5,7 @@
 
 #include <common/logging.hh>
 #include <common/common.hh>
+#include <common/constants.hh>
 
 #include <proxy/session.hh>
 #include <proxy/server_session.hh>
@@ -63,6 +64,7 @@ namespace springtail::pg_proxy {
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Server type={}; releasing session", _id,
                     (_type == REPLICA ? "Replica" : "Primary"));
+
         if (_type == PRIMARY) {
             DatabaseMgr::get_instance()->primary_set()->release_session(shared_from_this(), deallocate);
         } else {
@@ -249,7 +251,7 @@ namespace springtail::pg_proxy {
             // clear the client before going forward to avoid loops in shutdown handling
             unpin_client_session();
 
-            if (_state == READY) {
+            if (_state == READY && _db_id != constant::INVALID_DB_ID) {
                 // if in ready state, we can reuse this session, and add back to pool
                 // reset server_session and the private session state
                 DCHECK(_batch_queue.empty() && _pending_queue.empty());

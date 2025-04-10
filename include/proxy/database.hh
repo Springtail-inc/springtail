@@ -15,6 +15,7 @@
 #include <common/logging.hh>
 #include <common/service_register.hh>
 #include <common/singleton.hh>
+#include <common/constants.hh>
 
 #include <redis/db_state_change.hh>
 #include <redis/redis_db_tables.hh>
@@ -145,11 +146,13 @@ namespace springtail::pg_proxy {
          * @param user UserPtr user
          * @param db_id uint64_t database id
          * @param parameters std::unordered_map<std::string, std::string> parameters
+         * @param database std::string database name
          * @return ServerSessionPtr session
          */
         virtual ServerSessionPtr allocate_session(UserPtr user,
             uint64_t db_id,
-            const std::unordered_map<std::string, std::string> &parameters);
+            const std::unordered_map<std::string, std::string> &parameters,
+            const std::string &database);
 
     private:
         mutable std::shared_mutex _mutex;    ///< mutex for instance
@@ -209,11 +212,13 @@ namespace springtail::pg_proxy {
          * @param user UserPtr user
          * @param db_id uint64_t database id
          * @param parameters std::unordered_map<std::string, std::string> parameters
+         * @param database std::string database name
          * @return ServerSessionPtr session
          */
         virtual ServerSessionPtr allocate_session(UserPtr user,
             uint64_t db_id,
-            const std::unordered_map<std::string, std::string> &parameters) = 0;
+            const std::unordered_map<std::string, std::string> &parameters,
+            const std::string &database) = 0;
 
         /**
          * @brief Get size of the free session pool
@@ -238,12 +243,14 @@ namespace springtail::pg_proxy {
          * @param db_id uint64_t database id
          * @param parameters std::unordered_map<std::string, std::string> parameters
          * @param instance DatabaseInstancePtr instance
+         * @param database std::string database name
          * @return ServerSessionPtr session
          */
         virtual ServerSessionPtr _allocate_session(UserPtr user,
             uint64_t db_id,
             const std::unordered_map<std::string, std::string> &parameters,
-            DatabaseInstancePtr instance);
+            DatabaseInstancePtr instance,
+            const std::string &database);
 
         /**
          * @brief Get least loaded instance from the _instances_sessions map
@@ -317,11 +324,13 @@ namespace springtail::pg_proxy {
          * @param user UserPtr user
          * @param db_id uint64_t database id
          * @param parameters std::unordered_map<std::string, std::string> parameters
+         * @param database std::string database name
          * @return ServerSessionPtr session
          */
         ServerSessionPtr allocate_session(UserPtr user,
             uint64_t db_id,
-            const std::unordered_map<std::string, std::string> &parameters) override;
+            const std::unordered_map<std::string, std::string> &parameters,
+            const std::string &database) override;
 
     private:
         std::shared_mutex _mutex; ///< mutex for replicas set
@@ -365,11 +374,13 @@ namespace springtail::pg_proxy {
          * @param user UserPtr user
          * @param db_id uint64_t database id
          * @param parameters std::unordered_map<std::string, std::string> parameters
+         * @param database std::string database name
          * @return ServerSessionPtr session
          */
         ServerSessionPtr allocate_session(UserPtr user,
             uint64_t db_id,
-            const std::unordered_map<std::string, std::string> &parameters) override;
+            const std::unordered_map<std::string, std::string> &parameters,
+            const std::string &database) override;
 
     private:
         std::shared_mutex _mutex; ///< mutex for primary set
@@ -592,20 +603,22 @@ namespace springtail::pg_proxy {
          * @param server - proxy server
          * @param user - user
          * @param parameters - startup parameters
+         * @param database - database name
          * @return ServerSessionPtr
          */
         ServerSessionPtr allocate_session(const Session::Type type,
                                           const uint64_t db_id,
                                           UserPtr user,
-                                          const std::unordered_map<std::string, std::string> &parameters)
+                                          const std::unordered_map<std::string, std::string> &parameters,
+                                          const std::string &database)
         {
             if (type == Session::Type::PRIMARY) {
                 CHECK_NE(_primary_set, nullptr);
-                return _primary_set->allocate_session(user, db_id, parameters);
+                return _primary_set->allocate_session(user, db_id, parameters, database);
             } else if (type == Session::Type::REPLICA) {
                 CHECK_NE(_replica_set, nullptr);
-                CHECK_NE(db_id, INVALID_DB_ID);
-                return _replica_set->allocate_session(user, db_id, parameters);
+                CHECK_NE(db_id, constant::INVALID_DB_ID);
+                return _replica_set->allocate_session(user, db_id, parameters, database);
             }
 
             DCHECK(false);
