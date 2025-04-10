@@ -262,6 +262,8 @@ class Production:
         elif type == 'install_failed':
             subject = f"New version install failed: {srn}, {service_name} @{timestamp}"
             attributes['version'] = version
+        elif type == 'coordinator_reload_failed':
+            subject = f"New version coordinator reload failed: {srn}, {service_name} @{timestamp}"
         elif type == 'db_state_change':
             subject = f"Database state change: {srn}, {service_name} @{timestamp}"
             msg = f"\nState change: {attrs['old_state']} -> {attrs['new_state']}"

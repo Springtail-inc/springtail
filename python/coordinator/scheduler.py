@@ -28,6 +28,7 @@ class CoordinatorState(StrEnum):
     RUNNING = 'running'
     DEAD = 'dead'
     RELOAD = 'reload'
+    RELOADING = 'reloading'
 
 # Note: this must be kept in sync with the C++ DaemonType in coordinator.hh
 # Mapping to service names must also be updated below

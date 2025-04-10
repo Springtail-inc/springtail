@@ -29,16 +29,18 @@ class TestSet:
                  directory: str,
                  config_file: str,
                  build_dir: str,
+                 test_params: dict,
                  test_files: list[str] = []) -> None:
         """Initialize the test set"""
         self._directory = directory
         self._config_file = config_file
         self._build_dir = build_dir
         self._props = springtail.Properties(config_file, True)
+        self._test_params = test_params
         self._name = os.path.splitext(os.path.basename(self._config_file))[0] + ' - ' + os.path.basename(self._directory)
 
         # constuct the special "config" test case for global setup and cleanup
-        self._config = TestCase(os.path.join(directory, _GLOBAL_CONFIG_FILE), self._props, self._build_dir, ['setup', 'cleanup'])
+        self._config = TestCase(os.path.join(directory, _GLOBAL_CONFIG_FILE), self._props, self._build_dir, self._test_params, ['setup', 'cleanup'])
         self._config.parse_file()
 
         # collect and parse the test cases from the directory
@@ -57,7 +59,7 @@ class TestSet:
 
             try:
                 # parse the test
-                self._tests[test_file] = TestCase(os.path.join(directory, test_file), self._props, self._build_dir)
+                self._tests[test_file] = TestCase(os.path.join(directory, test_file), self._props, self._build_dir, self._test_params)
                 self._tests[test_file].parse_file()
 
                 # if only a subset of test cases was requsted, limit them here
@@ -116,6 +118,9 @@ class TestSet:
 
         # apply the REPLICA IDENTITY FULL to any tables without primary keys
         self._apply_replica_full()
+
+        # update postgres config to apply props for the test
+        springtail.update_postgres_config(self._test_params)
 
         # start Springtail
         logging.debug('Starting the Springtail instance')
@@ -177,6 +182,9 @@ class TestSet:
         # perform the primary db cleanup
         logging.debug('Perform the global cleanup()')
         self._config.cleanup()
+
+        # cleanup custom postgres config
+        springtail.cleanup_postgres_config()
 
         return not test_failed
 

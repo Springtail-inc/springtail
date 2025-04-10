@@ -3,6 +3,10 @@ if [ ! -e './install' ]; then
 	echo "Run 'make install' first"
 	return 1
 fi
-mkdir -p releases
 CWD=`pwd`
-tar cpvfz releases/"springtail-$(date +%Y%m%d).tgz" -C ./install/ . -C $CWD shared-lib/
+rm -rf release.tar release.tar.gz
+mkdir -p releases
+find python -name "*.py" -print0 | tar --null -cvf release.tar --exclude='benchmarks' --exclude='testing' --files-from=-
+tar --append -vf release.tar -C ./install/ . -C $CWD shared-lib/
+gzip release.tar
+mv release.tar.gz releases/"springtail-$(date +%Y%m%d).tgz"
