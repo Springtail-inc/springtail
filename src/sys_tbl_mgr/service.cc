@@ -211,16 +211,14 @@ Service::_create_index(const proto::IndexRequest& request)
         ddl["columns"].push_back(column_json);
     }
 
-    uint64_t namespace_id = 0;
     // update index names
     {
         // lookup the namespace info
         auto ns_info = _get_namespace_info(request.db_id(), request.index().namespace_name(), xid);
-        namespace_id = ns_info->id;
 
         auto index_names_t = _get_mutable_system_table(request.db_id(), sys_tbl::IndexNames::ID);
         auto tuple = sys_tbl::IndexNames::Data::tuple(
-            namespace_id, request.index().name(), request.index().table_id(), request.index().id(),
+            ns_info->id, request.index().name(), request.index().table_id(), request.index().id(),
             xid.xid, xid.lsn, static_cast<sys_tbl::IndexNames::State>(request.index().state()),
             request.index().is_unique());
 
@@ -231,10 +229,8 @@ Service::_create_index(const proto::IndexRequest& request)
 
     {
         boost::unique_lock lock(_mutex);
-        auto index = request.index();
-        index.set_namespace_id(namespace_id);
-        _index_cache[request.db_id()][index.table_id()][index.id()]
-            .emplace_back(xid, index);
+        _index_cache[request.db_id()][request.index().table_id()][request.index().id()]
+            .emplace_back(xid, request.index());
     }
 
     return ddl;
@@ -342,7 +338,6 @@ Service::_find_index(uint64_t db_id,
     info.set_is_unique(is_unique);
     info.set_table_id(table_id);
     info.set_state(state);
-    info.set_namespace_id(namespace_id);
 
     // need to look up the schema name in the namespace_names table
     auto ns_info = _get_namespace_info(db_id, namespace_id, access_xid);
@@ -364,28 +359,14 @@ Service::_drop_index(const XidLsn& xid,
     auto names_fields = names_schema->get_fields();
 
     // find the last record for the index id
-    proto::GetIndexInfoRequest index_info_request;
-    index_info_request.set_db_id(db_id);
-    index_info_request.set_xid(xid.xid);
-    index_info_request.set_lsn(xid.lsn);
-    if (tid) {
-        index_info_request.set_table_id(tid.value());
-    }
-    index_info_request.set_index_id(index_id);
-    auto index_info = _get_index_info(index_info_request);
+    auto info = _find_index(db_id, index_id, xid, tid);
 
-    if (index_info.id() == 0) {
+    if (!info) {
         LOG_DEBUG(LOG_SCHEMA, "Drop index not found: {}@{} - {}", db_id, xid.xid,
                             index_id);
         return;
     }
-
-    auto table_info = _get_table_info(db_id, index_info.table_id(), xid);
-    if (table_info == nullptr) {
-        LOG_DEBUG(LOG_SCHEMA, "Table not found: {}@{} - {}", db_id, xid.xid,
-                            index_id);
-        return;
-    }
+    auto& index_info = std::get<0>(*info);
 
     auto state = static_cast<sys_tbl::IndexNames::State>(index_info.state());
     if (state == sys_tbl::IndexNames::State::DELETED ||
@@ -401,7 +382,7 @@ Service::_drop_index(const XidLsn& xid,
                         index_id);
     auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);
     auto tuple = sys_tbl::IndexNames::Data::tuple(
-        index_info.namespace_id(), index_info.name(), index_info.table_id(), index_id, xid.xid, xid.lsn,
+        std::get<1>(*info), index_info.name(), index_info.table_id(), index_id, xid.xid, xid.lsn,
         index_state, index_info.is_unique());
     index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
@@ -1652,7 +1633,7 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
             names_fields->at(sys_tbl::IndexNames::Data::NAMESPACE_ID)->get_uint64(row);
         auto ns_info = _get_namespace_info(db_id, namespace_id, access_xid);
         info.set_namespace_name(ns_info->name);
-        info.set_namespace_id(namespace_id);
+
         info.set_name(names_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(row));
         info.set_table_id(tid);
         info.set_is_unique(names_fields->at(sys_tbl::IndexNames::Data::IS_UNIQUE)->get_bool(row));
@@ -2224,7 +2205,6 @@ Service::_set_primary_index(uint64_t db_id,
     index.set_is_unique(true);
     index.set_namespace_name(namespace_name);
     index.set_table_id(table_id);
-    index.set_namespace_id(namespace_id);
 
     for (auto const& c : info->columns()) {
         if (!c.has_pk_position()) {
