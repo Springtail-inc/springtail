@@ -603,7 +603,7 @@ namespace springtail::pg_log_mgr {
         // belonging to this transaction
         nlohmann::json ddl;
         RedisDDL redis_ddl;
-        ddl["action"] = "skip_index";
+        ddl["action"] = "abort_index";
         ddl["table_id"] = table_oid;
         redis_ddl.add_index_ddl(_db, xidlsn.xid, ddl.dump());
 

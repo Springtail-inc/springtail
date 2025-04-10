@@ -21,8 +21,7 @@ namespace springtail::committer {
         enum class IndexStatus {
             BUILDING,     // Default state
             DELETING,
-            ABORTING,
-            SKIPPING
+            ABORTING
         };
         struct IndexParams {
             uint64_t _db_id;
@@ -76,17 +75,17 @@ namespace springtail::committer {
         void process_index_reconciliation(uint64_t db_id, uint64_t reconcile_xid, uint64_t end_xid);
 
         /**
-         * @brief Set SKIPPING state for the indices of a given db_id and table_id.
+         * @brief Set ABORTING state for the indices of a given db_id and table_id.
          *        This is for the table thats being resync'ed
          *
          * Locks both _table_idx_map and _work_set mutex, iterates through all keys,
-         * retrieves corresponding work item, and sets state to SKIPPING
+         * retrieves corresponding work item, and sets state to ABORTING
          *
          * @param db_id Database ID.
          * @param table_id Table ID.
          * @param XID To manage index DDL counter
          */
-        void skip_indexes(uint64_t db_id, uint64_t table_id, uint64_t xid);
+        void abort_indexes(uint64_t db_id, uint64_t table_id, uint64_t xid);
 
     private:
         void task(std::stop_token st);

@@ -33,15 +33,15 @@ namespace springtail::committer {
                 build({db_id, xid, ddl});
             } else if (action == "drop_index") {
                 drop(db_id, ddl["id"], xid);
-            } else if (action == "skip_index") {
-                skip_indexes(db_id, ddl["table_id"], xid);
+            } else if (action == "abort_index") {
+                abort_indexes(db_id, ddl["table_id"], xid);
             } else {
                 assert(false);
             }
         }
     }
 
-    void Indexer::skip_indexes(uint64_t db_id, uint64_t table_id, uint64_t xid)
+    void Indexer::abort_indexes(uint64_t db_id, uint64_t table_id, uint64_t xid)
     {
         std::scoped_lock g(_m, _table_idx_map_mtx, _xid_ddl_counter_map_mtx);
         if (--_xid_ddl_counter_map[xid] == 0) {
@@ -57,11 +57,11 @@ namespace springtail::committer {
             return; // No entries for this table_id
         }
 
-        // Iterate through all keys and set work_item as SKIPPING
+        // Iterate through all keys and set work_item as ABORTING
         for (const Key& key : table_it->second) {
             auto work_it = _work_set.find(key);
             if (work_it != _work_set.end()) {
-                work_it->second._status = IndexStatus::SKIPPING;
+                work_it->second._status = IndexStatus::ABORTING;
             }
         }
     }
@@ -300,18 +300,18 @@ namespace springtail::committer {
 
         _work_set.erase(key);
         auto client = sys_tbl_mgr::Client::get_instance();
-
+        proto::IndexInfo index_info = client->get_index_info(db_id, index_id, xid);
+        auto index_deleted = static_cast<sys_tbl::IndexNames::State>(index_info.state()) == sys_tbl::IndexNames::State::DELETED;
 
         if (!root) {
             // if IndexStatus is BUILDING - stop could have got requested, so the index
             //                              will be rebuilt during restart
-            // If IndexStatus is SKIPPING - nothing to do here as root also doesnt exist
             // If IndexStatus is ABORTING - Drop came before build was even picked,
             //                              mark the state as DELETED
 
             if (work_item.is_status(IndexStatus::ABORTING)) {
                 auto table_exists = TableMgr::get_instance()->exists(db_id, tid, xid.xid, xid.lsn);
-                if (table_exists) {
+                if (table_exists && !index_deleted) {
                     // when dropping a table, PG generates DROP TABLE first
                     // following by DROP INDEX. We ignore DROP INDEX after DROP TABLE, because
                     // indexes will be set as DELETED directly as part of sys_tbl_mgr DROP TABLE
@@ -325,7 +325,6 @@ namespace springtail::committer {
                 auto meta = client->get_roots(db_id, tid, end_xid);
                 meta->roots.emplace_back(key.second, extent_id);
                 client->update_roots(db_id, tid, end_xid, *meta);
-                LOG_INFO("SETTING STATE {}", end_xid);
                 client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::READY);
             } else if (work_item.is_status(IndexStatus::ABORTING)) {
                 // the index was deleted while we were building it
@@ -333,13 +332,9 @@ namespace springtail::committer {
                 // may have got finalized while we were building.
                 root->truncate();
                 root->finalize();
-                LOG_INFO("SETTING STATE {}", index_id);
-                client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
-            } else if (work_item.is_status(IndexStatus::SKIPPING)) {
-                // Index is being skipped as the table is in resync state,
-                // clear the root and finalize
-                root->truncate();
-                root->finalize();
+                if (!index_deleted) {
+                    client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
+                }
             }
         }
 
@@ -409,10 +404,10 @@ namespace springtail::committer {
             // there wont be any DDL
             is_fresh_drop = work_item.is_status(IndexStatus::DELETING);
 
-            // When drop/skip index request comes in while
+            // When drop index request comes in while
             // we are in the process of building/catching-up,
-            // Proceed for commit phase to decide on abort or skip
-            is_drop_while_processing = work_item.is_status(IndexStatus::ABORTING) || work_item.is_status(IndexStatus::SKIPPING);
+            // Proceed for commit phase to decide on abort
+            is_drop_while_processing = work_item.is_status(IndexStatus::ABORTING);
         }
 
         if (is_fresh_drop) {
