@@ -269,6 +269,15 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
                 // process the indexes - create/drop, allowing them to happen in the background
                 _indexer->process_ddls(db_id, xid, index_ddls);
+
+                // Abort index_ddls if they have only abort_index
+                bool only_abort_index_ddls = std::ranges::all_of(index_ddls, [](const auto& ddl) {
+                        return ddl["action"] == "abort_index";
+                        });
+
+                if (only_abort_index_ddls) {
+                    _redis_ddl.abort_index_ddl(db_id, xid);
+                }
             }
 
             if (!completed_ddls.is_null()) {
