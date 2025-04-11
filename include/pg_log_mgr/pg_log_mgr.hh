@@ -9,7 +9,6 @@
 #include <fmt/format.h>
 
 #include <common/concurrent_queue.hh>
-#include <common/coordinator.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 #include <common/filesystem.hh>
@@ -180,7 +179,6 @@ namespace springtail::pg_log_mgr {
         /** Internal state synchronizer */
         common::StateSynchronizer<StateEnum> _internal_state{STATE_STARTUP};
 
-        Coordinator *_coordinator{nullptr};
         PgReplConnection _pg_conn;            ///< postgres replication connection
         int _proto_version;                   ///< postgres protocol version
         std::atomic<bool> _shutdown{false};   ///< shutdown flag

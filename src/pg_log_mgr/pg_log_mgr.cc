@@ -3,6 +3,7 @@
 #include <vector>
 
 #include <common/common.hh>
+#include <common/coordinator.hh>
 #include <common/logging.hh>
 #include <common/open_telemetry.hh>
 #include <common/properties.hh>
@@ -37,7 +38,6 @@ namespace springtail::pg_log_mgr {
       _host(host), _db_name(db_name), _user_name(user_name),
       _password(password), _pub_name(pub_name), _slot_name(slot_name),
       _log_size_rollover_threshold(log_size_rollover_threshold), _port(port),
-      _coordinator(Coordinator::get_instance()),
       _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
       _repl_log_path(repl_log_path),
       _committer_queue(committer_queue),
@@ -454,7 +454,7 @@ namespace springtail::pg_log_mgr {
         std::function<void (uint64_t, const std::filesystem::path &)> queue_append_func)
     {
         // mark alive with coordinator
-        _coordinator->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+        Coordinator::get_instance()->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
 
         // read data from pg replication connection (blocks)
         try {
@@ -520,7 +520,7 @@ namespace springtail::pg_log_mgr {
 
         std::string coordinator_id = fmt::format(WRITER_WORKER_ID, _db_id);
 
-        _coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+        Coordinator::get_instance()->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
 
         bool done = false;
         // while we are in recovery mode, append all entries to the vector
@@ -583,11 +583,12 @@ namespace springtail::pg_log_mgr {
     {
         std::string coordinator_id = fmt::format(READER_WORKER_ID, _db_id);
 
-        _coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+        auto coordinator = Coordinator::get_instance()->get_instance();
+        coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
 
         while (!_shutdown) {
             // mark alive with coordinator
-            _coordinator->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+            coordinator->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
 
             // get log entry from queue
             PgLogQueueEntryPtr log_entry = this->_logger_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
