@@ -45,7 +45,7 @@ VALUES
 (10, 'Order J', '2025-02-10', 450.25, TRUE, 'Tenth order details', 'N', 45.2);
 
 ## verify
-### schema_check public basic_ordering 1
+### schema_check public basic_ordering
 SELECT col3 FROM basic_ordering ORDER BY col3;
 SELECT col4, col5 FROM basic_ordering ORDER BY col4, col5;
 SELECT col6 FROM basic_ordering ORDER BY col6;

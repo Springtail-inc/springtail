@@ -45,7 +45,7 @@ VALUES
 (10, 'Order J', '2025-02-10', 450.25, TRUE, 'Tenth order details', 'N', 45.2);
 
 ## verify
-### schema_check public asc_desc_numeric_null 1
+### schema_check public asc_desc_numeric_null
 -- col3 = Specific Date
 SELECT col3, col4 FROM asc_desc_numeric_null WHERE col3 = '2025-02-05';
 

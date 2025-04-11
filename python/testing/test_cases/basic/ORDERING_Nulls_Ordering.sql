@@ -43,7 +43,7 @@ VALUES
 (11, 'Order K', NULL, NULL, NULL, NULL, 'Y', NULL);
 
 ## verify
-### schema_check public nulls_ordering 1
+### schema_check public nulls_ordering
 SELECT col3, col4 FROM nulls_ordering ORDER BY col3 ASC NULLS FIRST, col4 ASC NULLS FIRST;
 SELECT col3, col4 FROM nulls_ordering ORDER BY col3 ASC NULLS LAST, col4 ASC NULLS LAST;
 

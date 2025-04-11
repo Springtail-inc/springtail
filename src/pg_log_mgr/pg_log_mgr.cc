@@ -296,7 +296,6 @@ namespace springtail::pg_log_mgr {
                                     request->xid().xid, request->xid().lsn);
                 table_ids.insert(request->table_id());
                 SyncTracker::get_instance()->mark_inflight(_db_id, request->table_id(), request->xid()); // shift from resyncing to inflight
-                _committer->execute_on_resync(_db_id, request->table_id());
 
                 request = _redis_sync_queue.try_pop(REDIS_WORKER_ID);
             } while (request != nullptr);

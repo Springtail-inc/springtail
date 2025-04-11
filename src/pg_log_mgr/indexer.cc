@@ -63,28 +63,6 @@ namespace springtail::committer {
         }
     }
 
-    void Indexer::abort_indices(uint64_t db_id, uint64_t table_id)
-    {
-        std::scoped_lock g(_m, _table_idx_map_mtx);
-        auto db_it = _table_idx_map.find(db_id);
-        if (db_it == _table_idx_map.end()) {
-            return; // No entries for this db_id
-        }
-
-        auto table_it = db_it->second.find(table_id);
-        if (table_it == db_it->second.end()) {
-            return; // No entries for this table_id
-        }
-
-        // Iterate through all keys and set work_item as ABORTING
-        for (const Key& key : table_it->second) {
-            auto work_it = _work_set.find(key);
-            if (work_it != _work_set.end()) {
-                work_it->second._status = IndexStatus::ABORTING;
-            }
-        }
-    }
-
     void Indexer::build(IndexParams idx)
     {
         std::scoped_lock g(_m, _table_idx_map_mtx);
@@ -114,7 +92,7 @@ namespace springtail::committer {
 
     void Indexer::drop(uint64_t db_id, uint64_t index_id, uint64_t xid)
     {
-        std::scoped_lock g(_m, _xid_ddl_counter_map_mtx);
+        std::scoped_lock g(_m);
         Key key(db_id, index_id);
         auto it = _work_set.find(key);
         if (it == _work_set.end()) {
