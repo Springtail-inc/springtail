@@ -16,12 +16,9 @@ permissions:
 jobs:
   test:
     if: |
-      (
-        github.event.pull_request != null && ( 
-        github.event.pull_request.draft == true && github.event.action == 'ready_for_review'
-        ) || (
-        github.event.pull_request.draft == false && github.event.action == 'opened'
-        ) 
+      github.event.pull_request != null && (
+        github.event.action == 'ready_for_review' || 
+        (github.event.pull_request.draft == false && github.event.action == 'opened')
       )
     uses: ./.github/workflows/test.yml
     with:
