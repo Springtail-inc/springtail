@@ -26,15 +26,13 @@ BEGIN
             ELSIF obj.object_type = 'schema' THEN
                 tag_name := 'DROP SCHEMA';
             ELSIF obj.object_type = 'type' THEN
-                -- Check if the type is an enum
-                IF NOT EXISTS (
-                    SELECT 1
-                    FROM pg_type t
-                    WHERE t.oid = obj.objid AND t.typcategory = 'E'
-                ) THEN
+                -- the drop has already been done, so no way to check the type
+                -- seems drop type does two drops, one for the type and one for the enum labels
+                -- ignore the enum labels, if obj.object_identity contains []
+                -- RAISE NOTICE 'springtail: drop type % % %', obj.schema_name, obj.object_name, obj.object_identity;
+                IF obj.object_identity LIKE '%[]' AND obj.object_name LIKE '_%' THEN
                     CONTINUE;
                 END IF;
-
                 tag_name := 'DROP TYPE';
             END IF;
 
@@ -46,7 +44,7 @@ BEGIN
                 'name', obj.object_name,
                 'identity', obj.object_identity);
 
-            --- RAISE NOTICE 'springtail: % op, %.%', tag_name, obj.schema_name, obj.object_name;
+            -- RAISE NOTICE 'springtail: % op, %', tag_name, msg::text;
 
             -- tag_name is DROP TABLE or DROP INDEX or DROP SCHEMA
             PERFORM pg_logical_emit_message(true, 'springtail:' || tag_name, msg::text);
@@ -323,12 +321,13 @@ BEGIN
         IF (enum_obj IS NOT NULL) THEN
             msg := json_build_object('xid', txid_current(),
                 'oid', enum_obj.enum_type_oid,
+                'type', 'E',
                 'ns_oid', enum_obj.namespace_oid,
                 'schema', enum_obj.schema,
                 'name', enum_obj.enum_type_name,
-                'labels', enum_obj.labels);
+                'value', enum_obj.labels);
 
-            RAISE NOTICE 'springtail: %', msg::text;
+            -- RAISE NOTICE 'springtail: %', msg::text;
 
             PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
         END IF;

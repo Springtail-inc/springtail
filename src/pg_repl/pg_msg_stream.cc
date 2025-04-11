@@ -869,7 +869,7 @@ namespace springtail {
                 column.default_value = json["default"].get<std::string>();
             }
 
-            column.type = static_cast<uint8_t>(convert_pg_type(column.pg_type));
+            column.type = static_cast<uint8_t>(convert_pg_type(column.pg_type, column.type_category));
             columns.push_back(column);
         }
     }
@@ -1111,13 +1111,15 @@ namespace springtail {
 
         usertype_msg.xid = message.xid; // only valid in streaming mode
         usertype_msg.lsn = message.lsn;
-        usertype_msg.type = 'E'; // pg_type.typcategory = 'E' for enum
 
+        json["type"].get_to(usertype_msg.type);
         json["name"].get_to(usertype_msg.name);
         json["oid"].get_to(usertype_msg.oid);
         json["schema"].get_to(usertype_msg.namespace_name);
         json["ns_oid"].get_to(usertype_msg.namespace_id);
-        json["labels"].get_to(usertype_msg.value_json);
+        json["value"].get_to(usertype_msg.value_json);
+
+        CHECK_EQ(usertype_msg.type, 'E');
 
         LOG_DEBUG(LOG_PG_REPL, "Decoded create/alter usertype: json: {}", json.dump());
 

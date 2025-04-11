@@ -1165,6 +1165,17 @@ Service::DropUserType(grpc::ServerContext* context,
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
+    auto user_type_info = _get_usertype_info(request->db_id(), request->type_id(), xid);
+    if (user_type_info == nullptr) {
+        // drop could for a type we don't support, so ignore it here
+        LOG_WARN("User type {} not found", request->type_id());
+        ddl["action"] = "no_change";
+        // serialize the JSON and return
+        response->set_statement(nlohmann::to_string(ddl));
+        span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
+        return grpc::Status::OK;
+    }
+
     // update the user defined types table
     XidLsn xid(request->xid(), request->lsn());
     auto ddl = _mutate_usertype(request->db_id(), request->type_id(), request->name(),

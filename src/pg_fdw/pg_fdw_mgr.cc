@@ -66,9 +66,9 @@ namespace springtail::pg_fdw {
 
                 // must be of the same internal type
                 // XXX must handle user defined enum, the types won't match
-                if (convert_pg_type(state->columns.at(pos).pg_type) != convert_pg_type(qual->base.typeoid)) {
-                    continue;
-                }
+                //if (convert_pg_type(state->columns.at(pos).pg_type) != convert_pg_type(qual->base.typeoid)) {
+                //    continue;
+                //}
 
                 if (PgFdwMgr::_is_type_sortable(qual->base.typeoid, qual->base.op) &&
                         qual->base.isArray == false &&

@@ -691,7 +691,10 @@ namespace springtail::pg_log_mgr {
             {
                 auto &type_msg = std::get<PgMsgUserType>(change->msg);
                 std::string &&ddl_stmt = client->drop_usertype(_db, xidlsn, type_msg);
-                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                auto json = nlohmann::json::parse(ddl_stmt);
+                if (json.at("action").get<std::string>() != "no_change") {
+                    redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                }
                 break;
             }
         case PgMsgEnum::CREATE_INDEX:

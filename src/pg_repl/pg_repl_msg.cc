@@ -24,7 +24,7 @@ namespace pg_msg {
                std::stringstream &ss) noexcept
     {
         for (auto && c: tuple.tuple_data) {
-            ss << "  - type=" << std::to_string(c.type) << std::endl;
+            ss << "  - type=" << c.type << std::endl;
             ss << "  - data_len=" << c.data.size() << std::endl;
         }
     }

@@ -229,7 +229,7 @@ namespace springtail
         uint32_t oid;
         int32_t xid; // pg xid; proto vers 2+ only if streaming
         uint32_t namespace_id;
-        int32_t type; // pg_type.typcategory = 'E' for enum
+        char type; // pg_type.typcategory = 'E' for enum
         std::string name;
         std::string namespace_name;
         std::string value_json;
@@ -381,12 +381,5 @@ namespace springtail
          * @return LSN_t
          */
         LSN_t str_to_LSN(const char *lsn_str) noexcept;
-
-        /**
-         * @brief Convert a PG type to a Springtail type.
-         * @param pg_type The PG column type OID.
-         * @return A springtail SchemaType.
-         */
-        SchemaType convert_pg_type(int32_t pg_type);
     };
 }

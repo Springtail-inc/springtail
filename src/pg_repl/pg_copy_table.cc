@@ -337,9 +337,6 @@ namespace springtail
                 // atttypid oid
                 column.pg_type = _connection.get_int32(i, 4);
 
-                // springtail type
-                column.type = convert_pg_type(column.pg_type);
-
                 // is primary key
                 column.is_generated = _connection.get_boolean(i, 5);
 
@@ -361,6 +358,9 @@ namespace springtail
 
                 // type category of 'E' represents enum
                 column.type_category = _connection.get_char(i, 10);
+
+                // springtail type
+                column.type = convert_pg_type(column.pg_type, column.type_category);
 
                 LOG_DEBUG(LOG_PG_REPL,
                                     "Column: {} type={} position={} nullable={} default_value={} pkey={} is_generated={} is_non_standard_collation={} is_user_defined_type={}",
@@ -645,7 +645,8 @@ namespace springtail
 
             // get the underlying springtail type
             int32_t pg_type = _schema.columns[i].pg_type;
-            auto type = convert_pg_type(pg_type);
+            char pg_type_category = _schema.columns[i].type_category;
+            auto type = convert_pg_type(pg_type, pg_type_category);
 
             // check if null
             if (length == -1) {
