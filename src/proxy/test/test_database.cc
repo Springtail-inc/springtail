@@ -38,7 +38,8 @@ namespace {
         /** override allocate session (create a TestServerSession) to avoid creating a connection */
         ServerSessionPtr allocate_session(UserPtr user,
             uint64_t db_id,
-            const std::unordered_map<std::string, std::string> &parameters) override
+            const std::unordered_map<std::string, std::string> &parameters,
+            const std::string &database) override
         {
             return std::make_shared<TestServerSession>(Session::Type::PRIMARY, _session_id++, db_id,
                 "db" + std::to_string(db_id), user->username());
@@ -58,16 +59,17 @@ namespace {
         /** override abstract method */
         ServerSessionPtr allocate_session(UserPtr user,
                 uint64_t db_id,
-                const std::unordered_map<std::string, std::string> &parameters) override
+                const std::unordered_map<std::string, std::string> &parameters,
+                const std::string &database) override
         {
             // do nothing, not used in this test
             return nullptr;
         }
 
         /** allocate session from Test Instance and set the session's instance */
-        ServerSessionPtr allocate_session(uint64_t db_id, const std::string &username, DatabaseInstancePtr instance)
+        ServerSessionPtr allocate_session(uint64_t db_id, const std::string &username, DatabaseInstancePtr instance, const std::string &database)
         {
-            auto session = _allocate_session(std::make_shared<User>(username), db_id, {}, instance);
+            auto session = _allocate_session(std::make_shared<User>(username), db_id, {}, instance, database);
             TestServerSessionPtr test_session = std::dynamic_pointer_cast<TestServerSession>(session);
             test_session->set_instance(instance);
             return session;
@@ -235,7 +237,7 @@ namespace {
     };
 
     TEST_F(DatabaseSetTest, AllocateAndReleaseSession) {
-        auto session = db_set->allocate_session(1, "user1", instance1);
+        auto session = db_set->allocate_session(1, "user1", instance1, "springtail");
         EXPECT_NE(session, nullptr);
         EXPECT_EQ(session->database_id(), 1);
         EXPECT_EQ(session->username(), "user1");
@@ -251,8 +253,8 @@ namespace {
     }
 
     TEST_F(DatabaseSetTest, AllocateMultipleSessions) {
-        auto session1 = db_set->allocate_session(1, "user1", instance1);
-        auto session2 = db_set->allocate_session(1, "user1", instance1);
+        auto session1 = db_set->allocate_session(1, "user1", instance1, "springtail");
+        auto session2 = db_set->allocate_session(1, "user1", instance1, "springtail");
         EXPECT_NE(session1, session2);
 
         db_set->release_session(session1, false);
@@ -274,9 +276,9 @@ namespace {
     }
 
     TEST_F(DatabaseSetTest, RemoveInstance) {
-        auto session1 = db_set->allocate_session(1, "user1", instance1);
-        auto session2 = db_set->allocate_session(1, "user2", instance1);
-        auto session3 = db_set->allocate_session(2, "user1", instance2);
+        auto session1 = db_set->allocate_session(1, "user1", instance1, "springtail");
+        auto session2 = db_set->allocate_session(1, "user2", instance1, "springtail");
+        auto session3 = db_set->allocate_session(2, "user1", instance2, "springtail");
         db_set->release_session(session1, false);
         db_set->release_session(session2, false);
         db_set->release_session(session3, false);
@@ -292,8 +294,8 @@ namespace {
     }
 
     TEST_F(DatabaseSetTest, RemoveDatabase) {
-        auto session1 = db_set->allocate_session(1, "user1", instance1);
-        auto session2 = db_set->allocate_session(2, "user1", instance2);
+        auto session1 = db_set->allocate_session(1, "user1", instance1, "springtail");
+        auto session2 = db_set->allocate_session(2, "user1", instance2, "springtail");
         db_set->release_session(session1, false);
         db_set->release_session(session2, false);
 
@@ -306,9 +308,9 @@ namespace {
     }
 
     TEST_F(DatabaseSetTest, GetLeastLoadedInstance) {
-        auto session1 = db_set->allocate_session(1, "user1", instance1);
-        auto session2 = db_set->allocate_session(2, "user1", instance2);
-        auto session3 = db_set->allocate_session(2, "user1", instance2);
+        auto session1 = db_set->allocate_session(1, "user1", instance1, "springtail");
+        auto session2 = db_set->allocate_session(2, "user1", instance2, "springtail");
+        auto session3 = db_set->allocate_session(2, "user1", instance2, "springtail");
         db_set->release_session(session1, false);
         db_set->release_session(session2, false);
         db_set->release_session(session3, false);

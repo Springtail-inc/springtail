@@ -1,8 +1,9 @@
 #include <cstdint>
 #include <common/filesystem.hh>
+#include <common/logging.hh>
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_log_recovery.hh>
-#include "common/logging.hh"
+#include <sys_tbl_mgr/client.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -34,6 +35,9 @@ PgLogRecovery::replay_logs()
 {
     LOG_DEBUG(LOG_PG_LOG_MGR, "Start log replay");
 
+    // revert the system tables to the committed XID
+    _revert_system_tables();
+
     // scan the replication log to skip any already committed records
     bool has_more = _skip_committed();
 
@@ -49,6 +53,16 @@ PgLogRecovery::replay_logs()
     }
 }
 
+void
+PgLogRecovery::_revert_system_tables()
+{
+    // ask the SysTblMgr to revert the system tables to the most recently committed XID
+    sys_tbl_mgr::Client::get_instance()->revert(_db_id, _committed_xid);
+
+    // perform a commit at the next XID to ensure we have a clean snapshot from this point
+    sys_tbl_mgr::Client::get_instance()->finalize(_db_id, _committed_xid + 1);
+}
+
 bool
 PgLogRecovery::_skip_committed()
 {
@@ -62,6 +76,7 @@ PgLogRecovery::_skip_committed()
     _repl_log = fs::find_earliest_modified_file(_repl_path, PgLogMgr::LOG_PREFIX_REPL,
                                                 PgLogMgr::LOG_SUFFIX);
     if (!_repl_log) {
+        LOG_DEBUG(LOG_PG_LOG_MGR, "No repl log found");
         return false;
     }
 
@@ -77,6 +92,7 @@ PgLogRecovery::_skip_committed()
     // Open the xact log
     PgXactLogReaderMmap xact_reader(_xact_path, _committed_xid, _pg_log_reader->archive_logs());
     if (!xact_reader.begin()) {
+        LOG_DEBUG(LOG_PG_LOG_MGR, "No xact log found");
         return true;
     }
 
@@ -171,8 +187,8 @@ PgLogRecovery::_process_msg(PgMsgPtr msg,
                 auto &commit_msg = std::get<PgMsgStreamCommit>(msg->msg);
                 pgxid = commit_msg.xid;
             }
-
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Found COMMIT for pgxid {} with xact_xid {}", pgxid, xact_reader.get_xid());
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Found COMMIT for pgxid {} == {} with xact_xid {}", pgxid, xact_reader.get_pg_xid(), xact_reader.get_xid());
+            CHECK(pgxid == xact_reader.get_pg_xid() || pgxid == 0);
 
             bool done = false;
             CHECK_LE(xact_reader.get_xid(), _committed_xid);

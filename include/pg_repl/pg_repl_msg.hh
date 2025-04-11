@@ -240,6 +240,11 @@ namespace springtail
         int32_t pg_xid;
     };
 
+    struct PgMsgReconcileIndex{
+        uint64_t db_id;
+        uint64_t reconcile_xid;
+    };
+
     /** Message types */
     enum PgMsgEnum {
         INVALID=-1, COPY_HDR, KEEP_ALIVE, BEGIN, COMMIT, RELATION, INSERT, DELETE, UPDATE, TRUNCATE,
@@ -252,7 +257,8 @@ namespace springtail
         CREATE_INDEX, DROP_INDEX, COPY_SYNC,
         CREATE_TYPE, DROP_TYPE, ALTER_TYPE,
         // special message generated in the log reader
-        ALTER_RESYNC
+        RECONCILE_INDEX, // Custom committer notifiers
+        ALTER_RESYNC // generated when an invalid table becomes valid due to an ALTER TABLE
     };
 
     /**
@@ -284,10 +290,12 @@ namespace springtail
          PgMsgDropIndex,
          PgMsgNamespace,
          PgMsgUserType,
-         PgMsgCopySync
+         PgMsgCopySync,
+         PgMsgReconcileIndex
         > msg;                 ///< message data
 
-        uint64_t pg_log_timestamp;  ///< timestamp id of the current Postgres log file
+        /** timestamp id of the current Postgres log file -- will be zero for internal messages */
+        uint64_t pg_log_timestamp{0};
         PgMsgEnum msg_type;    ///< type defining union member
         int proto_version;     ///< which protocol version
         bool is_streaming;     ///< is this a streaming message

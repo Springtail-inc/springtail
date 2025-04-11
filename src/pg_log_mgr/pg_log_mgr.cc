@@ -30,7 +30,8 @@ namespace springtail::pg_log_mgr {
                        uint64_t log_size_rollover_threshold,
                        int port,
                        bool archive_logs,
-                       std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue)
+                       std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
+                       std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>> index_reconciliation_queue)
     : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
       _host(host), _db_name(db_name), _user_name(user_name),
       _password(password), _pub_name(pub_name), _slot_name(slot_name),
@@ -39,7 +40,8 @@ namespace springtail::pg_log_mgr {
       _repl_log_path(repl_log_path),
       _committer_queue(committer_queue),
       _xact_log_path(xact_log_path),
-      _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
+      _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
+      _index_reconciliation_queue(index_reconciliation_queue)
     {
         _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, xact_log_path, _committer_queue, archive_logs);
 
@@ -116,7 +118,10 @@ namespace springtail::pg_log_mgr {
         // fetch latest xid from xid mgr
         XidMgrClient *xid_mgr = XidMgrClient::get_instance();
         uint64_t committed_xid = xid_mgr->get_committed_xid(_db_id, 0);
-        _pg_log_reader->set_next_xid(committed_xid + 1);
+
+        // note: we skip an XID here to allow the recovery to commit the system tables before replay
+        uint64_t next_xid = committed_xid + 2;
+        _pg_log_reader->set_next_xid(next_xid);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Last committed XID: {}", committed_xid);
 
@@ -135,6 +140,9 @@ namespace springtail::pg_log_mgr {
             // initiate table copy thread; this will perform the initial copy of all tables
             _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
 
+            // start the index reconciliation thread
+            _reconciliation_thread = std::thread(&PgLogMgr::_index_reconciliation_thread, this);
+
             // start the log reader thread since it is also required for processing table copy completions
             _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
 
@@ -148,6 +156,9 @@ namespace springtail::pg_log_mgr {
             // initiate table copy thread; do this before we start replaying the log since it's needed
             // for table re-syncs that might have to be run
             _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
+
+            // start the index reconciliation thread
+            _reconciliation_thread = std::thread(&PgLogMgr::_index_reconciliation_thread, this);
 
             // start the log reader thread since it is also used to process recovery messages
             _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
@@ -223,6 +234,25 @@ namespace springtail::pg_log_mgr {
         // if in replay done set to running XXX
         _internal_state.test_and_set(STATE_REPLAYING, STATE_RUNNING);
         LOG_DEBUG(LOG_PG_LOG_MGR, "Current state is running: {}", (_internal_state.get() == STATE_RUNNING));
+    }
+
+    void
+    PgLogMgr::_index_reconciliation_thread()
+    {
+        PgMsgReconcileIndex reconcile_index_msg;
+        while (!_shutdown) {
+            // block on index reconciliation queue w/timeout for shutdown
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Waiting for index reconciliation request");
+            if (auto request = _index_reconciliation_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT); request) {
+                //Pass it to log reader to notify committer
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Request received for index reconciliation for XID: {} @ {}", request->db_id(), request->reconcile_xid());
+                reconcile_index_msg.db_id = request->db_id();
+                reconcile_index_msg.reconcile_xid = request->reconcile_xid();
+                auto msg = std::make_shared<PgMsg>(PgMsgEnum::RECONCILE_INDEX);
+                msg->msg.emplace<PgMsgReconcileIndex>(reconcile_index_msg);
+                _pg_log_reader->enqueue_msg(msg);
+            }
+        }
     }
 
     void
@@ -522,9 +552,11 @@ namespace springtail::pg_log_mgr {
             }
 
             LOG_DEBUG(LOG_PG_LOG_MGR, "Processing log entry: path={}, start_offset={}, num_messages={}",
-                                log_entry->path, log_entry->start_offset, log_entry->num_messages);
+                      log_entry->path, log_entry->start_offset, log_entry->num_messages);
 
-            _pg_log_reader->process_log(log_entry->path, _logger_file_timestamp.load(),
+            auto file_timestamp = fs::extract_timestamp_from_file(log_entry->path, LOG_PREFIX_REPL, LOG_SUFFIX);
+            CHECK(file_timestamp);
+            _pg_log_reader->process_log(log_entry->path, *file_timestamp,
                                         log_entry->start_offset, log_entry->num_messages);
         }
         LOG_DEBUG(LOG_PG_LOG_MGR, "Exiting log reader thread");
@@ -534,10 +566,6 @@ namespace springtail::pg_log_mgr {
     PgLogMgr::_create_repl_logger()
     {
         std::filesystem::path file = fs::create_log_file(_repl_log_path, LOG_PREFIX_REPL, LOG_SUFFIX);
-        auto file_timestamp = fs::extract_timestamp_from_file(file, LOG_PREFIX_REPL, LOG_SUFFIX);
-        DCHECK(file_timestamp.has_value());
-        _logger_file_timestamp.store(file_timestamp.value());
-
         return std::make_shared<PgLogWriter>(file,
             [this](LSN_t lsn) { _pg_conn.set_last_flushed_LSN(lsn); });
     }

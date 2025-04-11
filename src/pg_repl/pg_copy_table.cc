@@ -596,6 +596,7 @@ namespace springtail
 
         auto* stats = roots_req->mutable_stats();
         stats->set_row_count(metadata.stats.row_count);
+        stats->set_end_offset(metadata.stats.end_offset);
         roots_req->set_snapshot_xid(metadata.snapshot_xid);
 
         return copy_info;
@@ -1047,9 +1048,6 @@ namespace springtail
 
         // disconnect from the database
         copy_table.disconnect();
-
-        // flush to disk
-        client->finalize(db_id, xid);
     }
 
     void
@@ -1081,8 +1079,6 @@ namespace springtail
             // create the namespace
             client->create_namespace(ns_req);
         }
-        // flush to disk
-        client->finalize(db_id, xid);
     }
 
     std::vector<PgCopyResultPtr>

@@ -2,11 +2,11 @@
 #include <grpcpp/grpcpp.h>
 
 #include <common/constants.hh>
+#include <common/properties.hh>
 #include <grpc/grpc_server.hh>
 #include <sys_tbl_mgr/exception.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/service.hh>
-#include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 
@@ -255,8 +255,8 @@ Service::DropIndex(grpc::ServerContext* context,
 
     XidLsn xid(request->xid(), request->lsn());
 
-    // perform the CREATE INDEX
-    _drop_index(xid, request->db_id(), request->index_id());
+    // perform the DROP INDEX
+    _drop_index(xid, request->db_id(), request->index_id(), std::nullopt, sys_tbl::IndexNames::State::BEING_DELETED);
 
     // serialize the JSON and return
     response->set_statement(nlohmann::to_string(ddl));
@@ -350,8 +350,10 @@ void
 Service::_drop_index(const XidLsn& xid,
                      uint64_t db_id,
                      uint64_t index_id,
-                     std::optional<uint64_t> tid)
+                     std::optional<uint64_t> tid,
+                     sys_tbl::IndexNames::State index_state)
 {
+    assert(index_state == sys_tbl::IndexNames::State::DELETED || index_state == sys_tbl::IndexNames::State::BEING_DELETED);
     auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
     auto names_schema = names_t->extent_schema();
     auto names_fields = names_schema->get_fields();
@@ -366,10 +368,10 @@ Service::_drop_index(const XidLsn& xid,
     }
     auto& index_info = std::get<0>(*info);
 
-    if (static_cast<sys_tbl::IndexNames::State>(index_info.state()) ==
-        sys_tbl::IndexNames::State::DELETED) {
-        LOG_DEBUG(LOG_SCHEMA, "Index already deleted: {}@{} - {}", db_id, xid.xid,
-                            index_id);
+    auto state = static_cast<sys_tbl::IndexNames::State>(index_info.state());
+    if (state == sys_tbl::IndexNames::State::DELETED ||
+        state == sys_tbl::IndexNames::State::BEING_DELETED) {
+        LOG_DEBUG(LOG_SCHEMA, "Index already deleted: {}@{} - {}", db_id, xid.xid, index_id);
         return;
     }
 
@@ -381,7 +383,7 @@ Service::_drop_index(const XidLsn& xid,
     auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);
     auto tuple = sys_tbl::IndexNames::Data::tuple(
         std::get<1>(*info), index_info.name(), index_info.table_id(), index_id, xid.xid, xid.lsn,
-        sys_tbl::IndexNames::State::DELETED, index_info.is_unique());
+        index_state, index_info.is_unique());
     index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     std::map<uint32_t, uint32_t> keys;
@@ -395,7 +397,7 @@ Service::_drop_index(const XidLsn& xid,
 
     {
         boost::unique_lock lock(_mutex);
-        index_info.set_state(static_cast<int8_t>(sys_tbl::IndexNames::State::DELETED));
+        index_info.set_state(static_cast<int8_t>(index_state));
         _index_cache[db_id][index_info.table_id()][index_info.id()].emplace_back(xid, index_info);
     }
 }
@@ -865,6 +867,7 @@ Service::Finalize(grpc::ServerContext* context,
     auto write_xid = _get_write_xid(request->db_id());
     LOG_DEBUG(LOG_SCHEMA, "Finalize system tables: {}@{} >= {}", request->db_id(),
                         request->xid(), write_xid);
+    CHECK_GE(request->xid(), write_xid);
 
     // finalize the mutated tables at the write_xid
     // XXX we currently don't store the metadata, but re-read it from the roots file each time
@@ -936,7 +939,8 @@ Service::GetSchema(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "GetSchema");
 
-    LOG_INFO("got GetSchema()");
+    LOG_INFO("got GetSchema(): db {} tid {} xid {} lsn {}", request->db_id(),
+             request->table_id(), request->xid(), request->lsn());
 
     boost::shared_lock lock(_read_mutex);
 
@@ -1041,7 +1045,7 @@ Service::SwapSyncTable(grpc::ServerContext* context,
         drop.set_db_id(create_req.db_id());
         drop.set_table_id(create_req.table().id());
         drop.set_xid(create_req.xid());
-        drop.set_lsn(create_req.lsn() - 1);
+        drop.set_lsn(constant::RESYNC_DROP_LSN);
         drop.set_namespace_name(create_req.table().namespace_name());
         drop.set_name(create_req.table().name());
 
@@ -1056,7 +1060,7 @@ Service::SwapSyncTable(grpc::ServerContext* context,
     LOG_DEBUG(LOG_SCHEMA, "Create table: {}:{} @ {}:{}", create_req.db_id(),
                         create_req.table().id(), create_req.xid(), create_req.lsn());
 
-    assert(create_req.lsn() == constant::MAX_LSN - 1);
+    assert(create_req.lsn() == constant::RESYNC_CREATE_LSN);
     auto&& create_ddl = this->_create_table(create_req);
     ddls.push_back(create_ddl);
 
@@ -1064,7 +1068,7 @@ Service::SwapSyncTable(grpc::ServerContext* context,
         LOG_DEBUG(LOG_SCHEMA, "Create index: {}:{} @ {}:{}", index.db_id(),
                             index.index().id(), index.xid(), index.lsn());
 
-        CHECK_EQ(index.lsn(), constant::MAX_LSN - 1);
+        CHECK_EQ(index.lsn(), constant::RESYNC_CREATE_LSN);
         auto&& index_ddl = this->_create_index(index);
         ddls.push_back(index_ddl);
     }
@@ -1165,11 +1169,13 @@ Service::DropUserType(grpc::ServerContext* context,
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
+    XidLsn xid(request->xid(), request->lsn());
     auto user_type_info = _get_usertype_info(request->db_id(), request->type_id(), xid);
     if (user_type_info == nullptr) {
         // drop could for a type we don't support, so ignore it here
         LOG_WARN("User type {} not found", request->type_id());
-        ddl["action"] = "no_change";
+        nlohmann::json ddl = {"action", "no_change"};
+
         // serialize the JSON and return
         response->set_statement(nlohmann::to_string(ddl));
         span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
@@ -1177,7 +1183,6 @@ Service::DropUserType(grpc::ServerContext* context,
     }
 
     // update the user defined types table
-    XidLsn xid(request->xid(), request->lsn());
     auto ddl = _mutate_usertype(request->db_id(), request->type_id(), request->name(),
         request->namespace_id(), request->type(), request->value_json(), xid, false);
 
@@ -1276,6 +1281,101 @@ Service::_get_usertype_info(uint64_t db_id, uint64_t type_id, const XidLsn& xid)
         fields->at(sys_tbl::UserTypes::Data::EXISTS)->get_bool(*row_i));
 }
 
+
+grpc::Status
+Service::Revert(grpc::ServerContext* context,
+                const proto::RevertRequest* request,
+                google::protobuf::Empty* response)
+{
+    // ensure that we don't have a partially committed XID currently in-memory
+    CHECK(_write[request->db_id()].empty());
+
+    // get the base directory for table data
+    std::filesystem::path table_base;
+    nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
+    Json::get_to<std::filesystem::path>(json, "table_dir", table_base);
+    table_base = Properties::make_absolute_path(table_base);
+
+    // go through each system table and adjust it's roots symlink to point to the correct file for
+    // the committed XID
+    for (auto table_id : sys_tbl::TABLE_IDS) {
+        // get the table directory path
+        auto table_dir = table_helpers::get_table_dir(table_base, request->db_id(), table_id, 1);
+
+        // find all roots files and extract their XIDs
+        std::map<uint64_t, std::filesystem::path> roots_files;
+        for (const auto& entry : std::filesystem::directory_iterator(table_dir)) {
+            // only process files
+            if (!entry.is_regular_file()) {
+                continue;
+            }
+
+            // only process "roots.xid" files
+            auto filename = entry.path().filename().string();
+            if (!filename.starts_with("roots.")) {
+                continue;
+            }
+
+            try {
+                uint64_t xid = std::stoull(filename.substr(6)); // skip "roots."
+                roots_files.try_emplace(xid, entry.path());
+            } catch (...) {
+                // Skip files with invalid numbers
+                continue;
+            }
+        }
+
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Found {} root files for system table {}",
+                  roots_files.size(), table_id);
+
+        // find the largest valid XID
+        if (!roots_files.empty()) {
+            // find the first XID beyond the committed XID
+            auto del_i = roots_files.upper_bound(request->xid());
+            auto root_i = std::make_reverse_iterator(del_i);
+
+            if (root_i == roots_files.rend()) {
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Clear system table {}", root_i->second, table_id);
+                // there's no valid roots, clear *all* of the system table data
+                for (const auto& entry : std::filesystem::directory_iterator(table_dir)) {
+                    std::filesystem::remove_all(entry.path());
+                }
+            } else {
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Picked root file {} for system table {}", root_i->second,
+                          table_id);
+
+                // update the symlink
+                auto symlink_path = table_dir / "roots";
+
+                std::filesystem::create_symlink(root_i->second,
+                                                table_dir / constant::ROOTS_TMP_FILE);
+                std::filesystem::rename(table_dir / constant::ROOTS_TMP_FILE,
+                                        table_dir / constant::ROOTS_FILE);
+
+                // remove any roots files with larger XIDs
+                for (; del_i != roots_files.end(); ++del_i) {
+                    LOG_DEBUG(LOG_PG_LOG_MGR, "Delete root file {} for system table {}",
+                              del_i->second, table_id);
+                    std::filesystem::remove(del_i->second);
+                }
+            }
+        }
+
+        // remove rows from the table that are beyond the committed XID
+        auto mtable = _get_mutable_system_table(request->db_id(), table_id);
+        auto table = _get_system_table(request->db_id(), table_id);
+        FieldPtr xid_f = table->extent_schema()->get_field("xid");
+        auto primary_fields = table->extent_schema()->get_fields(table->primary_key());
+        for (auto row : *table) {
+            if (xid_f->get_uint64(row) > request->xid()) {
+                mtable->remove(std::make_shared<FieldTuple>(primary_fields, row),
+                               constant::UNKNOWN_EXTENT);
+            }
+        }
+    }
+
+    return grpc::Status::OK;
+}
 
 Service::TableCacheRecordPtr
 Service::_get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
@@ -1491,6 +1591,12 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     uint64_t snapshot_xid = 0;
     auto rrow_i = roots_t->lower_bound(search_key);
 
+    proto::GetIndexInfoRequest index_info_request;
+    index_info_request.set_db_id(db_id);
+    index_info_request.set_xid(xid.xid);
+    index_info_request.set_lsn(xid.lsn);
+    index_info_request.set_table_id(table_id);
+
     for (; rrow_i != roots_t->end(); ++rrow_i) {
         if (table_id_f->get_uint64(*rrow_i) > table_id) {
             break;
@@ -1502,6 +1608,20 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
         if (xid.xid < record_xid) {
             continue;
         }
+
+        // Allow roots to be picked up even for non-primary key tables
+        if (index_id_f->get_uint64(*rrow_i) != constant::INDEX_PRIMARY) {
+            index_info_request.set_index_id(index_id_f->get_uint64(*rrow_i));
+            auto index_info = _get_index_info(index_info_request);
+
+            if (static_cast<sys_tbl::IndexNames::State>(index_info.state()) != sys_tbl::IndexNames::State::READY &&
+                    static_cast<sys_tbl::IndexNames::State>(index_info.state()) != sys_tbl::IndexNames::State::BEING_DELETED) {
+                LOG_DEBUG(LOG_SCHEMA, "Index deleted or not-ready, so skipping the root {} -- {}",
+                          table_id, index_id_f->get_uint64(*rrow_i));
+                continue;
+            }
+        }
+
         proto::RootInfo ri;
         ri.set_index_id(index_id_f->get_uint64(*rrow_i));
         ri.set_extent_id(eid_f->get_uint64(*rrow_i));
@@ -1543,7 +1663,9 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
 
     // retrieve the stats from the row
     auto row_count_f = stats_t->extent_schema()->get_field("row_count");
+    auto end_offset_f = stats_t->extent_schema()->get_field("end_offset");
     roots_info->mutable_stats()->set_row_count(row_count_f->get_uint64(*srow_i));
+    roots_info->mutable_stats()->set_end_offset(end_offset_f->get_uint64(*srow_i));
 
     return roots_info;
 }
@@ -1573,7 +1695,7 @@ Service::_set_roots_info(uint64_t db_id,
     // update the table_stats
     auto table_stats_t = _get_mutable_system_table(db_id, sys_tbl::TableStats::ID);
     auto tuple =
-        sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats().row_count());
+        sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats().row_count(), roots_info->stats().end_offset());
     table_stats_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 
     LOG_DEBUG(LOG_SCHEMA, "Updated stats {}@{}:{} - {}", table_id, xid.xid, xid.lsn,

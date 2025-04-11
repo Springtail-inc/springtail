@@ -5,6 +5,7 @@
 
 #include <common/logging.hh>
 #include <common/singleton.hh>
+#include <sys_tbl_mgr/system_tables.hh>
 #include <grpcpp/grpcpp.h>
 #include <proto/sys_tbl_mgr.grpc.pb.h>
 #include <sys_tbl_mgr/table.hh>
@@ -136,6 +137,16 @@ public:
     grpc::Status SwapSyncTable(grpc::ServerContext* context,
                                const proto::SwapSyncTableRequest* request,
                                proto::DDLStatement* response) override;
+
+    /** Reverts the system tables of the provided db to the provided XID.  To avoid trying to write
+        data at an already committed XID, this causes the removal of rows with an XID beyond the
+        committed XID to be applied into the in-memory mutable tables, which will be committed with
+        the next finalize.  This should be safe because the other operations won't return data for
+        XIDs beyond the requested XID, and nothing should be requested beyond the committed XID. */
+    grpc::Status Revert(grpc::ServerContext* context,
+                        const proto::RevertRequest* request,
+                        google::protobuf::Empty* response) override;
+
 
 private:
     Service() = default;
@@ -468,11 +479,13 @@ private:
      * optional. There is a special case when tid is required. We construct primary indexes in
      * create table using the column attributes and assign the same index ID=constant::PRIMARY_INDEX
      * to all primary indexes and so tid is required for PRIMARY_INDEX.
+     * @param index_state Accepts BEING_DELETED or DELETED
      */
     void _drop_index(const XidLsn& xid,
                      uint64_t db_id,
                      uint64_t index_id,
-                     std::optional<uint64_t> tid = std::nullopt);
+                     std::optional<uint64_t> tid = std::nullopt,
+                     sys_tbl::IndexNames::State index_state = sys_tbl::IndexNames::State::DELETED);
 
     /**
      * Performs a create_table() assuming that the correct locks are already held.

@@ -60,7 +60,7 @@ namespace springtail::pg_log_mgr {
          * @brief Get file name
          * @return std::filesystem::path& filename
          */
-        std::filesystem::path &filename() { return _file; }
+        const std::filesystem::path &filename() const { return _file; }
 
         /**
          * @brief Get the latest synced lsn

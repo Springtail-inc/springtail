@@ -1,8 +1,11 @@
 #include <openssl/err.h>
-#include <proxy/auth/md5.h>
 
 #include <common/logging.hh>
+#include <common/constants.hh>
+
 #include <pg_repl/pg_types.hh>
+
+#include <proxy/auth/md5.h>
 #include <proxy/auth/scram.hh>
 #include <proxy/authorization.hh>
 #include <proxy/buffer_pool.hh>
@@ -162,12 +165,11 @@ ClientAuthorization::_process_startup_msg(int32_t remaining, uint64_t seq_id)
     _database = database;
     auto optional_db_id = DatabaseMgr::get_instance()->get_database_id(_database);
     if (!optional_db_id.has_value()) {
-        LOG_ERROR("Database {} not found for user {}", _database, username);
-        _state = ERROR;
-        _error_code = ProxyProtoError::INVALID_DATABASE;
-        return;
+        LOG_WARN("Database {} not found for user {}", _database, username);
+        _db_id = constant::INVALID_DB_ID;
+    } else {
+        _db_id = optional_db_id.value();
     }
-    _db_id = optional_db_id.value();
 
     // get login info for the user
     _login = _user->get_user_login();

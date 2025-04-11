@@ -94,15 +94,18 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             // handle a TABLE_SYNC_COMMIT
             if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT ||
                 result->type() == XidReady::Type::TABLE_SYNC_SWAP) {
-                LOG_DEBUG(LOG_COMMITTER, "Handle a TABLE_SYNC_SWAP/COMMIT: {}, {}, completed xid @{}",
-                                    static_cast<char>(result->type()), db_id, completed_xid);
+                LOG_DEBUG(
+                    LOG_COMMITTER,
+                    "Handle a TABLE_SYNC_SWAP/COMMIT: {}, {}, completed xid @{}, request xid @{}",
+                    static_cast<char>(result->type()), db_id, completed_xid, result->swap().xid());
 
                 nlohmann::json ddls;
 
                 // note: Need to check the completed XID against the most recent committed XID.  If
                 //       it is ahead, then we commit at the completed XID.  If it is the same then
                 //       we commit at the provided XID.
-                if (completed_xid == _committed_xids[db_id]) {
+                auto committed_i = _committed_xids.find(db_id);
+                if (committed_i == _committed_xids.end() || completed_xid == committed_i->second) {
                     completed_xid = result->swap().xid();
                 }
 
@@ -132,16 +135,16 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     //       up in the schema since it wouldn't get deleted by the DROP TABLE
                     auto *namespace_req = copy_info->mutable_namespace_req();
                     namespace_req->set_xid(completed_xid);
-                    namespace_req->set_lsn(constant::MAX_LSN - 2);
+                    namespace_req->set_lsn(constant::RESYNC_NAMESPACE_LSN);
                     auto *create = copy_info->mutable_table_req();
                     create->set_xid(completed_xid);
-                    create->set_lsn(constant::MAX_LSN - 1);
+                    create->set_lsn(constant::RESYNC_CREATE_LSN);
 
                     auto *indexes = copy_info->mutable_index_reqs();
                     std::vector<proto::IndexRequest> indexes_vec;
                     for (auto &index : *indexes) {
                         index.set_xid(completed_xid);
-                        index.set_lsn(constant::MAX_LSN - 1);
+                        index.set_lsn(constant::RESYNC_CREATE_LSN);
                         indexes_vec.push_back(index);
                     }
 
@@ -194,9 +197,16 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 continue;
             }
 
-            // note: from here we know we have an XACT_MSG
-            assert(result->type() == XidReady::Type::XACT_MSG);
-            uint64_t xid = result->xact().xid();
+            // note: from here we know we have an XACT_MSG or RECONCILE_INDEX
+            // XXX: Once we confirm we can commit the index at table's last XID safely,
+            //      we can remove the type RECONCILE_INDEX
+            assert(result->type() == XidReady::Type::XACT_MSG || result->type() == XidReady::Type::RECONCILE_INDEX);
+            uint64_t xid = 0;
+            if (result->type() == XidReady::Type::RECONCILE_INDEX) {
+                xid = result->reconcile().xid();
+            } else {
+                xid = result->xact().xid();
+            }
             auto token_4 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(xid)}});
             LOG_INFO("Process XID: {}@{}", db_id, xid);
             assert(xid > completed_xid);
@@ -249,12 +259,25 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
             nlohmann::json index_ddls = _redis_ddl.get_index_ddls_xid(db_id, xid);
 
+            // Trigger index reconciliation for the earliest pending XID
+            if (result->type() == XidReady::Type::RECONCILE_INDEX) {
+                _indexer->process_index_reconciliation(db_id, result->reconcile().reconcile_xid(), xid);
+            }
+
             if (!index_ddls.is_null()) {
                 _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
 
-                // build the indexes, stalling the pipeline
+                // process the indexes - create/drop, allowing them to happen in the background
                 _indexer->process_ddls(db_id, xid, index_ddls);
-                _indexer->wait_for_completion(db_id);
+
+                // Abort index_ddls if they have only abort_index
+                bool only_abort_index_ddls = std::ranges::all_of(index_ddls, [](const auto& ddl) {
+                        return ddl["action"] == "abort_index";
+                        });
+
+                if (only_abort_index_ddls) {
+                    _redis_ddl.abort_index_ddl(db_id, xid);
+                }
             }
 
             if (!completed_ddls.is_null()) {
@@ -286,11 +309,12 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             }
             _completed_xids[db_id] = xid;
 
-            if (!index_ddls.is_null()) {
-                _redis_ddl.commit_index_ddl(db_id, xid);
+            if (result->type() == XidReady::Type::RECONCILE_INDEX) {
+                // Commit index XID as they complete reconciliation
+                _redis_ddl.commit_index_ddl(db_id, result->reconcile().reconcile_xid());
+            } else if (result->type() == XidReady::Type::XACT_MSG) {
+                result->notify_tracker(xid);
             }
-
-            result->notify_tracker(xid);
 
             LOG_DEBUG(LOG_COMMITTER, "XID completed: {}@{}", db_id, xid);
         }
@@ -378,7 +402,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
     Committer::_create_indexer()
     {
         // use the same worker count for Indexer
-        _indexer = std::make_unique<Indexer>(_worker_count);
+        _indexer = std::make_unique<Indexer>(_worker_count, _index_reconciliation_queue);
 
         // cleanup
         auto &&precommit = _redis_ddl.get_precommit_index_ddl();
@@ -394,65 +418,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 });
 
         for (auto [db_id, xid, ddls] : precommit) {
-            uint64_t commit_xid = _xid_mgr->get_committed_xid(db_id, 0);
-            if (xid <= commit_xid) {
-                //TODO: In the synchronized version this should not be possible.
-                // We should figure out how to deal with it eventually.
-                assert(false);
-                _redis_ddl.abort_index_ddl(db_id, xid);
-                continue;
-            }
-            for (auto const &ddl: ddls) {
-                auto action = ddl["action"];
-                uint32_t index_id = ddl["id"];
-                if (action == "create_index") {
-                    uint64_t tid = ddl["table_id"];
-                    if (_index_exists(db_id, tid, index_id, xid)) {
-                        // this is very unlikely. It would mean that the system went down
-                        // after the index build was finalized but before it had a chance
-                        // to commit the DDL to redis.
-                        LOG_DEBUG(LOG_COMMITTER, "* Uncommitted index {}@{} -- {} {}", db_id, xid, tid, index_id);
-                    } else {
-                        // reconstruct the log message
-                        PgMsgIndex msg;
-                        msg.oid = index_id;
-                        msg.xid = xid;
-                        msg.namespace_name = ddl["schema"];
-                        msg.index = ddl["index"];
-                        msg.is_unique = ddl["is_unique"];
-                        msg.table_oid = tid;
-                        for (auto const& c: ddl["columns"]) {
-                            PgMsgSchemaIndexColumn col;
-                            col.idx_position = c["idx_position"];
-                            col.position = c["position"];
-                            col.name = c["name"];
-                            msg.columns.push_back(col);
-                        }
-                        XidLsn xid_c(xid);
-                        sys_tbl_mgr::Client::get_instance()->create_index(db_id, xid_c,
-                                msg, sys_tbl::IndexNames::State::READY);
-                        _indexer->build({db_id, xid, ddl});
-                    }
-                } else if (action == "drop_index") {
-                    _indexer->drop(db_id, index_id, xid);
-                } else {
-                    assert(false);
-                }
-            }
-        }
-
-        // wait for completion
-        for (auto [db_id, xid, ddls] : precommit) {
-            _indexer->wait_for_completion(db_id);
-        }
-
-        //finalize and commit
-        auto client = sys_tbl_mgr::Client::get_instance();
-        for (auto const& [db_id, xid, ddls] : precommit) {
-            // XXX I think this is not safe since it might have already been called -- we need to do
-            //     this another way, probably by injecting a record into the committer queue
-            client->finalize(db_id, xid);
-            _redis_ddl.commit_ddl(db_id, xid);
+            _indexer->process_ddls(db_id, xid, ddls["ddls"]);
         }
     }
 
