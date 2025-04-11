@@ -31,7 +31,7 @@ namespace springtail::pg_log_mgr {
                        int port,
                        bool archive_logs,
                        std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
-                       std::shared_ptr<ConcurrentQueue<std::string>> index_reconciliation_queue)
+                       std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>> index_reconciliation_queue)
     : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
       _host(host), _db_name(db_name), _user_name(user_name),
       _password(password), _pub_name(pub_name), _slot_name(slot_name),
@@ -245,11 +245,9 @@ namespace springtail::pg_log_mgr {
             LOG_DEBUG(LOG_PG_LOG_MGR, "Waiting for index reconciliation request");
             if (auto request = _index_reconciliation_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT); request) {
                 //Pass it to log reader to notify committer
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Request received for index reconciliation for {}", *request);
-                std::vector<std::string> split;
-                common::split_string(":", *request, split);
-                CHECK_EQ(split.size(), 2);
-                reconcile_index_msg.reconcile_xid = std::stoull(split[1]);
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Request received for index reconciliation for XID: {} @ {}", request->db_id(), request->reconcile_xid());
+                reconcile_index_msg.db_id = request->db_id();
+                reconcile_index_msg.reconcile_xid = request->reconcile_xid();
                 auto msg = std::make_shared<PgMsg>(PgMsgEnum::RECONCILE_INDEX);
                 msg->msg.emplace<PgMsgReconcileIndex>(reconcile_index_msg);
                 _pg_log_reader->enqueue_msg(msg);

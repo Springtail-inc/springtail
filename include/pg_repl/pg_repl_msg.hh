@@ -229,6 +229,7 @@ namespace springtail
     };
 
     struct PgMsgReconcileIndex{
+        uint64_t db_id;
         uint64_t reconcile_xid;
     };
 

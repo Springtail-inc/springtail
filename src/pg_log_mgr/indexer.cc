@@ -9,7 +9,7 @@
 
 namespace springtail::committer {
 
-    Indexer::Indexer(uint32_t worker_count, ReconciliationQueuePtr index_reconciliation_queue)
+    Indexer::Indexer(uint32_t worker_count, const ReconciliationQueuePtr& index_reconciliation_queue)
         : _index_reconciliation_queue(index_reconciliation_queue)
     {
         CHECK_GT(worker_count, 0);
@@ -365,7 +365,7 @@ namespace springtail::committer {
         // only after all the DDLs of XID are processed
         if (--_xid_ddl_counter_map[idx_state._idx._xid] == 0) {
             _xid_ddl_counter_map.erase(idx_state._idx._xid);
-            _index_reconciliation_queue->push(std::make_shared<std::string>(fmt::format("{}:{}", db_id, idx_state._idx._xid)));
+            _index_reconciliation_queue->push(std::make_shared<IndexReconcileRequest>(db_id, idx_state._idx._xid));
         }
     }
 

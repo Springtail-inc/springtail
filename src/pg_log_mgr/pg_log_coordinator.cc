@@ -72,7 +72,7 @@ namespace springtail::pg_log_mgr {
         _committer_queue = std::make_shared<ConcurrentQueue<committer::XidReady>>();
 
         // initialize index reconciliation queue
-        _index_reconciliation_queue = std::make_shared<ConcurrentQueue<std::string>>();
+        _index_reconciliation_queue = std::make_shared<ConcurrentQueue<IndexReconcileRequest>>();
 
         // read log mgr config
         nlohmann::json log_mgr_config = Properties::get(Properties::LOG_MGR_CONFIG);

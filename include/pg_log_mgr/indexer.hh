@@ -10,6 +10,8 @@
 #include <redis/redis_ddl.hh>
 #include <boost/functional/hash.hpp>
 #include <storage/mutable_btree.hh>
+#include <common/common.hh>
+#include <pg_repl/index_reconcile_request.hh>
 
 namespace springtail::committer {
 
@@ -40,9 +42,9 @@ namespace springtail::committer {
             }
         };
 
-        using ReconciliationQueuePtr = std::shared_ptr<ConcurrentQueue<std::string>>;
+        using ReconciliationQueuePtr = std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>>;
 
-        Indexer(uint32_t worker_count, ReconciliationQueuePtr index_reconciliation_queue);
+        Indexer(uint32_t worker_count, const ReconciliationQueuePtr& index_reconciliation_queue);
 
         Indexer(const Indexer&) = delete;
         Indexer& operator=(const Indexer&) = delete;
@@ -200,6 +202,6 @@ namespace springtail::committer {
         /*
          * @brief A queue for indexer to notify committer to trigger index reconciliation
          */
-        std::shared_ptr<ConcurrentQueue<std::string>> _index_reconciliation_queue;
+        ReconciliationQueuePtr _index_reconciliation_queue;
     };
 }
