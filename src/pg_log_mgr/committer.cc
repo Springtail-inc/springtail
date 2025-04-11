@@ -276,6 +276,15 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
                 // process the indexes - create/drop, allowing them to happen in the background
                 _indexer->process_ddls(db_id, xid, index_ddls);
+
+                // Abort index_ddls if they have only abort_index
+                bool only_abort_index_ddls = std::ranges::all_of(index_ddls, [](const auto& ddl) {
+                        return ddl["action"] == "abort_index";
+                        });
+
+                if (only_abort_index_ddls) {
+                    _redis_ddl.abort_index_ddl(db_id, xid);
+                }
             }
 
             if (!completed_ddls.is_null()) {
@@ -416,51 +425,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 });
 
         for (auto [db_id, xid, ddls] : precommit) {
-            uint64_t commit_xid = _xid_mgr->get_committed_xid(db_id, 0);
-            if (xid <= commit_xid) {
-                //TODO: In the synchronized version this should not be possible.
-                // We should figure out how to deal with it eventually.
-                assert(false);
-                _redis_ddl.abort_index_ddl(db_id, xid);
-                continue;
-            }
-            for (auto const &ddl: ddls) {
-                auto action = ddl["action"];
-                uint32_t index_id = ddl["id"];
-                if (action == "create_index") {
-                    uint64_t tid = ddl["table_id"];
-                    if (_index_exists(db_id, tid, index_id, xid)) {
-                        // this is very unlikely. It would mean that the system went down
-                        // after the index build was finalized but before it had a chance
-                        // to commit the DDL to redis.
-                        LOG_DEBUG(LOG_COMMITTER, "* Uncommitted index {}@{} -- {} {}", db_id, xid, tid, index_id);
-                    } else {
-                        // reconstruct the log message
-                        PgMsgIndex msg;
-                        msg.oid = index_id;
-                        msg.xid = xid;
-                        msg.namespace_name = ddl["schema"];
-                        msg.index = ddl["index"];
-                        msg.is_unique = ddl["is_unique"];
-                        msg.table_oid = tid;
-                        for (auto const& c: ddl["columns"]) {
-                            PgMsgSchemaIndexColumn col;
-                            col.idx_position = c["idx_position"];
-                            col.position = c["position"];
-                            col.name = c["name"];
-                            msg.columns.push_back(col);
-                        }
-                        XidLsn xid_c(xid);
-                        sys_tbl_mgr::Client::get_instance()->create_index(db_id, xid_c,
-                                msg, sys_tbl::IndexNames::State::NOT_READY);
-                        _indexer->build({db_id, xid, ddl});
-                    }
-                } else if (action == "drop_index") {
-                    _indexer->drop(db_id, index_id, xid);
-                } else {
-                    assert(false);
-                }
-            }
+            _indexer->process_ddls(db_id, xid, ddls["ddls"]);
         }
     }
 
@@ -600,13 +565,13 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 {
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
                     LOG_DEBUG(LOG_COMMITTER, "INSERT value={}", tuple->to_string());
-                    table->insert(tuple, wc_extent->xid, constant::UNKNOWN_EXTENT);
+                    table->insert(tuple, constant::UNKNOWN_EXTENT);
                     break;
                 }
             case UPDATE:
                 {
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
-                    table->update(tuple, wc_extent->xid, constant::UNKNOWN_EXTENT);
+                    table->update(tuple, constant::UNKNOWN_EXTENT);
                     break;
                 }
             case DELETE:
@@ -614,10 +579,10 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     if (wc_key_fields->empty()) {
                         // no sort key, so need to handle non-primary key by using the entire row
                         auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
-                        table->remove(tuple, wc_extent->xid, constant::UNKNOWN_EXTENT);
+                        table->remove(tuple, constant::UNKNOWN_EXTENT);
                     } else {
                         auto tuple = std::make_shared<FieldTuple>(wc_key_fields, row);
-                        table->remove(tuple, wc_extent->xid, constant::UNKNOWN_EXTENT);
+                        table->remove(tuple, constant::UNKNOWN_EXTENT);
                     }
                     break;
                 }

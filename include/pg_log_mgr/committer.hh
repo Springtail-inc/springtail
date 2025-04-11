@@ -18,6 +18,7 @@
 
 #include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/indexer.hh>
+#include <pg_repl/index_reconcile_request.hh>
 
 #include <sys_tbl_mgr/table.hh>
 #include <write_cache/write_cache_index.hh>
@@ -42,11 +43,11 @@ namespace springtail::committer {
      */
     class Committer {
     public:
-        Committer(uint32_t worker_count, std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
-                std::shared_ptr<ConcurrentQueue<std::string>> index_reconciliation_queue)
+        Committer(uint32_t worker_count, const std::shared_ptr<ConcurrentQueue<committer::XidReady>> &committer_queue,
+                const std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>> &index_reconciliation_queue)
             : _worker_count(worker_count),
-              _committer_queue{std::move(committer_queue)},
-              _index_reconciliation_queue{std::move(index_reconciliation_queue)}
+              _committer_queue(committer_queue),
+              _index_reconciliation_queue(index_reconciliation_queue)
         {
             _xid_mgr = XidMgrClient::get_instance();
             _worker_id = fmt::format("{}_{}_0", THREAD_TYPE, THREAD_MAIN);
@@ -128,7 +129,7 @@ namespace springtail::committer {
         uint32_t _worker_count;
         ConcurrentQueue<WorkerEntry> _worker_queue; ///< The queue of work for the worker threads.
         std::shared_ptr<ConcurrentQueue<XidReady>> _committer_queue;
-        std::shared_ptr<ConcurrentQueue<std::string>> _index_reconciliation_queue; ///< Queue where index reconciliation requests are received
+        std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>> _index_reconciliation_queue; ///< Queue where index reconciliation requests are received
         std::vector<std::thread> _worker_threads; ///< The worker threads.
 
         std::atomic<uint64_t> _shutdown = false; ///< Causes the committer to shut down when set to true.

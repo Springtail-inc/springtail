@@ -12,6 +12,10 @@ on:
         description: 'The number of processes to use for the build.'
         type: string
         default: "4"
+      ref:
+        description: 'The git reference to checkout.'
+        type: string
+        default: "refs/pull/${{ github.event.pull_request.number }}/merge"
     secrets:
       aws_role_arn:
         description: "The ARN of the role to assume."
@@ -45,6 +49,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref }}
           clean: true
 
       - name: Configure AWS Credentials
@@ -56,11 +61,11 @@ jobs:
 
       - name: Prepare Tests
         run: |
-          git config --global --add safe.directory /__w/springtail/springtail
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
           # Turns off the OTEL in the system.json.settings
           jq '.otel.enabled = false' system.json.settings > tmp.json && mv tmp.json system.json.settings
           # Replace the correct `springtail` code directory
-          sed -i -e 's|/home/dev/springtail|/__w/springtail/springtail|g' system.json.settings
+          sed -i -e "s|/home/dev/springtail|${GITHUB_WORKSPACE}|g" system.json.settings
           cp system.json.settings system.json.test
           mkdir -p /opt/springtail/pids
           service redis-server start
@@ -74,7 +79,16 @@ jobs:
       - name: Build
         run: |
           ln -s /home/dev/external external
-          ./debug.sh -j ${NUM_PROCS}
+          ./vcpkg.sh
+          mkdir -p /home/dev/debug
+          mkdir -p /home/dev/install
+          ln -s /home/dev/debug debug
+          ln -s /home/dev/install install
+          
+          cmake -B debug -S . -D'CMAKE_BUILD_TYPE=Debug' -DVCPKG_INSTALL_OPTIONS="--allow-unsupported"
+
+          cd debug
+          make -j${NUM_PROCS}
 
       - name: Prepare DB for Unit Tests
         run: |
@@ -94,13 +108,13 @@ jobs:
           cd ../../debug
           
           set +e
-          _LOG_FLAG="succeeded"
+          _LOG_FLAG="failed"
           # Per SPR-501: break upon test failures - "--gtest_break_on_failure"
           make test ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose --stop-on-failure" 2>&1 | tee tmplog
           # Grab the success/failure status of the unit tests
-          if [ $? -ne 0 ] || !  grep -qE "100% tests passed" tmplog
+          if [ $? -eq 0 ] &&  grep -qE "100% tests passed" tmplog
           then 
-            _LOG_FLAG="failed"
+            _LOG_FLAG="succeeded"
           fi
           # List the open listening ports and processes info after tests are done
           echo "==== Listening Ports ===="
@@ -151,7 +165,7 @@ jobs:
           name: 'Unit Test Logs'
           path: debug/unit-test-*.log.tar.gz
 
-      - name: Create Superuser for test
+      - name: Prepare Integration test
         if: success() || failure()      # run this step even if previous step failed
         run: |
           service postgresql start
@@ -169,12 +183,12 @@ jobs:
           ./startup.sh -s data_init.sql
 
           set +e
-          _LOG_FLAG="succeeded"          
+          _LOG_FLAG="failed"          
           python3 test_runner.py -c config.yaml -j /__w/springtail/springtail/integration-test-report.xml 2>&1 | tee tmplog
           # Grab the success/failure status of the integration tests
-          if [ $? -ne 0 ] || grep -qE "Tests failed: [1-9][0-9]*" tmplog
-          then 
-            _LOG_FLAG="failed"
+          if [ $? -eq 0 ] && ! grep -qE "Tests failed: [1-9][0-9]*" tmplog
+          then
+            _LOG_FLAG="succeeded"
           fi
           # Grab the current PR ID
           _LOG_PR_ID="${GITHUB_EVENT_PULL_REQUEST_NUMBER}"

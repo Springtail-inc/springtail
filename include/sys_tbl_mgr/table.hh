@@ -518,7 +518,7 @@ namespace indexer_helpers {
          * if the extent_id is UNKNOWN, then it will utilize the tuple data to determine where the
          * row should be added.
          */
-        void insert(TuplePtr value, uint64_t xid, uint64_t extent_id);
+        void insert(TuplePtr value, uint64_t extent_id);
 
         /**
          * Add a row to the table if it doesn't exist, otherwise update the existing row with the
@@ -526,14 +526,14 @@ namespace indexer_helpers {
          * extent_id is UNKNOWN, then it will utilize the tuple data to determine where the row
          * should be added.
          */
-        void upsert(TuplePtr value, uint64_t xid, uint64_t extent_id);
+        void upsert(TuplePtr value, uint64_t extent_id);
 
         /**
          * Remove a row from the table.  The data extent ID is provided externally by the write
          * cache, or if the extent_id is UNKNOWN, then it will utilize the tuple data to identify a
          * row to remove.
          */
-        void remove(TuplePtr key, uint64_t xid, uint64_t extent_id);
+        void remove(TuplePtr key, uint64_t extent_id);
 
         /**
          * Update a row in the table.  The value must contain the primary key to be updated and the
@@ -541,7 +541,7 @@ namespace indexer_helpers {
          * cache, or if the extent_id is UNKNOWN, then it will utilize the tuple data to identify a
          * row to remove.
          */
-        void update(TuplePtr value, uint64_t xid, uint64_t extent_id);
+        void update(TuplePtr value, uint64_t extent_id);
 
         /**
          * Truncates the table, removing the callback of any mutated pages in the cache, clearing
@@ -641,85 +641,85 @@ namespace indexer_helpers {
         /**
          * Inserts a tuple directly into the provided extent at the given XID.
          */
-        void _insert_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
+        void _insert_direct(TuplePtr value, uint64_t extent_id);
 
         /**
          * Inserts a tuple into the "empty" Page object.  Used when the Table started empty.
          */
-        void _insert_empty(TuplePtr value, uint64_t xid);
+        void _insert_empty(TuplePtr value);
 
         /**
          * Appends a tuple into the "empty" Page object.  Used when the Table started empty.
          */
-        void _append_empty(TuplePtr value, uint64_t xid);
+        void _append_empty(TuplePtr value);
 
         /**
          * Inserts a tuple at the end of the last extent of the table at the given XID.
          */
-        void _insert_append(TuplePtr value, uint64_t xid);
+        void _insert_append(TuplePtr value);
 
         /**
-         * Inserts a tuple at the given XID into the extent returned by a primary key lookup using
+         * Inserts a tuple into the extent returned by a primary key lookup using
          * the tuple.
          */
-        void _insert_by_lookup(TuplePtr value, uint64_t xid);
+        void _insert_by_lookup(TuplePtr value);
 
         /**
          * Either inserts a tuple directly into the provided extent at the given XID, or updates an
          * existing row with the same primary key value.
          */
-        bool _upsert_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
+        bool _upsert_direct(TuplePtr value, uint64_t extent_id);
 
         /**
          * Upserts a tuple into the "empty" Page object.  Used when the Table started empty.
          */
-        bool _upsert_empty(TuplePtr value, uint64_t xid);
+        bool _upsert_empty(TuplePtr value);
 
         /**
          * Inserts a tuple at the given XID, or updates an existing tuple with the same primary key
          * value, using a primary key lookup to find the containing extent.
          */
-        bool _upsert_by_lookup(TuplePtr value, uint64_t xid);
+        bool _upsert_by_lookup(TuplePtr value);
 
         /**
          * Removes a tuple from the provided extent at the given XID that has the same primary key
          * value.
          */
-        void _remove_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
+        void _remove_direct(TuplePtr value, uint64_t extent_id);
 
         /**
          * Removes a row from the "empty" Page object.  Used when the Table started empty.
          */
-        void _remove_empty(TuplePtr value, uint64_t xid);
+        void _remove_empty(TuplePtr value);
 
         /**
          * Removes a tuple at the given XID that has the same primary key value by using a primary
          * key lookup to find the containing extent.
          */
-        void _remove_by_lookup(TuplePtr key, uint64_t xid);
+        void _remove_by_lookup(TuplePtr key);
 
         /**
          * Removes a tuple at the given XID that has the same primary key value by using a table
          * scan to find the containing extent.
          */
-        void _remove_by_scan(TuplePtr value, uint64_t xid);
+        void _remove_by_scan(TuplePtr value);
 
         /**
          * Updates an existing row with the matching primary key value in the provided extent at the
          * given XID.
          */
-        void _update_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
+        void _update_direct(TuplePtr value, uint64_t extent_id);
 
         /**
          * Updates a row in the "empty" Page object.  Used when the Table started empty.
          */
-        void _update_empty(TuplePtr value, uint64_t xid);
+        void _update_empty(TuplePtr value);
 
         /**
          * Updates an existing row with the matching primary key value at the given XID, using a
          * primary key lookup to find the containing extent.
          */
-        void _update_by_lookup(TuplePtr key, uint64_t xid);
+        void _update_by_lookup(TuplePtr key);
 
         /**
          * Convert the schema of the page, if needed based on the target XID.

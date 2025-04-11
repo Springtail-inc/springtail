@@ -10,6 +10,8 @@
 #include <redis/redis_ddl.hh>
 #include <boost/functional/hash.hpp>
 #include <storage/mutable_btree.hh>
+#include <common/common.hh>
+#include <pg_repl/index_reconcile_request.hh>
 
 namespace springtail::committer {
 
@@ -40,9 +42,9 @@ namespace springtail::committer {
             }
         };
 
-        using ReconciliationQueuePtr = std::shared_ptr<ConcurrentQueue<std::string>>;
+        using ReconciliationQueuePtr = std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>>;
 
-        Indexer(uint32_t worker_count, ReconciliationQueuePtr index_reconciliation_queue);
+        Indexer(uint32_t worker_count, const ReconciliationQueuePtr& index_reconciliation_queue);
 
         Indexer(const Indexer&) = delete;
         Indexer& operator=(const Indexer&) = delete;
@@ -76,14 +78,16 @@ namespace springtail::committer {
 
         /**
          * @brief Set ABORTING state for the indices of a given db_id and table_id.
+         *        This is for the table thats being resync'ed
          *
          * Locks both _table_idx_map and _work_set mutex, iterates through all keys,
-         * retrieves corresponding work item, and sets state to ABORTING.
+         * retrieves corresponding work item, and sets state to ABORTING
          *
          * @param db_id Database ID.
          * @param table_id Table ID.
+         * @param XID To manage index DDL counter
          */
-        void abort_indices(uint64_t db_id, uint64_t table_id);
+        void abort_indexes(uint64_t db_id, uint64_t table_id, uint64_t xid);
 
     private:
         void task(std::stop_token st);
@@ -147,32 +151,45 @@ namespace springtail::committer {
         using TableIndicesMap = std::unordered_map<uint64_t, std::unordered_map<uint64_t, std::list<Key>>>;
         TableIndicesMap _table_idx_map;
 
+        /**
+         * @brief Tracks the number of DDL operations per XID.
+         *
+         * This map stores an atomic counter for each transaction ID (XID),
+         * initialized with the total number of DDL operations for that XID.
+         * The counter is decremented as each DDL is processed. When the count
+         * reaches zero, it indicates all DDLs for the transaction have been completed.
+         */
         std::unordered_map<uint64_t, std::atomic<int>> _xid_ddl_counter_map;
 
-        // Mutex to access pending reconciliation map
+        /**
+         * @brief Mutex for synchronizing access to the pending reconciliation map.
+         */
         std::mutex _pending_reconciliation_map_mtx;
 
-        // Mutex to access table index map
+        /**
+         * @brief Mutex for synchronizing access to the table index map.
+         */
         std::mutex _table_idx_map_mtx;
 
-        // Mutex to access ddl counter map
+        /**
+         * @brief Mutex for synchronizing access to the DDL counter map.
+         */
         std::mutex _xid_ddl_counter_map_mtx;
 
         /**
          * @brief Adds an IndexState to the pending reconciliation map.
          * 
          * This method ensures the correct db_id and xid mapping before inserting the IndexState.
-         * 
-         * @param idxState The IndexState to be added.
+         * @param idx_state The IndexState to be added.
          */
-        void _add_to_pending_reconciliation(IndexState&& idxState);
+        void _add_to_pending_reconciliation(IndexState&& idx_state);
 
         /**
-         * This will reconcile the index by catching
-         * all the table XIDs that happened post build initialization
-         * @param idxState Index state
+         * @brief Reconcile indexes at the given xid
+         * @param idx_state Index state
+         * @param end_xid XID at which indexes to be committed
          */
-        void _reconcile_index(IndexState& idxState, uint64_t end_xid);
+        void _reconcile_index(IndexState& idx_state, uint64_t end_xid);
 
         /**
          * @brief Removes an index key and cleans up empty entries.
@@ -185,6 +202,6 @@ namespace springtail::committer {
         /*
          * @brief A queue for indexer to notify committer to trigger index reconciliation
          */
-        std::shared_ptr<ConcurrentQueue<std::string>> _index_reconciliation_queue;
+        ReconciliationQueuePtr _index_reconciliation_queue;
     };
 }

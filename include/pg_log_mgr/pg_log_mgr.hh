@@ -19,6 +19,7 @@
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_copy_table.hh>
 #include <pg_repl/table_sync_request.hh>
+#include <pg_repl/index_reconcile_request.hh>
 
 #include <pg_log_mgr/pg_log_queue.hh>
 #include <pg_log_mgr/pg_log_writer.hh>
@@ -95,8 +96,7 @@ namespace springtail::pg_log_mgr {
                  int port,
                  bool archive_logs,
                  std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
-                 std::shared_ptr<ConcurrentQueue<std::string>> index_reconciliation_queue,
-                 std::shared_ptr<committer::Committer> committer);
+                 std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>> index_reconciliation_queue);
 
         /**
          * @brief Construct a new Pg Log Mgr object (for testing only)
@@ -111,7 +111,7 @@ namespace springtail::pg_log_mgr {
           _committer_queue(std::make_shared<ConcurrentQueue<committer::XidReady>>()),
           _xact_log_path(xact_log_path),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
-          _index_reconciliation_queue(std::make_shared<ConcurrentQueue<std::string>>())
+          _index_reconciliation_queue(std::make_shared<ConcurrentQueue<IndexReconcileRequest>>())
         {
             _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, xact_log_path, _committer_queue, false);
         }
@@ -240,8 +240,7 @@ namespace springtail::pg_log_mgr {
 
         // Index reconciliation
 
-        std::shared_ptr<ConcurrentQueue<std::string>> _index_reconciliation_queue; ///< Queue where index reconciliation requests are received
-        std::shared_ptr<committer::Committer> _committer;
+        std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>> _index_reconciliation_queue; ///< Queue where index reconciliation requests are received
         std::thread _reconciliation_thread;            ///< Index reconciliation thread
         /*
          * Index reconciliation thread; waits on index reconciliation requests

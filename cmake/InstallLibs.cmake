@@ -6,8 +6,16 @@ find_program(
     HINTS /usr/bin /bin /usr/local/bin
     REQUIRED
 )
-set(SOURCE_LIB_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/lib")
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(SOURCE_LIB_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/debug/lib")
+else()
+    set(SOURCE_LIB_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/lib")
+endif()
+
+# Clean up the destination directory
 set(DEST_LIB_DIR "${PROJECT_SOURCE_DIR}/shared-lib")
+file(REMOVE_RECURSE "${DEST_LIB_DIR}")
 add_custom_target(copy_shared_libraries ALL
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEST_LIB_DIR}"
     COMMAND ${CP_COMMAND} -au "${SOURCE_LIB_DIR}/*.so*" "${DEST_LIB_DIR}"

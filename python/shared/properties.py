@@ -201,20 +201,6 @@ class Properties:
 
         return proxy_config
 
-    def get_integration_test_config(self) -> dict:
-        """Return the integration test configuration as an object."""
-        key = str(self.db_instance_id) + ':instance_config'
-        if 'integration_test_config' in self.cache:
-            return self.cache['integration_test_config']
-
-        config = json.loads(self.redis.hget(key, 'system_settings'))
-        if 'integration_test_config' not in config:
-            return {}
-        integration_test_config = config['integration_test_config']
-        self.cache['integration_test_config'] = integration_test_config
-
-        return integration_test_config
-
     def get_system_config(self) -> dict:
         """Return the system configuration as an object."""
         key = str(self.db_instance_id) + ':instance_config'
@@ -310,7 +296,6 @@ class Properties:
         sys_config_json['sys_tbl_mgr'] = system_json['sys_tbl_mgr']
         sys_config_json['proxy'] = system_json['proxy']
         sys_config_json['otel'] = system_json['otel']
-        sys_config_json['integration_test_config'] = system_json['integration_test_config']
 
         self.redis.hset(db_instance_key, 'system_settings', json.dumps(sys_config_json))
 
@@ -346,6 +331,25 @@ class Properties:
                 return
             if error_state != "" and current_state == error_state:
                 raise Exception(f"Database {id} entered error state {error_state}")
+            time.sleep(1)
+            if time.time() - start > timeout:
+                break
+
+        if timeout != 0:
+            raise TimeoutError('Timed out waiting for state')
+
+    def wait_for_coordinator_state(self, state : str, timeout : int = 600) -> None:
+        """Wait for the coordinator state to reach the desired state.
+        :param state: the state to wait for
+        :param timeout: the maximum time to wait in seconds (0 wait forever)
+        """
+        key = self.db_instance_id + ':coordinator_state'
+        field_key = self.service_name + ':' + self.instance_key
+        start = time.time()
+        while True:
+            current_state = self.redis.hget(key, field_key)
+            if current_state == state:
+                return
             time.sleep(1)
             if time.time() - start > timeout:
                 break
@@ -493,7 +497,6 @@ def main():
     print(f"ingest_host: {props.get_hostname('ingestion')}")
     print(f"proxy_host: {props.get_hostname('proxy')}")
     print(f"coordinator_state: {props.get_coordinator_state()}")
-    print(f"test_proxy_config: {props.get_integration_test_config()}")
     print(f"otel_config: {props.get_otel_config()}")
 
     env_vars = [

@@ -598,6 +598,15 @@ namespace springtail::pg_log_mgr {
         TableSyncRequest request(table_oid, xidlsn);
         table_sync_queue.push(request);
 
+        // Add a message to skip indexes for this table
+        // for the currently building indexes and the ones
+        // belonging to this transaction
+        nlohmann::json ddl;
+        RedisDDL redis_ddl;
+        ddl["action"] = "abort_index";
+        ddl["table_id"] = table_oid;
+        redis_ddl.add_index_ddl(_db, xidlsn.xid, ddl.dump());
+
         // notify the Committer to stop committing XIDs
         if (is_first) {
             _committer_queue->push(std::make_shared<committer::XidReady>(_db));
@@ -927,7 +936,7 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::RECONCILE_INDEX:
             {
                 const auto &idx_reconcile_msg = std::get<PgMsgReconcileIndex>(msg->msg);
-                _process_index_reconciliation(idx_reconcile_msg.reconcile_xid);
+                _process_index_reconciliation(idx_reconcile_msg.db_id, idx_reconcile_msg.reconcile_xid);
                 break;
             }
         default:
@@ -960,10 +969,10 @@ namespace springtail::pg_log_mgr {
     }
 
     void
-    PgLogReader::_process_index_reconciliation(const uint64_t reconcile_xid)
+    PgLogReader::_process_index_reconciliation(const uint64_t db_id, const uint64_t reconcile_xid)
     {
         uint64_t xid = this->get_next_xid();
-        _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::ReconcileMsg(xid, reconcile_xid)));
+        _committer_queue->push(std::make_shared<committer::XidReady>(db_id, committer::XidReady::ReconcileMsg(xid, reconcile_xid)));
     }
 
     void

@@ -16,7 +16,7 @@ jobs:
   nightly_job:
     name: Nightly Job
     runs-on: warp-ubuntu-latest-arm64-4x
-    timeout-minutes: 90 
+    timeout-minutes: 90
     container:
       image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
       credentials:
@@ -43,6 +43,7 @@ jobs:
       SPRINGTAIL_LOG_PATH: /opt/springtail/logs
       SLACK_WEBHOOK_URL: ${{ vars.GENERIC_SLACK_WEBHOOK_URL }}
       SLACK_CHANNEL: '#nightly-builds'
+      LD_LIBRARY_PATH: /usr/lib/springtail
 
     steps:
       - name: Checkout repository
@@ -65,15 +66,33 @@ jobs:
       - name: Prepare Tests
         run: |
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
+          # Turns off the OTEL in the system.json.settings
+          jq '.otel.enabled = false' system.json.settings > tmp.json && mv tmp.json system.json.settings
+          # Replace the correct `springtail` code directory
+          sed -i -e "s|/home/dev/springtail|${GITHUB_WORKSPACE}|g" system.json.settings
           cp system.json.settings system.json.test
           mkdir -p /opt/springtail/pids
           service redis-server start
+          
+          # Copies over the fdw_config file to the designated location
+          conf_file=/etc/postgresql/16/main/postgresql.conf
+          fdw_config_file_path=$(grep -E "^springtail_fdw.config_file_path" $conf_file | awk '{print $3}' | tr -d "'")
+          mkdir -p $(dirname $fdw_config_file_path)
+          cp system.json.settings $fdw_config_file_path
 
       - name: Build
         run: |
           ln -s /home/dev/external external
-          ./clean.sh
-          ./debug.sh -j ${NUM_PROCS}          
+          ./vcpkg.sh
+          mkdir -p /home/dev/debug
+          mkdir -p /home/dev/install
+          ln -s /home/dev/debug debug
+          ln -s /home/dev/install install
+          
+          cmake -B debug -S . -D'CMAKE_BUILD_TYPE=Debug' -DVCPKG_INSTALL_OPTIONS="--allow-unsupported"
+
+          cd debug
+          make -j${NUM_PROCS}          
 
       - name: Set common env vars
         run: |
@@ -102,12 +121,16 @@ jobs:
           python3 springtail.py -f ../../system.json.test --load-redis --build-dir ../../debug
           cd ../../debug
           
+          set +e
+          _LOG_FLAG="failed"
           # Per SPR-501: break upon test failures - "--gtest_break_on_failure"
           make test ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose --stop-on-failure" 2>&1 | tee tmplog
-          
+          # Grab the success/failure status of the unit tests
+          if [ $? -eq 0 ] &&  grep -qE "100% tests passed" tmplog
+          then 
+            _LOG_FLAG="succeeded"
+          fi
           # List the open listening ports and processes info after tests are done
-          sudo apt update
-          sudo apt install net-tools          
           echo "==== Listening Ports ===="
           netstat -tulnp
           # Show the full launching command of each
@@ -115,20 +138,25 @@ jobs:
             cmd=$(ps -p $pid -o args=)
             echo "$pid - $cmd"
           done
+
+          # Grab the current PR ID
+          _LOG_PR_ID="${GITHUB_EVENT_PULL_REQUEST_NUMBER}"
+          # Grab the short SHA
+          _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
           
-          # Grab the success/failure status of the unit tests
-          _LOG_FLAG="succeeded"
-          if !  grep -qE "100% tests passed" tmplog
-          then 
-            _LOG_FLAG="failed"
+          _TIMESTAMP=$(date +"%Y-%m-%d-%H-%M-%S")
+          log_file="unit-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log.tar.gz" 
+          tar zcvf $log_file tmplog
+          rm tmplog
+          unit_test_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_PR_ID}/$log_file"
+          
+          aws s3 cp "$log_file" "$unit_test_log_s3key"
+          echo "*** Unit Test Log S3 Key: $unit_test_log_s3key"
+          
+          # Fail eventually
+          if [ "$_LOG_FLAG" = "failed" ]; then
+            exit 1
           fi
-          
-          _TIMESTAMP=$(date +%s)
-          log_file="unit-test-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log" 
-          log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${log_file}"
-          aws s3 cp tmplog $log_s3_key
-          echo "*** Unit Test Log S3 Key: $log_s3_key"
-          rm -rf tmplog
 
       - name: Cleanup Unit Test
         if: success() || failure()      # run this step even if previous step failed
@@ -175,13 +203,13 @@ jobs:
             # Note: there might be discrepancies between the _LOG_TIMESTAMP and the _LOG_DATE due to the time it takes to run the integration tests
             # it may run across a day. This is fine as long as the logs are grouped by _LOG_DATE
           
-            _LOG_FLAG="succeeded"
+            _LOG_FLAG="failed"
             echo "*** Starting iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
             python3 test_runner.py -c config.yaml -j ${GITHUB_WORKSPACE}/integration-test-report.xml 2>&1 | tee tmplog
             # Grab the success/failure status of the integration tests
-            if [ $? -ne 0 ] || grep -qE "Tests failed: [1-9][0-9]*" tmplog
-            then 
-              _LOG_FLAG="failed"
+            if [ $? -eq 0 ] && ! grep -qE "Tests failed: [1-9][0-9]*" tmplog
+            then
+              _LOG_FLAG="succeeded"
             fi
             echo "*** Finished iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
           
@@ -220,17 +248,19 @@ jobs:
       - name: Run Proxy Tests
         if: success() || failure()      # run this step even if previous step failed
         run: |
+          # Make sure Proxy `enable_ssl` is on 
+          sed -i 's/enable_ssl": false/enable_ssl": true/g' system.json.test
+          
           cd python/testing
           python3 springtail.py -f ../../system.json.test --kill --build-dir ../../debug
           
           cd proxy
           # Do not break out if errors occur
           set +e
-          _LOG_FLAG="succeeded"
+          _LOG_FLAG="failed"
           python3 test_runner.py -t -s postgres_all
-          # set Failure flag is the above command exits non-zero exit code
-          if [ $? -ne 0 ]; then
-              _LOG_FLAG="failed"
+          if [ $? -eq 0 ]; then
+              _LOG_FLAG="succeeded"
           fi
           set -e
           

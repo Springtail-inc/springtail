@@ -90,7 +90,7 @@ namespace {
             auto mtable = TableMgr::get_instance()->get_mutable_table(_db_id, _tid, access_xid, target_xid, false);
 
             // insert a number of rows
-            _populate_table(mtable, target_xid);
+            _populate_table(mtable);
 
             // finalize the empty table
             auto &&metadata = mtable->finalize();
@@ -241,11 +241,11 @@ namespace {
         }
 
         static void
-        _populate_table(MutableTablePtr mtable, uint64_t xid)
+        _populate_table(MutableTablePtr mtable)
         {
             // insert data to the tree
             for (int i = 0; i < _data.size(); i++) {
-                mtable->insert(_create_value(_data[i]), xid, constant::UNKNOWN_EXTENT);
+                mtable->insert(_create_value(_data[i]), constant::UNKNOWN_EXTENT);
             }
         }
 
