@@ -13,7 +13,8 @@ public:
                   const std::filesystem::path &xact_path,
                   std::shared_ptr<PgLogReader> log_reader,
                   uint64_t committed_xid)
-        : _repl_path(repl_path),
+        : _db_id(db_id),
+          _repl_path(repl_path),
           _xact_path(xact_path),
           _committed_xid(committed_xid),
           _pg_log_reader(log_reader)
@@ -34,6 +35,9 @@ public:
     void replay_logs();
 
 private:
+    /** Rollback the system tables to the most recent committed XID.  Clear any roots files beyond that. */
+    void _revert_system_tables();
+
     /** Skip all of the committed transactions from the replication log, while tracking (1) any
         "active" transactions at the time of the commit of the final committed transaction and (2)
         the position in the log of the end of the block containing the last committed
@@ -78,6 +82,7 @@ private:
         }
     };
 
+    uint64_t _db_id;
     std::filesystem::path _repl_path;
     std::filesystem::path _xact_path;
     uint64_t _committed_xid;        ///< Holds the last commited xid.

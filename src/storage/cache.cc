@@ -118,11 +118,12 @@ namespace springtail {
 #endif
     }
 
-    void
+    uint64_t
     StorageCache::flush(const std::filesystem::path &file)
     {
-        _page_cache->flush_file(file);
+        auto end_offset = _page_cache->flush_file(file);
         open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_FLUSH_CALLS);
+        return end_offset;
     }
 
     void
@@ -224,7 +225,7 @@ namespace springtail {
         --_size;
     }
 
-    void
+    uint64_t
     StorageCache::PageCache::flush_file(const std::filesystem::path &file)
     {
         boost::unique_lock lock(_mutex);
@@ -232,10 +233,18 @@ namespace springtail {
         open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_FLUSH_CALLS);
         const auto start_time = std::chrono::system_clock::now();
 
+        //Get the end offset of data file for the table
+        //to be returned if nothing to flush
+        uint64_t end_offset = 0;
+        if (std::filesystem::exists(file)) {
+            end_offset = std::filesystem::file_size(file);
+        }
+
         // go through the dirty page list for the file
         auto file_i = _flush_list.find(file);
         if (file_i == _flush_list.end()) {
-            return; // no dirty pages
+            // no dirty pages
+            return end_offset;
         }
         auto &flush_pages = file_i->second;
 
@@ -245,7 +254,7 @@ namespace springtail {
         // if the list is empty, remove it from the map and return
         if (page_i == flush_pages.end()) {
             _flush_list.erase(file_i);
-            return;
+            return end_offset;
         }
 
         while (!done) {
@@ -305,6 +314,9 @@ namespace springtail {
 
         // flush list for the file must be empty, so remove it
         _flush_list.erase(file);
+
+        //Get the end offset of data file for the table
+        return std::filesystem::file_size(file);
     }
 
     void

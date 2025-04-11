@@ -74,6 +74,10 @@ ALL_DAEMONS = CORE_DAEMONS + FDW_DAEMONS + PROXY_DAEMONS
 
 ALL_DAEMONS_NAMES = [name[0] for name in ALL_DAEMONS]
 
+# paths for the postgres config updates
+POSTGRES_CONF_PATH = '/etc/postgresql/16/main/postgresql.conf'
+TMP_POSTGRES_CONF_PATH = '/tmp/postgresql.conf'
+
 def get_lib_ext() -> str:
     """Get the library extension for the current platform."""
     if is_linux():
@@ -98,16 +102,6 @@ def cleanup_filesystem(props : Properties) -> None:
 
     # Check that the pid path exists; if not try to create it
     makedir(pid_path, '755')
-
-def connect_instance(props : Properties, db_name : str ='postgres') -> psycopg2.extensions.connection:
-    integration_test_config = props.get_integration_test_config()
-    use_proxy = integration_test_config["use_proxy"]
-    if use_proxy:
-        logging.info("Connecting to proxy")
-        return connect_proxy(props, db_name)
-    else:
-        logging.info("Connecting to primary")
-        return connect_db_instance(props, db_name)
 
 def connect_db_instance(props : Properties, db_name : str ='postgres') -> psycopg2.extensions.connection:
     """Connect to the database instance and return connection."""
@@ -201,6 +195,50 @@ def cleanup_db_instance(props : Properties) -> None:
     # Close the database connection
     conn.close()
 
+def update_postgres_config(test_params: dict = {}):
+    # cleanup the config to ensure during restarts/crashes we always use the proper config
+    cleanup_postgres_config()
+
+    postgres_config = test_params.get('postgres_config', {})
+
+    # if there is no override config for test, skip doing anything
+    if not postgres_config:
+        return
+
+    logging.info('Perform a local copy of the postgres conf file for modification(s)')
+    # perform a local copy to a /tmp path
+    run_command('cp', [POSTGRES_CONF_PATH, TMP_POSTGRES_CONF_PATH])
+
+    with open(TMP_POSTGRES_CONF_PATH, 'a') as f:
+        # add the keys with a TEST_REMOVE comment so we can cleanup once the tests are done
+        for key, value in postgres_config.items():
+            f.write(f"{key} = {value} #TEST_REMOVE#")
+
+    logging.info('Replacing the postgres conf file with the updated tmp file')
+    run_command('sudo', ['cp', TMP_POSTGRES_CONF_PATH, POSTGRES_CONF_PATH])
+
+def cleanup_postgres_config():
+    if not os.path.exists(TMP_POSTGRES_CONF_PATH):
+        # tmp file not found, so no configs are overridden
+        return
+
+    with open(TMP_POSTGRES_CONF_PATH, 'r') as f:
+        lines = f.readlines()
+
+    filtered_lines = []
+    # filter out the lines that are added as part of the test
+    for line in lines:
+        if "#TEST_REMOVE#" not in line:
+            filtered_lines.append(line)
+
+    with open(TMP_POSTGRES_CONF_PATH, 'w') as f:
+        f.writelines(filtered_lines)
+
+    logging.info('Replacing the postgres conf file')
+    # copy the config file to the postgres conf path
+    run_command('sudo', ['cp', TMP_POSTGRES_CONF_PATH, POSTGRES_CONF_PATH])
+    # remove the tmp file
+    run_command('sudo', ['rm', TMP_POSTGRES_CONF_PATH])
 
 def install_fdw(build_dir : str) -> None:
     """Install the foreign data wrapper extension."""

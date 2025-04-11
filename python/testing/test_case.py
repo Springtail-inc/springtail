@@ -19,6 +19,7 @@ class TestCase:
                  filename: str,
                  props: springtail.Properties,
                  build_dir: str,
+                 test_params: dict = {},
                  valid_sections: list = ['test', 'verify', 'cleanup']) -> None:
         """Initialize the test case"""
         self._filename = os.path.abspath(filename)
@@ -26,6 +27,7 @@ class TestCase:
         self._directory = os.path.dirname(self._filename)
         self._props = props
         self._build_dir = build_dir
+        self._test_params = test_params
         self._status = 'INIT'
         self._result = 'UNKNOWN'
         self._duration = 0
@@ -213,16 +215,26 @@ class TestCase:
                             'name': directive[1] if len(directive) > 1 else 'default'
                         }, section, is_threaded, cur_txn, line_num)
 
+                    elif directive[0] == 'streaming':
+                        if section != 'test':
+                            self._raise_error(f'{line_num}: "streaming" must be part of the "test" section')
+                        self._append_command({
+                            'type': 'streaming',
+                            'enable': directive[1] == 'true'
+                        }, section, is_threaded, cur_txn, line_num)
+
                     elif directive[0] == 'schema_check':
                         if section != 'verify':
                             self._raise_error(f'{line_num}: "schema_check" must be part of the "verify" section')
                         if len(directive) < 3:
-                            self._raise_error(f'{line_num}: "schema_check" must specify a schema and table')
+                            self._raise_error(f'{line_num}: "schema_check" must specify a schema and table, \
+                                    with an optional wait time for secondary indexes reconciliation')
 
                         self._append_command({
                             'type': 'schema_check',
                             'schema': directive[1],
-                            'table': directive[2]
+                            'table': directive[2],
+                            'wait_for': int(directive[3]) if len(directive) > 3 else 5
                         }, section, is_threaded, cur_txn, line_num)
 
                     # Usage - table_exists <schema> <table> <replica_exists>
@@ -355,6 +367,19 @@ class TestCase:
 
             return None
 
+        if command['type'] == 'streaming':
+            is_enabling = command['enable']
+            with self._connections[command['txn']].cursor() as cursor:
+                if is_enabling:
+                    logging.debug(f'Enabling streaming')
+                    # set to lower value to enable streaming
+                    self._execute_sql(cursor, f"ALTER SYSTEM SET logical_decoding_work_mem = '64kB'", False)
+                    self._execute_sql(cursor, f"SELECT pg_reload_conf()", False)
+                else:
+                    # reset to default value
+                    self._execute_sql(cursor, f"ALTER SYSTEM SET logical_decoding_work_mem = '64MB'", False)
+                    self._execute_sql(cursor, f"SELECT pg_reload_conf()", False)
+
         # handle SQL statements
         with self._connections[command['txn']].cursor() as cursor:
             if command['type'] == 'load_csv':
@@ -418,10 +443,57 @@ class TestCase:
                            WHERE n.nspname = '{command["schema"]}' AND t.relname = '{command["table"]}' AND c.contype = 'p';"""
                 results['primary'] = self._execute_sql(cursor, sql, True)
 
-                # XXX retrieve the secondary index information for the table
+                sql = f"""SELECT c.oid as table_id, i.indexrelid as index_id, unnest(string_to_array(i.indkey::text, ' '))::int as column_id
+                    FROM pg_index i
+                    JOIN pg_class c ON c.oid = i.indrelid
+                    JOIN pg_namespace ns ON ns.oid = c.relnamespace
+                    WHERE c.relname = '{command["table"]}' AND ns.nspname = '{command["schema"]}'
+                    AND i.indisprimary IS FALSE
+                    ORDER BY column_id ASC;
+                """
+                results['secondary'] = self._execute_sql(cursor, sql, True)
 
                 return results
 
+
+    def _wait_for_index_reconciliation(self, cursor, wait_for: int = 5) -> bool:
+        base_sql = """SELECT DISTINCT(index_id)
+                        FROM "__pg_springtail_catalog"."index_names"
+                       WHERE state in ({}) AND index_id <> 0"""
+
+        start_time = time.time()
+
+        while True:
+            # Convert list of tuples into a set of integers
+            not_ready_result = {row[0] for row in self._execute_sql(cursor, base_sql.format(0), True)}
+            ready_result = {row[0] for row in self._execute_sql(cursor, base_sql.format('1,2'), True)}
+
+            # If results match, return immediately
+            if not_ready_result == ready_result:
+                return True
+
+            # If wait_for time is exceeded, raise failure
+            if (time.time() - start_time) >= wait_for:
+                self._raise_failure(f'Secondary indexes not in sync within {wait_for}s.')
+
+
+    def _get_ranking_sql(self, is_index_query: bool = False) -> str:
+        index_cond = 'AND n.index_id <> 0' if is_index_query is True else 'AND n.index_id = 0'
+
+        xid_sql = f"""SELECT distinct on (n.index_id) index_id, n.xid, n.lsn,n.state
+            FROM "__pg_springtail_catalog"."index_names" n
+            WHERE n.table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)
+            {index_cond}
+            ORDER BY n.index_id, n.xid DESC, n.lsn DESC"""
+
+        ranking_sql = f"""SELECT i.*
+            FROM "__pg_springtail_catalog"."indexes" i
+            JOIN ({xid_sql}) n
+            ON i.index_id=n.index_id AND i.xid = n.xid AND i.lsn = n.lsn
+            WHERE i.table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)
+            AND n.state = 1"""
+
+        return ranking_sql
 
     def _replica_command(self, command: dict) -> list:
         """Runs a SQL command against the Springtail replica
@@ -479,20 +551,19 @@ class TestCase:
                                 WHERE "namespace_names"."name" = '{command["schema"]}' AND "table_names"."name" = '{command["table"]}'
                                 ORDER BY "table_names"."xid" DESC, "table_names"."lsn" DESC
                                 LIMIT 1"""
-                xid_sql = """SELECT "indexes"."xid", "indexes"."lsn"
-                                FROM "__pg_springtail_catalog"."indexes"
-                                WHERE table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)
-                                AND index_id = 0
-                                ORDER BY xid DESC, lsn DESC
-                                LIMIT 1"""
-                ranking_sql = f"""SELECT *
-                                  FROM "__pg_springtail_catalog"."indexes"
-                                  WHERE table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)
-                                    AND index_id = 0
-                                    AND (xid, lsn) IN ({xid_sql})"""
+
+                ranking_sql = self._get_ranking_sql()
                 sql = f"""WITH latest_table AS ({with_sql}), ranked_columns AS ({ranking_sql})
                           SELECT column_id, position FROM ranked_columns ORDER BY position ASC;"""
                 results['primary'] = self._execute_sql(cursor, sql, True)
+
+                # Wait for index reconciliation
+                self._wait_for_index_reconciliation(cursor, command["wait_for"])
+
+                index_sql = self._get_ranking_sql(is_index_query=True)
+                sql = f"""WITH latest_table AS ({with_sql}), ranked_indexes AS ({index_sql})
+                         SELECT table_id, index_id, column_id FROM ranked_indexes ORDER BY column_id ASC;"""
+                results['secondary'] = self._execute_sql(cursor, sql, True)
 
                 return results
 
@@ -570,8 +641,14 @@ class TestCase:
 
         # construct a connection for each transaction in the test
         for txn in self._txns:
-            logging.debug(f'Connecting to database for txn "{txn}"')
-            self._connections[txn] = springtail.connect_instance(self._props, self._primary_name)
+            # Determine what config to use for the test phase
+            use_proxy_for_test = self._test_params.get('use_proxy_for_test', False)
+            if use_proxy_for_test:
+                logging.debug(f'Connecting to proxy for txn "{txn}"')
+                self._connections[txn] = springtail.connect_proxy(self._props, self._primary_name)
+            else:
+                logging.debug(f'Connecting to primary for txn "{txn}"')
+                self._connections[txn] = springtail.connect_db_instance(self._props, self._primary_name)
             self._connections[txn].autocommit = self._metadata['autocommit']
 
         # connect to the replica database -- used to perform any 'sync' directives
@@ -643,6 +720,15 @@ class TestCase:
 
         # execute the verification commands against both databases, compare the results
         for command in self._sections['verify'][0]['sequential']:
+            # Determine what config to use for verify phase
+            use_proxy_for_verify = self._test_params.get('use_proxy_for_verify', False)
+            if use_proxy_for_verify:
+                logging.info(f'Using proxy to verify')
+                self._connections[command['txn']] = springtail.connect_proxy(self._props, self._primary_name)
+            else:
+                logging.info(f'Using primary to verify')
+                self._connections[command['txn']] = springtail.connect_db_instance(self._props, self._primary_name)
+
             primary_result = self._execute_command(command, True)
             replica_result = self._replica_command(command)
 

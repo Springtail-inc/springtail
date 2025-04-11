@@ -18,6 +18,7 @@
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_copy_table.hh>
 #include <pg_repl/table_sync_request.hh>
+#include <pg_repl/index_reconcile_request.hh>
 
 #include <pg_log_mgr/pg_log_queue.hh>
 #include <pg_log_mgr/pg_log_writer.hh>
@@ -28,6 +29,7 @@
 #include <pg_log_mgr/pg_xact_log_writer.hh>
 
 #include <pg_log_mgr/pg_redis_xact.hh>
+#include <pg_log_mgr/committer.hh>
 
 #include <redis/db_state_change.hh>
 
@@ -92,7 +94,8 @@ namespace springtail::pg_log_mgr {
                  uint64_t log_size_rollover_threshold,
                  int port,
                  bool archive_logs,
-                 std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue);
+                 std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
+                 std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>> index_reconciliation_queue);
 
         /**
          * @brief Construct a new Pg Log Mgr object (for testing only)
@@ -106,7 +109,8 @@ namespace springtail::pg_log_mgr {
           _repl_log_path(repl_log_path),
           _committer_queue(std::make_shared<ConcurrentQueue<committer::XidReady>>()),
           _xact_log_path(xact_log_path),
-          _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
+          _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
+          _index_reconciliation_queue(std::make_shared<ConcurrentQueue<IndexReconcileRequest>>())
         {
             _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, xact_log_path, _committer_queue, false);
         }
@@ -127,6 +131,8 @@ namespace springtail::pg_log_mgr {
             LOG_DEBUG(LOG_PG_LOG_MGR, "reader thread joined");
             _table_copy_thread.join();
             LOG_DEBUG(LOG_PG_LOG_MGR, "copy thread joined");
+            _reconciliation_thread.join();
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Index reconciliation thread joined");
         }
 
         /** Set shutdown flag */
@@ -206,7 +212,6 @@ namespace springtail::pg_log_mgr {
         std::filesystem::path _xact_log_path;      ///< xact log base path
 
         LSN_t _last_pushed_lsn = INVALID_LSN;      ///< last pushed lsn to redis queue for GC
-        std::atomic<uint64_t> _logger_file_timestamp;
 
         /** notify xact handler to start sync */
         void _notify_xact_start_sync();
@@ -229,6 +234,17 @@ namespace springtail::pg_log_mgr {
 
         /** Handle state change; callback from Redis pubsub */
         void _handle_external_state_change(const redis::db_state_change::DBState new_state);
+
+        // Index reconciliation
+
+        std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>> _index_reconciliation_queue; ///< Queue where index reconciliation requests are received
+        std::thread _reconciliation_thread;            ///< Index reconciliation thread
+        /*
+         * Index reconciliation thread; waits on index reconciliation requests
+         */
+        void _index_reconciliation_thread();
+
+
     };
     using PgLogMgrPtr = std::shared_ptr<PgLogMgr>;
 

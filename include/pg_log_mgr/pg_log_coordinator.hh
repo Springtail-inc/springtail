@@ -9,6 +9,7 @@
 
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/committer.hh>
+#include <pg_repl/index_reconcile_request.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -41,6 +42,11 @@ namespace springtail::pg_log_mgr {
         bool _archive_logs{false};                 ///< flag to turn on log archiving
 
         std::shared_ptr<ConcurrentQueue<committer::XidReady>> _committer_queue;
+
+        /*
+         * @brief A queue for indexer to notify committer to trigger index reconciliation
+         **/
+        std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>> _index_reconciliation_queue;
 
         /**
          * @brief Function for performing shutdown that is called by Singleton

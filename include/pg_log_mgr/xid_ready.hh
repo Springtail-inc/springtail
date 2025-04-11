@@ -57,13 +57,37 @@ namespace springtail::committer {
         };
 
         /**
+         * A sub-class holding data used by the RECONCILE_INDEX type.
+         */
+        class ReconcileMsg {
+        public:
+            ReconcileMsg(uint64_t xid, uint64_t reconcile_xid)
+                : _xid(xid),
+                _reconcile_xid(reconcile_xid)
+            { }
+
+            uint64_t xid() const {
+                return _xid;
+            }
+
+            uint64_t reconcile_xid() const {
+                return _reconcile_xid;
+            }
+
+        private:
+            uint64_t _xid;
+            uint64_t _reconcile_xid;
+        };
+
+        /**
          * Type enum for the various XidReady messages to the Committer.
          */
         enum Type : char {
             XACT_MSG = 'X',
             TABLE_SYNC_START = 'S',
             TABLE_SYNC_SWAP = 'W',
-            TABLE_SYNC_COMMIT = 'C'
+            TABLE_SYNC_COMMIT = 'C',
+            RECONCILE_INDEX = 'R'
         };
 
         /** Constructor for SWAP and COMMIT messages. */
@@ -89,6 +113,13 @@ namespace springtail::committer {
               _xid_tracker(xid_tracker)
         { }
 
+        /** Constructor for messages that are RECONCILE_INDEX. */
+        XidReady(uint64_t db_id, ReconcileMsg &&msg)
+            : _type(Type::RECONCILE_INDEX),
+              _db_id(db_id),
+              _msg(msg)
+        { }
+
         /** A getter for the type. */
         Type type() const {
             return _type;
@@ -109,6 +140,11 @@ namespace springtail::committer {
             return std::get<SwapMsg>(*_msg);
         }
 
+        /** A getter for the ReconcileMsg. */
+        const ReconcileMsg &reconcile() const {
+            return std::get<ReconcileMsg>(*_msg);
+        }
+
         /** A function to notify tracker about xid. */
         void notify_tracker(uint64_t xid) {
             CHECK(_xid_tracker);
@@ -118,7 +154,7 @@ namespace springtail::committer {
     private:
         Type _type; ///< The message type.
         uint64_t _db_id; ///< The database ID.
-        std::optional<std::variant<XactMsg, SwapMsg>> _msg; ///< The underlying message data.
+        std::optional<std::variant<XactMsg, SwapMsg, ReconcileMsg>> _msg; ///< The underlying message data.
         pg_log_mgr::WalProgressTrackerPtr _xid_tracker;
     };
 

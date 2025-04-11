@@ -23,31 +23,59 @@ get_table_dir(const std::filesystem::path &base,
 
 } // namespace table_helpers
 
+namespace indexer_helpers {
+    void invalidate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
+            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols,
+            const ExtentSchemaPtr& schema)
+    {
+        auto value_fields = std::make_shared<FieldArray>(2);
+        value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
+
+        // go through each row and pass the relevant key to each of the secondary indexes for removal
+        uint32_t row_id = 0;
+        for (auto &row : *page) {
+            value_fields->at(1) = std::make_shared<ConstTypeField<uint32_t>>(row_id);
+
+            auto key_fields = schema->get_fields(schema->get_column_names(idx_cols));
+            auto &&skey = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
+            root->remove(skey);
+            ++row_id;
+        }
+        LOG_DEBUG(LOG_BTREE, "Invalidated {} secondary rows", row_id);
+    }
+
+    void populate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
+            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols,
+            const ExtentSchemaPtr& schema)
+    {
+        uint32_t row_id = 0;
+        auto value_fields = std::make_shared<FieldArray>(2);
+        value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
+        for (auto &row : *page) {
+            (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
+
+            auto &&keys = schema->get_column_names(idx_cols);
+            auto key_fields = schema->get_fields(keys);
+            auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
+            root->insert(svalue);
+            ++row_id;
+        }
+        LOG_DEBUG(LOG_BTREE, "Populated {} secondary rows", row_id);
+    }
+} // namespace indexer_helpers
+
     namespace {
         const static std::vector<SchemaColumn> ROOTS_SCHEMA = {
             { "root", 1, SchemaType::UINT64, 20, true },
             { "index_id", 2, SchemaType::UINT64, 20, false },
         };
 
-        std::vector<std::string> 
-        _get_column_names(ExtentSchemaPtr schema, const std::vector<uint32_t>& col_position)
-        {
-            std::vector<std::string> col_names;
-            auto column_order = schema->column_order();
-            for (auto position: col_position) {
-                // the index positions start with one
-                assert(position <= column_order.size());
-                col_names.emplace_back(std::move(column_order[position-1]));
-            }
-            return col_names;
-        }
-
         std::shared_ptr<ExtentSchema> 
         _create_index_schema(ExtentSchemaPtr schema, const std::vector<uint32_t>& index_columns)
         {
 
             // get the column names in the order they appear in the index
-            std::vector<std::string> col_names = _get_column_names(schema, index_columns);
+            auto &&col_names = schema->get_column_names(index_columns);
 
             SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
             SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, 0, false);
@@ -167,12 +195,6 @@ get_table_dir(const std::filesystem::path &base,
                 _secondary_indexes[idx.id] = {btree, idx_cols};
             }
         }
-    }
-
-    std::vector<std::string> 
-    Table::get_column_names(const std::vector<uint32_t>& col_position)
-    {
-        return _get_column_names(_schema, col_position);
     }
 
     bool
@@ -390,6 +412,23 @@ get_table_dir(const std::filesystem::path &base,
                 return end(index_id);
             }
             return Iterator(this, btree, i, index_schema);
+        }
+    }
+
+    StorageCache::SafePagePtr
+    Table::read_page_from_disk(uint64_t extent_id) const
+    {
+        // XXX: When an extent is asked from the page,
+        // and if the extent's XID is different than the XID passed
+        // update page cache XID with extent's XID. This can avoid
+        // direct IO access from here
+        auto data_file_handle = IOMgr::get_instance()->open(_table_dir / constant::DATA_FILE, IOMgr::IO_MODE::READ, true);
+        auto response = data_file_handle->read(extent_id);
+        if (response->data.empty()) {
+            return StorageCache::get_instance()->get(_table_dir / constant::DATA_FILE, constant::UNKNOWN_EXTENT, _xid);
+        } else {
+            auto extent = std::make_shared<Extent>(response->data);
+            return StorageCache::get_instance()->get(_table_dir / constant::DATA_FILE, extent_id, extent->header().xid);
         }
     }
 
@@ -714,22 +753,8 @@ get_table_dir(const std::filesystem::path &base,
 
         // INVALIDATE SECONDARY INDEXES
 
-        FieldArrayPtr value_fields = std::make_shared<FieldArray>(2);
-        value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(orig_page->key().second);
-
-        // go through each row and pass the relevant key to each of the secondary indexes for removal
-        uint32_t row_id = 0;
-        for (auto &&row : *orig_page) {
-            value_fields->at(1) = std::make_shared<ConstTypeField<uint32_t>>(row_id);
-
-            for (auto const& [index_id, idx]: _secondary_indexes) {
-                auto &secondary = idx.first;
-                auto keys = get_column_names(idx.second);
-                auto key_fields = _schema->get_fields(keys);
-                auto &&skey = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
-                secondary->remove(skey);
-            }
-            ++row_id;
+        for (auto const& [index_id, idx]: _secondary_indexes) {
+            indexer_helpers::invalidate_index_for_page(orig_page->key().second, orig_page, idx.first, idx.second, _schema);
         }
     }
 
@@ -771,26 +796,9 @@ get_table_dir(const std::filesystem::path &base,
             _primary_index->insert(pkey);
 
             // POPULATE SECONDARY INDEXES
-
-            // go through each row and pass the relevant key to each of the secondary indexes for insertion
-            value_fields->resize(2);
-            uint32_t row_id = 0;
-            for (auto &row : *new_page) {
-                (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
-
-                for (auto const& [index_id, idx]: _secondary_indexes) {
-                    auto &secondary = idx.first;
-                    auto keys = get_column_names(idx.second);
-                    auto key_fields = _schema->get_fields(keys);
-                    auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
-                    // note: uncomment if you need to debug the entries being populated into the secondary indexes
-                    // LOG_DEBUG(LOG_BTREE, "Secondary populate {}", svalue->to_string());
-                    secondary->insert(svalue);
-                }
-                ++row_id;
+            for (auto const& [index_id, idx]: _secondary_indexes) {
+                indexer_helpers::populate_index_for_page(extent_id, new_page, idx.first, idx.second, _schema);
             }
-
-            LOG_DEBUG(LOG_BTREE, "Populated {} secondary rows", row_id);
         }
     }
 
@@ -806,7 +814,7 @@ get_table_dir(const std::filesystem::path &base,
         }
 
         // flush the dirty data pages of the table to disk
-        StorageCache::get_instance()->flush(_data_file);
+        auto end_offset = StorageCache::get_instance()->flush(_data_file);
 
         // now flush the indexes, capturing the roots
         TableMetadata metadata;
@@ -816,8 +824,13 @@ get_table_dir(const std::filesystem::path &base,
         for (auto secondary : _secondary_indexes) {
             metadata.roots.emplace_back(secondary.first, secondary.second.first->finalize());
         }
+
         metadata.stats = _stats;
         metadata.snapshot_xid = _snapshot_xid;
+
+        // Store file end offset for xid
+        // to be used later to catch-up index if needed
+        metadata.stats.end_offset = end_offset;
 
         // store the roots into a look-aside root file
         // XXX maybe we only need to do this for system tables?  or even just the table_roots table?
@@ -844,17 +857,11 @@ get_table_dir(const std::filesystem::path &base,
         return metadata;
     }
 
-    std::vector<std::string> 
-    MutableTable::get_column_names(const std::vector<uint32_t>& col_position)
-    {
-        return _get_column_names(_schema, col_position);
-    }
-
     MutableBTreePtr 
     MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns)
     {
         // get the column names in the order they appear in the index
-        std::vector<std::string> col_names = _get_column_names(_schema, index_columns);
+        auto &&col_names = _schema->get_column_names(index_columns);
 
         SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
         SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, 0, false);
@@ -1169,8 +1176,12 @@ get_table_dir(const std::filesystem::path &base,
     void
     MutableTable::_check_convert_page(StorageCache::SafePagePtr &page)
     {
+#if ENABLE_SCHEMA_MUTATES
         auto header = page->header();
         XidLsn access_xid(header.xid);
+#else
+        XidLsn access_xid(_access_xid);
+#endif
         XidLsn target_xid(_target_xid);
 
         auto schema = SchemaMgr::get_instance()->get_schema(_db_id, _id, access_xid, target_xid);
