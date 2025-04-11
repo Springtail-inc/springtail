@@ -149,32 +149,45 @@ namespace springtail::committer {
         using TableIndicesMap = std::unordered_map<uint64_t, std::unordered_map<uint64_t, std::list<Key>>>;
         TableIndicesMap _table_idx_map;
 
+        /**
+         * @brief Tracks the number of DDL operations per XID.
+         *
+         * This map stores an atomic counter for each transaction ID (XID),
+         * initialized with the total number of DDL operations for that XID.
+         * The counter is decremented as each DDL is processed. When the count
+         * reaches zero, it indicates all DDLs for the transaction have been completed.
+         */
         std::unordered_map<uint64_t, std::atomic<int>> _xid_ddl_counter_map;
 
-        // Mutex to access pending reconciliation map
+        /**
+         * @brief Mutex for synchronizing access to the pending reconciliation map.
+         */
         std::mutex _pending_reconciliation_map_mtx;
 
-        // Mutex to access table index map
+        /**
+         * @brief Mutex for synchronizing access to the table index map.
+         */
         std::mutex _table_idx_map_mtx;
 
-        // Mutex to access ddl counter map
+        /**
+         * @brief Mutex for synchronizing access to the DDL counter map.
+         */
         std::mutex _xid_ddl_counter_map_mtx;
 
         /**
          * @brief Adds an IndexState to the pending reconciliation map.
          * 
          * This method ensures the correct db_id and xid mapping before inserting the IndexState.
-         * 
-         * @param idxState The IndexState to be added.
+         * @param idx_state The IndexState to be added.
          */
-        void _add_to_pending_reconciliation(IndexState&& idxState);
+        void _add_to_pending_reconciliation(IndexState&& idx_state);
 
         /**
-         * This will reconcile the index by catching
-         * all the table XIDs that happened post build initialization
-         * @param idxState Index state
+         * @brief Reconcile indexes at the given xid
+         * @param idx_state Index state
+         * @param end_xid XID at which indexes to be committed
          */
-        void _reconcile_index(IndexState& idxState, uint64_t end_xid);
+        void _reconcile_index(IndexState& idx_state, uint64_t end_xid);
 
         /**
          * @brief Removes an index key and cleans up empty entries.
