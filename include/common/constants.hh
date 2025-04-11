@@ -21,6 +21,9 @@ namespace springtail::constant {
     static constexpr uint64_t RESYNC_DROP_LSN = MAX_LSN - 2;
     static constexpr uint64_t RESYNC_CREATE_LSN = MAX_LSN - 1;
 
+    /** Represents an invalid database ID. */
+    static constexpr uint64_t INVALID_DB_ID = 0;
+
     /** Represents an invalid table ID. */
     static constexpr uint64_t INVALID_TABLE = 0;
 
