@@ -20,11 +20,28 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
 
 } // namespace table_helpers
 
+namespace indexer_helpers {
+    /*
+     * Invalidate index for the rows present in the passed page
+     */
+    void invalidate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
+            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
+
+    /*
+     * Populate index for the rows present in the passed page
+     */
+    void populate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
+            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
+} // namespace indexer_helpers
+
     /**
-     * Structure to hold table statistics.  Currently only holds the row count of the table.
+     * Structure to hold table statistics,
+     * currently holds the row count of the table
+     * and end offset of table data file post XID disk flush
      */
     struct TableStats {
         uint64_t row_count = 0;
+        uint64_t end_offset = 0;
     };
 
     /**
@@ -332,10 +349,6 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
 
         bool empty() const;
 
-        /** This will convert column positions to column names based on the table schema
-         */
-        std::vector<std::string> get_column_names(const std::vector<uint32_t>& col_position);
-
         /**
          * Returns an iterator to the first row that is greater than or equal to the provided search
          * key.  Search key must match the primary index order.
@@ -387,11 +400,25 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
         StorageCache::SafePagePtr read_page(uint64_t extent_id) const;
 
         /**
+         * Reads an extent from the disk and returns it.
+         * @param extent_id The extent ID to read.
+         * @return A pointer to the requested page.
+         */
+        StorageCache::SafePagePtr read_page_from_disk(uint64_t extent_id) const;
+
+        /**
          * @brief Get table stats
          * @return TableStats
          */
         TableStats get_stats() const {
             return _stats;
+        }
+
+        /**
+         * Returns the schema of the table.
+         */
+        ExtentSchemaPtr schema() const {
+            return _schema;
         }
 
     protected:
@@ -585,9 +612,13 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
             return _secondary_indexes.at(idx).first;
         }
 
-        /** This will convert column positions to column names based on the table schema
+        /**
+         * @brief Get table stats
+         * @return TableStats
          */
-        std::vector<std::string> get_column_names(const std::vector<uint32_t>& col_position);
+        TableStats get_stats() const {
+            return _stats;
+        }
 
     private:
         /**

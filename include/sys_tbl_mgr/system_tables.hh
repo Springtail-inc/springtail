@@ -3,11 +3,17 @@
 #include <storage/field.hh>
 
 /** Wraps code blocks that would allow some layout-altering schema changes to be handled without a
- *  table resync.  Enabling these would require two key changes: (1) the FDW would need to utilize
+ *  table resync.
+ *  Enabling these would require few key changes:
+ *  (1) the FDW would need to utilize
  *  the virtual schema that matches the current extent's XID rather than the schema of the
- *  transaction's XID, and (2) the secondary index handling would need to be updated to re-build any
+ *  transaction's XID
+ *  (2) the secondary index handling would need to be updated to re-build any
  *  secondary indexes that were reliant on a modified column or to be dropped when a utilized column
- *  was dropped. */
+ *  was dropped.
+ *  (3) To check for page conversion for schema changes, we need to store the synchronization XID
+ *  against the table roots along with snapshot_xid and use that as start XID to access the source schema
+ *  */
 #define ENABLE_SCHEMA_MUTATES 0
 
 namespace springtail::sys_tbl {
@@ -276,15 +282,17 @@ public:
         static constexpr uint32_t TABLE_ID = 0;
         static constexpr uint32_t XID = 1;
         static constexpr uint32_t ROW_COUNT = 2;
+        static constexpr uint32_t END_OFFSET = 3;
 
         static const std::vector<SchemaColumn> SCHEMA;
 
-        static TuplePtr tuple(uint64_t table_id, uint64_t xid, uint64_t row_count)
+        static TuplePtr tuple(uint64_t table_id, uint64_t xid, uint64_t row_count, uint64_t end_offset)
         {
             auto fields = std::make_shared<FieldArray>(4);
             fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
             fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
             fields->at(ROW_COUNT) = std::make_shared<ConstTypeField<uint64_t>>(row_count);
+            fields->at(END_OFFSET) = std::make_shared<ConstTypeField<uint64_t>>(end_offset);
             return std::make_shared<FieldTuple>(fields, nullptr);
         }
     };
@@ -311,7 +319,7 @@ public:
  */
 class IndexNames {
 public:
-    enum class State { NOT_READY, READY, DELETED };
+    enum class State { NOT_READY, READY, DELETED, BEING_DELETED };
     static constexpr uint32_t ID = 6;
 
     struct Data {
@@ -437,6 +445,16 @@ public:
             return std::make_shared<FieldTuple>(key_fields, nullptr);
         }
     };
+};
+
+static constexpr std::array<uint32_t, 7> TABLE_IDS = {
+    TableNames::ID,
+    TableRoots::ID,
+    Indexes::ID,
+    Schemas::ID,
+    TableStats::ID,
+    IndexNames::ID,
+    NamespaceNames::ID
 };
 
 }  // namespace springtail::sys_tbl

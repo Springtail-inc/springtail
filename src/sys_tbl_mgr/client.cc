@@ -328,6 +328,7 @@ Client::update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const Tabl
 
     auto *stats = request.mutable_stats();
     stats->set_row_count(metadata.stats.row_count);
+    stats->set_end_offset(metadata.stats.end_offset);
     request.set_snapshot_xid(metadata.snapshot_xid);
 
     google::protobuf::Empty response;
@@ -348,6 +349,20 @@ Client::finalize(uint64_t db_id, uint64_t xid)
     grpc_client::retry_rpc("SysTblMgr", "Finalize",
                            [this, &request, &response](grpc::ClientContext *context) {
                                return _stub->Finalize(context, request, &response);
+                           });
+}
+
+void
+Client::revert(uint64_t db_id, uint64_t xid)
+{
+    proto::RevertRequest request;
+    request.set_db_id(db_id);
+    request.set_xid(xid);
+
+    google::protobuf::Empty response;
+    grpc_client::retry_rpc("SysTblMgr", "Revert",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->Revert(context, request, &response);
                            });
 }
 
@@ -393,6 +408,7 @@ Client::get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
         metadata->roots.push_back({root.index_id(), root.extent_id()});
     }
     metadata->stats.row_count = response.stats().row_count();
+    metadata->stats.end_offset = response.stats().end_offset();
     metadata->snapshot_xid = response.snapshot_xid();
 
     return metadata;

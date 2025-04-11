@@ -48,6 +48,7 @@ public:
 
     void update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const TableMetadata &metadata);
     void finalize(uint64_t db_id, uint64_t xid);
+    void revert(uint64_t db_id, uint64_t xid);
     TableMetadataPtr get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid);
 
     std::shared_ptr<const SchemaMetadata> get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
