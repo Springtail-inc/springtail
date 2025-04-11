@@ -37,6 +37,7 @@ from common import (
 from sysutils import (
     stop_daemons,
     clean_fs,
+    move_files,
     check_postgres_running,
     start_postgres,
     stop_postgres,
@@ -483,10 +484,26 @@ def current_xid(props: Properties, db_id: int) -> int:
 
 def restart(props: Properties,
             build_dir: str,
-            start_xid: int = None) -> None:
+            start_xid: int = None,
+            unarchive_logs: bool = False) -> None:
     # Stop the daemons
     print("\nStopping daemons...")
     stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
+
+    # optionally un-archive the log files
+    if unarchive_logs:
+        config = props.get_system_config()
+        if not config.get('log_mgr').get('archive_logs', False):
+            print('Cannot unarchive logs -- "archive_logs" not true')
+        else:
+            base_dir = config.get('fs').get('mount_point')
+            repl_dir = config.get('log_mgr').get('replication_log_path')
+            repl_path = os.path.join(base_dir, repl_dir)
+            move_files(os.path.join(repl_path, 'archive'), repl_path)
+
+            xact_dir = config.get('log_mgr').get('replication_log_path')
+            xact_path = os.path.join(base_dir, xact_dir)
+            move_files(os.path.join(xact_path, 'archive'), xact_path)
 
     # start daemons with XID if specified
     print("\nStarting daemons...")
