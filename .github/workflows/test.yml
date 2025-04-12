@@ -12,10 +12,6 @@ on:
         description: 'The number of processes to use for the build.'
         type: string
         default: "4"
-      ref:
-        description: 'The git reference to checkout.'
-        type: string
-        default: "refs/pull/${{ github.event.pull_request.number }}/merge"
     secrets:
       aws_role_arn:
         description: "The ARN of the role to assume."
@@ -49,7 +45,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
           clean: true
 
       - name: Configure AWS Credentials
