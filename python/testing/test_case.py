@@ -234,7 +234,7 @@ class TestCase:
                             'type': 'schema_check',
                             'schema': directive[1],
                             'table': directive[2],
-                            'wait_for': int(directive[3]) if len(directive) > 3 else 5
+                            'wait_for': int(directive[3]) if len(directive) > 3 else self._metadata['sync_timeout']
                         }, section, is_threaded, cur_txn, line_num)
 
                     # Usage - table_exists <schema> <table> <replica_exists>
@@ -456,25 +456,24 @@ class TestCase:
                 return results
 
 
-    def _wait_for_index_reconciliation(self, cursor, wait_for: int = 5) -> bool:
-        base_sql = """SELECT DISTINCT(index_id)
-                        FROM "__pg_springtail_catalog"."index_names"
-                       WHERE state in ({}) AND index_id <> 0"""
+    def _wait_for_index_reconciliation(self, cursor, wait_for: int) -> bool:
+        query = """
+        SELECT a - b
+        FROM
+          (SELECT COUNT(DISTINCT index_id) AS a
+             FROM "__pg_springtail_catalog"."index_names"
+            WHERE state = 0 AND index_id <> 0) AS t1
+        JOIN
+          (SELECT COUNT(DISTINCT index_id) AS b
+             FROM "__pg_springtail_catalog"."index_names"
+            WHERE state IN (1, 2) AND index_id <> 0) AS t2
+        ON (1=1);
+        """
 
-        start_time = time.time()
-
-        while True:
-            # Convert list of tuples into a set of integers
-            not_ready_result = {row[0] for row in self._execute_sql(cursor, base_sql.format(0), True)}
-            ready_result = {row[0] for row in self._execute_sql(cursor, base_sql.format('1,2'), True)}
-
-            # If results match, return immediately
-            if not_ready_result == ready_result:
-                return True
-
-            # If wait_for time is exceeded, raise failure
-            if (time.time() - start_time) >= wait_for:
-                self._raise_failure(f'Secondary indexes not in sync within {wait_for}s.')
+        try:
+            common.wait_for_replica_condition(self._fdw, query, (0, ), timeout=wait_for)
+        except Exception as e:
+            self._raise_failure(f'Secondary indexes not in sync within {wait_for}s.')
 
 
     def _get_ranking_sql(self, is_index_query: bool = False) -> str:
