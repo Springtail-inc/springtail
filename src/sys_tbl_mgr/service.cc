@@ -907,6 +907,7 @@ Service::Finalize(grpc::ServerContext* context,
     _clear_table_info(request->db_id());
     _clear_roots_info(request->db_id());
     _clear_schema_info(request->db_id());
+    _clear_namespace_info(request->db_id());
 
     span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
@@ -1368,6 +1369,12 @@ Service::_clear_table_info(uint64_t db_id)
     // clear the table cache since it only contains un-finalized entries
     boost::unique_lock lock(_mutex);
     _table_cache.erase(db_id);
+}
+
+void 
+Service::_clear_namespace_info(uint64_t db_id)
+{
+    boost::unique_lock lock(_mutex);
     _namespace_name_cache.erase(db_id);
     _namespace_id_cache.erase(db_id);
 }
