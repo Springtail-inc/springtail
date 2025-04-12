@@ -11,6 +11,7 @@
 #include <common/common.hh>
 #include <common/exception.hh>
 #include <common/logging.hh>
+#include <common/json.hh>
 
 #include <pg_repl/pg_common.hh>
 #include <pg_repl/pg_msg_stream.hh>
@@ -1112,7 +1113,7 @@ namespace springtail {
         usertype_msg.xid = message.xid; // only valid in streaming mode
         usertype_msg.lsn = message.lsn;
 
-        json["type"].get_to(usertype_msg.type);
+        Json::get_to<char>(json, "type", usertype_msg.type); // convert string to char
         json["name"].get_to(usertype_msg.name);
         json["oid"].get_to(usertype_msg.oid);
         json["schema"].get_to(usertype_msg.namespace_name);

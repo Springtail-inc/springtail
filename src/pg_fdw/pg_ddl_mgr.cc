@@ -152,7 +152,7 @@ namespace springtail::pg_fdw {
             std::string value_json(fields->at(sys_tbl::UserTypes::Data::VALUE)->get_text(row));
 
             // only enums supported
-            DCHECK(fields->at(sys_tbl::UserTypes::Data::TYPE)->get_int8(row) == constant::USER_TYPE_ENUM);
+            DCHECK(fields->at(sys_tbl::UserTypes::Data::TYPE)->get_uint8(row) == constant::USER_TYPE_ENUM);
 
             // insert into map by namespace_id
             usertype_map[namespace_id].insert({type_name, value_json});
@@ -650,8 +650,8 @@ namespace springtail::pg_fdw {
             }
 
             // need to check if schema has changed
-            const auto old_schema = conn->escape_identifier(ddl.at("old_namespace").get<std::string>());
-            const auto new_schema = conn->escape_identifier(ddl.at("namespace").get<std::string>());
+            const auto old_schema = conn->escape_identifier(ddl.at("old_schema").get<std::string>());
+            const auto new_schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
             if (old_schema != new_schema) {
                 return fmt::format("ALTER TYPE {}.{} SET SCHEMA {};",
                                    old_schema, new_name, new_schema);

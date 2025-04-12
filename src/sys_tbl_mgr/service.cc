@@ -1106,7 +1106,7 @@ Service::CreateUserType(grpc::ServerContext* context,
         request->namespace_id(), request->type(), request->value_json(), xid, true);
 
     ddl["action"] = "ut_create";
-    ddl["namespace"] = request->namespace_name();
+    ddl["schema"] = request->namespace_name();
 
     // serialize the JSON and return
     response->set_statement(nlohmann::to_string(ddl));
@@ -1138,16 +1138,16 @@ Service::AlterUserType(grpc::ServerContext* context,
         request->namespace_id(), request->type(), request->value_json(), xid, true);
 
     ddl["action"] = "ut_alter";
-    ddl["namespace"] = request->namespace_name();
+    ddl["schema"] = request->namespace_name();
     ddl["old_name"] = user_type_info->name;
     ddl["old_values"] = user_type_info->value_json;
 
     // need to get old namespace id and check if it has changed
     if (user_type_info->namespace_id != request->namespace_id()) {
         auto old_ns_info = _get_namespace_info(request->db_id(), user_type_info->namespace_id, xid);
-        ddl["old_namespace"] = old_ns_info->name;
+        ddl["old_schema"] = old_ns_info->name;
     } else {
-        ddl["old_namespace"] = request->namespace_name();
+        ddl["old_schema"] = request->namespace_name();
     }
 
     // serialize the JSON and return
@@ -1187,7 +1187,7 @@ Service::DropUserType(grpc::ServerContext* context,
         request->namespace_id(), request->type(), request->value_json(), xid, false);
 
     ddl["action"] = "ut_drop";
-    ddl["namespace"] = request->namespace_name();
+    ddl["schema"] = request->namespace_name();
 
     // serialize the JSON and return
     response->set_statement(nlohmann::to_string(ddl));
@@ -1211,7 +1211,7 @@ Service::_mutate_usertype(uint64_t db_id,
     ddl["xid"] = xid.xid;
     ddl["lsn"] = xid.lsn;
     ddl["name"] = name;
-    ddl["value_json"] = value_json;
+    ddl["value"] = value_json;
     ddl["type"] = type;
     ddl["namespace_id"] = ns_id;
 
