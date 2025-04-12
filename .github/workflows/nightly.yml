@@ -43,6 +43,7 @@ jobs:
       SPRINGTAIL_LOG_PATH: /opt/springtail/logs
       SLACK_WEBHOOK_URL: ${{ vars.GENERIC_SLACK_WEBHOOK_URL }}
       SLACK_CHANNEL: '#nightly-builds'
+      LD_LIBRARY_PATH: /usr/lib/springtail
 
     steps:
       - name: Checkout repository
@@ -256,11 +257,10 @@ jobs:
           cd proxy
           # Do not break out if errors occur
           set +e
-          _LOG_FLAG="succeeded"
+          _LOG_FLAG="failed"
           python3 test_runner.py -t -s postgres_all
-          # set Failure flag is the above command exits non-zero exit code
-          if [ $? -ne 0 ]; then
-              _LOG_FLAG="failed"
+          if [ $? -eq 0 ]; then
+              _LOG_FLAG="succeeded"
           fi
           set -e
           
