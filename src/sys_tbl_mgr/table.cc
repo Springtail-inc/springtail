@@ -325,7 +325,6 @@ namespace indexer_helpers {
         // check if it's a secondary index lookup
         if (index_id != constant::INDEX_PRIMARY) {
             auto const& [btree, cols] = _secondary_indexes.at(index_id);
-            auto index_schema = _create_index_schema(_schema, cols);
 
             // find the extent that could contain the lower_bound() key
             auto &&i = btree->lower_bound(search_key);
@@ -339,6 +338,7 @@ namespace indexer_helpers {
             // for secondary indexes, always decrement since it's a row-based index
             --i;
 
+            auto index_schema = _create_index_schema(_schema, cols);
             return Iterator(this, btree, i, index_schema);
         }
 

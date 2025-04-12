@@ -217,6 +217,32 @@ namespace {
         _client->alter_table(_db, xid, msg);
     }
 
+    TEST_F(SysTblMgr_Test, Namespace) {
+        uint64_t tid = 100010;
+
+        auto client = sys_tbl_mgr::Client::get_instance();
+
+        // create the public namespace in the sys_tbl_mgr
+        PgMsgNamespace ns_msg;
+        ns_msg.oid = 900010;
+        ns_msg.name = "test_ns";
+        client->create_namespace(_db, _xid, ns_msg);
+
+        // save xid
+        auto xid = _xid;
+        
+        _finalize();
+
+        PgMsgTable create_msg;
+        create_msg.oid = tid;
+        create_msg.namespace_name = "test_ns";
+        create_msg.table = "t";
+        create_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 1, 0, false, true});
+        create_msg.columns.push_back({"col2", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 2, 0, true, false});
+
+        client->create_table(_db, xid, create_msg);
+    }
+
     // Tests the schema modification paths
     TEST_F(SysTblMgr_Test, Basic) {
         _client->ping();
