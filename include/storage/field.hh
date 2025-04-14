@@ -1300,13 +1300,9 @@ namespace springtail {
         std::any _row;
 
         bool _equal(const Tuple &rhs, size_t size) const {
-            // check the tuple lengths and types using assert()
-            // we assume correct usage in production
-            for (int i = 0; i < size; i++) {
+            assert(size);
+            for (int i = 0; i != size; ++i) {
                 assert(this->field(i)->get_type() == rhs.field(i)->get_type());
-            }
-
-            for (int i = 0; i < size; i++) {
                 if (!this->field(i)->equal(this->row(), rhs.field(i), rhs.row())) {
                     return false;
                 }
