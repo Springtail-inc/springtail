@@ -592,6 +592,11 @@ namespace springtail::pg_fdw {
             // set value
             if (!nulls[i]) {
                 auto &column = state->columns.at(state->attr_map.at(attno));
+                if (column.pg_type < FirstNormalObjectId) {
+                    // this is a system column, so we need to use the pg_type
+                    // to get the value
+                    assert (attrs[i]->atttypid == column.pg_type);
+                }
                 assert (attrs[i]->atttypid == column.pg_type);
                 values[i] = _get_datum_from_field(field, row, column.pg_type, attrs[i]->atttypmod);
             } else {
