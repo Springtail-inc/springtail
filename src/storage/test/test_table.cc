@@ -967,6 +967,10 @@ namespace {
         int equal_count = 0;
         uint64_t test_value = 20;
 
+        uint64_t test_value_up = 100000;
+        uint64_t test_value_down = 0;
+
+
         for (auto &row : *table) {
             auto value = _fields->at(0)->get_uint64(row);
             if (value == test_value) {
@@ -975,14 +979,29 @@ namespace {
             if (value >= test_value) {
                 ++set_size;
             }
+            // make sure that the up/down test vaulues are out of range
+            ASSERT_LT(value, test_value_up);
+            ASSERT_GT(value, test_value_down);
         }
+
+        // make sure that that we have enough equal values 
+        // for testing the bounds functions
+        ASSERT_GT(equal_count, 1);
 
         // use the secondary index to iterate over the same set
         auto k = std::make_shared<ConstTypeField<uint64_t>>(test_value);
-        std::vector<ConstFieldPtr> v({ k });
-        auto key = std::make_shared<ValueTuple>(v);
+        auto key = std::make_shared<ValueTuple>(std::vector<ConstFieldPtr>{ k });
+
+        k = std::make_shared<ConstTypeField<uint64_t>>(test_value_up);
+        auto key_up = std::make_shared<ValueTuple>(std::vector<ConstFieldPtr>{ k });
+
+        k = std::make_shared<ConstTypeField<uint64_t>>(test_value_down);
+        auto key_down = std::make_shared<ValueTuple>(std::vector<ConstFieldPtr>{ k });
 
         auto end_it = table->end(1);
+        auto begin_it = table->begin(1);
+        auto last_it = table->end(1);
+        --last_it;
 
         // test the first index
         {
@@ -1007,6 +1026,14 @@ namespace {
             ASSERT_EQ(count, set_size);
             ASSERT_EQ(equal, equal_count);
         }
+        {
+            auto it = table->lower_bound(key_up, 1);
+            ASSERT_EQ(it, end_it);
+        }
+        {
+            auto it = table->lower_bound(key_down, 1);
+            ASSERT_EQ(it, begin_it);
+        }
 
         {
             auto it = table->inverse_lower_bound(key, 1);
@@ -1021,8 +1048,16 @@ namespace {
                 ASSERT_LE(test_value, value);
                 ++count;
             }
-            ASSERT_EQ(count, set_size);
             ASSERT_EQ(equal, 1);
+            ASSERT_EQ(count, set_size - equal_count + 1);
+        }
+        {
+            auto it = table->inverse_lower_bound(key_up, 1);
+            ASSERT_EQ(it, last_it);
+        }
+        {
+            auto it = table->inverse_lower_bound(key_down, 1);
+            ASSERT_EQ(it, end_it);
         }
 
         // test the second index

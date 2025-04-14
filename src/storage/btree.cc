@@ -203,27 +203,19 @@ namespace springtail {
 
         // find the first entry <= the key
         Iterator &&i = lower_bound(search_key);
-        if (i == end()) {
-            // go to the previous entry
-            --i;
-            return i;
+
+        for (; i != end(); ++i) {
+            // generate the key of the provided row
+            auto key = std::make_shared<FieldTuple>(_leaf_keys, *i);
+            if (!search_key->equal_prefix(*key)) {
+                if (i == begin()) {
+                    return end();
+                }
+                break;
+            }
         }
-
-        // generate the key of the provided row
-        auto key = std::make_shared<FieldTuple>(_leaf_keys, *i);
-
-        // if the search_key is equal to the entry then return it
-        if (search_key->equal(*key)) {
-            return i;
-        }
-
-        // if we are at the first entry, nothing before it, so return that?
-        if (i == begin()) {
-            return end();
-        }
-
-        // go to the previous entry
         --i;
+
         return i;
     }
 

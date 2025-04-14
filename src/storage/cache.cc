@@ -683,7 +683,7 @@ namespace springtail {
 
         // if the key is equal, return it
         auto key = FieldTuple(schema->get_sort_fields(), *i);
-        if (tuple->equal(key)) {
+        if (tuple->equal_strict(key)) {
             return i;
         }
 
@@ -765,7 +765,7 @@ namespace springtail {
 
         // note: row's key should *not* match the tuple's key
         CHECK(row_i == (*extent)->end() ||
-               !FieldTuple(schema->get_sort_fields(), *row_i).equal(*key));
+               !FieldTuple(schema->get_sort_fields(), *row_i).equal_strict(*key));
 
         // insert the tuple into the extent
         auto row = (*extent)->insert(row_i);
@@ -858,7 +858,7 @@ namespace springtail {
 
         // see if the row's key matches the tuple's key
         bool did_insert = false;
-        if (row_i != (*extent)->end() && FieldTuple(schema->get_sort_fields(), *row_i).equal(*key)) {
+        if (row_i != (*extent)->end() && FieldTuple(schema->get_sort_fields(), *row_i).equal_strict(*key)) {
             // update the existing row
             MutableTuple(schema->get_mutable_fields(), *row_i).assign(tuple);
             did_insert = true;
@@ -908,7 +908,7 @@ namespace springtail {
         CHECK(row_i != (**extent).end());
 
         // note: row's key should match the tuple's key
-        DCHECK(FieldTuple(schema->get_sort_fields(), *row_i).equal(*key));
+        DCHECK(FieldTuple(schema->get_sort_fields(), *row_i).equal_strict(*key));
 
         // update the existing row
         MutableTuple(schema->get_mutable_fields(), *row_i).assign(tuple);
@@ -946,7 +946,7 @@ namespace springtail {
                                               });
 
         // note: row's key should match the tuple's key
-        DCHECK(FieldTuple(schema->get_sort_fields(), *row_i).equal(*key));
+        DCHECK(FieldTuple(schema->get_sort_fields(), *row_i).equal_strict(*key));
 
         // remove the row
         (*extent)->remove(row_i);
