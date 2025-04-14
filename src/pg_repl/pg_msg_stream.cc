@@ -850,15 +850,15 @@ namespace springtail {
             json["is_nullable"].get_to(column.is_nullable);
             json["is_pkey"].get_to(column.is_pkey);
             json["is_generated"].get_to(column.is_generated);
-            if (!json["type_name"].is_null()) {
-                column.type_name = json["type_name"].get<std::string>();
-            }
+            json["type_name"].get_to(column.type_name);
+
             if (!json["collation"].is_null()) {
                 column.collation = json["collation"].get<std::string>();
             }
+
             json["is_non_standard_collation"].get_to(column.is_non_standard_collation);
             json["is_user_defined_type"].get_to(column.is_user_defined_type);
-            json["type_category"].get_to(column.type_category);
+            Json::get_to<char>(json, "type_category", column.type_category);
 
             if (!json["pkey_pos"].is_null()) {
                 json["pkey_pos"].get_to(column.pk_position);

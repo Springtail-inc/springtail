@@ -216,7 +216,8 @@ namespace springtail::pg_fdw {
                                            int32_t atttypmod);
 
         /** Helper to convert a PG type OID to a type name using the PG system cache. */
-        static std::string _get_type_name(int32_t pg_type);
+        static std::string _get_type_name(int32_t pg_type,
+                                          const std::map<uint64_t, std::string> &user_types);
 
         /** Helper to generate create foreign table sql */
         static std::string _gen_fdw_table_sql(const std::string &server_name,
@@ -244,9 +245,6 @@ namespace springtail::pg_fdw {
         /** Helper to setup quals and scan iterator in state, called from begin_scan */
         static void _init_quals(PgFdwState *state, List *qual_list);
 
-        /** Helper to setup itertor based on filtered qual list */
-        static void _init_qual_fields(PgFdwState *state);
-
         /** Helper to create constant field from qual and add to field array */
         static void _make_const_field(FieldArrayPtr fields, int idx, ConstQual *qual);
 
@@ -263,6 +261,13 @@ namespace springtail::pg_fdw {
         static FieldTuplePtr _gen_qual_tuple(const std::vector<ConstQualPtr> &quals,
                                              const FieldArrayPtr qual_fields);
 
+        /** Helper to get the user type names for a namespace used by import foreign schema */
+        static std::map<uint64_t, std::string> _load_user_types(uint64_t db_id,
+                                                                const std::string &namespace_name,
+                                                                uint64_t namespace_id,
+                                                                uint64_t schema_xid);
+
+        /** Helper to get the index quals for a given index */
         friend std::vector<ConstQualPtr>
         _get_index_quals(const PgFdwState *state, Index const& idx, List const* qual_list);
 

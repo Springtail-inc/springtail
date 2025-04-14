@@ -150,9 +150,9 @@ namespace springtail::pg_fdw {
          * @brief Helper to get user defined types from the system tables
          * @param db_id db id
          * @param xid transaction id
-         * @return map of namespace id to set of type tuples <type_name, value_json>
+         * @return map of namespace id to map of type_id to pair <type_name, value_json>
          */
-        std::map<uint64_t, std::set<std::pair<std::string, std::string>>> _get_usertypes(uint64_t db_id, uint64_t xid);
+        std::map<uint64_t, std::map<uint64_t, std::pair<std::string, std::string>>> _get_usertypes(uint64_t db_id, uint64_t xid);
 
         /**
          * @brief Helper to diff oid type set with keys from _type_map
@@ -192,7 +192,7 @@ namespace springtail::pg_fdw {
                            const std::string &schema,
                            const std::string &table,
                            uint64_t tid,
-                           std::vector<std::tuple<std::string, std::string, bool>> &columns);
+                           const nlohmann::json &columns);
 
         /**
          * @brief Function for creating a replicated database

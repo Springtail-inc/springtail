@@ -30,6 +30,7 @@ extern "C" {
     #include <postgres.h>
     #include <postgres_ext.h>
     #include <access/htup_details.h>
+    #include <access/transam.h>
     #include <catalog/pg_type.h>
     #include <utils/builtins.h>
     #include <utils/syscache.h>
@@ -882,21 +883,31 @@ namespace springtail::pg_fdw {
     }
 
     std::string
-    PgFdwMgr::_get_type_name(int32_t pg_type)
+    PgFdwMgr::_get_type_name(int32_t pg_type,
+                             const std::map<uint64_t, std::string> &user_types)
     {
-        // get the type name from the system cache
-        HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_type));
-        if (!HeapTupleIsValid(tuple)) {
-            elog(ERROR, "cache lookup failed for type%u", pg_type);
+        if (pg_type < FirstNormalObjectId) {
+           // get the type name from the system cache
+            HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_type));
+            if (!HeapTupleIsValid(tuple)) {
+                elog(ERROR, "cache lookup failed for type %u", pg_type);
+                ReleaseSysCache(tuple);
+
+                throw FdwError(fmt::format("Failed to find type name for {}", pg_type));
+            }
+            std::string type_name = ((Form_pg_type) GETSTRUCT(tuple))->typname.data;
             ReleaseSysCache(tuple);
 
-            throw FdwError(fmt::format("Failed to find type name for {}", pg_type));
+            return type_name;
         }
 
-        std::string type_name = ((Form_pg_type) GETSTRUCT(tuple))->typname.data;
-        ReleaseSysCache(tuple);
-
-        return type_name;
+        // otherwise, check if the type is a user type
+        auto it = user_types.find(pg_type);
+        if (it != user_types.end()) {
+            return it->second;
+        }
+        elog(ERROR, "cache lookup failed for type %u", pg_type);
+        throw FdwError(fmt::format("Failed to find type name for {}", pg_type));
     }
 
     std::string
@@ -949,7 +960,7 @@ namespace springtail::pg_fdw {
         std::vector<std::tuple<std::string, std::string, bool>> columns;
 
         for (const auto &column : column_schema) {
-            std::string type_name = _get_type_name(column.pg_type);
+            std::string type_name = _get_type_name(column.pg_type, {});
             columns.push_back({ column.name, type_name, column.nullable });
         }
 
@@ -984,9 +995,52 @@ namespace springtail::pg_fdw {
         return commands;
     }
 
+    std::map<uint64_t, std::string>
+    PgFdwMgr::_load_user_types(uint64_t db_id,
+                               const std::string &namespace_name,
+                               uint64_t namespace_id,
+                               uint64_t schema_xid)
+    {
+        std::map<uint64_t, std::string> user_types;
+
+        // get the user types table to iterate over
+        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::UserTypes::ID,
+                                                         schema_xid);
+        // get field array
+        auto fields = table->extent_schema()->get_fields();
+
+        // escape the namespace name; used for qualified type names
+        std::string escaped_namespace = quote_identifier(namespace_name.c_str());
+
+        // iterate over the user types table and populate the user type map
+        for (auto row : (*table)) {
+            auto type_ns_id = fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID)->get_uint64(row);
+
+            // check for schema-namespace match
+            if (type_ns_id != namespace_id) {
+                continue;
+            }
+
+            uint64_t pg_type = fields->at(sys_tbl::UserTypes::Data::TYPE_ID)->get_uint64(row);
+            bool exists = fields->at(sys_tbl::UserTypes::Data::EXISTS)->get_bool(row);
+            if (!exists) {
+                // find type and remove if it exists
+                user_types.erase(pg_type);
+                continue;
+            }
+
+            // generate a fully qualified quoted type name and add to map
+            std::string type_name(fields->at(sys_tbl::UserTypes::Data::NAME)->get_text(row));
+            std::string qualified_type_name = fmt::format("{}.{}", escaped_namespace, quote_identifier(type_name.c_str()));
+            user_types.insert({pg_type, qualified_type_name});
+        }
+
+        return user_types;
+    }
+
     List *
     PgFdwMgr::fdw_import_foreign_schema(const std::string &server,
-                                        const std::string &schema,
+                                        const std::string &namespace_name,
                                         const List *table_list,
                                         bool exclude, bool limit,
                                         uint64_t db_id,
@@ -1006,39 +1060,42 @@ namespace springtail::pg_fdw {
             }
         }
 
-        LOG_DEBUG(LOG_FDW, "Importing schema: {} <=> {}\n", schema, CATALOG_SCHEMA_NAME);
+        LOG_DEBUG(LOG_FDW, "Importing schema: {} <=> {}\n", namespace_name, CATALOG_SCHEMA_NAME);
 
         // if we are importing the catalog schema, handle it separately
-        if (schema == std::string(CATALOG_SCHEMA_NAME)) {
+        if (namespace_name == std::string(CATALOG_SCHEMA_NAME)) {
             return _import_springtail_catalog(server, table_set, exclude, limit);
         }
 
         // lookup the namespace_id for the requested schema
         auto ns_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, schema_xid);
-        auto ns_key = sys_tbl::NamespaceNames::Secondary::key_tuple(schema, schema_xid, constant::MAX_LSN);
+        auto ns_key = sys_tbl::NamespaceNames::Secondary::key_tuple(namespace_name, schema_xid, constant::MAX_LSN);
         auto ns_i = ns_table->inverse_lower_bound(ns_key, 1);
 
         // verify that the name is present and exists
         if (ns_i == ns_table->end(1)) {
             LOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
-                        schema, schema_xid, constant::MAX_LSN);
+                        namespace_name, schema_xid, constant::MAX_LSN);
             return commands;
         }
 
         auto ns_fields = ns_table->extent_schema()->get_fields();
-        if (schema != ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(*ns_i)) {
+        if (namespace_name != ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(*ns_i)) {
             LOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
-                        schema, schema_xid, constant::MAX_LSN);
+                        namespace_name, schema_xid, constant::MAX_LSN);
             return commands;
         }
         if (!ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*ns_i)) {
             LOG_WARN("Namespace marked as not-exists {} @ {}:{}",
-                        schema, schema_xid, constant::MAX_LSN);
+                        namespace_name, schema_xid, constant::MAX_LSN);
             return commands;
         }
 
         // record the namespace ID
         uint64_t namespace_id = ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(*ns_i);
+
+        // load the user type map;  primary pg_oid -> type_name
+        auto user_types = _load_user_types(db_id, namespace_name, namespace_id, schema_xid);
 
         // get the table names table to iterate over
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID,
@@ -1063,13 +1120,13 @@ namespace springtail::pg_fdw {
             std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row));
             // handle limit and exclude
             if (exclude && table_set.contains(table_name)) {
-                LOG_DEBUG(LOG_FDW, "Excluding table {}.{}", schema, table_name);
+                LOG_DEBUG(LOG_FDW, "Excluding table {}.{}", namespace_name, table_name);
                 continue;
             }
 
             // XXX should really stop after we have found all tables in limit
             if (limit && !table_set.contains(table_name)) {
-                LOG_DEBUG(LOG_FDW, "Limit, skipping table {}.{}", schema, table_name);
+                LOG_DEBUG(LOG_FDW, "Limit, skipping table {}.{}", namespace_name, table_name);
                 continue;
             }
 
@@ -1087,16 +1144,16 @@ namespace springtail::pg_fdw {
                     }
                 }
                 LOG_DEBUG(LOG_FDW, "Removed non-existant table {}.{} tid={}, xid={}",
-                                    schema, table_name, tid, xid);
+                                    namespace_name, table_name, tid, xid);
                 continue;
             }
 
-            LOG_DEBUG(LOG_FDW, "Found table {}.{} tid={}, xid={}", schema, table_name, tid, xid);
+            LOG_DEBUG(LOG_FDW, "Found table {}.{} tid={}, xid={}", namespace_name, table_name, tid, xid);
 
             // lookup table in map, if found the xid if it is newer
             auto entry = table_map.insert({table_name, {tid, xid}});
             if (entry.second == false) {
-                LOG_DEBUG(LOG_FDW, "Table {} already exists in schema {}", table_name, schema);
+                LOG_DEBUG(LOG_FDW, "Table {} already exists in schema {}", table_name, namespace_name);
                 // update if xid is newer
                 if (xid > entry.first->second.second) {
                     entry.first->second = {tid, xid};
@@ -1139,7 +1196,7 @@ namespace springtail::pg_fdw {
 
                 if (!current_table.empty()) {
                     // dump this table
-                    std::string sql = _gen_fdw_table_sql(server, schema, current_table,
+                    std::string sql = _gen_fdw_table_sql(server, namespace_name, current_table,
                                                          current_tid, columns);
                     commands = lappend(commands, pstrdup(sql.c_str()));
                 }
@@ -1178,13 +1235,13 @@ namespace springtail::pg_fdw {
             int32_t pg_type(fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(row));
             bool nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(row);
 
-            columns.push_back({column_name, _get_type_name(pg_type), nullable});
+            columns.push_back({column_name, _get_type_name(pg_type, user_types), nullable});
         }
 
         // process last table
         if (columns.size() > 0) {
             // dump this table
-            std::string sql = _gen_fdw_table_sql(server, schema, current_table, current_tid, columns);
+            std::string sql = _gen_fdw_table_sql(server, namespace_name, current_table, current_tid, columns);
             commands = lappend(commands, pstrdup(sql.c_str()));
         }
 

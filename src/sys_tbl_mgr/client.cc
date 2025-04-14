@@ -78,6 +78,7 @@ _gen_table_request(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
         column->set_position(col.position);
         column->set_is_nullable(col.is_nullable);
         column->set_is_generated(col.is_generated);
+        column->set_type_name(col.type_name);
         if (col.is_pkey) {
             column->set_pk_position(col.pk_position);
         }

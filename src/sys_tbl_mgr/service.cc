@@ -472,6 +472,7 @@ Service::_create_table(const proto::TableRequest& request)
         nlohmann::json column_json;
         column_json["name"] = column.name();
         column_json["type"] = column.pg_type();
+        column_json["type_name"] = column.type_name();
         column_json["nullable"] = column.is_nullable();
         if (column.has_default_value()) {
             column_json["default"] = column.default_value();
@@ -2574,6 +2575,7 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
                 if (new_col->has_default_value()) {
                     ddl["column"]["default"] = new_col->default_value();
                 }
+                CHECK(false); // XXX new_col->type_name must be added
             }
 #else
             ddl["action"] = "resync";
