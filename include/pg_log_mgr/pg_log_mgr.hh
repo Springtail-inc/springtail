@@ -133,6 +133,8 @@ namespace springtail::pg_log_mgr {
             LOG_DEBUG(LOG_PG_LOG_MGR, "copy thread joined");
             _reconciliation_thread.join();
             LOG_DEBUG(LOG_PG_LOG_MGR, "Index reconciliation thread joined");
+            _tracer_thread.join();
+            LOG_DEBUG(LOG_PG_LOG_MGR, "tracer thread joined");
         }
 
         /** Set shutdown flag */
@@ -195,11 +197,14 @@ namespace springtail::pg_log_mgr {
 
         ///// Stage 1 of pipeline, writing replication log to disk
         std::thread _writer_thread;           ///< log writer thread
+        std::thread _tracer_thread;
         std::filesystem::path _repl_log_path; ///< replication log base path
         PgLogQueue _logger_queue;             ///< queue between writer and reader
 
         /** Process data from replication stream in loop, queue path, offsets */
         void _log_writer_thread();
+
+        void _trace_thread();
 
         ///// Stage 2 of pipeline, reading replication log and updating the write cache
         std::thread _reader_thread;         ///< log reader thread

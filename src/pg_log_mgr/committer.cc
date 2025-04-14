@@ -116,6 +116,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
                 // go through the hash of sys tbl operations
                 for (auto &entry : result->swap().tids()) {
+                    // trace tr(fmt::format("table_swap_sync-xid_{}-tid_{}", completed_xid, entry.first));
                     auto copy_info = entry.second;
 
                     if ( copy_info == nullptr ){
@@ -288,6 +289,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
             // check if we are doing an active table sync, in which case we have to block commits
             if (!_block_commit.contains(db_id)) {
+                trace tr(fmt::format("committer_finalize-xid_{}", xid));
                 // finalize the system metadata
                 // note: we do this even without DDL changes to ensure the primary and secondary
                 //       index root offsets are written to disk
@@ -498,6 +500,8 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             }
         }
 
+        {
+        trace tr(fmt::format("_finalize_table-xid_{}", xid));
         // finalize the table
         auto &&metadata = table->finalize();
 
@@ -511,6 +515,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         }
         // update the system table roots
         TableMgr::get_instance()->update_roots(table->db(), table->id(), xid, metadata);
+        }
     }
 
     void
@@ -552,6 +557,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         //     which must always appear first in a batch (although not necessarily first in
         //     the transaction).
         for (auto &row : extent) {
+            trace tr(fmt::format("_process_row-xid_{}", wc_extent->xid));
             uint8_t op = op_f->get_uint8(row);
             switch (op) {
             case INSERT:

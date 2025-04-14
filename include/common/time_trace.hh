@@ -36,6 +36,20 @@ struct Trace {
         timer += rhs.timer;
         return *this;
     }
+
+    std::string
+    format()
+    {
+        std::ostringstream s;
+
+        s << "[TRACE]" << "[totalms=" << timer.elapsed_ms()
+        << ", totalmicros=" << timer.elapsed_micros()
+        << ", counter=" << start_count
+        << ", averagemicros=" << (timer.elapsed_micros() / start_count)
+        << ", averagems=" << (timer.elapsed_ms() / start_count) << "]";
+
+        return s.str();
+    }
 };
 
 /**

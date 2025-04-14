@@ -443,6 +443,22 @@ namespace springtail::pg_log_mgr {
 
         // create the worker threads
         _writer_thread = std::thread(&PgLogMgr::_log_writer_thread, this);
+
+        _tracer_thread = std::thread(&PgLogMgr::_trace_thread, this);
+    }
+
+    void
+    PgLogMgr::_trace_thread()
+    {
+        namespace fs = std::filesystem;
+        auto file_path = "/tmp/output_trace.txt";
+        while (!_shutdown) {
+            if (fs::exists(file_path)) {
+                TIME_TRACESET_LOG(time_trace::traces);
+                fs::remove(file_path);
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+        }
     }
 
     bool

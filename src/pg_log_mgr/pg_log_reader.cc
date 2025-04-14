@@ -58,6 +58,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::commit(uint64_t xid, PostgresTimestamp commit_ts)
     {
+        trace tr_xid(fmt::format("batch_commit-xid_{}", xid));
         auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
         _span->AddEvent("commit", {{"pg_commit_time", commit_ts.to_unix_ns()}});
 
@@ -194,6 +195,7 @@ namespace springtail::pg_log_mgr {
                                      int32_t tid,
                                      const PgMsgTupleData &data)
     {
+        trace tr_add(fmt::format("add_mutation-xid_{}", current_xid));
         XidLsn xidlsn(current_xid);
 
         // check if we should skip the mutation due to an invalid table
@@ -249,6 +251,7 @@ namespace springtail::pg_log_mgr {
 
         // if the batch has grown to the maximum size, pass it to the WriteCache
         if (entry.extent->byte_count() > MAX_BATCH_SIZE) {
+            trace tr_wc_add(fmt::format("add_extent-xid_{}", current_xid));
             WriteCacheFuncImpl::add_extent(_db, tid, pg_xid, entry.start_lsn, entry.extent);
             entry.extent = nullptr;
         }
@@ -702,7 +705,7 @@ namespace springtail::pg_log_mgr {
             }
         case PgMsgEnum::ALTER_RESYNC:
             {
-                // process the resync caused by an ALTER_TABLE 
+                // process the resync caused by an ALTER_TABLE
                 auto &table_msg = std::get<PgMsgTable>(change->msg);
                 _mark_table_resync(table_msg.oid, xidlsn);
                 break;

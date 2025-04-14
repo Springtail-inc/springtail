@@ -1,7 +1,10 @@
 #pragma once
 
+#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
+
 #include <common/open_telemetry.hh>
 #include <common/timestamp.hh>
+#include <common/time_trace.hh>
 
 #include <pg_repl/pg_msg_stream.hh>
 #include <pg_repl/pg_copy_table.hh>
@@ -23,6 +26,21 @@ namespace springtail::pg_log_mgr {
      */
     class PgLogReader {
     public:
+        struct trace
+        {
+            TIME_TRACE(xid);
+            std::string _n;
+
+            trace(std::string n): _n{std::move(n)} {
+                TIME_TRACE_START(xid);
+            }
+
+            ~trace() {
+                TIME_TRACE_STOP(xid);
+                TIME_TRACESET_UPDATE(time_trace::traces, _n, xid);
+            }
+        };
+
         /** convenience type for the shared msg queue */
         using PgMsgQueuePtr = std::shared_ptr<ConcurrentQueue<PgMsg>>;
 
@@ -274,7 +292,7 @@ namespace springtail::pg_log_mgr {
             /**
              * Helper to handle the table validation management.  Updates the Batch-local view of
              * the invalid tables and also updates the msg object as needed.
-             * 
+             *
              * @param msg The postgres message object.
              */
             bool _handle_validation(PgMsgPtr msg);

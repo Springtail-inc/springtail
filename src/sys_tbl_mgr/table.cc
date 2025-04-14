@@ -70,7 +70,7 @@ namespace indexer_helpers {
             { "index_id", 2, SchemaType::UINT64, 20, false },
         };
 
-        std::shared_ptr<ExtentSchema> 
+        std::shared_ptr<ExtentSchema>
         _create_index_schema(ExtentSchemaPtr schema, const std::vector<uint32_t>& index_columns)
         {
 
@@ -451,7 +451,7 @@ namespace indexer_helpers {
         return StorageCache::get_instance()->get(_table_dir / constant::DATA_FILE, extent_id, _xid);
     }
 
-    BTreePtr 
+    BTreePtr
     Table::_create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset)
     {
         auto index_schema = _create_index_schema(_schema, index_columns);
@@ -529,7 +529,7 @@ namespace indexer_helpers {
         SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
         SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, 0, false);
 
-        
+
         ExtentSchemaPtr primary_schema;
         if (primary_key.empty()) {
             std::vector<std::string> non_primary_key = { constant::INDEX_EID_FIELD };
@@ -600,6 +600,7 @@ namespace indexer_helpers {
     MutableTable::insert(TuplePtr value,
                          uint64_t extent_id)
     {
+        Table::trace tr(fmt::format("_mutable_table_insert-xid_{}", _target_xid));
         if (extent_id == constant::UNKNOWN_EXTENT) {
             if (_primary_key.empty()) {
                 _insert_append(value);
@@ -666,6 +667,7 @@ namespace indexer_helpers {
     MutableTable::update(TuplePtr value,
                          uint64_t extent_id)
     {
+        Table::trace tr(fmt::format("_mutable_table_update-xid_{}", _target_xid));
         if (extent_id == constant::UNKNOWN_EXTENT) {
             // note: cannot perform an update() with no primary key, should be split into a remove() and insert()
             assert(!_primary_key.empty());
@@ -805,6 +807,7 @@ namespace indexer_helpers {
     TableMetadata
     MutableTable::finalize()
     {
+        Table::trace tr(fmt::format("_mutable_table_finalize-xid_{}", _target_xid));
         // in the case of having an (initially) empty table, there are no invalidations... we can
         // flush the single Page and update the indexes
         if (_empty_page) {
@@ -857,7 +860,7 @@ namespace indexer_helpers {
         return metadata;
     }
 
-    MutableBTreePtr 
+    MutableBTreePtr
     MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns)
     {
         // get the column names in the order they appear in the index
@@ -882,8 +885,9 @@ namespace indexer_helpers {
     MutableTable::_insert_direct(TuplePtr value,
                                  uint64_t extent_id)
     {
+        Table::trace tr(fmt::format("_mutable_table_insert_direct-xid_{}", _target_xid));
         // get the page from the cache
-        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false, 
+        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false,
                                                       [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
         // check if we need to convert the page contents to a new schema
@@ -922,6 +926,7 @@ namespace indexer_helpers {
     void
     MutableTable::_insert_append(TuplePtr value)
     {
+        Table::trace tr(fmt::format("_mutable_table_insert_append-xid_{}", _target_xid));
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
         if (_primary_lookup->empty()) {
@@ -949,6 +954,7 @@ namespace indexer_helpers {
     void
     MutableTable::_insert_by_lookup(TuplePtr value)
     {
+        Table::trace tr(fmt::format("_mutable_table_insert_by_lookup-xid_{}", _target_xid));
         assert(!_primary_key.empty());
 
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
@@ -993,7 +999,7 @@ namespace indexer_helpers {
     {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
-            _empty_page = std::make_unique<StorageCache::SafePagePtr>( 
+            _empty_page = std::make_unique<StorageCache::SafePagePtr>(
                     StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid));
         }
 
@@ -1121,6 +1127,7 @@ namespace indexer_helpers {
     void
     MutableTable::_update_direct(TuplePtr value, uint64_t extent_id)
     {
+        Table::trace tr(fmt::format("_mutable_table_update_direct-xid_{}", _target_xid));
         // get the page from the cache
         auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
                 false,
@@ -1150,6 +1157,7 @@ namespace indexer_helpers {
     void
     MutableTable::_update_by_lookup(TuplePtr value)
     {
+        Table::trace tr(fmt::format("_mutable_table_update_by_lookup-xid_{}", _target_xid));
         assert(!_primary_key.empty());
 
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
@@ -1273,16 +1281,16 @@ namespace indexer_helpers {
     }
 
     Table::Iterator::Iterator(const Table *table, uint32_t index_id)
-    { 
+    {
         if (index_id == constant::INDEX_PRIMARY) {
-            _tracker.emplace<Primary>(table, table->_primary_index, 
-                    table->_primary_index->end(), 
-                    StorageCache::SafePagePtr{}, 
+            _tracker.emplace<Primary>(table, table->_primary_index,
+                    table->_primary_index->end(),
+                    StorageCache::SafePagePtr{},
                     StorageCache::Page::Iterator{});
         } else {
             auto const& [btree, cols] = table->_secondary_indexes.at(index_id);
             auto index_schema = _create_index_schema(table->_schema, cols);
-            _tracker.emplace<Secondary>(table, btree, 
+            _tracker.emplace<Secondary>(table, btree,
                     btree->end(), index_schema );
         }
     }

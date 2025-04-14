@@ -1,6 +1,8 @@
 #pragma once
+#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
 
 #include "common/constants.hh"
+#include <common/time_trace.hh>
 #include <memory>
 #include <stdexcept>
 #include <storage/btree.hh>
@@ -68,13 +70,27 @@ namespace indexer_helpers {
      */
     class Table : public std::enable_shared_from_this<Table> {
     public:
+        struct trace
+        {
+            TIME_TRACE(xid);
+            std::string _n;
+
+            trace(std::string n): _n{std::move(n)} {
+                TIME_TRACE_START(xid);
+            }
+
+            ~trace() {
+                TIME_TRACE_STOP(xid);
+                TIME_TRACESET_UPDATE(time_trace::traces, _n, xid);
+            }
+        };
         /**
          * A forward iterator over the rows of a Table object.
          */
         class Iterator {
             friend Table;
 
-            /** 
+            /**
              * We use the same Iterator type for both primary and secondary indexes.
              * However the way the indexes move around isn't the same.
              * Tracker provides an abstraction for the various index types.
@@ -121,7 +137,7 @@ namespace indexer_helpers {
                     _page_i(page_i)
                 {}
 
-                explicit Primary(const Table *table) 
+                explicit Primary(const Table *table)
                     :Tracker{table}
                 {}
 
@@ -131,7 +147,7 @@ namespace indexer_helpers {
                 void next();
                 void prev();
 
-                const Extent::Row& row() const 
+                const Extent::Row& row() const
                 {
                     return *_page_i;
                 }
@@ -139,7 +155,7 @@ namespace indexer_helpers {
                 friend bool operator==(const Primary& a, const Primary& b) {
                     const Tracker& ta = a;
                     const Tracker& tb = b;
-                    
+
                     if (ta == tb) {
                         return (a._btree_i == a._btree->end() || a._page_i == b._page_i);
                     }
@@ -199,7 +215,7 @@ namespace indexer_helpers {
             using pointer           = const Extent::Row *;  // or also value_type*
             using reference         = const Extent::Row &;  // or also value_type&
 
-            reference operator*() { 
+            reference operator*() {
                 if (auto p = std::get_if<Primary>(&_tracker)) {
                     return p->row();
                 }
@@ -272,11 +288,11 @@ namespace indexer_helpers {
         private:
             /** Specifically for the end() iterator of a vacant table. */
             Iterator(const Table *table)
-            { 
-                _tracker.emplace<Primary>(table, 
-                        BTreePtr{}, 
-                        BTree::Iterator{}, 
-                        StorageCache::SafePagePtr{}, 
+            {
+                _tracker.emplace<Primary>(table,
+                        BTreePtr{},
+                        BTree::Iterator{},
+                        StorageCache::SafePagePtr{},
                         StorageCache::Page::Iterator{});
             }
 
@@ -288,14 +304,14 @@ namespace indexer_helpers {
                      BTreePtr btree, const BTree::Iterator &btree_i,
                      StorageCache::SafePagePtr page,
                      const StorageCache::Page::Iterator &page_i)
-            { 
+            {
                 _tracker.emplace<Primary>(table, btree, btree_i, std::move(page), page_i);
             }
 
             Iterator(const Table *table,
                      BTreePtr btree, const BTree::Iterator &btree_i,
                      ExtentSchemaPtr index_schema)
-            { 
+            {
                 _tracker.emplace<Secondary>(table, btree, btree_i, index_schema);
             }
         };
@@ -439,7 +455,7 @@ namespace indexer_helpers {
         /**
          * Creates read-only index of the table.
          */
-        BTreePtr 
+        BTreePtr
         _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset);
 
     private:
