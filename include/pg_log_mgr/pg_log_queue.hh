@@ -56,6 +56,15 @@ namespace springtail::pg_log_mgr {
             _internal_push(new_entry, write_lock);
         }
 
+        void push(const std::vector<PgLogQueueEntry> &entries) {
+            std::unique_lock<std::mutex> write_lock{_mutex};
+            for (auto entry: entries) {
+                PgLogQueueEntryPtr new_entry = std::make_shared<PgLogQueueEntry>(entry.start_offset, entry.end_offset, entry.path);
+                new_entry->num_messages = entry.num_messages;
+                _internal_push(new_entry, write_lock);
+            }
+        }
+
         /**
          * @brief Used to push a stall message onto the queue
          */
