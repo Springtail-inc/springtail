@@ -69,6 +69,8 @@ namespace springtail::pg_log_mgr {
          */
         void enqueue_msg(PgMsgPtr msg);
 
+        void get_queue_details();
+
         /**
          * @brief Process next set of messages from log file
          * @param path file path
@@ -156,10 +158,13 @@ namespace springtail::pg_log_mgr {
             static constexpr uint32_t MAX_BATCH_SIZE = 4 * 1024 * 1024;
 
         public:
+            TIME_TRACE(transaction);
             Batch(uint64_t db_id, int32_t pg_xid, const CommitterQueuePtr committer_queue,
                   ExistsCachePtr exists_cache)
                 : _db(db_id), _pg_xid(pg_xid), _committer_queue(committer_queue), _exists_cache(exists_cache)
             {
+
+                TIME_TRACE_START(transaction);
                 auto tracer = open_telemetry::OpenTelemetry::tracer("PgLogReader");
                 _span = tracer->StartSpan("Transaction");
                 _span->SetAttribute("pg_xid", pg_xid);
@@ -167,6 +172,8 @@ namespace springtail::pg_log_mgr {
 
             ~Batch()
             {
+                TIME_TRACE_STOP(transaction);
+                TIME_TRACESET_UPDATE(time_trace::traces, "transaction", transaction);
                 if (_span->IsRecording()) {
                     _span->End();
                 }

@@ -718,6 +718,19 @@ namespace springtail::pg_log_mgr {
     }
 
     void
+    PgLogReader::get_queue_details()
+    {
+        if ( _msg_queue.size() > 0 ){
+            LOG_INFO("[TRACE] Getting queue details, Queue size {}", _msg_queue.size());
+            PgMsgPtr front_msg = _msg_queue.front();
+            auto current_ts = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()) * 1000;
+            auto first_msg_ts = front_msg->pg_log_timestamp;
+            LOG_INFO("[TRACE] Queue details: first message timestamp {}, current timestamp {}",
+                    first_msg_ts, current_ts);
+        }
+    }
+
+    void
     PgLogReader::enqueue_msg(PgMsgPtr msg)
     {
         _msg_queue.push(msg);

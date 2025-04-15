@@ -457,7 +457,9 @@ namespace springtail::pg_log_mgr {
                 TIME_TRACESET_LOG(time_trace::traces);
                 fs::remove(file_path);
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+
+            _pg_log_reader->get_queue_details();
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }
     }
 
