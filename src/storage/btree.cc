@@ -196,27 +196,13 @@ namespace springtail {
     BTree::Iterator
     BTree::inverse_lower_bound(TuplePtr search_key) const
     {
-        // check for empty() case
-        if (empty()) {
+        auto &&i = upper_bound(search_key);
+
+        if (i == begin()) {
             return end();
         }
 
-        // find the first entry <= the key
-        Iterator &&i = lower_bound(search_key);
-
-        for (; i != end(); ++i) {
-            // generate the key of the provided row
-            auto key = std::make_shared<FieldTuple>(_leaf_keys, *i);
-            if (!search_key->equal_prefix(*key)) {
-                if (i == begin()) {
-                    return end();
-                }
-                break;
-            }
-        }
-        --i;
-
-        return i;
+        return --i;
     }
 
     BTree::Iterator

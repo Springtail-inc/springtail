@@ -326,7 +326,7 @@ namespace indexer_helpers {
         if (index_id != constant::INDEX_PRIMARY) {
             auto const& [btree, cols] = _secondary_indexes.at(index_id);
 
-            // find the extent that could contain the lower_bound() key
+            // find the extent that contains the row matching the inverse_lower_bound() key
             auto &&i = btree->inverse_lower_bound(search_key);
 
             if (i == btree->end()) {
