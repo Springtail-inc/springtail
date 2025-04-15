@@ -9,38 +9,25 @@
 #include <redis/redis_ddl.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <write_cache/write_cache_func.hh>
-#include <xid_mgr/xid_mgr_client.hh>
-
-#include <opentelemetry/metrics/provider.h>
 
 namespace springtail::pg_log_mgr {
 
     PgLogReader::PgLogReader(uint64_t db_id, uint32_t queue_size,
                              const std::filesystem::path &repl_log_path,
-                             const std::filesystem::path &xact_log_path,
+                             // const std::filesystem::path &xact_log_path,
                              const CommitterQueuePtr committer_queue,
                              const bool archive_logs)
         : _db_id(db_id),
           // retrieve the most recently committed XID at startup
-          _committed_xid(XidMgrClient::get_instance()->get_committed_xid(db_id, 0)),
+         _committed_xid(xid_mgr::XidMgrServer::get_instance()->get_committed_xid(db_id, 0)),
           _archive_logs(archive_logs),
           _repl_log_path(repl_log_path),
-          _xact_log_path(xact_log_path),
+          // _xact_log_path(xact_log_path),
           _committer_queue(committer_queue),
-          _msg_queue(queue_size),
-          _xact_log_writer(xact_log_path)
+          _msg_queue(queue_size)
+          // _xact_log_writer(xact_log_path)
     {
         _xid_ts_tracker = std::make_shared<WalProgressTracker>();
-
-        // add the metric for replication lag tracking
-        auto meter = opentelemetry::metrics::Provider::GetMeterProvider()->GetMeter("pg_log_mgr");
-        _postgres_log_reader_latencies = std::shared_ptr<opentelemetry::metrics::Histogram<double>>(
-            meter
-                ->CreateDoubleHistogram("postgres_log_reader_latencies",
-                                        "Latency between when Postgres committed the transaction "
-                                        "and when we process it in the log reader",
-                                        "ms")
-                .release());
 
         // construct the table existence cache
         _exists_cache = std::make_shared<ExistsCache>(8192); // XXX make this size a property?
@@ -702,7 +689,7 @@ namespace springtail::pg_log_mgr {
             }
         case PgMsgEnum::ALTER_RESYNC:
             {
-                // process the resync caused by an ALTER_TABLE 
+                // process the resync caused by an ALTER_TABLE
                 auto &table_msg = std::get<PgMsgTable>(change->msg);
                 _mark_table_resync(table_msg.oid, xidlsn);
                 break;
@@ -790,7 +777,7 @@ namespace springtail::pg_log_mgr {
         uint64_t min_timestamp = _xid_ts_tracker->get_min_timestamp();
         fs::cleanup_files_from_dir(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX, min_timestamp, _archive_logs);
         fs::cleanup_files_from_dir(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL_STREAMING, PgLogMgr::LOG_SUFFIX, min_timestamp, _archive_logs);
-        fs::cleanup_files_from_dir(_xact_log_path, PgLogMgr::LOG_PREFIX_XACT, PgLogMgr::LOG_SUFFIX, min_timestamp, _archive_logs);
+        xid_mgr::XidMgrServer::get_instance()->cleanup(_db_id, min_timestamp, _archive_logs);
     }
 
     void
@@ -803,9 +790,9 @@ namespace springtail::pg_log_mgr {
         if (_pg_log_timestamp < msg->pg_log_timestamp) {
             LOG_DEBUG(LOG_PG_LOG_MGR, "Logs rollover to the new log timestamp id: {}", msg->pg_log_timestamp);
             _pg_log_timestamp = msg->pg_log_timestamp;
-            _xact_log_writer.rotate(msg->pg_log_timestamp);
+            xid_mgr::XidMgrServer::get_instance()->rotate(_db_id, _pg_log_timestamp);
             if (_is_streaming) {
-                fs::create_empty_file_with_timestamp(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL_STREAMING, PgLogMgr::LOG_SUFFIX, msg->pg_log_timestamp);
+                fs::create_empty_file_with_timestamp(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL_STREAMING, PgLogMgr::LOG_SUFFIX, _pg_log_timestamp);
             }
             _remove_old_log_files();
         }
@@ -1031,20 +1018,20 @@ namespace springtail::pg_log_mgr {
         _check_sync_commit(_db_id, xact->xid, xid);
 
         // write the pg_xid -> xid mapping
-        _xact_log_writer.log(xact->xid, xid);
+        // _xact_log_writer.log(xact->xid, xid);
 
         // note: this check should only be false when re-processing records during recovery
         if (xid > _committed_xid) {
             // Record latency between postgres commit time and when we process it
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - postgres_timestamp.to_system_time());
-            _postgres_log_reader_latencies->Record(duration.count(), _context);
+            open_telemetry::OpenTelemetry::record_histogram(PG_LOG_MGR_LOG_READER_LATENCIES, duration.count());
             LOG_DEBUG(LOG_PG_LOG_MGR, "Commit processed {} milliseconds after postgres commit",
                       duration.count());
 
             // message the Committer
             LOG_DEBUG(LOG_PG_LOG_MGR, "Issue XID to committer on {} @ {}", _db_id, xid);
-            _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::XactMsg(xid),
+            _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::XactMsg(xact->xid, xid),
                                     _xid_ts_tracker));
         }
 
@@ -1122,11 +1109,11 @@ namespace springtail::pg_log_mgr {
         // write the pg_xid -> xid mapping
         // note: we do this even if the xact isn't being committed since it is needed for recovery
         //       in the case of a crash
-        _xact_log_writer.log(commit_msg.xid, xid);
+        // _xact_log_writer.log(commit_msg.xid, xid);
 
         if (xid > _committed_xid) {
             // message the Committer
-            _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::XactMsg(xid),
+            _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::XactMsg(commit_msg.xid, xid),
                                     _xid_ts_tracker));
         }
 

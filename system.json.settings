@@ -43,21 +43,6 @@
         },
         "io_threads": 1
     },
-    "xid_mgr": {
-        "rpc_config" : {
-            "server_port": 5052,
-            "server_worker_threads": 32,
-            "server_cert" : "/home/dev/springtail/ca_certs/server_cert.pem",
-            "server_key" : "/home/dev/springtail/ca_certs/server_key.pem",
-            "server_trusted" : "/home/dev/springtail/ca_certs/ca_cert.pem",
-            "ssl": false,
-            "client_connections": 8,
-            "client_cert" : "/home/dev/springtail/ca_certs/client_cert.pem",
-            "client_key" : "/home/dev/springtail/ca_certs/client_key.pem",
-            "client_trusted" : "/home/dev/springtail/ca_certs/ca_cert.pem"
-        },
-        "base_path": "xid_mgr"
-    },
     "sys_tbl_mgr": {
         "rpc_config" : {
             "server_port": 5053,
@@ -84,8 +69,20 @@
     "log_mgr": {
         "replication_log_path": "repl_logs",
         "transaction_log_path": "xact_logs",
-	"log_size_rollover_threshold": 134217728,
-        "archive_logs": false
+        "log_size_rollover_threshold": 134217728,
+        "archive_logs": false,
+        "rpc_config" : {
+            "server_port": 5052,
+            "server_worker_threads": 32,
+            "server_cert" : "/home/dev/springtail/ca_certs/server_cert.pem",
+            "server_key" : "/home/dev/springtail/ca_certs/server_key.pem",
+            "server_trusted" : "/home/dev/springtail/ca_certs/ca_cert.pem",
+            "ssl": false,
+            "client_connections": 8,
+            "client_cert" : "/home/dev/springtail/ca_certs/client_cert.pem",
+            "client_key" : "/home/dev/springtail/ca_certs/client_key.pem",
+            "client_trusted" : "/home/dev/springtail/ca_certs/ca_cert.pem"
+        }
     },
     "fs": {
         "mount_point": "/opt/springtail/data",

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <string>
-#include <filesystem>
 #include <set>
 #include <vector>
 #include <cassert>
@@ -32,24 +31,16 @@ namespace springtail::pg_log_mgr {
 
         /** Transaction message */
         struct XactMsg {
-            std::filesystem::path begin_path;
-            std::filesystem::path commit_path;
-            uint64_t begin_offset;
-            uint64_t commit_offset;
             uint64_t xact_lsn;
             uint64_t xid;
             uint64_t db_id; ///< database id
             uint32_t pg_xid;
             std::set<uint32_t> aborted_xids;
 
-            XactMsg(const std::filesystem::path &begin_path,
-                  const std::filesystem::path &commit_path,
-                  uint64_t db_id, uint64_t begin_offset, uint64_t commit_offset,
-                  uint64_t xact_lsn, uint64_t xid, uint32_t pg_xid,
-                  const std::set<uint32_t> &aborted_xids)
-            : begin_path(begin_path), commit_path(commit_path),
-              begin_offset(begin_offset), commit_offset(commit_offset),
-              xact_lsn(xact_lsn), xid(xid), db_id(db_id), pg_xid(pg_xid),
+            XactMsg(uint64_t db_id,
+                    uint64_t xact_lsn, uint64_t xid, uint32_t pg_xid,
+                    const std::set<uint32_t> &aborted_xids)
+            : xact_lsn(xact_lsn), xid(xid), db_id(db_id), pg_xid(pg_xid),
               aborted_xids(aborted_xids) {}
         };
 
@@ -84,23 +75,16 @@ namespace springtail::pg_log_mgr {
 
         /**
          * @brief Construct a new PgXactMsg object of type XACT_MSG
-         * @param begin_path   file path holding begin message
-         * @param commit_path  file path holding commit message
          * @param db_id        database id
-         * @param begin_offset file offset for begin message
-         * @param commit_offset file offset for commit message
          * @param xact_lsn transaction LSN
          * @param xid springtail XID
          * @param pg_xid postgres XID
          */
-        PgXactMsg(const std::filesystem::path &begin_path,
-                  const std::filesystem::path &commit_path,
-                  uint64_t db_id, uint64_t begin_offset, uint64_t commit_offset,
+        PgXactMsg(uint64_t db_id,
                   uint64_t xact_lsn, uint64_t xid, uint32_t pg_xid,
                   const std::set<uint32_t> &aborted_xids)
             : type(XACT_MSG),
-              msg(XactMsg(begin_path, commit_path, db_id, begin_offset,
-                          commit_offset, xact_lsn, xid, pg_xid, aborted_xids))
+              msg(XactMsg(db_id, xact_lsn, xid, pg_xid, aborted_xids))
         {}
 
         /**

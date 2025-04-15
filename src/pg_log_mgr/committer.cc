@@ -6,6 +6,7 @@
 #include <common/open_telemetry.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <proto/pg_copy_table.pb.h>
+#include <cstdint>
 #include <redis/db_state_change.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
@@ -15,14 +16,14 @@
 
 namespace springtail::committer {
 
-bool
-_index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
-{
-    auto meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, tid, xid);
-    auto it =
-        std::ranges::find_if(meta->roots, [&](auto const &v) { return index_id == v.index_id; });
-    return it != meta->roots.end();
-}
+    bool
+    _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
+    {
+        auto meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, tid, xid);
+        auto it =
+            std::ranges::find_if(meta->roots, [&](auto const &v) { return index_id == v.index_id; });
+        return it != meta->roots.end();
+    }
 
     void
     Committer::run()
@@ -171,7 +172,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     client->finalize(db_id, completed_xid);
 
                     // perform a commit to the XidMgr
-                    _xid_mgr->commit_xid(db_id, completed_xid, true);
+                    _xid_mgr->commit_xid(db_id, 0, completed_xid, true);
                     _committed_xids[db_id] = completed_xid;
 
                     LOG_DEBUG(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, completed_xid);
@@ -181,7 +182,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                         _has_ddl_precommit = false;
                     }
                 } else {
-                    _xid_mgr->record_ddl_change(db_id, completed_xid);
+                    _xid_mgr->record_mapping(db_id, 0, completed_xid, true);
                 }
                 _completed_xids[db_id] = completed_xid;
 
@@ -202,10 +203,12 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             //      we can remove the type RECONCILE_INDEX
             assert(result->type() == XidReady::Type::XACT_MSG || result->type() == XidReady::Type::RECONCILE_INDEX);
             uint64_t xid = 0;
+            uint64_t pg_xid = 0;
             if (result->type() == XidReady::Type::RECONCILE_INDEX) {
                 xid = result->reconcile().xid();
             } else {
                 xid = result->xact().xid();
+                pg_xid = result->xact().pg_xid();
             }
             auto token_4 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(xid)}});
             LOG_INFO("Process XID: {}@{}", db_id, xid);
@@ -294,7 +297,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
 
                 // commit the completed XID
-                _xid_mgr->commit_xid(db_id, xid, !completed_ddls.is_null());
+                _xid_mgr->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null());
                 _committed_xids[db_id] = xid;
 
                 // push completed DDL changes to the FDWs
@@ -303,9 +306,9 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     _redis_ddl.commit_ddl(db_id, xid);
                     _has_ddl_precommit = false;
                 }
-            } else if (!completed_ddls.is_null()) {
+            } else {
                 // don't commit, but record any DDL changes to the history
-                _xid_mgr->record_ddl_change(db_id, xid);
+                _xid_mgr->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null());
             }
             _completed_xids[db_id] = xid;
 

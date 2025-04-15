@@ -11,10 +11,6 @@ set(PG_LOG_SOURCES
     pg_log_writer.cc
     pg_log_reader.cc
     pg_log_recovery.cc
-    pg_xact_log_writer.cc
-    pg_xact_log_reader.cc
-    pg_xact_log_writer_mmap.cc
-    pg_xact_log_reader_mmap.cc
     sync_tracker.cc
 )
 
@@ -26,7 +22,7 @@ target_include_directories(springtail_pglog
 target_link_libraries(springtail_pglog
     PUBLIC springtail_pg
            springtail_common
-	   springtail_redis
+           springtail_redis
            springtail_xid_mgr
            springtail_storage
            springtail_sys_tbl_mgr
@@ -53,27 +49,12 @@ target_link_libraries(test_xact_log
 target_include_directories(test_xact_log PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_dsymutil_command(test_xact_log)
 
-add_executable(test_xact_log_mmap test/test_xact_log_mmap.cc)
-target_link_libraries(test_xact_log_mmap
-    PUBLIC springtail_pglog
-           springtail_common
-    PRIVATE GTest::gtest_main)
-target_include_directories(test_xact_log_mmap PRIVATE ${CMAKE_SOURCE_DIR}/include)
-add_dsymutil_command(test_xact_log_mmap)
-
 add_executable(test_pg_log_redis test/test_redis.cc)
 target_link_libraries(test_pg_log_redis
     PUBLIC springtail_pglog
     PRIVATE GTest::gtest_main)
 target_include_directories(test_pg_log_redis PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_dsymutil_command(test_pg_log_redis)
-
-add_executable(dump_xact_log test/dump_xact_log.cc)
-target_link_libraries(dump_xact_log
-    PUBLIC springtail_pglog
-           springtail_common)
-target_include_directories(dump_xact_log PRIVATE ${CMAKE_SOURCE_DIR}/include)
-add_dsymutil_command(dump_xact_log)
 
 # dump_repl_log
 add_executable(dump_repl_log test/dump_repl_log.cc)
@@ -91,11 +72,9 @@ install(TARGETS pg_log_mgr_daemon RUNTIME DESTINATION bin/system)
 
 # install utils
 install(TARGETS
-    dump_xact_log
     dump_repl_log
     RUNTIME DESTINATION bin/utils
 )
 
 gtest_discover_tests(test_xact_log)
-gtest_discover_tests(test_xact_log_mmap)
 gtest_discover_tests(test_pg_log_redis)

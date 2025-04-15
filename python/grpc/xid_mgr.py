@@ -93,36 +93,6 @@ class XidMgrClient:
         )
         return self.stub.CommitXid(request)
 
-    def record_ddl_change(self, db_id: int, xid: int) -> None:
-        """Record that the given XID contains a schema change.
-
-        Args:
-            db_id: Database identifier
-            xid: Transaction ID containing DDL changes
-        """
-        request = xid_manager_pb2.RecordDdlChangeRequest(
-            db_id=db_id,
-            xid=xid
-        )
-        return self.stub.RecordDdlChange(request)
-
-    def get_committed_xid(self, db_id: int, schema_xid: int = 0) -> int:
-        """Get latest committed XID.
-
-        Args:
-            db_id: Database identifier
-            schema_xid: Schema version XID
-
-        Returns:
-            The latest committed XID
-        """
-        request = xid_manager_pb2.GetCommittedXidRequest(
-            db_id=db_id,
-            schema_xid=schema_xid
-        )
-        response = self.stub.GetCommittedXid(request)
-        return response.xid
-
     def close(self):
         """Close the gRPC channel."""
         self.channel.close()

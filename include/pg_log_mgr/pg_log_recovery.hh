@@ -1,8 +1,9 @@
 #pragma once
 
 #include <pg_log_mgr/pg_log_reader.hh>
-#include <pg_log_mgr/pg_xact_log_reader_mmap.hh>
 #include <pg_repl/pg_msg_stream.hh>
+
+#include <xid_mgr/pg_xact_log_reader.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -47,7 +48,7 @@ private:
     /** Helper to process an individual message during _skip_committed() */
     bool _process_msg(PgMsgPtr msg,
                       uint32_t log_number,
-                      PgXactLogReaderMmap &xact_reader,
+                      xid_mgr::PgXactLogReader &xact_reader,
                       uint32_t &cur_pgxid);
 
     /** Play back only the "active" transaction from the replication log until we have replayed the

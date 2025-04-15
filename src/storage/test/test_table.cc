@@ -13,6 +13,7 @@
 #include <sys_tbl_mgr/table.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
+#include <xid_mgr/xid_mgr_server.hh>
 
 #include <test/services.hh>
 
@@ -48,7 +49,6 @@ namespace {
 
             std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
             runners.emplace();
-            runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
             runners->emplace_back(std::make_unique<IOMgrRunner>());
 
             auto service_runners = test::get_services(true, true, false);
@@ -60,6 +60,7 @@ namespace {
 
             auto xid_client = XidMgrClient::get_instance();
             uint64_t access_xid = xid_client->get_committed_xid(1, 0);
+            ASSERT_NE(access_xid, 0);
             uint64_t target_xid = access_xid + 1;
 
             // create the public namespace in the sys_tbl_mgr
@@ -68,7 +69,8 @@ namespace {
             ns_msg.name = "public";
             client->create_namespace(_db_id, XidLsn(target_xid, constant::MAX_LSN - 1), ns_msg);
 
-            xid_client->commit_xid(1, target_xid, false);
+            auto xid_server = xid_mgr::XidMgrServer::get_instance();
+            xid_server->commit_xid(1, 1, target_xid, false);
         }
 
         static void TearDownTestSuite() {
@@ -250,6 +252,7 @@ namespace {
 
     TEST_P(Table_Test, CreateEmpty) {
         auto client = XidMgrClient::get_instance();
+        auto server = xid_mgr::XidMgrServer::get_instance();
         uint64_t access_xid = client->get_committed_xid(1, 0);
         uint64_t target_xid = access_xid + 1;
 
@@ -264,7 +267,7 @@ namespace {
         // finalize the empty table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        client->commit_xid(1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false);
 
         // create an access table
         access_xid = target_xid;
@@ -283,6 +286,7 @@ namespace {
 
     TEST_P(Table_Test, Inserts) {
         auto client = XidMgrClient::get_instance();
+        auto server = xid_mgr::XidMgrServer::get_instance();
         uint64_t access_xid = client->get_committed_xid(1, 0);
         uint64_t target_xid = access_xid + 1;
 
@@ -301,7 +305,7 @@ namespace {
         // finalize the table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        client->commit_xid(1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false);
 
         // create an access table
         access_xid = target_xid;
@@ -338,6 +342,7 @@ namespace {
 
     TEST_P(Table_Test, SingleXactMutations) {
         auto client = XidMgrClient::get_instance();
+        auto server = xid_mgr::XidMgrServer::get_instance();
         uint64_t access_xid = client->get_committed_xid(1, 0);
         uint64_t target_xid = access_xid + 1;
 
@@ -405,7 +410,7 @@ namespace {
         // finalize the table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        client->commit_xid(1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false);
 
         // create an access table
         access_xid = target_xid;
@@ -454,6 +459,7 @@ namespace {
 
     TEST_P(Table_Test, MultiXactMutations) {
         auto client = XidMgrClient::get_instance();
+        auto server = xid_mgr::XidMgrServer::get_instance();
         uint64_t access_xid = client->get_committed_xid(1, 0);
         uint64_t target_xid = access_xid + 1;
 
@@ -471,7 +477,7 @@ namespace {
         // finalize the table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        client->commit_xid(1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false);
 
         // create an access table for lookup
         access_xid = target_xid;
@@ -512,7 +518,7 @@ namespace {
         // finalize the table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        client->commit_xid(1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false);
 
         // create an access table
         access_xid = target_xid;
@@ -591,7 +597,7 @@ namespace {
         // finalize the table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        client->commit_xid(1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false);
 
         // create an access table
         access_xid = target_xid;
@@ -675,7 +681,7 @@ namespace {
         // finalize the table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        client->commit_xid(1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false);
 
         // create an access table
         access_xid = target_xid;
@@ -764,7 +770,7 @@ namespace {
         // finalize the table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        client->commit_xid(1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false);
 
         // create an access table
         access_xid = target_xid;
@@ -823,6 +829,7 @@ namespace {
 
     TEST_P(Table_Test, MultiThreadMutations) {
         auto client = XidMgrClient::get_instance();
+        auto server = xid_mgr::XidMgrServer::get_instance();
         uint64_t access_xid = client->get_committed_xid(1, 0);
         uint64_t target_xid = access_xid + 1;
 
@@ -840,7 +847,7 @@ namespace {
         // finalize the table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        client->commit_xid(1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false);
 
         // create an access table and identify extents to be mutated
         access_xid = target_xid;
@@ -875,11 +882,11 @@ namespace {
         }
 
         // finalize and verify the table
-        tester.set_verify([this, mtable, target_xid, client]() {
+        tester.set_verify([this, mtable, target_xid, server]() {
             // create an access table
             TableMetadata metadata = mtable->finalize();
             sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-            client->commit_xid(1, target_xid, false);
+            server->commit_xid(1, 1, target_xid, false);
 
             auto access_xid = target_xid;
             auto table = _create_table(1004, access_xid, metadata.roots);
@@ -922,6 +929,7 @@ namespace {
 
     TEST_P(Table_Test, SecondaryIndex) {
         auto client = XidMgrClient::get_instance();
+        auto server = xid_mgr::XidMgrServer::get_instance();
         uint64_t access_xid = client->get_committed_xid(1, 0);
         uint64_t target_xid = access_xid + 1;
 
@@ -942,7 +950,7 @@ namespace {
         // finalize the table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
-        client->commit_xid(1, target_xid, false);
+        server->commit_xid(1, 1, target_xid, false);
 
         // create an access table
         access_xid = target_xid;

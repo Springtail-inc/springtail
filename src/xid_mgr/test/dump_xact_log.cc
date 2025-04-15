@@ -2,12 +2,10 @@
 
 #include <common/init.hh>
 
-#include <pg_log_mgr/pg_xact_log_reader_mmap.hh>
-#include <pg_log_mgr/pg_log_mgr.hh>
-#include "common/init.hh"
+#include <xid_mgr/pg_xact_log_reader.hh>
 
 using namespace springtail;
-using namespace springtail::pg_log_mgr;
+using namespace springtail::xid_mgr;
 
 int main(int argc, char *argv[])
 {
@@ -23,7 +21,7 @@ int main(int argc, char *argv[])
 
     springtail_init_custom(service_runners);
 
-    PgXactLogReaderMmap reader(log_dir);
+    PgXactLogReader reader(log_dir);
     reader.begin();
 
     bool has_more;

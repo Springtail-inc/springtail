@@ -39,6 +39,7 @@ namespace springtail::xid_mgr {
 
             if (_dirty) {
                 _dirty = false; // reset dirty flag before we write them out
+                // TODO: change it to flashing xact log
                 _write_committed_xids();
             }
 
@@ -145,6 +146,7 @@ namespace springtail::xid_mgr {
         }
     }
 
+    // TODO: this functionality needs to be preserved
     void
     Partition::_cleanup_history(RedisDDL &redis_ddl)
     {
@@ -185,6 +187,7 @@ namespace springtail::xid_mgr {
             LOG_DEBUG(LOG_XID_MGR, "Partition: commit xid: db_id={}, xid={}", db_id, xid);
 
             _committed_xids[db_id] = xid;
+            // TODO: write to xact log here
             _dirty = true;
         } else {
             LOG_WARN("Partition: commit xid: db_id={}, xid={}, was already committed at {}", db_id, xid, it->second);

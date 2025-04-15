@@ -55,7 +55,6 @@ FDW_SYSTEM_CATALOG = '__pg_springtail_catalog'
 
 # List of daemons to start tuple: (name, path, args)
 CORE_DAEMONS = [
-    ('xid_mgr_daemon', 'src/xid_mgr/xid_mgr_daemon', '-x,10'),
     ('sys_tbl_mgr_daemon', 'src/sys_tbl_mgr/sys_tbl_mgr_daemon'),
     ('pg_log_mgr_daemon', 'src/pg_log_mgr/pg_log_mgr_daemon')
 ]
@@ -512,7 +511,7 @@ def gen_dump_tarball(props : Properties, build_dir : str) -> str:
 
 def current_xid(props: Properties, db_id: int) -> int:
     config = props.get_system_config()
-    rpc_config = config['xid_mgr']['rpc_config']
+    rpc_config = config['log_mgr']['rpc_config']
 
     hostname = props.get_hostname('ingestion')
     client = XidMgrClient(hostname, rpc_config)
@@ -526,19 +525,14 @@ def restart(props: Properties,
     print("\nStopping daemons...")
     stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
 
+    config = props.get_system_config()
+    xid_log_path = config['fs']['mount_point'] + '/' + config['log_mgr']['transaction_log_path']
+    
+    run_command(os.path.join(build_dir, 'src/xid_mgr/roll_back_xact_log'), ['-p', xid_log_path, '-d', '1', '-a', 'true', '-x', start_xid ])
+
     # start daemons with XID if specified
     print("\nStarting daemons...")
-    if start_xid is not None:
-        # Modify xid_mgr_daemon args to include starting XID
-        modified_daemons = []
-        for daemon in CORE_DAEMONS:
-            if daemon[0] == 'xid_mgr_daemon':
-                modified_daemons.append((daemon[0], daemon[1], f'-x,{start_xid}'))
-            else:
-                modified_daemons.append(daemon)
-        start_daemons(build_dir, modified_daemons)
-    else:
-        start_daemons(build_dir, CORE_DAEMONS)
+    start_daemons(build_dir, CORE_DAEMONS)
 
     # wait for running state
     print("\nWaiting for running state...")
@@ -559,8 +553,7 @@ def start(config_file: str,
           build_dir: str,
           sql_file: str = None,
           do_cleanup: bool = True,
-          do_init: bool = True,
-          start_xid: int = None) -> None:
+          do_init: bool = True,) -> None:
     """Main function to start the Springtail system."""
     # must do init if we are performing cleanup
     if do_cleanup:
@@ -609,17 +602,7 @@ def start(config_file: str,
 
     # start daemons with XID if specified
     print("\nStarting daemons...")
-    if start_xid is not None:
-        # Modify xid_mgr_daemon args to include starting XID
-        modified_daemons = []
-        for daemon in CORE_DAEMONS:
-            if daemon[0] == 'xid_mgr_daemon':
-                modified_daemons.append((daemon[0], daemon[1], f'-x,{start_xid}'))
-            else:
-                modified_daemons.append(daemon)
-        start_daemons(build_dir, modified_daemons)
-    else:
-        start_daemons(build_dir, CORE_DAEMONS)
+    start_daemons(build_dir, CORE_DAEMONS)
 
     # wait for running state
     print("\nWaiting for running state...")
@@ -851,7 +834,7 @@ if __name__ == "__main__":
 
         if args.start:
             start(args.config_file, args.build_dir, args.sql_file,
-                  do_cleanup=not args.no_cleanup, do_init=not args.no_cleanup, start_xid=args.start_xid)
+                  do_cleanup=not args.no_cleanup, do_init=not args.no_cleanup)
 
     except Exception as e:
         print(f"Caught error: {e}")

@@ -42,6 +42,8 @@ namespace springtail {
     constexpr std::string_view SYS_TBL_MGR_GET_TARGET_SCHEMA_CALLS = "sys_tbl_mgr_get_target_schema_calls";
     constexpr std::string_view SYS_TBL_MGR_EXISTS_CALLS = "sys_tbl_mgr_exists_calls";
 
+    constexpr std::string_view PG_LOG_MGR_LOG_READER_LATENCIES = "pg_log_mgr_log_reader_latencies";
+
     namespace metrics {
         inline const std::vector<std::pair<std::string_view, std::string_view>> _counter_metrics = {
             // xid_mgr counter metrics
@@ -49,7 +51,7 @@ namespace springtail {
             {XID_MGR_GET_PARTITION_CALLS, "Total number of XID get partition calls"},
             {XID_MGR_GET_COMMITTED_XID_CALLS, "Total number of XID get committed xid calls"},
             {XID_MGR_COMMIT_XID_CALLS, "Total number of XID commit xid calls"},
-            
+
             // storage cache counter metrics
             {STORAGE_CACHE_GET_CALLS, "Total number of storage cache get calls"},
             {STORAGE_CACHE_GET_CACHE_MISSES, "Total number of storage cache get cache misses"},
@@ -85,7 +87,9 @@ namespace springtail {
 
             // storage cache histogram metrics
             {STORAGE_CACHE_FLUSH_LATENCIES, "Latency of storage cache flush calls"},
-            {STORAGE_CACHE_DROP_LATENCIES, "Latency of storage cache drop calls"}
+            {STORAGE_CACHE_DROP_LATENCIES, "Latency of storage cache drop calls"},
+
+            {PG_LOG_MGR_LOG_READER_LATENCIES, "Latency between when Postgres committed the transaction and when we process it in the log reader"}
         };
     }
 }

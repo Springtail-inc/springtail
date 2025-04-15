@@ -1,14 +1,15 @@
 #pragma once
 
-#include <common/logging.hh>
-
-#include <proto/xid_manager.grpc.pb.h>
-#include <google/protobuf/empty.pb.h>
-#include <grpcpp/grpcpp.h>
 #include <memory>
 #include <stop_token>
 #include <thread>
 #include <unordered_set>
+
+#include <google/protobuf/empty.pb.h>
+#include <grpcpp/grpcpp.h>
+
+#include <common/logging.hh>
+#include <proto/xid_manager.grpc.pb.h>
 
 namespace springtail {
 namespace xid_mgr {
@@ -31,15 +32,6 @@ namespace xid_mgr {
         grpc::ServerUnaryReactor* Ping(grpc::CallbackServerContext* context,
                          const google::protobuf::Empty* request,
                          google::protobuf::Empty* response) override;
-
-        grpc::ServerUnaryReactor* CommitXid(grpc::CallbackServerContext* context,
-                              const proto::CommitXidRequest* request,
-                              google::protobuf::Empty* response) override;
-
-        grpc::ServerUnaryReactor* RecordDdlChange(grpc::CallbackServerContext* context,
-                                    const proto::RecordDdlChangeRequest* request,
-                                    google::protobuf::Empty* response) override;
-
         grpc::ServerUnaryReactor* GetCommittedXid(grpc::CallbackServerContext* context,
                                     const proto::GetCommittedXidRequest* request,
                                     proto::GetCommittedXidResponse* response) override;
@@ -47,6 +39,15 @@ namespace xid_mgr {
         grpc::ServerWriteReactor<proto::XidPushResponse>* Subscribe(
                 grpc::CallbackServerContext* context,
                 const proto::SubscribeRequest* request) override;
+
+        void
+        notify_subscriber(uint64_t db_id, uint64_t xid)
+        {
+            proto::XidPushResponse msg;
+            msg.set_db_id(db_id);
+            msg.set_xid(xid);
+            _notification_thread->notify(msg);
+        }
 
     private:
         xid_mgr::XidMgrServer& _srv;

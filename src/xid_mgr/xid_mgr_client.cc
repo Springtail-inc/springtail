@@ -15,7 +15,7 @@ namespace springtail {
 
 XidMgrClient::XidMgrClient()
 {
-    nlohmann::json json = Properties::get(Properties::XID_MGR_CONFIG);
+    nlohmann::json json = Properties::get(Properties::LOG_MGR_CONFIG);
     nlohmann::json rpc_json;
 
     // fetch RPC properties for the xid mgr client
@@ -41,6 +41,7 @@ XidMgrClient::ping()
         });
 }
 
+/*
 void
 XidMgrClient::commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_changes)
 {
@@ -67,12 +68,13 @@ XidMgrClient::record_ddl_change(uint64_t db_id, uint64_t xid)
     google::protobuf::Empty response;
 
     grpc_client::retry_rpc(
-        "XidManager", 
+        "XidManager",
         "RecordDdlChange",
         [&](grpc::ClientContext* context) {
             return _stub->RecordDdlChange(context, request, &response);
         });
 }
+*/
 
 uint64_t
 XidMgrClient::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
@@ -84,7 +86,7 @@ XidMgrClient::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
 
     grpc_client::retry_rpc(
         "XidManager",
-        "GetCommittedXid", 
+        "GetCommittedXid",
         [&](grpc::ClientContext* context) {
             return _stub->GetCommittedXid(context, request, &response);
         });

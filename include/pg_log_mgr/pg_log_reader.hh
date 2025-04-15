@@ -1,6 +1,5 @@
 #pragma once
 
-#include <common/open_telemetry.hh>
 #include <common/timestamp.hh>
 
 #include <pg_repl/pg_msg_stream.hh>
@@ -11,9 +10,9 @@
 
 #include <storage/field.hh>
 
-#include <pg_log_mgr/pg_xact_log_writer_mmap.hh>
 #include <sys_tbl_mgr/client.hh>
-#include <xid_mgr/xid_mgr_client.hh>
+#include <xid_mgr/xid_mgr_server.hh>
+// #include <xid_mgr/pg_xact_log_writer_mmap.hh>
 
 namespace springtail::pg_log_mgr {
     /**
@@ -40,7 +39,7 @@ namespace springtail::pg_log_mgr {
          */
         PgLogReader(uint64_t db_id, uint32_t queue_size,
                     const std::filesystem::path &repl_log_path,
-                    const std::filesystem::path &xact_log_path,
+                    // const std::filesystem::path &xact_log_path,
                     const CommitterQueuePtr committer_queue,
                     const bool archive_logs);
 
@@ -274,7 +273,7 @@ namespace springtail::pg_log_mgr {
             /**
              * Helper to handle the table validation management.  Updates the Batch-local view of
              * the invalid tables and also updates the msg object as needed.
-             * 
+             *
              * @param msg The postgres message object.
              */
             bool _handle_validation(PgMsgPtr msg);
@@ -323,7 +322,7 @@ namespace springtail::pg_log_mgr {
         bool _archive_logs{false};     ///< This flag indicates that the reader should archive old logs instead of removing them
         std::filesystem::path _current_path; ///< current log file path
         std::filesystem::path _repl_log_path;   ///< Path for Postgres logs storage directory
-        std::filesystem::path _xact_log_path;   ///< Path for Springtail logs storage directory
+        // std::filesystem::path _xact_log_path;   ///< Path for Springtail logs storage directory
         PgMsgStreamReader _reader;           ///< msg stream reader for log file
         CommitterQueuePtr _committer_queue;  ///< shared queue for committer
         PgTransactionPtr _current_xact;      ///< current transaction
@@ -334,7 +333,7 @@ namespace springtail::pg_log_mgr {
         ConcurrentQueue<PgMsg> _msg_queue; ///< Queue of PgMsg records to process
         std::thread _msg_thread; ///< Thread for processing messages using the _msg_worker()
 
-        PgXactLogWriterMmap _xact_log_writer; ///< For logging the xact mapping of pgxid to springtail XID
+        // PgXactLogWriterMmap _xact_log_writer; ///< For logging the xact mapping of pgxid to springtail XID
 
         /** Tracks mutation batches using a map of pgxid -> Extent.  The pgxid is always the
             top-most pgxid and never a subtxn, which are handled within the batch. */

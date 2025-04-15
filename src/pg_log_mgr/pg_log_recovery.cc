@@ -90,7 +90,7 @@ PgLogRecovery::_skip_committed()
     _repl_reader.set_file(*_repl_log);
 
     // Open the xact log
-    PgXactLogReaderMmap xact_reader(_xact_path, _committed_xid, _pg_log_reader->archive_logs());
+    xid_mgr::PgXactLogReader xact_reader(_xact_path);
     if (!xact_reader.begin()) {
         LOG_DEBUG(LOG_PG_LOG_MGR, "No xact log found");
         return true;
@@ -132,14 +132,13 @@ PgLogRecovery::_skip_committed()
         }
     }
 
-    xact_reader.cleanup_logs();
     return true;
 }
 
 bool
 PgLogRecovery::_process_msg(PgMsgPtr msg,
                             uint32_t log_number,
-                            PgXactLogReaderMmap &xact_reader,
+                            xid_mgr::PgXactLogReader &xact_reader,
                             uint32_t &cur_pgxid)
 {
     switch (msg->msg_type) {
