@@ -560,7 +560,7 @@ def start(config_file: str,
           sql_file: str = None,
           do_cleanup: bool = True,
           do_init: bool = True,
-          start_springtail: bool = True,
+          postgres_only: bool = False,
           start_xid: int = None) -> None:
     """Main function to start the Springtail system."""
     # must do init if we are performing cleanup
@@ -598,7 +598,7 @@ def start(config_file: str,
         print(f"\nExecuting startup SQL file: {sql_file}")
         execute_startup_sql(props, sql_file)
 
-    if start_springtail:
+    if not postgres_only:
         # install fdw
         print("\nInstalling foreign data wrapper...")
         install_fdw(build_dir)
@@ -794,7 +794,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('-s', '--sql-file', type=str, required=False, help='Path to a sql file to execute prior to startup')
     parser.add_argument('-x', '--start-xid', type=int, required=False, help='Start the system at a specific XID')
     parser.add_argument('--no-cleanup', action='store_true', help="Start without reinitializing the system")
-    parser.add_argument('--no-springtail', action='store_true', help="Start primary only")
+    parser.add_argument('--postgres-only', action='store_true', help="Start postgres only, don't start springtail FDW")
     parser.add_argument('--start', action=argparse.BooleanOptionalAction, help="Start the Springtail system")
     parser.add_argument('--status', action=argparse.BooleanOptionalAction, help="Check the status of the Springtail daemons")
     parser.add_argument('--kill', action=argparse.BooleanOptionalAction, help="Kill the Springtail daemons")
@@ -857,7 +857,7 @@ if __name__ == "__main__":
         if args.start:
             start(args.config_file, args.build_dir, args.sql_file,
                   do_cleanup=not args.no_cleanup, do_init=not args.no_cleanup, 
-                  start_springtail=not args.no_springtail, start_xid=args.start_xid)
+                  postgres_only=args.postgres_only, start_xid=args.start_xid)
 
     except Exception as e:
         print(f"Caught error: {e}")

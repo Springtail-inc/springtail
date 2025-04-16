@@ -36,7 +36,7 @@ echo "Starting PG..."
 
 python3 ./springtail.py -f ../../system.json.test -b ../../${build} --kill
 # don't start springtail yet
-python3 ./springtail.py -s $dataset_folder/create_dataset_tables.sql -f ../../system.json.test -b ../../${build} --start --no-springtail
+python3 ./springtail.py -s $dataset_folder/create_dataset_tables.sql -f ../../system.json.test -b ../../${build} --start --postgres-only
 
 # load data into primary 
 while read -r line; do
