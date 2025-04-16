@@ -170,6 +170,7 @@ namespace springtail::pg_log_mgr {
         std::string _slot_name;
         uint64_t _log_size_rollover_threshold;
         int _port;
+        std::atomic<bool> _recovery_flag{false};    ///< flag the indicates recovery mode
 
         /** Internal state synchronizer */
         common::StateSynchronizer<StateEnum> _internal_state{STATE_STARTUP};
@@ -240,7 +241,8 @@ namespace springtail::pg_log_mgr {
          */
         void _index_reconciliation_thread();
 
-
+        /** Function for writer thread to read data from connection and store it */
+        bool _writer_read_data(const std::string &coordinator_id, PgCopyData &data, PgLogWriterPtr &logger, uint64_t &start_offset, std::function<void (uint64_t, const std::filesystem::path &)> queue_append_func);
     };
     using PgLogMgrPtr = std::shared_ptr<PgLogMgr>;
 
