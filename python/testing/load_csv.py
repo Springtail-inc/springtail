@@ -127,8 +127,6 @@ if __name__ == "__main__":
         # Check the configuration
         check_config(props)
 
-        print(f"Loading {args.csv_file} into {args.table_name}...")
-
         # Connect to the primary database
         db_name = props.get_db_configs()[0]['name']
         print(f"Connecting database: {db_name}...")
