@@ -1,3 +1,4 @@
+#include <common/constants.hh>
 #include <pg_repl/pg_common.hh>
 
 extern "C" {
@@ -44,9 +45,9 @@ namespace springtail
                 return SchemaType::INT8;
 
             default:
-                if (pg_type_category == 'E') {
-                    // enum types; treat as TEXT
-                    return SchemaType::TEXT;
+                if (pg_type_category == constant::USER_TYPE_ENUM) {
+                    // enum types; treat as REAL/FLOAT4, to store the enum index
+                    return SchemaType::FLOAT32;
                 }
                 // put all other types into BINARY data for now
                 return SchemaType::BINARY;

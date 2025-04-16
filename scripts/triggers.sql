@@ -310,7 +310,7 @@ BEGIN
                n.oid::integer AS namespace_oid,
                n.nspname::text AS schema,
                t.typname::text AS enum_type_name,
-               json_agg(e.enumlabel::text ORDER BY e.enumsortorder)::text AS labels
+               json_agg(json_build_object(e.enumlabel::text, e.enumsortorder::double precision) ORDER BY e.enumsortorder)::text AS value
         FROM pg_enum e
         JOIN pg_type t ON t.oid = e.enumtypid
         JOIN pg_namespace n ON n.oid = t.typnamespace
@@ -325,7 +325,7 @@ BEGIN
                 'ns_oid', enum_obj.namespace_oid,
                 'schema', enum_obj.schema,
                 'name', enum_obj.enum_type_name,
-                'value', enum_obj.labels);
+                'value', enum_obj.value);
 
             -- RAISE NOTICE 'springtail: %', msg::text;
 

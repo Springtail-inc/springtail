@@ -960,6 +960,8 @@ namespace springtail {
             }
         }
     };
+    template <class T>
+    using ConstTypeFieldPtr = std::shared_ptr<ConstTypeField<T>>;
 
     /**
      * A value that is always null represented as a Field for use in conditionals and joins.

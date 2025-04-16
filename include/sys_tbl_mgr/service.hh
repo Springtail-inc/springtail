@@ -653,5 +653,12 @@ private:
     // index cache per DB
     using DbId = uint64_t;
     std::map<DbId, TableIndexMap> _index_cache;
+
+    // Enum cache per DB
+    using EnumId = uint64_t;
+    using EnumIndex = float;
+    using EnumTypeCache = std::unordered_map<DbId,
+        std::unordered_map<EnumIndex,
+            std::map<std::string, float>>>;
 };
 }  // namespace springtail::sys_tbl_mgr
