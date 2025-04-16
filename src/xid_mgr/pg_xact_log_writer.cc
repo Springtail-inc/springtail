@@ -100,9 +100,7 @@ PgXactLogWriter::log(uint32_t pg_xid, uint64_t xid, bool real_commit)
     mem_xid_element->real_commit = real_commit;
     mem_xid_element->xid = xid;
 
-    if (pg_xid != 0) {
-        _last_stored_xid = xid;
-    }
+    _last_stored_xid = xid;
 
     _last_offset += sizeof(XidElement);
     // check if we reached the end of the page
@@ -169,9 +167,7 @@ PgXactLogWriter::_extract_last_xid()
                 break;
             }
             current_offset += sizeof(xid_mgr::PgXactLogWriter::XidElement);
-            if (current_xid->pg_xid != 0) {
-                _last_stored_xid = current_xid->xid;
-            }
+            _last_stored_xid = current_xid->xid;
         }
         if (current_offset < PG_XLOG_PAGE_SIZE) {
             break;

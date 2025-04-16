@@ -22,12 +22,12 @@ int main(int argc, char *argv[])
     springtail_init_custom(service_runners);
 
     PgXactLogReader reader(log_dir);
-    reader.begin();
+    reader.begin(true);
 
     bool has_more;
     do {
-        std::cout << fmt::format("pgxid: {}, xid: {}",
-                                 reader.get_pg_xid(), reader.get_xid()) << std::endl;
+        std::cout << fmt::format("pgxid: {}, xid: {}, real_commit: {}",
+                                 reader.get_pg_xid(), reader.get_xid(), reader.get_real_commit()) << std::endl;
         has_more = reader.next();
     } while (has_more);
 

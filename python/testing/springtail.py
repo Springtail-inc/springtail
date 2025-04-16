@@ -526,10 +526,12 @@ def restart(props: Properties,
     stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
 
     config = props.get_system_config()
-    xid_log_path = config['fs']['mount_point'] + '/' + config['log_mgr']['transaction_log_path']
-    
-    # roll start_xid back
-    run_command(os.path.join(build_dir, 'src/xid_mgr/roll_back_xact_log'), ['-p', xid_log_path, '-d', '1', '-a', 'true', '-x', start_xid ])
+    mount_path = props.get_mount_path()
+    xid_log_path = mount_path + '/' + config['log_mgr']['transaction_log_path']
+
+    if start_xid is not None:
+        # roll start_xid back
+        run_command(os.path.join(build_dir, 'src/xid_mgr/roll_back_xact_log'), ['-p', xid_log_path, '-d', '1', '-a', 'true', '-x', str(start_xid)])
 
     # start daemons with XID if specified
     print("\nStarting daemons...")

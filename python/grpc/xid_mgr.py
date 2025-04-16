@@ -78,6 +78,21 @@ class XidMgrClient:
                 time.sleep(sleep_time)
         raise last_exc
 
+    def get_committed_xid(self, db_id: int, schema_xid: int = 0) -> int:
+        """Get latest committed XID.
+        Args:
+            db_id: Database identifier
+            schema_xid: Schema version XID
+        Returns:
+            The latest committed XID
+        """
+        request = xid_manager_pb2.GetCommittedXidRequest(
+            db_id=db_id,
+            schema_xid=schema_xid
+        )
+        response = self.stub.GetCommittedXid(request)
+        return response.xid
+
     def close(self):
         """Close the gRPC channel."""
         self.channel.close()
@@ -92,7 +107,7 @@ def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Xid Manager Client")
     parser.add_argument('--host', type=str, default='localhost', help='Host of the service')
-    parser.add_argument('--port', type=int, default=55052, help='Port of the service')
+    parser.add_argument('--port', type=int, default=5052, help='Port of the service')
     parser.add_argument('--cert-path', type=str, required=False, help='Path to client certificates/key')
 
     args = parser.parse_args()

@@ -98,7 +98,6 @@ XidMgrServer::_record_xid_change(uint64_t db_id, uint32_t pg_xid, uint64_t xid, 
     std::shared_lock read_lock(_mutex);
     auto db_id_to_log_data = _find_or_add(db_id, read_lock);
     db_id_to_log_data->second.record_mapping(pg_xid, xid, has_schema_changes, real_commit);
-    // TODO: not sure if it should be called when pg_xid == 0
     _service->notify_subscriber(db_id, xid);
 }
 
