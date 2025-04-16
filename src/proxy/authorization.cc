@@ -30,6 +30,16 @@ decode_error(BufferPtr buffer, std::string &code, std::string &message)
     LOG_ERROR("Error response from server: {}, {}, {}", text, code, message);
 }
 
+static std::string
+get_or_default(const std::unordered_map<std::string, std::string>& m, const std::string& key, const std::string& def)
+{
+    auto it = m.find(key);
+    if (it != m.end()) {
+        return it->second;
+    }
+    return def;
+}
+
 bool
 ClientAuthorization::process_auth_data(uint64_t seq_id)
 {
@@ -462,12 +472,20 @@ ClientAuthorization::send_auth_done(uint64_t seq_id,
 
     // send final set of params followed by ready for query
     // parameter status
-    _encode_parameter_status(buffer, "server_encoding", "UTF8");
-    _encode_parameter_status(buffer, "client_encoding", "UTF8");
-    _encode_parameter_status(buffer, "server_version", SERVER_VERSION);
-    _encode_parameter_status(buffer, "standard_conforming_strings", "on");
-    _encode_parameter_status(buffer, "integer_datetimes", "on");
+    _encode_parameter_status(buffer, "server_encoding", get_or_default(parameters, "server_encoding", "UTF8"));
+    _encode_parameter_status(buffer, "client_encoding", get_or_default(parameters, "client_encoding", "UTF8"));
+    _encode_parameter_status(buffer, "server_version", get_or_default(parameters, "server_version", SERVER_VERSION));
+    _encode_parameter_status(buffer, "standard_conforming_strings", get_or_default(parameters, "standard_conforming_strings", "on"));
+    _encode_parameter_status(buffer, "integer_datetimes", get_or_default(parameters, "integer_datetimes", "on"));
     _encode_parameter_status(buffer, "session_authorization", _user->username());
+
+    std::set<std::string> other_params = {"TimeZone", "DateStyle", "IntervalStyle", "is_superuser"};
+    for (const auto &param : other_params) {
+        auto it = parameters.find(param);
+        if (it != parameters.end()) {
+            _encode_parameter_status(buffer, param, it->second);
+        }
+    }
 
     // backend key data -- for cancellation
     buffer->put('K');
@@ -533,6 +551,8 @@ ClientAuthorization::_encode_parameter_status(BufferPtr buffer,
     } else {
         buffer->put_string(value);
     }
+
+    PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Parameter status: {}={}", _id, key, value);
 }
 
 ///////// Server Authorization
