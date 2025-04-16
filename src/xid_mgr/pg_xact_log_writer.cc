@@ -27,6 +27,7 @@ PgXactLogWriter::PgXactLogWriter(const std::filesystem::path &base_dir) :
 PgXactLogWriter::~PgXactLogWriter()
 {
     if (_fd != -1) {
+        flush();
         ::munmap(_file_mem, PG_XLOG_PAGE_SIZE);
         ::close(_fd);
     }
@@ -47,6 +48,7 @@ PgXactLogWriter::rotate(uint64_t timestamp)
         if (file == _file) {
             return;
         }
+        flush();
         if (::munmap(_file_mem, PG_XLOG_PAGE_SIZE) == -1) {
             throw Error(fmt::format("Failed to unmap memory for file {}; error {}: {}", _file.string(), errno, strerror(errno)));
         }
@@ -56,6 +58,7 @@ PgXactLogWriter::rotate(uint64_t timestamp)
         _mmap_offset = 0;
         _last_offset = 0;
         _file_mem = nullptr;
+        _can_flush = false;
     }
     _file = file;
 
@@ -97,9 +100,6 @@ PgXactLogWriter::log(uint32_t pg_xid, uint64_t xid, bool real_commit)
     mem_xid_element->real_commit = real_commit;
     mem_xid_element->xid = xid;
 
-    // flush the memory
-    _flush();
-
     if (pg_xid != 0) {
         _last_stored_xid = xid;
     }
@@ -120,6 +120,7 @@ PgXactLogWriter::log(uint32_t pg_xid, uint64_t xid, bool real_commit)
         // resize file to a bigger size and remap the newly added segment to memory
         _resize_and_map();
     }
+    _can_flush = true;
 }
 
 void
@@ -183,14 +184,15 @@ PgXactLogWriter::_extract_last_xid()
 }
 
 void
-PgXactLogWriter::_flush()
+PgXactLogWriter::flush()
 {
-    if (_file_mem != nullptr) {
+    if (_file_mem != nullptr || !_can_flush) {
         return;
     }
     if (::msync(_file_mem, PG_XLOG_PAGE_SIZE, MS_SYNC) == -1) {
         throw Error(fmt::format("Failed to sync memory for file {}; error {}: {}", _file.string(), errno, strerror(errno)));
     }
+    _can_flush = false;
 }
 
 bool

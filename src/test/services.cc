@@ -37,6 +37,7 @@ namespace springtail::test {
         }
 
         void stop() override {
+            xid_mgr::XidMgrServer::get_instance()->stop_thread();
             xid_mgr::XidMgrServer::get_instance()->cleanup(1, std::numeric_limits<uint64_t>::max(), false);
             xid_mgr::XidMgrServer::shutdown();
         }

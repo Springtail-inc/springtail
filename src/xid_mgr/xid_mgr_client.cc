@@ -41,41 +41,6 @@ XidMgrClient::ping()
         });
 }
 
-/*
-void
-XidMgrClient::commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_changes)
-{
-    proto::CommitXidRequest request;
-    request.set_db_id(db_id);
-    request.set_xid(xid);
-    request.set_has_schema_changes(has_schema_changes);
-    google::protobuf::Empty response;
-
-    grpc_client::retry_rpc(
-        "XidManager",
-        "CommitXid",
-        [&](grpc::ClientContext* context) {
-            return _stub->CommitXid(context, request, &response);
-        });
-}
-
-void
-XidMgrClient::record_ddl_change(uint64_t db_id, uint64_t xid)
-{
-    proto::RecordDdlChangeRequest request;
-    request.set_db_id(db_id);
-    request.set_xid(xid);
-    google::protobuf::Empty response;
-
-    grpc_client::retry_rpc(
-        "XidManager",
-        "RecordDdlChange",
-        [&](grpc::ClientContext* context) {
-            return _stub->RecordDdlChange(context, request, &response);
-        });
-}
-*/
-
 uint64_t
 XidMgrClient::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
 {

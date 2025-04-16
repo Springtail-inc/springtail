@@ -30,8 +30,6 @@ XidMgrServer::XidMgrServer() {
     }
 
     _grpc_server_manager.init(rpc_json);
-    // iterate over all files in the base path creating partitions
-    // _load_partitions();
 
     _service = std::make_unique<GrpcXidMgrService>(*this);
     _grpc_server_manager.addService(_service.get());
@@ -40,6 +38,7 @@ XidMgrServer::XidMgrServer() {
 void
 XidMgrServer::startup()
 {
+    start_thread();
     _grpc_server_manager.startup();
 }
 
@@ -52,31 +51,39 @@ XidMgrServer::_internal_shutdown()
     _xact_log_data.clear();
 }
 
+void
+XidMgrServer::_internal_run()
+{
+    RedisDDL redis_ddl;
+    while (!_is_shutting_down()) {
+        // sleep for at least XIG_MGR_MIN_SYNC_MS
+        std::this_thread::sleep_for(std::chrono::milliseconds(XIG_MGR_MIN_SYNC_MS));
+        std::shared_lock lock(_mutex);
+        for (auto &it: _xact_log_data) {
+            it.second.cleanup_history_and_flush(redis_ddl);
+        }
+    }
+}
+
 uint64_t
 XidMgrServer::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
 {
-    // std::cout << __PRETTY_FUNCTION__ << "(" << std::this_thread::get_id() << "): db_id = " << db_id << "; schema_id = " << schema_xid << std::endl;
     auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
     std::shared_lock read_lock(_mutex);
     auto db_id_to_log_data = _find_or_add(db_id, read_lock);
     uint64_t xid = db_id_to_log_data->second.get_committed_xid(schema_xid);
-    // std::cout << __PRETTY_FUNCTION__ << "(" << std::this_thread::get_id() << "): returning xid = " << xid << std::endl;
     return xid;
 }
 
 void
 XidMgrServer::commit_xid(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes)
 {
-    // std::cout << __PRETTY_FUNCTION__ << "(" << std::this_thread::get_id() << "): db_id = " << db_id << "; pg_xid = " << pg_xid
-    //         << "; xid = " << xid << "; has_schema_changes = " << has_schema_changes << std::endl;
     _record_xid_change(db_id, pg_xid, xid, has_schema_changes, true);
 }
 
 void
 XidMgrServer::record_mapping(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes)
 {
-    // std::cout << __PRETTY_FUNCTION__ << "(" << std::this_thread::get_id() << "): db_id = " << db_id << "; pg_xid = " << pg_xid
-    //         << "; xid = " << xid << "; has_schema_changes = " << has_schema_changes << std::endl;
     _record_xid_change(db_id, pg_xid, xid, has_schema_changes, false);
 }
 
@@ -127,6 +134,92 @@ XidMgrServer::_find_or_add(uint64_t db_id, std::shared_lock<std::shared_mutex> &
     }
     std::pair<const uint64_t, DBXactLogData> *pair_ptr = &*it;
     return pair_ptr;
+}
+
+XidMgrServer::DBXactLogData::DBXactLogData(uint64_t db_id, const std::filesystem::path &base_dir):
+                                           _xact_log(base_dir / std::to_string(db_id)),
+                                           _db_id(db_id) {
+    std::filesystem::create_directories(base_dir);
+    LOG_INFO("Creating directory {} for db_id={}", base_dir, _db_id);
+}
+
+void
+XidMgrServer::DBXactLogData::record_mapping(uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit)
+{
+    std::unique_lock lock(_mutex);
+    _xact_log.log(pg_xid, xid, real_commit);
+    if (has_schema_changes) {
+        _xact_history.push_back(xid);
+        _dirty_history = true;
+    }
+}
+
+void
+XidMgrServer::DBXactLogData::cleanup_history_and_flush(RedisDDL redis_ddl)
+{
+    std::unique_lock lock(_mutex);
+    if (!_xact_history.empty() && _dirty_history) {
+        // get min schema xid
+        uint64_t min_schema_xid = redis_ddl.min_schema_xid(_db_id);
+
+        // find position lower than min_schema_xid
+        auto it = std::ranges::lower_bound(_xact_history.begin(), _xact_history.end(), min_schema_xid);
+        // erase all smaller xids
+        _xact_history.erase(_xact_history.begin(), it);
+        if (_xact_history.empty()) {
+            LOG_DEBUG(LOG_XID_MGR, "The history for db_id={} is now empty", _db_id);
+        } else {
+            LOG_DEBUG(LOG_XID_MGR, "The history for db_id={} now starts with xid={}", _db_id, _xact_history.front());
+        }
+        _dirty_history = false;
+    }
+    _xact_log.flush();
+}
+
+uint64_t
+XidMgrServer::DBXactLogData::get_committed_xid(uint64_t schema_xid)
+{
+    std::shared_lock lock(_mutex);
+    uint64_t last_xid = _xact_log.get_last_xid();
+
+    // if schema XID is zero or there is no history for this database,
+    // then we always return the most recent committed XID
+    if (schema_xid == 0 || _xact_history.empty()) {
+        LOG_DEBUG(LOG_XID_MGR, "Get committed xid for db_id={}: {}", _db_id, last_xid);
+        return last_xid;
+    }
+
+    auto pos_i = std::ranges::upper_bound(_xact_history, schema_xid);
+    if (pos_i == _xact_history.end()) {
+        // if the schema XID is ahead of the history, return the most recent commited XID
+        LOG_DEBUG(LOG_XID_MGR, "Get committed xid for db_id={}: {}", _db_id, last_xid);
+        return last_xid;
+    }
+
+    // if the history is ahead of the commit, return the committed xid
+    auto target_xid = (*pos_i) - 1;
+    if (target_xid > last_xid) {
+        LOG_DEBUG(LOG_XID_MGR, "Get committed xid for db_id={}: {}; ahead of history {}", _db_id, last_xid, target_xid);
+        return last_xid;
+    }
+
+    // if we found an entry in the history, return the XID directly before that
+    LOG_DEBUG(LOG_XID_MGR, "Get committed xid for db_id={}: xid limited by schema_xid: {} -> {}", _db_id, schema_xid, target_xid);
+    return target_xid;
+}
+
+void
+XidMgrServer::DBXactLogData::rotate(uint64_t timestamp)
+{
+    std::unique_lock lock(_mutex);
+    _xact_log.rotate(timestamp);
+}
+
+void
+XidMgrServer::DBXactLogData::cleanup(uint64_t min_timestamp, bool archive_logs)
+{
+    std::unique_lock lock(_mutex);
+    _xact_log.cleanup(min_timestamp, archive_logs);
 }
 
 }  // namespace springtail::xid_mgr

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <atomic>
-#include <cassert>
 #include <mutex>
 #include <thread>
 
@@ -133,7 +132,7 @@ namespace springtail {
          *
          */
         virtual void stop_thread() {
-            _shutting_down = true;
+            _shutting_down.store(true);
         }
 
     protected:
@@ -158,7 +157,7 @@ namespace springtail {
          * @return true
          * @return false
          */
-        bool _is_shutting_down() const { return _shutting_down; }
+        bool _is_shutting_down() const { return _shutting_down.load(); }
 
         /**
          * @brief Constructor of a new SingletonWithThread object can only be accessed by the derived class
@@ -171,6 +170,14 @@ namespace springtail {
          *
          */
         virtual ~SingletonWithThread() = default;
+
+        /**
+         * @brief Assert if the singleton object has not been created yet
+         *
+         */
+         static void _assert_instance() {
+            CHECK_NE(_instance, nullptr);
+        }
 
     private:
         static inline T* _instance = nullptr;             ///< derived class instance

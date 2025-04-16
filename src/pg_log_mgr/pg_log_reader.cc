@@ -14,7 +14,6 @@ namespace springtail::pg_log_mgr {
 
     PgLogReader::PgLogReader(uint64_t db_id, uint32_t queue_size,
                              const std::filesystem::path &repl_log_path,
-                             // const std::filesystem::path &xact_log_path,
                              const CommitterQueuePtr committer_queue,
                              const bool archive_logs)
         : _db_id(db_id),
@@ -22,10 +21,8 @@ namespace springtail::pg_log_mgr {
          _committed_xid(xid_mgr::XidMgrServer::get_instance()->get_committed_xid(db_id, 0)),
           _archive_logs(archive_logs),
           _repl_log_path(repl_log_path),
-          // _xact_log_path(xact_log_path),
           _committer_queue(committer_queue),
           _msg_queue(queue_size)
-          // _xact_log_writer(xact_log_path)
     {
         _xid_ts_tracker = std::make_shared<WalProgressTracker>();
 
@@ -1017,9 +1014,6 @@ namespace springtail::pg_log_mgr {
         // check if we need to perform a table swap / commit before proceeding
         _check_sync_commit(_db_id, xact->xid, xid);
 
-        // write the pg_xid -> xid mapping
-        // _xact_log_writer.log(xact->xid, xid);
-
         // note: this check should only be false when re-processing records during recovery
         if (xid > _committed_xid) {
             // Record latency between postgres commit time and when we process it
@@ -1105,11 +1099,6 @@ namespace springtail::pg_log_mgr {
 
         // check if we need to perform a table swap / commit before proceeding
         _check_sync_commit(_db_id, xact->xid, xid);
-
-        // write the pg_xid -> xid mapping
-        // note: we do this even if the xact isn't being committed since it is needed for recovery
-        //       in the case of a crash
-        // _xact_log_writer.log(commit_msg.xid, xid);
 
         if (xid > _committed_xid) {
             // message the Committer

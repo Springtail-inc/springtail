@@ -117,7 +117,7 @@ namespace springtail::committer {
         bool _shift_to_xid(SchemaMetadata &meta, const XidLsn &xid);
 
     private:
-        xid_mgr::XidMgrServer *_xid_mgr; ///< Pointer to the XidMgr client singleton.
+        xid_mgr::XidMgrServer *_xid_mgr; ///< Pointer to the XidMgr server singleton.
 
         RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         bool _has_ddl_precommit = false; ///< Flag indiciating if the redis DDL is holding precommit entries

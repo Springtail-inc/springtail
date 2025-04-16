@@ -53,6 +53,12 @@ public:
      */
     uint64_t get_xid() const { return ((_current_xid == nullptr)? 0 : _current_xid->xid); }
 
+    /**
+     * @brief Get the real value of current xid entry
+     *
+     * @return true - if it was a real commit
+     * @return false - if it was not a real commit
+     */
     bool get_real_commit() const { return ((_current_xid == nullptr)? false : _current_xid->real_commit);}
 
 private:
@@ -64,17 +70,26 @@ private:
     uint32_t _page_count{0};            ///< number of pages in the current file
     int _fd{-1};                        ///< current file descriptor
 
+    /**
+     * @brief Move current xid pointer to the next xid entry
+     *
+     * @return true - success
+     * @return false - failure
+     */
     bool _get_next_xid();
 
     /**
-    * @brief Load the next extent from current file
-    */
+     * @brief Load the next page from current file
+     *
+     * @return true - success
+     * @return false - failure
+     */
     bool _load_next_page();
 
     /**
-    * @brief Open and load the next file
-    * @return true if successful, false if no more files
-    */
+     * @brief Open and load the next file
+     * @return true if successful, false if no more files
+     */
     bool _open_next_file();
 
     /**

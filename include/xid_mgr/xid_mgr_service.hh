@@ -1,13 +1,5 @@
 #pragma once
 
-#include <memory>
-#include <stop_token>
-#include <thread>
-#include <unordered_set>
-
-#include <google/protobuf/empty.pb.h>
-#include <grpcpp/grpcpp.h>
-
 #include <common/logging.hh>
 #include <proto/xid_manager.grpc.pb.h>
 
@@ -29,17 +21,26 @@ namespace xid_mgr {
 
         void shutdown();
 
-        grpc::ServerUnaryReactor* Ping(grpc::CallbackServerContext* context,
-                         const google::protobuf::Empty* request,
-                         google::protobuf::Empty* response) override;
-        grpc::ServerUnaryReactor* GetCommittedXid(grpc::CallbackServerContext* context,
-                                    const proto::GetCommittedXidRequest* request,
-                                    proto::GetCommittedXidResponse* response) override;
+        grpc::ServerUnaryReactor*
+        Ping(grpc::CallbackServerContext* context,
+             const google::protobuf::Empty* request,
+             google::protobuf::Empty* response) override;
 
-        grpc::ServerWriteReactor<proto::XidPushResponse>* Subscribe(
-                grpc::CallbackServerContext* context,
-                const proto::SubscribeRequest* request) override;
+        grpc::ServerUnaryReactor*
+        GetCommittedXid(grpc::CallbackServerContext* context,
+                        const proto::GetCommittedXidRequest* request,
+                        proto::GetCommittedXidResponse* response) override;
 
+        grpc::ServerWriteReactor<proto::XidPushResponse>*
+        Subscribe(grpc::CallbackServerContext* context,
+                  const proto::SubscribeRequest* request) override;
+
+        /**
+         * @brief Notify xid manager subscriber of the change
+         *
+         * @param db_id - database id
+         * @param xid - transaction id
+         */
         void
         notify_subscriber(uint64_t db_id, uint64_t xid)
         {

@@ -11,7 +11,6 @@ int
 main(int argc, char **argv)
 {
     bool get = false;
-    uint64_t xid = 0;
     uint64_t db_id = 1;
     uint64_t schema_xid = 0;
 
@@ -26,7 +25,6 @@ main(int argc, char **argv)
     desc.add_options()("help,h", "Help message.");
     desc.add_options()("get,g", "Get latest committed xid");
     desc.add_options()("dbid,d", po::value<uint64_t>(&db_id)->default_value(1), "DB ID.");
-    desc.add_options()("xid,x", po::value<uint64_t>(&xid)->default_value(0), "Xid to set");
     desc.add_options()("schema_xid,s", po::value<uint64_t>(&schema_xid)->default_value(0), "Schema xid to set");
 
     po::variables_map vm;

@@ -78,21 +78,6 @@ class XidMgrClient:
                 time.sleep(sleep_time)
         raise last_exc
 
-    def commit_xid(self, db_id: int, xid: int, has_schema_changes: bool = False) -> None:
-        """Commit up to and including the provided XID.
-
-        Args:
-            db_id: Database identifier
-            xid: Transaction ID to commit
-            has_schema_changes: Whether the transaction includes schema changes
-        """
-        request = xid_manager_pb2.CommitXidRequest(
-            db_id=db_id,
-            xid=xid,
-            has_schema_changes=has_schema_changes
-        )
-        return self.stub.CommitXid(request)
-
     def close(self):
         """Close the gRPC channel."""
         self.channel.close()

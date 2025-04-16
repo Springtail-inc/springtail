@@ -6,7 +6,6 @@
 #include <common/open_telemetry.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <proto/pg_copy_table.pb.h>
-#include <cstdint>
 #include <redis/db_state_change.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/table_mgr.hh>

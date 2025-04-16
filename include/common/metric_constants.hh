@@ -8,10 +8,6 @@ namespace springtail {
     constexpr std::string_view XID_MGR_GET_COMMITTED_XID_CALLS = "xid_mgr_get_committed_xid_calls";
     constexpr std::string_view XID_MGR_COMMIT_XID_CALLS = "xid_mgr_commit_xid_calls";
 
-    // xid_mgr histogram metrics
-    constexpr std::string_view XID_MGR_COMMIT_XID_LATENCIES = "xid_mgr_commit_xid_latencies";
-    constexpr std::string_view XID_MGR_RECORD_DDL_CHANGE_LATENCIES = "xid_mgr_record_ddl_change_latencies";
-
     // storage cache counter metrics
     constexpr std::string_view STORAGE_CACHE_GET_CALLS = "storage_cache_get_calls";
     constexpr std::string_view STORAGE_CACHE_GET_CACHE_MISSES = "storage_cache_get_cache_misses";
@@ -42,6 +38,7 @@ namespace springtail {
     constexpr std::string_view SYS_TBL_MGR_GET_TARGET_SCHEMA_CALLS = "sys_tbl_mgr_get_target_schema_calls";
     constexpr std::string_view SYS_TBL_MGR_EXISTS_CALLS = "sys_tbl_mgr_exists_calls";
 
+    // log manager histogram metrics
     constexpr std::string_view PG_LOG_MGR_LOG_READER_LATENCIES = "pg_log_mgr_log_reader_latencies";
 
     namespace metrics {
@@ -81,14 +78,11 @@ namespace springtail {
 
         // histogram metrics
         inline const std::vector<std::pair<std::string_view, std::string_view>> _histogram_metrics = {
-            // xid_mgr histogram metrics
-            {XID_MGR_COMMIT_XID_LATENCIES, "Latency of XID commits"},
-            {XID_MGR_RECORD_DDL_CHANGE_LATENCIES, "Latency of XID record DDL change calls"},
-
             // storage cache histogram metrics
             {STORAGE_CACHE_FLUSH_LATENCIES, "Latency of storage cache flush calls"},
             {STORAGE_CACHE_DROP_LATENCIES, "Latency of storage cache drop calls"},
 
+            // log manager histogram metrics
             {PG_LOG_MGR_LOG_READER_LATENCIES, "Latency between when Postgres committed the transaction and when we process it in the log reader"}
         };
     }

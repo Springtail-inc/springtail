@@ -3,7 +3,6 @@
 #include <common/common.hh>
 #include <fmt/ranges.h>
 #include <proto/pg_copy_table.pb.h>
-#include <cstdint>
 
 #include <pg_log_mgr/wal_progress_tracker.hh>
 
@@ -20,7 +19,7 @@ namespace springtail::committer {
          */
         class XactMsg {
         public:
-            explicit XactMsg(uint32_t pg_xid, uint64_t xid)
+            XactMsg(uint32_t pg_xid, uint64_t xid)
                 : _xid(xid), _pg_xid(pg_xid)
             { }
 
