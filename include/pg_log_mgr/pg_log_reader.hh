@@ -324,17 +324,6 @@ namespace springtail::pg_log_mgr {
                 return utp;
             }
 
-            /**
-             * @brief Invalidate the user type cache for a given pg_type
-             * @param pg_type The pg type to invalidate
-             */
-            void _usertype_cache_invalidate(int32_t pg_type) {
-                auto it = _user_types.find(pg_type);
-                if (it != _user_types.end()) {
-                    _user_types.erase(it);
-                }
-            }
-
             //// MEMBER VARIABLES
             std::map<int32_t, TxnEntryPtr> _txns; ///< Map of pgxid to txn details.
 

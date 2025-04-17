@@ -210,6 +210,7 @@ namespace springtail::pg_log_mgr {
 
             // lookup user type in cache
             auto utp = _usertype_cache_lookup(pg_type, xidlsn);
+            CHECK(utp->exists);
 
             // reassign the value of the tuple, a float value of the user type index
             std::string label = std::string(data.tuple_data[i].data.begin(),
@@ -478,12 +479,13 @@ namespace springtail::pg_log_mgr {
                 auto &user_type = std::get<PgMsgUserType>(msg->msg);
                 int32_t oid = user_type.oid;
                 if (msg->msg_type == PgMsgEnum::DROP_TYPE) {
-                    _usertype_cache_invalidate(oid);
+                    _user_types.erase(oid);
+                    _user_types[oid] = std::make_shared<UserType>(oid, false);
                 } else if (msg->msg_type == PgMsgEnum::CREATE_TYPE) {
                     UserTypePtr utp = std::make_shared<UserType>(oid, user_type.namespace_id, user_type.type, user_type.name, user_type.value_json);
                     _user_types[oid] = utp;
                 } else if (msg->msg_type == PgMsgEnum::ALTER_TYPE) {
-                    _usertype_cache_invalidate(oid);
+                    _user_types.erase(oid);
                     UserTypePtr utp = std::make_shared<UserType>(oid, user_type.namespace_id, user_type.type, user_type.name, user_type.value_json);
                     _user_types[oid] = utp;
                 }

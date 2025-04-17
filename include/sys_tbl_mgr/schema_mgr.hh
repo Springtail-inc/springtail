@@ -17,7 +17,9 @@ namespace springtail {
         uint64_t namespace_id;      // pg namespace oid
         std::string name;           // pg type name
         nlohmann::json value_json;  // json representation of the user type value;
-                                // for enum, it is a json array of objects with label: index pairs
+        bool exists;
+
+        // for enum, it is a json array of objects with label: index pairs
         std::unordered_map<std::string, float> enum_label_map;
 
         /** Enum type for user defined types */
@@ -25,14 +27,23 @@ namespace springtail {
             ENUM = 'E',
         } type;
 
-        UserType(uint64_t id, uint64_t namespace_id, int8_t type, const std::string &name, const std::string &value)
+        UserType(uint64_t id, bool exists=false, int8_t type=constant::USER_TYPE_ENUM)
+            : id(id),
+              exists(exists),
+              type(static_cast<Type>(type))
+        {
+            DCHECK(type == constant::USER_TYPE_ENUM); // only support enum for now
+        }
+
+        UserType(uint64_t id, uint64_t namespace_id, int8_t type, const std::string &name, const std::string &value, bool exists=true)
             : id(id),
             namespace_id(namespace_id),
             name(name),
             value_json(nlohmann::json::parse(value)),
+            exists(exists),
             type(static_cast<Type>(type))
         {
-            DCHECK(type == 'E'); // only support enum for now
+            DCHECK(type == constant::USER_TYPE_ENUM); // only support enum for now
             DCHECK(value_json.is_array());
             for (const auto &obj : value_json) {
                 DCHECK(obj.is_object());

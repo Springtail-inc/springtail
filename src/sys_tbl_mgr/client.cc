@@ -750,7 +750,8 @@ Client::get_usertype(uint64_t db_id, uint64_t type_id, const XidLsn &xid)
                                                 response.namespace_id(),
                                                 response.type(),
                                                 response.name(),
-                                                response.value_json());
+                                                response.value_json(),
+                                                response.exists());
     return user_type;
 }
 
