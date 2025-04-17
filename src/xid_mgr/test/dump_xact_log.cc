@@ -1,5 +1,4 @@
 #include <fmt/format.h>
-#include <cstdint>
 #include <string>
 
 #include <common/init.hh>
