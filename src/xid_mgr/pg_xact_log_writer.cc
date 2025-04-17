@@ -4,6 +4,7 @@
 
 #include <common/exception.hh>
 #include <xid_mgr/pg_xact_log_writer.hh>
+#include "common/logging.hh"
 
 namespace springtail::xid_mgr {
 
@@ -27,7 +28,11 @@ PgXactLogWriter::PgXactLogWriter(const std::filesystem::path &base_dir) :
 PgXactLogWriter::~PgXactLogWriter()
 {
     if (_fd != -1) {
-        flush();
+        try {
+            flush();
+        } catch (...) {
+            LOG_ERROR("Faild to flush xact log {}", _base_dir.string());
+        }
         ::munmap(_file_mem, PG_XLOG_PAGE_SIZE);
         ::close(_fd);
     }

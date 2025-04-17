@@ -165,11 +165,9 @@ XidMgrServer::DBXactLogData::cleanup_history_and_flush(RedisDDL redis_ddl)
         auto it = std::ranges::lower_bound(_xact_history.begin(), _xact_history.end(), min_schema_xid);
         // erase all smaller xids
         _xact_history.erase(_xact_history.begin(), it);
-        if (_xact_history.empty()) {
-            LOG_DEBUG(LOG_XID_MGR, "The history for db_id={} is now empty", _db_id);
-        } else {
-            LOG_DEBUG(LOG_XID_MGR, "The history for db_id={} now starts with xid={}", _db_id, _xact_history.front());
-        }
+
+        LOG_DEBUG(LOG_XID_MGR, "The history for db_id={} {}",
+            _db_id, (_xact_history.empty())? "is now empty" : fmt::format("now starts with xid={}", _xact_history.front()));
         _dirty_history = false;
     }
     _xact_log.flush();
