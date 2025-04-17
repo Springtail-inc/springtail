@@ -45,12 +45,12 @@ def print_sys_props(props: Properties, config_file: str) -> None:
     print(f"  Primary DB name: {db_config['name']}")
     print(f"  Primary DB ID  : {db_config['id']}")
 
-def write_metrics_to_csv(csv_file: str, duration_ms: float, txid: int, pg_ts: str) -> None:
+def write_metrics_to_csv(csv_file: str, _type: str, duration_ms: float, txid: int, pg_ts: str) -> None:
     with open(csv_file, mode='a', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow([txid, duration_ms, pg_ts])
+        writer.writerow([_type, txid, duration_ms, pg_ts])
 
-def time_and_log_query(conn, query: str, csv_file: str, params=None) -> None:
+def time_and_log_query(conn, _type: str, query: str, csv_file: str, params=None) -> None:
     start = time.time()
     with conn.cursor() as cur:
         if params:
@@ -63,16 +63,16 @@ def time_and_log_query(conn, query: str, csv_file: str, params=None) -> None:
     with conn.cursor() as cur:
         cur.execute("SELECT txid_current(), FLOOR(EXTRACT(EPOCH FROM now()) * 1000) AS pg_ts_epoch_ms")
         txid, pg_ts = cur.fetchone()
-    write_metrics_to_csv(csv_file, duration_ms, txid, pg_ts)
+    write_metrics_to_csv(csv_file, _type, duration_ms, txid, pg_ts)
 
 def create_schema_and_tables(conn, csv_file: str):
     schema_name = f"test_schema_{random.randint(1000, 9999)}"
-    time_and_log_query(conn, f"CREATE SCHEMA IF NOT EXISTS {schema_name}", csv_file)
+    time_and_log_query(conn, "create_schema", f"CREATE SCHEMA IF NOT EXISTS {schema_name}", csv_file)
     print(f"[+] Created schema: {schema_name}")
 
     for i in range(NUM_TABLES_PER_SCHEMA):
         table_name = f"table_{random.randint(1000, 9999)}"
-        time_and_log_query(conn, f"""
+        time_and_log_query(conn, "create_table", f"""
             CREATE TABLE IF NOT EXISTS {schema_name}.{table_name} (
                 id SERIAL PRIMARY KEY,
                 name TEXT,
@@ -82,10 +82,13 @@ def create_schema_and_tables(conn, csv_file: str):
         """, csv_file)
         print(f"[+] Created table: {schema_name}.{table_name}")
 
-        time_and_log_query(conn, f"CREATE INDEX IF NOT EXISTS idx_{table_name}_value ON {schema_name}.{table_name} (value)", csv_file)
+        insert_data(conn, schema_name, table_name, csv_file)
+
+        time_and_log_query(conn, "create_index", f"CREATE INDEX IF NOT EXISTS idx_{table_name}_value ON {schema_name}.{table_name} (value)", csv_file)
         print(f"[+] Created index on: {schema_name}.{table_name}(value)")
 
         insert_data(conn, schema_name, table_name, csv_file)
+
 
     return schema_name
 
@@ -93,30 +96,30 @@ def insert_data(conn, schema_name: str, table_name: str, csv_file: str):
     for _ in range(NUM_INSERTS):
         name = f"name_{random.randint(1, 100)}"
         value = random.randint(1, 1000)
-        time_and_log_query(conn, f"""
+        time_and_log_query(conn, "insert_data", f"""
             INSERT INTO {schema_name}.{table_name} (name, value)
             VALUES (%s, %s)
         """, csv_file, (name, value))
     print(f"[+] Inserted {NUM_INSERTS} rows into {schema_name}.{table_name}")
 
 def drop_schema(conn, schema_name):
-    time_and_log_query(conn, f"DROP SCHEMA IF EXISTS {schema_name} CASCADE")
+    time_and_log_query(conn, "drop_schema", f"DROP SCHEMA IF EXISTS {schema_name} CASCADE")
     print(f"[-] Dropped schema: {schema_name}")
 
 def load_data(config_file: str, csv_file: str) -> None:
     config_file = os.path.abspath(config_file)
-    props = Properties(config_file, True)
+    props = Properties(config_file)
     print_sys_props(props, config_file)
 
     with open(csv_file, mode='w', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow(["txid", "duration_ms", "pg_timestamp"])
+        writer.writerow(["query_type", "txid", "duration_ms", "pg_timestamp"])
 
     conn = connect_db_instance(props, "springtail")
     start_time = time.time()
 
-    while time.time() - start_time < RUN_TIME_SECONDS:
-        schema = create_schema_and_tables(conn, csv_file)
+    #while time.time() - start_time < RUN_TIME_SECONDS:
+    schema = create_schema_and_tables(conn, csv_file)
 
     conn.close()
 
