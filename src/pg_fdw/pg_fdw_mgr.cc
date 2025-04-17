@@ -25,7 +25,7 @@
 
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/shm_cache.hh>
-#include "sys_tbl_mgr/system_tables.hh"
+#include <sys_tbl_mgr/system_tables.hh>
 
 extern "C" {
     #include <postgres.h>
@@ -1317,7 +1317,7 @@ namespace springtail::pg_fdw {
                 if (static_cast<sys_tbl::IndexNames::State>(v.state) != sys_tbl::IndexNames::State::READY) {
                     continue;
                 }
-                indexes.emplace_back(std::move(v));
+                indexes.push_back(v);
             }
         }
     }
