@@ -765,7 +765,7 @@ namespace springtail::pg_fdw {
             std::string type_name = col.at("type_name");
 
             // the constant FirstNormalObjectId is defined in postgres include/access/transam.h
-            if (type_oid >= 16384) {
+            if (type_oid >= constant::FIRST_USER_DEFINED_PG_OID) {
                 // this is a user defined type, fully qualify it
                 type_name = fmt::format("{}.{}", escaped_schema,
                                                  conn->escape_identifier(type_name));

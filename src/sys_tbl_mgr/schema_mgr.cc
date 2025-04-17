@@ -130,4 +130,12 @@ namespace springtail {
         return std::make_shared<ExtentSchema>(meta->columns);
     }
 
+    std::shared_ptr<UserType>
+    SchemaMgr::get_usertype(uint64_t db_id,
+                            uint64_t type_id,
+                            const XidLsn &xid)
+    {
+        // call into the SysTblMgr to get the user_type at the given XID/LSN
+        return sys_tbl_mgr::Client::get_instance()->get_usertype(db_id, type_id, xid);
+    }
 }

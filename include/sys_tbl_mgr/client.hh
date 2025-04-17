@@ -69,10 +69,15 @@ public:
 
     /** Create user defined type stub */
     std::string create_usertype(const proto::UserTypeRequest &request);
+
     /** Alter user defined type stub */
     std::string alter_usertype(const proto::UserTypeRequest &request);
+
     /** Drop user defined type stub */
     std::string drop_usertype(const proto::UserTypeRequest &request);
+
+    /** Get user type at xid */
+    std::shared_ptr<UserType> get_usertype(uint64_t db_id, uint64_t type_id, const XidLsn &xid);
 
     /**
      * Invalidates the schema entry for a given table from a given XID/LSN

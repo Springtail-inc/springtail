@@ -166,6 +166,22 @@ message GetTargetSchemaRequest {
   int64 target_lsn = 6;
 }
 
+message GetUserTypeRequest {
+  int64 db_id = 1;
+  int64 type_id = 2;
+  int64 xid = 3;
+  int64 lsn = 4;
+}
+
+message GetUserTypeResponse {
+  int64 type_id = 1;
+  int64 namespace_id = 2;
+  string name = 3;
+  string value_json = 4;
+  int32 type = 5;
+  bool exists = 6;
+}
+
 message ColumnHistory {
   int64 xid = 1;
   int64 lsn = 2;
@@ -275,4 +291,7 @@ service SysTblMgr {
 
   // Drop user defined type
   rpc DropUserType(UserTypeRequest) returns (DDLStatement) {}
+
+  // Get user defined type
+  rpc GetUserType(GetUserTypeRequest) returns (GetUserTypeResponse) {}
 }

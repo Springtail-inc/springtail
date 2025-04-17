@@ -1196,6 +1196,37 @@ Service::DropUserType(grpc::ServerContext* context,
     return grpc::Status::OK;
 }
 
+grpc::Status
+Service::GetUserType(grpc::ServerContext* context,
+                     const proto::GetUserTypeRequest* request,
+                     proto::GetUserTypeResponse* response)
+{
+    ServerSpan span(context, "SysTblMgrService", "GetUserType");
+
+    LOG_INFO("got GetUserType() -- db {} type_id {} xid {} lsn {}", request->db_id(),
+                request->type_id(), request->xid(), request->lsn());
+
+    boost::shared_lock lock(_read_mutex);
+
+    XidLsn xid(request->xid(), constant::MAX_LSN);
+    auto info = _get_usertype_info(request->db_id(), request->type_id(), xid);
+
+    if (info != nullptr) {
+        response->set_type_id(info->id);
+        response->set_name(info->name);
+        response->set_namespace_id(info->namespace_id);
+        response->set_type(info->type);
+        response->set_value_json(info->value_json);
+        response->set_exists(info->exists);
+    } else {
+        response->set_type_id(info->id);
+        response->set_exists(false);
+    }
+
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
+    return grpc::Status::OK;
+}
+
 nlohmann::json
 Service::_mutate_usertype(uint64_t db_id,
                           uint64_t type_id,
@@ -1258,14 +1289,14 @@ Service::_get_usertype_info(uint64_t db_id, uint64_t type_id, const XidLsn& xid)
     // find the row that matches the type_id at the given XID/LSN
     auto row_i = table->inverse_lower_bound(search_key);
 
-    // make sure table ID exists at this XID/LSN
+    // make sure type ID exists at this XID/LSN
     auto id_field = fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID);
     if (row_i == table->end() || id_field->get_uint64(*row_i) != type_id) {
         LOG_WARN("No user type info at xid {}:{}", xid.xid, xid.lsn);
         return nullptr;
     }
 
-    // make sure that the table is marked as existing at this XID/LSN
+    // make sure that the usertype is marked as existing at this XID/LSN
     bool exists = fields->at(sys_tbl::UserTypes::Data::EXISTS)->get_bool(*row_i);
     if (!exists) {
         LOG_WARN("User type marked non-existant at xid {}:{}", xid.xid, xid.lsn);
@@ -2133,7 +2164,7 @@ Service::_apply_index_cache_history(SchemaInfoPtr schema_info,
                                     uint64_t table_id,
                                     const XidLsn& xid)
 {
-    boost::unique_lock ulock(_mutex);
+    boost::unique_lock ulock(_mutex);  // XXX I think this can be a shared lock
 
     auto db_it = _index_cache.find(db_id);
     if (db_it == _index_cache.end()) {

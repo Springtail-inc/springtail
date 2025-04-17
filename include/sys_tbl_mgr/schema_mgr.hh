@@ -11,6 +11,38 @@
 
 namespace springtail {
 
+    /** UserType class for holding user defined types */
+    struct UserType {
+        uint64_t id;                // pg type oid
+        uint64_t namespace_id;      // pg namespace oid
+        std::string name;           // pg type name
+        nlohmann::json value_json;  // json representation of the user type value;
+                                // for enum, it is a json array of objects with label: index pairs
+        std::unordered_map<std::string, float> enum_label_map;
+
+        /** Enum type for user defined types */
+        enum Type : int8_t {
+            ENUM = 'E',
+        } type;
+
+        UserType(uint64_t id, uint64_t namespace_id, int8_t type, const std::string &name, const std::string &value)
+            : id(id),
+            namespace_id(namespace_id),
+            name(name),
+            value_json(nlohmann::json::parse(value)),
+            type(static_cast<Type>(type))
+        {
+            DCHECK(type == 'E'); // only support enum for now
+            DCHECK(value_json.is_array());
+            for (const auto &obj : value_json) {
+                DCHECK(obj.is_object());
+                auto it = obj.begin();  // Only one key-value pair per object
+                enum_label_map[it.key()] = it.value().get<float>();
+            }
+        }
+    };
+    using UserTypePtr = std::shared_ptr<UserType>;
+
     class ExtentType;
 
     /** Interface for accessing all of the schemas for a specific table.  This includes retrieving
@@ -29,6 +61,7 @@ namespace springtail {
 
         /**
          * Retrieve the schema for a given table at a given point in time.
+         * @param db_id The database ID of the table.
          * @param table_id The ID of the table being requested.
          * @param extent_xid The XID of the extent being processed.
          * @param target_xid The XID that the query is executing at.
@@ -40,13 +73,21 @@ namespace springtail {
          * Retrieve an ExtentSchema for a given table at a given XID that can be used for writing /
          * updating the extent.  This function assumes we are retrieving the schema of the table's
          * underlying data.
-         *
+         * @param db_id The database ID of the table.
          * @param table_id The table we need the schema for.
-         * @param xid The XID that we need the schema at.
-         * @param lsn The LSN that we need the schema at.  Defaults to the MAX_LSN, providing the
+         * @param xid The XID/LSN that we need the schema at. Defaults to the MAX_LSN, providing the
          *            schema at the point after all changes in the XID have been applied.
          */
         std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+
+        /**
+         * @brief Get the usertype object
+         * @param db_id database id
+         * @param type_id user defined type id
+         * @param xid The XID/LSN we need the schema at.
+         * @return std::shared_ptr<UserType>
+         */
+        UserTypePtr get_usertype(uint64_t db_id, uint64_t type_id, const XidLsn &xid);
 
     private:
         /**

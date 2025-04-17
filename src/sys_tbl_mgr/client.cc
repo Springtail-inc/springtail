@@ -731,4 +731,27 @@ Client::alter_usertype(const proto::UserTypeRequest &request)
     return response.statement();
 }
 
+std::shared_ptr<UserType>
+Client::get_usertype(uint64_t db_id, uint64_t type_id, const XidLsn &xid)
+{
+    proto::GetUserTypeRequest request;
+    request.set_db_id(db_id);
+    request.set_type_id(type_id);
+    request.set_xid(xid.xid);
+    request.set_lsn(xid.lsn);
+
+    proto::GetUserTypeResponse response;
+    grpc_client::retry_rpc("SysTblMgr", "GetUserType",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->GetUserType(context, request, &response);
+                           });
+
+    auto user_type = std::make_shared<UserType>(response.type_id(),
+                                                response.namespace_id(),
+                                                response.type(),
+                                                response.name(),
+                                                response.value_json());
+    return user_type;
+}
+
 }  // namespace springtail::sys_tbl_mgr

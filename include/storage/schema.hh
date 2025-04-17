@@ -279,6 +279,19 @@ namespace springtail {
         }
 
         /**
+         * @brief Get the pg type of a column by name
+         * @param name The name of the column being requested
+         * @return int32_t pg_type
+         */
+        int32_t get_type(const std::string &name) const {
+            auto &&i = _field_map.find(name);
+            if (i == _field_map.end()) {
+                throw SchemaError(fmt::format("No such column: {}", name));
+            }
+            return _pg_types[i->second.second];
+        }
+
+        /**
          * Generate a list of all of the fields in the schema.
          */
         std::shared_ptr<std::vector<FieldPtr>> get_fields() const override;

@@ -177,7 +177,7 @@ namespace springtail::pg_log_mgr {
              * Adds a mutation to a given table's batch.
              */
             template <int T>
-            void add_mutation(uint64_t current_xid, int32_t pg_xid, int32_t tid, const PgMsgTupleData &data);
+            void add_mutation(uint64_t current_xid, int32_t pg_xid, int32_t tid, PgMsgTupleData &data);
 
             /**
              * Records a truncation of a given set of tables into the batch.
@@ -212,6 +212,8 @@ namespace springtail::pg_log_mgr {
 
                 FieldArrayPtr pg_fields; ///< The matching fields for processing a PgMsgTupleData
                 FieldArrayPtr pg_pkey_fields; ///< The matching pkey fields for processing a PgMsgTupleData
+
+                bool has_usertypes = false; ///< Flag to indicate if the table has user-defined types.
 
                 TableEntry() = default;
                 explicit TableEntry(ExtentSchemaPtr table_schema)
@@ -274,7 +276,6 @@ namespace springtail::pg_log_mgr {
             /**
              * Helper to handle the table validation management.  Updates the Batch-local view of
              * the invalid tables and also updates the msg object as needed.
-             * 
              * @param msg The postgres message object.
              */
             bool _handle_validation(PgMsgPtr msg);
@@ -292,6 +293,47 @@ namespace springtail::pg_log_mgr {
                 return _exists_cache->exists(_db, table_id, xid);
             }
 
+            /**
+             * @brief Lookup a user type in the batch and modify the tuple data
+             * @param types The pg types of the fields in the tuple.
+             * @param data The PgMsgTupleData to update.
+             * @param xidlsn The XID and LSN of the message.
+             */
+            void _convert_user_types(const std::vector<int32_t> &types, PgMsgTupleData &data, const XidLsn &xidlsn);
+
+            /**
+             * Convert primary key fields to an array of pg types
+             * @param entry The table entry.
+             * @return std::vector<int32_t> The pg types of the primary key fields.
+             */
+            std::vector<int32_t> _get_pkey_pg_types(const TableEntry &entry) const;
+
+            /**
+             * Lookup a user type in the batch and return the schema.
+             * @param pg_type The pg type of the field.
+             * @param xidlsn The XID and LSN of the message.
+             * @return UserTypePtr The user type schema.
+             */
+            UserTypePtr _usertype_cache_lookup(int32_t pg_type, const XidLsn &xidlsn) {
+                auto it = _user_types.find(pg_type);
+                if (it != _user_types.end()) {
+                    return it->second;
+                }
+                auto utp = SchemaMgr::get_instance()->get_usertype(_db, pg_type, xidlsn);
+                _user_types[pg_type] = utp;
+                return utp;
+            }
+
+            /**
+             * @brief Invalidate the user type cache for a given pg_type
+             * @param pg_type The pg type to invalidate
+             */
+            void _usertype_cache_invalidate(int32_t pg_type) {
+                auto it = _user_types.find(pg_type);
+                if (it != _user_types.end()) {
+                    _user_types.erase(it);
+                }
+            }
 
             //// MEMBER VARIABLES
             std::map<int32_t, TxnEntryPtr> _txns; ///< Map of pgxid to txn details.
@@ -313,6 +355,9 @@ namespace springtail::pg_log_mgr {
                 table contains std::nullopt, while an invalid one contains a JSON describing the
                 invalid columns.  */
             std::unordered_map<uint32_t, std::optional<nlohmann::json>> _table_validations;
+
+            /** Simple map of pg_type to user defined type.  Currently invalidated on any alteration */
+            std::unordered_map<int32_t, UserTypePtr> _user_types; ///< Map of user types to their schema
         };
         using BatchPtr = std::shared_ptr<Batch>;
 

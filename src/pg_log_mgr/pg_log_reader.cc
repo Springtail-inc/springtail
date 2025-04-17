@@ -176,9 +176,14 @@ namespace springtail::pg_log_mgr {
         op_f = schema->get_mutable_field("__springtail_op");
         lsn_f = schema->get_mutable_field("__springtail_lsn");
 
+        auto pg_types = table_schema->get_types();
         pg_fields = std::make_shared<FieldArray>();
         for (int i = 0; i < fields->size(); i++) {
             pg_fields->push_back(std::make_shared<PgLogField>(fields->at(i)->get_type(), i));
+            // check if the pg_type is a user type
+            if (pg_types[i] >= constant::FIRST_USER_DEFINED_PG_OID) {
+                has_usertypes = true;
+            }
         }
 
         pg_pkey_fields = std::make_shared<FieldArray>();
@@ -187,12 +192,55 @@ namespace springtail::pg_log_mgr {
         }
     }
 
+
+    void
+    PgLogReader::Batch::_convert_user_types(const std::vector<int32_t> &pg_types,
+                                            PgMsgTupleData &data,
+                                            const XidLsn &xidlsn)
+    {
+        // need to check for user types that may need remapping
+        // iterate through the schema pg_types:
+        for (int i = 0; i < pg_types.size(); i++) {
+            int32_t pg_type = pg_types[i];
+
+            // check if the pg_type is a user type and not null
+            if (pg_type < constant::FIRST_USER_DEFINED_PG_OID || data.tuple_data[i].type == 'n') {
+                continue;
+            }
+
+            // lookup user type in cache
+            auto utp = _usertype_cache_lookup(pg_type, xidlsn);
+
+            // reassign the value of the tuple, a float value of the user type index
+            std::string label = std::string(data.tuple_data[i].data.begin(),
+                                            data.tuple_data[i].data.end());
+            float index = utp->enum_label_map.at(label);
+            data.tuple_data[i].data.clear();
+            auto bytes = std::bit_cast<std::array<char, 4>>(index);
+            data.tuple_data[i].data.insert(data.tuple_data[i].data.end(),
+                                            bytes.begin(), bytes.end());
+        }
+    }
+
+    std::vector<int32_t>
+    PgLogReader::Batch::_get_pkey_pg_types(const TableEntry &entry) const
+    {
+        std::vector<int32_t> pkey_pg_types;
+
+        for (auto &sort_key : entry.table_schema->get_sort_keys()) {
+            int32_t pg_type = entry.table_schema->get_type(sort_key);
+            pkey_pg_types.push_back(pg_type);
+        }
+
+        return pkey_pg_types;
+    }
+
     template <int T>
     void
     PgLogReader::Batch::add_mutation(uint64_t current_xid,
                                      int32_t pg_xid,
                                      int32_t tid,
-                                     const PgMsgTupleData &data)
+                                     PgMsgTupleData &data)
     {
         XidLsn xidlsn(current_xid);
 
@@ -236,8 +284,17 @@ namespace springtail::pg_log_mgr {
         // add the mutation to the batch
         auto &&row = entry.extent->append();
         if constexpr (T == PgMsgEnum::INSERT || T == PgMsgEnum::UPDATE) {
+            if (entry.has_usertypes) {
+                // convert any user types to the appropriate index
+                _convert_user_types(entry.table_schema->get_types(), data, xidlsn);
+            }
             MutableTuple(entry.fields, row).assign(FieldTuple(entry.pg_fields, &data));
         } else if constexpr (T == PgMsgEnum::DELETE) {
+            if (entry.has_usertypes) {
+                // convert any user types to the appropriate index
+                auto pg_types = _get_pkey_pg_types(entry);
+                _convert_user_types(pg_types, data, xidlsn);
+            }
             MutableTuple(entry.pkey_fields, row).assign(FieldTuple(entry.pg_pkey_fields, &data));
         } else {
             static_assert(false, "Invalid template parameter: PgLogReader::Batch::add_mutation");
@@ -412,10 +469,26 @@ namespace springtail::pg_log_mgr {
             case PgMsgEnum::CREATE_NAMESPACE:
             case PgMsgEnum::ALTER_NAMESPACE:
             case PgMsgEnum::DROP_NAMESPACE:
-            case PgMsgEnum::CREATE_TYPE:
-            case PgMsgEnum::ALTER_TYPE:
-            case PgMsgEnum::DROP_TYPE:
                 break;  // nothing to check for these
+
+            case PgMsgEnum::ALTER_TYPE:
+            case PgMsgEnum::CREATE_TYPE:
+            case PgMsgEnum::DROP_TYPE: {
+                // update the batch usertype cache appropriately
+                auto &user_type = std::get<PgMsgUserType>(msg->msg);
+                int32_t oid = user_type.oid;
+                if (msg->msg_type == PgMsgEnum::DROP_TYPE) {
+                    _usertype_cache_invalidate(oid);
+                } else if (msg->msg_type == PgMsgEnum::CREATE_TYPE) {
+                    UserTypePtr utp = std::make_shared<UserType>(oid, user_type.namespace_id, user_type.type, user_type.name, user_type.value_json);
+                    _user_types[oid] = utp;
+                } else if (msg->msg_type == PgMsgEnum::ALTER_TYPE) {
+                    _usertype_cache_invalidate(oid);
+                    UserTypePtr utp = std::make_shared<UserType>(oid, user_type.namespace_id, user_type.type, user_type.name, user_type.value_json);
+                    _user_types[oid] = utp;
+                }
+                break;
+            }
 
             case PgMsgEnum::DROP_INDEX:
                 break;  // XXX we should check both sync tracker and table existence against the

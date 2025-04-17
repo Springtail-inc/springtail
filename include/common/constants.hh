@@ -64,6 +64,9 @@ namespace springtail::constant {
     /** Coordinator keep alive timeout seconds */
     static constexpr uint32_t COORDINATOR_KEEP_ALIVE_TIMEOUT = 5;
 
+    /** First User defined PG OID - FirstNormalObjectId in postgres include/access/transam.h */
+    static constexpr uint32_t FIRST_USER_DEFINED_PG_OID = 16384;
+
     /** User defined types */
     static constexpr int8_t USER_TYPE_ENUM = 'E';
 }

@@ -98,6 +98,11 @@ public:
                               const proto::UserTypeRequest* request,
                               proto::DDLStatement* response) override;
 
+    /** Retrieves the user defined type at a given XID/LSN. */
+    grpc::Status GetUserType(grpc::ServerContext* context,
+                             const proto::GetUserTypeRequest* request,
+                             proto::GetUserTypeResponse* response) override;
+
     /** Updates the roots extents of the indexes of the table as well as the table stats. */
     grpc::Status UpdateRoots(grpc::ServerContext* context,
                              const proto::UpdateRootsRequest* request,
