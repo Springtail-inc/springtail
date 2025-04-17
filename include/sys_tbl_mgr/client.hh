@@ -38,7 +38,7 @@ public:
 
     /**
      * Call get_index_info() on the SysTblMgr.
-     * @param tid The optional table ID that the index belongs to. Usually index ID's are unique is tid is optional
+     * @param tid The optional table ID that the index belongs to. Usually index ID's are unique and tid is optional.
      *            There is a special case when tid is required. We construct primary indexes in create table
      *            using the column attributes and assign the same index ID=constant::PRIMARY_INDEX to all primary
      *            indexes and so tid is required for PRIMARY_INDEX.
