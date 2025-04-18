@@ -296,21 +296,25 @@ namespace springtail::pg_fdw {
                                      std::string_view value_json_str,
                                      LibPqConnectionPtr conn)
     {
-        // iterate through json array and convert to string of form 'val1', 'val2', 'val3'
         nlohmann::json value_json = nlohmann::json::parse(value_json_str);
         CHECK(value_json.is_array());
 
         std::stringstream value_ss;
-        for (size_t i = 0; i < value_json.size(); i++) {
+        int i = 0;
+
+        // iterate through json array of form: [{'val1':1}, {'val2':2}, {'val3':3}]
+        for (const auto &obj : value_json) {
+            DCHECK(obj.is_object());
+            auto it = obj.begin();
             if (i > 0) {
                 value_ss << ", ";
             }
-            value_ss << "'" << conn->escape_string(value_json[i].get<std::string>()) << "'";
+            value_ss << "'" << conn->escape_string(it.key()) << "'";
+            i++;
         }
-        std::string enum_options = value_ss.str();
 
         return fmt::format("CREATE TYPE {}.{} AS ENUM ({})",
-                           escaped_schema, escaped_name, enum_options);
+                           escaped_schema, escaped_name, value_ss.str());
     }
 
     void
