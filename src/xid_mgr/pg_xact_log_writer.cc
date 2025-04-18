@@ -4,6 +4,7 @@
 
 #include <common/exception.hh>
 #include <xid_mgr/pg_xact_log_writer.hh>
+#include "common/coordinator.hh"
 #include "common/logging.hh"
 
 namespace springtail::xid_mgr {
@@ -97,6 +98,7 @@ PgXactLogWriter::rotate(uint64_t timestamp)
 void
 PgXactLogWriter::log(uint32_t pg_xid, uint64_t xid, bool real_commit)
 {
+    LOG_DEBUG(LOG_PG_LOG_MGR, "Recoding: pg_xid: {}, xid: {}, real_commit: {}", pg_xid, xid, real_commit);
     DCHECK(_file_mem != nullptr);
 
     // set xid data in the mapped memory
