@@ -192,7 +192,6 @@ namespace springtail::pg_log_mgr {
         }
     }
 
-
     void
     PgLogReader::Batch::_convert_user_types(const std::vector<int32_t> &pg_types,
                                             PgMsgTupleData &data,
@@ -208,6 +207,8 @@ namespace springtail::pg_log_mgr {
                 continue;
             }
 
+            LOG_DEBUG(LOG_PG_REPL, "Converting user type: pg_type={} col_idx={}", pg_type, i);
+
             // lookup user type in cache
             auto utp = _usertype_cache_lookup(pg_type, xidlsn);
             CHECK(utp->exists);
@@ -216,6 +217,7 @@ namespace springtail::pg_log_mgr {
             std::string label = std::string(data.tuple_data[i].data.begin(),
                                             data.tuple_data[i].data.end());
             float index = utp->enum_label_map.at(label);
+
             data.tuple_data[i].data.clear();
             auto bytes = std::bit_cast<std::array<char, 4>>(index);
             data.tuple_data[i].data.insert(data.tuple_data[i].data.end(),
@@ -289,14 +291,14 @@ namespace springtail::pg_log_mgr {
                 // convert any user types to the appropriate index
                 _convert_user_types(entry.table_schema->get_types(), data, xidlsn);
             }
-            MutableTuple(entry.fields, row).assign(FieldTuple(entry.pg_fields, &data));
+            MutableTuple(entry.fields, row).assign(FieldTuple(entry.pg_fields, static_cast<const PgMsgTupleData*>(&data)));
         } else if constexpr (T == PgMsgEnum::DELETE) {
             if (entry.has_usertypes) {
                 // convert any user types to the appropriate index
                 auto pg_types = _get_pkey_pg_types(entry);
                 _convert_user_types(pg_types, data, xidlsn);
             }
-            MutableTuple(entry.pkey_fields, row).assign(FieldTuple(entry.pg_pkey_fields, &data));
+            MutableTuple(entry.pkey_fields, row).assign(FieldTuple(entry.pg_pkey_fields, static_cast<const PgMsgTupleData*>(&data)));
         } else {
             static_assert(false, "Invalid template parameter: PgLogReader::Batch::add_mutation");
         }
