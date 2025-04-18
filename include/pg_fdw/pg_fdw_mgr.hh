@@ -55,6 +55,7 @@ namespace springtail::pg_fdw {
     /** Internal state used to track table scan */
     struct PgFdwState {
         TablePtr table;
+        uint64_t db_id;
         uint64_t tid;
         uint64_t xid;
         FieldArrayPtr fields = nullptr;       ///< Fields for the columns from the target list
@@ -81,7 +82,7 @@ namespace springtail::pg_fdw {
         std::optional<Index> index; ///< The final index to use for scanning
 
         /** Constructor */
-        PgFdwState(TablePtr table, uint64_t tid, uint64_t xid);
+        PgFdwState(TablePtr table, uint64_t db_id, uint64_t tid, uint64_t xid);
     };
     using PgFdwStatePtr = std::shared_ptr<PgFdwState>;
 
@@ -98,6 +99,9 @@ namespace springtail::pg_fdw {
         static constexpr char CATALOG_NAMESPACE_NAMES[] = "namespace_names";      ///< Table name for namespace schema names
         static constexpr char CATALOG_USER_TYPES[] = "user_types";        ///< Table name for system user defined types
         static constexpr char PG_FDW_LOG_FILE_PREFIX[] = "pg_fdw";        ///< Log file prefix
+
+        /** Maximum number of user type definitions to cache */
+        static constexpr int MAX_USER_TYPE_CACHE = 100;
 
         /** Get singleton instance */
         static PgFdwMgr* get_instance() {
@@ -193,7 +197,7 @@ namespace springtail::pg_fdw {
 
     private:
         /** Delete constructor */
-        PgFdwMgr() {};
+        PgFdwMgr() : _user_type_cache(MAX_USER_TYPE_CACHE) {};
         PgFdwMgr(const PgFdwMgr&) = delete;
         PgFdwMgr& operator=(const PgFdwMgr&) = delete;
 
@@ -208,12 +212,35 @@ namespace springtail::pg_fdw {
 
         std::shared_ptr<sys_tbl_mgr::ShmCache> _roots_cache; ///< An IPC cache shared by pg_xid_subscriber_daemon
 
-        // static methods
+        LruObjectCache<int32_t, UserType> _user_type_cache; ///< cache of user types
+
+        /**
+         * @brief Lookup enum user type from cache based on oid and index
+         * @param db_id db_id of the database
+         * @param oid pg oid of type (in springtail)
+         * @param index enum index
+         * @param xid xid for this request
+         * @return user type pointer
+         */
+        UserTypePtr _enum_cache_lookup(uint64_t db_id,
+                                       int32_t oid,
+                                       uint64_t xid);
+
+        /** Helper to convert an enum user type to a datum */
+        Datum _get_enum_datum(PgFdwState *state,
+                              int32_t springtail_oid,
+                              Oid pg_oid,
+                              float sort_order);
+
         /** Helper to convert field to PG Datum */
-        static Datum _get_datum_from_field(FieldPtr field,
-                                           const Extent::Row &row,
-                                           int32_t pg_type,
-                                           int32_t atttypmod);
+        Datum _get_datum_from_field(PgFdwState *state,
+                                    FieldPtr field,
+                                    const Extent::Row &row,
+                                    int32_t springtail_oid,
+                                    Oid pg_oid,
+                                    int32_t atttypmod);
+
+        // static methods
 
         /** Helper to convert a PG type OID to a type name using the PG system cache. */
         static std::string _get_type_name(int32_t pg_type,

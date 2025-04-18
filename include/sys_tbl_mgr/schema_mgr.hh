@@ -21,6 +21,7 @@ namespace springtail {
 
         // for enum, it is a json array of objects with label: index pairs
         std::unordered_map<std::string, float> enum_label_map;
+        std::unordered_map<float, std::string> enum_index_map;
 
         /** Enum type for user defined types */
         enum Type : int8_t {
@@ -48,7 +49,9 @@ namespace springtail {
             for (const auto &obj : value_json) {
                 DCHECK(obj.is_object());
                 auto it = obj.begin();  // Only one key-value pair per object
-                enum_label_map[it.key()] = it.value().get<float>();
+                float idx = it.value().get<float>();
+                enum_label_map[it.key()] = idx;
+                enum_index_map[idx] = it.key();
             }
         }
     };

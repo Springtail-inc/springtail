@@ -218,10 +218,12 @@ namespace springtail::pg_log_mgr {
                                             data.tuple_data[i].data.end());
             float index = utp->enum_label_map.at(label);
 
+            // bit-cast float to uint32_t and convert to network byte order
+            uint32_t raw = std::bit_cast<uint32_t>(index);
+            // resize vector and copy in data
             data.tuple_data[i].data.clear();
-            auto bytes = std::bit_cast<std::array<char, 4>>(index);
-            data.tuple_data[i].data.insert(data.tuple_data[i].data.end(),
-                                            bytes.begin(), bytes.end());
+            data.tuple_data[i].data.resize(4);
+            sendint32(raw, data.tuple_data[i].data.data());
         }
     }
 

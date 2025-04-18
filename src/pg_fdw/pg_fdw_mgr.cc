@@ -32,6 +32,7 @@ extern "C" {
     #include <access/htup_details.h>
     #include <access/transam.h>
     #include <catalog/pg_type.h>
+    #include <catalog/pg_enum.h>
     #include <utils/builtins.h>
     #include <utils/syscache.h>
     #include <utils/typcache.h>
@@ -239,7 +240,7 @@ namespace springtail::pg_fdw {
                             db_id, tid, xid, pg_xid, schema_xid);
 
         TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid);
-        PgFdwState *state = new PgFdwState{table, tid, xid};
+        PgFdwState *state = new PgFdwState{table, db_id, tid, xid};
 
         return state;
     }
@@ -597,8 +598,7 @@ namespace springtail::pg_fdw {
                     // to get the value
                     assert (attrs[i]->atttypid == column.pg_type);
                 }
-                assert (attrs[i]->atttypid == column.pg_type);
-                values[i] = _get_datum_from_field(field, row, column.pg_type, attrs[i]->atttypmod);
+                values[i] = _get_datum_from_field(state, field, row, column.pg_type, attrs[i]->atttypid, attrs[i]->atttypmod);
             } else {
                 values[i] = 0;
             }
@@ -816,11 +816,57 @@ namespace springtail::pg_fdw {
     }
 
     Datum
-    PgFdwMgr::_get_datum_from_field(FieldPtr field,
+    PgFdwMgr::_get_enum_datum(PgFdwState *state,
+                              int32_t springtail_oid,
+                              Oid pg_oid,
+                              float sort_order)
+    {
+        UserTypePtr utp = _enum_cache_lookup(state->db_id, springtail_oid, state->xid);
+
+        // lookup the index and get the string label
+        auto &&it = utp->enum_index_map.find(sort_order);
+        if (it == utp->enum_index_map.end()) {
+            LOG_ERROR("Index {} not found for enum oid: {}", sort_order, springtail_oid);
+            CHECK(false);
+        }
+
+        // convert label to datum for lookup
+        auto label = it->second;
+        char *name = pnstrdup(label.data(), label.size());
+
+        auto tup = SearchSysCache2(ENUMTYPOIDNAME,
+            ObjectIdGetDatum(pg_oid),
+            CStringGetDatum(name));
+
+        if (!HeapTupleIsValid(tup)) {
+            CHECK(false);
+        }
+
+        // This comes from pg_enum.oid and stores system oids in user tables.
+        Oid enum_oid = ((Form_pg_enum) GETSTRUCT(tup))->oid;
+
+        ReleaseSysCache(tup);
+
+        // create a datum from the enum's entry oid
+        return ObjectIdGetDatum(enum_oid);
+    }
+
+    Datum
+    PgFdwMgr::_get_datum_from_field(PgFdwState *state,
+                                    FieldPtr field,
                                     const Extent::Row &row,
-                                    int32_t pg_type,
+                                    int32_t springtail_oid,
+                                    Oid pg_oid,
                                     int32_t atttypmod)
     {
+        // check for user defined type
+        if (springtail_oid >= FirstNormalObjectId) {
+            // user type; enum, lookup index to label
+            assert(field->get_type() == SchemaType::FLOAT32);
+            return _get_enum_datum(state, springtail_oid, pg_oid, field->get_float32(row));
+        }
+
+        // otherwise convert they row by the schema type
         switch (field->get_type()) {
         case SchemaType::INT64:
             return Int64GetDatum(field->get_int64(row));
@@ -851,9 +897,9 @@ namespace springtail::pg_fdw {
         }
         case SchemaType::BINARY: {
             // retrieve the type's entry from the pg_type table
-            HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_type));
+            HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_oid));
             if (!HeapTupleIsValid(tuple)) {
-                elog(ERROR, "FDW: cache lookup failed for type %u", pg_type);
+                elog(ERROR, "FDW: cache lookup failed for type %u", pg_oid);
             }
 
             // get the receive function
@@ -862,7 +908,7 @@ namespace springtail::pg_fdw {
             // handle array types by retrieving the subscript element type
             Oid typelem = ((Form_pg_type) GETSTRUCT(tuple))->typelem;
             if (typelem != 0) {
-                pg_type = typelem;
+                pg_oid = typelem;
             }
 
             ReleaseSysCache(tuple);
@@ -877,7 +923,7 @@ namespace springtail::pg_fdw {
             Datum datum = PointerGetDatum(&string);
 
             // call the recieve function
-            Datum value_datum = OidFunctionCall3(typeinput, datum, ObjectIdGetDatum(pg_type), Int32GetDatum(atttypmod));
+            Datum value_datum = OidFunctionCall3(typeinput, datum, ObjectIdGetDatum(pg_oid), Int32GetDatum(atttypmod));
 
             return value_datum;
         }
@@ -1365,8 +1411,25 @@ namespace springtail::pg_fdw {
         }
     }
 
-    PgFdwState::PgFdwState(TablePtr table, uint64_t tid, uint64_t xid)
-            : table(table), tid(tid), xid(xid), stats(table->get_stats())
+    UserTypePtr
+    PgFdwMgr::_enum_cache_lookup(uint64_t db_id, int32_t oid, uint64_t xid)
+    {
+        // first check the _user_type_cache for the oid
+        LOG_DEBUG(LOG_FDW, "Enum cache lookup for oid: {}", oid);
+
+        UserTypePtr utp = _user_type_cache.get(oid);
+        if (utp == nullptr) {
+            XidLsn xidlsn {xid};
+            utp = SchemaMgr::get_instance()->get_usertype(db_id, oid, xidlsn);
+            CHECK_NE(utp, nullptr);
+            _user_type_cache.insert(oid, utp);
+        }
+
+        return utp;
+    }
+
+    PgFdwState::PgFdwState(TablePtr table, uint64_t db_id, uint64_t tid, uint64_t xid)
+            : table(table), db_id(db_id), tid(tid), xid(xid), stats(table->get_stats())
     {
         columns = SchemaMgr::get_instance()->get_columns(table->db(), tid, { xid, constant::MAX_LSN });
         for (const auto &entry : columns) {
