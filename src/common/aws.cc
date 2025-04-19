@@ -45,7 +45,7 @@ namespace springtail {
 
         auto outcome = _client->GetSecretValue(request);
         if (!outcome.IsSuccess()) {
-            LOG_ERROR("Error fetching secret: {}", outcome.GetError().GetMessage());
+            LOG_ERROR("Error fetching secret: {}, error: {}", secret_name, outcome.GetError().GetMessage());
             throw Error("Error fetching secret: " + outcome.GetError().GetMessage());
         }
 
