@@ -4,8 +4,6 @@
 
 #include <common/exception.hh>
 #include <xid_mgr/pg_xact_log_writer.hh>
-#include "common/coordinator.hh"
-#include "common/logging.hh"
 
 namespace springtail::xid_mgr {
 
