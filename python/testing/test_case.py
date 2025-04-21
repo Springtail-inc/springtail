@@ -358,7 +358,8 @@ class TestCase:
             logging.debug(f'Force recovery to {target_xid}')
 
             # restart Springtail at the target XID
-            springtail.restart(self._props, self._build_dir, start_xid=target_xid)
+            springtail.restart(self._props, self._build_dir,
+                               start_xid=target_xid, unarchive_logs=True)
 
             # reconnect to the replica database
             if self._fdw:

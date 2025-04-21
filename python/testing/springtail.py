@@ -534,14 +534,23 @@ def restart(props: Properties,
         if not config.get('log_mgr').get('archive_logs', False):
             print('Cannot unarchive logs -- "archive_logs" not true')
         else:
-            base_dir = config.get('fs').get('mount_point')
+            base_dir = props.get_mount_path()
+
+            # move back the repl archive files for each database
             repl_dir = config.get('log_mgr').get('replication_log_path')
             repl_path = os.path.join(base_dir, repl_dir)
-            move_files(os.path.join(repl_path, 'archive'), repl_path)
+            db_dirs = os.listdir(repl_path)
+            for db_dir in db_dirs:
+                repl_db_path = os.path.join(repl_path, db_dir)
+                move_files(os.path.join(repl_db_path, 'archive'), repl_db_path)
 
-            xact_dir = config.get('log_mgr').get('replication_log_path')
+            # move back the xact archive files for each database
+            xact_dir = config.get('log_mgr').get('transaction_log_path')
             xact_path = os.path.join(base_dir, xact_dir)
-            move_files(os.path.join(xact_path, 'archive'), xact_path)
+            db_dirs = os.listdir(xact_path)
+            for db_dir in db_dirs:
+                xact_db_path = os.path.join(xact_path, db_dir)
+                move_files(os.path.join(xact_db_path, 'archive'), xact_db_path)
 
     # start daemons with XID if specified
     print("\nStarting daemons...")

@@ -39,6 +39,8 @@ PgXactLogReaderMmap::next()
     } else {
         _current_xid = reinterpret_cast<PgXactLogWriterMmap::XidElement *>(&_read_buffer[_current_offset]);
         if (_current_xid->xid > _last_xid) {
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Last xid found: xid={} last_xid={}",
+                      _current_xid->xid, _last_xid);
             _last_xid_found = true;
             return false;
         } else {
@@ -100,6 +102,8 @@ PgXactLogReaderMmap::_load_next_page()
 
     _current_xid = reinterpret_cast<PgXactLogWriterMmap::XidElement *>(&_read_buffer[_current_offset]);
     if (_current_xid->xid > _last_xid) {
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Last xid found: xid={} last_xid={}",
+                  _current_xid->xid, _last_xid);
         _last_xid_found = true;
     } else {
         _current_offset += sizeof(PgXactLogWriterMmap::XidElement);
