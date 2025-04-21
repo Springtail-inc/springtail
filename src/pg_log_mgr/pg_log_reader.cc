@@ -9,6 +9,7 @@
 #include <redis/redis_ddl.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <write_cache/write_cache_func.hh>
+#include <xid_mgr/xid_mgr_server.hh>
 
 namespace springtail::pg_log_mgr {
 

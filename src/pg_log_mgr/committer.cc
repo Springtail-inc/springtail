@@ -10,6 +10,7 @@
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_func.hh>
+#include <xid_mgr/xid_mgr_server.hh>
 
 #include <pg_log_mgr/committer.hh>
 
@@ -82,7 +83,7 @@ namespace springtail::committer {
             uint64_t completed_xid;
             auto itr = _completed_xids.find(db_id);
             if (itr == _completed_xids.end()) {
-                completed_xid = _xid_mgr->get_committed_xid(db_id, 0);
+                completed_xid = xid_mgr::XidMgrServer::get_instance()->get_committed_xid(db_id, 0);
                 _completed_xids[db_id] = completed_xid;
             } else {
                 completed_xid = itr->second;
@@ -171,7 +172,7 @@ namespace springtail::committer {
                     client->finalize(db_id, completed_xid);
 
                     // perform a commit to the XidMgr
-                    _xid_mgr->commit_xid(db_id, 0, completed_xid, true);
+                    xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, 0, completed_xid, true);
                     _committed_xids[db_id] = completed_xid;
 
                     LOG_DEBUG(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, completed_xid);
@@ -181,7 +182,7 @@ namespace springtail::committer {
                         _has_ddl_precommit = false;
                     }
                 } else {
-                    _xid_mgr->record_mapping(db_id, 0, completed_xid, true);
+                    xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, completed_xid, true);
                 }
                 _completed_xids[db_id] = completed_xid;
 
@@ -296,7 +297,7 @@ namespace springtail::committer {
                 sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
 
                 // commit the completed XID
-                _xid_mgr->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null());
+                xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null());
                 _committed_xids[db_id] = xid;
 
                 // push completed DDL changes to the FDWs
@@ -307,7 +308,7 @@ namespace springtail::committer {
                 }
             } else {
                 // don't commit, but record any DDL changes to the history
-                _xid_mgr->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null());
+                xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null());
             }
             _completed_xids[db_id] = xid;
 
@@ -368,7 +369,7 @@ namespace springtail::committer {
                 auto &&precommit = _redis_ddl.get_precommit_ddl();
 
                 for (const auto &entry : precommit) {
-                    uint64_t commit_xid = _xid_mgr->get_committed_xid(entry.first, 0);
+                    uint64_t commit_xid = xid_mgr::XidMgrServer::get_instance()->get_committed_xid(entry.first, 0);
 
                     if (entry.second <= commit_xid) {
                         // for those that are <= the committed XID, commit them

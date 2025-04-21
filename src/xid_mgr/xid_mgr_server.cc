@@ -119,20 +119,19 @@ XidMgrServer::rotate(uint64_t db_id, uint64_t timestamp)
     db_id_to_log_data->second.rotate(timestamp);
 }
 
-std::pair<const uint64_t, XidMgrServer::DBXactLogData> *
+std::map<uint64_t, XidMgrServer::DBXactLogData>::iterator
 XidMgrServer::_find_or_add(uint64_t db_id, std::shared_lock<std::shared_mutex> &read_lock)
 {
     auto it = _xact_log_data.find(db_id);
     if (it == _xact_log_data.end()) {
         read_lock.unlock();
         std::unique_lock write_lock(_mutex);
-        _xact_log_data.emplace(std::piecewise_construct, std::forward_as_tuple(db_id), std::forward_as_tuple(db_id, _base_path));
+        auto result = _xact_log_data.emplace(std::piecewise_construct, std::forward_as_tuple(db_id), std::forward_as_tuple(db_id, _base_path));
+        it = result.first;
         write_lock.unlock();
         read_lock.lock();
-        it = _xact_log_data.find(db_id);
     }
-    std::pair<const uint64_t, DBXactLogData> *pair_ptr = &*it;
-    return pair_ptr;
+    return it;
 }
 
 XidMgrServer::DBXactLogData::DBXactLogData(uint64_t db_id, const std::filesystem::path &base_dir):
@@ -154,7 +153,7 @@ XidMgrServer::DBXactLogData::record_mapping(uint32_t pg_xid, uint64_t xid, bool 
 }
 
 void
-XidMgrServer::DBXactLogData::cleanup_history_and_flush(RedisDDL redis_ddl)
+XidMgrServer::DBXactLogData::cleanup_history_and_flush(RedisDDL &redis_ddl)
 {
     std::unique_lock lock(_mutex);
     if (!_xact_history.empty() && _dirty_history) {

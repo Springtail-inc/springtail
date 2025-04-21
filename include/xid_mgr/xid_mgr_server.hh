@@ -92,7 +92,7 @@ private:
          * @param redis_ddl - redis DDL object
          */
         void
-        cleanup_history_and_flush(RedisDDL redis_ddl);
+        cleanup_history_and_flush(RedisDDL &redis_ddl);
 
         /**
          * @brief Get the value of the last committed xid
@@ -149,9 +149,10 @@ private:
      *
      * @param db_id - database id
      * @param read_lock - read lock to be used for read access to transaction log data
-     * @return std::pair<const uint64_t, DBXactLogData>* - a pointer to database id and associated transaction log data
+     * @return std::map<uint64_t, DBXactLogData>::iterator - iterator to the map pair
      */
-    std::pair<const uint64_t, DBXactLogData> *
+    // std::pair<const uint64_t, DBXactLogData> *
+    std::map<uint64_t, DBXactLogData>::iterator
     _find_or_add(uint64_t db_id, std::shared_lock<std::shared_mutex> &read_lock);
 
     /**

@@ -30,7 +30,7 @@ public:
      * @brief Begin reading from the first log file
      * @return true if successful, false if no files found or no data in the first file.
      */
-    bool begin(bool show_all = false);
+    bool begin();
 
      /**
       * @brief Move to the next row in the log
@@ -69,7 +69,6 @@ private:
     size_t _current_offset{0};          ///< current memory offset inside the current read segment
     uint32_t _page_count{0};            ///< number of pages in the current file
     int _fd{-1};                        ///< current file descriptor
-    bool _show_all{false};              ///< flag indicating if we should show all xids or only those with pg_xid != 0
 
     /**
      * @brief Move current xid pointer to the next xid entry

@@ -105,7 +105,9 @@ PgXactLogWriter::log(uint32_t pg_xid, uint64_t xid, bool real_commit)
     mem_xid_element->real_commit = real_commit;
     mem_xid_element->xid = xid;
 
-    _last_stored_xid = xid;
+    if (real_commit) {
+        _last_stored_xid = xid;
+    }
 
     _last_offset += sizeof(XidElement);
     // check if we reached the end of the page
@@ -172,7 +174,9 @@ PgXactLogWriter::_extract_last_xid()
                 break;
             }
             current_offset += sizeof(xid_mgr::PgXactLogWriter::XidElement);
-            _last_stored_xid = current_xid->xid;
+            if (current_xid->real_commit) {
+                _last_stored_xid = current_xid->xid;
+            }
         }
         if (current_offset < PG_XLOG_PAGE_SIZE) {
             break;
@@ -207,8 +211,9 @@ PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir, uint64_
             throw Error(fmt::format("Failed to open file {}; error {}: {}", current_file.value().string(), errno, strerror(errno)));
         }
         uint32_t page_count = 0;
+        bool done = false;
         int ret;
-        while ((ret = ::read(fd, read_buffer, PG_XLOG_PAGE_SIZE)) != 0) {
+        while (!done && (ret = ::read(fd, read_buffer, PG_XLOG_PAGE_SIZE)) != 0) {
             ++page_count;
             if (ret == -1) {
                 throw Error(fmt::format("Error reading from file {}; error {}: {}", current_file.value().string(), errno, strerror(errno)));
@@ -220,7 +225,8 @@ PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir, uint64_
             while (current_offset != PG_XLOG_PAGE_SIZE) {
                 XidElement * current_xid = reinterpret_cast<XidElement *>(&read_buffer[current_offset]);
                 if (current_xid->xid == 0) {
-                    goto next_file;
+                    done = true;
+                    break;
                 }
                 if (current_xid->xid > last_xid) {
                     size_t file_size = PG_XLOG_PAGE_SIZE * (page_count - 1) + current_offset;
@@ -237,9 +243,8 @@ PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir, uint64_
                 current_offset += sizeof(PgXactLogWriter::XidElement);
             }
         }
-        next_file:
-            ::close(fd);
-            current_file = fs::get_next_log_file(current_file.value(), LOG_PREFIX_XACT, LOG_SUFFIX);
+        ::close(fd);
+        current_file = fs::get_next_log_file(current_file.value(), LOG_PREFIX_XACT, LOG_SUFFIX);
     }
     return false;
 }

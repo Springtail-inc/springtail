@@ -492,49 +492,4 @@ namespace {
             ASSERT_FALSE(reader.next());
         }
     }
-
-    TEST_F(XactLogReadWrite_Test, SkipPgXidZeroTest)
-    {
-        {
-            PgXactLogWriter writer(log_path);
-
-            uint64_t log_timestamp = get_log_timestamp();
-            writer.rotate(log_timestamp);
-
-            writer.log(101, 11, true);
-            writer.log(0, 12, true);
-            writer.log(103, 13, true);
-            writer.log(0, 14, true);
-            writer.log(106, 16, true);
-            writer.log(0, 17, true);
-            writer.log(108, 18, true);
-            writer.log(0, 19, true);
-            writer.log(110, 20, true);
-        }
-        {
-            PgXactLogReader reader(log_path);
-
-            ASSERT_TRUE(reader.begin());
-            ASSERT_EQ(reader.get_pg_xid(), 101);
-            ASSERT_EQ(reader.get_xid(), 11);
-
-            ASSERT_TRUE(reader.next());
-            ASSERT_EQ(reader.get_pg_xid(), 103);
-            ASSERT_EQ(reader.get_xid(), 13);
-
-            ASSERT_TRUE(reader.next());
-            ASSERT_EQ(reader.get_pg_xid(), 106);
-            ASSERT_EQ(reader.get_xid(), 16);
-
-            ASSERT_TRUE(reader.next());
-            ASSERT_EQ(reader.get_pg_xid(), 108);
-            ASSERT_EQ(reader.get_xid(), 18);
-
-            ASSERT_TRUE(reader.next());
-            ASSERT_EQ(reader.get_pg_xid(), 110);
-            ASSERT_EQ(reader.get_xid(), 20);
-
-            ASSERT_FALSE(reader.next());
-        }
-    }
 }

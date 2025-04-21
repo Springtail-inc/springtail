@@ -11,7 +11,6 @@
 #include <storage/field.hh>
 
 #include <sys_tbl_mgr/client.hh>
-#include <xid_mgr/xid_mgr_server.hh>
 
 namespace springtail::pg_log_mgr {
     /**

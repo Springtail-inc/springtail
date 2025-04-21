@@ -22,7 +22,6 @@
 
 #include <sys_tbl_mgr/table.hh>
 #include <write_cache/write_cache_index.hh>
-#include <xid_mgr/xid_mgr_server.hh>
 
 #include <opentelemetry/context/context.h>
 #include <opentelemetry/metrics/meter.h>
@@ -49,7 +48,6 @@ namespace springtail::committer {
               _committer_queue(committer_queue),
               _index_reconciliation_queue(index_reconciliation_queue)
         {
-            _xid_mgr = xid_mgr::XidMgrServer::get_instance();
             _worker_id = fmt::format("{}_{}_0", THREAD_TYPE, THREAD_MAIN);
         }
 
@@ -117,8 +115,6 @@ namespace springtail::committer {
         bool _shift_to_xid(SchemaMetadata &meta, const XidLsn &xid);
 
     private:
-        xid_mgr::XidMgrServer *_xid_mgr; ///< Pointer to the XidMgr server singleton.
-
         RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         bool _has_ddl_precommit = false; ///< Flag indiciating if the redis DDL is holding precommit entries
         std::string _worker_id; ///< Unique worker ID for the Committer.

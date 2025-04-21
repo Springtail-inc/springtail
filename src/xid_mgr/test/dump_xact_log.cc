@@ -23,7 +23,7 @@ int main(int argc, char *argv[])
     springtail_init_custom(service_runners);
 
     PgXactLogReader reader(log_dir);
-    bool has_more = reader.begin(true);
+    bool has_more = reader.begin();
     uint32_t pg_xid_max_len = 0;
     uint32_t xid_max_len = 0;
 
@@ -41,7 +41,7 @@ int main(int argc, char *argv[])
 
     std::string format_str = fmt::format("pgxid: {{:>{}}} | xid: {{:>{}}} | real_commit: {{}}",
                                          pg_xid_max_len + 1, xid_max_len + 1);
-    has_more = reader.begin(true);
+    has_more = reader.begin();
 
     while (has_more) {
         std::cout << fmt::format(fmt::runtime(format_str.c_str()),

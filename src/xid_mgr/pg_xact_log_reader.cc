@@ -13,10 +13,9 @@ PgXactLogReader::~PgXactLogReader()
 }
 
 bool
-PgXactLogReader::begin(bool show_all)
+PgXactLogReader::begin()
 {
     _cleanup();
-    _show_all = show_all;
     return _open_next_file() && _get_next_xid();
 }
 
@@ -45,9 +44,6 @@ PgXactLogReader::_get_next_xid()
         _current_xid = reinterpret_cast<PgXactLogWriter::XidElement *>(&_read_buffer[_current_offset]);
         if (_current_xid->xid != 0) {
             _current_offset += sizeof(PgXactLogWriter::XidElement);
-            if (!_show_all && _current_xid->pg_xid == 0) {
-                _current_xid = nullptr;
-            }
         } else {
             _current_xid = nullptr;
             if (!_open_next_file()) {

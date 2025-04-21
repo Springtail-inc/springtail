@@ -107,6 +107,16 @@ PgLogRecovery::_skip_committed()
     uint32_t log_number = 0;
     uint32_t cur_pgxid = 0;
     while (!done) {
+        // make sure that xact log record has non-zero pg_xid
+        while(xact_reader.get_pg_xid() == 0) {
+            if (!xact_reader.next()) {
+                done = true;
+                break;
+            }
+        }
+        if (done) {
+            break;
+        }
         // check if there are more messages in the replication log
         bool eob = false, eos = false;
         auto msg = _repl_reader.read_message(filter, eos, eob);
