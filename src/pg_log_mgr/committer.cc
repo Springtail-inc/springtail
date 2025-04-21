@@ -262,6 +262,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
 
             // Trigger index reconciliation for the earliest pending XID
             if (result->type() == XidReady::Type::RECONCILE_INDEX) {
+                trace index_tr(fmt::format("reconcile_index-xid_{}", xid));
                 _indexer->process_index_reconciliation(db_id, result->reconcile().reconcile_xid(), xid);
             }
 
