@@ -33,7 +33,7 @@ def connect_db_instance(props: Properties, db_name: str = 'postgres') -> psycopg
     db_port = db_instance_config['port']
     db_user = db_instance_config['replication_user']
     db_password = db_instance_config['password']
-    return connect_db(db_name, db_user, db_password, db_host, db_port)
+    return connect_db(db_name, db_user, db_password, db_host, db_port, False)
 
 def print_sys_props(props: Properties, config_file: str) -> None:
     db_config = props.get_db_configs()[0]
@@ -52,18 +52,23 @@ def write_metrics_to_csv(csv_file: str, _type: str, duration_ms: float, txid: in
 
 def time_and_log_query(conn, _type: str, query: str, csv_file: str, params=None) -> None:
     start = time.time()
+
     with conn.cursor() as cur:
+        cur.execute("BEGIN;")
+
         if params:
             cur.execute(query, params)
         else:
             cur.execute(query)
-    conn.commit()
+
+        cur.execute("SELECT txid_current(), FLOOR(EXTRACT(EPOCH FROM now()) * 1000)")
+        txid, pg_ts_epoch_ms = cur.fetchone()
+
+        cur.execute("COMMIT;")
+
     end = time.time()
     duration_ms = round((end - start) * 1000, 2)
-    with conn.cursor() as cur:
-        cur.execute("SELECT txid_current(), FLOOR(EXTRACT(EPOCH FROM now()) * 1000) AS pg_ts_epoch_ms")
-        txid, pg_ts = cur.fetchone()
-    write_metrics_to_csv(csv_file, _type, duration_ms, txid, pg_ts)
+    write_metrics_to_csv(csv_file, _type, duration_ms, txid, pg_ts_epoch_ms)
 
 def create_schema_and_tables(conn, csv_file: str):
     schema_name = f"test_schema_{random.randint(1000, 9999)}"
@@ -113,7 +118,7 @@ def load_data(config_file: str, csv_file: str) -> None:
 
     with open(csv_file, mode='w', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow(["query_type", "txid", "duration_ms", "pg_timestamp"])
+        writer.writerow(["query_type", "pg_xid", "duration_ms", "pg_timestamp"])
 
     conn = connect_db_instance(props, "springtail")
     start_time = time.time()

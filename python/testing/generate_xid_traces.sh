@@ -2,14 +2,15 @@
 
 set -e
 
-if [ $# -ne 1 ]; then
-    echo "Usage: $0 <log_file>"
+if [ $# -ne 2 ]; then
+    echo "Usage: $0 <log_file> <query_info_csv>"
     exit 1
 fi
 
 logfile="$1"
+query_info="$2"
 
-# Step 1: Extract traces.csv (no filter)
+# Step 1: Extract traces.csv
 grep '\[TRACE\] \[.*-xid_[0-9]\+,' "$logfile" \
 | sed -E 's/.*\[(.*)-xid_([0-9]+),([^]]+)\].*/\1,\2,\3/' \
 | sed 's/ms//g; s/us//g' \
@@ -27,9 +28,9 @@ grep 'Committing PG XID:' "$logfile" \
 | awk 'BEGIN {print "pg_xid,xid"} {print $0}' > xid_mapping.csv
 
 # Step 3: Run Python script
-python3 merge_pg_xid.py xid_mapping.csv traces.csv final_traces.csv
+python3 merge_pg_xid.py xid_mapping.csv traces.csv "$query_info" final_traces.csv
 
 # Step 4: Cleanup intermediate CSVs
-rm -f traces.csv xid_mapping.csv
+rm -f traces.csv xid_mapping.csv "$query_info"
 
-echo "✅ Generated final_traces.csv!"
+echo "Generated final_traces.csv!"
