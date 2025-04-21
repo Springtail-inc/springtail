@@ -221,6 +221,7 @@ def parse_arguments():
     parser.add_argument('-c', '--config', type=str, default='config.yaml', help='Path to the test configuration file')
     parser.add_argument('-j', '--junit', type=str, help='Output test results to the specified JUnit XML file')
     parser.add_argument('-o', '--overlay', type=str, help='Run using a specific overlay config')
+    parser.add_argument('-s', '--shutdown-on-fail', action=store_true, help='Shutdown Springtail processes on test failure')
     parser.add_argument('test_set', type=str, nargs='?', help='Limit to a specific test set')
     parser.add_argument('test_case', type=str, nargs='*', help='Limit to a specific test case from the test set')
     return parser.parse_args()
@@ -295,7 +296,7 @@ if __name__ == "__main__":
 
     # run the tests
     for test in tests:
-        success = test.run()
+        success = test.run(args.shutdown_on_fail)
         if not success:
             break
 
