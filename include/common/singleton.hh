@@ -132,7 +132,7 @@ namespace springtail {
          *
          */
         virtual void stop_thread() {
-            _shutting_down.store(true);
+            _shutting_down = true;
         }
 
     protected:
@@ -157,7 +157,7 @@ namespace springtail {
          * @return true
          * @return false
          */
-        bool _is_shutting_down() const { return _shutting_down.load(); }
+        bool _is_shutting_down() const { return _shutting_down; }
 
         /**
          * @brief Constructor of a new SingletonWithThread object can only be accessed by the derived class
