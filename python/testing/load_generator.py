@@ -27,6 +27,9 @@ NUM_TABLES_PER_SCHEMA = 25
 NUM_INSERTS = 5
 RUN_TIME_SECONDS = 5
 
+# Global dictionary to store table column information
+table_columns = {}
+
 def connect_db_instance(props: Properties, db_name: str = 'postgres') -> psycopg2.extensions.connection:
     db_instance_config = props.get_db_instance_config()
     db_host = db_instance_config['host']
@@ -70,42 +73,161 @@ def time_and_log_query(conn, _type: str, query: str, csv_file: str, params=None)
     duration_ms = round((end - start) * 1000, 2)
     write_metrics_to_csv(csv_file, _type, duration_ms, txid, pg_ts_epoch_ms)
 
-def create_schema_and_tables(conn, csv_file: str):
-    schema_name = f"test_schema_{random.randint(1000, 9999)}"
+def create_table(conn, schema_name: str, table_name: str, csv_file: str):
+    # List of PostgreSQL data types to choose from
+    # XXX Need to add other possible types too
+    column_types = [
+        "TEXT",
+        "INT",
+        "BIGINT",
+        "FLOAT",
+        "DOUBLE PRECISION",
+        "BOOLEAN",
+        "DATE",
+        "TIME",
+        "VARCHAR(255)",
+        "CHAR(10)",
+        "NUMERIC(10,2)"
+    ]
+
+    # Always include id as SERIAL PRIMARY KEY and created_at as TIMESTAMP
+    columns = [
+        "id SERIAL PRIMARY KEY",
+        "created_at TIMESTAMP DEFAULT NOW()"
+    ]
+
+    # Add 2-9 random columns with random types
+    num_columns = random.randint(2, 9)
+    for i in range(num_columns):
+        column_type = random.choice(column_types)
+        col_type = column_type.replace(" ", "_").replace("(", "_").replace(")", "_").replace(",", "_").lower()
+        column_name = f"col_{i}_{col_type}"
+        columns.append(f"{column_name} {column_type}")
+
+    # Store column information in the global dictionary
+    table_columns[f"{schema_name}.{table_name}"] = []
+    for col in columns:
+        if col.startswith("id") or col.startswith("created_at"):
+            continue
+
+        col_name, col_type = col.split()[0], col.split()[1]
+        # Handle special cases like VARCHAR(255)
+        if '(' in col_type:
+            col_type = col_type.split('(')[0]
+
+        table_columns[f"{schema_name}.{table_name}"].append((col_name, col_type.lower()))
+
+    # Create the CREATE TABLE statement
+    create_table_sql = f"""
+        CREATE TABLE IF NOT EXISTS {schema_name}.{table_name} (
+            {',\n            '.join(columns)}
+        )
+    """
+
+    time_and_log_query(conn, "create_table", create_table_sql, csv_file)
+    print(f"[+] Created table: {schema_name}.{table_name} with {num_columns} random columns")
+
+def create_index(conn, schema_name: str, table_name: str, csv_file: str):
+    full_table_name = f"{schema_name}.{table_name}"
+    if full_table_name not in table_columns:
+        print(f"[!] No column information found for {full_table_name}")
+        return
+
+    columns = table_columns[full_table_name]
+    if not columns:
+        print(f"[!] No suitable columns found for indexing in {schema_name}.{table_name}")
+        return
+
+    # Filter out columns that are not suitable for indexing
+    indexable_columns = [col[0] for col in columns if col[1] not in ['jsonb', 'bytea', 'uuid']]
+
+    if not indexable_columns:
+        print(f"[!] No indexable columns found in {schema_name}.{table_name}")
+        return
+
+    # Create index on a random column
+    index_column = random.choice(indexable_columns)
+    index_name = f"idx_{table_name}_{index_column}"
+
+    time_and_log_query(conn, "create_index", f"""
+        CREATE INDEX IF NOT EXISTS {index_name}
+        ON {schema_name}.{table_name} ({index_column})
+    """, csv_file)
+    print(f"[+] Created index on: {schema_name}.{table_name}({index_column})")
+
+def insert_data(conn, schema_name: str, table_name: str, csv_file: str):
+    full_table_name = f"{schema_name}.{table_name}"
+    if full_table_name not in table_columns:
+        print(f"[!] No column information found for {full_table_name}")
+        return
+
+    columns = table_columns[full_table_name]
+    if not columns:
+        print(f"[!] No columns found in {schema_name}.{table_name}")
+        return
+
+    # Generate INSERT statement with all columns
+    column_names = [col[0] for col in columns]
+    placeholders = ['%s'] * len(column_names)
+
+    insert_sql = f"""
+        INSERT INTO {schema_name}.{table_name} ({', '.join(column_names)})
+        VALUES ({', '.join(placeholders)})
+    """
+
+    # Generate random batch sizes that add up to NUM_INSERTS
+    remaining_inserts = NUM_INSERTS
+    while remaining_inserts > 0:
+        if remaining_inserts <= 10:  # For small remaining, just insert them all
+            batch_size = remaining_inserts
+        else:
+            # Generate random batch size between 5% and 70% of remaining inserts
+            batch_size = random.randint(max(1, int(remaining_inserts * 0.05)),
+                                     min(remaining_inserts, int(remaining_inserts * 0.7)))
+
+        values_list = []
+        for _ in range(batch_size):
+            values = []
+            for col_name, col_type in columns:
+                if col_type in ['text', 'varchar', 'char']:
+                    values.append(f"value_{random.randint(1, 100)}")
+                elif col_type in ['int', 'bigint', 'numeric', 'double precision', 'float']:
+                    values.append(random.randint(1, 1000))
+                elif col_type == 'boolean':
+                    values.append(random.choice([True, False]))
+                elif col_type == 'date':
+                    values.append(f"{random.randint(2000, 2025)}-0{random.randint(1, 9)}-0{random.randint(1, 9)}")
+                elif col_type == 'time':
+                    values.append(f"{random.randint(0, 23)}:{random.randint(0, 59)}:{random.randint(0, 59)}")
+                else:
+                    values.append(None)
+            values_list.append(tuple(values))
+
+        # Execute the batch insert
+        with conn.cursor() as cur:
+            cur.executemany(insert_sql, values_list)
+            conn.commit()
+
+        remaining_inserts -= batch_size
+        print(f"[+] Inserted batch of {batch_size} rows into {schema_name}.{table_name} (remaining: {remaining_inserts})")
+
+    print(f"[+] Total {NUM_INSERTS} rows inserted into {schema_name}.{table_name}")
+
+def create_schema_and_tables(conn, csv_file: str, schema_name: str):
     time_and_log_query(conn, "create_schema", f"CREATE SCHEMA IF NOT EXISTS {schema_name}", csv_file)
     print(f"[+] Created schema: {schema_name}")
 
     for i in range(NUM_TABLES_PER_SCHEMA):
         table_name = f"table_{random.randint(1000, 9999)}"
-        time_and_log_query(conn, "create_table", f"""
-            CREATE TABLE IF NOT EXISTS {schema_name}.{table_name} (
-                id SERIAL PRIMARY KEY,
-                name TEXT,
-                value INT,
-                created_at TIMESTAMP DEFAULT NOW()
-            )
-        """, csv_file)
-        print(f"[+] Created table: {schema_name}.{table_name}")
 
-        insert_data(conn, schema_name, table_name, csv_file)
-
-        time_and_log_query(conn, "create_index", f"CREATE INDEX IF NOT EXISTS idx_{table_name}_value ON {schema_name}.{table_name} (value)", csv_file)
-        print(f"[+] Created index on: {schema_name}.{table_name}(value)")
-
-        insert_data(conn, schema_name, table_name, csv_file)
-
+        try:
+            create_table(conn, schema_name, table_name, csv_file)
+            create_index(conn, schema_name, table_name, csv_file)
+            insert_data(conn, schema_name, table_name, csv_file)
+        except Exception as e:
+            print(f"[-] Failed to create table {schema_name}.{table_name}: {e}")
 
     return schema_name
-
-def insert_data(conn, schema_name: str, table_name: str, csv_file: str):
-    for _ in range(NUM_INSERTS):
-        name = f"name_{random.randint(1, 100)}"
-        value = random.randint(1, 1000)
-        time_and_log_query(conn, "insert_data", f"""
-            INSERT INTO {schema_name}.{table_name} (name, value)
-            VALUES (%s, %s)
-        """, csv_file, (name, value))
-    print(f"[+] Inserted {NUM_INSERTS} rows into {schema_name}.{table_name}")
 
 def drop_schema(conn, schema_name):
     time_and_log_query(conn, "drop_schema", f"DROP SCHEMA IF EXISTS {schema_name} CASCADE")
@@ -123,8 +245,10 @@ def load_data(config_file: str, csv_file: str) -> None:
     conn = connect_db_instance(props, "springtail")
     start_time = time.time()
 
-    #while time.time() - start_time < RUN_TIME_SECONDS:
-    schema = create_schema_and_tables(conn, csv_file)
+    # Create NUM_SCHEMAS schemas
+    for schema_idx in range(NUM_SCHEMAS):
+        schema_name = f"test_schema_{schema_idx}"
+        create_schema_and_tables(conn, csv_file, schema_name)
 
     conn.close()
 
