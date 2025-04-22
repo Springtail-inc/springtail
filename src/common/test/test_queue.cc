@@ -152,5 +152,5 @@ TEST(QueueTest, ThreadedTestBlockAndDrain) {
     std::ranges::sort(popped_values);
 
     // Validate popped values
-    EXPECT_EQ(popped_values, (std::vector<int>{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}));
+    ASSERT_EQ(popped_values, (std::vector<int>{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}));
 }
