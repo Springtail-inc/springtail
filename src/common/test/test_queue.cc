@@ -134,7 +134,7 @@ TEST(QueueTest, ThreadedTestBlockAndDrain) {
         queue.push(std::make_shared<QueueEntry>(12));
     });
 
-    // Sleep to let pushers fill queue and possibly block
+    // Sleep to let push threads fill queue and possibly block
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     // Now pop everything
