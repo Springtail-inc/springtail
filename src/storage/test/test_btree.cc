@@ -311,10 +311,12 @@ namespace {
             auto lb_i = tree->lower_bound(tuple);
             auto ffu_i = tree->lower_bound(tuple, true);
             auto iub_i = tree->inverse_upper_bound(tuple);
+            auto ilb_i = tree->inverse_lower_bound(tuple);
 
             ASSERT_EQ(lb_i, find_i);
             ASSERT_EQ(ffu_i, find_i);
             ASSERT_EQ(iub_i, end_i);
+            ASSERT_EQ(ilb_i, begin_i);
         }
 
         // search for an existing entry in the middle
