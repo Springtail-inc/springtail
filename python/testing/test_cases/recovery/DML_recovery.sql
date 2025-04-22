@@ -7,14 +7,15 @@ CREATE TABLE IF NOT EXISTS test1 (
     value TEXT
 );
 
+### recovery_point
+
 INSERT INTO test1 (value) VALUES ('test_value_1');
 INSERT INTO test1 (value) VALUES ('test_value_2');
 INSERT INTO test1 (value) VALUES ('test_value_3');
 INSERT INTO test1 (value) VALUES ('test_value_4');
 
 -- revert to before the INSERTs, recover from there
-### sync
-### force_recovery 4
+### force_recovery
 
 ## verify
 SELECT * FROM test1 ORDER BY id;

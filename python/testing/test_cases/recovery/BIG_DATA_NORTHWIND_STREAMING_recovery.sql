@@ -17,6 +17,8 @@
 
 -- Northwind database
 
+### recovery_point
+
 BEGIN;
 CREATE TABLE IF NOT EXISTS categories (
     category_id smallint NOT NULL,
@@ -3621,8 +3623,7 @@ ALTER TABLE ONLY employees
     ADD CONSTRAINT fk_employees_employees FOREIGN KEY (reports_to) REFERENCES employees;
 COMMIT;
 
-### sync
-### force_recovery 10
+### force_recovery
 
 ## verify
 SELECT * FROM customer_customer_demo;

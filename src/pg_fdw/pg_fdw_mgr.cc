@@ -25,6 +25,7 @@
 
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/shm_cache.hh>
+#include <sys_tbl_mgr/system_tables.hh>
 
 extern "C" {
     #include <postgres.h>
@@ -407,6 +408,7 @@ namespace springtail::pg_fdw {
             std::vector<ConstQualPtr> best;
 
             for (auto const& idx: state->indexes) {
+                CHECK(static_cast<sys_tbl::IndexNames::State>(idx.state) == sys_tbl::IndexNames::State::READY);
                 auto index_quals = _get_index_quals(state, idx, qual_list);
                 if (index_quals.empty()) {
                     continue;
@@ -1311,7 +1313,12 @@ namespace springtail::pg_fdw {
 
         if (tid > constant::MAX_SYSTEM_TABLE_ID) {
             auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(table->db(), tid, { xid, constant::MAX_LSN });
-            indexes = meta->indexes;
+            for (auto& v: meta->indexes) {
+                if (static_cast<sys_tbl::IndexNames::State>(v.state) != sys_tbl::IndexNames::State::READY) {
+                    continue;
+                }
+                indexes.push_back(v);
+            }
         }
     }
 } // namespace springtail::pg_fdw

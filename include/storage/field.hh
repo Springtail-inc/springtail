@@ -1215,23 +1215,16 @@ namespace springtail {
             return false;
         }
 
-        bool equal(const Tuple &rhs) const {
+        bool equal_strict(const Tuple &rhs) const {
             // check the tuple lengths and types using assert()
             // we assume correct usage in production
             assert(this->size() == rhs.size());
-            for (int i = 0; i < this->size(); i++) {
-                assert(this->field(i)->get_type() == rhs.field(i)->get_type());
-            }
+            return _equal(rhs, size());
+        }
 
-            // XXX switch everything to compare()?
-            for (int i = 0; i < this->size(); i++) {
-                if (!this->field(i)->equal(this->row(), rhs.field(i), rhs.row())) {
-                    return false;
-                }
-            }
-
-            // all values are equal
-            return true;
+        bool equal_prefix(const Tuple &rhs) const {
+            size_t size = std::min(this->size(), rhs.size());
+            return _equal(rhs, size);
         }
 
         std::string to_string() const {
@@ -1305,7 +1298,21 @@ namespace springtail {
 
     private:
         std::any _row;
+
+        bool _equal(const Tuple &rhs, size_t size) const {
+            assert(size);
+            for (int i = 0; i != size; ++i) {
+                assert(this->field(i)->get_type() == rhs.field(i)->get_type());
+                if (!this->field(i)->equal(this->row(), rhs.field(i), rhs.row())) {
+                    return false;
+                }
+            }
+
+            // all values are equal
+            return true;
+        }
     };
+
     typedef std::shared_ptr<Tuple> TuplePtr;
 
     class FieldTuple : public Tuple {
