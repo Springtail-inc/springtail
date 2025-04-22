@@ -1,4 +1,5 @@
 import os
+import shutil
 import time
 from typing import Dict, List, Optional
 
@@ -63,6 +64,30 @@ def clean_fs(mount_path : str, log_path : str) -> None:
     # remove log files
     print(f"Clearing log files at directory: {log_path}")
     run_command('sudo', ['rm', '-rf', log_path])
+
+
+def move_files(source_dir, destination_dir):
+    """Move all files from source directory to destination directory.
+
+    Args:
+        source_dir (str): Path to the source directory
+        destination_dir (str): Path to the destination directory
+
+    """
+    # Create destination directory if it doesn't exist
+    if not os.path.exists(destination_dir):
+        raise Exception(f'Destination does not exist: {destination_dir}')
+
+    # Get all items in the source directory
+    items = os.listdir(source_dir)
+
+    # Move each file to the destination directory
+    for item in items:
+        item_path = os.path.join(source_dir, item)
+
+        # Check if it's a file (not a directory)
+        if os.path.isfile(item_path):
+            shutil.move(item_path, os.path.join(destination_dir, item))
 
 
 def check_postgres_running() -> bool:

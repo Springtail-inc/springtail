@@ -37,6 +37,7 @@ from common import (
 from sysutils import (
     stop_daemons,
     clean_fs,
+    move_files,
     check_postgres_running,
     start_postgres,
     stop_postgres,
@@ -521,10 +522,35 @@ def current_xid(props: Properties, db_id: int) -> int:
 
 def restart(props: Properties,
             build_dir: str,
-            start_xid: int = None) -> None:
+            start_xid: int = None,
+            unarchive_logs: bool = False) -> None:
     # Stop the daemons
     print("\nStopping daemons...")
     stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
+
+    # optionally un-archive the log files
+    if unarchive_logs:
+        config = props.get_system_config()
+        if not config.get('log_mgr').get('archive_logs', False):
+            print('Cannot unarchive logs -- "archive_logs" not true')
+        else:
+            base_dir = props.get_mount_path()
+
+            # move back the repl archive files for each database
+            repl_dir = config.get('log_mgr').get('replication_log_path')
+            repl_path = os.path.join(base_dir, repl_dir)
+            db_dirs = os.listdir(repl_path)
+            for db_dir in db_dirs:
+                repl_db_path = os.path.join(repl_path, db_dir)
+                move_files(os.path.join(repl_db_path, 'archive'), repl_db_path)
+
+            # move back the xact archive files for each database
+            xact_dir = config.get('log_mgr').get('transaction_log_path')
+            xact_path = os.path.join(base_dir, xact_dir)
+            db_dirs = os.listdir(xact_path)
+            for db_dir in db_dirs:
+                xact_db_path = os.path.join(xact_path, db_dir)
+                move_files(os.path.join(xact_db_path, 'archive'), xact_db_path)
 
     # start daemons with XID if specified
     print("\nStarting daemons...")
