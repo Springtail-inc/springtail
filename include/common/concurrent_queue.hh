@@ -97,9 +97,7 @@ namespace springtail {
 
             write_lock.unlock();
 
-            if (_queue.size() >= (_limit-1)) {
-                _cv_push.notify_one();
-            }
+            _cv_push.notify_one();
 
             return entry;
         }
@@ -120,9 +118,7 @@ namespace springtail {
 
             write_lock.unlock();
 
-            if (_queue.size() >= (_limit-1)) {
-                _cv_push.notify_one();
-            }
+            _cv_push.notify_one();
 
             return entry;
         }
