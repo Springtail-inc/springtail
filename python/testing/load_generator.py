@@ -76,7 +76,7 @@ def create_schema_and_tables(conn, csv_file: str):
     print(f"[+] Created schema: {schema_name}")
 
     for i in range(NUM_TABLES_PER_SCHEMA):
-        table_name = f"table_{random.randint(1000, 9999)}"
+        table_name = f"table_{i}"
         time_and_log_query(conn, "create_table", f"""
             CREATE TABLE IF NOT EXISTS {schema_name}.{table_name} (
                 id SERIAL PRIMARY KEY,
