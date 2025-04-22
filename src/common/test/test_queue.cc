@@ -1,4 +1,5 @@
 #include <memory>
+#include <algorithm>
 #include <gtest/gtest.h>
 
 #include <common/concurrent_queue.hh>
@@ -110,4 +111,46 @@ TEST(QueueTest, ThreadedTestBound) {
 
     t1.join();
     t2.join();
+}
+
+TEST(QueueTest, ThreadedTestBlockAndDrain) {
+    ConcurrentQueue<QueueEntry> queue{4};  // Small bounded queue
+
+    std::thread t1([&queue]() {
+        queue.push(std::make_shared<QueueEntry>(1));
+        queue.push(std::make_shared<QueueEntry>(2));
+        queue.push(std::make_shared<QueueEntry>(3));
+        queue.push(std::make_shared<QueueEntry>(4));
+        queue.push(std::make_shared<QueueEntry>(5));
+        queue.push(std::make_shared<QueueEntry>(6));
+    });
+
+    std::thread t2([&queue]() {
+        queue.push(std::make_shared<QueueEntry>(7));
+        queue.push(std::make_shared<QueueEntry>(8));
+        queue.push(std::make_shared<QueueEntry>(9));
+        queue.push(std::make_shared<QueueEntry>(10));
+        queue.push(std::make_shared<QueueEntry>(11));
+        queue.push(std::make_shared<QueueEntry>(12));
+    });
+
+    // Sleep to let pushers fill queue and possibly block
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Now pop everything
+    std::vector<int> popped_values;
+    for (int i = 0; i < 12; ++i) {
+        auto entry = queue.pop(1);
+        ASSERT_NE(entry, nullptr);
+        popped_values.push_back(entry->a);
+    }
+
+    t1.join();
+    t2.join();
+
+    // Sort the popped values
+    std::ranges::sort(popped_values);
+
+    // Validate popped values
+    EXPECT_EQ(popped_values, (std::vector<int>{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}));
 }
