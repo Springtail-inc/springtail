@@ -26,6 +26,7 @@ NUM_SCHEMAS = 10
 NUM_TABLES_PER_SCHEMA = 25
 NUM_INSERTS = 5
 RUN_TIME_SECONDS = 5
+RUN_TS = int(time.time())
 
 # Global dictionary to store table column information
 table_columns = {}
@@ -215,14 +216,20 @@ def create_schema_and_tables(conn, csv_file: str, schema_name: str):
     print(f"[+] Created schema: {schema_name}")
 
     for i in range(NUM_TABLES_PER_SCHEMA):
-        table_name = f"table_{random.randint(1000, 9999)}"
+        table_name = f"table_{i}_{random.randint(1000, 9999)}"
 
         try:
             create_table(conn, schema_name, table_name, csv_file)
+        except Exception as e:
+            print(f"[-] Got an error while creating table {schema_name}.{table_name}: {e}")
+        try:
             create_index(conn, schema_name, table_name, csv_file)
+        except Exception as e:
+            print(f"[-] Got an error while creating index {schema_name}.{table_name}: {e}")
+        try:
             insert_data(conn, schema_name, table_name, csv_file)
         except Exception as e:
-            print(f"[-] Got an error while {schema_name}.{table_name}: {e}")
+            print(f"[-] Got an error while inserting data into {schema_name}.{table_name}: {e}")
 
     return schema_name
 
@@ -244,7 +251,7 @@ def load_data(config_file: str, csv_file: str) -> None:
 
     # Create NUM_SCHEMAS schemas
     for schema_idx in range(NUM_SCHEMAS):
-        schema_name = f"test_schema_{schema_idx}"
+        schema_name = f"test_schema_{schema_idx}_{RUN_TS}"
         create_schema_and_tables(conn, csv_file, schema_name)
 
     conn.close()
