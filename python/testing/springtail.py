@@ -8,6 +8,7 @@ import traceback
 import tempfile
 import time
 import logging
+import datetime
 from typing import Dict, List, Optional
 import psycopg2
 from psycopg2.extensions import quote_ident
@@ -531,7 +532,10 @@ def restart(props: Properties,
 
     if start_xid is not None:
         # roll start_xid back
-        run_command(os.path.join(build_dir, 'src/xid_mgr/roll_back_xact_log'), ['-p', xid_log_path, '-d', '1', '-a', 'true', '-x', str(start_xid)])
+        ts = int(datetime.datetime.utcnow().timestamp())
+        log_file = "/tmp/roll_back_" + str(ts) + ".log"
+        print(f"Running command: roll_back_xact_log; rolling back to xid: {start_xid}, output log: {log_file}")
+        run_command(os.path.join(build_dir, 'src/xid_mgr/roll_back_xact_log'), ['-p', xid_log_path, '-d', '1', '-a', 'true', '-x', str(start_xid)], log_file)
 
     # start daemons with XID if specified
     print("\nStarting daemons...")

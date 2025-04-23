@@ -594,6 +594,7 @@ namespace springtail::pg_log_mgr {
 
         // notify the Committer to stop committing XIDs
         if (is_first) {
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Stop committing XIDs for db: {}", _db);
             _committer_queue->push(std::make_shared<committer::XidReady>(_db));
         }
     }
@@ -788,7 +789,6 @@ namespace springtail::pg_log_mgr {
         if (_pg_log_timestamp < msg->pg_log_timestamp) {
             LOG_DEBUG(LOG_PG_LOG_MGR, "Logs rollover to the new log timestamp id: {}", msg->pg_log_timestamp);
             _pg_log_timestamp = msg->pg_log_timestamp;
-            xid_mgr::XidMgrServer::get_instance()->rotate(_db_id, _pg_log_timestamp);
             if (_is_streaming) {
                 fs::create_empty_file_with_timestamp(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL_STREAMING, PgLogMgr::LOG_SUFFIX, _pg_log_timestamp);
             }
@@ -948,7 +948,8 @@ namespace springtail::pg_log_mgr {
             SyncTracker::get_instance()->clear_tables(db_id, *xid_msg);
 
             // issue the swap/commit at the GC-2 prior to processing this xid
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Issue TABLE_SYNC_COMMIT on {} @ {}", db_id, xid);
+            xid_msg->set_timestamp(_pg_log_timestamp);
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Issue COMMIT/SWAP message to committer on {} @ {}, type {}", db_id, xid, std::string(1, xid_msg->type()));
             _committer_queue->push(xid_msg);
         }
     }
@@ -957,7 +958,8 @@ namespace springtail::pg_log_mgr {
     PgLogReader::_process_index_reconciliation(const uint64_t db_id, const uint64_t reconcile_xid)
     {
         uint64_t xid = this->get_next_xid();
-        _committer_queue->push(std::make_shared<committer::XidReady>(db_id, committer::XidReady::ReconcileMsg(xid, reconcile_xid)));
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Issue Index Reconciliation message to committer on {} @ {}", db_id, xid);
+        _committer_queue->push(std::make_shared<committer::XidReady>(db_id, _pg_log_timestamp, committer::XidReady::ReconcileMsg(xid, reconcile_xid)));
     }
 
     void
@@ -1025,8 +1027,8 @@ namespace springtail::pg_log_mgr {
                       duration.count());
 
             // message the Committer
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Issue XID to committer on {} @ {}", _db_id, xid);
-            _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::XactMsg(xact->xid, xid),
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Issue XactMsg to committer on {} @ {}", _db_id, xid);
+            _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, _pg_log_timestamp, committer::XidReady::XactMsg(xact->xid, xid),
                                     _xid_ts_tracker));
         }
 
@@ -1103,7 +1105,8 @@ namespace springtail::pg_log_mgr {
 
         if (xid > _committed_xid) {
             // message the Committer
-            _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::XactMsg(commit_msg.xid, xid),
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Issue XactMsg to committer on {} @ {}", _db_id, xid);
+            _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, _pg_log_timestamp, committer::XidReady::XactMsg(commit_msg.xid, xid),
                                     _xid_ts_tracker));
         }
 

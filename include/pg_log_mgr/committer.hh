@@ -146,6 +146,9 @@ namespace springtail::committer {
             sync state. */
         std::set<uint64_t> _block_commit;
 
+        /** Maping of database id to xact log timestamp id */
+        std::map<uint64_t, uint64_t> _db_to_timestamp;
+
         /** Indexer
          */
         std::unique_ptr<Indexer> _indexer;

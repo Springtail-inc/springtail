@@ -96,9 +96,10 @@ namespace springtail::committer {
         };
 
         /** Constructor for SWAP and COMMIT messages. */
-        XidReady(const Type &type, uint64_t db_id, SwapMsg &&msg)
+        XidReady(const Type &type, uint64_t db_id, uint64_t timestamp, SwapMsg &&msg)
             : _type(type),
               _db_id(db_id),
+              _timestamp(timestamp),
               _msg(msg)
         {
             assert(_type == Type::TABLE_SYNC_SWAP || _type == Type::TABLE_SYNC_COMMIT);
@@ -107,21 +108,23 @@ namespace springtail::committer {
         /** Constructor for TABLE_SYNC_START messages. */
         explicit XidReady(uint64_t db_id)
             : _type(Type::TABLE_SYNC_START),
-              _db_id(db_id)
+            _db_id(db_id), _timestamp(0)
         { }
 
         /** Constructor for messages that are XACT_MSG. */
-        XidReady(uint64_t db_id, XactMsg &&msg, pg_log_mgr::WalProgressTrackerPtr xid_tracker = nullptr)
+        XidReady(uint64_t db_id, uint64_t timestamp, XactMsg &&msg, pg_log_mgr::WalProgressTrackerPtr xid_tracker = nullptr)
             : _type(Type::XACT_MSG),
               _db_id(db_id),
+              _timestamp(timestamp),
               _msg(msg),
               _xid_tracker(xid_tracker)
         { }
 
         /** Constructor for messages that are RECONCILE_INDEX. */
-        XidReady(uint64_t db_id, ReconcileMsg &&msg)
+        XidReady(uint64_t db_id, uint64_t timestamp, ReconcileMsg &&msg)
             : _type(Type::RECONCILE_INDEX),
               _db_id(db_id),
+              _timestamp(timestamp),
               _msg(msg)
         { }
 
@@ -133,6 +136,14 @@ namespace springtail::committer {
         /** A getter for the database ID. */
         uint64_t db() const {
             return _db_id;
+        }
+
+        uint64_t timestamp() const {
+            return _timestamp;
+        }
+
+        void set_timestamp(uint64_t timestamp) {
+            _timestamp = timestamp;
         }
 
         /** A getter for the XactMsg. */
@@ -159,6 +170,7 @@ namespace springtail::committer {
     private:
         Type _type; ///< The message type.
         uint64_t _db_id; ///< The database ID.
+        uint64_t _timestamp; ///< timestamp id of repl_log
         std::optional<std::variant<XactMsg, SwapMsg, ReconcileMsg>> _msg; ///< The underlying message data.
         pg_log_mgr::WalProgressTrackerPtr _xid_tracker;
     };

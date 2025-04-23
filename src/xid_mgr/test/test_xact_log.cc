@@ -244,7 +244,6 @@ namespace {
                 found_xid++;
             } while(reader.next());
             ASSERT_EQ(found_xid, current_xid - 20);
-            // reader.cleanup_logs();
         }
         {
             current_xid -= 20;

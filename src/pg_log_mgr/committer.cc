@@ -67,6 +67,20 @@ namespace springtail::committer {
                 continue; // got a timeout, try again
             }
             uint64_t db_id = result->db();
+            uint64_t timestamp = result->timestamp();
+            if (!_db_to_timestamp.contains(db_id)) {
+                _db_to_timestamp.emplace(db_id, timestamp);
+                if (timestamp != 0) {
+                    xid_mgr::XidMgrServer::get_instance()->rotate(db_id, timestamp);
+                }
+            }
+            uint64_t stored_timestamp = _db_to_timestamp[db_id];
+            if (timestamp > stored_timestamp) {
+                _db_to_timestamp[db_id] = timestamp;
+                xid_mgr::XidMgrServer::get_instance()->rotate(db_id, timestamp);
+            } else if (timestamp == 0) {
+                timestamp = _db_to_timestamp[db_id];
+            }
 
             auto token_1 = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
 
@@ -91,6 +105,7 @@ namespace springtail::committer {
 
             auto token_2 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(completed_xid)}});
             LOG_INFO("Last completed XID: {}@{}", db_id, completed_xid);
+            DCHECK(timestamp != 0);
 
             // handle a TABLE_SYNC_COMMIT
             if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT ||
@@ -106,6 +121,11 @@ namespace springtail::committer {
                 //       it is ahead, then we commit at the completed XID.  If it is the same then
                 //       we commit at the provided XID.
                 auto committed_i = _committed_xids.find(db_id);
+                if (committed_i == _committed_xids.end()) {
+                    LOG_DEBUG(LOG_COMMITTER, "No committed xid found for db: {}", db_id);
+                } else {
+                    LOG_DEBUG(LOG_COMMITTER, "Last committed xid found for db: {}, xid: {}", db_id, committed_i->second);
+                }
                 if (committed_i == _committed_xids.end() || completed_xid == committed_i->second) {
                     completed_xid = result->swap().xid();
                 }
@@ -201,7 +221,7 @@ namespace springtail::committer {
             // note: from here we know we have an XACT_MSG or RECONCILE_INDEX
             // XXX: Once we confirm we can commit the index at table's last XID safely,
             //      we can remove the type RECONCILE_INDEX
-            assert(result->type() == XidReady::Type::XACT_MSG || result->type() == XidReady::Type::RECONCILE_INDEX);
+            CHECK(result->type() == XidReady::Type::XACT_MSG || result->type() == XidReady::Type::RECONCILE_INDEX);
             uint64_t xid = 0;
             uint64_t pg_xid = 0;
             if (result->type() == XidReady::Type::RECONCILE_INDEX) {

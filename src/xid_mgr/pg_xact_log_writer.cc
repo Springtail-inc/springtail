@@ -200,18 +200,27 @@ PgXactLogWriter::flush()
     _can_flush = false;
 }
 
+// TODO: need unit tests for this function
 bool
 PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir, uint64_t last_xid, bool archive)
 {
+    LOG_INFO("Looking for xid: {}", last_xid);
     auto current_file = fs::find_earliest_modified_file(base_dir, LOG_PREFIX_XACT, LOG_SUFFIX);
     char read_buffer[PG_XLOG_PAGE_SIZE];
-    while (current_file.has_value()) {
+    std::filesystem::path last_committed_xid_file;
+    size_t last_committed_xid_offset = 0;
+    uint32_t last_committed_xid_page_count = 0;
+    uint64_t last_committed_xid = 0;
+
+    bool xid_found = false;
+    while (!xid_found && current_file.has_value()) {
+        LOG_INFO("Processing file: {}", current_file->string());
+        bool done = false;
         int fd = ::open(current_file.value().c_str(), O_RDWR, 0660);
         if (fd == -1) {
             throw Error(fmt::format("Failed to open file {}; error {}: {}", current_file.value().string(), errno, strerror(errno)));
         }
         uint32_t page_count = 0;
-        bool done = false;
         int ret;
         while (!done && (ret = ::read(fd, read_buffer, PG_XLOG_PAGE_SIZE)) != 0) {
             ++page_count;
@@ -224,21 +233,26 @@ PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir, uint64_
             size_t current_offset = 0;
             while (current_offset != PG_XLOG_PAGE_SIZE) {
                 XidElement * current_xid = reinterpret_cast<XidElement *>(&read_buffer[current_offset]);
+                LOG_INFO("Current entry: pg_xid = {};; xid = {}; real_commit = {}", current_xid->pg_xid, current_xid->xid, current_xid->real_commit);
                 if (current_xid->xid == 0) {
                     done = true;
                     break;
                 }
+
                 if (current_xid->xid > last_xid) {
-                    size_t file_size = PG_XLOG_PAGE_SIZE * (page_count - 1) + current_offset;
-                    ::ftruncate(fd, file_size);
-                    ::ftruncate(fd, PG_XLOG_PAGE_SIZE * page_count);
-                    ::close(fd);
-                    auto current_timestamp = fs::extract_timestamp_from_file(current_file.value(), LOG_PREFIX_XACT, LOG_SUFFIX);
-                    if (!current_timestamp.has_value()) {
-                        throw Error(fmt::format("Error: file name {} does not include timestamp", current_file.value().string()));
-                    }
-                    fs::cleanup_files_from_dir<std::greater<uint64_t>>(base_dir, LOG_PREFIX_XACT, LOG_SUFFIX, current_timestamp.value(), archive);
-                    return true;
+                    LOG_INFO("Current xid {} is greater than last_xid {}", current_xid->xid, last_xid);
+                    xid_found = true;
+                    break;
+                }
+
+                // record location of the last committed xid
+                if (current_xid->real_commit) {
+                    last_committed_xid_file = current_file.value();
+                    last_committed_xid_offset = current_offset + sizeof(PgXactLogWriter::XidElement);
+                    last_committed_xid_page_count = page_count;
+                    last_committed_xid = current_xid->xid;
+                    LOG_INFO("Most recent real commit: xid = {}, file = {}, page = {}, offset = {}",
+                        last_committed_xid, last_committed_xid_file.string(), last_committed_xid_page_count, last_committed_xid_offset);
                 }
                 current_offset += sizeof(PgXactLogWriter::XidElement);
             }
@@ -246,7 +260,28 @@ PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir, uint64_
         ::close(fd);
         current_file = fs::get_next_log_file(current_file.value(), LOG_PREFIX_XACT, LOG_SUFFIX);
     }
-    return false;
+    if (last_committed_xid != 0) {
+        // truncate the file to the appropriate length
+        int fd = ::open(last_committed_xid_file.c_str(), O_RDWR, 0660);
+        if (fd == -1) {
+            throw Error(fmt::format("Failed to open file {}; error {}: {}", last_committed_xid_file.string(), errno, strerror(errno)));
+        }
+        size_t file_size = PG_XLOG_PAGE_SIZE * (last_committed_xid_page_count - 1) + last_committed_xid_offset;
+        ::ftruncate(fd, file_size);
+        ::ftruncate(fd, PG_XLOG_PAGE_SIZE * last_committed_xid_page_count);
+        ::close(fd);
+
+        // cleanup leftover files
+        auto file_timestamp = fs::extract_timestamp_from_file(last_committed_xid_file, LOG_PREFIX_XACT, LOG_SUFFIX);
+        if (!file_timestamp.has_value()) {
+            throw Error(fmt::format("Error: file name {} does not include timestamp", last_committed_xid_file.string()));
+        }
+        fs::cleanup_files_from_dir<std::greater<uint64_t>>(base_dir, LOG_PREFIX_XACT, LOG_SUFFIX, file_timestamp.value(), archive);
+    } else {
+        // cleanup all the files
+        fs::cleanup_files_from_dir<std::greater<uint64_t>>(base_dir, LOG_PREFIX_XACT, LOG_SUFFIX, 0, archive);
+    }
+    return true;
 }
 
 
