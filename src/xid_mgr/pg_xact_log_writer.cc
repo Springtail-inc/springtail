@@ -11,8 +11,8 @@ PgXactLogWriter::PgXactLogWriter(const std::filesystem::path &base_dir) :
             _base_dir(base_dir)
 {
     // create the base directory for the file if it doesn't exist
-    std::filesystem::create_directories(_base_dir);
     LOG_INFO("Creating directory {}", base_dir);
+    std::filesystem::create_directories(_base_dir);
     auto last_file = fs::find_latest_modified_file(_base_dir, LOG_PREFIX_XACT, LOG_SUFFIX);
     if (!last_file.has_value()) {
         return;
@@ -201,7 +201,7 @@ PgXactLogWriter::flush()
 }
 
 // TODO: need unit tests for this function
-bool
+void
 PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir, uint64_t last_xid, bool archive)
 {
     LOG_INFO("Looking for xid: {}", last_xid);
@@ -281,7 +281,7 @@ PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir, uint64_
         // cleanup all the files
         fs::cleanup_files_from_dir<std::greater<uint64_t>>(base_dir, LOG_PREFIX_XACT, LOG_SUFFIX, 0, archive);
     }
-    return true;
+    return;
 }
 
 

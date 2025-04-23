@@ -77,10 +77,8 @@ public:
      * @param base_dir - directory where xact log files are stored
      * @param last_xid - last allowed xid
      * @param archive - flag to archive or remove the files with the xids greater than the give one
-     * @return true - success
-     * @return false - failure
      */
-    static bool set_last_xid_in_storage(std::filesystem::path base_dir, uint64_t last_xid, bool archive);
+    static void set_last_xid_in_storage(std::filesystem::path base_dir, uint64_t last_xid, bool archive);
 
     /**
      * @brief Flush from memory to file.

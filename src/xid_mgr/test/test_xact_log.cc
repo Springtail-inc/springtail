@@ -234,7 +234,7 @@ namespace {
         }
         ASSERT_EQ(current_xid, iterations * 3 + 10);
         {
-            EXPECT_TRUE(PgXactLogWriter::set_last_xid_in_storage(log_path, current_xid - 20, true));
+            PgXactLogWriter::set_last_xid_in_storage(log_path, current_xid - 20, true);
             PgXactLogReader reader(log_path);
             uint64_t found_xid = 10;
             ASSERT_TRUE(reader.begin());
@@ -303,7 +303,7 @@ namespace {
         }
 
         current_xid = 13;
-        EXPECT_TRUE(PgXactLogWriter::set_last_xid_in_storage(log_path, current_xid, true));
+        PgXactLogWriter::set_last_xid_in_storage(log_path, current_xid, true);
         {
             PgXactLogReader reader(log_path);
             ASSERT_TRUE(reader.begin());
@@ -415,7 +415,7 @@ namespace {
             writer.log(109, 19, true);
             writer.log(110, 20, true);
         }
-        EXPECT_TRUE(PgXactLogWriter::set_last_xid_in_storage(log_path, 15, true));
+        PgXactLogWriter::set_last_xid_in_storage(log_path, 15, true);
         {
             PgXactLogReader reader(log_path);
 

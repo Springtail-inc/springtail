@@ -47,7 +47,20 @@ public:
      */
     uint64_t get_committed_xid(uint64_t db_id, uint64_t schema_xid);
 
-    void cleanup(uint64_t db_id, uint64_t min_timestamp, bool archive_logs);
+    /**
+     * @brief Cleanup xact logs with timestamp id less than given timestamp
+     *
+     * @param db_id database id
+     * @param min_timestamp minimum timestamp id of xact logs
+     */
+    void cleanup(uint64_t db_id, uint64_t min_timestamp);
+
+    /**
+     * @brief Rotate database xact log to the new timestamp id
+     *
+     * @param db_id database id
+     * @param timestamp timestamp id
+     */
     void rotate(uint64_t db_id, uint64_t timestamp);
 
 private:
@@ -73,7 +86,9 @@ private:
          * @param db_id - database id
          * @param base_dir - parent directory of all transaction logs
          */
-        DBXactLogData(uint64_t db_id, const std::filesystem::path &base_dir);
+        DBXactLogData(uint64_t db_id, const std::filesystem::path &base_dir) :
+                      _xact_log(base_dir / std::to_string(db_id)),
+                      _db_id(db_id) {}
 
         /**
          * @brief Record mapping from pg_xid to xid with some attributes
@@ -130,6 +145,7 @@ private:
 
     std::shared_mutex _mutex;                   ///< mutex for access control to transaction log data
     std::map<uint64_t, DBXactLogData> _xact_log_data;   ///< map of database id to transaction log data
+    bool _archive_logs;                         ///< log archiving flag
 
     /**
      * @brief Record new xid for given database

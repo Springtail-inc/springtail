@@ -51,12 +51,8 @@ main(int argc, char **argv)
 
     std::filesystem::path db_path = base_dir + "/" + std::to_string(db_id);
 
-    int ret = 0;
-    if (!PgXactLogWriter::set_last_xid_in_storage(db_path, xid, archive)) {
-        std::cout << "Failed to roll xid back to " << xid << std::endl;
-        ret = 1;
-    }
+    PgXactLogWriter::set_last_xid_in_storage(db_path, xid, archive);
 
     springtail_shutdown();
-    return ret;
+    return 0;
 }

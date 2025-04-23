@@ -33,6 +33,8 @@ XidMgrServer::XidMgrServer() {
 
     _service = std::make_unique<GrpcXidMgrService>(*this);
     _grpc_server_manager.addService(_service.get());
+
+    _archive_logs = Json::get_or<bool>(json, "archive_logs", false);
 }
 
 void
@@ -102,12 +104,12 @@ XidMgrServer::_record_xid_change(uint64_t db_id, uint32_t pg_xid, uint64_t xid, 
 }
 
 void
-XidMgrServer::cleanup(uint64_t db_id, uint64_t min_timestamp, bool archive_logs)
+XidMgrServer::cleanup(uint64_t db_id, uint64_t min_timestamp)
 {
     LOG_DEBUG(LOG_XID_MGR, "Cleaning up database {} with min_timestamp {}", db_id, min_timestamp);
     std::shared_lock read_lock(_mutex);
     auto db_id_to_log_data = _find_or_add(db_id, read_lock);
-    db_id_to_log_data->second.cleanup(min_timestamp, archive_logs);
+    db_id_to_log_data->second.cleanup(min_timestamp, _archive_logs);
 }
 
 void
@@ -125,20 +127,19 @@ XidMgrServer::_find_or_add(uint64_t db_id, std::shared_lock<std::shared_mutex> &
     auto it = _xact_log_data.find(db_id);
     if (it == _xact_log_data.end()) {
         read_lock.unlock();
+
         std::unique_lock write_lock(_mutex);
+        // this will sanitize existing logs for recovery, if there are any records at the end with
+        // real_commit set to false, it will remove those, so that the log can be written from
+        // the last real commit
+        PgXactLogWriter::set_last_xid_in_storage(_base_path / std::to_string(db_id), std::numeric_limits<uint64_t>::max(), _archive_logs);
         auto result = _xact_log_data.emplace(std::piecewise_construct, std::forward_as_tuple(db_id), std::forward_as_tuple(db_id, _base_path));
         it = result.first;
         write_lock.unlock();
+
         read_lock.lock();
     }
     return it;
-}
-
-XidMgrServer::DBXactLogData::DBXactLogData(uint64_t db_id, const std::filesystem::path &base_dir):
-                                           _xact_log(base_dir / std::to_string(db_id)),
-                                           _db_id(db_id) {
-    std::filesystem::create_directories(base_dir);
-    LOG_INFO("Creating directory {} for db_id={}", base_dir, _db_id);
 }
 
 void
