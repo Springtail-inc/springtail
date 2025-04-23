@@ -218,18 +218,11 @@ def create_schema_and_tables(conn, csv_file: str, schema_name: str):
     for i in range(NUM_TABLES_PER_SCHEMA):
         table_name = f"table_{i}_{random.randint(1000, 9999)}"
 
-        try:
-            create_table(conn, schema_name, table_name, csv_file)
-        except Exception as e:
-            print(f"[-] Got an error while creating table {schema_name}.{table_name}: {e}")
-        try:
-            create_index(conn, schema_name, table_name, csv_file)
-        except Exception as e:
-            print(f"[-] Got an error while creating index {schema_name}.{table_name}: {e}")
-        try:
-            insert_data(conn, schema_name, table_name, csv_file)
-        except Exception as e:
-            print(f"[-] Got an error while inserting data into {schema_name}.{table_name}: {e}")
+        for func in [create_table, create_index, insert_data]:
+            try:
+                func(conn, schema_name, table_name, csv_file)
+            except Exception as e:
+                print(f"[-] Got an error while {func.__name__} {schema_name}.{table_name}: {e}")
 
     return schema_name
 
