@@ -440,8 +440,7 @@ namespace springtail::committer {
             auto next_extent_result = table->read_extent_from_disk(next_eid);
             auto next_extent = next_extent_result.first.value_or(nullptr);
 
-            // If next_extent is available, invalidate previous XID's extents first and then populate all the
-            // extents of the next XID
+            // If next_extent is available, invalidate previous extent first and then populate using next_extent
             while (next_extent) {
                 // Get the table at the next XID
                 // and fetch the page for the extent
