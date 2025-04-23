@@ -466,8 +466,8 @@ namespace springtail::committer {
                 indexer_helpers::populate_index_for_page(next_eid, next_page, idx_state._root, idx_cols, table->schema());
 
                 // Get the next extent if next_offset is present, else exit the reconciliation
-                next_eid = next_extent_result.second.value_or(-1);
-                if (next_eid != -1) {
+                next_eid = next_extent_result.second.value_or(0);
+                if (next_eid > 0) {
                     next_extent_result = table->read_extent_from_disk(next_eid);
                     next_extent = next_extent_result.first.value_or(nullptr);
                 } else {
