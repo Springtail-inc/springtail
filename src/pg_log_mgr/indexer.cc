@@ -436,9 +436,10 @@ namespace springtail::committer {
 
             // Get the next_extent from disk using the stats last offset
             auto table = TableMgr::get_instance()->get_table(db_id, idx_state._tid, idx_state._idx._xid);
-            auto next_extent_result = table->read_extent_from_disk(table->get_stats().end_offset);
-            auto next_extent = next_extent_result.first.value_or(nullptr);
             auto next_eid = table->get_stats().end_offset;
+            auto next_extent_result = table->read_extent_from_disk(next_eid);
+            auto next_extent = next_extent_result.first.value_or(nullptr);
+
             // If next_extent is available, invalidate previous XID's extents first and then populate all the
             // extents of the next XID
             while (next_extent) {
@@ -448,52 +449,29 @@ namespace springtail::committer {
                 table = TableMgr::get_instance()->get_table(db_id, idx_state._tid, next_xid);
                 auto next_page = StorageCache::get_instance()->get(table->get_table_dir() / constant::DATA_FILE, next_eid, next_xid);
 
-                // If previous offset exists, lets invalidate them first
+                // If previous offset exists, lets invalidate that first
                 if (auto prev_eid = next_page->header().prev_offset; prev_eid != constant::UNKNOWN_EXTENT) {
-                    bool invalidated_all_prev_extents = false;
 
                     // Get the previous extent and its schema
-                    auto prev_extent_result = table->read_extent_from_disk(prev_eid);
-                    auto prev_extent = prev_extent_result.first.value_or(nullptr);
-                    auto prev_xid = prev_extent->header().xid;
+                    auto [prev_extent, tmp_next_eid] = table->read_extent_from_disk(prev_eid);
+                    auto prev_xid = prev_extent.value()->header().xid;
                     auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(prev_xid));
+                    auto prev_page = StorageCache::get_instance()->get(table->get_table_dir() / constant::DATA_FILE, prev_eid, prev_xid);
 
-                    // invalidate and fetch previous extents of the previous XID
-                    while (!invalidated_all_prev_extents) {
-                        auto prev_page = StorageCache::get_instance()->get(table->get_table_dir() / constant::DATA_FILE, prev_eid, prev_xid);
-
-                        // and invalidate index for the rows in the page
-                        indexer_helpers::invalidate_index_for_page(prev_eid, prev_page, idx_state._root, idx_cols, prev_schema);
-
-                        prev_eid = prev_page->header().prev_offset;
-                        prev_extent_result = table->read_extent_from_disk(prev_eid);
-                        prev_extent = prev_extent_result.first.value_or(nullptr);
-
-                        // If no previous extent, or if the previous extent belongs to different XID,
-                        // stop invalidating
-                        if (!prev_extent || prev_extent->header().xid != prev_xid) {
-                            invalidated_all_prev_extents = true;
-                        }
-                    }
+                    // and invalidate index for the rows in the prev page
+                    indexer_helpers::invalidate_index_for_page(prev_eid, prev_page, idx_state._root, idx_cols, prev_schema);
                 }
 
-                // Populate using all the extents at the next XID
-                bool populated_all_extents = false;
-                while (!populated_all_extents) {
-                    // Populate index for the rows in the next page
-                    indexer_helpers::populate_index_for_page(next_eid, next_page, idx_state._root, idx_cols, table->schema());
+                // Populate index for the rows in the next page
+                indexer_helpers::populate_index_for_page(next_eid, next_page, idx_state._root, idx_cols, table->schema());
 
-                    next_eid = next_extent_result.second.value_or(0);
+                // Get the next extent if next_offset is present, else exit the reconciliation
+                next_eid = next_extent_result.second.value_or(-1);
+                if (next_eid != -1) {
                     next_extent_result = table->read_extent_from_disk(next_eid);
                     next_extent = next_extent_result.first.value_or(nullptr);
-
-                    // If there is no next extent, or the next extent's XID is different,
-                    // stop populating
-                    if (!next_extent || next_extent->header().xid != next_xid) {
-                        populated_all_extents = true;
-                        break;
-                    }
-                    next_page = StorageCache::get_instance()->get(table->get_table_dir() / constant::DATA_FILE, next_eid, next_xid);
+                } else {
+                    break;
                 }
             }
 
