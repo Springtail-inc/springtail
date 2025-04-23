@@ -60,7 +60,7 @@ def time_and_log_query(conn, _type: str, query: str, csv_file: str, params=None)
         cur.execute("BEGIN;")
 
         if params:
-            cur.execute(query, params)
+            cur.executemany(query, params)
         else:
             cur.execute(query)
 
@@ -203,10 +203,7 @@ def insert_data(conn, schema_name: str, table_name: str, csv_file: str):
                     values.append(None)
             values_list.append(tuple(values))
 
-        # Execute the batch insert
-        with conn.cursor() as cur:
-            cur.executemany(insert_sql, values_list)
-            conn.commit()
+        time_and_log_query(conn, "insert_data", insert_sql, csv_file, values_list)
 
         remaining_inserts -= batch_size
         print(f"[+] Inserted batch of {batch_size} rows into {schema_name}.{table_name} (remaining: {remaining_inserts})")
@@ -225,7 +222,7 @@ def create_schema_and_tables(conn, csv_file: str, schema_name: str):
             create_index(conn, schema_name, table_name, csv_file)
             insert_data(conn, schema_name, table_name, csv_file)
         except Exception as e:
-            print(f"[-] Failed to create table {schema_name}.{table_name}: {e}")
+            print(f"[-] Got an error while {schema_name}.{table_name}: {e}")
 
     return schema_name
 
