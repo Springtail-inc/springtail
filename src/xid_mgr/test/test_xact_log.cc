@@ -491,4 +491,64 @@ namespace {
             ASSERT_FALSE(reader.next());
         }
     }
+
+    TEST_F(XactLogReadWrite_Test, LogRecoveryWithCleanupTest)
+    {
+        uint64_t log_timestamp = 0;
+
+        {
+            PgXactLogWriter writer(log_path);
+
+            log_timestamp = get_log_timestamp();
+            writer.rotate(log_timestamp);
+
+            writer.log(101, 11, true);
+            writer.log(102, 12, true);
+            writer.log(103, 13, true);
+            writer.log(104, 14, true);
+            writer.log(106, 16, true);
+            writer.log(107, 17, true);
+            writer.log(108, 18, true);
+            writer.log(109, 19, false);
+            writer.log(110, 20, false);
+        }
+        PgXactLogWriter::set_last_xid_in_storage(log_path, std::numeric_limits<uint64_t>::max(), true);
+        {
+            PgXactLogWriter writer(log_path);
+            EXPECT_EQ(writer.get_last_xid(), 18);
+        }
+        {
+            PgXactLogReader reader(log_path);
+
+            ASSERT_TRUE(reader.begin());
+            ASSERT_EQ(reader.get_pg_xid(), 101);
+            ASSERT_EQ(reader.get_xid(), 11);
+
+            ASSERT_TRUE(reader.next());
+            ASSERT_EQ(reader.get_pg_xid(), 102);
+            ASSERT_EQ(reader.get_xid(), 12);
+
+            ASSERT_TRUE(reader.next());
+            ASSERT_EQ(reader.get_pg_xid(), 103);
+            ASSERT_EQ(reader.get_xid(), 13);
+
+            ASSERT_TRUE(reader.next());
+            ASSERT_EQ(reader.get_pg_xid(), 104);
+            ASSERT_EQ(reader.get_xid(), 14);
+
+            ASSERT_TRUE(reader.next());
+            ASSERT_EQ(reader.get_pg_xid(), 106);
+            ASSERT_EQ(reader.get_xid(), 16);
+
+            ASSERT_TRUE(reader.next());
+            ASSERT_EQ(reader.get_pg_xid(), 107);
+            ASSERT_EQ(reader.get_xid(), 17);
+
+            ASSERT_TRUE(reader.next());
+            ASSERT_EQ(reader.get_pg_xid(), 108);
+            ASSERT_EQ(reader.get_xid(), 18);
+
+            ASSERT_FALSE(reader.next());
+        }
+    }
 }

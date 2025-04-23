@@ -776,7 +776,10 @@ namespace springtail::pg_log_mgr {
         uint64_t min_timestamp = _xid_ts_tracker->get_min_timestamp();
         fs::cleanup_files_from_dir(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX, min_timestamp, _archive_logs);
         fs::cleanup_files_from_dir(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL_STREAMING, PgLogMgr::LOG_SUFFIX, min_timestamp, _archive_logs);
-        xid_mgr::XidMgrServer::get_instance()->cleanup(_db_id, min_timestamp, _archive_logs);
+        if (min_timestamp == 0) {
+            min_timestamp = _pg_log_timestamp;
+        }
+        xid_mgr::XidMgrServer::get_instance()->cleanup(_db_id, min_timestamp);
     }
 
     void
@@ -788,11 +791,11 @@ namespace springtail::pg_log_mgr {
         //       the xact_log
         if (_pg_log_timestamp < msg->pg_log_timestamp) {
             LOG_DEBUG(LOG_PG_LOG_MGR, "Logs rollover to the new log timestamp id: {}", msg->pg_log_timestamp);
+            _remove_old_log_files();
             _pg_log_timestamp = msg->pg_log_timestamp;
             if (_is_streaming) {
                 fs::create_empty_file_with_timestamp(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL_STREAMING, PgLogMgr::LOG_SUFFIX, _pg_log_timestamp);
             }
-            _remove_old_log_files();
         }
         _is_streaming = msg->is_streaming;
         // handle the message
