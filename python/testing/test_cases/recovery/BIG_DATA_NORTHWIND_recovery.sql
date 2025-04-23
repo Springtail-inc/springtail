@@ -3437,6 +3437,8 @@ INSERT INTO suppliers VALUES (28, 'Gai pâturage', 'Eliane Noz', 'Sales Represen
 INSERT INTO suppliers VALUES (29, 'Forêts d''érables', 'Chantal Goulet', 'Accounting Manager', '148 rue Chasseur', 'Ste-Hyacinthe', 'Québec', 'J2S 7S8', 'Canada', '(514) 555-2955', '(514) 555-2921', NULL);
 COMMIT;
 
+### recovery_point
+
 BEGIN;
 INSERT INTO territories VALUES ('01581', 'Westboro', 1);
 INSERT INTO territories VALUES ('01730', 'Bedford', 1);
@@ -3630,8 +3632,7 @@ ALTER TABLE ONLY employees
     ADD CONSTRAINT fk_employees_employees FOREIGN KEY (reports_to) REFERENCES employees;
 COMMIT;
 
-### sync
-### force_recovery 3
+### force_recovery
 
 ## verify
 SELECT * FROM customer_customer_demo;

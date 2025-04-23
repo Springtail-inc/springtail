@@ -158,6 +158,7 @@ INSERT INTO departments(department_id,department_name,location_id) VALUES (10,'F
 INSERT INTO departments(department_id,department_name,location_id) VALUES (11,'Accounting',1700);
 COMMIT;
 
+### recovery_point
 
 BEGIN;
 INSERT INTO employees(employee_id,first_name,last_name,email,phone_number,hire_date,job_id,salary,manager_id,department_id) VALUES (100,'Steven','King','steven.king@sqltutorial.org','515.123.4567','1987-06-17',4,24000.00,NULL,9);
@@ -235,8 +236,7 @@ INSERT INTO dependents(dependent_id,first_name,last_name,relationship,employee_i
 INSERT INTO dependents(dependent_id,first_name,last_name,relationship,employee_id) VALUES (30,'Sandra','Taylor','Child',176);
 COMMIT;
 
-### sync
-### force_recovery 2
+### force_recovery
 
 ## verify
 SELECT * FROM regions ORDER BY region_id;

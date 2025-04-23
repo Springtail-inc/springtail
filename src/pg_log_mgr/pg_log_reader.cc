@@ -820,6 +820,11 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::INSERT:
             {
                 auto &insert = std::get<PgMsgInsert>(msg->msg);
+                if (_current_batch == nullptr) {
+                    LOG_DEBUG(LOG_PG_LOG_MGR, "Skip INSERT because no batch tid={}", insert.rel_id);
+                    break;
+                }
+
                 int32_t pg_xid = (msg->is_streaming) ? insert.xid : _current_xact->xid;
                 LOG_DEBUG(LOG_PG_LOG_MGR, "INSERT pg_xid={} tid={}", pg_xid, insert.rel_id);
 
@@ -831,6 +836,11 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::DELETE:
             {
                 auto &remove = std::get<PgMsgDelete>(msg->msg);
+                if (_current_batch == nullptr) {
+                    LOG_DEBUG(LOG_PG_LOG_MGR, "Skip DELETE because no batch tid={}", remove.rel_id);
+                    break;
+                }
+
                 int32_t pg_xid = (msg->is_streaming) ? remove.xid : _current_xact->xid;
                 LOG_DEBUG(LOG_PG_LOG_MGR, "DELETE pg_xid={} tid={}", pg_xid, remove.rel_id);
 
@@ -842,6 +852,11 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::UPDATE:
             {
                 auto &update = std::get<PgMsgUpdate>(msg->msg);
+                if (_current_batch == nullptr) {
+                    LOG_DEBUG(LOG_PG_LOG_MGR, "Skip UPDATE because no batch tid={}", update.rel_id);
+                    break;
+                }
+
                 int32_t pg_xid = (msg->is_streaming) ? update.xid : _current_xact->xid;
                 LOG_DEBUG(LOG_PG_LOG_MGR, "UPDATE pg_xid={} tid={}", pg_xid, update.rel_id);
 
@@ -863,6 +878,10 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::TRUNCATE:
             {
                 LOG_DEBUG(LOG_PG_LOG_MGR, "TRUNCATE pg_xid={}", this->get_current_xid());
+                if (_current_batch == nullptr) {
+                    LOG_DEBUG(LOG_PG_LOG_MGR, "Skip TRUNCATE because no batch");
+                    break;
+                }
 
                 // note: the current XID is only used to determine table existence
                 _current_batch->truncate(this->get_current_xid(),
@@ -1149,6 +1168,11 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::_process_ddl(std::optional<uint32_t> table_oid, uint32_t oid, int32_t pg_xid, bool is_streaming, PgMsgPtr msg)
     {
+        if (_current_batch == nullptr) {
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Skip DDL because no batch type={}", static_cast<char>(msg->msg_type));
+            return;
+        }
+
         int32_t pg_xid_txn;
         PgTransactionPtr xact;
         if (!is_streaming) {

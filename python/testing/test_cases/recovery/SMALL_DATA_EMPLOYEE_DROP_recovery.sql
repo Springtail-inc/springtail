@@ -35,6 +35,8 @@ INSERT INTO regions(region_id,region_name) VALUES (3,'Asia');
 INSERT INTO regions(region_id,region_name) VALUES (4,'Middle East and Africa');
 COMMIT;
 
+### recovery_point
+
 BEGIN;
 INSERT INTO countries(country_id,country_name,region_id) VALUES ('AR','Argentina',2);
 INSERT INTO countries(country_id,country_name,region_id) VALUES ('AU','Australia',3);
@@ -89,8 +91,7 @@ BEGIN;
 DROP TABLE IF EXISTS jobs;
 COMMIT;
 
-### sync
-### force_recovery 3
+### force_recovery
 
 ## verify
 
