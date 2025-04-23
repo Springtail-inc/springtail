@@ -38,7 +38,7 @@ namespace {
         void TearDown() override
         {
             // remove the directory
-            // std::filesystem::remove_all(log_path);
+            std::filesystem::remove_all(log_path);
         }
 
         static uint64_t get_log_timestamp()
