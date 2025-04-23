@@ -410,8 +410,8 @@ namespace indexer_helpers {
         }
     }
 
-    StorageCache::SafePagePtr
-    Table::read_page_from_disk(uint64_t extent_id) const
+    std::pair<std::optional<std::shared_ptr<Extent>>, std::optional<uint64_t>>
+    Table::read_extent_from_disk(uint64_t extent_id) const
     {
         // XXX: When an extent is asked from the page,
         // and if the extent's XID is different than the XID passed
@@ -420,10 +420,10 @@ namespace indexer_helpers {
         auto data_file_handle = IOMgr::get_instance()->open(_table_dir / constant::DATA_FILE, IOMgr::IO_MODE::READ, true);
         auto response = data_file_handle->read(extent_id);
         if (response->data.empty()) {
-            return StorageCache::get_instance()->get(_table_dir / constant::DATA_FILE, constant::UNKNOWN_EXTENT, _xid);
+            return {std::nullopt, std::nullopt};
         } else {
             auto extent = std::make_shared<Extent>(response->data);
-            return StorageCache::get_instance()->get(_table_dir / constant::DATA_FILE, extent_id, extent->header().xid);
+            return {extent, response->next_offset};
         }
     }
 

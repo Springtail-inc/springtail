@@ -402,9 +402,11 @@ namespace indexer_helpers {
         /**
          * Reads an extent from the disk and returns it.
          * @param extent_id The extent ID to read.
-         * @return A pointer to the requested page.
+         * @return std::pair where:
+         *         - first - std::optional<std::shared_ptr<Extent>> pointer to the retrieved extent
+         *         - second - std::optional<uint64_t> Next offset
          */
-        StorageCache::SafePagePtr read_page_from_disk(uint64_t extent_id) const;
+        std::pair<std::optional<std::shared_ptr<Extent>>, std::optional<uint64_t>> read_extent_from_disk(uint64_t extent_id) const;
 
         /**
          * @brief Get table stats
@@ -419,6 +421,14 @@ namespace indexer_helpers {
          */
         ExtentSchemaPtr schema() const {
             return _schema;
+        }
+
+        /**
+         * @brief Get table dir path
+         * @return std::filesystem::path
+         */
+        std::filesystem::path get_table_dir() const {
+            return _table_dir;
         }
 
     protected:
