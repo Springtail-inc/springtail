@@ -40,6 +40,7 @@ namespace springtail {
 
     // log manager histogram metrics
     constexpr std::string_view PG_LOG_MGR_LOG_READER_LATENCIES = "pg_log_mgr_log_reader_latencies";
+    constexpr std::string_view PG_LOG_MGR_BTREE_LATENCIES = "pg_log_mgr_btree_write_latencies";
 
     namespace metrics {
         inline const std::vector<std::pair<std::string_view, std::string_view>> _counter_metrics = {
@@ -83,7 +84,8 @@ namespace springtail {
             {STORAGE_CACHE_DROP_LATENCIES, "Latency of storage cache drop calls"},
 
             // log manager histogram metrics
-            {PG_LOG_MGR_LOG_READER_LATENCIES, "Latency between when Postgres committed the transaction and when we process it in the log reader"}
+            {PG_LOG_MGR_LOG_READER_LATENCIES, "Latency between when Postgres committed the transaction and when we process it in the log reader"},
+            {PG_LOG_MGR_BTREE_LATENCIES, "Latency between postgres commit and btree write completion"}
         };
     }
 }

@@ -31,13 +31,6 @@ namespace springtail::committer {
         // perform cleanup for any Committer threads in a previous run
         cleanup();
         _create_indexer();
-        auto meter = metrics::Provider::GetMeterProvider()->GetMeter("committer");
-        _btree_write_latencies = std::shared_ptr<metrics::Histogram<double>>(
-            meter
-                ->CreateDoubleHistogram(
-                    "btree_write_latencies",
-                    "Latency between postgres commit and btree write completion", "ms")
-                .release());
 
         auto coordinator = Coordinator::get_instance();
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
@@ -121,11 +114,6 @@ namespace springtail::committer {
                 //       it is ahead, then we commit at the completed XID.  If it is the same then
                 //       we commit at the provided XID.
                 auto committed_i = _committed_xids.find(db_id);
-                if (committed_i == _committed_xids.end()) {
-                    LOG_DEBUG(LOG_COMMITTER, "No committed xid found for db: {}", db_id);
-                } else {
-                    LOG_DEBUG(LOG_COMMITTER, "Last committed xid found for db: {}, xid: {}", db_id, committed_i->second);
-                }
                 if (committed_i == _committed_xids.end() || completed_xid == committed_i->second) {
                     completed_xid = result->swap().xid();
                 }
@@ -528,7 +516,7 @@ namespace springtail::committer {
             // log how long it took to process this table
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - min_commit_ts->to_system_time());
-            _btree_write_latencies->Record(duration.count(), _context);
+            open_telemetry::OpenTelemetry::record_histogram(PG_LOG_MGR_BTREE_LATENCIES, duration.count());
             LOG_DEBUG(LOG_COMMITTER, "Processed table {} in {} milliseconds", tid, duration.count());
             LOG_ERROR("Processed table {} in {} milliseconds", tid, duration.count());
         }

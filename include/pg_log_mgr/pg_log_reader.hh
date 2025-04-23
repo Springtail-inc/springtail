@@ -374,8 +374,5 @@ namespace springtail::pg_log_mgr {
          * @param reconcile_xid XID for which index reconciliation to be done
          */
         void _process_index_reconciliation(const uint64_t db_id, const uint64_t reconcile_xid);
-
-        std::shared_ptr<opentelemetry::metrics::Histogram<double>> _postgres_log_reader_latencies;
-        opentelemetry::context::Context _context;
     };
 } // namespace springtail::pg_log_mgr

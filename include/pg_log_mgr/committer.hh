@@ -23,11 +23,7 @@
 #include <sys_tbl_mgr/table.hh>
 #include <write_cache/write_cache_index.hh>
 
-#include <opentelemetry/context/context.h>
-#include <opentelemetry/metrics/meter.h>
-
 namespace springtail::committer {
-    namespace metrics = opentelemetry::metrics;
 
     /**
      * The Committer is responsible for reading modifications from the write cache and applying them
@@ -152,8 +148,5 @@ namespace springtail::committer {
         /** Indexer
          */
         std::unique_ptr<Indexer> _indexer;
-
-        std::shared_ptr<metrics::Histogram<double>> _btree_write_latencies;
-        opentelemetry::context::Context _context;
     };
 }
