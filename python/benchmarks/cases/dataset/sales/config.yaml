@@ -1,0 +1,8 @@
+test: 
+  - select_sales_by_customer.sql
+  - basic_join.sql
+  - selective_join.sql
+  - count_sales_by_customer.sql
+  - count_sales.sql
+  - count_customers.sql
+  - count_sales_by_product.sql
