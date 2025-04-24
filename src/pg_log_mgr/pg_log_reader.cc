@@ -937,7 +937,7 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::COPY_SYNC:
             {
                 const auto &sync_msg = std::get<PgMsgCopySync>(msg->msg);
-                _check_sync_commit(_db_id, sync_msg.pg_xid, sync_msg.target_xid);
+                _check_sync_commit(_db_id, sync_msg.pg_xid);
                 break;
             }
         case PgMsgEnum::RECONCILE_INDEX:
@@ -954,8 +954,7 @@ namespace springtail::pg_log_mgr {
 
     void
     PgLogReader::_check_sync_commit(uint64_t db_id,
-                                    int32_t pg_xid,
-                                    uint64_t xid)
+                                    int32_t pg_xid)
     {
         // check if we need to perform a table swap / commit before proceeding
         auto xid_msg = SyncTracker::get_instance()->check_commit(db_id, pg_xid);
@@ -971,6 +970,8 @@ namespace springtail::pg_log_mgr {
 
             // issue the swap/commit at the GC-2 prior to processing this xid
             xid_msg->set_timestamp(_pg_log_timestamp);
+            uint64_t xid = get_next_xid();
+            xid_msg->swap().set_xid(xid);
             LOG_DEBUG(LOG_PG_LOG_MGR, "Issue COMMIT/SWAP message to committer on {} @ {}, type {}", db_id, xid, std::string(1, xid_msg->type()));
             _committer_queue->push(xid_msg);
         }
@@ -1014,6 +1015,9 @@ namespace springtail::pg_log_mgr {
 
         CHECK_EQ(xact->type, PgTransaction::TYPE_COMMIT);
 
+        // check if we need to perform a table swap / commit before proceeding
+        _check_sync_commit(_db_id, xact->xid);
+
         // assign a Springtail XID to this transaction
         uint64_t xid = this->get_next_xid();
 
@@ -1035,9 +1039,6 @@ namespace springtail::pg_log_mgr {
         // clear the current batch
         _batch_map.erase(xact->xid);
         _current_batch = nullptr;
-
-        // check if we need to perform a table swap / commit before proceeding
-        _check_sync_commit(_db_id, xact->xid, xid);
 
         // note: this check should only be false when re-processing records during recovery
         if (xid > _committed_xid) {
@@ -1102,6 +1103,9 @@ namespace springtail::pg_log_mgr {
 
         CHECK_EQ(xact->type, PgTransaction::TYPE_COMMIT);
 
+        // check if we need to perform a table swap / commit before proceeding
+        _check_sync_commit(_db_id, xact->xid);
+
         // assign the transaction a Springtail XID
         uint64_t xid = this->get_next_xid();
 
@@ -1121,9 +1125,6 @@ namespace springtail::pg_log_mgr {
 
         // free the batch
         _batch_map.erase(commit_msg.xid);
-
-        // check if we need to perform a table swap / commit before proceeding
-        _check_sync_commit(_db_id, xact->xid, xid);
 
         if (xid > _committed_xid) {
             // message the Committer

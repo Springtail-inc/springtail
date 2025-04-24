@@ -52,6 +52,10 @@ namespace springtail::committer {
                 return _xid;
             }
 
+            void set_xid(uint64_t xid) {
+                _xid = xid;
+            }
+
             const std::vector<TableInfo> &tids() const {
                 return _tids;
             }
@@ -153,6 +157,10 @@ namespace springtail::committer {
 
         /** A getter for the SwapMsg. */
         const SwapMsg &swap() const {
+            return std::get<SwapMsg>(*_msg);
+        }
+
+        SwapMsg &swap() {
             return std::get<SwapMsg>(*_msg);
         }
 

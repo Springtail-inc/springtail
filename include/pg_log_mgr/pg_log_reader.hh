@@ -367,7 +367,7 @@ namespace springtail::pg_log_mgr {
         void _process_ddl(std::optional<uint32_t> table_oid, uint32_t oid, int32_t xid, bool is_streaming, PgMsgPtr msg);
 
         /** Check if we need to perform a table swap / commit and notify the Committer if so. */
-        void _check_sync_commit(uint64_t db_id, int32_t pg_xid, uint64_t xid);
+        void _check_sync_commit(uint64_t db_id, int32_t pg_xid);
 
         /** @brief Notify the Committer for an index reconciliation
          * @param db_id DB for which reconcile to be notified
