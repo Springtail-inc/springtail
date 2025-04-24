@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
-#include <memory>
+
 #include <common/init.hh>
+
 #include <proxy/database.hh>
 #include <proxy/server_session.hh>
 
@@ -8,6 +9,16 @@ using namespace springtail;
 using namespace springtail::pg_proxy;
 
 namespace {
+
+    class TestEnvironment : public ::testing::Environment {
+    public:
+        virtual void SetUp() {
+            springtail_init_test();
+        }
+        virtual void TearDown() {
+            springtail_shutdown();
+        }
+    };
 
     /** Mock server session */
     class TestServerSession : public ServerSession {
@@ -33,7 +44,7 @@ namespace {
     public:
 
         TestDatabaseInstance(Session::Type type, const std::string &hostname, const std::string &prefix, int port)
-            : DatabaseInstance(type, hostname, prefix, port) {}
+            : DatabaseInstance(0, 0, 0, type, hostname, prefix, port) {}
 
         /** override allocate session (create a TestServerSession) to avoid creating a connection */
         ServerSessionPtr allocate_session(UserPtr user,
@@ -95,20 +106,11 @@ namespace {
     /** Test DatabasePool Class */
     class DatabasePoolTest : public ::testing::Test {
     protected:
-        static void SetUpTestSuite()
-        {
-            springtail_init_test();
-        }
-
-        static void TearDownTestSuite()
-        {
-            springtail_shutdown();
-        }
-
         void SetUp() override
         {
-            pool = std::make_shared<DatabasePool>();
-            // Create 3 sessions: type, id, db_id, database name, username
+            pool = std::make_shared<DatabasePool>(0, 0, 0);
+
+            // Create 4 sessions: type, id, db_id, database name, username
             session1 = std::make_shared<TestServerSession>(Session::Type::PRIMARY, 1, 1, "db1", "user1");
             session2 = std::make_shared<TestServerSession>(Session::Type::PRIMARY, 2, 1, "db1", "user1");
             session3 = std::make_shared<TestServerSession>(Session::Type::PRIMARY, 3, 2, "db2", "user1");
@@ -121,6 +123,58 @@ namespace {
             session2->set_instance(instance1);
             session3->set_instance(instance2);
             session4->set_instance(instance2);
+        }
+
+        void create_sessions(std::vector<uint64_t> &db_ids, std::vector<std::string> &user_names, std::vector<TestServerSessionPtr> &sessions)
+        {
+            uint64_t id = 0;
+            for (auto &db_id: db_ids) {
+                for (auto &user_name: user_names) {
+                    id++;
+                    TestServerSessionPtr new_session = std::make_shared<TestServerSession>(Session::Type::PRIMARY, id, db_id, "db" + std::to_string(db_id), user_name);
+                    sessions.push_back(new_session);
+                }
+            }
+            EXPECT_EQ(sessions.size(), db_ids.size() * user_names.size());
+        }
+
+        void add_sessions(DatabasePoolPtr pool,
+                          std::vector<TestServerSessionPtr>::iterator it_begin,
+                          std::vector<TestServerSessionPtr>::iterator it_end)
+        {
+            for (auto &it = it_begin; it != it_end; ++it) {
+                pool->add_session(*it);
+            }
+            EXPECT_LE(pool->size(), pool->get_size_limit());
+        }
+
+        void test_timeout_limit(std::vector<uint64_t> &db_ids, std::vector<std::string> &user_names)
+        {
+            DatabasePoolPtr pool = std::make_shared<DatabasePool>(10, 5, 3);
+
+            EXPECT_EQ(pool->get_size_limit(), 10);
+            EXPECT_EQ(pool->get_timeout_limit(), 5);
+
+            std::vector<TestServerSessionPtr> sessions;
+
+            create_sessions(db_ids, user_names, sessions);
+            add_sessions(pool, sessions.begin(), sessions.end());
+            EXPECT_EQ(pool->size(), std::min(db_ids.size() * user_names.size(), pool->get_size_limit()));
+
+            sleep(4);
+
+            TestServerSessionPtr next_session1 = std::make_shared<TestServerSession>(Session::Type::PRIMARY, 10, 1, "db1", "user1");
+            pool->add_session(next_session1);
+            EXPECT_EQ(pool->size(), pool->get_timeout_limit());
+
+            TestServerSessionPtr next_session2 = std::make_shared<TestServerSession>(Session::Type::PRIMARY, 10, 1, "db1", "user2");
+            pool->add_session(next_session2);
+            EXPECT_EQ(pool->size(), pool->get_timeout_limit());
+
+            std::vector<TestServerSessionPtr> more_sessions;
+            create_sessions(db_ids, user_names, more_sessions);
+            add_sessions(pool, more_sessions.begin(), more_sessions.end());
+            EXPECT_EQ(pool->size(), std::min(db_ids.size() * user_names.size() + 2, pool->get_size_limit()));
         }
 
         DatabasePoolPtr pool;
@@ -173,33 +227,89 @@ namespace {
         EXPECT_NE(non_null_session, nullptr);
     }
 
-    TEST_F(DatabasePoolTest, EvictBySession) {
-        pool->add_session(session1);
-        pool->add_session(session2);
-        pool->add_session(session3);
-        pool->add_session(session4);
-        pool->evict(session3);
+    TEST_F(DatabasePoolTest, TestAddGetWithLimit) {
+        DatabasePoolPtr pool = std::make_shared<DatabasePool>(10, 0, 0);
 
-        EXPECT_EQ(pool->size(), 3);
+        std::vector<std::string> users = {"user1", "user2", "user3", "user4"};
+        std::vector<uint64_t> database_ids = {1, 2, 3 ,4};
 
-        auto null_session = pool->get_session(2, "user1");
-        EXPECT_EQ(null_session, nullptr);
+        std::vector<TestServerSessionPtr> sessions;
+
+        create_sessions(database_ids, users, sessions);
+        add_sessions(pool, sessions.begin(), sessions.end());
+        EXPECT_EQ(pool->size(), pool->get_size_limit());
+
+        for (auto &user: users) {
+            EXPECT_EQ(pool->get_session(1, user), nullptr);
+        }
+        EXPECT_EQ(pool->get_session(2, "user1"), nullptr);
+        EXPECT_EQ(pool->get_session(2, "user2"), nullptr);
+        ServerSessionPtr session = pool->get_session(2, "user3");
+        EXPECT_EQ(session, sessions[6]);
+        session = pool->get_session(2, "user4");
+        EXPECT_EQ(session, sessions[7]);
+
+        EXPECT_EQ(pool->size(), 8);
     }
 
-    TEST_F(DatabasePoolTest, EvictByInstance) {
-        pool->add_session(session1);
-        pool->add_session(session2);
-        pool->add_session(session3);
-        pool->add_session(session4);
-        pool->evict(instance2);
+    TEST_F(DatabasePoolTest, TestAddGetWithTimeoutLimit) {
+        std::vector<std::string> users = {"user1", "user2", "user3"};
+        std::vector<uint64_t> database_ids = {1, 2, 3};
+        test_timeout_limit(database_ids, users);
+    }
 
-        EXPECT_EQ(pool->size(), 2);
+    TEST_F(DatabasePoolTest, TestAddGetWithSizeAndTimeoutLimit) {
+        std::vector<std::string> users = {"user1", "user2", "user3", "user4"};
+        std::vector<uint64_t> database_ids = {1, 2, 3, 4};
+        test_timeout_limit(database_ids, users);
+    }
 
-        auto null_session = pool->get_session(2, "user1");
-        EXPECT_EQ(null_session, nullptr);
+    TEST_F(DatabasePoolTest, TestDatabaseUserLIFO) {
+        DatabasePoolPtr pool = std::make_shared<DatabasePool>(10, 0, 0);
 
-        auto non_null_session = pool->get_session(1, "user1");
-        EXPECT_NE(non_null_session, nullptr);
+        std::vector<std::string> users = {"user1", "user1", "user1", "user1"};
+        std::vector<uint64_t> database_ids = {1, 2};
+
+        std::vector<TestServerSessionPtr> sessions;
+
+        create_sessions(database_ids, users, sessions);
+        add_sessions(pool, sessions.begin(), sessions.end());
+        EXPECT_EQ(pool->size(), 8);
+        EXPECT_EQ(pool->size(1, "user1"), 4);
+        EXPECT_EQ(pool->size(2, "user1"), 4);
+
+        EXPECT_EQ(pool->get_session(1, "user1"), sessions[3]);
+        EXPECT_EQ(pool->get_session(1, "user1"), sessions[2]);
+        EXPECT_EQ(pool->get_session(1, "user1"), sessions[1]);
+        EXPECT_EQ(pool->get_session(1, "user1"), sessions[0]);
+
+        EXPECT_EQ(pool->get_session(2, "user1"), sessions[7]);
+        EXPECT_EQ(pool->get_session(2, "user1"), sessions[6]);
+        EXPECT_EQ(pool->get_session(2, "user1"), sessions[5]);
+        EXPECT_EQ(pool->get_session(2, "user1"), sessions[4]);
+
+        EXPECT_EQ(pool->size(), 0);
+    }
+
+    TEST_F(DatabasePoolTest, TestDatabaseEvict) {
+        DatabasePoolPtr pool = std::make_shared<DatabasePool>(10, 0, 0);
+
+        std::vector<std::string> users = {"user1", "user1", "user1", "user1"};
+        std::vector<uint64_t> database_ids = {1, 2};
+
+        std::vector<TestServerSessionPtr> sessions;
+
+        create_sessions(database_ids, users, sessions);
+        add_sessions(pool, sessions.begin(), sessions.end());
+        EXPECT_EQ(pool->size(), 8);
+
+        pool->evict(2);
+        EXPECT_EQ(pool->size(), 4);
+        EXPECT_EQ(pool->get_session(2, "user1"), nullptr);
+
+        pool->evict(1);
+        EXPECT_EQ(pool->size(), 0);
+        EXPECT_EQ(pool->get_session(1, "user1"), nullptr);
     }
 
     TEST_F(DatabasePoolTest, AddMultipleSessions) {
@@ -215,15 +325,6 @@ namespace {
     /** Test DatabaseSet class */
     class DatabaseSetTest : public ::testing::Test {
     protected:
-        static void SetUpTestSuite()
-        {
-            springtail_init_test();
-        }
-        static void TearDownTestSuite()
-        {
-            springtail_shutdown();
-        }
-
         void SetUp() override
         {
             db_set = std::make_shared<TestableDatabaseSet>();
@@ -242,14 +343,18 @@ namespace {
         EXPECT_EQ(session->database_id(), 1);
         EXPECT_EQ(session->username(), "user1");
 
+        EXPECT_EQ(db_set->get_session(1, "user1"), nullptr);
+
         db_set->release_session(session, false);
 
-        EXPECT_EQ(db_set->pool_size(), 1);
+        EXPECT_EQ(instance1->get_pool()->size(), 1);
+        EXPECT_EQ(instance1->get_pool()->size(1, "user1"), 1);
 
         auto retrieved_session = db_set->get_session(1, "user1");
         EXPECT_EQ(retrieved_session, session);
 
-        EXPECT_EQ(db_set->pool_size(), 0);
+        EXPECT_EQ(instance1->get_pool()->size(), 0);
+        EXPECT_EQ(instance1->get_pool()->size(1, "user1"), 0);
     }
 
     TEST_F(DatabaseSetTest, AllocateMultipleSessions) {
@@ -263,13 +368,13 @@ namespace {
         auto retrieved_session1 = db_set->get_session(1, "user1");
         auto retrieved_session2 = db_set->get_session(1, "user1");
         EXPECT_NE(retrieved_session1, retrieved_session2);
-        EXPECT_TRUE((retrieved_session1 == session1 && retrieved_session2 == session2) ||
-                    (retrieved_session1 == session2 && retrieved_session2 == session1));
+        EXPECT_TRUE(retrieved_session1 == session2);
+        EXPECT_TRUE(retrieved_session2 == session1);
 
         db_set->release_session(retrieved_session1, true);
         db_set->release_session(retrieved_session2, true);
 
-        EXPECT_EQ(db_set->pool_size(), 0);
+        EXPECT_EQ(instance1->get_pool()->size(), 0);
 
         auto null_session = db_set->get_session(1, "user1");
         EXPECT_EQ(null_session, nullptr);
@@ -283,9 +388,12 @@ namespace {
         db_set->release_session(session2, false);
         db_set->release_session(session3, false);
 
-        EXPECT_EQ(db_set->pool_size(), 3);
+        // EXPECT_EQ(db_set->pool_size(), 3);
+        EXPECT_EQ(instance1->get_pool()->size(), 2);
+        EXPECT_EQ(instance2->get_pool()->size(), 1);
         db_set->remove_instance(instance1);
-        EXPECT_EQ(db_set->pool_size(), 1);
+        // EXPECT_EQ(db_set->pool_size(), 1);
+        EXPECT_EQ(instance2->get_pool()->size(), 1);
 
         auto null_session1 = db_set->get_session(1, "user1");
         auto null_session2 = db_set->get_session(1, "user2");
@@ -334,3 +442,10 @@ namespace {
     }
 
 } // namespace
+
+int main(int argc, char* argv[]) {
+    ::testing::InitGoogleTest(&argc, argv);
+    // gtest takes ownership of the TestEnvironment ptr - we don't delete it.
+    ::testing::AddGlobalTestEnvironment(new TestEnvironment());
+    return RUN_ALL_TESTS();
+}

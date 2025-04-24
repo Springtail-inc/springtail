@@ -1,95 +1,160 @@
 #pragma once
 
-#include <string>
-#include <memory>
-#include <mutex>
-#include <shared_mutex>
-#include <set>
-#include <map>
-#include <utility>
-#include <list>
-#include <climits>
-#include <unordered_map>
-#include <fmt/core.h>
-
 #include <common/logging.hh>
 #include <common/service_register.hh>
 #include <common/singleton.hh>
 #include <common/constants.hh>
 
 #include <redis/db_state_change.hh>
-#include <redis/redis_db_tables.hh>
 #include <redis/pubsub_thread.hh>
 
-#include <proxy/connection.hh>
 #include <proxy/server_session.hh>
 
 namespace springtail::pg_proxy {
 
     /**
-     * @brief Implements a simple pool of database sessions
+     * @brief Class for managing database sessions
+     *
      */
     class DatabasePool {
     public:
-        DatabasePool() = default;
+        /**
+         * @brief Construct a new Database Pool object
+         *
+         * @param size_limit - maximum number of sessions in the pool (0 when not set)
+         * @param timeout_limit - maximum number of sessions that can be stored in the pool
+         *      without expiration (0 when not set)
+         * @param expiration_interval - session expiration interval (0 when not set)
+         */
+        DatabasePool(size_t size_limit, size_t timeout_limit, uint64_t expiration_interval):
+            _size_limit(size_limit), _timeout_limit(timeout_limit), _expiration_interval(expiration_interval)
+        {
+            DCHECK((_size_limit == 0 ) || (_size_limit > _timeout_limit));
+        }
 
         /**
-         * @brief Add session to pool; marked as free
-         * @param session  session to add
+         * @brief Destroy the Database Pool object
+         *
+         */
+        ~DatabasePool()
+        {
+            while (!_cache.empty()) {
+                _evict_next();
+            }
+        }
+
+        /**
+         * @brief Add new session to the database pool
+         *
+         * @param session - new session
          */
         void add_session(ServerSessionPtr session);
 
         /**
-         * @brief Get a session from the pool removing that session
-         * @param db_id database id
-         * @param username username
-         * @returns session  session from pool or nullptr if pool is empty
+         * @brief Get an existing session from the database pool
+         *
+         * @param db_id - database id
+         * @param username - user name
+         * @return ServerSessionPtr - session pointer
          */
-        ServerSessionPtr get_session(uint64_t db_id,
-                                     const std::string &username);
+        ServerSessionPtr get_session(uint64_t db_id, const std::string &username);
 
         /**
-         * @brief Evict all sessions for a given db_id
-         * @param db_id database id
+         * @brief Evict all sessions from the pool for the given database id
+         *
+         * @param db_id - database id
          */
         void evict(uint64_t db_id);
 
         /**
-         * @brief Evict a session from the pool
-         * @param session ServerSessionPtr session
+         * @brief Get the total number of sessions stored in the pool
+         *
+         * @return size_t
          */
-        void evict(ServerSessionPtr session);
-
-        /**
-         * @brief Evict a session from the pool based on the instance
-         * @param instance DatabaseInstancePtr instance
-         */
-        void evict(DatabaseInstancePtr instance);
-
-        /**
-         * @brief Get the size of the pool
-         * @returns size of the pool
-         */
-        int size() const {
+        size_t size() const
+        {
             std::shared_lock lock(_mutex);
-            return count;
+            return _cache.size();
         }
 
-        void dump() const {
-            std::shared_lock lock(_mutex);
-            LOG_DEBUG(LOG_PROXY, "DatabasePool size: {}", count);
-            for ([[maybe_unused]] const auto &it : _free_sessions) {
-                LOG_DEBUG(LOG_PROXY, "DatabasePool db_id: {} username: {} size: {}", it.first.first, it.first.second, it.second.size());
-            }
-        }
+        /**
+         * @brief Total number of sessions stored in the pool for the given database id and user
+         *
+         * @param db_id - database id
+         * @param username - user name
+         * @return size_t - number of sessions
+         */
+        size_t size(uint64_t db_id, const std::string &username) const;
+
+        /**
+         * @brief Get the maximum number of sessions that can be stored in the pool
+         *
+         * @return size_t - number of sessions
+         */
+        size_t get_size_limit() const { return _size_limit; }
+
+        /**
+         * @brief Get the maximum number of sessions that can be stored in the pool without expiration.
+         *
+         * @return size_t - number of sessions
+         */
+        size_t get_timeout_limit() const { return _timeout_limit; }
 
     private:
-        mutable std::shared_mutex _mutex;   ///< mutex for pool
-        int count = 0;                      ///< count of sessions in pool
+        mutable std::shared_mutex _mutex;                       ///< mutex for pool
+        using SessionKey = std::pair<uint64_t, std::string>;    ///< typedef for session key, that is database id and user name pair
 
-        /** pair<db_id, username> to list of sessions */
-        std::map<std::pair<uint64_t, std::string>, std::list<ServerSessionWeakPtr>> _free_sessions;
+        /**
+         * @brief Entry datatype for pool cache
+         *
+         */
+        struct SessionEntry {
+            SessionKey key;                 ///< session key
+            ServerSessionWeakPtr value;     ///< session value
+            uint64_t expiration_time;       ///< storage expiration time
+        };
 
+        std::map<SessionKey, std::deque<typename std::list<SessionEntry>::iterator>> _lookup; ///< A map that holds the entries.
+        std::list<SessionEntry> _cache;     ///< An ordered list of objects for priority removal
+        size_t _size_limit;                 ///< Maximum number of sessions that can be stored in cache
+        size_t _timeout_limit;              ///< Maximum number of sessions that can be stored in cache without expiration
+        uint64_t _expiration_interval;      ///< Expiration interval
+
+        /**
+         * @brief Get current timestamp in seconds
+         *
+         * @return uint64_t - timestamp in seconds
+         */
+        uint64_t _get_timestamp();
+
+        /**
+         * @brief Remove entry for the given session key
+         *
+         * @param key - session key
+         */
+        void _remove_entry(const SessionKey &key);
+
+        /**
+         * @brief Evict next session from the cache.
+         *
+         */
+        void _evict_next();
+
+        /**
+         * @brief Insert new session into the cache
+         *
+         * @param key - session key
+         * @param value - session
+         */
+        void _insert(const SessionKey &key, ServerSessionWeakPtr value);
+
+        /**
+         * @brief Get the most recently used session for the given key and user
+         *
+         * @param key - session key
+         * @return ServerSessionPtr - session
+         */
+        ServerSessionPtr _get(const SessionKey &key);
     };
     using DatabasePoolPtr = std::shared_ptr<DatabasePool>;
 
@@ -98,14 +163,19 @@ namespace springtail::pg_proxy {
      */
     class DatabaseInstance : public std::enable_shared_from_this<DatabaseInstance> {
     public:
-        DatabaseInstance(const Session::Type type,
+        DatabaseInstance(size_t pool_size_limit,
+                         size_t pool_timeout_limit,
+                         uint64_t pool_expiration_interval,
+                         const Session::Type type,
                          const std::string &hostname,
                          std::string db_prefix="",
                          int port=5432)
             : _type(type), _hostname(hostname),
               _replica_db_prefix(db_prefix),
               _port(port)
-        {}
+        {
+            _pool = std::make_shared<DatabasePool>(pool_size_limit, pool_timeout_limit, pool_expiration_interval);
+        }
 
         /**
          * @brief Get hostname
@@ -154,7 +224,9 @@ namespace springtail::pg_proxy {
             const std::unordered_map<std::string, std::string> &parameters,
             const std::string &database);
 
+        DatabasePoolPtr get_pool() { return _pool; }
     private:
+        DatabasePoolPtr _pool;               ///< free connections pool for this instance
         mutable std::shared_mutex _mutex;    ///< mutex for instance
         Session::Type _type;                 ///< type of instance (primary, replica)
         std::string _hostname;               ///< hostname of instance
@@ -171,8 +243,7 @@ namespace springtail::pg_proxy {
     public:
 
         explicit DatabaseSet(int max_sessions_per_instance) :
-            _max_sessions_per_instance(max_sessions_per_instance),
-            _pool(std::make_shared<DatabasePool>())
+            _max_sessions_per_instance(max_sessions_per_instance)
         {}
 
         virtual ~DatabaseSet() = default;
@@ -186,7 +257,26 @@ namespace springtail::pg_proxy {
         ServerSessionPtr get_session(const uint64_t db_id,
                                      const std::string &username) {
             std::shared_lock lock(_mutex);
-            return _pool->get_session(db_id, username);
+            if (_instance_sessions.empty()) {
+                return nullptr;
+            }
+
+            // find the instance with the least number of sessions
+            DatabaseInstancePtr instance = nullptr;
+            int max_free_sessions = INT_MIN;
+            for (auto &it : _instance_sessions) {
+                DatabasePoolPtr pool = it.first->get_pool();
+                int pool_size = pool->size();
+                if (pool_size > max_free_sessions) {
+                    max_free_sessions = pool_size;
+                    instance = it.first;
+                }
+            }
+            if (instance != nullptr) {
+                return instance->get_pool()->get_session(db_id, username);
+            }
+
+            return nullptr;
         }
 
         /**
@@ -219,14 +309,6 @@ namespace springtail::pg_proxy {
             uint64_t db_id,
             const std::unordered_map<std::string, std::string> &parameters,
             const std::string &database) = 0;
-
-        /**
-         * @brief Get size of the free session pool
-         * @return int size of pool
-         */
-        int pool_size() const {
-            return _pool->size();
-        }
 
     protected:
 
@@ -278,8 +360,6 @@ namespace springtail::pg_proxy {
 
         /* map of instance to number of sessions */
         std::map<DatabaseInstancePtr, int> _instance_sessions;
-
-        DatabasePoolPtr _pool;  ///< Database pool across all instances
     };
     using DatabaseSetPtr = std::shared_ptr<DatabaseSet>;
 

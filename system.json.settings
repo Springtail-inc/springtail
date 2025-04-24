@@ -103,7 +103,10 @@
         "mode": "primary",
         "shadow_log_path": null,
         "log_level": 3,
-        "use_pg_shadow": true
+        "use_pg_shadow": true,
+        "pool_size_limit": 0,
+        "pool_timeout_limit": 0,
+        "pool_expiration_interval": 0
     },
     "org": {
         "NOTE": "this section is for testing only, in production env vars are used",
