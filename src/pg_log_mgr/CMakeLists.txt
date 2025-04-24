@@ -68,6 +68,15 @@ target_link_libraries(test_pg_log_redis
 target_include_directories(test_pg_log_redis PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_dsymutil_command(test_pg_log_redis)
 
+add_executable(test_pg_log_indexer test/test_indexer.cc)
+target_link_libraries(test_pg_log_indexer
+    PUBLIC springtail_pglog
+           springtail_test
+           springtail_sys_tbl_mgr
+    PRIVATE GTest::gtest_main)
+target_include_directories(test_pg_log_indexer PRIVATE ${CMAKE_SOURCE_DIR}/include)
+add_dsymutil_command(test_pg_log_indexer)
+
 add_executable(dump_xact_log test/dump_xact_log.cc)
 target_link_libraries(dump_xact_log
     PUBLIC springtail_pglog
@@ -99,3 +108,4 @@ install(TARGETS
 gtest_discover_tests(test_xact_log)
 gtest_discover_tests(test_xact_log_mmap)
 gtest_discover_tests(test_pg_log_redis)
+gtest_discover_tests(test_pg_log_indexer)

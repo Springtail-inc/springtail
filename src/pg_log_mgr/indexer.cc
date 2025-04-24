@@ -445,7 +445,7 @@ namespace springtail::committer {
                 // Get the table at the next XID
                 // and fetch the page for the extent
                 auto next_xid = next_extent->header().xid;
-                table = TableMgr::get_instance()->get_table(db_id, idx_state._tid, next_xid);
+                auto next_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(next_xid));
                 auto next_page = StorageCache::get_instance()->get(table->get_table_dir() / constant::DATA_FILE, next_eid, next_xid);
 
                 // If previous offset exists, lets invalidate that first
@@ -462,7 +462,7 @@ namespace springtail::committer {
                 }
 
                 // Populate index for the rows in the next page
-                indexer_helpers::populate_index_for_page(next_eid, next_page, idx_state._root, idx_cols, table->schema());
+                indexer_helpers::populate_index_for_page(next_eid, next_page, idx_state._root, idx_cols, next_schema);
 
                 // Get the next extent if next_offset is present, else exit the reconciliation
                 next_eid = next_extent_result.second.value_or(0);
