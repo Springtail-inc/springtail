@@ -217,6 +217,11 @@ namespace springtail {
                 return _cache_page->end();
             }
 
+            /** Returns an iterator to the last valid element of the tree. */
+            Iterator last() {
+                return _cache_page->last();
+            }
+
             /**
              * Returns a reference to the last row in the page.
              */
@@ -688,6 +693,75 @@ namespace springtail {
          * @param keys The list of columns that make up the sort key of the tree.
          */
         void _init_schemas(ExtentSchemaPtr schema, const std::vector<std::string> &keys);
+
+        //// ITERATOR SUPPORT
+    public:
+        class Iterator {
+            friend MutableBTree;
+
+        private:
+            Iterator(MutableBTree *btree, NodePtr node)
+                : _btree(btree),
+                  _page_lock(node->page->mutex),
+                  _node(node),
+                  _page_i(node->page->begin())
+            { }
+
+            Iterator(MutableBTree *btree, NodePtr node, Page::Iterator page_i)
+                : _btree(btree),
+                  _page_lock(node->page->mutex),
+                  _node(node),
+                  _page_i(page_i)
+            { }
+
+        public:
+            using iterator_category = std::forward_iterator_tag;
+            using difference_type   = std::ptrdiff_t;
+            using value_type        = const Extent::Row;
+            using pointer           = const Extent::Row *;  // or also value_type*
+            using reference         = const Extent::Row &;  // or also value_type&
+
+            Iterator() = default;
+
+            Iterator &operator++() {
+                ++_page_i;
+                if (_page_i == _node->page->end()) {
+                    _node = _btree->_next_leaf(_node);
+                    _page_lock = boost::shared_lock(_node->page->mutex);
+                    _page_i = _node->page->begin();
+                }
+                return *this;
+            }
+
+            reference operator*() {
+                return *_page_i;
+            }
+
+            bool operator==(const Iterator &rhs) const {
+                if (_node == nullptr && rhs._node == nullptr) {
+                    return true;
+                }
+                return (_btree == rhs._btree && _node == rhs._node && _page_i == rhs._page_i);
+            }
+
+        private:
+            MutableBTree *_btree = nullptr;
+            boost::shared_lock<boost::shared_mutex> _page_lock;
+            NodePtr _node;
+            Page::Iterator _page_i;
+        };
+
+        Iterator begin();
+        Iterator last();
+        Iterator lower_bound(TuplePtr search_key, bool for_update);
+
+        Iterator end() {
+            return Iterator();
+        }
+
+    private:
+        /** Iterator helper to find the next leaf node given a current node. */
+        NodePtr _next_leaf(NodePtr node);
     };
     typedef std::shared_ptr<MutableBTree> MutableBTreePtr;
 

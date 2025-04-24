@@ -221,6 +221,196 @@ namespace springtail {
         return _root->extent_id;
     }
 
+MutableBTree::NodePtr
+MutableBTree::_next_leaf(NodePtr node)
+{
+    // if the leaf has no parent, then there is no next leaf
+    if (node->parent == nullptr) {
+        return nullptr;
+    }
+
+    // move up the tree
+    while (node != nullptr) {
+        // create the key for the current page
+        auto value = std::make_shared<FieldArray>();
+        value->push_back(std::make_shared<ConstTypeField<uint64_t>>(node->page->extent_id));
+        auto kv = std::make_shared<KeyValueTuple>(node->page->prev_key->fields(),
+                                                  value, node->page->prev_key->row());
+
+        // lock the parent for access
+        boost::shared_lock parent_lock(node->parent->page->mutex);
+
+        // find it in the parent
+        auto parent_i = node->parent->page->find(kv);
+
+        // move to the next entry
+        ++parent_i;
+
+        if (parent_i == node->parent->page->end()) {
+            // if that was the last entry, move up the tree further
+            node = node->parent;
+        } else {
+            // we found the next branch to follow, setup the node for the page
+            uint64_t extent_id = _branch_child_f->get_uint64(*parent_i);
+
+            // read the next child page
+            NodePtr child = _read_page(extent_id, node, parent_lock);
+
+            // if the child was flushed while we were reading the page, we need to re-find it in the parent
+            if (!child) {
+                continue;
+            }
+
+            // recurse to the child
+            node = child;
+        }
+    }
+
+    // if we were at the last leaf, return nullptr to indiciate end()
+    if (node == nullptr) {
+        return nullptr;
+    }
+
+    // from here, if we don't have a leaf node, then we need to find the first entry of the first
+    // leaf node of this sub-tree
+    while (node->page->type.is_branch()) {
+        // lock page for read access
+        boost::shared_lock page_lock(node->page->mutex);
+
+        // use a lower_bound() check to find the appropriate child branch
+        auto &&i = node->page->begin();
+
+        // retrieve the child offset
+        uint64_t extent_id = _branch_child_f->get_uint64(*i);
+
+        // read the child page; will handle updating the locks
+        // note: this will release the page_lock once it has a pointer to the child in memory
+        NodePtr child = _read_page(extent_id, node, page_lock);
+
+        // if the child was flushed while we were reading the page, we need to re-find it in the parent
+        if (!child) {
+            continue;
+        }
+
+        // recurse to the child
+        node = child;
+    }
+
+    return node;
+}
+
+MutableBTree::Iterator
+MutableBTree::begin()
+{
+    // must have called init() or init_empty()
+    CHECK(_root != nullptr);
+
+    // acquire a shared lock on the btree
+    boost::shared_lock tree_lock(_mutex);
+
+    // safe because the root pointer can't change if we are holding the btree lock
+    NodePtr node = std::make_shared<Node>(nullptr, _root);
+
+    // iterate through the levels until we find a leaf page
+    while (node->page->type.is_branch()) {
+        // lock page for read access
+        boost::shared_lock page_lock(node->page->mutex);
+
+        // use a lower_bound() check to find the appropriate child branch
+        auto &&i = node->page->begin();
+
+        // retrieve the child offset
+        uint64_t extent_id = _branch_child_f->get_uint64(*i);
+
+        // read the child page; will handle updating the locks
+        // note: this will release the page_lock once it has a pointer to the child in memory
+        NodePtr child = _read_page(extent_id, node, page_lock);
+
+        // if the child was flushed while we were reading the page, we need to re-find it in the parent
+        if (!child) {
+            continue;
+        }
+
+        // recurse to the child
+        node = child;
+    }
+
+    return Iterator(this, node);
+}
+
+MutableBTree::Iterator
+MutableBTree::last()
+{
+    // must have called init() or init_empty()
+    CHECK(_root != nullptr);
+
+    // acquire a shared lock on the btree
+    boost::shared_lock tree_lock(_mutex);
+
+    // safe because the root pointer can't change if we are holding the btree lock
+    NodePtr node = std::make_shared<Node>(nullptr, _root);
+
+    // iterate through the levels until we find a leaf page
+    while (node->page->type.is_branch()) {
+        // lock page for read access
+        boost::shared_lock page_lock(node->page->mutex);
+
+        // use last() to find the appropriate child branch
+        auto &&i = node->page->last();
+
+        // retrieve the child offset
+        uint64_t extent_id = _branch_child_f->get_uint64(*i);
+
+        // read the child page; will handle updating the locks
+        // note: this will release the page_lock once it has a pointer to the child in memory
+        NodePtr child = _read_page(extent_id, node, page_lock);
+
+        // if the child was flushed while we were reading the page, we need to re-find it in the parent
+        if (!child) {
+            continue;
+        }
+
+        // recurse to the child
+        node = child;
+    }
+
+    return Iterator(this, node, node->page->last());
+}
+
+MutableBTree::Iterator
+MutableBTree::lower_bound(TuplePtr search_key,
+                          bool for_update)
+{
+    // must have called init() or init_empty()
+    CHECK(_root != nullptr);
+
+    // acquire a shared lock on the btree
+    boost::shared_lock tree_lock(_mutex);
+
+    // traverse the tree to find the page that could contain the search_key
+    NodePtr node = _find_leaf(search_key);
+
+    // find the specific entry in the page
+    boost::shared_lock page_lock(node->page->mutex);
+    auto page_i = node->page->lower_bound(search_key);
+    if (page_i == node->page->end()) {
+        auto next_node = _next_leaf(node);
+        if (next_node == nullptr) {
+            if (for_update) {
+                page_i = node->page->last();
+            } else {
+                return Iterator();
+            }
+        } else {
+            node = next_node;
+            page_i = node->page->begin();
+        }
+    }
+
+    return Iterator(this, node, page_i);
+}
+
+
     MutableBTree::Page::Iterator
     MutableBTree::Page::lower_bound(TuplePtr search_key)
     {
