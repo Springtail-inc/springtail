@@ -37,6 +37,7 @@ from common import (
 from sysutils import (
     stop_daemons,
     clean_fs,
+    move_files,
     check_postgres_running,
     start_postgres,
     stop_postgres,
@@ -521,10 +522,35 @@ def current_xid(props: Properties, db_id: int) -> int:
 
 def restart(props: Properties,
             build_dir: str,
-            start_xid: int = None) -> None:
+            start_xid: int = None,
+            unarchive_logs: bool = False) -> None:
     # Stop the daemons
     print("\nStopping daemons...")
     stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
+
+    # optionally un-archive the log files
+    if unarchive_logs:
+        config = props.get_system_config()
+        if not config.get('log_mgr').get('archive_logs', False):
+            print('Cannot unarchive logs -- "archive_logs" not true')
+        else:
+            base_dir = props.get_mount_path()
+
+            # move back the repl archive files for each database
+            repl_dir = config.get('log_mgr').get('replication_log_path')
+            repl_path = os.path.join(base_dir, repl_dir)
+            db_dirs = os.listdir(repl_path)
+            for db_dir in db_dirs:
+                repl_db_path = os.path.join(repl_path, db_dir)
+                move_files(os.path.join(repl_db_path, 'archive'), repl_db_path)
+
+            # move back the xact archive files for each database
+            xact_dir = config.get('log_mgr').get('transaction_log_path')
+            xact_path = os.path.join(base_dir, xact_dir)
+            db_dirs = os.listdir(xact_path)
+            for db_dir in db_dirs:
+                xact_db_path = os.path.join(xact_path, db_dir)
+                move_files(os.path.join(xact_db_path, 'archive'), xact_db_path)
 
     # start daemons with XID if specified
     print("\nStarting daemons...")
@@ -560,6 +586,7 @@ def start(config_file: str,
           sql_file: str = None,
           do_cleanup: bool = True,
           do_init: bool = True,
+          postgres_only: bool = False,
           start_xid: int = None) -> None:
     """Main function to start the Springtail system."""
     # must do init if we are performing cleanup
@@ -597,7 +624,7 @@ def start(config_file: str,
         print(f"\nExecuting startup SQL file: {sql_file}")
         execute_startup_sql(props, sql_file)
 
-    if do_init:
+    if not postgres_only:
         # install fdw
         print("\nInstalling foreign data wrapper...")
         install_fdw(build_dir)
@@ -607,34 +634,37 @@ def start(config_file: str,
         check_log_writable(props)
         start_replication(props, build_dir)
 
-    # start daemons with XID if specified
-    print("\nStarting daemons...")
-    if start_xid is not None:
-        # Modify xid_mgr_daemon args to include starting XID
-        modified_daemons = []
-        for daemon in CORE_DAEMONS:
-            if daemon[0] == 'xid_mgr_daemon':
-                modified_daemons.append((daemon[0], daemon[1], f'-x,{start_xid}'))
-            else:
-                modified_daemons.append(daemon)
-        start_daemons(build_dir, modified_daemons)
+        # start daemons with XID if specified
+        print("\nStarting daemons...")
+        if start_xid is not None:
+            # Modify xid_mgr_daemon args to include starting XID
+            modified_daemons = []
+            for daemon in CORE_DAEMONS:
+                if daemon[0] == 'xid_mgr_daemon':
+                    modified_daemons.append((daemon[0], daemon[1], f'-x,{start_xid}'))
+                else:
+                    modified_daemons.append(daemon)
+            start_daemons(build_dir, modified_daemons)
+        else:
+            start_daemons(build_dir, CORE_DAEMONS)
+
+        # wait for running state
+        print("\nWaiting for running state...")
+        wait_for_running(props)
+
+        # start the fdw daemons (e.g., ddl manager to import schemas)
+        print("\nStarting FDW daemons...")
+        start_fdw_daemons(props, build_dir, config_file)
+        fixup_log_perms(props)
+
+        # start the proxy
+        start_proxy(props, build_dir)
+        print("\nSpringtail system started successfully.")
+
     else:
-        start_daemons(build_dir, CORE_DAEMONS)
-
-    # wait for running state
-    print("\nWaiting for running state...")
-    wait_for_running(props)
-
-    # start the fdw daemons (e.g., ddl manager to import schemas)
-    print("\nStarting FDW daemons...")
-    start_fdw_daemons(props, build_dir, config_file)
-    fixup_log_perms(props)
-
-    # start the proxy
-    start_proxy(props, build_dir)
-
-    print("\nSpringtail system started successfully.")
-
+        # start postgres
+        print("Starting postgres...")
+        start_postgres()
 
 def status() -> None:
     """Function to check the status of the Springtail system."""
@@ -790,6 +820,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('-s', '--sql-file', type=str, required=False, help='Path to a sql file to execute prior to startup')
     parser.add_argument('-x', '--start-xid', type=int, required=False, help='Start the system at a specific XID')
     parser.add_argument('--no-cleanup', action='store_true', help="Start without reinitializing the system")
+    parser.add_argument('--postgres-only', action='store_true', help="Start postgres only, don't start springtail FDW")
     parser.add_argument('--start', action=argparse.BooleanOptionalAction, help="Start the Springtail system")
     parser.add_argument('--status', action=argparse.BooleanOptionalAction, help="Check the status of the Springtail daemons")
     parser.add_argument('--kill', action=argparse.BooleanOptionalAction, help="Kill the Springtail daemons")
@@ -851,7 +882,8 @@ if __name__ == "__main__":
 
         if args.start:
             start(args.config_file, args.build_dir, args.sql_file,
-                  do_cleanup=not args.no_cleanup, do_init=not args.no_cleanup, start_xid=args.start_xid)
+                  do_cleanup=not args.no_cleanup, do_init=not args.no_cleanup, 
+                  postgres_only=args.postgres_only, start_xid=args.start_xid)
 
     except Exception as e:
         print(f"Caught error: {e}")

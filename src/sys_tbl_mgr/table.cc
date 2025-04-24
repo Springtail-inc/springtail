@@ -325,20 +325,15 @@ namespace indexer_helpers {
         // check if it's a secondary index lookup
         if (index_id != constant::INDEX_PRIMARY) {
             auto const& [btree, cols] = _secondary_indexes.at(index_id);
-            auto index_schema = _create_index_schema(_schema, cols);
 
-            // find the extent that could contain the lower_bound() key
-            auto &&i = btree->lower_bound(search_key);
+            // find the extent that contains the row matching the inverse_lower_bound() key
+            auto &&i = btree->inverse_lower_bound(search_key);
 
-            // for secondary indexes, it's a row-based index, so finding begin() means there's no
-            // row before the search key
-            if (i == btree->begin()) {
+            if (i == btree->end()) {
                 return end(index_id);
             }
 
-            // for secondary indexes, always decrement since it's a row-based index
-            --i;
-
+            auto index_schema = _create_index_schema(_schema, cols);
             return Iterator(this, btree, i, index_schema);
         }
 
@@ -1110,7 +1105,7 @@ namespace indexer_helpers {
 
             auto &&j = page->begin();
             while (!found && j != page->end()) {
-                if (value->equal(FieldTuple(fields, *j))) {
+                if (value->equal_strict(FieldTuple(fields, *j))) {
                     page->remove(j);
                     found = true;
                 } else {

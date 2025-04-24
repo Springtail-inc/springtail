@@ -43,7 +43,6 @@ jobs:
       SPRINGTAIL_LOG_PATH: /opt/springtail/logs
       SLACK_WEBHOOK_URL: ${{ vars.GENERIC_SLACK_WEBHOOK_URL }}
       SLACK_CHANNEL: '#nightly-builds'
-      LD_LIBRARY_PATH: /usr/lib/springtail
 
     steps:
       - name: Checkout repository
@@ -253,6 +252,10 @@ jobs:
           
           cd python/testing
           python3 springtail.py -f ../../system.json.test --kill --build-dir ../../debug
+          
+          if [ $? -ne 0 ]; then
+            exit 1
+          fi
           
           cd proxy
           # Do not break out if errors occur

@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS regions (
 );
 COMMIT;
 
+### recovery_point
+
 BEGIN;
 INSERT INTO regions(region_id,region_name) VALUES (1,'Europe');
 INSERT INTO regions(region_id,region_name) VALUES (2,'Americas');
@@ -54,8 +56,7 @@ INSERT INTO countries(country_id,country_name,region_id) VALUES ('ZM','Zambia',4
 INSERT INTO countries(country_id,country_name,region_id) VALUES ('ZW','Zimbabwe',4);
 COMMIT;
 
-### sync
-### force_recovery 4
+### force_recovery
 
 ## verify
 

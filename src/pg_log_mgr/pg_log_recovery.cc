@@ -51,6 +51,8 @@ PgLogRecovery::replay_logs()
     if (has_more) {
         _replay_uncommitted();
     }
+
+    LOG_DEBUG(LOG_PG_LOG_MGR, "Log replay completed");
 }
 
 void
@@ -104,7 +106,6 @@ PgLogRecovery::_skip_committed()
     std::vector<char> filter = {pg_msg::MSG_BEGIN, pg_msg::MSG_COMMIT, pg_msg::MSG_STREAM_START,
                                 pg_msg::MSG_STREAM_COMMIT, pg_msg::MSG_STREAM_ABORT};
 
-    uint32_t log_number = 0;
     uint32_t cur_pgxid = 0;
     while (!done) {
         // check if there are more messages in the replication log
@@ -112,7 +113,7 @@ PgLogRecovery::_skip_committed()
         auto msg = _repl_reader.read_message(filter, eos, eob);
         if (msg != nullptr) {
             LOG_DEBUG(LOG_PG_LOG_MGR, "Found message {}, eob {}, eos {}", static_cast<int>(msg->msg_type), eob, eos);
-            done = _process_msg(msg, log_number, xact_reader, cur_pgxid);
+            done = _process_msg(msg, xact_reader, cur_pgxid);
         } else {
             LOG_DEBUG(LOG_PG_LOG_MGR, "Skipping message in repl log; offset {}, eob {}, eos {}", _repl_reader.offset(), eob, eos);
         }
@@ -127,7 +128,6 @@ PgLogRecovery::_skip_committed()
             }
             LOG_DEBUG(LOG_PG_LOG_MGR, "Set streaming for file {}", _repl_log.value().string());
 
-            ++log_number;
             _repl_reader.set_file(*_repl_log);
         }
     }
@@ -138,7 +138,6 @@ PgLogRecovery::_skip_committed()
 
 bool
 PgLogRecovery::_process_msg(PgMsgPtr msg,
-                            uint32_t log_number,
                             PgXactLogReaderMmap &xact_reader,
                             uint32_t &cur_pgxid)
 {
@@ -147,7 +146,7 @@ PgLogRecovery::_process_msg(PgMsgPtr msg,
             // starting point for the scan along with pgxid
         case PgMsgEnum::BEGIN: {
             auto &begin_msg = std::get<PgMsgBegin>(msg->msg);
-            Position p(log_number, _repl_reader.header_offset(), *_repl_log);
+            Position p(_repl_reader.header_offset(), *_repl_log);
             _active_map.try_emplace(begin_msg.xid, p);
             cur_pgxid = begin_msg.xid;
             return false;
@@ -155,7 +154,7 @@ PgLogRecovery::_process_msg(PgMsgPtr msg,
         case PgMsgEnum::STREAM_START: {
             auto &start_msg = std::get<PgMsgStreamStart>(msg->msg);
             if (start_msg.first) {
-                Position p(log_number, _repl_reader.header_offset(), *_repl_log);
+                Position p(_repl_reader.header_offset(), *_repl_log);
                 _active_map.try_emplace(start_msg.xid, p);
             }
             cur_pgxid = start_msg.xid;
@@ -191,18 +190,26 @@ PgLogRecovery::_process_msg(PgMsgPtr msg,
             CHECK(pgxid == xact_reader.get_pg_xid() || pgxid == 0);
 
             bool done = false;
-            CHECK_LE(xact_reader.get_xid(), _committed_xid);
-            if (pgxid != 0) {
-                _active_map.erase(pgxid);
-            }
 
-            if (xact_reader.get_xid() == _committed_xid) {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Found final commit");
-                _final_committed = {log_number, _repl_reader.block_end_offset(), *_repl_log};
+            if (xact_reader.get_xid() > _committed_xid) {
+                // the previous commit was the final commit -- this can happen when a commit we are
+                // rolling back to is not directly recorded in the log because it's an XID with no
+                // associated pgxid
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Previous was final commit");
                 done = true;
             } else {
-                done = !xact_reader.next();  // move to the next record in the xact log
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Advanced xact_reader to the next xid; done = {}", done);
+                if (pgxid != 0) {
+                    _active_map.erase(pgxid);
+                }
+
+                _final_committed = {_repl_reader.block_end_offset(), *_repl_log};
+                if (xact_reader.get_xid() == _committed_xid) {
+                    LOG_DEBUG(LOG_PG_LOG_MGR, "Found final commit");
+                    done = true;
+                } else {
+                    done = !xact_reader.next();  // move to the next record in the xact log
+                    LOG_DEBUG(LOG_PG_LOG_MGR, "Advanced xact_reader to the next xid; done = {}", done);
+                }
             }
 
             return done;
@@ -254,6 +261,13 @@ PgLogRecovery::_replay_active()
 
     bool done = false;
     while (!done) {
+        // if we are past the final committed entry then all following entries need to be replayed
+        if (*_repl_log == _final_committed.file &&
+            _repl_reader.offset() >= _final_committed.offset) {
+            done = true;
+            continue;
+        }
+
         // get the next matching message, returns nullptr when there are no more messages in any logs
         bool eob, eos;
         auto msg = _repl_reader.read_message(filter, eos, eob);
