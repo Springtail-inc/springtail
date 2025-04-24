@@ -6,3 +6,5 @@ test:
   - count_sales.sql
   - count_customers.sql
   - count_sales_by_product.sql
+  - count_customer_id_sales.sql
+  - read_all_sales.sql
