@@ -167,7 +167,6 @@ private:
      * @param read_lock - read lock to be used for read access to transaction log data
      * @return std::map<uint64_t, DBXactLogData>::iterator - iterator to the map pair
      */
-    // std::pair<const uint64_t, DBXactLogData> *
     std::map<uint64_t, DBXactLogData>::iterator
     _find_or_add(uint64_t db_id, std::shared_lock<std::shared_mutex> &read_lock);
 

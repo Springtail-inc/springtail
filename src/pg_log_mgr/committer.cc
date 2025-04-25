@@ -59,20 +59,19 @@ namespace springtail::committer {
             if (result == nullptr) {
                 continue; // got a timeout, try again
             }
+
+            // perform rotation if needed
             uint64_t db_id = result->db();
             uint64_t timestamp = result->timestamp();
-            if (!_db_to_timestamp.contains(db_id)) {
-                _db_to_timestamp.emplace(db_id, timestamp);
-                if (timestamp != 0) {
-                    xid_mgr::XidMgrServer::get_instance()->rotate(db_id, timestamp);
-                }
+            uint64_t stored_timestamp = 0;
+            auto emplace_result = _db_to_timestamp.try_emplace(db_id, timestamp);
+            if (!emplace_result.second) {
+                // set stored_timestamp
+                stored_timestamp = emplace_result.first->second;
             }
-            uint64_t stored_timestamp = _db_to_timestamp[db_id];
             if (timestamp > stored_timestamp) {
-                _db_to_timestamp[db_id] = timestamp;
                 xid_mgr::XidMgrServer::get_instance()->rotate(db_id, timestamp);
-            } else if (timestamp == 0) {
-                timestamp = _db_to_timestamp[db_id];
+                emplace_result.first->second = timestamp;
             }
 
             auto token_1 = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
@@ -98,7 +97,6 @@ namespace springtail::committer {
 
             auto token_2 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(completed_xid)}});
             LOG_INFO("Last completed XID: {}@{}", db_id, completed_xid);
-            DCHECK(timestamp != 0);
 
             // handle a TABLE_SYNC_COMMIT
             if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT ||
