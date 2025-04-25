@@ -707,7 +707,7 @@ namespace springtail {
                   _page_i(node->page->begin())
             { }
 
-            Iterator(MutableBTree *btree, NodePtr node, Page::Iterator page_i)
+            Iterator(MutableBTree *btree, NodePtr node, Page::Iterator &&page_i)
                 : _btree(btree),
                   _page_lock(node->page->mutex),
                   _node(node),

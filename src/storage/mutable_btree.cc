@@ -407,7 +407,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
         }
     }
 
-    return Iterator(this, node, page_i);
+    return Iterator(this, node, std::move(page_i));
 }
 
 
