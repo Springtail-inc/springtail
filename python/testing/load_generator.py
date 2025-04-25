@@ -25,6 +25,8 @@ from common import (
 NUM_SCHEMAS = 10
 NUM_TABLES_PER_SCHEMA = 25
 NUM_INSERTS = 5
+NUM_UPDATES = 5
+NUM_DELETES = 2
 RUN_TIME_SECONDS = 5
 RUN_TS = int(time.time())
 
@@ -49,12 +51,12 @@ def print_sys_props(props: Properties, config_file: str) -> None:
     print(f"  Primary DB name: {db_config['name']}")
     print(f"  Primary DB ID  : {db_config['id']}")
 
-def write_metrics_to_csv(csv_file: str, _type: str, duration_ms: float, txid: int, pg_ts: str) -> None:
+def write_metrics_to_csv(csv_file: str, _type: str, duration_ms: float, txid: int, pg_ts: str, rows: int) -> None:
     with open(csv_file, mode='a', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow([_type, txid, duration_ms, pg_ts])
+        writer.writerow([_type, txid, duration_ms, pg_ts, rows])
 
-def time_and_log_query(conn, _type: str, query: str, csv_file: str, params=None) -> None:
+def time_and_log_query(conn, _type: str, query: str, csv_file: str, params=None) -> int:
     start = time.time()
 
     with conn.cursor() as cur:
@@ -64,6 +66,8 @@ def time_and_log_query(conn, _type: str, query: str, csv_file: str, params=None)
             cur.executemany(query, params)
         else:
             cur.execute(query)
+        # Get the number of rows affected
+        rows_affected = cur.rowcount
 
         cur.execute("SELECT txid_current(), FLOOR(EXTRACT(EPOCH FROM now()) * 1000)")
         txid, pg_ts_epoch_ms = cur.fetchone()
@@ -72,7 +76,8 @@ def time_and_log_query(conn, _type: str, query: str, csv_file: str, params=None)
 
     end = time.time()
     duration_ms = round((end - start) * 1000, 2)
-    write_metrics_to_csv(csv_file, _type, duration_ms, txid, pg_ts_epoch_ms)
+    write_metrics_to_csv(csv_file, _type, duration_ms, txid, pg_ts_epoch_ms, rows_affected)
+    return rows_affected
 
 def create_table(conn, schema_name: str, table_name: str, csv_file: str):
     # List of PostgreSQL data types to choose from
@@ -146,15 +151,39 @@ def create_index(conn, schema_name: str, table_name: str, csv_file: str):
         print(f"[!] No indexable columns found in {schema_name}.{table_name}")
         return
 
-    # Create index on a random column
-    index_column = random.choice(indexable_columns)
-    index_name = f"idx_{table_name}_{index_column}"
+    # Create a random number of indexes with a random number of columns
+    num_indexes = random.randint(1, 2)
+    for i in range(num_indexes):
+        index_columns = random.sample(indexable_columns, random.randint(1, 2))
+        index_name = f"idx_{table_name}_{i}_{('_'.join(index_columns))}"
 
-    time_and_log_query(conn, "create_index", f"""
-        CREATE INDEX IF NOT EXISTS {index_name}
-        ON {schema_name}.{table_name} ({index_column})
-    """, csv_file)
-    print(f"[+] Created index on: {schema_name}.{table_name}({index_column})")
+        time_and_log_query(conn, "create_index", f"""
+            CREATE INDEX IF NOT EXISTS {index_name}
+            ON {schema_name}.{table_name} ({', '.join(index_columns)})
+        """, csv_file)
+        print(f"[+] Created index on: {schema_name}.{table_name}({index_name})")
+
+def generate_values_list(columns: list, batch_size: int) -> list:
+    values_list = []
+
+    for _ in range(batch_size):
+        values = []
+        for col_name, col_type in columns:
+            if col_type in ['text', 'varchar', 'char']:
+                values.append(f"value_{random.randint(1, 100)}")
+            elif col_type in ['int', 'bigint', 'numeric', 'double', 'float']:
+                values.append(random.randint(1, 1000))
+            elif col_type == 'boolean':
+                values.append(random.choice([True, False]))
+            elif col_type == 'date':
+                values.append(f"{random.randint(2000, 2025)}-0{random.randint(1, 9)}-0{random.randint(1, 9)}")
+            elif col_type == 'time':
+                values.append(f"{random.randint(0, 23)}:{random.randint(0, 59)}:{random.randint(0, 59)}")
+            else:
+                values.append(None)
+        values_list.append(tuple(values))
+
+    return values_list
 
 def insert_data(conn, schema_name: str, table_name: str, csv_file: str):
     full_table_name = f"{schema_name}.{table_name}"
@@ -186,23 +215,7 @@ def insert_data(conn, schema_name: str, table_name: str, csv_file: str):
             batch_size = random.randint(max(1, int(remaining_inserts * 0.05)),
                                      min(remaining_inserts, int(remaining_inserts * 0.7)))
 
-        values_list = []
-        for _ in range(batch_size):
-            values = []
-            for col_name, col_type in columns:
-                if col_type in ['text', 'varchar', 'char']:
-                    values.append(f"value_{random.randint(1, 100)}")
-                elif col_type in ['int', 'bigint', 'numeric', 'double precision', 'float']:
-                    values.append(random.randint(1, 1000))
-                elif col_type == 'boolean':
-                    values.append(random.choice([True, False]))
-                elif col_type == 'date':
-                    values.append(f"{random.randint(2000, 2025)}-0{random.randint(1, 9)}-0{random.randint(1, 9)}")
-                elif col_type == 'time':
-                    values.append(f"{random.randint(0, 23)}:{random.randint(0, 59)}:{random.randint(0, 59)}")
-                else:
-                    values.append(None)
-            values_list.append(tuple(values))
+        values_list = generate_values_list(columns, batch_size)
 
         time_and_log_query(conn, "insert_data", insert_sql, csv_file, values_list)
 
@@ -211,6 +224,60 @@ def insert_data(conn, schema_name: str, table_name: str, csv_file: str):
 
     print(f"[+] Total {NUM_INSERTS} rows inserted into {schema_name}.{table_name}")
 
+def update_data(conn, schema_name: str, table_name: str, csv_file: str):
+    full_table_name = f"{schema_name}.{table_name}"
+    if full_table_name not in table_columns:
+        print(f"[!] No column information found for {full_table_name}")
+        return
+
+    columns = table_columns[full_table_name]
+    if not columns:
+        print(f"[!] No columns found in {schema_name}.{table_name}")
+        return
+
+    for _ in range(NUM_UPDATES):
+        # Generate UPDATE statement with 1-3 random columns
+        num_columns_to_update = random.randint(1, min(3, len(columns)))
+        columns_to_update = random.sample(columns, num_columns_to_update)
+        update_column_where = random.sample(columns, 1)
+        column_names = [col[0] for col in columns_to_update]
+        placeholders = ['%s'] * len(column_names)
+        update_sql = f"""
+            UPDATE {schema_name}.{table_name}
+            SET {', '.join(f'{col[0]} = %s' for col in columns_to_update)}
+            WHERE {' AND '.join(f'{col[0]} = %s' for col in update_column_where)}
+        """
+
+        value_columns = columns_to_update + update_column_where
+        values_list = generate_values_list(value_columns, 1)
+
+        out = time_and_log_query(conn, "update_data", update_sql, csv_file, values_list)
+
+        print(f"[+] Updated {out} rows in {schema_name}.{table_name}")
+
+    print(f"[+] Total {NUM_UPDATES} updates in {schema_name}.{table_name}")
+
+def delete_data(conn, schema_name: str, table_name: str, csv_file: str):
+    full_table_name = f"{schema_name}.{table_name}"
+    if full_table_name not in table_columns:
+        print(f"[!] No column information found for {full_table_name}")
+        return
+
+    columns = table_columns[full_table_name]
+    if not columns:
+        print(f"[!] No columns found in {schema_name}.{table_name}")
+        return
+
+    delete_column = random.choice(columns)
+
+    values_list = generate_values_list([delete_column], 1)
+
+    delete_sql = f"DELETE FROM {schema_name}.{table_name} WHERE {delete_column[0]} = %s"
+
+    out = time_and_log_query(conn, "delete_data", delete_sql, csv_file, values_list)
+
+    print(f"[+] Deleted {out} rows from {schema_name}.{table_name}")
+
 def create_schema_and_tables(conn, csv_file: str, schema_name: str):
     time_and_log_query(conn, "create_schema", f"CREATE SCHEMA IF NOT EXISTS {schema_name}", csv_file)
     print(f"[+] Created schema: {schema_name}")
@@ -218,7 +285,7 @@ def create_schema_and_tables(conn, csv_file: str, schema_name: str):
     for i in range(NUM_TABLES_PER_SCHEMA):
         table_name = f"table_{i}_{random.randint(1000, 9999)}"
 
-        for func in [create_table, create_index, insert_data]:
+        for func in [create_table, create_index, insert_data, update_data, delete_data]:
             try:
                 func(conn, schema_name, table_name, csv_file)
             except Exception as e:
@@ -237,7 +304,7 @@ def load_data(config_file: str, csv_file: str) -> None:
 
     with open(csv_file, mode='w', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow(["query_type", "pg_xid", "duration_ms", "pg_timestamp"])
+        writer.writerow(["query_type", "pg_xid", "duration_ms", "pg_timestamp", "rows_affected"])
 
     conn = connect_db_instance(props, "springtail")
     start_time = time.time()
@@ -258,6 +325,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('--num-schemas', type=int, default=NUM_SCHEMAS, help='Number of schemas to create')
     parser.add_argument('--num-tables-per-schema', type=int, default=NUM_TABLES_PER_SCHEMA, help='Number of tables per schema')
     parser.add_argument('--num-inserts', type=int, default=NUM_INSERTS, help='Number of inserts per table')
+    parser.add_argument('--num-updates', type=int, default=NUM_UPDATES, help='Number of updates per table')
+    parser.add_argument('--num-deletes', type=int, default=NUM_DELETES, help='Number of deletes per table')
     parser.add_argument('--run-time-seconds', type=int, default=RUN_TIME_SECONDS, help='Duration to run the data load (seconds)')
 
     return parser.parse_args()
