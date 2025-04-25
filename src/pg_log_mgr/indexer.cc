@@ -437,31 +437,41 @@ namespace springtail::committer {
             // Get the next_extent from disk using the stats last offset
             auto table = TableMgr::get_instance()->get_table(db_id, idx_state._tid, idx_state._idx._xid);
             auto next_eid = table->get_stats().end_offset;
-            auto next_page = table->read_page_from_disk(next_eid);
+            auto next_extent_result = table->read_extent_from_disk(next_eid);
+            auto next_extent = next_extent_result.first;
 
-            while (!next_page->empty()) {
-                // Get the table at the next_page XID
-                table = TableMgr::get_instance()->get_table(db_id, idx_state._tid, next_page->header().xid);
+            // If next_extent is available, invalidate previous extent first and then populate using next_extent
+            while (next_extent) {
+                // Get the table at the next XID
+                // and fetch the page for the extent
+                auto next_xid = next_extent->header().xid;
+                auto next_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(next_xid));
 
-                // Get the previous_extent_id from next_extent header
-                // and fetch the extent from disk using the extent_id
-                if (auto prev_eid = next_page->header().prev_offset; prev_eid != constant::UNKNOWN_EXTENT) {
-                    // Retrieve the page for previous_extent_id
-                    auto prev_page = table->read_page_from_disk(prev_eid);
-                    auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(prev_page->header().xid));
+                // If previous offset exists, lets invalidate that first
+                if (auto prev_eid = next_extent->header().prev_offset; prev_eid != constant::UNKNOWN_EXTENT) {
 
-                    // and invalidate index for the rows in the page
-                    indexer_helpers::invalidate_index_for_page(prev_eid, prev_page, idx_state._root, idx_cols, prev_schema);
+                    // Get the previous extent and its schema
+                    auto [prev_extent, tmp_next_eid] = table->read_extent_from_disk(prev_eid);
+                    auto prev_xid = prev_extent->header().xid;
+                    auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(prev_xid));
+
+                    // and invalidate index for the rows in the prev page
+                    indexer_helpers::invalidate_index_for_extent(prev_eid, prev_extent, idx_state._root, idx_cols, prev_schema);
                 }
 
                 // Populate index for the rows in the next page
-                indexer_helpers::populate_index_for_page(next_eid, next_page, idx_state._root, idx_cols, table->schema());
+                indexer_helpers::populate_index_for_extent(next_eid, next_extent, idx_state._root, idx_cols, next_schema);
 
-                // Get the next page using end offset of that XID
-                next_eid = table->get_stats().end_offset;
-                next_page = table->read_page_from_disk(next_eid);
+                // Get the next extent if next_offset is present, else exit the reconciliation
+                next_eid = next_extent_result.second;
+                if (next_eid > 0) {
+                    next_extent_result = table->read_extent_from_disk(next_eid);
+                    next_extent = next_extent_result.first;
+                } else {
+                    break;
+                }
             }
-            // Commit the index
+
             LOG_DEBUG(LOG_COMMITTER, "Initiating Index commit: {}:{}", db_id, index_id);
             _commit_build(idx_state._root, idx_state._key, idx_state._idx, end_xid);
         }
