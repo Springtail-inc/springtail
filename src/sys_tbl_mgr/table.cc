@@ -25,16 +25,19 @@ get_table_dir(const std::filesystem::path &base,
 
 namespace indexer_helpers {
 
-    template <typename RowPtrT,             // SafePagePtr | std::shared_ptr<Extent>
-             typename BTreeOp>              // lambda: (MutableBTreePtr, KvPtr) → void
+    /**
+     * @brief Compile-time selector for the secondary-index operation.
+     */
+    enum class IndexOperation { Insert, Remove };
+
+    template <IndexOperation op,            // Operation on the index - insert/remove
+             typename RowPtrT>              // SafePagePtr | std::shared_ptr<Extent>
     static void _update_secondary_index(
             uint64_t                        extent_id,
             const RowPtrT                  &rows,        // pointer-like, supports *rows
             const MutableBTreePtr          &root,
             const std::vector<uint32_t>    &idx_cols,
-            const ExtentSchemaPtr          &schema,
-            BTreeOp                         op,          // insert  / remove
-            const char                     *tag)         // “Populated” / “Invalidated”
+            const ExtentSchemaPtr          &schema)
     {
         /* 1. Column metadata is the same for every row – fetch it once. */
         const auto column_names = schema->get_column_names(idx_cols);
@@ -49,11 +52,19 @@ namespace indexer_helpers {
             (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
 
             auto kv = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
-            op(root, kv);              // insert / remove
+            if constexpr (op == IndexOperation::Insert) {
+                root->insert(kv);
+            } else { /* op == IndexOperation::Remove */
+                root->remove(kv);
+            }
             ++row_id;
         }
 
-        LOG_DEBUG(LOG_BTREE, "{} {} secondary rows", tag, row_id);
+        if constexpr (op == IndexOperation::Insert) {
+            LOG_DEBUG(LOG_BTREE, "Populated {} secondary rows",   row_id);
+        } else {
+            LOG_DEBUG(LOG_BTREE, "Invalidated {} secondary rows", row_id);
+        }
     }
 
     /* ------------------------------  PAGE  ----------------------------------- */
@@ -63,10 +74,8 @@ namespace indexer_helpers {
             const std::vector<uint32_t>    &idx_cols,
             const ExtentSchemaPtr          &schema)
     {
-        _update_secondary_index(extent_id, page, root, idx_cols, schema,
-                [](const MutableBTreePtr &r,
-                    const std::shared_ptr<KeyValueTuple>& kv){ r->insert(kv); },
-                "Populated");
+        _update_secondary_index<IndexOperation::Insert>(extent_id, page, root,
+                idx_cols, schema);
     }
 
     void invalidate_index_for_page(uint64_t extent_id,
@@ -75,10 +84,8 @@ namespace indexer_helpers {
             const std::vector<uint32_t>    &idx_cols,
             const ExtentSchemaPtr          &schema)
     {
-        _update_secondary_index(extent_id, page, root, idx_cols, schema,
-                [](const MutableBTreePtr &r,
-                    const std::shared_ptr<KeyValueTuple>& kv){ r->remove(kv); },
-                "Invalidated");
+        _update_secondary_index<IndexOperation::Remove>(extent_id, page, root,
+                idx_cols, schema);
     }
 
     /* -----------------------------  EXTENT  ---------------------------------- */
@@ -88,10 +95,8 @@ namespace indexer_helpers {
             const std::vector<uint32_t>   &idx_cols,
             const ExtentSchemaPtr         &schema)
     {
-        _update_secondary_index(extent_id, extent, root, idx_cols, schema,
-                [](const MutableBTreePtr &r,
-                    const std::shared_ptr<KeyValueTuple>& kv){ r->insert(kv); },
-                "Populated");
+        _update_secondary_index<IndexOperation::Insert>(extent_id, extent, root,
+                idx_cols, schema);
     }
 
     void invalidate_index_for_extent(uint64_t extent_id,
@@ -100,10 +105,8 @@ namespace indexer_helpers {
             const std::vector<uint32_t>   &idx_cols,
             const ExtentSchemaPtr         &schema)
     {
-        _update_secondary_index(extent_id, extent, root, idx_cols, schema,
-                [](const MutableBTreePtr &r,
-                    const std::shared_ptr<KeyValueTuple>& kv){ r->remove(kv); },
-                "Invalidated");
+        _update_secondary_index<IndexOperation::Remove>(extent_id, extent, root,
+                idx_cols, schema);
     }
 } // namespace indexer_helpers
 
