@@ -21,16 +21,52 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
 } // namespace table_helpers
 
 namespace indexer_helpers {
-    /*
-     * Invalidate index for the rows present in the passed page
+    /**
+     * @brief Remove secondary-index entries for every row in a page.
+     *
+     * @param extent_id  Extent ID
+     * @param page       SafePagePtr whose rows should be removed from index.
+     * @param root       Mutable B-tree root of the secondary index.
+     * @param idx_cols   index columns
+     * @param schema     ExtentSchemaPtr to fetch schema columns
      */
     void invalidate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
             const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
 
-    /*
-     * Populate index for the rows present in the passed page
+    /**
+     * @brief Remove secondary-index entries for every row in an extent.
+     *
+     * @param extent_id  Extent ID
+     * @param extent     Extent whose rows should be removed.
+     * @param root       Mutable B-tree root of the secondary index.
+     * @param idx_cols   index columns
+     * @param schema     ExtentSchemaPtr to fetch schema columns
+     */
+    void invalidate_index_for_extent(uint64_t extent_id, const std::shared_ptr<Extent> &extent,
+            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
+
+    /**
+     * @brief Insert secondary-index entries for every row in a page.
+     *
+     * @param extent_id  Extent ID
+     * @param page       SafePagePtr whose rows should be indexed.
+     * @param root       Mutable B-tree root of the secondary index.
+     * @param idx_cols   index columns
+     * @param schema     ExtentSchemaPtr to fetch schema columns
      */
     void populate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
+            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
+
+    /**
+     * @brief Insert secondary-index entries for every row in an extent.
+     *
+     * @param extent_id  Extent ID
+     * @param extent     Extent whose rows should be indexed.
+     * @param root       Mutable B-tree root of the secondary index.
+     * @param idx_cols   index columns
+     * @param schema     ExtentSchemaPtr to fetch schema columns
+     */
+    void populate_index_for_extent(uint64_t extent_id, const std::shared_ptr<Extent> &extent,
             const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
 } // namespace indexer_helpers
 

@@ -24,43 +24,86 @@ get_table_dir(const std::filesystem::path &base,
 } // namespace table_helpers
 
 namespace indexer_helpers {
-    void invalidate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
-            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols,
-            const ExtentSchemaPtr& schema)
+
+    template <typename RowPtrT,             // SafePagePtr | std::shared_ptr<Extent>
+             typename BTreeOp>              // lambda: (MutableBTreePtr, KvPtr) → void
+    static void _update_secondary_index(
+            uint64_t                        extent_id,
+            const RowPtrT                  &rows,        // pointer-like, supports *rows
+            const MutableBTreePtr          &root,
+            const std::vector<uint32_t>    &idx_cols,
+            const ExtentSchemaPtr          &schema,
+            BTreeOp                         op,          // insert  / remove
+            const char                     *tag)         // “Populated” / “Invalidated”
     {
-        auto value_fields = std::make_shared<FieldArray>(2);
-        value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
+        /* 1. Column metadata is the same for every row – fetch it once. */
+        const auto column_names = schema->get_column_names(idx_cols);
+        const auto key_fields   = schema->get_fields(column_names);
 
-        // go through each row and pass the relevant key to each of the secondary indexes for removal
+        /* 2. Build the (extent_id , row_id) value tuple incrementally. */
+        auto value_fields   = std::make_shared<FieldArray>(2);
+        (*value_fields)[0]  = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
+
         uint32_t row_id = 0;
-        for (auto &row : *page) {
-            value_fields->at(1) = std::make_shared<ConstTypeField<uint32_t>>(row_id);
-
-            auto key_fields = schema->get_fields(schema->get_column_names(idx_cols));
-            auto &&skey = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
-            root->remove(skey);
-            ++row_id;
-        }
-        LOG_DEBUG(LOG_BTREE, "Invalidated {} secondary rows", row_id);
-    }
-
-    void populate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
-            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols,
-            const ExtentSchemaPtr& schema)
-    {
-        uint32_t row_id = 0;
-        auto value_fields = std::make_shared<FieldArray>(2);
-        value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
-        for (auto &row : *page) {
+        for (auto &row : *rows) {
             (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
 
-            auto &&keys = schema->get_column_names(idx_cols);
-            auto key_fields = schema->get_fields(keys);
-            auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
-            root->insert(svalue);
+            auto kv = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
+            op(root, kv);              // insert / remove
             ++row_id;
         }
-        LOG_DEBUG(LOG_BTREE, "Populated {} secondary rows", row_id);
+
+        LOG_DEBUG(LOG_BTREE, "{} {} secondary rows", tag, row_id);
+    }
+
+    /* ------------------------------  PAGE  ----------------------------------- */
+    void populate_index_for_page(uint64_t extent_id,
+            const StorageCache::SafePagePtr &page,
+            const MutableBTreePtr          &root,
+            const std::vector<uint32_t>    &idx_cols,
+            const ExtentSchemaPtr          &schema)
+    {
+        _update_secondary_index(extent_id, page, root, idx_cols, schema,
+                [](const MutableBTreePtr &r,
+                    const std::shared_ptr<KeyValueTuple>& kv){ r->insert(kv); },
+                "Populated");
+    }
+
+    void invalidate_index_for_page(uint64_t extent_id,
+            const StorageCache::SafePagePtr &page,
+            const MutableBTreePtr          &root,
+            const std::vector<uint32_t>    &idx_cols,
+            const ExtentSchemaPtr          &schema)
+    {
+        _update_secondary_index(extent_id, page, root, idx_cols, schema,
+                [](const MutableBTreePtr &r,
+                    const std::shared_ptr<KeyValueTuple>& kv){ r->remove(kv); },
+                "Invalidated");
+    }
+
+    /* -----------------------------  EXTENT  ---------------------------------- */
+    void populate_index_for_extent(uint64_t extent_id,
+            const std::shared_ptr<Extent> &extent,
+            const MutableBTreePtr         &root,
+            const std::vector<uint32_t>   &idx_cols,
+            const ExtentSchemaPtr         &schema)
+    {
+        _update_secondary_index(extent_id, extent, root, idx_cols, schema,
+                [](const MutableBTreePtr &r,
+                    const std::shared_ptr<KeyValueTuple>& kv){ r->insert(kv); },
+                "Populated");
+    }
+
+    void invalidate_index_for_extent(uint64_t extent_id,
+            const std::shared_ptr<Extent> &extent,
+            const MutableBTreePtr         &root,
+            const std::vector<uint32_t>   &idx_cols,
+            const ExtentSchemaPtr         &schema)
+    {
+        _update_secondary_index(extent_id, extent, root, idx_cols, schema,
+                [](const MutableBTreePtr &r,
+                    const std::shared_ptr<KeyValueTuple>& kv){ r->remove(kv); },
+                "Invalidated");
     }
 } // namespace indexer_helpers
 

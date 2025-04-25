@@ -446,23 +446,21 @@ namespace springtail::committer {
                 // and fetch the page for the extent
                 auto next_xid = next_extent->header().xid;
                 auto next_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(next_xid));
-                auto next_page = StorageCache::get_instance()->get(table->get_table_dir() / constant::DATA_FILE, next_eid, next_xid);
 
                 // If previous offset exists, lets invalidate that first
-                if (auto prev_eid = next_page->header().prev_offset; prev_eid != constant::UNKNOWN_EXTENT) {
+                if (auto prev_eid = next_extent->header().prev_offset; prev_eid != constant::UNKNOWN_EXTENT) {
 
                     // Get the previous extent and its schema
                     auto [prev_extent, tmp_next_eid] = table->read_extent_from_disk(prev_eid);
                     auto prev_xid = prev_extent->header().xid;
                     auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(prev_xid));
-                    auto prev_page = StorageCache::get_instance()->get(table->get_table_dir() / constant::DATA_FILE, prev_eid, prev_xid);
 
                     // and invalidate index for the rows in the prev page
-                    indexer_helpers::invalidate_index_for_page(prev_eid, prev_page, idx_state._root, idx_cols, prev_schema);
+                    indexer_helpers::invalidate_index_for_extent(prev_eid, prev_extent, idx_state._root, idx_cols, prev_schema);
                 }
 
                 // Populate index for the rows in the next page
-                indexer_helpers::populate_index_for_page(next_eid, next_page, idx_state._root, idx_cols, next_schema);
+                indexer_helpers::populate_index_for_extent(next_eid, next_extent, idx_state._root, idx_cols, next_schema);
 
                 // Get the next extent if next_offset is present, else exit the reconciliation
                 next_eid = next_extent_result.second;
