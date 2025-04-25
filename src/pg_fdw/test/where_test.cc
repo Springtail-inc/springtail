@@ -78,11 +78,11 @@ namespace {
             sys_tbl_mgr::Client::get_instance()->create_namespace(_db_id, { access_xid, 0 }, ns_msg);
 
             // create the table via the table mgr
-            create_table(_db_id, _tid, access_xid, _columns);
+            create_table(_db_id, _tid, access_xid, "test_table_where", _columns);
             access_xid++;
             target_xid++;
 
-            create_index(_db_id, _tid, access_xid, _secondary_index_id,
+            create_index(_db_id, _tid, access_xid, _secondary_index_id, "idx_test_where_1",
                 std::vector<PgMsgSchemaColumn>(_columns.end() - 2, _columns.end()), sys_tbl::IndexNames::State::READY);
             access_xid++;
             target_xid++;

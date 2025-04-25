@@ -89,14 +89,14 @@ namespace {
         };
 
         // create the table via the table mgr
-        create_table(_db_id, _tid, access_xid, _columns);
+        create_table(_db_id, _tid, access_xid, "test_table", _columns);
         access_xid++;
         target_xid++;
 
         // Create index at an XID
         uint64_t index_xid = access_xid;
         nlohmann::json idx_ddls;
-        auto create_idx_ddl = create_index(_db_id, _tid, access_xid, _secondary_index_id,
+        auto create_idx_ddl = create_index(_db_id, _tid, access_xid, _secondary_index_id, "idx_test_indexer_1",
                 std::vector<PgMsgSchemaColumn>(_columns.end() - 2, _columns.end()), sys_tbl::IndexNames::State::NOT_READY);
         access_xid++;
         target_xid++;

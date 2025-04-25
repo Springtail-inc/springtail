@@ -3,7 +3,7 @@
 #include <sys_tbl_mgr/client.hh>
 
 namespace springtail::test::ddl_helpers {
-    void create_table(uint64_t db_id, uint64_t table_id, uint64_t xid, std::vector<PgMsgSchemaColumn> columns)
+    void create_table(uint64_t db_id, uint64_t table_id, uint64_t xid, std::string table_name, std::vector<PgMsgSchemaColumn> columns)
     {
         // create a table
         PgMsgTable create_msg;
@@ -11,7 +11,7 @@ namespace springtail::test::ddl_helpers {
         create_msg.oid = table_id;
         create_msg.xid = xid;
         create_msg.namespace_name = "public";
-        create_msg.table = "test_table";
+        create_msg.table = table_name;
         create_msg.columns = columns;
 
         TableMgr::get_instance()->create_table(db_id, { xid, 0 }, create_msg);
@@ -19,7 +19,7 @@ namespace springtail::test::ddl_helpers {
     }
 
     std::string create_index(uint64_t db_id, uint64_t table_id, uint64_t xid, uint64_t index_id,
-            std::vector<PgMsgSchemaColumn> columns, sys_tbl::IndexNames::State idx_state)
+            std::string idx_name, std::vector<PgMsgSchemaColumn> columns, sys_tbl::IndexNames::State idx_state)
     {
 
         PgMsgIndex msg;
@@ -27,7 +27,7 @@ namespace springtail::test::ddl_helpers {
         msg.lsn = 0;
         msg.xid = xid;
         msg.namespace_name = "public";
-        msg.index = "secondary_index";
+        msg.index = idx_name;
         msg.is_unique = false;
         msg.table_oid = table_id;
         msg.oid = index_id;
