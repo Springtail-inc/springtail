@@ -60,7 +60,7 @@ namespace springtail::test::ddl_helpers {
     }
 
     std::shared_ptr<Tuple>
-        create_key(const std::string &name)
+        _create_key(const std::string &name)
         {
             auto k = std::make_shared<ConstTypeField<std::string>>(name);
             std::vector<ConstFieldPtr> v({ k });
@@ -68,7 +68,7 @@ namespace springtail::test::ddl_helpers {
         }
 
     std::shared_ptr<Tuple>
-        create_value(const std::vector<int32_t> &data)
+        _create_value(const std::vector<int32_t> &data)
         {
             std::vector<ConstFieldPtr> v;
 
@@ -83,7 +83,7 @@ namespace springtail::test::ddl_helpers {
     {
         // insert data to the tree
         for (int i = 0; i < data.size(); i++) {
-            mtable->insert(create_value(data[i]), constant::UNKNOWN_EXTENT);
+            mtable->insert(_create_value(data[i]), constant::UNKNOWN_EXTENT);
         }
     }
 }
