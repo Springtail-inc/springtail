@@ -711,7 +711,7 @@ namespace springtail {
                 : _btree(btree),
                   _page_lock(node->page->mutex),
                   _node(node),
-                  _page_i(page_i)
+                  _page_i(std::move(page_i))
             { }
 
         public:
