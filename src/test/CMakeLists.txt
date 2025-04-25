@@ -1,5 +1,5 @@
 ## library of functions using in testing
-set(TEST_SOURCES services.cc)
+set(TEST_SOURCES services.cc ddl_helpers.cc)
 
 find_package(absl REQUIRED)
 
