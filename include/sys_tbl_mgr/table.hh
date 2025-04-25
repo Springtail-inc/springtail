@@ -403,10 +403,10 @@ namespace indexer_helpers {
          * Reads an extent from the disk and returns it.
          * @param extent_id The extent ID to read.
          * @return std::pair where:
-         *         - first - std::optional<std::shared_ptr<Extent>> pointer to the retrieved extent
-         *         - second - std::optional<uint64_t> Next offset
+         *         - first -  std::shared_ptr<Extent> pointer to the retrieved extent
+         *         - second - uint64_t Next offset
          */
-        std::pair<std::optional<std::shared_ptr<Extent>>, std::optional<uint64_t>> read_extent_from_disk(uint64_t extent_id) const;
+        std::pair<std::shared_ptr<Extent>, uint64_t> read_extent_from_disk(uint64_t extent_id) const;
 
         /**
          * @brief Get table stats

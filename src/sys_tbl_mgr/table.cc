@@ -410,7 +410,7 @@ namespace indexer_helpers {
         }
     }
 
-    std::pair<std::optional<std::shared_ptr<Extent>>, std::optional<uint64_t>>
+    std::pair<std::shared_ptr<Extent>, uint64_t>
     Table::read_extent_from_disk(uint64_t extent_id) const
     {
         // XXX: When an extent is asked from the page,
@@ -420,7 +420,7 @@ namespace indexer_helpers {
         auto data_file_handle = IOMgr::get_instance()->open(_table_dir / constant::DATA_FILE, IOMgr::IO_MODE::READ, true);
         auto response = data_file_handle->read(extent_id);
         if (response->data.empty()) {
-            return {std::nullopt, std::nullopt};
+            return {nullptr, 0};
         } else {
             auto extent = std::make_shared<Extent>(response->data);
             return {extent, response->next_offset};

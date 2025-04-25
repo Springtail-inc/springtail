@@ -438,7 +438,7 @@ namespace springtail::committer {
             auto table = TableMgr::get_instance()->get_table(db_id, idx_state._tid, idx_state._idx._xid);
             auto next_eid = table->get_stats().end_offset;
             auto next_extent_result = table->read_extent_from_disk(next_eid);
-            auto next_extent = next_extent_result.first.value_or(nullptr);
+            auto next_extent = next_extent_result.first;
 
             // If next_extent is available, invalidate previous extent first and then populate using next_extent
             while (next_extent) {
@@ -453,7 +453,7 @@ namespace springtail::committer {
 
                     // Get the previous extent and its schema
                     auto [prev_extent, tmp_next_eid] = table->read_extent_from_disk(prev_eid);
-                    auto prev_xid = prev_extent.value()->header().xid;
+                    auto prev_xid = prev_extent->header().xid;
                     auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(prev_xid));
                     auto prev_page = StorageCache::get_instance()->get(table->get_table_dir() / constant::DATA_FILE, prev_eid, prev_xid);
 
@@ -465,10 +465,10 @@ namespace springtail::committer {
                 indexer_helpers::populate_index_for_page(next_eid, next_page, idx_state._root, idx_cols, next_schema);
 
                 // Get the next extent if next_offset is present, else exit the reconciliation
-                next_eid = next_extent_result.second.value_or(0);
+                next_eid = next_extent_result.second;
                 if (next_eid > 0) {
                     next_extent_result = table->read_extent_from_disk(next_eid);
-                    next_extent = next_extent_result.first.value_or(nullptr);
+                    next_extent = next_extent_result.first;
                 } else {
                     break;
                 }
