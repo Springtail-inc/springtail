@@ -63,6 +63,7 @@ namespace {
         }
 
         static void TearDownTestSuite() {
+            _indexer.reset();
             springtail_shutdown();
         }
 
@@ -84,36 +85,44 @@ namespace {
 
         inline static std::unique_ptr<Indexer> _indexer;
 
+        void _create_table_and_index(uint64_t table_id, uint64_t index_id, uint64_t table_xid,
+                uint64_t index_xid, std::string table_name, std::string index_name) {
+            // create the table via the table mgr
+            create_table(_db_id, table_id, table_xid, table_name, _columns);
+
+            // Create index at an XID
+            nlohmann::json idx_ddls;
+            auto create_idx_ddl = create_index(_db_id, table_id, index_xid, index_id, index_name,
+                    std::vector<PgMsgSchemaColumn>(_columns.end() - 2, _columns.end()), sys_tbl::IndexNames::State::NOT_READY);
+            access_xid++;
+            target_xid++;
+            idx_ddls.push_back(nlohmann::json::parse(create_idx_ddl));
+
+            // Validate index as NOT_READY
+            auto index_info = sys_tbl_mgr::Client::get_instance()->get_index_info(_db_id, index_id, {index_xid, constant::MAX_LSN});
+            ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(index_info.state()), sys_tbl::IndexNames::State::NOT_READY);
+
+            // Process Index DDLs
+            _indexer->process_ddls(_db_id, index_xid, idx_ddls);
+            sys_tbl_mgr::Client::get_instance()->finalize(_db_id, index_xid);
+
+        }
+
     };
 
     TEST_F(Indexer_Test, Test_EmptyReconcile)
     {
-        // create the table via the table mgr
-        create_table(_db_id, _tid, access_xid, "test_indexer_table1", _columns);
-        access_xid++;
-        target_xid++;
+        uint64_t table_id = _tid++;
+        uint64_t index_id = _secondary_index_id + 1;
+        uint64_t table_xid = access_xid++;
+        uint64_t index_xid = access_xid++;
 
-        // Create index at an XID
-        uint64_t index_xid = access_xid;
-        nlohmann::json idx_ddls;
-        auto create_idx_ddl = create_index(_db_id, _tid, access_xid, _secondary_index_id, "idx_test_indexer_1",
-                std::vector<PgMsgSchemaColumn>(_columns.end() - 2, _columns.end()), sys_tbl::IndexNames::State::NOT_READY);
-        access_xid++;
-        target_xid++;
-        idx_ddls.push_back(nlohmann::json::parse(create_idx_ddl));
-
-        // Validate index as NOT_READY
-        auto index_info = sys_tbl_mgr::Client::get_instance()->get_index_info(_db_id, _secondary_index_id, {index_xid, constant::MAX_LSN});
-        ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(index_info.state()), sys_tbl::IndexNames::State::NOT_READY);
-
-        // Process Index DDLs
-        _indexer->process_ddls(_db_id, index_xid, idx_ddls);
-        sys_tbl_mgr::Client::get_instance()->finalize(_db_id, access_xid);
+        _create_table_and_index(table_id, index_id, table_xid, index_xid, "test_indexer_table1", "idx_test_indexer_1");
 
         // Trigger index reconcilation at reconcile_xid
-        uint64_t reconcile_xid = access_xid;
+        uint64_t reconcile_xid = access_xid++;
         _indexer->process_index_reconciliation(_db_id, index_xid, reconcile_xid);
-        index_info = sys_tbl_mgr::Client::get_instance()->get_index_info(_db_id, _secondary_index_id, {reconcile_xid, constant::MAX_LSN});
+        auto index_info = sys_tbl_mgr::Client::get_instance()->get_index_info(_db_id, index_id, {reconcile_xid, constant::MAX_LSN});
 
         // Validate index as READY at reconcile_xid
         ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(index_info.state()), sys_tbl::IndexNames::State::READY);
@@ -121,27 +130,12 @@ namespace {
 
     TEST_F(Indexer_Test, Test_ReconcileAfterInserts)
     {
-        // create the table via the table mgr
-        create_table(_db_id, _tid, access_xid, "test_indexer_table2", _columns);
-        access_xid++;
-        target_xid++;
+        uint64_t table_id = _tid++;
+        uint64_t index_id = _secondary_index_id + 2;
+        uint64_t table_xid = access_xid++;
+        uint64_t index_xid = access_xid++;
 
-        // Create index at an XID
-        uint64_t index_xid = access_xid;
-        nlohmann::json idx_ddls;
-        auto create_idx_ddl = create_index(_db_id, _tid, access_xid, _secondary_index_id, "idx_test_indexer_2",
-                std::vector<PgMsgSchemaColumn>(_columns.end() - 2, _columns.end()), sys_tbl::IndexNames::State::NOT_READY);
-        access_xid++;
-        target_xid++;
-        idx_ddls.push_back(nlohmann::json::parse(create_idx_ddl));
-
-        // Validate index as NOT_READY
-        auto index_info = sys_tbl_mgr::Client::get_instance()->get_index_info(_db_id, _secondary_index_id, {index_xid, constant::MAX_LSN});
-        ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(index_info.state()), sys_tbl::IndexNames::State::NOT_READY);
-
-        // Process Index DDLs
-        _indexer->process_ddls(_db_id, index_xid, idx_ddls);
-        sys_tbl_mgr::Client::get_instance()->finalize(_db_id, access_xid);
+        _create_table_and_index(table_id, index_id, table_xid, index_xid, "test_indexer_table2", "idx_test_indexer_2");
 
         std::vector<std::vector<int32_t>> _data;
         const size_t num_rows = 100000;
@@ -159,22 +153,23 @@ namespace {
             _data.push_back(std::move(row));
         }
 
+        target_xid = access_xid + 1;
         // create a mutable table
-        auto mtable = TableMgr::get_instance()->get_mutable_table(_db_id, _tid, access_xid, target_xid, false);
+        auto mtable = TableMgr::get_instance()->get_mutable_table(_db_id, table_id, access_xid, target_xid, false);
 
         // insert a number of rows
         populate_table(mtable, _data);
 
         // finalize the empty table
         auto &&metadata = mtable->finalize();
-        TableMgr::get_instance()->update_roots(_db_id, _tid, target_xid, metadata);
+        TableMgr::get_instance()->update_roots(_db_id, table_id, target_xid, metadata);
         access_xid++;
         target_xid++;
 
         // Trigger index reconcilation at reconcile_xid
         uint64_t reconcile_xid = access_xid;
         _indexer->process_index_reconciliation(_db_id, index_xid, reconcile_xid);
-        index_info = sys_tbl_mgr::Client::get_instance()->get_index_info(_db_id, _secondary_index_id, {reconcile_xid, constant::MAX_LSN});
+        auto index_info = sys_tbl_mgr::Client::get_instance()->get_index_info(_db_id, index_id, {reconcile_xid, constant::MAX_LSN});
 
         // Validate index as READY at reconcile_xid
         ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(index_info.state()), sys_tbl::IndexNames::State::READY);
