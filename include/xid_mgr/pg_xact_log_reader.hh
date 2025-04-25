@@ -1,5 +1,7 @@
 #pragma once
 
+#include <absl/log/check.h>
+
 #include <common/filesystem.hh>
 #include <xid_mgr/pg_xact_log_writer.hh>
 
@@ -44,14 +46,24 @@ public:
      *
      * @return uint32_t
      */
-    uint32_t get_pg_xid() const { return ((_current_xid == nullptr)? 0 : _current_xid->pg_xid);}
+    uint32_t
+    get_pg_xid() const
+    {
+        CHECK(_current_xid != nullptr);
+        return _current_xid->pg_xid;
+    }
 
     /**
      * @brief Get the xid value
      *
      * @return uint64_t
      */
-    uint64_t get_xid() const { return ((_current_xid == nullptr)? 0 : _current_xid->xid); }
+    uint64_t
+    get_xid() const
+    {
+        CHECK(_current_xid != nullptr);
+        return _current_xid->xid;
+    }
 
     /**
      * @brief Get the real value of current xid entry
@@ -59,7 +71,12 @@ public:
      * @return true - if it was a real commit
      * @return false - if it was not a real commit
      */
-    bool get_real_commit() const { return ((_current_xid == nullptr)? false : _current_xid->real_commit);}
+    bool
+    get_real_commit() const
+    {
+        CHECK(_current_xid != nullptr);
+        return _current_xid->real_commit;
+    }
 
 private:
     std::filesystem::path _base_dir;        ///< full path to transaction logs directory

@@ -99,7 +99,7 @@ private:
          * @param real_commit - thi flag indicates if this is a real commit
          */
         void
-        record_mapping(uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit);
+        record_log_entry(uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit);
 
         /**
          * @brief Cleanup committed history of schema changes

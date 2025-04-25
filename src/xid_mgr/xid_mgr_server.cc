@@ -99,7 +99,7 @@ XidMgrServer::_record_xid_change(uint64_t db_id, uint32_t pg_xid, uint64_t xid, 
     });
     std::shared_lock read_lock(_mutex);
     auto db_id_to_log_data = _find_or_add(db_id, read_lock);
-    db_id_to_log_data->second.record_mapping(pg_xid, xid, has_schema_changes, real_commit);
+    db_id_to_log_data->second.record_log_entry(pg_xid, xid, has_schema_changes, real_commit);
     _service->notify_subscriber(db_id, xid);
 }
 
@@ -143,7 +143,7 @@ XidMgrServer::_find_or_add(uint64_t db_id, std::shared_lock<std::shared_mutex> &
 }
 
 void
-XidMgrServer::DBXactLogData::record_mapping(uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit)
+XidMgrServer::DBXactLogData::record_log_entry(uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit)
 {
     std::unique_lock lock(_mutex);
     _xact_log.log(pg_xid, xid, real_commit);

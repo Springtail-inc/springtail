@@ -59,14 +59,7 @@ namespace {
         {
             PgXactLogReader reader(log_path);
             ASSERT_FALSE(reader.begin());
-
-            ASSERT_EQ(reader.get_pg_xid(), 0);
-            ASSERT_EQ(reader.get_xid(), 0);
-
             ASSERT_FALSE(reader.next());
-
-            ASSERT_EQ(reader.get_pg_xid(), 0);
-            ASSERT_EQ(reader.get_xid(), 0);
         }
 
         // write first
@@ -103,10 +96,6 @@ namespace {
             // call next twice after the end of data is reached
             ASSERT_FALSE(reader.next());
             ASSERT_FALSE(reader.next());
-
-            // try to get xids after the end of data is reached
-            ASSERT_EQ(reader.get_pg_xid(), 0);
-            ASSERT_EQ(reader.get_xid(), 0);
 
             // call begin() twice
             ASSERT_TRUE(reader.begin());
