@@ -2,7 +2,6 @@ import logging
 from lxml import etree
 import os
 import springtail
-import sysutils
 
 from test_case import TestCase
 
@@ -122,9 +121,17 @@ class TestSet:
         # update postgres config to apply props for the test
         springtail.update_postgres_config(self._test_params)
 
+        # install FDW with Postgres restart
+        logging.debug("Installing foreign data wrapper...")
+        springtail.install_fdw(self._build_dir)
+
+        # start background query
+        logging.debug("Start background query")
+        self._config.start_background()
+
         # start Springtail
         logging.debug('Starting the Springtail instance')
-        springtail.start(self._config_file, self._build_dir, do_cleanup=False, do_init=True)
+        springtail.start(self._config_file, self._build_dir, do_cleanup=False, do_init=True, postgres_only=False, do_fdw_install=False)
 
         # run the tests
         logging.info(f'Run the tests: {self._test_files}')
@@ -174,6 +181,9 @@ class TestSet:
         # if a test failed and we don't shutdown on failure, return immediately
         if test_failed and not shutdown_on_fail:
             return False
+
+        logging.debug('Stop background query execution and verify')
+        self._config.stop_background()
 
         # shutdown Springtail
         logging.debug('Stopping the Springtail instance')

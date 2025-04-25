@@ -587,7 +587,8 @@ def start(config_file: str,
           do_cleanup: bool = True,
           do_init: bool = True,
           postgres_only: bool = False,
-          start_xid: int = None) -> None:
+          start_xid: int = None,
+          do_fdw_install: bool = True) -> None:
     """Main function to start the Springtail system."""
     # must do init if we are performing cleanup
     if do_cleanup:
@@ -625,9 +626,10 @@ def start(config_file: str,
         execute_startup_sql(props, sql_file)
 
     if not postgres_only:
-        # install fdw
-        print("\nInstalling foreign data wrapper...")
-        install_fdw(build_dir)
+        if do_fdw_install:
+            # install fdw
+            print("\nInstalling foreign data wrapper...")
+            install_fdw(build_dir)
 
         # start replication on db instance
         print("\nStarting replication on database instance...")
@@ -882,7 +884,7 @@ if __name__ == "__main__":
 
         if args.start:
             start(args.config_file, args.build_dir, args.sql_file,
-                  do_cleanup=not args.no_cleanup, do_init=not args.no_cleanup, 
+                  do_cleanup=not args.no_cleanup, do_init=not args.no_cleanup,
                   postgres_only=args.postgres_only, start_xid=args.start_xid)
 
     except Exception as e:

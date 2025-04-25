@@ -6,9 +6,11 @@ from lxml import etree
 import os
 import psycopg2
 import springtail
-import sysutils
 import time
 import common
+import threading
+
+_GLOBAL_CONFIG_FILE = '__config.sql'
 
 class TestCase:
     """Class to manage a single test-case.  Handles all phases of the
@@ -313,9 +315,10 @@ class TestCase:
             cursor.copy_from(f, table, sep=',', null='')
 
 
-    def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool) -> list:
+    def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool, quiet: bool = False) -> list:
         """Execute the provided SQL using the provided cursor."""
-        logging.debug(f'Execute SQL: {sql}')
+        if not quiet:
+            logging.debug(f'Execute SQL: {sql}')
         try:
             cursor.execute(sql)
 
@@ -580,6 +583,29 @@ class TestCase:
             self._execute_command(command)
 
 
+    def _run_background(self):
+        connection = springtail.connect_db_instance(self._props, self._primary_name)
+        with connection.cursor() as cursor:
+            self._execute_sql(cursor, f'BEGIN; DROP TABLE IF EXISTS background_control; CREATE TABLE background_control (value INT); COMMIT;', False)
+
+        # wait for 1 millisecond
+        while not self._stop_thread.wait(0.001):
+            self._value += 1
+            with connection.cursor() as cursor:
+                self._execute_sql(cursor, f"BEGIN; INSERT INTO background_control (value) VALUES ({self._value}); COMMIT;", False, True)
+
+            pass
+        connection.close()
+
+
+    def start_background(self) -> None:
+        if self._filename.endswith(_GLOBAL_CONFIG_FILE):
+            self._stop_thread = threading.Event()
+            self._value = 0
+            self._bg_thread = threading.Thread(target=self._run_background)
+            self._bg_thread.start()
+
+
     def setup(self) -> None:
         """Run SQL commands prior to starting Springtail.  Used to
         prepare tables and data that will be copied into Springtail on
@@ -742,6 +768,21 @@ class TestCase:
 
         self._result = 'SUCCESS'
         self._status = 'VERIFY_END'
+
+    def stop_background(self) -> None:
+        if self._filename.endswith(_GLOBAL_CONFIG_FILE):
+            self._stop_thread.set()
+            self._bg_thread.join()
+            if self._fdw is None:
+                self._fdw = springtail.connect_fdw_instance(self._props, self._replica_name)
+                self._fdw.autocommit = True
+            with self._fdw.cursor() as cursor:
+                self._execute_sql(cursor, f'BEGIN; SET statement_timeout = {self._metadata["query_timeout"] * 1000}; COMMIT;', False)
+                result = self._execute_sql(cursor, f"SELECT MAX(value) FROM background_control;", True)
+            if result[0][0] != self._value:
+                logging.error(f"background_control value {result[0][0]} is not equal to the one recorded {self._value}")
+            else:
+                logging.info(f"background_control value {result[0][0]} is verified to be equal to the one recorded {self._value}")
 
 
     def cleanup(self) -> None:
