@@ -596,15 +596,12 @@ namespace indexer_helpers {
         assert(it != roots.end());
 
         if (it->extent_id != constant::UNKNOWN_EXTENT) {
+            _began_empty = false;
             _primary_index->init(it->extent_id);
         } else {
+            _began_empty = true;
             _primary_index->init_empty();
         }
-
-        _primary_lookup = std::make_shared<BTree>(_table_dir / constant::INDEX_PRIMARY_FILE,
-                                                  access_xid,
-                                                  primary_schema,
-                                                  it->extent_id);
 
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
 
@@ -965,14 +962,14 @@ namespace indexer_helpers {
     {
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_primary_lookup->empty()) {
+        if (_began_empty) {
             _append_empty(value);
             return;
         }
 
         // note: in this case there is no explicit primary key, so we need to append the row to the
         //       end of the file
-        auto pos = --(_primary_lookup->end());
+        auto pos = _primary_index->last();
         uint64_t extent_id = _primary_extent_id_f->get_uint64(*pos);
 
         // get the page from the cache
@@ -994,20 +991,17 @@ namespace indexer_helpers {
 
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_primary_lookup->empty()) {
+        if (_began_empty) {
             _insert_empty(value);
             return;
         }
 
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_lookup->lower_bound(search_key, true);
+        auto i = _primary_index->lower_bound(search_key, true);
 
-        uint64_t extent_id = constant::UNKNOWN_EXTENT;
-        if (i != _primary_lookup->end()) {
-            // if the primary index is not empty, get the target extent
-            extent_id = _primary_extent_id_f->get_uint64(*i);
-        }
+        // if the primary index is not empty, get the target extent
+        uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
 
         // then we can do a direct insert
         _insert_direct(value, extent_id);
@@ -1049,19 +1043,16 @@ namespace indexer_helpers {
 
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_primary_lookup->empty()) {
+        if (_began_empty) {
             return _upsert_empty(value);
         }
 
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_lookup->lower_bound(search_key, true);
+        auto i = _primary_index->lower_bound(search_key, true);
 
-        uint64_t extent_id = constant::UNKNOWN_EXTENT;
-        if (i != _primary_lookup->end()) {
-            // if the primary index is not empty, get the target extent
-            extent_id = _primary_extent_id_f->get_uint64(*i);
-        }
+        // if the primary index is not empty, get the target extent
+        uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
 
         // then we can do a direct insert
         return _upsert_direct(value, extent_id);
@@ -1100,20 +1091,16 @@ namespace indexer_helpers {
     {
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_primary_lookup->empty()) {
+        if (_began_empty) {
             _remove_empty(key);
             return;
         }
 
         // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
-        auto i = _primary_lookup->lower_bound(key, true);
+        auto i = _primary_index->lower_bound(key, true);
 
-        // if the key isn't available, then it may be in the
-        uint64_t extent_id = constant::UNKNOWN_EXTENT;
-        if (i != _primary_lookup->end()) {
-            // if the primary index is not empty, get the target extent
-            extent_id = _primary_extent_id_f->get_uint64(*i);
-        }
+        // if the primary index is not empty, get the target extent
+        uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
 
         // then we can do a direct removal
         _remove_direct(key, extent_id);
@@ -1132,8 +1119,8 @@ namespace indexer_helpers {
 
         // scan the index
         bool found = false;
-        auto &&i = _primary_lookup->begin();
-        while (!found && i != _primary_lookup->end()) {
+        auto i = _primary_index->begin();
+        while (!found && i != _primary_index->end()) {
             // scan each extent, looking for a match
             uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
 
@@ -1195,20 +1182,17 @@ namespace indexer_helpers {
 
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_primary_lookup->empty()) {
+        if (_began_empty) {
             _update_empty(value);
             return;
         }
 
         // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_lookup->lower_bound(search_key, true);
+        auto i = _primary_index->lower_bound(search_key, true);
 
-        uint64_t extent_id = constant::UNKNOWN_EXTENT;
-        if (i != _primary_lookup->end()) {
-            // if the primary index is not empty, get the target extent
-            extent_id = _primary_extent_id_f->get_uint64(*i);
-        }
+        // if the primary index is not empty, get the target extent
+        uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
 
         // then we can do a direct update
         _update_direct(value, extent_id);
