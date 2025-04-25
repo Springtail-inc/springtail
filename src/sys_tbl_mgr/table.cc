@@ -60,11 +60,11 @@ namespace indexer_helpers {
             ++row_id;
         }
 
-        if constexpr (op == IndexOperation::Insert) {
-            LOG_DEBUG(LOG_BTREE, "Populated {} secondary rows",   row_id);
-        } else {
-            LOG_DEBUG(LOG_BTREE, "Invalidated {} secondary rows", row_id);
-        }
+        constexpr const char* kVerb =
+            (op == IndexOperation::Insert) ? "Populated"
+            : "Invalidated";
+
+        LOG_DEBUG(LOG_BTREE, "{} {} secondary rows", kVerb, row_id);
     }
 
     /* ------------------------------  PAGE  ----------------------------------- */
