@@ -459,14 +459,6 @@ namespace indexer_helpers {
             return _schema;
         }
 
-        /**
-         * @brief Get table dir path
-         * @return std::filesystem::path
-         */
-        std::filesystem::path get_table_dir() const {
-            return _table_dir;
-        }
-
     protected:
         /**
          * Reads a data extent using the provided iterator position within the primary index.
