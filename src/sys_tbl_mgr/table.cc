@@ -24,43 +24,89 @@ get_table_dir(const std::filesystem::path &base,
 } // namespace table_helpers
 
 namespace indexer_helpers {
-    void invalidate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
-            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols,
-            const ExtentSchemaPtr& schema)
+
+    /**
+     * @brief Compile-time selector for the secondary-index operation.
+     */
+    enum class IndexOperation { Insert, Remove };
+
+    template <IndexOperation op,            // Operation on the index - insert/remove
+             typename RowPtrT>              // SafePagePtr | std::shared_ptr<Extent>
+    static void _update_secondary_index(
+            uint64_t                        extent_id,
+            const RowPtrT                  &rows,        // pointer-like, supports *rows
+            const MutableBTreePtr          &root,
+            const std::vector<uint32_t>    &idx_cols,
+            const ExtentSchemaPtr          &schema)
     {
-        auto value_fields = std::make_shared<FieldArray>(2);
-        value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
+        /* 1. Column metadata is the same for every row – fetch it once. */
+        const auto column_names = schema->get_column_names(idx_cols);
+        const auto key_fields   = schema->get_fields(column_names);
 
-        // go through each row and pass the relevant key to each of the secondary indexes for removal
+        /* 2. Build the (extent_id , row_id) value tuple incrementally. */
+        auto value_fields   = std::make_shared<FieldArray>(2);
+        (*value_fields)[0]  = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
+
         uint32_t row_id = 0;
-        for (auto &row : *page) {
-            value_fields->at(1) = std::make_shared<ConstTypeField<uint32_t>>(row_id);
-
-            auto key_fields = schema->get_fields(schema->get_column_names(idx_cols));
-            auto &&skey = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
-            root->remove(skey);
-            ++row_id;
-        }
-        LOG_DEBUG(LOG_BTREE, "Invalidated {} secondary rows", row_id);
-    }
-
-    void populate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
-            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols,
-            const ExtentSchemaPtr& schema)
-    {
-        uint32_t row_id = 0;
-        auto value_fields = std::make_shared<FieldArray>(2);
-        value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
-        for (auto &row : *page) {
+        for (auto &row : *rows) {
             (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
 
-            auto &&keys = schema->get_column_names(idx_cols);
-            auto key_fields = schema->get_fields(keys);
-            auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
-            root->insert(svalue);
+            auto kv = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
+            if constexpr (op == IndexOperation::Insert) {
+                root->insert(kv);
+            } else { /* op == IndexOperation::Remove */
+                root->remove(kv);
+            }
             ++row_id;
         }
-        LOG_DEBUG(LOG_BTREE, "Populated {} secondary rows", row_id);
+
+        constexpr const char* kVerb =
+            (op == IndexOperation::Insert) ? "Populated"
+            : "Invalidated";
+
+        LOG_DEBUG(LOG_BTREE, "{} {} secondary rows", kVerb, row_id);
+    }
+
+    /* ------------------------------  PAGE  ----------------------------------- */
+    void populate_index_for_page(uint64_t extent_id,
+            const StorageCache::SafePagePtr &page,
+            const MutableBTreePtr          &root,
+            const std::vector<uint32_t>    &idx_cols,
+            const ExtentSchemaPtr          &schema)
+    {
+        _update_secondary_index<IndexOperation::Insert>(extent_id, page, root,
+                idx_cols, schema);
+    }
+
+    void invalidate_index_for_page(uint64_t extent_id,
+            const StorageCache::SafePagePtr &page,
+            const MutableBTreePtr          &root,
+            const std::vector<uint32_t>    &idx_cols,
+            const ExtentSchemaPtr          &schema)
+    {
+        _update_secondary_index<IndexOperation::Remove>(extent_id, page, root,
+                idx_cols, schema);
+    }
+
+    /* -----------------------------  EXTENT  ---------------------------------- */
+    void populate_index_for_extent(uint64_t extent_id,
+            const std::shared_ptr<Extent> &extent,
+            const MutableBTreePtr         &root,
+            const std::vector<uint32_t>   &idx_cols,
+            const ExtentSchemaPtr         &schema)
+    {
+        _update_secondary_index<IndexOperation::Insert>(extent_id, extent, root,
+                idx_cols, schema);
+    }
+
+    void invalidate_index_for_extent(uint64_t extent_id,
+            const std::shared_ptr<Extent> &extent,
+            const MutableBTreePtr         &root,
+            const std::vector<uint32_t>   &idx_cols,
+            const ExtentSchemaPtr         &schema)
+    {
+        _update_secondary_index<IndexOperation::Remove>(extent_id, extent, root,
+                idx_cols, schema);
     }
 } // namespace indexer_helpers
 
@@ -410,8 +456,8 @@ namespace indexer_helpers {
         }
     }
 
-    StorageCache::SafePagePtr
-    Table::read_page_from_disk(uint64_t extent_id) const
+    std::pair<std::shared_ptr<Extent>, uint64_t>
+    Table::read_extent_from_disk(uint64_t extent_id) const
     {
         // XXX: When an extent is asked from the page,
         // and if the extent's XID is different than the XID passed
@@ -420,10 +466,10 @@ namespace indexer_helpers {
         auto data_file_handle = IOMgr::get_instance()->open(_table_dir / constant::DATA_FILE, IOMgr::IO_MODE::READ, true);
         auto response = data_file_handle->read(extent_id);
         if (response->data.empty()) {
-            return StorageCache::get_instance()->get(_table_dir / constant::DATA_FILE, constant::UNKNOWN_EXTENT, _xid);
+            return {nullptr, 0};
         } else {
             auto extent = std::make_shared<Extent>(response->data);
-            return StorageCache::get_instance()->get(_table_dir / constant::DATA_FILE, extent_id, extent->header().xid);
+            return {extent, response->next_offset};
         }
     }
 

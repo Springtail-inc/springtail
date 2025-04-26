@@ -246,6 +246,8 @@ jobs:
 
       - name: Run Proxy Tests
         if: success() || failure()      # run this step even if previous step failed
+        env:
+          LD_LIBRARY_PATH: /usr/lib/springtail
         run: |
           # Make sure Proxy `enable_ssl` is on 
           sed -i 's/enable_ssl": false/enable_ssl": true/g' system.json.test
