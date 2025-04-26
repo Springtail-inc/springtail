@@ -5,7 +5,7 @@
 // springtail includes
 #include <common/init.hh>
 
-#include <pg_log_mgr/pg_log_coordinator.hh>
+#include <xid_mgr/xid_mgr_client.hh>
 
 using namespace springtail;
 using namespace springtail::pg_fdw;

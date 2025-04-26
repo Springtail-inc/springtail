@@ -40,47 +40,6 @@ GrpcXidMgrService::Ping(grpc::CallbackServerContext* context,
 }
 
 grpc::ServerUnaryReactor*
-GrpcXidMgrService::CommitXid(grpc::CallbackServerContext* context,
-                             const proto::CommitXidRequest* request,
-                             google::protobuf::Empty* response)
-{
-    ServerSpan span(context, "XidMgrService", "CommitXid");
-    auto* reactor = context->DefaultReactor();
-
-    try {
-        _srv.commit_xid(request->db_id(), request->xid(), request->has_schema_changes());
-        proto::XidPushResponse msg;
-        msg.set_db_id(request->db_id());
-        msg.set_xid(request->xid());
-        _notification_thread->notify(msg);
-        span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
-        reactor->Finish(grpc::Status::OK);
-    } catch (const std::exception& e) {
-        span.span()->SetStatus(opentelemetry::trace::StatusCode::kError, e.what());
-        reactor->Finish(grpc::Status(grpc::StatusCode::INTERNAL, e.what()));
-    }
-    return reactor;
-}
-
-grpc::ServerUnaryReactor*
-GrpcXidMgrService::RecordDdlChange(grpc::CallbackServerContext* context,
-                                   const proto::RecordDdlChangeRequest* request,
-                                   google::protobuf::Empty* response)
-{
-    ServerSpan span(context, "XidMgrService", "RecordDdlChange");
-    auto* reactor = context->DefaultReactor();
-    try {
-        _srv.record_ddl_change(request->db_id(), request->xid());
-        span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
-        reactor->Finish(grpc::Status::OK);
-    } catch (const std::exception& e) {
-        span.span()->SetStatus(opentelemetry::trace::StatusCode::kError, e.what());
-        reactor->Finish(grpc::Status(grpc::StatusCode::INTERNAL, e.what()));
-    }
-    return reactor;
-}
-
-grpc::ServerUnaryReactor*
 GrpcXidMgrService::GetCommittedXid(grpc::CallbackServerContext* context,
                                    const proto::GetCommittedXidRequest* request,
                                    proto::GetCommittedXidResponse* response)

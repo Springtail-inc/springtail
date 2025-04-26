@@ -14,6 +14,7 @@
 #include <sys_tbl_mgr/table.hh>
 #include <test/services.hh>
 #include <xid_mgr/xid_mgr_client.hh>
+#include <xid_mgr/xid_mgr_server.hh>
 
 using namespace springtail;
 
@@ -26,7 +27,6 @@ namespace {
         static void SetUpTestSuite() {
             std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
             runners.emplace();
-            runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
             runners->emplace_back(std::make_unique<IOMgrRunner>());
 
             auto service_runners = test::get_services(true, true, true);
@@ -37,6 +37,7 @@ namespace {
             // create the public namespace
             auto client = sys_tbl_mgr::Client::get_instance();
             auto xid_client = XidMgrClient::get_instance();
+            auto xid_server = xid_mgr::XidMgrServer::get_instance();
             uint64_t target_xid = xid_client->get_committed_xid(1, 0) + 1;
 
             // create the public namespace in the sys_tbl_mgr
@@ -45,7 +46,7 @@ namespace {
             ns_msg.name = "public";
             client->create_namespace(1, XidLsn(target_xid, 0), ns_msg);
 
-            xid_client->commit_xid(1, target_xid, false);
+            xid_server->commit_xid(1, 1, target_xid, false);
         }
 
         static void TearDownTestSuite() {
@@ -123,7 +124,7 @@ namespace {
 
         // commit the xid
         LOG_DEBUG(LOG_ALL, "Committing xid: {}", xid);
-        XidMgrClient::get_instance()->commit_xid(db_id, xid, false);
+        xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, 1, xid, false);
 
         // create an access table
         auto table = TableMgr::get_instance()->get_table(db_id, oid, xid);

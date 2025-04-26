@@ -159,7 +159,6 @@ namespace springtail {
         _json[LOGGING_CONFIG] = system_json["logging"];
         _json[IOPOOL_CONFIG] = system_json["iopool"];
         _json[WRITE_CACHE_CONFIG] = system_json["write_cache"];
-        _json[XID_MGR_CONFIG] = system_json["xid_mgr"];
         _json[STORAGE_CONFIG] = system_json["storage"];
         _json[REDIS_CONFIG] = system_json["redis"];
         _json[LOG_MGR_CONFIG] = system_json["log_mgr"];

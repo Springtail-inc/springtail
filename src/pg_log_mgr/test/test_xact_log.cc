@@ -1,10 +1,7 @@
 #include <gtest/gtest.h>
-#include <filesystem>
 
 #include <common/init.hh>
 #include <pg_log_mgr/pg_log_mgr.hh>
-#include <pg_log_mgr/pg_xact_log_reader.hh>
-#include <pg_log_mgr/pg_xact_log_writer.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
 
 using namespace springtail;
@@ -26,65 +23,22 @@ namespace {
         }
 
         void SetUp() override {
-            // remove the directory
-            std::filesystem::remove_all("/tmp/test_xlog");
-            // make a directory in /tmp/
-            std::filesystem::create_directory("/tmp/test_xlog");
+            // nothing to do here
         }
 
         void TearDown() override {
-            // remove the directory
-            //std::filesystem::remove_all("/tmp/test_xlog/");
-        }
-
-        static uint64_t get_log_timestamp(PgXactLogWriter &writer) {
-            // Get the current time from the system clock
-            auto now = std::chrono::system_clock::now();
-
-            // Convert the current time to time since epoch
-            auto duration = now.time_since_epoch();
-
-            // Convert duration to milliseconds
-            return std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
+            // nothing to do here
         }
     };
 
-    TEST_F(XactLogRW_Test, XactLogWriter) {
-        std::filesystem::path p = "/tmp/test_xlog";
-        PgXactLogWriter writer(p);
-        uint64_t timestamp = get_log_timestamp(writer);
-
-        writer.rotate(timestamp);
-
-        writer.log(1, 10);
-        writer.log(2, 11);
-
-        writer.close();
-
-        // read the log file and verify
-        PgXactLogReader reader(p);
-        ASSERT_EQ(reader.begin(), true);
-
-        ASSERT_EQ(reader.get_pg_xid(), 1);
-        ASSERT_EQ(reader.get_xid(), 10);
-        reader.next();
-
-        ASSERT_EQ(reader.get_pg_xid(), 2);
-        ASSERT_EQ(reader.get_xid(), 11);
-    }
-
     TEST_F(XactLogRW_Test, XactTestMsg)
     {
-        PgXactMsg msg("/tmp/test_xlog/test_1.log", "/tmp/test_xlog/test_2.log", 1, 1, 100, 1000, 5, 1, {10, 20});
+        PgXactMsg msg(1, 1000, 5, 1, {10, 20});
 
         PgXactMsg::XactMsg msg3 = std::get<PgXactMsg::XactMsg>(msg.msg);
 
         ASSERT_EQ(msg.type, PgXactMsg::Type::XACT_MSG);
-        ASSERT_EQ(msg3.begin_path, std::filesystem::path("/tmp/test_xlog/test_1.log"));
-        ASSERT_EQ(msg3.commit_path, "/tmp/test_xlog/test_2.log");
         ASSERT_EQ(msg3.db_id, 1);
-        ASSERT_EQ(msg3.begin_offset, 1);
-        ASSERT_EQ(msg3.commit_offset, 100);
         ASSERT_EQ(msg3.xact_lsn, 1000);
         ASSERT_EQ(msg3.xid, 5);
         ASSERT_EQ(msg3.pg_xid, 1);

@@ -21,7 +21,7 @@ namespace {
             ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
 
             // get xid_mgr properties check for cert files
-            nlohmann::json json = Properties::get(Properties::XID_MGR_CONFIG);
+            nlohmann::json json = Properties::get(Properties::LOG_MGR_CONFIG);
             if (json.empty() || !json.contains("rpc_config") || !json["rpc_config"].contains("server_cert")) {
                 GTEST_SKIP() << "Missing XidMgr rpc config";
                 return;

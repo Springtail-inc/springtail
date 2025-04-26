@@ -173,7 +173,8 @@ namespace springtail::pg_log_mgr {
         }
         LOG_DEBUG(LOG_PG_LOG_MGR, "Found {} tables", tids.size());
 
-        return std::make_shared<committer::XidReady>(type, db_id, committer::XidReady::SwapMsg(xid, std::move(tids)));
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Creating commit_queue message for committer queue db: {}, xid: {}, type: {}", db_id, xid, std::string(1,type));
+        return std::make_shared<committer::XidReady>(type, db_id, 0, committer::XidReady::SwapMsg(xid, std::move(tids)));
     }
 
     void
