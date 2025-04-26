@@ -33,7 +33,7 @@ from sys_tbl_mgr import SysTblMgrClient
 
 from otel_logger import init_logging
 
-ALL_DAEMONS = ['xid_mgr_daemon', 'sys_tbl_mgr_daemon', 'pg_log_mgr_daemon', 'pg_ddl_daemon', 'proxy']
+ALL_DAEMONS = ['sys_tbl_mgr_daemon', 'pg_log_mgr_daemon', 'pg_ddl_daemon', 'proxy']
 
 class Coordinator:
     """The Coordinator class to manage the components of the system."""
@@ -141,9 +141,8 @@ class Coordinator:
 
         match self.service_name:
             case "ingestion":
-                self.scheduler.register_component(factory.create_xid_mgr_daemon(), 1)
-                self.scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 2)
-                self.scheduler.register_component(factory.create_log_mgr_daemon(), 3)
+                self.scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 1)
+                self.scheduler.register_component(factory.create_log_mgr_daemon(), 2)
 
             case "fdw":
                 try:
@@ -166,10 +165,9 @@ class Coordinator:
 
                 # in test startup ingestion services
                 if not self.production:
-                    self.xid_mgr_component = factory.create_xid_mgr_daemon()
                     self.sys_tlb_mgr_component = factory.create_sys_tbl_mgr_daemon()
-                    if not self.xid_mgr_component.start() or not self.sys_tlb_mgr_component.start():
-                        self.logger.error("Failed to start xid_mgr_component or sys_tbl_mgr_component")
+                    if not self.sys_tlb_mgr_component.start():
+                        self.logger.error("Failed to start sys_tbl_mgr_component")
                         raise ValueError("Failed to start components")
 
                 # wait for ingestion to be ready
@@ -222,10 +220,8 @@ class Coordinator:
             self.logger.info(f"Received signal {signum}, shutting down...")
             self.scheduler.shutdown()
 
-        # if not in production, shutdown the xid_mgr and sys_tbl_mgr
+        # if not in production, shutdown the sys_tbl_mgr
         if not self.production and self.service_name == 'fdw':
-            if self.xid_mgr_component:
-                self.xid_mgr_component.shutdown()
             if self.sys_tlb_mgr_component:
                 self.sys_tlb_mgr_component.shutdown()
 
@@ -272,7 +268,7 @@ class Coordinator:
             time.sleep(1)
 
         system_config = props.get_system_config()
-        xid_config = system_config['xid_mgr']['rpc_config']
+        xid_config = system_config['log_mgr']['rpc_config']
         sys_tbl_config = system_config['sys_tbl_mgr']['rpc_config']
 
         waiting = True
@@ -281,7 +277,7 @@ class Coordinator:
                 self.logger.debug(f"Connecting to XidManager at {host}:{xid_config['server_port']}")
                 with XidMgrClient(host, xid_config) as client:
                     client.ping()
-                    self.logger.info("XidManager is ready")
+                    self.logger.info("LogManager is ready")
                     waiting = False
             except Exception as e:
                 continue

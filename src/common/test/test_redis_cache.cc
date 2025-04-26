@@ -91,7 +91,7 @@ namespace {
     TEST_F(RedisCache_Test, TestSimpleChange)
     {
         int connections = 0;
-        nlohmann::json::json_pointer pointer("/xid_mgr/rpc_config/client_connections");
+        nlohmann::json::json_pointer pointer("/log_mgr/rpc_config/client_connections");
         std::string system_settings_key = "instance_config/system_settings";
         // create callback class
         auto redis_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
@@ -208,23 +208,22 @@ namespace {
         _cache->add_callback("instance_config/system_settings/storage",     redis_watcher);
         _cache->add_callback("instance_config/system_settings/sys_tbl_mgr", redis_watcher);
         _cache->add_callback("instance_config/system_settings/write_cache", redis_watcher);
-        _cache->add_callback("instance_config/system_settings/xid_mgr",     redis_watcher);
 
-        EXPECT_EQ(_cache->get_callback_count(""), 35);
+        EXPECT_EQ(_cache->get_callback_count(""), 34);
 
         _cache->add_callback("instance_config/primary_db/host",             redis_watcher);
         _cache->add_callback("instance_config/primary_db/port",             redis_watcher);
         _cache->add_callback("instance_config/primary_db/replication_user", redis_watcher);
 
-        EXPECT_EQ(_cache->get_callback_count(""), 38);
+        EXPECT_EQ(_cache->get_callback_count(""), 37);
 
         _cache->add_callback("instance_config/database_ids/0",  redis_watcher);
 
+        EXPECT_EQ(_cache->get_callback_count(""), 38);
+
+        _cache->add_callback("instance_config/system_settings/log_mgr/rpc_config/client_connections", redis_watcher);
+
         EXPECT_EQ(_cache->get_callback_count(""), 39);
-
-        _cache->add_callback("instance_config/system_settings/xid_mgr/rpc_config/client_connections", redis_watcher);
-
-        EXPECT_EQ(_cache->get_callback_count(""), 40);
 
         int connections = 0;
         // create callback class
@@ -232,14 +231,14 @@ namespace {
             if (!new_value.is_null()) {
                 if (path == "instance_config") {
                     // less specific path match
-                    EXPECT_EQ(connections, new_value.at("/system_settings/xid_mgr/rpc_config/client_connections"_json_pointer));
+                    EXPECT_EQ(connections, new_value.at("/system_settings/log_mgr/rpc_config/client_connections"_json_pointer));
                 } else if (path == "instance_config/system_settings") {
                     // less specific path match
-                    EXPECT_EQ(connections, new_value.at("/xid_mgr/rpc_config/client_connections"_json_pointer));
-                } else if (path == "instance_config/system_settings/xid_mgr") {
+                    EXPECT_EQ(connections, new_value.at("/log_mgr/rpc_config/client_connections"_json_pointer));
+                } else if (path == "instance_config/system_settings/log_mgr") {
                     // less specific path match
                     EXPECT_EQ(connections, new_value.at("/rpc_config/client_connections"_json_pointer));
-                } else if (path == "instance_config/system_settings/xid_mgr/rpc_config/client_connections")  {
+                } else if (path == "instance_config/system_settings/log_mgr/rpc_config/client_connections")  {
                     // exact path match of the updated value
                     EXPECT_EQ(connections, new_value);
                 } else {
@@ -253,7 +252,7 @@ namespace {
         // get value from cache
         std::string system_settings_key = "instance_config/system_settings";
         nlohmann::json system_settings_value = _cache->get_value(system_settings_key);
-        nlohmann::json::json_pointer pointer("/xid_mgr/rpc_config/client_connections");
+        nlohmann::json::json_pointer pointer("/log_mgr/rpc_config/client_connections");
         connections = system_settings_value.at(pointer);
         connections++;
         system_settings_value.at(pointer) = connections;

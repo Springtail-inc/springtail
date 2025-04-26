@@ -25,9 +25,6 @@
 #include <pg_log_mgr/pg_log_reader.hh>
 #include <pg_log_mgr/xid_ready.hh>
 
-#include <pg_log_mgr/pg_xact_log_reader.hh>
-#include <pg_log_mgr/pg_xact_log_writer.hh>
-
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <pg_log_mgr/committer.hh>
 
@@ -54,7 +51,6 @@ namespace springtail::pg_log_mgr {
         /** replication and transaction log prefixes and suffix */
         static constexpr char const * const LOG_PREFIX_REPL = "pg_log_repl_";
         static constexpr char const * const LOG_PREFIX_REPL_STREAMING = "pg_log_streaming_";
-        static constexpr char const * const LOG_PREFIX_XACT = "pg_log_xact_";
         static constexpr char const * const LOG_SUFFIX = ".log";
 
         /** redis worker id for redis sync queue */
@@ -112,7 +108,7 @@ namespace springtail::pg_log_mgr {
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
           _index_reconciliation_queue(std::make_shared<ConcurrentQueue<IndexReconcileRequest>>())
         {
-            _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, xact_log_path, _committer_queue, false);
+            _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, _committer_queue, false);
         }
 
         /** Start the pipeline; setup the log reader/writer log files etc. */

@@ -30,8 +30,6 @@ namespace springtail {
         static inline constexpr char IOPOOL_CONFIG[] = "iopool";
         /** Write cache config */
         static inline constexpr char WRITE_CACHE_CONFIG[] = "write_cache";
-        /** XID mgr config */
-        static inline constexpr char XID_MGR_CONFIG[] = "xid_mgr";
         /** Storage config section */
         static inline constexpr char STORAGE_CONFIG[] = "storage";
         /** Logging config section */

@@ -11,9 +11,11 @@
 #include <pg_fdw/pg_fdw_mgr.hh>
 
 #include <test/services.hh>
+#include <test/ddl_helpers.hh>
 
 using namespace springtail;
 using namespace springtail::pg_fdw;
+using namespace springtail::test::ddl_helpers;
 
 namespace {
 
@@ -76,11 +78,12 @@ namespace {
             sys_tbl_mgr::Client::get_instance()->create_namespace(_db_id, { access_xid, 0 }, ns_msg);
 
             // create the table via the table mgr
-            _create_table(_db_id, _tid, access_xid);
+            create_table(_db_id, _tid, access_xid, "test_table_where", _columns);
             access_xid++;
             target_xid++;
 
-            _create_index(_db_id, _tid, access_xid);
+            create_index(_db_id, _tid, access_xid, _secondary_index_id, "idx_test_where_1",
+                std::vector<PgMsgSchemaColumn>(_columns.end() - 2, _columns.end()), sys_tbl::IndexNames::State::READY);
             access_xid++;
             target_xid++;
             sys_tbl_mgr::Client::get_instance()->finalize(_db_id, access_xid);
@@ -90,7 +93,7 @@ namespace {
             auto mtable = TableMgr::get_instance()->get_mutable_table(_db_id, _tid, access_xid, target_xid, false);
 
             // insert a number of rows
-            _populate_table(mtable);
+            populate_table(mtable, _data);
 
             // finalize the empty table
             auto &&metadata = mtable->finalize();
@@ -163,91 +166,6 @@ namespace {
         };
 
         Form_pg_attribute *_attrs;
-
-        static void
-        _create_table(uint64_t db_id, uint64_t table_id, uint64_t xid)
-        {
-            // create a table
-            PgMsgTable create_msg;
-            create_msg.lsn = 0;
-            create_msg.oid = table_id;
-            create_msg.xid = xid;
-            create_msg.namespace_name = "public";
-            create_msg.table = "test_table";
-            create_msg.columns = _columns;
-
-            TableMgr::get_instance()->create_table(db_id, { xid, 0 }, create_msg);
-
-        }
-
-        static void
-        _create_index(uint64_t db_id, uint64_t table_id, uint64_t xid)
-        {
-
-            std::vector<PgMsgSchemaIndexColumn> columns;
-            PgMsgIndex msg;
-
-            msg.lsn = 0;
-            msg.xid = xid;
-            msg.namespace_name = "public";
-            msg.index = "secondary_index";
-            msg.is_unique = false;
-            msg.table_oid = table_id;
-            msg.oid = _secondary_index_id;
-
-            msg.columns.push_back({"col4", 4, 0});
-            msg.columns.push_back({"col5", 5, 1});
-
-            XidLsn xid_lsn{xid};
-
-            sys_tbl_mgr::Client::get_instance()->create_index(db_id, xid_lsn, msg, sys_tbl::IndexNames::State::READY);
-        }
-
-        static void
-        _drop_index(uint64_t db_id, uint32_t index_id, uint64_t xid)
-        {
-            PgMsgDropIndex msg;
-
-            msg.lsn = 0;
-            msg.xid = xid;
-            msg.namespace_name = "public";
-            msg.oid = index_id;
-
-            XidLsn xid_lsn{xid};
-
-            sys_tbl_mgr::Client::get_instance()->drop_index(db_id, xid_lsn, msg);
-
-            sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
-        }
-
-        std::shared_ptr<Tuple>
-        _create_key(const std::string &name)
-        {
-            auto k = std::make_shared<ConstTypeField<std::string>>(name);
-            std::vector<ConstFieldPtr> v({ k });
-            return std::make_shared<ValueTuple>(v);
-        }
-
-        static std::shared_ptr<Tuple>
-        _create_value(const std::vector<int32_t> &data)
-        {
-            std::vector<ConstFieldPtr> v;
-
-            for (auto &d : data) {
-                v.push_back(std::make_shared<ConstTypeField<int32_t>>(d));
-            }
-
-            return std::make_shared<ValueTuple>(v);
-        }
-
-        static void
-        _populate_table(MutableTablePtr mtable)
-        {
-            // insert data to the tree
-            for (int i = 0; i < _data.size(); i++) {
-                mtable->insert(_create_value(_data[i]), constant::UNKNOWN_EXTENT);
-            }
-        }
 
         List *
         _add_sortgroup(int attnum, bool reversed, List *sort_list = nullptr) {
