@@ -9,8 +9,6 @@
 #include <common/properties.hh>
 #include <common/redis.hh>
 
-#include <xid_mgr/xid_mgr_client.hh>
-
 #include <pg_repl/pg_types.hh>
 #include <pg_repl/pg_repl_connection.hh>
 #include <pg_repl/pg_copy_table.hh>
@@ -20,6 +18,8 @@
 #include <pg_log_mgr/pg_log_coordinator.hh>
 #include <pg_log_mgr/pg_log_recovery.hh>
 #include <pg_log_mgr/sync_tracker.hh>
+
+#include <xid_mgr/xid_mgr_server.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -45,7 +45,7 @@ namespace springtail::pg_log_mgr {
       _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
       _index_reconciliation_queue(index_reconciliation_queue)
     {
-        _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, xact_log_path, _committer_queue, archive_logs);
+        _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, _committer_queue, archive_logs);
 
         // construct the callback for watching for database state changes
         _cache_watcher_db_states = std::make_shared<RedisCache::RedisChangeWatcher>(
@@ -118,7 +118,7 @@ namespace springtail::pg_log_mgr {
         _redis_sync_queue.clear();
 
         // fetch latest xid from xid mgr
-        XidMgrClient *xid_mgr = XidMgrClient::get_instance();
+        xid_mgr::XidMgrServer *xid_mgr = xid_mgr::XidMgrServer::get_instance();
         uint64_t committed_xid = xid_mgr->get_committed_xid(_db_id, 0);
 
         // note: we skip an XID here to allow the recovery to commit the system tables before replay
@@ -387,6 +387,7 @@ namespace springtail::pg_log_mgr {
 
             // notify the Committer to stop committing XIDs
             if (sync_start) {
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Stop committing XIDs for db: {}", _db_id);
                 _committer_queue->push(std::make_shared<committer::XidReady>(_db_id));
             }
         }

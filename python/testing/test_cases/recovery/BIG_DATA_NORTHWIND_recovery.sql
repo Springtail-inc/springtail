@@ -3437,8 +3437,6 @@ INSERT INTO suppliers VALUES (28, 'Gai pâturage', 'Eliane Noz', 'Sales Represen
 INSERT INTO suppliers VALUES (29, 'Forêts d''érables', 'Chantal Goulet', 'Accounting Manager', '148 rue Chasseur', 'Ste-Hyacinthe', 'Québec', 'J2S 7S8', 'Canada', '(514) 555-2955', '(514) 555-2921', NULL);
 COMMIT;
 
-### recovery_point
-
 BEGIN;
 INSERT INTO territories VALUES ('01581', 'Westboro', 1);
 INSERT INTO territories VALUES ('01730', 'Bedford', 1);
@@ -3548,6 +3546,8 @@ INSERT INTO us_states VALUES (49, 'West Virginia', 'WV', 'south');
 INSERT INTO us_states VALUES (50, 'Wisconsin', 'WI', 'midwest');
 INSERT INTO us_states VALUES (51, 'Wyoming', 'WY', 'west');
 COMMIT;
+
+### recovery_point
 
 BEGIN;
 ALTER TABLE ONLY categories

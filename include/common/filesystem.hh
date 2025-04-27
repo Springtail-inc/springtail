@@ -271,7 +271,7 @@ namespace springtail {
         {
             if (archive && !std::filesystem::exists(dir / "archive")) {
                 // create archive directory
-                std::filesystem::create_directory(dir / "archive");
+                std::filesystem::create_directories(dir / "archive");
             }
             for (const auto& entry : std::filesystem::directory_iterator(dir)) {
                 auto path = entry.path();

@@ -92,7 +92,7 @@ PgLogRecovery::_skip_committed()
     _repl_reader.set_file(*_repl_log);
 
     // Open the xact log
-    PgXactLogReaderMmap xact_reader(_xact_path, _committed_xid, _pg_log_reader->archive_logs());
+    xid_mgr::PgXactLogReader xact_reader(_xact_path);
     if (!xact_reader.begin()) {
         LOG_DEBUG(LOG_PG_LOG_MGR, "No xact log found");
         return true;
@@ -108,6 +108,16 @@ PgLogRecovery::_skip_committed()
 
     uint32_t cur_pgxid = 0;
     while (!done) {
+        // make sure that xact log record has non-zero pg_xid
+        while(xact_reader.get_pg_xid() == 0) {
+            if (!xact_reader.next()) {
+                done = true;
+                break;
+            }
+        }
+        if (done) {
+            break;
+        }
         // check if there are more messages in the replication log
         bool eob = false, eos = false;
         auto msg = _repl_reader.read_message(filter, eos, eob);
@@ -132,13 +142,12 @@ PgLogRecovery::_skip_committed()
         }
     }
 
-    xact_reader.cleanup_logs();
     return true;
 }
 
 bool
 PgLogRecovery::_process_msg(PgMsgPtr msg,
-                            PgXactLogReaderMmap &xact_reader,
+                            xid_mgr::PgXactLogReader &xact_reader,
                             uint32_t &cur_pgxid)
 {
     switch (msg->msg_type) {

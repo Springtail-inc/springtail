@@ -1,7 +1,6 @@
 #pragma once
 
 #include <atomic>
-#include <cassert>
 #include <mutex>
 #include <thread>
 
@@ -171,6 +170,14 @@ namespace springtail {
          *
          */
         virtual ~SingletonWithThread() = default;
+
+        /**
+         * @brief Assert if the singleton object has not been created yet
+         *
+         */
+         static void _assert_instance() {
+            CHECK_NE(_instance, nullptr);
+        }
 
     private:
         static inline T* _instance = nullptr;             ///< derived class instance

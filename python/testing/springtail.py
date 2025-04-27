@@ -8,6 +8,7 @@ import traceback
 import tempfile
 import time
 import logging
+import datetime
 from typing import Dict, List, Optional
 import psycopg2
 from psycopg2.extensions import quote_ident
@@ -56,7 +57,6 @@ FDW_SYSTEM_CATALOG = '__pg_springtail_catalog'
 
 # List of daemons to start tuple: (name, path, args)
 CORE_DAEMONS = [
-    ('xid_mgr_daemon', 'src/xid_mgr/xid_mgr_daemon', '-x,10'),
     ('sys_tbl_mgr_daemon', 'src/sys_tbl_mgr/sys_tbl_mgr_daemon'),
     ('pg_log_mgr_daemon', 'src/pg_log_mgr/pg_log_mgr_daemon')
 ]
@@ -513,7 +513,7 @@ def gen_dump_tarball(props : Properties, build_dir : str) -> str:
 
 def current_xid(props: Properties, db_id: int) -> int:
     config = props.get_system_config()
-    rpc_config = config['xid_mgr']['rpc_config']
+    rpc_config = config['log_mgr']['rpc_config']
 
     hostname = props.get_hostname('ingestion')
     client = XidMgrClient(hostname, rpc_config)
@@ -528,14 +528,16 @@ def restart(props: Properties,
     print("\nStopping daemons...")
     stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
 
+    config = props.get_system_config()
+    base_dir = props.get_mount_path()
+    xact_dir = config.get('log_mgr').get('transaction_log_path')
+    xact_path = os.path.join(base_dir, xact_dir)
+
     # optionally un-archive the log files
     if unarchive_logs:
-        config = props.get_system_config()
         if not config.get('log_mgr').get('archive_logs', False):
             print('Cannot unarchive logs -- "archive_logs" not true')
         else:
-            base_dir = props.get_mount_path()
-
             # move back the repl archive files for each database
             repl_dir = config.get('log_mgr').get('replication_log_path')
             repl_path = os.path.join(base_dir, repl_dir)
@@ -545,26 +547,21 @@ def restart(props: Properties,
                 move_files(os.path.join(repl_db_path, 'archive'), repl_db_path)
 
             # move back the xact archive files for each database
-            xact_dir = config.get('log_mgr').get('transaction_log_path')
-            xact_path = os.path.join(base_dir, xact_dir)
             db_dirs = os.listdir(xact_path)
             for db_dir in db_dirs:
                 xact_db_path = os.path.join(xact_path, db_dir)
                 move_files(os.path.join(xact_db_path, 'archive'), xact_db_path)
 
+    if start_xid is not None:
+        # roll start_xid back
+        ts = int(datetime.datetime.utcnow().timestamp())
+        log_file = "/tmp/roll_back_" + str(ts) + ".log"
+        print(f"Running command: roll_back_xact_log; rolling back to xid: {start_xid}, output log: {log_file}")
+        run_command(os.path.join(build_dir, 'src/xid_mgr/roll_back_xact_log'), ['-p', xact_path, '-d', '1', '-a', 'true', '-x', str(start_xid)], log_file)
+
     # start daemons with XID if specified
     print("\nStarting daemons...")
-    if start_xid is not None:
-        # Modify xid_mgr_daemon args to include starting XID
-        modified_daemons = []
-        for daemon in CORE_DAEMONS:
-            if daemon[0] == 'xid_mgr_daemon':
-                modified_daemons.append((daemon[0], daemon[1], f'-x,{start_xid}'))
-            else:
-                modified_daemons.append(daemon)
-        start_daemons(build_dir, modified_daemons)
-    else:
-        start_daemons(build_dir, CORE_DAEMONS)
+    start_daemons(build_dir, CORE_DAEMONS)
 
     # wait for running state
     print("\nWaiting for running state...")
@@ -587,7 +584,6 @@ def start(config_file: str,
           do_cleanup: bool = True,
           do_init: bool = True,
           postgres_only: bool = False,
-          start_xid: int = None,
           do_fdw_install: bool = True) -> None:
     """Main function to start the Springtail system."""
     # must do init if we are performing cleanup
@@ -638,17 +634,7 @@ def start(config_file: str,
 
         # start daemons with XID if specified
         print("\nStarting daemons...")
-        if start_xid is not None:
-            # Modify xid_mgr_daemon args to include starting XID
-            modified_daemons = []
-            for daemon in CORE_DAEMONS:
-                if daemon[0] == 'xid_mgr_daemon':
-                    modified_daemons.append((daemon[0], daemon[1], f'-x,{start_xid}'))
-                else:
-                    modified_daemons.append(daemon)
-            start_daemons(build_dir, modified_daemons)
-        else:
-            start_daemons(build_dir, CORE_DAEMONS)
+        start_daemons(build_dir, CORE_DAEMONS)
 
         # wait for running state
         print("\nWaiting for running state...")
@@ -885,7 +871,7 @@ if __name__ == "__main__":
         if args.start:
             start(args.config_file, args.build_dir, args.sql_file,
                   do_cleanup=not args.no_cleanup, do_init=not args.no_cleanup,
-                  postgres_only=args.postgres_only, start_xid=args.start_xid)
+                  postgres_only=args.postgres_only)
 
     except Exception as e:
         print(f"Caught error: {e}")
