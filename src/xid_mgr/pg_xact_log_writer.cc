@@ -267,8 +267,8 @@ PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir, uint64_
             throw Error(fmt::format("Failed to open file {}; error {}: {}", last_committed_xid_file.string(), errno, strerror(errno)));
         }
         size_t file_size = PG_XLOG_PAGE_SIZE * (last_committed_xid_page_count - 1) + last_committed_xid_offset;
-        ::ftruncate(fd, file_size);
-        ::ftruncate(fd, PG_XLOG_PAGE_SIZE * last_committed_xid_page_count);
+        [[maybe_unused]] int r = ::ftruncate(fd, file_size);
+        r = ::ftruncate(fd, PG_XLOG_PAGE_SIZE * last_committed_xid_page_count);
         ::close(fd);
 
         // cleanup leftover files
