@@ -25,7 +25,7 @@ namespace springtail
              * @return std::optional<std::string> Value if found, otherwise std::nullopt
              */
             std::optional<std::string> hget(uint64_t key) {
-                std::shared_lock<std::shared_mutex> lock(cache_mutex);
+                std::lock_guard lock(cache_mutex);
 
                 // Check in-memory cache
                 auto cache_iterator = cache.find(key);
@@ -49,7 +49,7 @@ namespace springtail
              * @param value Value that needs to be set
              */
             void hset(uint64_t key, const std::string& value) {
-                std::unique_lock<std::shared_mutex> lock(cache_mutex);
+                std::lock_guard lock(cache_mutex);
 
                 // Update in-memory cache
                 cache[key] = value;
@@ -64,7 +64,7 @@ namespace springtail
              * @param key Key that needs to be deleted
              */
             void hdel(uint64_t key) {
-                std::unique_lock<std::shared_mutex> lock(cache_mutex);
+                std::lock_guard lock(cache_mutex);
 
                 // Update in-memory cache
                 cache.erase(key);
@@ -74,7 +74,7 @@ namespace springtail
             }
         private:
             std::unordered_map<uint64_t, std::optional<std::string>, boost::hash<uint64_t>> cache;
-            std::shared_mutex cache_mutex;
+            std::mutex cache_mutex;
             RedisClientPtr redis;
             const std::string redis_key;
     };
