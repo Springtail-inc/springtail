@@ -11,7 +11,7 @@
 #include <sys_tbl_mgr/schema_mgr.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_server.hh>
-#include <xid_mgr/xid_mgr_client.hh>
+#include <xid_mgr/xid_mgr_server.hh>
 
 using namespace springtail;
 
@@ -43,7 +43,7 @@ int main(int argc, char *argv[])
     runners.emplace();
     runners->emplace_back(std::make_unique<IOMgrRunner>());
     runners->emplace_back(std::make_unique<WriteCacheRunner>());
-    runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
+    runners->emplace_back(std::make_unique<xid_mgr::XidMgrRunner>());
     runners->emplace_back(std::make_unique<GrpcClientRunner<sys_tbl_mgr::Client>>());
     runners->emplace_back(std::make_unique<SchemaMgrRunner>());
     runners->emplace_back(std::make_unique<TableMgrRunner>());

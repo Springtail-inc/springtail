@@ -289,7 +289,6 @@ class Properties:
         sys_config_json['logging'] = system_json['logging']
         sys_config_json['iopool'] = system_json['iopool']
         sys_config_json['write_cache'] = system_json['write_cache']
-        sys_config_json['xid_mgr'] = system_json['xid_mgr']
         sys_config_json['storage'] = system_json['storage']
         sys_config_json['redis'] = system_json['redis']
         sys_config_json['log_mgr'] = system_json['log_mgr']

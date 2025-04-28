@@ -78,41 +78,11 @@ class XidMgrClient:
                 time.sleep(sleep_time)
         raise last_exc
 
-    def commit_xid(self, db_id: int, xid: int, has_schema_changes: bool = False) -> None:
-        """Commit up to and including the provided XID.
-
-        Args:
-            db_id: Database identifier
-            xid: Transaction ID to commit
-            has_schema_changes: Whether the transaction includes schema changes
-        """
-        request = xid_manager_pb2.CommitXidRequest(
-            db_id=db_id,
-            xid=xid,
-            has_schema_changes=has_schema_changes
-        )
-        return self.stub.CommitXid(request)
-
-    def record_ddl_change(self, db_id: int, xid: int) -> None:
-        """Record that the given XID contains a schema change.
-
-        Args:
-            db_id: Database identifier
-            xid: Transaction ID containing DDL changes
-        """
-        request = xid_manager_pb2.RecordDdlChangeRequest(
-            db_id=db_id,
-            xid=xid
-        )
-        return self.stub.RecordDdlChange(request)
-
     def get_committed_xid(self, db_id: int, schema_xid: int = 0) -> int:
         """Get latest committed XID.
-
         Args:
             db_id: Database identifier
             schema_xid: Schema version XID
-
         Returns:
             The latest committed XID
         """
@@ -137,7 +107,7 @@ def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Xid Manager Client")
     parser.add_argument('--host', type=str, default='localhost', help='Host of the service')
-    parser.add_argument('--port', type=int, default=55052, help='Port of the service')
+    parser.add_argument('--port', type=int, default=5052, help='Port of the service')
     parser.add_argument('--cert-path', type=str, required=False, help='Path to client certificates/key')
 
     args = parser.parse_args()

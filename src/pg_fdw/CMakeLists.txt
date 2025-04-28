@@ -48,7 +48,7 @@ target_link_libraries(springtail_pg_fdw
     PRIVATE springtail_pg
     PRIVATE springtail_common
     PRIVATE springtail_storage
-    PRIVATE springtail_xid_mgr
+    PRIVATE springtail_xid_mgr_client
     PRIVATE springtail_sys_tbl_mgr
 )
 
@@ -73,6 +73,7 @@ target_include_directories(pg_xid_subscriber_daemon
 target_link_libraries(pg_xid_subscriber_daemon
     PRIVATE springtail_common
     PRIVATE springtail_pg
+    PRIVATE springtail_xid_mgr_client
     PRIVATE Boost::program_options
 )
 add_dsymutil_command(pg_xid_subscriber_daemon)

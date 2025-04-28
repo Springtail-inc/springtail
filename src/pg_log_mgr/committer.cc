@@ -10,19 +10,20 @@
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_func.hh>
+#include <xid_mgr/xid_mgr_server.hh>
 
 #include <pg_log_mgr/committer.hh>
 
 namespace springtail::committer {
 
-bool
-_index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
-{
-    auto meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, tid, xid);
-    auto it =
-        std::ranges::find_if(meta->roots, [&](auto const &v) { return index_id == v.index_id; });
-    return it != meta->roots.end();
-}
+    bool
+    _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
+    {
+        auto meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, tid, xid);
+        auto it =
+            std::ranges::find_if(meta->roots, [&](auto const &v) { return index_id == v.index_id; });
+        return it != meta->roots.end();
+    }
 
     void
     Committer::run()
@@ -30,13 +31,6 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
         // perform cleanup for any Committer threads in a previous run
         cleanup();
         _create_indexer();
-        auto meter = metrics::Provider::GetMeterProvider()->GetMeter("committer");
-        _btree_write_latencies = std::shared_ptr<metrics::Histogram<double>>(
-            meter
-                ->CreateDoubleHistogram(
-                    "btree_write_latencies",
-                    "Latency between postgres commit and btree write completion", "ms")
-                .release());
 
         auto coordinator = Coordinator::get_instance();
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
@@ -65,7 +59,20 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             if (result == nullptr) {
                 continue; // got a timeout, try again
             }
+
+            // perform rotation if needed
             uint64_t db_id = result->db();
+            uint64_t timestamp = result->timestamp();
+            uint64_t stored_timestamp = 0;
+            auto emplace_result = _db_to_timestamp.try_emplace(db_id, timestamp);
+            if (!emplace_result.second) {
+                // set stored_timestamp
+                stored_timestamp = emplace_result.first->second;
+            }
+            if (timestamp > stored_timestamp) {
+                xid_mgr::XidMgrServer::get_instance()->rotate(db_id, timestamp);
+                emplace_result.first->second = timestamp;
+            }
 
             auto token_1 = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
 
@@ -82,7 +89,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             uint64_t completed_xid;
             auto itr = _completed_xids.find(db_id);
             if (itr == _completed_xids.end()) {
-                completed_xid = _xid_mgr->get_committed_xid(db_id, 0);
+                completed_xid = xid_mgr::XidMgrServer::get_instance()->get_committed_xid(db_id, 0);
                 _completed_xids[db_id] = completed_xid;
             } else {
                 completed_xid = itr->second;
@@ -172,7 +179,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     client->finalize(db_id, completed_xid);
 
                     // perform a commit to the XidMgr
-                    _xid_mgr->commit_xid(db_id, completed_xid, true);
+                    xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, 0, completed_xid, true);
                     _committed_xids[db_id] = completed_xid;
 
                     LOG_DEBUG(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, completed_xid);
@@ -182,7 +189,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                         _has_ddl_precommit = false;
                     }
                 } else {
-                    _xid_mgr->record_ddl_change(db_id, completed_xid);
+                    xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, completed_xid, true);
                 }
                 _completed_xids[db_id] = completed_xid;
 
@@ -201,12 +208,14 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             // note: from here we know we have an XACT_MSG or RECONCILE_INDEX
             // XXX: Once we confirm we can commit the index at table's last XID safely,
             //      we can remove the type RECONCILE_INDEX
-            assert(result->type() == XidReady::Type::XACT_MSG || result->type() == XidReady::Type::RECONCILE_INDEX);
+            CHECK(result->type() == XidReady::Type::XACT_MSG || result->type() == XidReady::Type::RECONCILE_INDEX);
             uint64_t xid = 0;
+            uint64_t pg_xid = 0;
             if (result->type() == XidReady::Type::RECONCILE_INDEX) {
                 xid = result->reconcile().xid();
             } else {
                 xid = result->xact().xid();
+                pg_xid = result->xact().pg_xid();
             }
             auto token_4 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(xid)}});
             LOG_INFO("Process XID: {}@{}", db_id, xid);
@@ -297,7 +306,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
 
                 // commit the completed XID
-                _xid_mgr->commit_xid(db_id, xid, !completed_ddls.is_null());
+                xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null());
                 _committed_xids[db_id] = xid;
 
                 // push completed DDL changes to the FDWs
@@ -306,9 +315,9 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                     _redis_ddl.commit_ddl(db_id, xid);
                     _has_ddl_precommit = false;
                 }
-            } else if (!completed_ddls.is_null()) {
+            } else {
                 // don't commit, but record any DDL changes to the history
-                _xid_mgr->record_ddl_change(db_id, xid);
+                xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null());
             }
             _completed_xids[db_id] = xid;
 
@@ -369,7 +378,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
                 auto &&precommit = _redis_ddl.get_precommit_ddl();
 
                 for (const auto &entry : precommit) {
-                    uint64_t commit_xid = _xid_mgr->get_committed_xid(entry.first, 0);
+                    uint64_t commit_xid = xid_mgr::XidMgrServer::get_instance()->get_committed_xid(entry.first, 0);
 
                     if (entry.second <= commit_xid) {
                         // for those that are <= the committed XID, commit them
@@ -510,7 +519,7 @@ _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
             // log how long it took to process this table
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - min_commit_ts->to_system_time());
-            _btree_write_latencies->Record(duration.count(), _context);
+            open_telemetry::OpenTelemetry::record_histogram(PG_LOG_MGR_BTREE_LATENCIES, duration.count());
             LOG_DEBUG(LOG_COMMITTER, "Processed table {} in {} milliseconds", tid, duration.count());
             LOG_ERROR("Processed table {} in {} milliseconds", tid, duration.count());
         }

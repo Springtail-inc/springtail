@@ -23,16 +23,52 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base, uint64_t 
 } // namespace table_helpers
 
 namespace indexer_helpers {
-    /*
-     * Invalidate index for the rows present in the passed page
+    /**
+     * @brief Remove secondary-index entries for every row in a page.
+     *
+     * @param extent_id  Extent ID
+     * @param page       SafePagePtr whose rows should be removed from index.
+     * @param root       Mutable B-tree root of the secondary index.
+     * @param idx_cols   index columns
+     * @param schema     ExtentSchemaPtr to fetch schema columns
      */
     void invalidate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
             const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
 
-    /*
-     * Populate index for the rows present in the passed page
+    /**
+     * @brief Remove secondary-index entries for every row in an extent.
+     *
+     * @param extent_id  Extent ID
+     * @param extent     Extent whose rows should be removed.
+     * @param root       Mutable B-tree root of the secondary index.
+     * @param idx_cols   index columns
+     * @param schema     ExtentSchemaPtr to fetch schema columns
+     */
+    void invalidate_index_for_extent(uint64_t extent_id, const std::shared_ptr<Extent> &extent,
+            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
+
+    /**
+     * @brief Insert secondary-index entries for every row in a page.
+     *
+     * @param extent_id  Extent ID
+     * @param page       SafePagePtr whose rows should be indexed.
+     * @param root       Mutable B-tree root of the secondary index.
+     * @param idx_cols   index columns
+     * @param schema     ExtentSchemaPtr to fetch schema columns
      */
     void populate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
+            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
+
+    /**
+     * @brief Insert secondary-index entries for every row in an extent.
+     *
+     * @param extent_id  Extent ID
+     * @param extent     Extent whose rows should be indexed.
+     * @param root       Mutable B-tree root of the secondary index.
+     * @param idx_cols   index columns
+     * @param schema     ExtentSchemaPtr to fetch schema columns
+     */
+    void populate_index_for_extent(uint64_t extent_id, const std::shared_ptr<Extent> &extent,
             const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols, const ExtentSchemaPtr &schema);
 } // namespace indexer_helpers
 
@@ -418,9 +454,11 @@ namespace indexer_helpers {
         /**
          * Reads an extent from the disk and returns it.
          * @param extent_id The extent ID to read.
-         * @return A pointer to the requested page.
+         * @return std::pair where:
+         *         - first -  std::shared_ptr<Extent> pointer to the retrieved extent
+         *         - second - uint64_t Next offset
          */
-        StorageCache::SafePagePtr read_page_from_disk(uint64_t extent_id) const;
+        std::pair<std::shared_ptr<Extent>, uint64_t> read_extent_from_disk(uint64_t extent_id) const;
 
         /**
          * @brief Get table stats
@@ -755,7 +793,7 @@ namespace indexer_helpers {
         std::vector<std::string> _primary_key; ///< The key columns of the primary index.
 
         /** A lookup version of the primary index.  Pinned to the most recent XID. */
-        BTreePtr _primary_lookup;
+        bool _began_empty; ///< True if the table was empty at the access XID.
         FieldPtr _primary_extent_id_f; ///< A field accessor for the extent ID within the primary index extents.
 
         /** The primary index of the table. */

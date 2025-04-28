@@ -16,7 +16,7 @@
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/shm_cache.hh>
-#include <xid_mgr/xid_mgr_client.hh>
+#include <xid_mgr/xid_mgr_server.hh>
 
 #include <pg_fdw/pg_xid_subscriber_mgr.hh>
 
@@ -64,9 +64,9 @@ namespace {
         uint64_t db = 1;
         uint64_t tid = 200;
 
-        auto xid_mgr = XidMgrClient::get_instance();
+        auto xid_mgr_server = xid_mgr::XidMgrServer::get_instance();
 
-        // this will create shm cache asynchronously 
+        // this will create shm cache asynchronously
         PgXidSubscriberMgr s(10*1024, 4);
 
         // this the same cache created by PgXidSubscriber
@@ -95,13 +95,13 @@ namespace {
         _client->create_table(db, _xid, create_msg);
         auto &&metadata = _client->get_roots(db, tid, _xid.xid);
 
-        // this 
-        xid_mgr->commit_xid(db, _xid.xid, true);
+        // this
+        xid_mgr_server->commit_xid(db, 1, _xid.xid, true);
 
         ++_xid.xid;
         _client->update_roots(db, tid, _xid.xid, {{{0, 1234}}, {17}});
         // commit new xid
-        xid_mgr->commit_xid(db, _xid.xid, true);
+        xid_mgr_server->commit_xid(db, 1, _xid.xid, true);
 
         // wait for the new xid to be cached by the push
         // notification to PgXidsubscriber

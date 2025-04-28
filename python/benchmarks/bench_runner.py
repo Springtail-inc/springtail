@@ -22,7 +22,9 @@ def wait_for_springtail_ready(props: springtail.Properties) -> None:
     replica_name = fdw_config.get("db_prefix", "") + primary_name
 
     # Connect to databases
+    print(f"Connecting to {primary_name}")
     primary_conn = springtail.connect_db_instance(props, primary_name)
+    print(f"Connecting to {replica_name}")
     replica_conn = springtail.connect_fdw_instance(props, replica_name)
 
     try:
@@ -81,9 +83,16 @@ def run_benchmark(
     """
     logging.info(f"Running benchmarks from: {bench_dir}")
 
-    props = springtail.Properties(config_file, True)
-
     # Handle startup control flags
+    init_prop = True
+    if nostartstop:
+        init_prop = False
+        if not springtail.check_postgres_running():
+            print("Error: postgres isn't running")
+            return
+
+    props = springtail.Properties(config_file, init_prop)
+
     if stop_only:
         springtail.stop(config_file, do_cleanup=True)
         return
@@ -109,16 +118,30 @@ def run_benchmark(
                           for f in files if f.endswith(".yaml")]
             benchmarks = dict(sorted({os.path.basename(os.path.dirname(key)): key for key in test_files}.items()))
 
-        print("\nRunning benchmarks:")
+        print("\nRunning benchmarks")
         for n, f in benchmarks.items():
-            print(f" {n}:   {f}")
-
-        for n, f in benchmarks.items():
-            print(f"\nBenchmark: {n}")
-            bench = BenchCase(props, n, f, config_file, build_dir)
-            result = bench.run(setup_timeout)
-            for d, t in result.items():
-                print(f"   {d}: {t}")
+            print(f"{n}:   {f}")
+            root = os.path.dirname(f)
+            with open(f) as cfg:
+                config = yaml.safe_load(cfg)
+                p = config.get("test")
+                if isinstance(p, list):
+                    for test in p:
+                        sql_path = os.path.join(root, test)
+                        if not os.path.exists(sql_path):
+                            raise ValueError(f"File not found: {sql_path}")
+                        with open(sql_path) as sql_f:
+                            sql_content = sql_f.read()
+                        print(f"  Benchmark: {test}")
+                        bench = BenchCase(props, n, f, sql_content, build_dir)
+                        result = bench.run(setup_timeout)
+                        for d, t in result.items():
+                            print(f"    {d}: {t}")
+                else:
+                    bench = BenchCase(props, n, f, None, build_dir)
+                    result = bench.run(setup_timeout)
+                    for d, t in result.items():
+                        print(f"    {d}: {t}")
 
     finally:
         if not nostartstop:

@@ -25,13 +25,8 @@
 
 #include <sys_tbl_mgr/table.hh>
 #include <write_cache/write_cache_index.hh>
-#include <xid_mgr/xid_mgr_client.hh>
-
-#include <opentelemetry/context/context.h>
-#include <opentelemetry/metrics/meter.h>
 
 namespace springtail::committer {
-    namespace metrics = opentelemetry::metrics;
 
     /**
      * The Committer is responsible for reading modifications from the write cache and applying them
@@ -66,7 +61,6 @@ namespace springtail::committer {
               _committer_queue(committer_queue),
               _index_reconciliation_queue(index_reconciliation_queue)
         {
-            _xid_mgr = XidMgrClient::get_instance();
             _worker_id = fmt::format("{}_{}_0", THREAD_TYPE, THREAD_MAIN);
         }
 
@@ -134,8 +128,6 @@ namespace springtail::committer {
         bool _shift_to_xid(SchemaMetadata &meta, const XidLsn &xid);
 
     private:
-        XidMgrClient *_xid_mgr; ///< Pointer to the XidMgr client singleton.
-
         RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         bool _has_ddl_precommit = false; ///< Flag indiciating if the redis DDL is holding precommit entries
         std::string _worker_id; ///< Unique worker ID for the Committer.
@@ -167,11 +159,11 @@ namespace springtail::committer {
             sync state. */
         std::set<uint64_t> _block_commit;
 
+        /** Maping of database id to xact log timestamp id */
+        std::map<uint64_t, uint64_t> _db_to_timestamp;
+
         /** Indexer
          */
         std::unique_ptr<Indexer> _indexer;
-
-        std::shared_ptr<metrics::Histogram<double>> _btree_write_latencies;
-        opentelemetry::context::Context _context;
     };
 }

@@ -1,20 +1,17 @@
 #include <common/common.hh>
+#include <common/exception.hh>
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/open_telemetry.hh>
 #include <common/properties.hh>
-#include <grpcpp/grpcpp.h>
-#include <nlohmann/json.hpp>
-#include <proto/xid_manager.grpc.pb.h>
 
 #include <xid_mgr/xid_mgr_server.hh>
 #include <xid_mgr/xid_mgr_service.hh>
 
-
 namespace springtail::xid_mgr {
 
 XidMgrServer::XidMgrServer() {
-    nlohmann::json json = Properties::get(Properties::XID_MGR_CONFIG);
+    nlohmann::json json = Properties::get(Properties::LOG_MGR_CONFIG);
     nlohmann::json rpc_json;
 
     // fetch RPC properties for the xid mgr server
@@ -23,7 +20,7 @@ XidMgrServer::XidMgrServer() {
     }
 
     std::string base_path;
-    Json::get_to<std::string>(json, "base_path", base_path);
+    Json::get_to<std::string>(json, "transaction_log_path", base_path);
     _base_path = Properties::make_absolute_path(base_path);
 
     LOG_DEBUG(LOG_XID_MGR, "XidMgrServer: base_path: {}", _base_path.string());
@@ -33,183 +30,193 @@ XidMgrServer::XidMgrServer() {
     }
 
     _grpc_server_manager.init(rpc_json);
-    // iterate over all files in the base path creating partitions
-    _load_partitions();
 
     _service = std::make_unique<GrpcXidMgrService>(*this);
     _grpc_server_manager.addService(_service.get());
+
+    _archive_logs = Json::get_or<bool>(json, "archive_logs", false);
 }
 
-void XidMgrServer::startup() {
+void
+XidMgrServer::startup()
+{
+    start_thread();
     _grpc_server_manager.startup();
 }
 
-void XidMgrServer::_internal_shutdown() {
+void
+XidMgrServer::_internal_shutdown()
+{
     _service->shutdown();
     _grpc_server_manager.shutdown();
     std::unique_lock lock(_mutex);
-    // iterate over partitions and shutdown
-    for (auto& partition : _partitions) {
-        partition->shutdown();
-    }
+    _xact_log_data.clear();
 }
 
-void XidMgrServer::_load_partitions()
+void
+XidMgrServer::_internal_run()
 {
-    std::set<int> partition_ids;
-
-    // iterate over all files in the base path
-    LOG_DEBUG(LOG_XID_MGR, "XidMgrServer: loading partitions from {}",
-                        _base_path.string());
-
-    for (const auto& entry : std::filesystem::directory_iterator(_base_path)) {
-        LOG_DEBUG(LOG_XID_MGR, "XidMgrServer: found file {}", entry.path().string());
-
-        if (!entry.is_regular_file()) {
-            continue;
-        }
-
-        // check if filename is a partition file
-        std::string filename = entry.path().filename().string();
-        if (filename.find(Partition::PARTITION_FILE_PREFIX) != 0) {
-            continue;
-        }
-
-        // remove prefix from filename to get id
-        int id = std::stoi(filename.substr(strlen(Partition::PARTITION_FILE_PREFIX)));
-
-        // insert into set
-        partition_ids.insert(id);
-    }
-
-    // iterate set in order to load partitions in order
-    for (int id : partition_ids) {
-        // create a partition and load it
-        LOG_DEBUG(LOG_XID_MGR, "XidMgrServer: loading partition {}", id);
-
-        PartitionPtr partition = std::make_shared<Partition>(_base_path, id);
-        partition->load();
-
-        // add partition to list and map
-        _partitions.push_back(partition);
-
-        // load db_ids into map
-        for (const auto& db_id : partition->get_db_ids()) {
-            _partition_map[db_id] = partition;
+    RedisDDL redis_ddl;
+    while (!_is_shutting_down()) {
+        // sleep for at least XIG_MGR_MIN_SYNC_MS
+        std::this_thread::sleep_for(std::chrono::milliseconds(XIG_MGR_MIN_SYNC_MS));
+        std::shared_lock lock(_mutex);
+        for (auto &it: _xact_log_data) {
+            it.second.cleanup_history_and_flush(redis_ddl);
         }
     }
 }
 
-PartitionPtr XidMgrServer::_get_partition(uint64_t db_id, bool create)
+uint64_t
+XidMgrServer::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
 {
-    // assumes caller has lock
-
-    auto it = _partition_map.find(db_id);
-    if (it != _partition_map.end()) {
-        // found a partition, return it
-        return it->second;
-    }
-
-    // not doing a create, so return nullptr
-    if (!create) {
-        return nullptr;
-    }
-
-    // at this point we didn't find a partition for this db_id
-    // so must allocate one, either by creating a new partition
-    // or by reusing an existing partition that has space
-
-    if (!_partitions.empty()) {
-        // see if the last partition has space
-        // we use the number of db_ids in the map modulo the
-        // number of entries in a partition to determine if we
-        // need to create a new partition; we do this to avoid
-        // a race condition where a partition is not full, but
-        // by the time we return and use it, it is full.
-        if (_partition_map.size() % Partition::MAX_ENTRIES != 0) {
-            PartitionPtr partition = _partitions.back();
-            _partition_map[db_id] = partition;
-            return partition;
-        }
-    }
-
-    // create a new partition
-    PartitionPtr partition = std::make_shared<Partition>(_base_path, _partitions.size());
-    _partition_map[db_id] = partition;
-    _partitions.push_back(partition);
-
-    return partition;
-}
-
-uint64_t XidMgrServer::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
-{
-    PartitionPtr partition;
     auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
-    // first try to get partition without write lock
+    std::shared_lock read_lock(_mutex);
+    auto db_id_to_log_data = _find_or_add(db_id, read_lock);
+    uint64_t xid = db_id_to_log_data->second.get_committed_xid(schema_xid);
+    return xid;
+}
+
+void
+XidMgrServer::commit_xid(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes)
+{
+    _record_xid_change(db_id, pg_xid, xid, has_schema_changes, true);
+}
+
+void
+XidMgrServer::record_mapping(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes)
+{
+    _record_xid_change(db_id, pg_xid, xid, has_schema_changes, false);
+}
+
+void
+XidMgrServer::_record_xid_change(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit)
+{
+    auto token = open_telemetry::OpenTelemetry::set_context_variables({
+        {"db_id", std::to_string(db_id)},
+        {"pg_xid", std::to_string(pg_xid)},
+        {"xid", std::to_string(xid)}
+    });
+    std::shared_lock read_lock(_mutex);
+    auto db_id_to_log_data = _find_or_add(db_id, read_lock);
+    db_id_to_log_data->second.record_log_entry(pg_xid, xid, has_schema_changes, real_commit);
+    _service->notify_subscriber(db_id, xid);
+}
+
+void
+XidMgrServer::cleanup(uint64_t db_id, uint64_t min_timestamp)
+{
+    LOG_DEBUG(LOG_XID_MGR, "Cleaning up database {} with min_timestamp {}", db_id, min_timestamp);
+    std::shared_lock read_lock(_mutex);
+    auto db_id_to_log_data = _find_or_add(db_id, read_lock);
+    db_id_to_log_data->second.cleanup(min_timestamp, _archive_logs);
+}
+
+void
+XidMgrServer::rotate(uint64_t db_id, uint64_t timestamp)
+{
+    LOG_DEBUG(LOG_XID_MGR, "Rotate log for database {}, timestamp {}", db_id, timestamp);
+    std::shared_lock read_lock(_mutex);
+    auto db_id_to_log_data = _find_or_add(db_id, read_lock);
+    db_id_to_log_data->second.rotate(timestamp);
+}
+
+std::map<uint64_t, XidMgrServer::DBXactLogData>::iterator
+XidMgrServer::_find_or_add(uint64_t db_id, std::shared_lock<std::shared_mutex> &read_lock)
+{
+    auto it = _xact_log_data.find(db_id);
+    if (it == _xact_log_data.end()) {
+        read_lock.unlock();
+
+        std::unique_lock write_lock(_mutex);
+        // this will sanitize existing logs for recovery, if there are any records at the end with
+        // real_commit set to false, it will remove those, so that the log can be written from
+        // the last real commit
+        PgXactLogWriter::set_last_xid_in_storage(_base_path / std::to_string(db_id), std::numeric_limits<uint64_t>::max(), _archive_logs);
+        auto result = _xact_log_data.emplace(std::piecewise_construct, std::forward_as_tuple(db_id), std::forward_as_tuple(db_id, _base_path));
+        it = result.first;
+        write_lock.unlock();
+
+        read_lock.lock();
+    }
+    return it;
+}
+
+void
+XidMgrServer::DBXactLogData::record_log_entry(uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit)
+{
+    std::unique_lock lock(_mutex);
+    _xact_log.log(pg_xid, xid, real_commit);
+    if (has_schema_changes) {
+        _xact_history.push_back(xid);
+        _dirty_history = true;
+    }
+}
+
+void
+XidMgrServer::DBXactLogData::cleanup_history_and_flush(RedisDDL &redis_ddl)
+{
+    std::unique_lock lock(_mutex);
+    if (!_xact_history.empty() && _dirty_history) {
+        // get min schema xid
+        uint64_t min_schema_xid = redis_ddl.min_schema_xid(_db_id);
+
+        // find position lower than min_schema_xid
+        auto it = std::ranges::lower_bound(_xact_history.begin(), _xact_history.end(), min_schema_xid);
+        // erase all smaller xids
+        _xact_history.erase(_xact_history.begin(), it);
+
+        LOG_DEBUG(LOG_XID_MGR, "The history for db_id={} {}",
+            _db_id, (_xact_history.empty())? "is now empty" : fmt::format("now starts with xid={}", _xact_history.front()));
+        _dirty_history = false;
+    }
+    _xact_log.flush();
+}
+
+uint64_t
+XidMgrServer::DBXactLogData::get_committed_xid(uint64_t schema_xid)
+{
     std::shared_lock lock(_mutex);
-    partition = _get_partition(db_id, false);
-    lock.unlock();
+    uint64_t last_xid = _xact_log.get_last_xid();
 
-    // if partition is null
-    if (partition == nullptr) {
-        return 0;
+    // if schema XID is zero or there is no history for this database,
+    // then we always return the most recent committed XID
+    if (schema_xid == 0 || _xact_history.empty()) {
+        LOG_DEBUG(LOG_XID_MGR, "Get committed xid for db_id={}: {}", _db_id, last_xid);
+        return last_xid;
     }
 
-    return partition->get_committed_xid(db_id, schema_xid);
+    auto pos_i = std::ranges::upper_bound(_xact_history, schema_xid);
+    if (pos_i == _xact_history.end()) {
+        // if the schema XID is ahead of the history, return the most recent commited XID
+        LOG_DEBUG(LOG_XID_MGR, "Get committed xid for db_id={}: {}", _db_id, last_xid);
+        return last_xid;
+    }
+
+    // if the history is ahead of the commit, return the committed xid
+    auto target_xid = (*pos_i) - 1;
+    if (target_xid > last_xid) {
+        LOG_DEBUG(LOG_XID_MGR, "Get committed xid for db_id={}: {}; ahead of history {}", _db_id, last_xid, target_xid);
+        return last_xid;
+    }
+
+    // if we found an entry in the history, return the XID directly before that
+    LOG_DEBUG(LOG_XID_MGR, "Get committed xid for db_id={}: xid limited by schema_xid: {} -> {}", _db_id, schema_xid, target_xid);
+    return target_xid;
 }
 
-void XidMgrServer::commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_changes)
+void
+XidMgrServer::DBXactLogData::rotate(uint64_t timestamp)
 {
-    PartitionPtr partition;
-    auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(xid)}});
-    // first try to get partition without write lock
-    std::shared_lock rd_lock(_mutex);
-    partition = _get_partition(db_id, false);
-
-    if (partition != nullptr) {
-        // shared lock held for update
-        partition->commit_xid(db_id, xid, has_schema_changes);
-        return;
-    }
-
-    rd_lock.unlock();
-
-    // if partition is null, then get it with write lock to create new partition
-    // we hold the lock during the commit to preserve space in the partition
-    std::unique_lock wr_lock(_mutex);
-    partition = _get_partition(db_id, true);
-
-    // exclusive lock held for insert/create
-    partition->commit_xid(db_id, xid, has_schema_changes);
-
-    return;
+    std::unique_lock lock(_mutex);
+    _xact_log.rotate(timestamp);
 }
 
-void XidMgrServer::record_ddl_change(uint64_t db_id, uint64_t xid)
+void
+XidMgrServer::DBXactLogData::cleanup(uint64_t min_timestamp, bool archive_logs)
 {
-    // note: code is nearly identical to commit_xid()... make sure they stay in sync
-
-    auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(xid)}});
-    PartitionPtr partition;
-
-    // first try to get partition without write lock
-    std::shared_lock rd_lock(_mutex);
-    partition = _get_partition(db_id, false);
-
-    if (partition != nullptr) {
-        // shared lock held for update
-        partition->record_ddl_change(db_id, xid);
-        return;
-    }
-
-    rd_lock.unlock();
-
-    // if partition is null, then get it with write lock to create new partition
-    // we hold the lock during the commit to preserve space in the partition
-    std::unique_lock wr_lock(_mutex);
-    partition = _get_partition(db_id, true);
-
-    // exclusive lock held for insert/create
-    partition->record_ddl_change(db_id, xid);
+    std::unique_lock lock(_mutex);
+    _xact_log.cleanup(min_timestamp, archive_logs);
 }
+
 }  // namespace springtail::xid_mgr

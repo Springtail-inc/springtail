@@ -215,6 +215,20 @@ class TestCase:
                             'name': directive[1] if len(directive) > 1 else 'default'
                         }, section, is_threaded, cur_txn, line_num)
 
+                    elif directive[0] == 'restart':
+                        if section != 'test':
+                            self._raise_error(f'{line_num}: "restart" must be part of the "test" section')
+                        if is_threaded:
+                            self._raise_error(f'{line_num}: "restart" must be within a sequential sub-section')
+
+                        # note: always force a sync before recovery
+                        self._append_command({
+                            'type': 'sync'
+                        }, section, is_threaded, cur_txn, line_num)
+                        self._append_command({
+                            'type': 'restart',
+                        }, section, is_threaded, cur_txn, line_num)
+
                     elif directive[0] == 'streaming':
                         if section != 'test':
                             self._raise_error(f'{line_num}: "streaming" must be part of the "test" section')
@@ -360,6 +374,18 @@ class TestCase:
             # restart Springtail at the target XID
             springtail.restart(self._props, self._build_dir,
                                start_xid=target_xid, unarchive_logs=True)
+
+            # reconnect to the replica database
+            if self._fdw:
+                self._fdw.close()
+                self._fdw = springtail.connect_fdw_instance(self._props, self._replica_name)
+
+            return None
+
+        if command['type'] == 'restart':
+            # restart Springtail at the target XID
+            springtail.restart(self._props, self._build_dir,
+                               start_xid=None, unarchive_logs=True)
 
             # reconnect to the replica database
             if self._fdw:
