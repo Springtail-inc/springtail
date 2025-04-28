@@ -28,6 +28,7 @@ NUM_INSERTS = 5
 NUM_UPDATES = 5
 NUM_DELETES = 2
 RUN_TIME_SECONDS = 5
+BATCHED_INSERTS = False
 RUN_TS = int(time.time())
 
 # Global dictionary to store table column information
@@ -205,22 +206,26 @@ def insert_data(conn, schema_name: str, table_name: str, csv_file: str):
         VALUES ({', '.join(placeholders)})
     """
 
-    # Generate random batch sizes that add up to NUM_INSERTS
-    remaining_inserts = NUM_INSERTS
-    while remaining_inserts > 0:
-        if remaining_inserts <= 10:  # For small remaining, just insert them all
-            batch_size = remaining_inserts
-        else:
-            # Generate random batch size between 5% and 70% of remaining inserts
-            batch_size = random.randint(max(1, int(remaining_inserts * 0.05)),
-                                     min(remaining_inserts, int(remaining_inserts * 0.7)))
+    if BATCHED_INSERTS:
+        remaining_inserts = NUM_INSERTS
+        while remaining_inserts > 0:
+            if remaining_inserts <= 10:  # For small remaining, just insert them all
+                batch_size = remaining_inserts
+            else:
+                # Generate random batch size between 5% and 70% of remaining inserts
+                batch_size = random.randint(max(1, int(remaining_inserts * 0.05)),
+                                        min(remaining_inserts, int(remaining_inserts * 0.7)))
 
-        values_list = generate_values_list(columns, batch_size)
+            values_list = generate_values_list(columns, batch_size)
 
+            time_and_log_query(conn, "insert_data", insert_sql, csv_file, values_list)
+
+            remaining_inserts -= batch_size
+            print(f"[+] Inserted batch of {batch_size} rows into {schema_name}.{table_name} (remaining: {remaining_inserts})")
+    else:
+        # Generate random batch sizes that add up to NUM_INSERTS
+        values_list = generate_values_list(columns, NUM_INSERTS)
         time_and_log_query(conn, "insert_data", insert_sql, csv_file, values_list)
-
-        remaining_inserts -= batch_size
-        print(f"[+] Inserted batch of {batch_size} rows into {schema_name}.{table_name} (remaining: {remaining_inserts})")
 
     print(f"[+] Total {NUM_INSERTS} rows inserted into {schema_name}.{table_name}")
 
@@ -285,7 +290,7 @@ def create_schema_and_tables(conn, csv_file: str, schema_name: str):
     for i in range(NUM_TABLES_PER_SCHEMA):
         table_name = f"table_{i}_{random.randint(1000, 9999)}"
 
-        for func in [create_table, create_index, insert_data, update_data, delete_data]:
+        for func in [create_table, create_index, insert_data]: # update_data, delete_data
             try:
                 func(conn, schema_name, table_name, csv_file)
             except Exception as e:
@@ -329,6 +334,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('--num-deletes', type=int, default=NUM_DELETES, help='Number of deletes per table')
     parser.add_argument('--run-time-seconds', type=int, default=RUN_TIME_SECONDS, help='Duration to run the data load (seconds)')
 
+    parser.add_argument('--batched_inserts', type=bool, default=BATCHED_INSERTS, help='Use batched inserts')
     return parser.parse_args()
 
 if __name__ == "__main__":

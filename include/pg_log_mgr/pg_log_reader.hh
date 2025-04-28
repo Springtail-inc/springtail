@@ -1,5 +1,5 @@
 #pragma once
-
+#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
 #include <common/timestamp.hh>
 #include <common/time_trace.hh>
 

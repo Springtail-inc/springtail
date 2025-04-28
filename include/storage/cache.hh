@@ -1,5 +1,5 @@
 #pragma once
-
+#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
 #include <filesystem>
 #include <memory>
 

@@ -18,6 +18,7 @@
 #include <pg_log_mgr/pg_log_coordinator.hh>
 #include <pg_log_mgr/pg_log_recovery.hh>
 #include <pg_log_mgr/sync_tracker.hh>
+#include <common/time_trace.hh>
 
 #include <xid_mgr/xid_mgr_server.hh>
 
@@ -453,13 +454,19 @@ namespace springtail::pg_log_mgr {
     {
         namespace fs = std::filesystem;
         auto file_path = "/tmp/output_trace.txt";
+        auto clear_traces = "/tmp/clear_trace.txt";
         while (!_shutdown) {
             if (fs::exists(file_path)) {
                 TIME_TRACESET_LOG(time_trace::traces);
                 fs::remove(file_path);
             }
+            if (fs::exists(clear_traces)) {
+                TIME_TRACESET_LOG(time_trace::traces);
+                time_trace::traces.reset();
+                fs::remove(clear_traces);
+            }
 
-            _pg_log_reader->get_queue_details();
+            // _pg_log_reader->get_queue_details();
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }
     }

@@ -271,7 +271,7 @@ namespace springtail::committer {
 
             // Trigger index reconciliation for the earliest pending XID
             if (result->type() == XidReady::Type::RECONCILE_INDEX) {
-                trace index_tr(fmt::format("reconcile_index-xid_{}", xid));
+                // trace index_tr(fmt::format("reconcile_index-xid_{}", xid));
                 _indexer->process_index_reconciliation(db_id, result->reconcile().reconcile_xid(), xid);
             }
 
@@ -299,7 +299,7 @@ namespace springtail::committer {
 
             // check if we are doing an active table sync, in which case we have to block commits
             if (!_block_commit.contains(db_id)) {
-                trace tr(fmt::format("committer_finalize-xid_{}", xid));
+                // trace tr(fmt::format("committer_finalize"));
                 // finalize the system metadata
                 // note: we do this even without DDL changes to ensure the primary and secondary
                 //       index root offsets are written to disk
@@ -505,15 +505,22 @@ namespace springtail::committer {
             }
 
             // process each extent of ordered mutations
+            time_trace::Trace process_trace;
+            TIME_TRACE_START(process_trace);
             for (auto wc_extent : extent_list) {
                 _process_extent(db_id, tid, table, wc_extent);
             }
+            TIME_TRACE_STOP(process_trace);
+            TIME_TRACESET_UPDATE(time_trace::traces, "_process_table_process_extent", process_trace);
         }
 
-        {
-        trace tr(fmt::format("_finalize_table-xid_{}", xid));
+        time_trace::Trace finalize_trace;
+        TIME_TRACE_START(finalize_trace);
         // finalize the table
         auto &&metadata = table->finalize();
+
+        TIME_TRACE_STOP(finalize_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, "_process_table_finalize_table", finalize_trace);
 
         if (min_commit_ts) {
             // log how long it took to process this table
@@ -521,11 +528,14 @@ namespace springtail::committer {
                 std::chrono::system_clock::now() - min_commit_ts->to_system_time());
             open_telemetry::OpenTelemetry::record_histogram(PG_LOG_MGR_BTREE_LATENCIES, duration.count());
             LOG_DEBUG(LOG_COMMITTER, "Processed table {} in {} milliseconds", tid, duration.count());
-            LOG_ERROR("Processed table {} in {} milliseconds", tid, duration.count());
         }
+
+        time_trace::Trace update_roots_trace;
+        TIME_TRACE_START(update_roots_trace);
         // update the system table roots
         TableMgr::get_instance()->update_roots(table->db(), table->id(), xid, metadata);
-        }
+        TIME_TRACE_STOP(update_roots_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, "_process_table_update_roots", update_roots_trace);
     }
 
     void
@@ -551,10 +561,18 @@ namespace springtail::committer {
         SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
         std::vector<SchemaColumn> new_columns{op, lsn};
 
+        time_trace::Trace create_schema_trace;
+        TIME_TRACE_START(create_schema_trace);
         auto wc_schema = schema->create_schema(columns, new_columns, sort_keys);
+        TIME_TRACE_STOP(create_schema_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, "_process_extent_create_schema", create_schema_trace);
 
+        time_trace::Trace create_extent_trace;
+        TIME_TRACE_START(create_extent_trace);
         // Get the extent from the write cache index
         Extent extent(*wc_extent->data);
+        TIME_TRACE_STOP(create_extent_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, "_process_extent_create_extent", create_extent_trace);
 
         // process the rows
         auto op_f = wc_schema->get_field("__springtail_op");
@@ -567,14 +585,19 @@ namespace springtail::committer {
         //     which must always appear first in a batch (although not necessarily first in
         //     the transaction).
         for (auto &row : extent) {
-            trace tr(fmt::format("_process_row-xid_{}", wc_extent->xid));
+            time_trace::Trace process_row_trace;
+            TIME_TRACE_START(process_row_trace);
             uint8_t op = op_f->get_uint8(row);
             switch (op) {
             case INSERT:
                 {
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
                     LOG_DEBUG(LOG_COMMITTER, "INSERT value={}", tuple->to_string());
+                    time_trace::Trace table_insert_trace;
+                    TIME_TRACE_START(table_insert_trace);
                     table->insert(tuple, constant::UNKNOWN_EXTENT);
+                    TIME_TRACE_STOP(table_insert_trace);
+                    TIME_TRACESET_UPDATE(time_trace::traces, "_process_extent_table_insert", table_insert_trace);
                     break;
                 }
             case UPDATE:
@@ -603,6 +626,8 @@ namespace springtail::committer {
                     break;
                 }
             }
+            TIME_TRACE_STOP(process_row_trace);
+            TIME_TRACESET_UPDATE(time_trace::traces, "_process_extent_process_row", process_row_trace);
         }
     }
 }  // namespace springtail::gc

@@ -1,6 +1,9 @@
+#include <boost/functional/hash.hpp>
+
 #include <nlohmann/json.hpp>
 
 #include <fmt/format.h>
+#include <string>
 
 #include <common/properties.hh>
 #include <common/redis.hh>
@@ -13,7 +16,7 @@ namespace springtail
 {
     class InvalidTableCache {
         public:
-            explicit InvalidTableCache(RedisClientPtr redis) : redis(std::move(redis)) {}
+            explicit InvalidTableCache(RedisClientPtr redis) : redis(std::move(redis)), redis_key(fmt::format(redis::HASH_INVALID_TABLES, Properties::get_db_instance_id())) {}
 
             /**
              * @brief Gets a value from Cache, if its not found in the In memory cache
@@ -22,8 +25,8 @@ namespace springtail
              * @param key Key that needs to be fetched
              * @return std::optional<std::string> Value if found, otherwise std::nullopt
              */
-            std::optional<std::string> hget(const std::string& key) {
-                std::lock_guard<std::mutex> lock(cache_mutex);
+            std::optional<std::string> hget(uint64_t key) {
+                std::shared_lock<std::shared_mutex> lock(cache_mutex);
 
                 // Check in-memory cache
                 auto cache_iterator = cache.find(key);
@@ -31,14 +34,10 @@ namespace springtail
                     // Found in the in-memory cache
                     return cache_iterator->second;
                 }
-
+                LOG_INFO("InvalidTableCache: missing cache({})", key);
                 // If not in cache, check Redis
-                auto redis_key = fmt::format(redis::HASH_INVALID_TABLES, Properties::get_db_instance_id());
-                auto redis_value = redis->hget(redis_key, key);
-                if (redis_value) {
-                    // Store in cache for next time
-                    cache[key] = *redis_value;
-                }
+                auto redis_value = redis->hget(redis_key, std::to_string(key));
+                cache[key] = redis_value;
 
                 return redis_value; // std::nullopt if key not found
             }
@@ -49,15 +48,14 @@ namespace springtail
              * @param key Key that needs to be set
              * @param value Value that needs to be set
              */
-            void hset(const std::string& key, const std::string& value) {
-                std::lock_guard<std::mutex> lock(cache_mutex);
+            void hset(uint64_t key, const std::string& value) {
+                std::unique_lock<std::shared_mutex> lock(cache_mutex);
 
                 // Update in-memory cache
                 cache[key] = value;
 
                 // Write-through to Redis
-                auto redis_key = fmt::format(redis::HASH_INVALID_TABLES, Properties::get_db_instance_id());
-                redis->hset(redis_key, key, value);
+                redis->hset(redis_key, std::to_string(key), value);
             }
 
             /**
@@ -65,20 +63,20 @@ namespace springtail
              *
              * @param key Key that needs to be deleted
              */
-            void hdel(const std::string& key) {
-                std::lock_guard<std::mutex> lock(cache_mutex);
+            void hdel(uint64_t key) {
+                std::unique_lock<std::shared_mutex> lock(cache_mutex);
 
                 // Update in-memory cache
                 cache.erase(key);
 
                 // Write-through to Redis
-                auto redis_key = fmt::format(redis::HASH_INVALID_TABLES, Properties::get_db_instance_id());
-                redis->hdel(redis_key, key);
+                redis->hdel(redis_key, std::to_string(key));
             }
         private:
-            std::unordered_map<std::string, std::string> cache;
-            std::mutex cache_mutex;
+            std::unordered_map<uint64_t, std::optional<std::string>, boost::hash<uint64_t>> cache;
+            std::shared_mutex cache_mutex;
             RedisClientPtr redis;
+            const std::string redis_key;
     };
 
     class TableValidator : public Singleton<TableValidator> {
@@ -108,6 +106,14 @@ namespace springtail
             * @param table_oid The table oid which has the invalid columns
             */
             void mark_valid(uint64_t table_oid);
+
+            /**
+            * @brief Get the invalid columns for a table
+            *
+            * @param table_oid The table oid which has the invalid columns
+            * @return nlohmann::json JSON field containing meta info about the invalid columns
+            */
+            nlohmann::json get_invalid_columns(uint64_t table_oid);
 
             /**
             * @brief Validate the DDL operation and get the list of invalid columns
