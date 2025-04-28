@@ -401,9 +401,6 @@ springtail_BeginForeignScan(ForeignScanState *node, int eflags)
 
     node->fdw_state = planstate->pg_fdw_state;
 
-
-    void *state = node->fdw_state;
-
     TupleTableSlot *slot = node->ss.ss_ScanTupleSlot;
     Form_pg_attribute attrs[slot->tts_tupleDescriptor->natts];
 
