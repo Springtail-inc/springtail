@@ -1141,7 +1141,7 @@ Service::AlterUserType(grpc::ServerContext* context,
     ddl["action"] = "ut_alter";
     ddl["schema"] = request->namespace_name();
     ddl["old_name"] = user_type_info->name;
-    ddl["old_values"] = user_type_info->value_json;
+    ddl["old_value"] = user_type_info->value_json;
 
     // need to get old namespace id and check if it has changed
     if (user_type_info->namespace_id != request->namespace_id()) {
@@ -2164,7 +2164,7 @@ Service::_apply_index_cache_history(SchemaInfoPtr schema_info,
                                     uint64_t table_id,
                                     const XidLsn& xid)
 {
-    boost::unique_lock ulock(_mutex);  // XXX I think this can be a shared lock
+    boost::shared_lock ulock(_mutex);
 
     auto db_it = _index_cache.find(db_id);
     if (db_it == _index_cache.end()) {

@@ -1,5 +1,3 @@
-//#include <libpq-fe.h>
-
 #include <common/counter.hh>
 #include <common/common.hh>
 #include <common/json.hh>
@@ -22,13 +20,6 @@
 #include <pg_fdw/pg_ddl_mgr.hh>
 
 #include <pg_fdw/constants.hh>
-
-// clang-format off
-// This #include must come last, as it ends up including postgres
-// files that end up doing a #define ERROR, and the side effects
-// of this define break other c++ headers from being includable.
-//#include <pg_fdw/pg_fdw_common.h>
-// clang-format on
 
 namespace springtail::pg_fdw {
 
@@ -665,8 +656,12 @@ namespace springtail::pg_fdw {
 
             // need to check if value has changed
             const auto value_json_str = ddl.at("value").get<std::string>();
-            if (value_json_str != ddl.at("old_value").get<std::string>()) {
-                // NOT SUPPORTED YET
+            if (value_json_str != ddl.at("old_values").get<std::string>()) {
+                return gen_alter_enum_sql(ddl.at("schema").get<std::string>(),
+                                          ddl.at("name").get<std::string>(),
+                                          ddl.at("old_value"),
+                                          ddl.at("value"),
+                                          conn);
             }
         }
 
@@ -965,6 +960,78 @@ namespace springtail::pg_fdw {
         // remove it from internal storage
         std::unique_lock unique_lock(_db_mutex);
         _db_xid_map.erase(db_id);
+    }
+
+    std::string
+    PgDDLMgr::gen_alter_enum_sql(const std::string &schema_str,
+                                 const std::string &type_str,
+                                 const nlohmann::json &from,
+                                 const nlohmann::json &to,
+                                 const LibPqConnectionPtr conn)
+    {
+        size_t i = 0, j = 0;
+
+        std::string schema = conn->escape_identifier(schema_str);
+        std::string type_name = conn->escape_identifier(type_str);
+
+        LOG_DEBUG(LOG_FDW, "Comparing enum types: {}.{} from: {} to: {}", schema, type_name, from.dump(), to.dump());
+
+        while (i < from.size() && j < to.size()) {
+            float from_val = from[i].begin().value();
+            float to_val = to[j].begin().value();
+
+            std::string from_key = from[i].begin().key();
+            std::string to_key = to[j].begin().key();
+
+            if (from_val == to_val) {
+                if (from_key == to_key) {
+                    ++i;
+                    ++j;
+                    continue;
+                } else {
+                    // key changed
+                    return fmt::format("ALTER TYPE {}.{} RENAME VALUE '{}' TO '{}';",
+                        schema, type_name, conn->escape_string(from_key), conn->escape_string(to_key));
+                }
+            }
+            else if ((i + 1 < from.size()) && (from[i + 1].begin().value() == to_val)) {
+                // from[i] was removed
+                CHECK(false);  // removal is not supported
+            }
+            else if ((j + 1 < to.size()) && (to[j + 1].begin().value() == from_val)) {
+                // to[j] was added before from[i]
+                return fmt::format("ALTER TYPE {}.{} ADD VALUE '{}' BEFORE '{}';",
+                    schema, type_name, conn->escape_string(to_key), conn->escape_string(from_key));
+            }
+            else {
+                // Otherwise treat as added after previous
+                if (i > 0) {
+                    return fmt::format("ALTER TYPE {}.{} ADD VALUE '{}' AFTER '{}';",
+                        schema, type_name, conn->escape_string(to_key), conn->escape_string(from[i - 1].begin().key()));
+                } else {
+                    return fmt::format("ALTER TYPE {}.{} ADD VALUE '{}' BEFORE '{}';",
+                        schema, type_name, conn->escape_string(to_key), conn->escape_string(from_key));
+                }
+            }
+
+            CHECK(false);
+        }
+
+        if (j < to.size()) {
+            // Some elements left in `to` -> must be addition
+            CHECK(!from.empty());
+            return fmt::format("ALTER TYPE {}.{} ADD VALUE '{}' AFTER '{}';",
+                schema, type_name, conn->escape_string(to[j].begin().key()), conn->escape_string(from.back().begin().key()));
+        }
+
+        // Check leftover elements
+        if (i < from.size()) {
+            // Some elements left in `from` -> must be removal
+            CHECK(false);  // removal is not supported
+        }
+
+        DCHECK(false);  // no changes
+        return {};
     }
 
 } // namespace springtail::pg_fdw

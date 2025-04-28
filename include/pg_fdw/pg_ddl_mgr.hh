@@ -47,15 +47,28 @@ namespace springtail::pg_fdw {
 
         /**
          * @brief This function runs the main loop of DDL manager
-         *
          */
         void run();
 
         /**
          * @brief This function notifies DDL manager to exit the main loop
-         *
          */
         void notify_shutdown() { _is_shutting_down = true; }
+
+        /**
+         * @brief Generate enum alter type sql statement
+         * It is public due for testing
+         * @param escaped_schema schema name
+         * @param escaped_name type name
+         * @param old_value_json_str json array of value strings
+         * @param new_value_json_str json array of new value strings
+         * @param conn connection
+         */
+        static std::string gen_alter_enum_sql(const std::string &escaped_schema,
+                                              const std::string &escaped_name,
+                                              const nlohmann::json &from,
+                                              const nlohmann::json &to,
+                                              const LibPqConnectionPtr conn);
     private:
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections
         RedisCache::RedisChangeWatcherPtr _cache_watcher;           ///< redis cache callback object
