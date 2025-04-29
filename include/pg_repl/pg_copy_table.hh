@@ -315,6 +315,12 @@ namespace springtail
          */
         PgCopyTable(const std::string &db_name) : _db_name(db_name) {}
 
+        // this object should be copied or moved
+        PgCopyTable(const PgCopyTable &) = delete;
+        PgCopyTable& operator=(const PgCopyTable &) = delete;
+        PgCopyTable(PgCopyTable &&) = delete;
+        PgCopyTable& operator=(PgCopyTable &&) = delete;
+
         ~PgCopyTable()
         {
             // release underlying connection if connected
