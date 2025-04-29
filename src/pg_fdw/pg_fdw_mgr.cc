@@ -302,6 +302,9 @@ namespace springtail::pg_fdw {
             }
         }
 
+        // sort by attnum for more optimal search during iteration
+        std::ranges::sort(state->target_columns, {}, [](const auto& v) {return v.pg_attr.attnum;});
+
         // set target columns; will contain filtered qual columns as well
         if (target_colnames.empty()) {
             // if no target columns, use all columns
@@ -561,17 +564,14 @@ namespace springtail::pg_fdw {
                 ConstQual *qual = state->filtered_quals[i];
                 int attno = qual->base.varattno;
 
-
                 // look for the attno in target columns
-                auto it = std::ranges::find_if(state->target_columns,
-                        [attno](auto v) {return v == attno;},  
-                        [](const PgFdwState::TargetColumn& c) { return c.pg_attr.attnum; });
-                assert(it != state->target_columns.end());
-
-                int field_idx = it->field_idx;
+                auto it = std::ranges::lower_bound(state->target_columns, attno, {},
+                        [](const auto& v) {return v.pg_attr.attnum;} );
+                DCHECK(it != state->target_columns.end());
+                DCHECK_EQ(it->pg_attr.attnum, attno);
 
                 // compare the qual field to the field in the row
-                bool res = _compare_field(row, state->fields->at(field_idx),
+                bool res = _compare_field(row, state->fields->at(it->field_idx),
                                           state->qual_fields->at(i), qual->base.op);
                 if (res) {
                     continue;
@@ -595,7 +595,7 @@ namespace springtail::pg_fdw {
         // iterate through attributes passed in
         for (const auto& c: state->target_columns) {
             auto attno = c.pg_attr.attnum;
-            CHECK_LE(attno, num_attrs);
+            DCHECK_LE(attno, num_attrs);
 
             LOG_DEBUG(LOG_FDW, "Fetching column: {}", attno);
 
