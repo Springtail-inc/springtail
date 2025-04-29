@@ -85,17 +85,37 @@ namespace {
 
         inline static std::unique_ptr<Indexer> _indexer;
 
-        void _create_table_and_index(uint64_t table_id, uint64_t index_id, uint64_t table_xid,
-                uint64_t index_xid, std::string table_name, std::string index_name) {
-            // create the table via the table mgr
-            create_table(_db_id, table_id, table_xid, table_name, _columns);
+        void _populate_table_with_data(uint64_t table_id, uint64_t table_xid,
+                uint64_t data_xid, int num_rows, int num_cols, int start_value = 0) {
+            std::vector<std::vector<int32_t>> _data;
+            _data.clear();
+            _data.reserve(num_rows);
 
+            for (size_t i = 0; i < num_rows; ++i) {
+                std::vector<int32_t> row;
+                row.reserve(num_cols);
+                for (size_t j = 0; j < num_cols; ++j) {
+                    row.push_back(start_value + static_cast<int32_t>(i * 10 + j));
+                }
+                _data.push_back(std::move(row));
+            }
+
+            // create a mutable table
+            auto mtable = TableMgr::get_instance()->get_mutable_table(_db_id, table_id, table_xid, data_xid);
+
+            // insert a number of rows
+            populate_table(mtable, _data);
+
+            // finalize the table and update roots
+            auto &&metadata = mtable->finalize();
+            TableMgr::get_instance()->update_roots(_db_id, table_id, data_xid, metadata);
+        }
+
+        void _create_index(uint64_t table_id, uint64_t index_id, uint64_t index_xid, std::string index_name) {
             // Create index at an XID
             nlohmann::json idx_ddls;
             auto create_idx_ddl = create_index(_db_id, table_id, index_xid, index_id, index_name,
                     std::vector<PgMsgSchemaColumn>(_columns.end() - 2, _columns.end()), sys_tbl::IndexNames::State::NOT_READY);
-            access_xid++;
-            target_xid++;
             idx_ddls.push_back(nlohmann::json::parse(create_idx_ddl));
 
             // Validate index as NOT_READY
@@ -105,7 +125,15 @@ namespace {
             // Process Index DDLs
             _indexer->process_ddls(_db_id, index_xid, idx_ddls);
             sys_tbl_mgr::Client::get_instance()->finalize(_db_id, index_xid);
+        }
 
+        void _process_index_and_validate(uint64_t index_id, uint64_t index_xid, uint64_t reconcile_xid) {
+            // Trigger index reconcilation at reconcile_xid
+            _indexer->process_index_reconciliation(_db_id, index_xid, reconcile_xid);
+            auto index_info = sys_tbl_mgr::Client::get_instance()->get_index_info(_db_id, index_id, {reconcile_xid, constant::MAX_LSN});
+
+            // Validate index as READY at reconcile_xid
+            ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(index_info.state()), sys_tbl::IndexNames::State::READY);
         }
 
     };
@@ -117,15 +145,15 @@ namespace {
         uint64_t table_xid = access_xid++;
         uint64_t index_xid = access_xid++;
 
-        _create_table_and_index(table_id, index_id, table_xid, index_xid, "test_indexer_table1", "idx_test_indexer_1");
+        // Create table
+        create_table(_db_id, table_id, table_xid, "test_indexer_table1", _columns);
+
+        // Create index
+        _create_index(table_id, index_id, index_xid, "idx_test_indexer_1");
 
         // Trigger index reconcilation at reconcile_xid
         uint64_t reconcile_xid = access_xid++;
-        _indexer->process_index_reconciliation(_db_id, index_xid, reconcile_xid);
-        auto index_info = sys_tbl_mgr::Client::get_instance()->get_index_info(_db_id, index_id, {reconcile_xid, constant::MAX_LSN});
-
-        // Validate index as READY at reconcile_xid
-        ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(index_info.state()), sys_tbl::IndexNames::State::READY);
+        _process_index_and_validate(index_id, index_xid, reconcile_xid);
     }
 
     TEST_F(Indexer_Test, Test_ReconcileAfterInserts)
@@ -134,44 +162,46 @@ namespace {
         uint64_t index_id = _secondary_index_id + 2;
         uint64_t table_xid = access_xid++;
         uint64_t index_xid = access_xid++;
+        uint64_t data_xid = access_xid++;
 
-        _create_table_and_index(table_id, index_id, table_xid, index_xid, "test_indexer_table2", "idx_test_indexer_2");
+        // Create table
+        create_table(_db_id, table_id, table_xid, "test_indexer_table2", _columns);
 
-        std::vector<std::vector<int32_t>> _data;
-        const size_t num_rows = 100000;
-        const size_t num_cols = 5;
+        // Create index
+        _create_index(table_id, index_id, index_xid, "idx_test_indexer_2");
 
-        _data.clear();
-        _data.reserve(num_rows);
-
-        for (size_t i = 0; i < num_rows; ++i) {
-            std::vector<int32_t> row;
-            row.reserve(num_cols);
-            for (size_t j = 0; j < num_cols; ++j) {
-                row.push_back(static_cast<int32_t>(i * 10 + j));
-            }
-            _data.push_back(std::move(row));
-        }
-
-        target_xid = access_xid + 1;
-        // create a mutable table
-        auto mtable = TableMgr::get_instance()->get_mutable_table(_db_id, table_id, access_xid, target_xid, false);
-
-        // insert a number of rows
-        populate_table(mtable, _data);
-
-        // finalize the empty table
-        auto &&metadata = mtable->finalize();
-        TableMgr::get_instance()->update_roots(_db_id, table_id, target_xid, metadata);
-        access_xid++;
-        target_xid++;
+        // Populate table
+        _populate_table_with_data(table_id, table_xid, data_xid, 100000, 5);
 
         // Trigger index reconcilation at reconcile_xid
-        uint64_t reconcile_xid = access_xid;
-        _indexer->process_index_reconciliation(_db_id, index_xid, reconcile_xid);
-        auto index_info = sys_tbl_mgr::Client::get_instance()->get_index_info(_db_id, index_id, {reconcile_xid, constant::MAX_LSN});
+        uint64_t reconcile_xid = access_xid++;
+        _process_index_and_validate(index_id, index_xid, reconcile_xid);
+    }
 
-        // Validate index as READY at reconcile_xid
-        ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(index_info.state()), sys_tbl::IndexNames::State::READY);
+    TEST_F(Indexer_Test, Test_ReconcileAlongInserts)
+    {
+        uint64_t table_id = _tid++;
+        uint64_t index_id = _secondary_index_id + 3;
+        uint64_t table_xid = access_xid++;
+        uint64_t data_xid1 = access_xid++;
+        uint64_t index_xid = access_xid++;
+        uint64_t data_xid2 = access_xid++;
+
+        // Create table
+        create_table(_db_id, table_id, table_xid, "test_indexer_table3", _columns);
+
+        int num_rows = 2000;
+        // Populate table
+        _populate_table_with_data(table_id, table_xid, data_xid1, num_rows, 5);
+
+        // Create index
+        _create_index(table_id, index_id, index_xid, "idx_test_indexer_3");
+
+        // Populate table
+        _populate_table_with_data(table_id, index_xid, data_xid2, num_rows, 5, num_rows + 1);
+
+        // Trigger index reconcilation at reconcile_xid
+        uint64_t reconcile_xid = access_xid++;
+        _process_index_and_validate(index_id, index_xid, reconcile_xid);
     }
 } // namespace

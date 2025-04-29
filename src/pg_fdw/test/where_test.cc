@@ -289,7 +289,7 @@ namespace {
             }
 
             // begin the scan
-            mgr->fdw_begin_scan(state, _target_list, qual_list, nullptr);
+            mgr->fdw_begin_scan(state, _columns.size(), _attrs, _target_list, qual_list, nullptr);
 
             if (index_id == std::numeric_limits<uint32_t>::max()) {
                 // a full scan is expected
@@ -308,7 +308,7 @@ namespace {
                 Datum values[_columns.size()];
                 bool nulls[_columns.size()];
 
-                row_valid = mgr->fdw_iterate_scan(state, _columns.size(), _attrs, values, nulls, &eos);
+                row_valid = mgr->fdw_iterate_scan(state, values, nulls, &eos);
                 if (eos) {
                     break;
                 }

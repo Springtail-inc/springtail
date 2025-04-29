@@ -80,6 +80,8 @@ namespace springtail::pg_fdw {
         std::optional<Index> sortgroup_index; ///< Index matching the sortgroup.
         std::optional<Index> index; ///< The final index to use for scanning
 
+        std::vector<Form_pg_attribute> _attrs; ///< Scan tuple attributes
+
         /** Constructor */
         PgFdwState(TablePtr table, uint64_t tid, uint64_t xid);
     };
@@ -123,27 +125,27 @@ namespace springtail::pg_fdw {
 
         /** Begin scan
          * @param state PgFdwState
+         * @param num_attrs Number of attributes
+-        * @param attrs Array of pg attributes
          * @param target_list List of target columns (Value or String)
          * @param qual_list List of predicate clauses (BaseQual)
          * @param sortgroup List of sort group columns (DeparsedSortGroup)
          */
         void fdw_begin_scan(PgFdwState *state,
+                            int num_attrs,
+                            const Form_pg_attribute* attrs,
                             List *target_list,
                             List *qual_list,
                             List *sortgroup);
 
         /** Iterate scan -- get next row
          * @param state PgFdwState
-         * @param num_attrs Number of attributes
-         * @param attrs Array of pg attributes
          * @param values Array of Datum values (output)
          * @param isnull Array of null flags (output)
          * @param eos End of scan flag; no more data (output)
          * @return True if row is valid, false row not valid, check eos for more data
          */
         bool fdw_iterate_scan(PgFdwState *state,
-                              int num_attrs,
-                              Form_pg_attribute *attrs,
                               Datum *values,
                               bool *isnull,
                               bool *eos);

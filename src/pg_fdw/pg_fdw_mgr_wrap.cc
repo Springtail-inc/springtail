@@ -31,20 +31,19 @@ extern "C" {
 
     /** Begin scan wrapper */
     void
-    fdw_begin_scan(void *state, List *target_list, List *qual_list, List *sortgroup)
+    fdw_begin_scan(void *state, int num_attrs, Form_pg_attribute* attrs, List *target_list, List *qual_list, List *sortgroup)
     {
         if (state) {
-            return get_fdw_mgr()->fdw_begin_scan(static_cast<PgFdwState*>(state), target_list, qual_list, sortgroup);
+            return get_fdw_mgr()->fdw_begin_scan(static_cast<PgFdwState*>(state), num_attrs, attrs, target_list, qual_list, sortgroup);
         }
     }
 
     /** Iterate scan wrapper */
     bool
-    fdw_iterate_scan(void *state, int num_attrs, Form_pg_attribute *attrs,
-                     Datum *values, bool *nulls, bool *eos)
+    fdw_iterate_scan(void *state, Datum *values, bool *nulls, bool *eos)
     {
         if (state) {
-            return get_fdw_mgr()->fdw_iterate_scan(static_cast<PgFdwState*>(state), num_attrs, attrs, values, nulls, eos);
+            return get_fdw_mgr()->fdw_iterate_scan(static_cast<PgFdwState*>(state), values, nulls, eos);
         }
         return false;
     }
