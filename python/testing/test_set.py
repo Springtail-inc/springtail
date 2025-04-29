@@ -125,17 +125,16 @@ class TestSet:
         logging.debug("Installing foreign data wrapper...")
         springtail.install_fdw(self._build_dir)
 
-        # start background query
-        logging.debug("Start background query")
+        # start background mutations
         self._config.start_background()
 
         # start Springtail
         logging.debug('Starting the Springtail instance')
         springtail.start(self._config_file, self._build_dir, do_cleanup=False, do_init=True, postgres_only=False, do_fdw_install=False)
 
-        logging.debug('Stop background query execution and verify')
-        live_start = self._config.stop_background()
-        if not live_start:
+        # stop the background mutations and verify correctness
+        success = self._config.stop_background()
+        if not success:
             return False
 
         # run the tests

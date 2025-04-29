@@ -41,7 +41,8 @@ class TestCase:
             'autocommit': True,
             'sync_timeout': 200,
             'default_txn': 'default',
-            'query_timeout': 5
+            'query_timeout': 5,
+            'live_startup': None
         }
 
         fdw_config = props.get_fdw_config()
@@ -289,6 +290,13 @@ class TestCase:
                         if section != 'metadata':
                             self._raise_error(f'{line_num}: "default_txn" must be specified in the "metadata" section')
                         self._metadata['default_txn'] = directive[1]
+
+                    elif directive[0] == 'live_startup':
+                        if section != 'metadata':
+                            self._raise_error(f'{line_num}: "live_startup" must be specified in the "metadata" section')
+                        if not self._filename.endswith(_GLOBAL_CONFIG_FILE):
+                            self._raise_error(f'{line_num}: "live_startup" must be specified in the "{_GLOBAL_CONFIG_FILE}" file')
+                        self._metadata['live_startup'] = float(directive[1])
 
                     else:
                         self._raise_error(f'{line_num}: unknown directive "{directive[0]}"')
@@ -609,13 +617,13 @@ class TestCase:
             self._execute_command(command)
 
 
-    def _run_background(self):
+    def _run_background(self, frequency: float):
         connection = springtail.connect_db_instance(self._props, self._primary_name)
         with connection.cursor() as cursor:
             self._execute_sql(cursor, f'BEGIN; DROP TABLE IF EXISTS background_control; CREATE TABLE background_control (value INT); COMMIT;', False)
 
-        # wait for 1 millisecond
-        while not self._stop_thread.wait(0.01):
+        # run periodically
+        while not self._stop_thread.wait(frequency):
             self._value += 1
             with connection.cursor() as cursor:
                 self._execute_sql(cursor, f"BEGIN; INSERT INTO background_control (value) VALUES ({self._value}); COMMIT;", False, True)
@@ -625,10 +633,11 @@ class TestCase:
 
 
     def start_background(self) -> None:
-        if self._filename.endswith(_GLOBAL_CONFIG_FILE):
+        if self._metadata['live_startup'] is not None:
+            logging.debug("Start background mutations")
             self._stop_thread = threading.Event()
             self._value = 0
-            self._bg_thread = threading.Thread(target=self._run_background)
+            self._bg_thread = threading.Thread(target=self._run_background, args=[ self._metadata['live_startup'] ])
             self._bg_thread.start()
 
 
@@ -796,9 +805,10 @@ class TestCase:
         self._status = 'VERIFY_END'
 
     def stop_background(self) -> None:
-        if not self._filename.endswith(_GLOBAL_CONFIG_FILE):
+        if self._metadata['live_startup'] is None:
             return False
 
+        logging.debug('Stop background mutations and verify')
         self._stop_thread.set()
         self._bg_thread.join()
 
