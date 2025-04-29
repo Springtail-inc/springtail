@@ -26,7 +26,7 @@ namespace springtail
              * @return std::optional<std::string> Value if found, otherwise std::nullopt
              */
             std::optional<std::string> hget(uint64_t key) {
-                std::shared_lock<std::shared_mutex> lock(cache_mutex);
+                std::lock_guard lock(cache_mutex);
 
                 // Check in-memory cache
                 auto cache_iterator = cache.find(key);
@@ -37,6 +37,7 @@ namespace springtail
                 LOG_INFO("InvalidTableCache: missing cache({})", key);
                 // If not in cache, check Redis
                 auto redis_value = redis->hget(redis_key, std::to_string(key));
+                // Even if value isn't present, update the cache
                 cache[key] = redis_value;
 
                 return redis_value; // std::nullopt if key not found
@@ -49,7 +50,7 @@ namespace springtail
              * @param value Value that needs to be set
              */
             void hset(uint64_t key, const std::string& value) {
-                std::unique_lock<std::shared_mutex> lock(cache_mutex);
+                std::lock_guard lock(cache_mutex);
 
                 // Update in-memory cache
                 cache[key] = value;
@@ -64,7 +65,7 @@ namespace springtail
              * @param key Key that needs to be deleted
              */
             void hdel(uint64_t key) {
-                std::unique_lock<std::shared_mutex> lock(cache_mutex);
+                std::lock_guard lock(cache_mutex);
 
                 // Update in-memory cache
                 cache.erase(key);
@@ -74,7 +75,7 @@ namespace springtail
             }
         private:
             std::unordered_map<uint64_t, std::optional<std::string>, boost::hash<uint64_t>> cache;
-            std::shared_mutex cache_mutex;
+            std::mutex cache_mutex;
             RedisClientPtr redis;
             const std::string redis_key;
     };

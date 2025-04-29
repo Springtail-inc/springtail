@@ -19,13 +19,4 @@ namespace springtail
     {
         _cache.hdel(table_oid);
     }
-
-    nlohmann::json
-    TableValidator::get_invalid_columns(uint64_t table_oid)
-    {
-        if ( _cache.hget(table_oid).has_value()) {
-            return _cache.hget(table_oid).value();
-        }
-        return nlohmann::json();
-    }
 } // namespace springtail
