@@ -139,11 +139,9 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::TableEntry::update_schema()
     {
-        auto sort_keys = table_schema->get_sort_keys();
-        bool has_primary = !sort_keys.empty();
-        sort_keys.push_back("__springtail_lsn");
-
         auto columns = table_schema->column_order();
+        auto sort_keys = table_schema->get_sort_keys();
+        sort_keys.push_back("__springtail_lsn");
 
         SchemaColumn op("__springtail_op", 0, SchemaType::UINT8, 0, false);
         SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
@@ -152,77 +150,64 @@ namespace springtail::pg_log_mgr {
 
         schema = table_schema->create_schema(columns, new_columns, sort_keys);
 
-        fields = schema->get_mutable_fields(columns);
-        if (has_primary) {
-            pkey_fields = schema->get_mutable_fields(table_schema->get_sort_keys());
-        } else {
-            pkey_fields = fields;
-        }
         op_f = schema->get_mutable_field("__springtail_op");
         lsn_f = schema->get_mutable_field("__springtail_lsn");
+    }
 
-        auto pg_types = table_schema->get_types();
-        pg_fields = std::make_shared<FieldArray>();
+    FieldArrayPtr
+    PgLogReader::Batch::TableEntry::get_pg_fields(Batch *batch,
+                                                  const XidLsn &xid,
+                                                  const MutableFieldArrayPtr fields,
+                                                  const std::vector<int32_t> &pg_types)
+    {
+        auto pg_fields = std::make_shared<FieldArray>();
         for (int i = 0; i < fields->size(); i++) {
-            pg_fields->push_back(std::make_shared<PgLogField>(fields->at(i)->get_type(), i));
             // check if the pg_type is a user type
+            auto type = fields->at(i)->get_type();
             if (pg_types[i] >= constant::FIRST_USER_DEFINED_PG_OID) {
-                has_usertypes = true;
+                auto utp = batch->_usertype_cache_lookup(pg_types[i], xid);
+                DCHECK(utp->exists);
+                pg_fields->push_back(std::make_shared<PgEnumField>(type, i, utp));
+            } else {
+                pg_fields->push_back(std::make_shared<PgLogField>(type, i));
             }
         }
-
-        pg_pkey_fields = std::make_shared<FieldArray>();
-        for (int i = 0; i < pkey_fields->size(); i++) {
-            pg_pkey_fields->push_back(std::make_shared<PgLogField>(pkey_fields->at(i)->get_type(), i));
-        }
+        return pg_fields;
     }
 
     void
-    PgLogReader::Batch::_convert_user_types(const std::vector<int32_t> &pg_types,
-                                            PgMsgTupleData &data,
-                                            const XidLsn &xidlsn)
+    PgLogReader::Batch::TableEntry::update_fields(Batch *batch,
+                                                  const XidLsn &xid)
     {
-        // need to check for user types that may need remapping
-        // iterate through the schema pg_types:
-        for (int i = 0; i < pg_types.size(); i++) {
-            int32_t pg_type = pg_types[i];
+        DCHECK_NE(schema, nullptr);
+        auto sort_keys = table_schema->get_sort_keys();
+        bool has_primary = !sort_keys.empty();
+        auto columns = table_schema->column_order();
 
-            // check if the pg_type is a user type and not null
-            if (pg_type < constant::FIRST_USER_DEFINED_PG_OID || data.tuple_data[i].type == 'n') {
-                continue;
-            }
-
-            LOG_DEBUG(LOG_PG_REPL, "Converting user type: pg_type={} col_idx={}", pg_type, i);
-
-            // lookup user type in cache
-            auto utp = _usertype_cache_lookup(pg_type, xidlsn);
-            CHECK(utp->exists);
-
-            // reassign the value of the tuple, a float value of the user type index
-            std::string label = std::string(data.tuple_data[i].data.begin(),
-                                            data.tuple_data[i].data.end());
-            float index = utp->enum_label_map.at(label);
-
-            // bit-cast float to uint32_t and convert to network byte order
-            uint32_t raw = std::bit_cast<uint32_t>(index);
-            // resize vector and copy in data
-            data.tuple_data[i].data.clear();
-            data.tuple_data[i].data.resize(4);
-            sendint32(raw, data.tuple_data[i].data.data());
-        }
-    }
-
-    std::vector<int32_t>
-    PgLogReader::Batch::_get_pkey_pg_types(const TableEntry &entry) const
-    {
-        std::vector<int32_t> pkey_pg_types;
-
-        for (auto &sort_key : entry.table_schema->get_sort_keys()) {
-            int32_t pg_type = entry.table_schema->get_type(sort_key);
-            pkey_pg_types.push_back(pg_type);
+        fields = schema->get_mutable_fields(columns);
+        if (has_primary) {
+            pkey_fields = schema->get_mutable_fields(sort_keys);
+        } else {
+            pkey_fields = fields;
         }
 
-        return pkey_pg_types;
+        // get the pg fields for all columns
+        auto pg_types = table_schema->get_pg_types();
+        pg_fields = get_pg_fields(batch, xid, fields, pg_types);
+
+        // with no primary key; pg_fields and pg_key_fields are the same
+        if (fields == pkey_fields) {
+            pg_pkey_fields = pg_fields;
+            return;
+        }
+
+        // primary keys are defined and different from the fields
+        // get the pg fields for the primary key columns
+        auto pkey_pg_types = table_schema->get_sort_key_pg_types();
+        pg_pkey_fields = get_pg_fields(batch, xid, pkey_fields, pkey_pg_types);
+
+        // reset fields; forces a resync of fields during add_mutation()
+        fields = nullptr;
     }
 
     template <int T>
@@ -271,20 +256,16 @@ namespace springtail::pg_log_mgr {
             entry.start_lsn = _lsn;
         }
 
+        // check if we need to update the fields
+        if (entry.fields == nullptr) {
+            entry.update_fields(this, xidlsn);
+        }
+
         // add the mutation to the batch
         auto &&row = entry.extent->append();
         if constexpr (T == PgMsgEnum::INSERT || T == PgMsgEnum::UPDATE) {
-            if (entry.has_usertypes) {
-                // convert any user types to the appropriate index
-                _convert_user_types(entry.table_schema->get_types(), data, xidlsn);
-            }
             MutableTuple(entry.fields, row).assign(FieldTuple(entry.pg_fields, static_cast<const PgMsgTupleData*>(&data)));
         } else if constexpr (T == PgMsgEnum::DELETE) {
-            if (entry.has_usertypes) {
-                // convert any user types to the appropriate index
-                auto pg_types = _get_pkey_pg_types(entry);
-                _convert_user_types(pg_types, data, xidlsn);
-            }
             MutableTuple(entry.pkey_fields, row).assign(FieldTuple(entry.pg_pkey_fields, static_cast<const PgMsgTupleData*>(&data)));
         } else {
             static_assert(false, "Invalid template parameter: PgLogReader::Batch::add_mutation");

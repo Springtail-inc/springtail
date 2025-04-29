@@ -603,7 +603,7 @@ namespace springtail::pg_fdw {
                 if (column.pg_type < FirstNormalObjectId) {
                     // this is a system column, so we need to use the pg_type
                     // to get the value
-                    assert (attrs[i]->atttypid == column.pg_type);
+                    assert (state->_attrs[i]->atttypid == column.pg_type);
                 }
                 values[i] = _get_datum_from_field(state, field, row, column.pg_type, state->_attrs[i]->atttypid, state->_attrs[i]->atttypmod);
             } else {

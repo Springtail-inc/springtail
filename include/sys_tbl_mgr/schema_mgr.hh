@@ -11,52 +11,6 @@
 
 namespace springtail {
 
-    /** UserType class for holding user defined types */
-    struct UserType {
-        uint64_t id;                // pg type oid
-        uint64_t namespace_id;      // pg namespace oid
-        std::string name;           // pg type name
-        nlohmann::json value_json;  // json representation of the user type value;
-        bool exists;
-
-        // for enum, it is a json array of objects with label: index pairs
-        std::unordered_map<std::string, float> enum_label_map;
-        std::unordered_map<float, std::string> enum_index_map;
-
-        /** Enum type for user defined types */
-        enum Type : int8_t {
-            ENUM = 'E',
-        } type;
-
-        UserType(uint64_t id, bool exists=false, int8_t type=constant::USER_TYPE_ENUM)
-            : id(id),
-              exists(exists),
-              type(static_cast<Type>(type))
-        {
-            DCHECK(type == constant::USER_TYPE_ENUM); // only support enum for now
-        }
-
-        UserType(uint64_t id, uint64_t namespace_id, int8_t type, const std::string &name, const std::string &value, bool exists=true)
-            : id(id),
-            namespace_id(namespace_id),
-            name(name),
-            value_json(nlohmann::json::parse(value)),
-            exists(exists),
-            type(static_cast<Type>(type))
-        {
-            DCHECK(type == constant::USER_TYPE_ENUM); // only support enum for now
-            DCHECK(value_json.is_array());
-            for (const auto &obj : value_json) {
-                DCHECK(obj.is_object());
-                auto it = obj.begin();  // Only one key-value pair per object
-                float idx = it.value().get<float>();
-                enum_label_map[it.key()] = idx;
-                enum_index_map[idx] = it.key();
-            }
-        }
-    };
-    using UserTypePtr = std::shared_ptr<UserType>;
-
     class ExtentType;
 
     /** Interface for accessing all of the schemas for a specific table.  This includes retrieving

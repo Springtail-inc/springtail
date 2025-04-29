@@ -209,15 +209,34 @@ namespace springtail::pg_log_mgr {
                 FieldArrayPtr pg_fields; ///< The matching fields for processing a PgMsgTupleData
                 FieldArrayPtr pg_pkey_fields; ///< The matching pkey fields for processing a PgMsgTupleData
 
-                bool has_usertypes = false; ///< Flag to indicate if the table has user-defined types.
-
                 TableEntry() = default;
                 explicit TableEntry(ExtentSchemaPtr table_schema)
                     : table_schema(table_schema)
                 { }
 
-                /** Updates the schema and related fields from the table_schema. */
+                /**
+                 * Updates the schema and related fields from the table_schema.
+                 */
                 void update_schema();
+
+                /**
+                 * Update the fields and pkey fields for the table.
+                 * Called by add_mutation()
+                 * @param batch The current batch.
+                 * @param xid The XID and LSN of the mutation.
+                 */
+                void update_fields(Batch *batch, const XidLsn &xid);
+
+                /**
+                 * Helper to update a field array.
+                 * @param batch The current batch.
+                 * @param xid The XID and LSN of the mutation.
+                 * @param fields The field array to update.
+                 */
+                FieldArrayPtr get_pg_fields(Batch *batch,
+                                            const XidLsn &xid,
+                                            const MutableFieldArrayPtr fields,
+                                            const std::vector<int32_t> &pg_types);
             };
             using TableMap = std::map<int32_t, TableEntry>;
 
@@ -288,21 +307,6 @@ namespace springtail::pg_log_mgr {
 
                 return _exists_cache->exists(_db, table_id, xid);
             }
-
-            /**
-             * @brief Lookup a user type in the batch and modify the tuple data
-             * @param types The pg types of the fields in the tuple.
-             * @param data The PgMsgTupleData to update.
-             * @param xidlsn The XID and LSN of the message.
-             */
-            void _convert_user_types(const std::vector<int32_t> &types, PgMsgTupleData &data, const XidLsn &xidlsn);
-
-            /**
-             * Convert primary key fields to an array of pg types
-             * @param entry The table entry.
-             * @return std::vector<int32_t> The pg types of the primary key fields.
-             */
-            std::vector<int32_t> _get_pkey_pg_types(const TableEntry &entry) const;
 
             /**
              * Lookup a user type in the batch and return the schema.
