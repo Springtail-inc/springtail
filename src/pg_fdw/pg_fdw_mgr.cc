@@ -307,6 +307,9 @@ namespace springtail::pg_fdw {
 
         // set the iterators for the scan taking quals into consideration
         _set_scan_iterators(state);
+
+        // reset the user type cache since cached types may have changed
+        _user_type_cache.clear();
     }
 
 
@@ -1424,9 +1427,10 @@ namespace springtail::pg_fdw {
         // first check the _user_type_cache for the oid
         LOG_DEBUG(LOG_FDW, "Enum cache lookup for oid: {}", oid);
 
+        // lookup oid in user type cache, if not there fetch from systbl mgr
         UserTypePtr utp = _user_type_cache.get(oid);
         if (utp == nullptr) {
-            XidLsn xidlsn {xid};
+            XidLsn xidlsn{xid};
             utp = SchemaMgr::get_instance()->get_usertype(db_id, oid, xidlsn);
             CHECK_NE(utp, nullptr);
             _user_type_cache.insert(oid, utp);

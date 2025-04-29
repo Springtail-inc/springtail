@@ -656,11 +656,12 @@ namespace springtail::pg_fdw {
 
             // need to check if value has changed
             const auto value_json_str = ddl.at("value").get<std::string>();
-            if (value_json_str != ddl.at("old_values").get<std::string>()) {
+            const auto old_value_json_str = ddl.at("old_value").get<std::string>();
+            if (value_json_str != old_value_json_str) {
                 return gen_alter_enum_sql(ddl.at("schema").get<std::string>(),
                                           ddl.at("name").get<std::string>(),
-                                          ddl.at("old_value"),
-                                          ddl.at("value"),
+                                          nlohmann::json::parse(old_value_json_str),
+                                          nlohmann::json::parse(value_json_str),
                                           conn);
             }
         }
@@ -974,14 +975,24 @@ namespace springtail::pg_fdw {
         std::string schema = conn->escape_identifier(schema_str);
         std::string type_name = conn->escape_identifier(type_str);
 
+        CHECK(from.is_array());
+        CHECK(to.is_array());
+
         LOG_DEBUG(LOG_FDW, "Comparing enum types: {}.{} from: {} to: {}", schema, type_name, from.dump(), to.dump());
 
         while (i < from.size() && j < to.size()) {
+
+            LOG_DEBUG(LOG_FDW, "i={}, j={}", i, j);
+
             float from_val = from[i].begin().value();
             float to_val = to[j].begin().value();
 
+            LOG_DEBUG(LOG_FDW, "got from vals");
+
             std::string from_key = from[i].begin().key();
             std::string to_key = to[j].begin().key();
+
+            LOG_DEBUG(LOG_FDW, "From key: {}, From val: {}, To key: {}, To val: {}", from_key, from_val, to_key, to_val);
 
             if (from_val == to_val) {
                 if (from_key == to_key) {

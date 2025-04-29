@@ -320,5 +320,5 @@ namespace {
         });
         sql = PgDDLMgr::gen_alter_enum_sql("public", "color", from_json, to_json, conn);
         EXPECT_EQ(sql, "ALTER TYPE \"public\".\"color\" RENAME VALUE 'blue' TO 'green';");
-        }
-    };
+    }
+} // namespace 
