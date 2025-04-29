@@ -204,6 +204,11 @@ private:
      */
     void _clear_table_info(uint64_t db_id);
 
+    /**
+     * Clears the cache of namespace objects.  Called by finalize().
+     * */
+    void _clear_namespace_info(uint64_t db_id);
+
     // CACHE FOR ROOTS / STATS
 
     /** We use the thrift object response as the cache data for the roots/stats. */
@@ -399,7 +404,8 @@ private:
      */
     NamespaceCacheRecordPtr _get_namespace_info(uint64_t db_id,
                                                 uint64_t namespace_id,
-                                                const XidLsn& xid);
+                                                const XidLsn& xid,
+                                                bool check_exists = true);
 
     /**
      * Read the namespace info from the NamespaceNames system table given it's name and an
@@ -407,7 +413,8 @@ private:
      */
     NamespaceCacheRecordPtr _get_namespace_info(uint64_t db_id,
                                                 const std::string& name,
-                                                const XidLsn& xid);
+                                                const XidLsn& xid,
+                                                bool check_exists = true);
 
     /**
      * Cache entry for the user defined types.

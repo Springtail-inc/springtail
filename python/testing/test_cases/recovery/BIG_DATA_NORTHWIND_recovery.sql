@@ -3547,6 +3547,8 @@ INSERT INTO us_states VALUES (50, 'Wisconsin', 'WI', 'midwest');
 INSERT INTO us_states VALUES (51, 'Wyoming', 'WY', 'west');
 COMMIT;
 
+### recovery_point
+
 BEGIN;
 ALTER TABLE ONLY categories
     ADD CONSTRAINT pk_categories PRIMARY KEY (category_id);
@@ -3630,8 +3632,7 @@ ALTER TABLE ONLY employees
     ADD CONSTRAINT fk_employees_employees FOREIGN KEY (reports_to) REFERENCES employees;
 COMMIT;
 
-### sync
-### force_recovery 3
+### force_recovery
 
 ## verify
 SELECT * FROM customer_customer_demo;

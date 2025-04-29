@@ -2,14 +2,15 @@
 
 #include <common/exception.hh>
 #include <common/logging.hh>
-#include "common/open_telemetry.hh"
 
 namespace {
     void
     backtrace_handler(int signo)
     {
+        LOG_ERROR("Crash detected from signal {}", signo);
+        // NOTE: this part is commented out for now as it was causing segmentation fault in the signal handler
         // flush open telemetry data
-        springtail::open_telemetry::OpenTelemetry::flush();
+        // springtail::open_telemetry::OpenTelemetry::flush();
 
         // attempt to flush the log before we try to capture the backtrace in case something goes wrong
         spdlog::default_logger()->flush();

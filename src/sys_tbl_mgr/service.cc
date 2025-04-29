@@ -112,6 +112,7 @@ Service::_set_index_state(const proto::SetIndexStateRequest& request)
     //     somewhat ugly / hard to follow.  We should revist this whole flow to improve
     //     performance and readability.
     auto ns_info = _get_namespace_info(request.db_id(), index_info.namespace_name(), xid);
+    CHECK(ns_info);
 
     auto index_names_t = _get_mutable_system_table(request.db_id(), sys_tbl::IndexNames::ID);
     auto tuple = sys_tbl::IndexNames::Data::tuple(
@@ -215,6 +216,7 @@ Service::_create_index(const proto::IndexRequest& request)
     {
         // lookup the namespace info
         auto ns_info = _get_namespace_info(request.db_id(), request.index().namespace_name(), xid);
+        CHECK(ns_info);
 
         auto index_names_t = _get_mutable_system_table(request.db_id(), sys_tbl::IndexNames::ID);
         auto tuple = sys_tbl::IndexNames::Data::tuple(
@@ -340,7 +342,8 @@ Service::_find_index(uint64_t db_id,
     info.set_state(state);
 
     // need to look up the schema name in the namespace_names table
-    auto ns_info = _get_namespace_info(db_id, namespace_id, access_xid);
+    auto ns_info = _get_namespace_info(db_id, namespace_id, access_xid, false);
+    CHECK(ns_info);
     info.set_namespace_name(ns_info->name);
 
     return {{info, namespace_id, index_xid}};
@@ -432,6 +435,7 @@ Service::_create_table(const proto::TableRequest& request)
     // retrieve the id of the namespace
     auto ns_info = _get_namespace_info(request.db_id(), request.table().namespace_name(),
                                        XidLsn(request.xid(), request.lsn()));
+    CHECK(ns_info);
 
     // initialize the ddl statement
     nlohmann::json ddl;
@@ -500,8 +504,11 @@ Service::AlterTable(grpc::ServerContext* context,
     LOG_INFO("got AlterTable()");
 
     // retrieve the id of the namespace
+    // this function is called by drop table, so we don't check if
+    // the namespace exists
     auto ns_info = _get_namespace_info(request->db_id(), request->table().namespace_name(),
-                                       XidLsn(request->xid(), request->lsn()));
+                                       XidLsn(request->xid(), request->lsn()), false);
+    CHECK(ns_info);
 
     nlohmann::json ddl;
     ddl["tid"] = request->table().id();
@@ -532,6 +539,7 @@ Service::AlterTable(grpc::ServerContext* context,
 
         auto old_ns_info = _get_namespace_info(request->db_id(), table_info->namespace_id,
                                                XidLsn(request->xid(), request->lsn()));
+        CHECK(old_ns_info);
         ddl["old_schema"] = old_ns_info->name;
 
     } else if (table_info->name != request->table().name()) {
@@ -549,6 +557,7 @@ Service::AlterTable(grpc::ServerContext* context,
         if (table_info->namespace_id != ns_info->id) {
             auto old_ns_info = _get_namespace_info(request->db_id(), table_info->namespace_id,
                                                    XidLsn(request->xid(), request->lsn()));
+            CHECK(old_ns_info);
             ddl["old_schema"] = old_ns_info->name;
         } else {
             ddl["old_schema"] = request->table().namespace_name();
@@ -608,8 +617,14 @@ nlohmann::json
 Service::_drop_table(const proto::DropTableRequest& request)
 {
     // retrieve the id of the namespace
+    // DROP SCHEMA in PG will automatically drop all tables 
+    // DropTable may be called after DropNamespace, so we
+    // don't check if the namespace was dropped and just use 
+    // the id of the dropped schema in this case
     auto ns_info = _get_namespace_info(request.db_id(), request.namespace_name(),
-                                       XidLsn(request.xid(), request.lsn()));
+                                       XidLsn(request.xid(), request.lsn()), false);
+
+    CHECK(ns_info);
 
     // initialize the ddl json
     nlohmann::json ddl;
@@ -702,7 +717,7 @@ Service::AlterNamespace(grpc::ServerContext* context,
 
     // retrieve the old namespace name
     auto ns_info = _get_namespace_info(request->db_id(), request->namespace_id(), xid);
-    CHECK(ns_info != nullptr);
+    CHECK(ns_info);
 
     // update the namespace_names table
     auto ddl =
@@ -899,6 +914,7 @@ Service::Finalize(grpc::ServerContext* context,
     _clear_table_info(request->db_id());
     _clear_roots_info(request->db_id());
     _clear_schema_info(request->db_id());
+    _clear_namespace_info(request->db_id());
 
     span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;
@@ -1462,7 +1478,7 @@ Service::_get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
 }
 
 Service::NamespaceCacheRecordPtr
-Service::_get_namespace_info(uint64_t db_id, uint64_t namespace_id, const XidLsn& xid)
+Service::_get_namespace_info(uint64_t db_id, uint64_t namespace_id, const XidLsn& xid, bool check_exists)
 {
     // check the cache of un-finalized records
     {
@@ -1495,10 +1511,12 @@ Service::_get_namespace_info(uint64_t db_id, uint64_t namespace_id, const XidLsn
     }
 
     // make sure that the table is marked as existing at this XID/LSN
-    bool exists = fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*row_i);
-    if (!exists) {
-        LOG_WARN("Namespace marked non-existant at xid {}:{}", xid.xid, xid.lsn);
-        return nullptr;
+    if (check_exists) {
+        bool exists = fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*row_i);
+        if (!exists) {
+            LOG_WARN("Namespace marked non-existant at xid {}:{}", xid.xid, xid.lsn);
+            return nullptr;
+        }
     }
 
     // create and populate the namespace info
@@ -1508,7 +1526,7 @@ Service::_get_namespace_info(uint64_t db_id, uint64_t namespace_id, const XidLsn
 }
 
 Service::NamespaceCacheRecordPtr
-Service::_get_namespace_info(uint64_t db_id, const std::string& name, const XidLsn& xid)
+Service::_get_namespace_info(uint64_t db_id, const std::string& name, const XidLsn& xid, bool check_exists)
 {
     // check the cache of un-finalized records
     {
@@ -1553,7 +1571,7 @@ Service::_get_namespace_info(uint64_t db_id, const std::string& name, const XidL
         LOG_WARN("Couldn't find entry for namespace {} @ {}:{}", name, xid.xid, xid.lsn);
         return nullptr;
     }
-    if (!fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*row_i)) {
+    if (check_exists && !fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*row_i)) {
         LOG_WARN("Namespace marked as not-exists {} @ {}:{}", name, xid.xid, xid.lsn);
         return nullptr;
     }
@@ -1588,6 +1606,14 @@ Service::_clear_table_info(uint64_t db_id)
     // clear the table cache since it only contains un-finalized entries
     boost::unique_lock lock(_mutex);
     _table_cache.erase(db_id);
+}
+
+void 
+Service::_clear_namespace_info(uint64_t db_id)
+{
+    boost::unique_lock lock(_mutex);
+    _namespace_name_cache.erase(db_id);
+    _namespace_id_cache.erase(db_id);
 }
 
 Service::RootsCacheRecordPtr
@@ -1860,7 +1886,8 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
 
         uint64_t namespace_id =
             names_fields->at(sys_tbl::IndexNames::Data::NAMESPACE_ID)->get_uint64(row);
-        auto ns_info = _get_namespace_info(db_id, namespace_id, access_xid);
+        auto ns_info = _get_namespace_info(db_id, namespace_id, access_xid, false);
+        CHECK(ns_info);
         info.set_namespace_name(ns_info->name);
 
         info.set_name(names_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(row));

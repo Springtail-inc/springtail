@@ -78,31 +78,39 @@ namespace {
             uint64_t _db_id;
         };
 
-        void SetUp() override {
+        static void SetUpTestSuite() {
             auto service_runners = test::get_services(true, false, false);
             std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
             runners.emplace();
             std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
             springtail_init_test(runners);
-
-            _subscriber = std::make_unique<Subscriber>();
         }
 
-        void TearDown() override {
-            _threads.clear();
+        static void TearDownTestSuite() {
             // shutdown server
             LOG_DEBUG(LOG_XID_MGR, "Shutting down server");
             springtail_shutdown();
         }
 
+        void SetUp() override {
+            _subscriber = std::make_unique<Subscriber>();
+        }
+
+        void TearDown() override {
+            if (_threads.size() > 0) {
+                _threads.clear();
+            }
+        }
+
         void run_clients(int thread_id, int iterations)
         {
             LOG_INFO("Thread: {}, running {} iterations", thread_id, iterations);
+            XidMgrClient *client = XidMgrClient::get_instance();
+            xid_mgr::XidMgrServer *server = xid_mgr::XidMgrServer::get_instance();
 
             for (int i = 0; i < iterations; i++) {
-                XidMgrClient *client = XidMgrClient::get_instance();
                 uint64_t xid = client->get_committed_xid(1, 0);
-                client->commit_xid(1, xid + 1, false);
+                server->commit_xid(1, 1, xid + 1, false);
             }
 
             LOG_INFO("Thread: {}, finished", thread_id);
@@ -112,7 +120,8 @@ namespace {
         std::unique_ptr<Subscriber> _subscriber;
     };
 
-    TEST_F(XidMgr_Test, ThreadedTest) {
+    TEST_F(XidMgr_Test, ThreadedTest)
+    {
         // startup clients
         for (int i = 0; i < THREADS; i++) {
             _threads.emplace_back([this, i](){run_clients(i, ITERS);});
@@ -129,7 +138,33 @@ namespace {
 
         _subscriber->cancel();
         ASSERT_GE(_subscriber->_push_cnt, 200);
+        LOG_INFO("Push count = {}", _subscriber->_push_cnt);
     }
+
+    TEST_F(XidMgr_Test, Subscriber_Test)
+    {
+        XidMgrClient *client = XidMgrClient::get_instance();
+        xid_mgr::XidMgrServer *server = xid_mgr::XidMgrServer::get_instance();
+        auto now = std::chrono::system_clock::now();
+        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
+        server->rotate(1, timestamp.count());
+        uint64_t xid = client->get_committed_xid(1, 0);
+
+        server->commit_xid(1, 1, xid + 1, false);
+        server->commit_xid(1, 1, xid + 2, false);
+        server->commit_xid(1, 1, xid + 3, false);
+
+        sleep(1);
+
+        uint64_t new_xid = client->get_committed_xid(1, 0);
+        ASSERT_EQ(_subscriber->_last_xid, new_xid);
+        ASSERT_EQ(_subscriber->_db_id, 1);
+        ASSERT_EQ(new_xid, xid + 3);
+
+        _subscriber->cancel();
+        ASSERT_GE(_subscriber->_last_xid, 1);
+    }
+
 } // namespace
 
 

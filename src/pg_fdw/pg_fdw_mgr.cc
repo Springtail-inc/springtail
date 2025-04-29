@@ -25,6 +25,7 @@
 
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/shm_cache.hh>
+#include <sys_tbl_mgr/system_tables.hh>
 
 extern "C" {
     #include <postgres.h>
@@ -246,9 +247,14 @@ namespace springtail::pg_fdw {
     }
 
     void
-    PgFdwMgr::fdw_begin_scan(PgFdwState *state, List *target_list, List *qual_list, List *sortgroup)
+    PgFdwMgr::fdw_begin_scan(PgFdwState *state, int num_attrs, const Form_pg_attribute* attrs,
+            List *target_list, List *qual_list, List *sortgroup)
     {
-        LOG_DEBUG(LOG_FDW, "fdw_begin_scan: tid: {}", state->tid);
+        LOG_DEBUG(LOG_FDW, "fdw_begin_scan: tid: {}, {}", state->tid, num_attrs);
+
+        for (size_t i = 0; i != num_attrs; ++i) {
+           state->_attrs.push_back(attrs[i]);
+        }
 
         // copy lists into state structure in a more CPP friendly way
 
@@ -410,6 +416,7 @@ namespace springtail::pg_fdw {
             std::vector<ConstQualPtr> best;
 
             for (auto const& idx: state->indexes) {
+                CHECK(static_cast<sys_tbl::IndexNames::State>(idx.state) == sys_tbl::IndexNames::State::READY);
                 auto index_quals = _get_index_quals(state, idx, qual_list);
                 if (index_quals.empty()) {
                     continue;
@@ -471,14 +478,14 @@ namespace springtail::pg_fdw {
 
     bool
     PgFdwMgr::fdw_iterate_scan(PgFdwState *state,
-                               int num_attrs,
-                               Form_pg_attribute *attrs,
                                Datum *values,
                                bool *nulls,
                                bool *eos)
     {
         // Note: for now always scan up, so we don't need to check if we are scanning down
         LOG_DEBUG(LOG_FDW, "fdw_iterate_scan: tid: {}", state->tid);
+
+        size_t num_attrs = state->_attrs.size();
 
         // default to not end of scan
         *eos = false;
@@ -570,8 +577,8 @@ namespace springtail::pg_fdw {
         }
 
         // iterate through attributes passed in
-        for (int i = 0; i < num_attrs; i++) {
-            int attno = attrs[i]->attnum;
+        for (int i = 0; i < num_attrs; ++i) {
+            int attno = state->_attrs[i]->attnum;
 
             // check if this column is in target list, if not skip
             if (!state->target_columns.contains(attno)) {
@@ -598,7 +605,7 @@ namespace springtail::pg_fdw {
                     // to get the value
                     assert (attrs[i]->atttypid == column.pg_type);
                 }
-                values[i] = _get_datum_from_field(state, field, row, column.pg_type, attrs[i]->atttypid, attrs[i]->atttypmod);
+                values[i] = _get_datum_from_field(state, field, row, column.pg_type, state->_attrs[i]->atttypid, state->_attrs[i]->atttypmod);
             } else {
                 values[i] = 0;
             }
@@ -1438,7 +1445,12 @@ namespace springtail::pg_fdw {
 
         if (tid > constant::MAX_SYSTEM_TABLE_ID) {
             auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(table->db(), tid, { xid, constant::MAX_LSN });
-            indexes = meta->indexes;
+            for (auto& v: meta->indexes) {
+                if (static_cast<sys_tbl::IndexNames::State>(v.state) != sys_tbl::IndexNames::State::READY) {
+                    continue;
+                }
+                indexes.push_back(v);
+            }
         }
     }
 } // namespace springtail::pg_fdw

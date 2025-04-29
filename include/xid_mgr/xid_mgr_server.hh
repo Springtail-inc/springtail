@@ -2,20 +2,27 @@
 
 #include <shared_mutex>
 #include <filesystem>
-#include <vector>
 
 #include <common/service_register.hh>
 #include <common/singleton.hh>
 #include <grpc/grpc_server_manager.hh>
-#include <xid_mgr/xid_partition.hh>
+#include <redis/redis_ddl.hh>
+#include <xid_mgr/pg_xact_log_writer.hh>
 #include <xid_mgr/xid_mgr_service.hh>
 
 namespace springtail::xid_mgr {
 
-class XidMgrServer : public Singleton<XidMgrServer> {
-    friend class Singleton<XidMgrServer>;
+class XidMgrServer : public SingletonWithThread<XidMgrServer> {
+    friend class SingletonWithThread<XidMgrServer>;
 
 public:
+    /** SYNC interval */
+    static constexpr int XIG_MGR_MIN_SYNC_MS = 500;
+
+    /**
+     * @brief Start xid manager
+     *
+     */
     void startup();
 
     /**
@@ -23,14 +30,14 @@ public:
      * @param db_id database id
      * @param xid xid to commit
      */
-    void commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_changes);
+    void commit_xid(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes);
 
     /**
      * @brief Record a DDL change without doing a commit.  Used for table sync operations.
      * @param db_id database id
      * @param xid xid to commit
      */
-    void record_ddl_change(uint64_t db_id, uint64_t xid);
+    void record_mapping(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes);
 
     /**
      * @brief Get the latest committed xid object
@@ -39,6 +46,22 @@ public:
      * @return uint64_t
      */
     uint64_t get_committed_xid(uint64_t db_id, uint64_t schema_xid);
+
+    /**
+     * @brief Cleanup xact logs with timestamp id less than given timestamp
+     *
+     * @param db_id database id
+     * @param min_timestamp minimum timestamp id of xact logs
+     */
+    void cleanup(uint64_t db_id, uint64_t min_timestamp);
+
+    /**
+     * @brief Rotate database xact log to the new timestamp id
+     *
+     * @param db_id database id
+     * @param timestamp timestamp id
+     */
+    void rotate(uint64_t db_id, uint64_t timestamp);
 
 private:
     XidMgrServer();
@@ -51,54 +74,129 @@ private:
     /** base path */
     std::filesystem::path _base_path;
 
-    std::shared_mutex _mutex;
+    /**
+     * @brief Class for keeping transaction log data and managing access to them
+     *
+     */
+    class DBXactLogData {
+    public:
+        /**
+         * @brief Construct a new DBXactLogData object
+         *
+         * @param db_id - database id
+         * @param base_dir - parent directory of all transaction logs
+         */
+        DBXactLogData(uint64_t db_id, const std::filesystem::path &base_dir) :
+                      _xact_log(base_dir / std::to_string(db_id)),
+                      _db_id(db_id) {}
 
-    /** list of partitions */
-    std::vector<PartitionPtr> _partitions;
+        /**
+         * @brief Record mapping from pg_xid to xid with some attributes
+         *
+         * @param pg_xid - Postgres xid
+         * @param xid - Springtail xid
+         * @param has_schema_changes - this flag indicates if transaction has schema changes
+         * @param real_commit - thi flag indicates if this is a real commit
+         */
+        void
+        record_log_entry(uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit);
 
-    /** map of db_id to partitions */
-    std::map<uint64_t, PartitionPtr> _partition_map;
+        /**
+         * @brief Cleanup committed history of schema changes
+         *
+         * @param redis_ddl - redis DDL object
+         */
+        void
+        cleanup_history_and_flush(RedisDDL &redis_ddl);
+
+        /**
+         * @brief Get the value of the last committed xid
+         *
+         * @param schema_xid - schema xid
+         * @return uint64_t - last committed xid value
+         */
+        uint64_t
+        get_committed_xid(uint64_t schema_xid);
+
+        /**
+         * @brief Start logging xids in a file with the new timestamp
+         *
+         * @param timestamp - file timestamp
+         */
+        void
+        rotate(uint64_t timestamp);
+
+        /**
+         * @brief Cleanup files below the given timestamp
+         *
+         * @param min_timestamp - minimum allowed timestamp
+         * @param archive_logs - archive logs flag
+         */
+        void
+        cleanup(uint64_t min_timestamp, bool archive_logs);
+
+    private:
+        PgXactLogWriter _xact_log;              ///< log writer object
+        std::shared_mutex _mutex;               ///< mutex for access control
+        std::vector<uint64_t> _xact_history;    ///< schema changes xids
+        uint64_t _db_id;                        ///< database id
+        bool _dirty_history{false};             ///< dirty history flag
+    };
+
+    std::shared_mutex _mutex;                   ///< mutex for access control to transaction log data
+    std::map<uint64_t, DBXactLogData> _xact_log_data;   ///< map of database id to transaction log data
+    bool _archive_logs;                         ///< log archiving flag
 
     /**
-     * @brief Get a partition based on a db_id, optionally create it
-     * @param db_id database id
-     * @param create whether to create the partition if it doesn't exist
-     * @return PartitionPtr
+     * @brief Record new xid for given database
+     *
+     * @param db_id - database id
+     * @param pg_xid - Postgress xid
+     * @param xid - Springtail xid
+     * @param has_schema_changes - schema changes flag
+     * @param real_commit - real commit flag
      */
-    PartitionPtr _get_partition(uint64_t db_id, bool create);
+    void
+    _record_xid_change(uint64_t db_id, uint32_t pg_xid, uint64_t xid,
+                       bool has_schema_changes, bool real_commit);
 
     /**
-     * @brief Load partitions from base path
+     * @brief Find database for the give database idand if it is not there, add it
+     *
+     * @param db_id - database id
+     * @param read_lock - read lock to be used for read access to transaction log data
+     * @return std::map<uint64_t, DBXactLogData>::iterator - iterator to the map pair
      */
-    void _load_partitions();
+    std::map<uint64_t, DBXactLogData>::iterator
+    _find_or_add(uint64_t db_id, std::shared_lock<std::shared_mutex> &read_lock);
 
+    /**
+     * @brief Instance shutdown function
+     *
+     */
     void _internal_shutdown() override;
+
+    /**
+     * @brief Run function for singleton thread
+     *
+     */
+    void _internal_run() override;
 };
 
 class XidMgrRunner : public ServiceRunner {
 public:
-    XidMgrRunner(bool commit_starting_xid, uint64_t db_id, uint64_t starting_xid) :
-        ServiceRunner("XidMgr"),
-        _commit_starting_xid(commit_starting_xid),
-        _db_id(db_id), _starting_xid(starting_xid) {}
+    XidMgrRunner() :
+        ServiceRunner("XidMgr") {}
 
     bool start() override {
-        if (_commit_starting_xid) {
-            LOG_INFO("Starting XidMgr with _db_id = {} and _starting_xid = {}", _db_id, _starting_xid);
-            xid_mgr::XidMgrServer::get_instance()->commit_xid(_db_id, _starting_xid, false);
-        }
         xid_mgr::XidMgrServer::get_instance()->startup();
         return true;
     }
 
     void stop() override {
+        xid_mgr::XidMgrServer::get_instance()->stop_thread();
         xid_mgr::XidMgrServer::shutdown();
     }
-
-private:
-    bool _commit_starting_xid;
-    uint64_t _db_id;
-    uint64_t _starting_xid;
 };
 
 }  // namespace springtail::xid_mgr

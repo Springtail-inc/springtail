@@ -64,6 +64,7 @@ class TestCase:
         self._connections = {} # connections to the primary for each transaction
         self._fdw = None # connection to Springtail
         self._sync_step = 0 # incrementing ID used for replica synchronization
+        self._recovery_points = { } # map from recovery point name to XID
 
 
     def _append_command(self,
@@ -184,12 +185,48 @@ class TestCase:
                             'type': 'sync'
                         }, section, is_threaded, cur_txn, line_num)
 
+                    elif directive[0] == 'recovery_point':
+                        if section != 'test':
+                            self._raise_error(f'{line_num}: "recovery_point" must be part of the "test" section')
+                        if is_threaded:
+                            self._raise_error(f'{line_num}: "recovery_point" must be within a sequential sub-section')
+
+                        # note: force a sync prior to capturing the XID recovery point so that the recovery is consistent
+                        self._append_command({
+                            'type': 'sync'
+                        }, section, is_threaded, cur_txn, line_num)
+                        self._append_command({
+                            'type': 'recovery_point',
+                            'name': directive[1] if len(directive) > 1 else 'default'
+                        }, section, is_threaded, cur_txn, line_num)
+
                     elif directive[0] == 'force_recovery':
                         if section != 'test':
                             self._raise_error(f'{line_num}: "force_recovery" must be part of the "test" section')
+                        if is_threaded:
+                            self._raise_error(f'{line_num}: "force_recovery" must be within a sequential sub-section')
+
+                        # note: always force a sync before recovery
+                        self._append_command({
+                            'type': 'sync'
+                        }, section, is_threaded, cur_txn, line_num)
                         self._append_command({
                             'type': 'force_recovery',
-                            'count': int(directive[1])
+                            'name': directive[1] if len(directive) > 1 else 'default'
+                        }, section, is_threaded, cur_txn, line_num)
+
+                    elif directive[0] == 'restart':
+                        if section != 'test':
+                            self._raise_error(f'{line_num}: "restart" must be part of the "test" section')
+                        if is_threaded:
+                            self._raise_error(f'{line_num}: "restart" must be within a sequential sub-section')
+
+                        # note: always force a sync before recovery
+                        self._append_command({
+                            'type': 'sync'
+                        }, section, is_threaded, cur_txn, line_num)
+                        self._append_command({
+                            'type': 'restart',
                         }, section, is_threaded, cur_txn, line_num)
 
                     elif directive[0] == 'streaming':
@@ -211,7 +248,7 @@ class TestCase:
                             'type': 'schema_check',
                             'schema': directive[1],
                             'table': directive[2],
-                            'wait_for': int(directive[3]) if len(directive) > 3 else 5
+                            'wait_for': int(directive[3]) if len(directive) > 3 else self._metadata['sync_timeout']
                         }, section, is_threaded, cur_txn, line_num)
 
                     # Usage - table_exists <schema> <table> <replica_exists>
@@ -319,17 +356,36 @@ class TestCase:
             time.sleep(float(command['duration']))
             return None
 
-        if command['type'] == 'force_recovery':
-            # check the current XID and revert to an earlier target XID
-            db_id_str = self._props.get_db_configs()[0]['id']
-            logging.debug(f'Force recovery for {db_id_str}')
-            db_id = int(db_id_str)
+        if command['type'] == 'recovery_point':
+            # check the current XID and store it as a recovery point using the provided name
+            db_id = int(self._props.get_db_configs()[0]['id'])
             current_xid = springtail.current_xid(self._props, db_id)
-            target_xid = current_xid - command['count']
-            logging.debug(f'Force recovery from {current_xid} to {target_xid}')
+            self._recovery_points[command['name']] = current_xid
+
+        if command['type'] == 'force_recovery':
+            # confirm we have a recorded recovery point
+            if command['name'] not in self._recovery_points:
+                self._raise_error(f'Tried to recover to undefined recovery point: {command["name"]}')
+
+            # check the current XID and revert to an earlier target XID
+            target_xid = self._recovery_points[command['name']]
+            logging.debug(f'Force recovery to {target_xid}')
 
             # restart Springtail at the target XID
-            springtail.restart(self._props, self._build_dir, start_xid=target_xid)
+            springtail.restart(self._props, self._build_dir,
+                               start_xid=target_xid, unarchive_logs=True)
+
+            # reconnect to the replica database
+            if self._fdw:
+                self._fdw.close()
+                self._fdw = springtail.connect_fdw_instance(self._props, self._replica_name)
+
+            return None
+
+        if command['type'] == 'restart':
+            # restart Springtail at the target XID
+            springtail.restart(self._props, self._build_dir,
+                               start_xid=None, unarchive_logs=True)
 
             # reconnect to the replica database
             if self._fdw:
@@ -429,25 +485,24 @@ class TestCase:
                 return results
 
 
-    def _wait_for_index_reconciliation(self, cursor, wait_for: int = 5) -> bool:
-        base_sql = """SELECT DISTINCT(index_id)
-                        FROM "__pg_springtail_catalog"."index_names"
-                       WHERE state in ({}) AND index_id <> 0"""
+    def _wait_for_index_reconciliation(self, cursor, wait_for: int) -> bool:
+        query = """
+        SELECT a - b
+        FROM
+          (SELECT COUNT(DISTINCT index_id) AS a
+             FROM "__pg_springtail_catalog"."index_names"
+            WHERE state = 0 AND index_id <> 0) AS t1
+        JOIN
+          (SELECT COUNT(DISTINCT index_id) AS b
+             FROM "__pg_springtail_catalog"."index_names"
+            WHERE state IN (1, 2) AND index_id <> 0) AS t2
+        ON (1=1);
+        """
 
-        start_time = time.time()
-
-        while True:
-            # Convert list of tuples into a set of integers
-            not_ready_result = {row[0] for row in self._execute_sql(cursor, base_sql.format(0), True)}
-            ready_result = {row[0] for row in self._execute_sql(cursor, base_sql.format('1,2'), True)}
-
-            # If results match, return immediately
-            if not_ready_result == ready_result:
-                return True
-
-            # If wait_for time is exceeded, raise failure
-            if (time.time() - start_time) >= wait_for:
-                self._raise_failure(f'Secondary indexes not in sync within {wait_for}s.')
+        try:
+            common.wait_for_replica_condition(self._fdw, query, (0, ), timeout=wait_for)
+        except Exception as e:
+            self._raise_failure(f'Secondary indexes not in sync within {wait_for}s.')
 
 
     def _get_ranking_sql(self, is_index_query: bool = False) -> str:

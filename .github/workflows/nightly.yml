@@ -43,7 +43,6 @@ jobs:
       SPRINGTAIL_LOG_PATH: /opt/springtail/logs
       SLACK_WEBHOOK_URL: ${{ vars.GENERIC_SLACK_WEBHOOK_URL }}
       SLACK_CHANNEL: '#nightly-builds'
-      LD_LIBRARY_PATH: /usr/lib/springtail
 
     steps:
       - name: Checkout repository
@@ -247,12 +246,18 @@ jobs:
 
       - name: Run Proxy Tests
         if: success() || failure()      # run this step even if previous step failed
+        env:
+          LD_LIBRARY_PATH: /usr/lib/springtail
         run: |
           # Make sure Proxy `enable_ssl` is on 
           sed -i 's/enable_ssl": false/enable_ssl": true/g' system.json.test
           
           cd python/testing
           python3 springtail.py -f ../../system.json.test --kill --build-dir ../../debug
+          
+          if [ $? -ne 0 ]; then
+            exit 1
+          fi
           
           cd proxy
           # Do not break out if errors occur

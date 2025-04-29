@@ -24,43 +24,88 @@ get_table_dir(const std::filesystem::path &base,
 } // namespace table_helpers
 
 namespace indexer_helpers {
-    void invalidate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
-            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols,
-            const ExtentSchemaPtr& schema)
+
+    /**
+     * @brief Compile-time selector for the secondary-index operation.
+     */
+    enum class IndexOperation { Insert, Remove };
+
+    template <IndexOperation op,            // Operation on the index - insert/remove
+             typename RowPtrT>              // SafePagePtr | std::shared_ptr<Extent>
+    static void _update_secondary_index(
+            uint64_t                        extent_id,
+            const RowPtrT                  &rows,        // pointer-like, supports *rows
+            const MutableBTreePtr          &root,
+            const std::vector<uint32_t>    &idx_cols,
+            const ExtentSchemaPtr          &schema)
     {
-        auto value_fields = std::make_shared<FieldArray>(2);
-        value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
+        /* 1. Column metadata is the same for every row – fetch it once. */
+        const auto column_names = schema->get_column_names(idx_cols);
+        const auto key_fields   = schema->get_fields(column_names);
 
-        // go through each row and pass the relevant key to each of the secondary indexes for removal
+        /* 2. Build the (extent_id , row_id) value tuple incrementally. */
+        auto value_fields   = std::make_shared<FieldArray>(2);
+        (*value_fields)[0]  = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
+
         uint32_t row_id = 0;
-        for (auto &row : *page) {
-            value_fields->at(1) = std::make_shared<ConstTypeField<uint32_t>>(row_id);
-
-            auto key_fields = schema->get_fields(schema->get_column_names(idx_cols));
-            auto &&skey = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
-            root->remove(skey);
-            ++row_id;
-        }
-        LOG_DEBUG(LOG_BTREE, "Invalidated {} secondary rows", row_id);
-    }
-
-    void populate_index_for_page(uint64_t extent_id, const StorageCache::SafePagePtr &page,
-            const MutableBTreePtr &root, const std::vector<uint32_t> &idx_cols,
-            const ExtentSchemaPtr& schema)
-    {
-        uint32_t row_id = 0;
-        auto value_fields = std::make_shared<FieldArray>(2);
-        value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
-        for (auto &row : *page) {
+        for (auto &row : *rows) {
             (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
 
-            auto &&keys = schema->get_column_names(idx_cols);
-            auto key_fields = schema->get_fields(keys);
-            auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
-            root->insert(svalue);
+            auto kv = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
+            if constexpr (op == IndexOperation::Insert) {
+                root->insert(kv);
+            } else { /* op == IndexOperation::Remove */
+                root->remove(kv);
+            }
             ++row_id;
         }
-        LOG_DEBUG(LOG_BTREE, "Populated {} secondary rows", row_id);
+
+        LOG_DEBUG(LOG_BTREE, "{} {} secondary rows", 
+            (op == IndexOperation::Insert) ? "Populated"
+            : "Invalidated",
+            row_id);
+    }
+
+    /* ------------------------------  PAGE  ----------------------------------- */
+    void populate_index_for_page(uint64_t extent_id,
+            const StorageCache::SafePagePtr &page,
+            const MutableBTreePtr          &root,
+            const std::vector<uint32_t>    &idx_cols,
+            const ExtentSchemaPtr          &schema)
+    {
+        _update_secondary_index<IndexOperation::Insert>(extent_id, page, root,
+                idx_cols, schema);
+    }
+
+    void invalidate_index_for_page(uint64_t extent_id,
+            const StorageCache::SafePagePtr &page,
+            const MutableBTreePtr          &root,
+            const std::vector<uint32_t>    &idx_cols,
+            const ExtentSchemaPtr          &schema)
+    {
+        _update_secondary_index<IndexOperation::Remove>(extent_id, page, root,
+                idx_cols, schema);
+    }
+
+    /* -----------------------------  EXTENT  ---------------------------------- */
+    void populate_index_for_extent(uint64_t extent_id,
+            const std::shared_ptr<Extent> &extent,
+            const MutableBTreePtr         &root,
+            const std::vector<uint32_t>   &idx_cols,
+            const ExtentSchemaPtr         &schema)
+    {
+        _update_secondary_index<IndexOperation::Insert>(extent_id, extent, root,
+                idx_cols, schema);
+    }
+
+    void invalidate_index_for_extent(uint64_t extent_id,
+            const std::shared_ptr<Extent> &extent,
+            const MutableBTreePtr         &root,
+            const std::vector<uint32_t>   &idx_cols,
+            const ExtentSchemaPtr         &schema)
+    {
+        _update_secondary_index<IndexOperation::Remove>(extent_id, extent, root,
+                idx_cols, schema);
     }
 } // namespace indexer_helpers
 
@@ -325,20 +370,15 @@ namespace indexer_helpers {
         // check if it's a secondary index lookup
         if (index_id != constant::INDEX_PRIMARY) {
             auto const& [btree, cols] = _secondary_indexes.at(index_id);
-            auto index_schema = _create_index_schema(_schema, cols);
 
-            // find the extent that could contain the lower_bound() key
-            auto &&i = btree->lower_bound(search_key);
+            // find the extent that contains the row matching the inverse_lower_bound() key
+            auto &&i = btree->inverse_lower_bound(search_key);
 
-            // for secondary indexes, it's a row-based index, so finding begin() means there's no
-            // row before the search key
-            if (i == btree->begin()) {
+            if (i == btree->end()) {
                 return end(index_id);
             }
 
-            // for secondary indexes, always decrement since it's a row-based index
-            --i;
-
+            auto index_schema = _create_index_schema(_schema, cols);
             return Iterator(this, btree, i, index_schema);
         }
 
@@ -415,8 +455,8 @@ namespace indexer_helpers {
         }
     }
 
-    StorageCache::SafePagePtr
-    Table::read_page_from_disk(uint64_t extent_id) const
+    std::pair<std::shared_ptr<Extent>, uint64_t>
+    Table::read_extent_from_disk(uint64_t extent_id) const
     {
         // XXX: When an extent is asked from the page,
         // and if the extent's XID is different than the XID passed
@@ -425,10 +465,10 @@ namespace indexer_helpers {
         auto data_file_handle = IOMgr::get_instance()->open(_table_dir / constant::DATA_FILE, IOMgr::IO_MODE::READ, true);
         auto response = data_file_handle->read(extent_id);
         if (response->data.empty()) {
-            return StorageCache::get_instance()->get(_table_dir / constant::DATA_FILE, constant::UNKNOWN_EXTENT, _xid);
+            return {nullptr, 0};
         } else {
             auto extent = std::make_shared<Extent>(response->data);
-            return StorageCache::get_instance()->get(_table_dir / constant::DATA_FILE, extent_id, extent->header().xid);
+            return {extent, response->next_offset};
         }
     }
 
@@ -555,15 +595,12 @@ namespace indexer_helpers {
         assert(it != roots.end());
 
         if (it->extent_id != constant::UNKNOWN_EXTENT) {
+            _began_empty = false;
             _primary_index->init(it->extent_id);
         } else {
+            _began_empty = true;
             _primary_index->init_empty();
         }
-
-        _primary_lookup = std::make_shared<BTree>(_table_dir / constant::INDEX_PRIMARY_FILE,
-                                                  access_xid,
-                                                  primary_schema,
-                                                  it->extent_id);
 
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
 
@@ -924,14 +961,14 @@ namespace indexer_helpers {
     {
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_primary_lookup->empty()) {
+        if (_began_empty) {
             _append_empty(value);
             return;
         }
 
         // note: in this case there is no explicit primary key, so we need to append the row to the
         //       end of the file
-        auto pos = --(_primary_lookup->end());
+        auto pos = _primary_index->last();
         uint64_t extent_id = _primary_extent_id_f->get_uint64(*pos);
 
         // get the page from the cache
@@ -953,20 +990,17 @@ namespace indexer_helpers {
 
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_primary_lookup->empty()) {
+        if (_began_empty) {
             _insert_empty(value);
             return;
         }
 
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_lookup->lower_bound(search_key, true);
+        auto i = _primary_index->lower_bound(search_key, true);
 
-        uint64_t extent_id = constant::UNKNOWN_EXTENT;
-        if (i != _primary_lookup->end()) {
-            // if the primary index is not empty, get the target extent
-            extent_id = _primary_extent_id_f->get_uint64(*i);
-        }
+        // if the primary index is not empty, get the target extent
+        uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
 
         // then we can do a direct insert
         _insert_direct(value, extent_id);
@@ -1008,19 +1042,16 @@ namespace indexer_helpers {
 
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_primary_lookup->empty()) {
+        if (_began_empty) {
             return _upsert_empty(value);
         }
 
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_lookup->lower_bound(search_key, true);
+        auto i = _primary_index->lower_bound(search_key, true);
 
-        uint64_t extent_id = constant::UNKNOWN_EXTENT;
-        if (i != _primary_lookup->end()) {
-            // if the primary index is not empty, get the target extent
-            extent_id = _primary_extent_id_f->get_uint64(*i);
-        }
+        // if the primary index is not empty, get the target extent
+        uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
 
         // then we can do a direct insert
         return _upsert_direct(value, extent_id);
@@ -1059,20 +1090,16 @@ namespace indexer_helpers {
     {
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_primary_lookup->empty()) {
+        if (_began_empty) {
             _remove_empty(key);
             return;
         }
 
         // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
-        auto i = _primary_lookup->lower_bound(key, true);
+        auto i = _primary_index->lower_bound(key, true);
 
-        // if the key isn't available, then it may be in the
-        uint64_t extent_id = constant::UNKNOWN_EXTENT;
-        if (i != _primary_lookup->end()) {
-            // if the primary index is not empty, get the target extent
-            extent_id = _primary_extent_id_f->get_uint64(*i);
-        }
+        // if the primary index is not empty, get the target extent
+        uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
 
         // then we can do a direct removal
         _remove_direct(key, extent_id);
@@ -1091,8 +1118,8 @@ namespace indexer_helpers {
 
         // scan the index
         bool found = false;
-        auto &&i = _primary_lookup->begin();
-        while (!found && i != _primary_lookup->end()) {
+        auto i = _primary_index->begin();
+        while (!found && i != _primary_index->end()) {
             // scan each extent, looking for a match
             uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
 
@@ -1104,7 +1131,7 @@ namespace indexer_helpers {
 
             auto &&j = page->begin();
             while (!found && j != page->end()) {
-                if (value->equal(FieldTuple(fields, *j))) {
+                if (value->equal_strict(FieldTuple(fields, *j))) {
                     page->remove(j);
                     found = true;
                 } else {
@@ -1154,20 +1181,17 @@ namespace indexer_helpers {
 
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_primary_lookup->empty()) {
+        if (_began_empty) {
             _update_empty(value);
             return;
         }
 
         // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_lookup->lower_bound(search_key, true);
+        auto i = _primary_index->lower_bound(search_key, true);
 
-        uint64_t extent_id = constant::UNKNOWN_EXTENT;
-        if (i != _primary_lookup->end()) {
-            // if the primary index is not empty, get the target extent
-            extent_id = _primary_extent_id_f->get_uint64(*i);
-        }
+        // if the primary index is not empty, get the target extent
+        uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
 
         // then we can do a direct update
         _update_direct(value, extent_id);

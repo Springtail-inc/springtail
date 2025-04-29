@@ -1,6 +1,5 @@
 #pragma once
 
-#include <common/open_telemetry.hh>
 #include <common/timestamp.hh>
 
 #include <pg_repl/pg_msg_stream.hh>
@@ -11,9 +10,7 @@
 
 #include <storage/field.hh>
 
-#include <pg_log_mgr/pg_xact_log_writer_mmap.hh>
 #include <sys_tbl_mgr/client.hh>
-#include <xid_mgr/xid_mgr_client.hh>
 
 namespace springtail::pg_log_mgr {
     /**
@@ -40,7 +37,6 @@ namespace springtail::pg_log_mgr {
          */
         PgLogReader(uint64_t db_id, uint32_t queue_size,
                     const std::filesystem::path &repl_log_path,
-                    const std::filesystem::path &xact_log_path,
                     const CommitterQueuePtr committer_queue,
                     const bool archive_logs);
 
@@ -357,7 +353,6 @@ namespace springtail::pg_log_mgr {
         bool _archive_logs{false};     ///< This flag indicates that the reader should archive old logs instead of removing them
         std::filesystem::path _current_path; ///< current log file path
         std::filesystem::path _repl_log_path;   ///< Path for Postgres logs storage directory
-        std::filesystem::path _xact_log_path;   ///< Path for Springtail logs storage directory
         PgMsgStreamReader _reader;           ///< msg stream reader for log file
         CommitterQueuePtr _committer_queue;  ///< shared queue for committer
         PgTransactionPtr _current_xact;      ///< current transaction
@@ -367,8 +362,6 @@ namespace springtail::pg_log_mgr {
 
         ConcurrentQueue<PgMsg> _msg_queue; ///< Queue of PgMsg records to process
         std::thread _msg_thread; ///< Thread for processing messages using the _msg_worker()
-
-        PgXactLogWriterMmap _xact_log_writer; ///< For logging the xact mapping of pgxid to springtail XID
 
         /** Tracks mutation batches using a map of pgxid -> Extent.  The pgxid is always the
             top-most pgxid and never a subtxn, which are handled within the batch. */
@@ -408,15 +401,12 @@ namespace springtail::pg_log_mgr {
         void _process_ddl(std::optional<uint32_t> table_oid, uint32_t oid, int32_t xid, bool is_streaming, PgMsgPtr msg);
 
         /** Check if we need to perform a table swap / commit and notify the Committer if so. */
-        void _check_sync_commit(uint64_t db_id, int32_t pg_xid, uint64_t xid);
+        void _check_sync_commit(uint64_t db_id, int32_t pg_xid);
 
         /** @brief Notify the Committer for an index reconciliation
          * @param db_id DB for which reconcile to be notified
          * @param reconcile_xid XID for which index reconciliation to be done
          */
         void _process_index_reconciliation(const uint64_t db_id, const uint64_t reconcile_xid);
-
-        std::shared_ptr<opentelemetry::metrics::Histogram<double>> _postgres_log_reader_latencies;
-        opentelemetry::context::Context _context;
     };
 } // namespace springtail::pg_log_mgr

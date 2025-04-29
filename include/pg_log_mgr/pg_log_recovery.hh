@@ -1,8 +1,9 @@
 #pragma once
 
 #include <pg_log_mgr/pg_log_reader.hh>
-#include <pg_log_mgr/pg_xact_log_reader_mmap.hh>
 #include <pg_repl/pg_msg_stream.hh>
+
+#include <xid_mgr/pg_xact_log_reader.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -46,8 +47,7 @@ private:
 
     /** Helper to process an individual message during _skip_committed() */
     bool _process_msg(PgMsgPtr msg,
-                      uint32_t log_number,
-                      PgXactLogReaderMmap &xact_reader,
+                      xid_mgr::PgXactLogReader &xact_reader,
                       uint32_t &cur_pgxid);
 
     /** Play back only the "active" transaction from the replication log until we have replayed the
@@ -61,13 +61,12 @@ private:
     /** Helper structure to track the starting position of the first block in the replication log
         for a given pgxid. */
     struct Position {
-        uint32_t log_number = 0; ///< A logical sequence number for the log files.
         uint64_t offset = 0; ///< The offset within the file.
         std::filesystem::path file; ///< The actual file path.
 
         Position() = default;
-        Position(uint32_t ln, uint64_t o, const std::filesystem::path &f)
-            : log_number(ln), offset(o), file(f)
+        Position(uint64_t o, const std::filesystem::path &f)
+            : offset(o), file(f)
         {
         }
 
@@ -78,7 +77,7 @@ private:
 
         std::strong_ordering operator<=>(const Position &rhs) const
         {
-            return std::tie(log_number, offset) <=> std::tie(rhs.log_number, rhs.offset);
+            return std::tie(file, offset) <=> std::tie(rhs.file, rhs.offset);
         }
     };
 

@@ -10,11 +10,10 @@ class ComponentFactory:
     # NOTE: IDs must match the IDs used in the Redis queue defined
     # in src/common/coordinator.hh enum DaemonType
     LOG_MGR_ID = "1"
-    XID_MGR_ID = "2"
-    DDL_ID = "3"
-    SYS_TBL_MGR_ID = "4"
-    PROXY_ID = "5"
-    XID_SUBSCRIBER_ID = "6"
+    DDL_ID = "2"
+    SYS_TBL_MGR_ID = "3"
+    PROXY_ID = "4"
+    XID_SUBSCRIBER_ID = "5"
     POSTGRES = "10"
 
     def __init__(self, install_dir : str, pid_dir : str):
@@ -30,16 +29,6 @@ class ComponentFactory:
             args=["--daemon"],
             path=self.install_dir,
             pid_path=os.path.join(self.pid_dir, 'pg_log_mgr.pid')
-        )
-
-    def create_xid_mgr_daemon(self) -> Component:
-        """Create a new xid mgr component."""
-        return Component(
-            name="xid_mgr_daemon",
-            id=self.XID_MGR_ID,
-            args=["--daemon"],
-            path=self.install_dir,
-            pid_path=os.path.join(self.pid_dir, 'xid_mgr.pid')
         )
 
     def create_sys_tbl_mgr_daemon(self) -> Component:
