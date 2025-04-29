@@ -39,7 +39,7 @@ class TestCase:
 
         self._metadata = {
             'autocommit': True,
-            'sync_timeout': 3,
+            'sync_timeout': 200,
             'default_txn': 'default',
             'query_timeout': 5
         }
@@ -615,7 +615,7 @@ class TestCase:
             self._execute_sql(cursor, f'BEGIN; DROP TABLE IF EXISTS background_control; CREATE TABLE background_control (value INT); COMMIT;', False)
 
         # wait for 1 millisecond
-        while not self._stop_thread.wait(0.001):
+        while not self._stop_thread.wait(0.01):
             self._value += 1
             with connection.cursor() as cursor:
                 self._execute_sql(cursor, f"BEGIN; INSERT INTO background_control (value) VALUES ({self._value}); COMMIT;", False, True)
@@ -796,20 +796,28 @@ class TestCase:
         self._status = 'VERIFY_END'
 
     def stop_background(self) -> None:
-        if self._filename.endswith(_GLOBAL_CONFIG_FILE):
-            self._stop_thread.set()
-            self._bg_thread.join()
+        if not self._filename.endswith(_GLOBAL_CONFIG_FILE):
+            return False
+
+        self._stop_thread.set()
+        self._bg_thread.join()
+
+        # wait for the background job to complete -- if it never does then we fail
+        try:
             if self._fdw is None:
                 self._fdw = springtail.connect_fdw_instance(self._props, self._replica_name)
-                self._fdw.autocommit = True
-            with self._fdw.cursor() as cursor:
-                self._execute_sql(cursor, f'BEGIN; SET statement_timeout = {self._metadata["query_timeout"] * 1000}; COMMIT;', False)
-                result = self._execute_sql(cursor, f"SELECT MAX(value) FROM background_control;", True)
-            if result[0][0] != self._value:
-                logging.error(f"background_control value {result[0][0]} is not equal to the one recorded {self._value}")
-            else:
-                logging.info(f"background_control value {result[0][0]} is verified to be equal to the one recorded {self._value}")
 
+            common.wait_for_replica_condition(
+                self._fdw,
+                "SELECT COUNT(value), MAX(value) FROM background_control;",
+                (self._value, self._value),
+                timeout=self._metadata['sync_timeout']
+            )
+        except Exception as e:
+            logging.error(f'Background job error: {e}')
+            return False
+
+        return True
 
     def cleanup(self) -> None:
         """Run SQL commands to clean up the primary database and close

@@ -41,28 +41,22 @@ namespace springtail::committer {
          */
         class SwapMsg {
         public:
-            using TableInfo = std::pair<int32_t, std::shared_ptr<proto::CopyTableInfo>>;
-
-            SwapMsg(uint64_t xid, std::vector<TableInfo> &&tids)
+            SwapMsg(uint64_t xid, nlohmann::json &&ddls)
                 : _xid(xid),
-                  _tids(tids)
+                  _ddls(std::move(ddls))
             { }
 
             const uint64_t xid() const {
                 return _xid;
             }
 
-            void set_xid(uint64_t xid) {
-                _xid = xid;
-            }
-
-            const std::vector<TableInfo> &tids() const {
-                return _tids;
+            const nlohmann::json &ddls() const {
+                return _ddls;
             }
 
         private:
             uint64_t _xid;
-            std::vector<TableInfo> _tids;
+            nlohmann::json _ddls;
         };
 
         /**

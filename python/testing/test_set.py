@@ -133,6 +133,11 @@ class TestSet:
         logging.debug('Starting the Springtail instance')
         springtail.start(self._config_file, self._build_dir, do_cleanup=False, do_init=True, postgres_only=False, do_fdw_install=False)
 
+        logging.debug('Stop background query execution and verify')
+        live_start = self._config.stop_background()
+        if not live_start:
+            return False
+
         # run the tests
         logging.info(f'Run the tests: {self._test_files}')
 
@@ -181,9 +186,6 @@ class TestSet:
         # if a test failed and we don't shutdown on failure, return immediately
         if test_failed and not shutdown_on_fail:
             return False
-
-        logging.debug('Stop background query execution and verify')
-        self._config.stop_background()
 
         # shutdown Springtail
         logging.debug('Stopping the Springtail instance')
