@@ -135,9 +135,6 @@ namespace springtail::committer {
             ahead of the most recently committed XID at the XidMgr. */
         std::map<uint64_t, uint64_t> _completed_xids;
 
-        /** The most recently committed XID by db. */
-        std::map<uint64_t, uint64_t> _committed_xids;
-
         /** The set of databases that are currently not committing XIDs because they are in a table
             sync state. */
         std::set<uint64_t> _block_commit;

@@ -85,14 +85,14 @@ namespace {
         ASSERT_EQ(res.size(), 1);
         ASSERT_EQ(res[0]->tids.size(), 1);
 
-        uint32_t oid = res[0]->tids[0].first;
+        uint32_t oid = res[0]->tids[0]->table_id;
         xid = res[0]->target_xid;
 
         // apply the system table changes
         auto client = sys_tbl_mgr::Client::get_instance();
 
         for (auto &entry : res[0]->tids) {
-            auto copy_info = entry.second;
+            auto copy_info = entry->info;
 
             // perform the table swap
             // note: we wait to perform this operation in the GC-2 to ensure that all system
