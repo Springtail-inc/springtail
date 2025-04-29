@@ -440,6 +440,9 @@ namespace springtail::committer {
             auto next_extent_result = table->read_extent_from_disk(next_eid);
             auto next_extent = next_extent_result.first;
 
+            // To keep track of invalidated extent IDs, as multiple extents can have same previous extent
+            std::unordered_set<uint64_t> invalidated_eids;
+
             // If next_extent is available, invalidate previous extent first and then populate using next_extent
             while (next_extent) {
                 // Get the table at the next XID
@@ -447,8 +450,9 @@ namespace springtail::committer {
                 auto next_xid = next_extent->header().xid;
                 auto next_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(next_xid));
 
-                // If previous offset exists, lets invalidate that first
-                if (auto prev_eid = next_extent->header().prev_offset; prev_eid != constant::UNKNOWN_EXTENT) {
+                // If previous offset exists and not processed before, lets invalidate that first
+                if (auto prev_eid = next_extent->header().prev_offset; prev_eid != constant::UNKNOWN_EXTENT
+                        && invalidated_eids.find(prev_eid) == invalidated_eids.end()) {
 
                     // Get the previous extent and its schema
                     auto [prev_extent, tmp_next_eid] = table->read_extent_from_disk(prev_eid);
@@ -457,6 +461,10 @@ namespace springtail::committer {
 
                     // and invalidate index for the rows in the prev page
                     indexer_helpers::invalidate_index_for_extent(prev_eid, prev_extent, idx_state._root, idx_cols, prev_schema);
+
+                    // Insert into a set to skip for other extents pointing
+                    // to the same previous extent
+                    invalidated_eids.insert(prev_eid);
                 }
 
                 // Populate index for the rows in the next page
@@ -471,6 +479,9 @@ namespace springtail::committer {
                     break;
                 }
             }
+
+            // Clear invalidated extents list
+            invalidated_eids.clear();
 
             LOG_DEBUG(LOG_COMMITTER, "Initiating Index commit: {}:{}", db_id, index_id);
             _commit_build(idx_state._root, idx_state._key, idx_state._idx, end_xid);
