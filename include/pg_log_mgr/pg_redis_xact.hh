@@ -49,7 +49,7 @@ namespace springtail::pg_log_mgr {
             uint32_t xmax;                 ///< xmax; one past highest completed xid
             uint32_t xmin_epoch;
             uint32_t xmax_epoch;
-            std::vector<std::pair<int32_t, std::shared_ptr<proto::CopyTableInfo>>> tids;    ///< table ids and rpc info
+            std::vector<PgCopyResult::TableInfoPtr> tids; ///< table info from the copy
             std::vector<uint32_t> xips;
 
             TableSyncMsg(uint64_t db_id, PgCopyResultPtr copy_result)

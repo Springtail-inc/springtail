@@ -105,69 +105,13 @@ namespace springtail::committer {
                     LOG_COMMITTER,
                     "Handle a TABLE_SYNC_SWAP/COMMIT: {}, {}, completed xid @{}, request xid @{}",
                     static_cast<char>(result->type()), db_id, completed_xid, result->swap().xid());
+                CHECK_GT(result->swap().xid(), completed_xid);
 
-                nlohmann::json ddls;
-
-                // note: Need to check the completed XID against the most recent committed XID.  If
-                //       it is ahead, then we commit at the completed XID.  If it is the same then
-                //       we commit at the provided XID.
-                auto committed_i = _committed_xids.find(db_id);
-                if (committed_i == _committed_xids.end() || completed_xid == committed_i->second) {
-                    completed_xid = result->swap().xid();
-                }
+                // note: we used to bundle the commit onto the previous XID, but now the XID is guaranteed to be in-order
+                completed_xid = result->swap().xid();
+                nlohmann::json ddls = result->swap().ddls();
 
                 auto token_3 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(completed_xid)}});
-
-                // for operations at the SysTblMgr
-                auto client = sys_tbl_mgr::Client::get_instance();
-
-                // go through the hash of sys tbl operations
-                for (auto &entry : result->swap().tids()) {
-                    auto copy_info = entry.second;
-
-                    if ( copy_info == nullptr ){
-                        // During resync if the table is found to be invalid as part of the copy flow, the table
-                        // becomes invalidated the copy_ptr becomes null, in those cases we don't need to
-                        // perform any operaion and just skip
-                        LOG_DEBUG(LOG_COMMITTER, "Copy info not present for table {}", entry.first);
-                        continue;
-                    }
-
-                    LOG_DEBUG(LOG_COMMITTER, "table_id {}", entry.first);
-
-                    // perform the table swap
-                    // note: we wait to perform this operation in the GC-2 to ensure that all system
-                    //       table mutations up to this XID have already been applied, otherwise we
-                    //       could potentially get a stray column added before the swap XID showing
-                    //       up in the schema since it wouldn't get deleted by the DROP TABLE
-                    auto *namespace_req = copy_info->mutable_namespace_req();
-                    namespace_req->set_xid(completed_xid);
-                    namespace_req->set_lsn(constant::RESYNC_NAMESPACE_LSN);
-                    auto *create = copy_info->mutable_table_req();
-                    create->set_xid(completed_xid);
-                    create->set_lsn(constant::RESYNC_CREATE_LSN);
-
-                    auto *indexes = copy_info->mutable_index_reqs();
-                    std::vector<proto::IndexRequest> indexes_vec;
-                    for (auto &index : *indexes) {
-                        index.set_xid(completed_xid);
-                        index.set_lsn(constant::RESYNC_CREATE_LSN);
-                        indexes_vec.push_back(index);
-                    }
-
-                    auto *roots = copy_info->mutable_roots_req();
-                    roots->set_xid(completed_xid);
-
-                    // note: this will also invalidate the table's client cache entry
-                    auto ddl_str =
-                        client->swap_sync_table(*namespace_req, *create, indexes_vec, *roots);
-
-                    // store the ddl mutations for the FDWs
-                    ddls = nlohmann::json::parse(ddl_str);
-                    assert(ddls.is_array());
-                }
-
-                LOG_INFO("Swapped synced tables: {}@{}", db_id, completed_xid);
 
                 // pre-commit the DDLs in case there's a failure
                 _redis_ddl.precommit_ddl(db_id, completed_xid, ddls);
@@ -175,11 +119,10 @@ namespace springtail::committer {
 
                 if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
                     // finalize the system metadata
-                    client->finalize(db_id, completed_xid);
+                    sys_tbl_mgr::Client::get_instance()->finalize(db_id, completed_xid);
 
                     // perform a commit to the XidMgr
                     xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, 0, completed_xid, true);
-                    _committed_xids[db_id] = completed_xid;
 
                     LOG_DEBUG(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, completed_xid);
                     // notify the FDW of the schema changes
@@ -188,6 +131,7 @@ namespace springtail::committer {
                         _has_ddl_precommit = false;
                     }
                 } else {
+                    LOG_DEBUG(LOG_COMMITTER, "Record DDL changes db {} xid {}", db_id, completed_xid);
                     xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, 0, completed_xid, true);
                 }
                 _completed_xids[db_id] = completed_xid;
@@ -304,7 +248,6 @@ namespace springtail::committer {
 
                 // commit the completed XID
                 xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null());
-                _committed_xids[db_id] = xid;
 
                 // push completed DDL changes to the FDWs
                 if (_has_ddl_precommit) {
@@ -549,6 +492,7 @@ namespace springtail::committer {
 
         // Get the extent from the write cache index
         Extent extent(*wc_extent->data);
+        LOG_DEBUG(LOG_COMMITTER, "xid={} rows={}", xid.xid, extent.row_count());
 
         // process the rows
         auto op_f = wc_schema->get_field("__springtail_op");
@@ -573,6 +517,7 @@ namespace springtail::committer {
             case UPDATE:
                 {
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
+                    LOG_DEBUG(LOG_COMMITTER, "UPDATE value={}", tuple->to_string());
                     table->update(tuple, constant::UNKNOWN_EXTENT);
                     break;
                 }
@@ -581,9 +526,11 @@ namespace springtail::committer {
                     if (wc_key_fields->empty()) {
                         // no sort key, so need to handle non-primary key by using the entire row
                         auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
+                        LOG_DEBUG(LOG_COMMITTER, "DELETE value={}", tuple->to_string());
                         table->remove(tuple, constant::UNKNOWN_EXTENT);
                     } else {
                         auto tuple = std::make_shared<FieldTuple>(wc_key_fields, row);
+                        LOG_DEBUG(LOG_COMMITTER, "DELETE value={}", tuple->to_string());
                         table->remove(tuple, constant::UNKNOWN_EXTENT);
                     }
                     break;
@@ -591,9 +538,15 @@ namespace springtail::committer {
 
             case TRUNCATE:
                 {
+                    LOG_DEBUG(LOG_COMMITTER, "TRUNCATE");
                     // note: this should always be the first operation within an extent
                     table->truncate();
                     break;
+                }
+            default:
+                {
+                    LOG_ERROR("Invalid operation: {}", op);
+                    CHECK(false);
                 }
             }
         }

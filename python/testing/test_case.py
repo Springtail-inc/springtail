@@ -6,9 +6,11 @@ from lxml import etree
 import os
 import psycopg2
 import springtail
-import sysutils
 import time
 import common
+import threading
+
+_GLOBAL_CONFIG_FILE = '__config.sql'
 
 class TestCase:
     """Class to manage a single test-case.  Handles all phases of the
@@ -37,9 +39,10 @@ class TestCase:
 
         self._metadata = {
             'autocommit': True,
-            'sync_timeout': 3,
+            'sync_timeout': 200,
             'default_txn': 'default',
-            'query_timeout': 5
+            'query_timeout': 5,
+            'live_startup': None
         }
 
         fdw_config = props.get_fdw_config()
@@ -288,6 +291,13 @@ class TestCase:
                             self._raise_error(f'{line_num}: "default_txn" must be specified in the "metadata" section')
                         self._metadata['default_txn'] = directive[1]
 
+                    elif directive[0] == 'live_startup':
+                        if section != 'metadata':
+                            self._raise_error(f'{line_num}: "live_startup" must be specified in the "metadata" section')
+                        if not self._filename.endswith(_GLOBAL_CONFIG_FILE):
+                            self._raise_error(f'{line_num}: "live_startup" must be specified in the "{_GLOBAL_CONFIG_FILE}" file')
+                        self._metadata['live_startup'] = float(directive[1])
+
                     else:
                         self._raise_error(f'{line_num}: unknown directive "{directive[0]}"')
 
@@ -327,9 +337,10 @@ class TestCase:
             cursor.copy_from(f, table, sep=',', null='')
 
 
-    def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool) -> list:
+    def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool, quiet: bool = False) -> list:
         """Execute the provided SQL using the provided cursor."""
-        logging.debug(f'Execute SQL: {sql}')
+        if not quiet:
+            logging.debug(f'Execute SQL: {sql}')
         try:
             cursor.execute(sql)
 
@@ -606,6 +617,30 @@ class TestCase:
             self._execute_command(command)
 
 
+    def _run_background(self, frequency: float):
+        connection = springtail.connect_db_instance(self._props, self._primary_name)
+        with connection.cursor() as cursor:
+            self._execute_sql(cursor, f'BEGIN; DROP TABLE IF EXISTS background_control; CREATE TABLE background_control (value INT); COMMIT;', False)
+
+        # run periodically
+        while not self._stop_thread.wait(frequency):
+            self._value += 1
+            with connection.cursor() as cursor:
+                self._execute_sql(cursor, f"BEGIN; INSERT INTO background_control (value) VALUES ({self._value}); COMMIT;", False, True)
+
+            pass
+        connection.close()
+
+
+    def start_background(self) -> None:
+        if self._metadata['live_startup'] is not None:
+            logging.debug("Start background mutations")
+            self._stop_thread = threading.Event()
+            self._value = 0
+            self._bg_thread = threading.Thread(target=self._run_background, args=[ self._metadata['live_startup'] ])
+            self._bg_thread.start()
+
+
     def setup(self) -> None:
         """Run SQL commands prior to starting Springtail.  Used to
         prepare tables and data that will be copied into Springtail on
@@ -769,6 +804,30 @@ class TestCase:
         self._result = 'SUCCESS'
         self._status = 'VERIFY_END'
 
+    def stop_background(self) -> None:
+        if self._metadata['live_startup'] is None:
+            return False
+
+        logging.debug('Stop background mutations and verify')
+        self._stop_thread.set()
+        self._bg_thread.join()
+
+        # wait for the background job to complete -- if it never does then we fail
+        try:
+            if self._fdw is None:
+                self._fdw = springtail.connect_fdw_instance(self._props, self._replica_name)
+
+            common.wait_for_replica_condition(
+                self._fdw,
+                "SELECT COUNT(value), MAX(value) FROM background_control;",
+                (self._value, self._value),
+                timeout=self._metadata['sync_timeout']
+            )
+        except Exception as e:
+            logging.error(f'Background job error: {e}')
+            return False
+
+        return True
 
     def cleanup(self) -> None:
         """Run SQL commands to clean up the primary database and close
