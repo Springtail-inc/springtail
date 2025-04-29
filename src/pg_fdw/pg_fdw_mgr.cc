@@ -821,7 +821,7 @@ namespace springtail::pg_fdw {
     }
 
     Datum
-    PgFdwMgr::_get_datum_from_field(FieldPtr field,
+    PgFdwMgr::_get_datum_from_field(FieldPtr& field,
                                     const Extent::Row &row,
                                     int32_t pg_type,
                                     int32_t atttypmod)
