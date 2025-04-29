@@ -250,7 +250,7 @@ namespace springtail::pg_fdw {
         LOG_DEBUG(LOG_FDW, "fdw_begin_scan: tid: {}, {}", state->tid, num_attrs);
 
         for (size_t i = 0; i != num_attrs; ++i) {
-           state->_attrs.push_back(attrs[i]);
+            state->_attrs.emplace_back(attrs[i]->atttypid, attrs[i]->atttypmod, attrs[i]->attnum);
         }
 
         // copy lists into state structure in a more CPP friendly way
@@ -264,7 +264,6 @@ namespace springtail::pg_fdw {
             //       column ID on the primary.  We need to map the local attnum to the primary's column ID.
             auto column = (SpringtailTargetColumn *)lfirst(lc);
             int attno = column->attnum;
-            assert(state->attr_map.contains(attno));
 
             auto col_i = state->columns.find(state->attr_map.at(attno));
             if (col_i == state->columns.end()) {
@@ -273,7 +272,11 @@ namespace springtail::pg_fdw {
             }
 
             target_colnames.push_back(col_i->second.name);
-            state->target_columns.insert({attno,i++});
+            CHECK_GT(attno, 0);
+            CHECK_LE(attno, state->_attrs.size());
+
+            state->target_columns.emplace_back(i++, state->_attrs[attno-1]);
+
             LOG_DEBUG(LOG_FDW, "Target list column: {}:{}",
                                 attno, col_i->second.name);
         }
@@ -287,9 +290,15 @@ namespace springtail::pg_fdw {
         i = state->target_columns.size();
         for (int j = 0; j < state->filtered_quals.size(); j++) {
             int attno = state->filtered_quals[j]->base.varattno;
-            if (!state->target_columns.contains(attno)) {
+
+            // look for the attno in target columns
+            auto it = std::ranges::find_if(state->target_columns,
+                    [attno](auto v) {return v == attno;},  
+                    [](const PgFdwState::TargetColumn& c) { return c.pg_attr.attnum; });
+
+            if (it == state->target_columns.end()) {
                 target_colnames.push_back(state->columns.at(state->attr_map.at(attno)).name);
-                state->target_columns.insert({attno, i++});
+                state->target_columns.emplace_back(i++, state->_attrs[attno-1]);
             }
         }
 
@@ -547,12 +556,19 @@ namespace springtail::pg_fdw {
         // go through the qual fields and see how they compare to the values with in the row
         // if they all match then we can return the row
         if (state->qual_fields != nullptr) {
-            for (int i = 0; i < state->filtered_quals.size(); i++) {
+            for (int i = 0; i < state->filtered_quals.size(); ++i) {
                 // extract the attrno and field index to find the field in the row
                 ConstQual *qual = state->filtered_quals[i];
                 int attno = qual->base.varattno;
-                assert(state->target_columns.contains(attno));
-                int field_idx = state->target_columns[attno];
+
+
+                // look for the attno in target columns
+                auto it = std::ranges::find_if(state->target_columns,
+                        [attno](auto v) {return v == attno;},  
+                        [](const PgFdwState::TargetColumn& c) { return c.pg_attr.attnum; });
+                assert(it != state->target_columns.end());
+
+                int field_idx = it->field_idx;
 
                 // compare the qual field to the field in the row
                 bool res = _compare_field(row, state->fields->at(field_idx),
@@ -573,34 +589,23 @@ namespace springtail::pg_fdw {
             }
         }
 
-        // iterate through attributes passed in
-        for (int i = 0; i < num_attrs; ++i) {
-            int attno = state->_attrs[i]->attnum;
+        memset(nulls, true, num_attrs * sizeof(bool));
+        memset(values, 0, num_attrs * sizeof(values[0]));
 
-            // check if this column is in target list, if not skip
-            if (!state->target_columns.contains(attno)) {
-                nulls[i] = true;
-                values[i] = 0;
-                LOG_DEBUG(LOG_FDW, "Skipping column: {}; not found in target column", attno);
-                continue;
-            }
+        // iterate through attributes passed in
+        for (const auto& c: state->target_columns) {
+            auto attno = c.pg_attr.attnum;
+            CHECK_LE(attno, num_attrs);
 
             LOG_DEBUG(LOG_FDW, "Fetching column: {}", attno);
 
             // get field idx that matches this attrno, then fetch the field and data
-            int field_idx = state->target_columns[attno];
-            FieldPtr field = state->fields->at(field_idx);
-
-            // set null
-            nulls[i] = field->is_null(row);
+            FieldPtr field = state->fields->at(c.field_idx);
 
             // set value
-            if (!nulls[i]) {
-                auto &column = state->columns.at(state->attr_map.at(attno));
-                CHECK_EQ(state->_attrs[i]->atttypid, column.pg_type );
-                values[i] = _get_datum_from_field(field, row, column.pg_type, state->_attrs[i]->atttypmod);
-            } else {
-                values[i] = 0;
+            if (!field->is_null(row)) {
+                values[attno-1] = _get_datum_from_field(field, row, c.pg_attr.atttypid, c.pg_attr.atttypmod);
+                nulls[attno-1] = false;
             }
         }
 
