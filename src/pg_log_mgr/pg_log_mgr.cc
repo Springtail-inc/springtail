@@ -137,6 +137,7 @@ namespace springtail::pg_log_mgr {
         if (do_init) {
             LOG_DEBUG(LOG_PG_LOG_MGR, "Started in init state");
             _startup_init();
+            _wal_buffer_flag = true;
 
             // start streaming immediately so that we can't miss any mutations to copied tables
             _start_streaming(lsn, true);
@@ -152,7 +153,7 @@ namespace springtail::pg_log_mgr {
 
         } else {
             LOG_DEBUG(LOG_PG_LOG_MGR, "Started in recovery state");
-            _recovery_flag = true;
+            _wal_buffer_flag = true;
 
             // XXX currently we perform full recovery any time that the state is not INITIALIZE, but if
             //     we had a clean shutdown mechanism, we could start up without any recovery
@@ -178,7 +179,7 @@ namespace springtail::pg_log_mgr {
             // note: we wait to perform these actions until the log reader has been started
             // perform the any required log recovery here
             recovery.replay_logs();
-            _recovery_flag = false;
+            _wal_buffer_flag = false;
             LOG_DEBUG(LOG_PG_LOG_MGR, "Done with recovery");
         }
     }
@@ -279,6 +280,7 @@ namespace springtail::pg_log_mgr {
             PgCopyTable::create_namespaces(_db_id, xid);
 
             _do_table_copies();
+            _wal_buffer_flag = false;
         }
 
         while (!_shutdown) {
@@ -550,8 +552,8 @@ namespace springtail::pg_log_mgr {
 
         bool done = false;
         // while we are in recovery mode, append all entries to the vector
-        if (_recovery_flag) {
-            while (!_shutdown && _recovery_flag) {
+        if (_wal_buffer_flag) {
+            while (!_shutdown && _wal_buffer_flag) {
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Recevied data in recovery mode");
                 if (!_writer_read_data(coordinator_id, data, logger, start_offset,
                     [&post_recovery_queue, &start_offset](uint64_t end_offset, const std::filesystem::path &file_path) {

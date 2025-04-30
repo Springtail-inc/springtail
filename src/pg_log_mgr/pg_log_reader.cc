@@ -154,6 +154,7 @@ namespace springtail::pg_log_mgr {
         sort_keys.push_back("__springtail_lsn");
 
         auto columns = table_schema->column_order();
+        CHECK_GT(columns.size(), 0);
 
         SchemaColumn op("__springtail_op", 0, SchemaType::UINT8, 0, false);
         SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
@@ -209,7 +210,7 @@ namespace springtail::pg_log_mgr {
         TIME_TRACE_START(add_mutation_trace);
         // check if we should skip the mutation due to ongoing table sync
         auto sync_skip = SyncTracker::get_instance()->should_skip(_db, tid, _pg_xid);
-        if (sync_skip.second) {
+        if (sync_skip.should_skip()) {
             LOG_DEBUG(LOG_PG_LOG_MGR,
                       "Skip mutation due to ongoing sync: oid={} pg_xid={}\n", tid,
                       pg_xid);
@@ -221,7 +222,7 @@ namespace springtail::pg_log_mgr {
         time_trace::Trace add_mutation_table_exists_trace;
         TIME_TRACE_START(add_mutation_table_exists_trace);
         // check if the system is aware of this table -- if not, need to skip this mutation
-        if (!sync_skip.first && !_table_exists(tid, xidlsn)) {
+        if (!sync_skip.is_syncing() && !_table_exists(tid, xidlsn)) {
             LOG_DEBUG(LOG_PG_LOG_MGR, "Skip mutation due to unknown table: tid={} pg_xid={}\n", tid,
                       pg_xid);
             return;
@@ -238,7 +239,10 @@ namespace springtail::pg_log_mgr {
         auto &entry = txn->table_map[tid];
         if (entry.extent == nullptr) {
             if (entry.schema == nullptr) {
-                entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, xidlsn);
+                entry.table_schema = sync_skip.schema();
+                if (entry.table_schema == nullptr) {
+                    entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, xidlsn);
+                }
                 entry.update_schema();
             }
 
@@ -251,7 +255,8 @@ namespace springtail::pg_log_mgr {
         time_trace::Trace add_mutation_append_trace;
         TIME_TRACE_START(add_mutation_append_trace);
         // add the mutation to the batch
-        auto &&row = entry.extent->append();
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, T);
+        auto row = entry.extent->append();
         if constexpr (T == PgMsgEnum::INSERT || T == PgMsgEnum::UPDATE) {
             MutableTuple(entry.fields, row).assign(FieldTuple(entry.pg_fields, &data));
         } else if constexpr (T == PgMsgEnum::DELETE) {
@@ -259,10 +264,12 @@ namespace springtail::pg_log_mgr {
         } else {
             static_assert(false, "Invalid template parameter: PgLogReader::Batch::add_mutation");
         }
-        entry.op_f->set_int8(row, T);
+        entry.op_f->set_uint8(row, T);
         entry.lsn_f->set_uint64(row, _lsn++);
         TIME_TRACE_STOP(add_mutation_append_trace);
         TIME_TRACESET_UPDATE(time_trace::traces, "_batch_add_mutation_append", add_mutation_append_trace);
+
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, entry.op_f->get_uint8(row));
 
         // XXX we need some way to limit the total memory used by a batch across all extents
 
@@ -292,13 +299,13 @@ namespace springtail::pg_log_mgr {
 
             // check if we should skip this table due to ongoing table sync
             auto sync_skip = SyncTracker::get_instance()->should_skip(_db, tid, _pg_xid);
-            if (sync_skip.second) {
+            if (sync_skip.should_skip()) {
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Skip truncate: oid={} pg_xid={}\n", tid, _pg_xid);
                 continue;
             }
 
             // check if the system is aware of this table -- if not, need to skip this mutation
-            if (!sync_skip.first && !_table_exists(tid, XidLsn(current_xid))) {
+            if (!sync_skip.is_syncing() && !_table_exists(tid, XidLsn(current_xid))) {
                 LOG_DEBUG(LOG_PG_LOG_MGR,
                           "Skip truncate due to unknown table: tid={} pg_xid={} xid={}\n", tid,
                           _pg_xid, current_xid);
@@ -315,7 +322,10 @@ namespace springtail::pg_log_mgr {
             auto &entry = txn->table_map[tid];
             if (entry.schema == nullptr) {
                 XidLsn current(current_xid);
-                entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, current);
+                entry.table_schema = sync_skip.schema();
+                if (entry.table_schema == nullptr) {
+                    entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, current);
+                }
                 entry.update_schema();
             }
 
@@ -324,7 +334,7 @@ namespace springtail::pg_log_mgr {
 
             // add a TRUNCATE row
             auto &&row = entry.extent->append();
-            entry.op_f->set_int8(row, PgMsgEnum::TRUNCATE);
+            entry.op_f->set_uint8(row, PgMsgEnum::TRUNCATE);
             entry.lsn_f->set_uint64(row, _lsn++);
         }
     }
@@ -449,7 +459,7 @@ namespace springtail::pg_log_mgr {
             case PgMsgEnum::ALTER_RESYNC: {
                 // check if there's an ongoing sync for this table
                 auto sync_skip = SyncTracker::get_instance()->should_skip(_db, *tid, pg_xid_txn);
-                if (sync_skip.second) {
+                if (sync_skip.should_skip()) {
                     LOG_DEBUG(LOG_PG_LOG_MGR, "Skip DDL: tid={} pg_xid={}\n", *tid, pg_xid_txn);
                     return;
                 }
@@ -463,7 +473,7 @@ namespace springtail::pg_log_mgr {
             case PgMsgEnum::DROP_TABLE: {
                 // check if there's an ongoing sync for this table
                 auto sync_skip = SyncTracker::get_instance()->should_skip(_db, *tid, pg_xid_txn);
-                if (sync_skip.second) {
+                if (sync_skip.should_skip()) {
                     LOG_DEBUG(LOG_PG_LOG_MGR, "Skip DDL: tid={} pg_xid={}\n", *tid, pg_xid_txn);
                     return;
                 }
@@ -471,7 +481,7 @@ namespace springtail::pg_log_mgr {
                 // check if the system is aware of this table -- if not, need to skip this mutation
                 // note: if there's an ongoing sync then we consider that as existence unless it's
                 //       overridden by a local mutation
-                if (!sync_skip.first && !_table_exists(*tid, XidLsn(current_xid))) {
+                if (!sync_skip.is_syncing() && !_table_exists(*tid, XidLsn(current_xid))) {
                     LOG_DEBUG(LOG_PG_LOG_MGR,
                               "Skip schema change due to unknown table: tid={} pg_xid={}\n", *tid,
                               pg_xid);
@@ -1020,22 +1030,70 @@ namespace springtail::pg_log_mgr {
                                     int32_t pg_xid)
     {
         // check if we need to perform a table swap / commit before proceeding
-        auto xid_msg = SyncTracker::get_instance()->check_commit(db_id, pg_xid);
-        if (xid_msg != nullptr) {
-            // update the existence cache for the referenced tables
-            // note: do this here because SWAP happens in the committer, which can't update this
-            for (const auto &info : xid_msg->swap().tids()) {
-                _exists_cache->insert(db_id, info.first, true);
-            }
-
+        auto swap = SyncTracker::get_instance()->check_commit(db_id, pg_xid);
+        if (swap != nullptr) {
             // once the swap/commit is ready, we can clear the entries from the sync tracker
-            SyncTracker::get_instance()->clear_tables(db_id, *xid_msg);
+            SyncTracker::get_instance()->clear_tables(swap);
+
+            // set the XID of the swap/commit
+            uint64_t xid = get_next_xid();
+
+            // for operations at the SysTblMgr
+            auto client = sys_tbl_mgr::Client::get_instance();
+            nlohmann::json ddls = nlohmann::json::array({});
+
+            // issue the updates to the system tables
+            for (auto &entry : swap->table_info()) {
+                // update the existence cache for the referenced tables
+                _exists_cache->insert(db_id, entry->table_id, true);
+
+                auto copy_info = entry->info;
+                if (copy_info == nullptr) {
+                    // During resync if the table is found to be invalid as part of the copy flow, the table
+                    // becomes invalidated the copy_ptr becomes null, in those cases we don't need to
+                    // perform any operaion and just skip
+                    LOG_DEBUG(LOG_PG_LOG_MGR, "Copy info not present for table {}", entry->table_id);
+                    continue;
+                }
+                LOG_DEBUG(LOG_PG_LOG_MGR, "table_id {}", entry->table_id);
+
+                // perform the table swap
+                auto *namespace_req = copy_info->mutable_namespace_req();
+                namespace_req->set_xid(xid);
+                namespace_req->set_lsn(constant::RESYNC_NAMESPACE_LSN);
+
+                auto *create = copy_info->mutable_table_req();
+                create->set_xid(xid);
+                create->set_lsn(constant::RESYNC_CREATE_LSN);
+
+                auto *indexes = copy_info->mutable_index_reqs();
+                std::vector<proto::IndexRequest> indexes_vec;
+                for (auto &index : *indexes) {
+                    index.set_xid(xid);
+                    index.set_lsn(constant::RESYNC_CREATE_LSN);
+                    indexes_vec.push_back(index);
+                }
+
+                auto *roots = copy_info->mutable_roots_req();
+                roots->set_xid(xid);
+
+                // note: this will also invalidate the table's client cache entry
+                auto ddl_str = client->swap_sync_table(*namespace_req, *create, indexes_vec, *roots);
+
+                // store the ddl mutations for the FDWs
+                auto ddl = nlohmann::json::parse(ddl_str);
+                assert(ddl.is_array());
+                ddls.insert(ddls.end(), ddl.begin(), ddl.end());
+            }
+            LOG_INFO("Swapped synced tables: {}@{}", db_id, xid);
+
+            auto xid_msg = std::make_shared<committer::XidReady>
+                (swap->type(), swap->db(), _pg_log_timestamp,
+                 committer::XidReady::SwapMsg(xid, std::move(ddls)));
 
             // issue the swap/commit at the GC-2 prior to processing this xid
-            xid_msg->set_timestamp(_pg_log_timestamp);
-            uint64_t xid = get_next_xid();
-            xid_msg->swap().set_xid(xid);
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Issue COMMIT/SWAP message to committer on {} @ {}, type {}", db_id, xid, std::string(1, xid_msg->type()));
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Issue COMMIT/SWAP message to committer on {} @ {}, type {}",
+                      db_id, xid, std::string(1, xid_msg->type()));
             _committer_queue->push(xid_msg);
         }
     }

@@ -172,7 +172,7 @@ namespace springtail::pg_log_mgr {
         std::string _slot_name;
         uint64_t _log_size_rollover_threshold;
         int _port;
-        std::atomic<bool> _recovery_flag{false};    ///< flag the indicates recovery mode
+        std::atomic<bool> _wal_buffer_flag{false}; ///< buffering WAL in the writer during init
 
         /** Internal state synchronizer */
         common::StateSynchronizer<StateEnum> _internal_state{STATE_STARTUP};

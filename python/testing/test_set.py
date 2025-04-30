@@ -2,7 +2,6 @@ import logging
 from lxml import etree
 import os
 import springtail
-import sysutils
 
 from test_case import TestCase
 
@@ -122,9 +121,21 @@ class TestSet:
         # update postgres config to apply props for the test
         springtail.update_postgres_config(self._test_params)
 
+        # install FDW with Postgres restart
+        logging.debug("Installing foreign data wrapper...")
+        springtail.install_fdw(self._build_dir)
+
+        # start background mutations
+        self._config.start_background()
+
         # start Springtail
         logging.debug('Starting the Springtail instance')
-        springtail.start(self._config_file, self._build_dir, do_cleanup=False, do_init=True)
+        springtail.start(self._config_file, self._build_dir, do_cleanup=False, do_init=True, postgres_only=False, do_fdw_install=False)
+
+        # stop the background mutations and verify correctness
+        success = self._config.stop_background()
+        if not success:
+            return False
 
         # run the tests
         logging.info(f'Run the tests: {self._test_files}')
