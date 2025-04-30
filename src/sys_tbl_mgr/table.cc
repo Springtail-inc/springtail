@@ -5,6 +5,7 @@
 #include <sys_tbl_mgr/table.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_client.hh>
+#include <common/time_trace.hh>
 
 namespace springtail {
 
@@ -60,7 +61,7 @@ namespace indexer_helpers {
             ++row_id;
         }
 
-        LOG_DEBUG(LOG_BTREE, "{} {} secondary rows", 
+        LOG_DEBUG(LOG_BTREE, "{} {} secondary rows",
             (op == IndexOperation::Insert) ? "Populated"
             : "Invalidated",
             row_id);
@@ -637,7 +638,7 @@ namespace indexer_helpers {
     MutableTable::insert(TuplePtr value,
                          uint64_t extent_id)
     {
-        Table::trace tr(fmt::format("_mutable_table_insert-xid_{}", _target_xid));
+        Table::trace tr(fmt::format("_mutable_table_insert"));
         if (extent_id == constant::UNKNOWN_EXTENT) {
             if (_primary_key.empty()) {
                 _insert_append(value);
@@ -704,7 +705,7 @@ namespace indexer_helpers {
     MutableTable::update(TuplePtr value,
                          uint64_t extent_id)
     {
-        Table::trace tr(fmt::format("_mutable_table_update-xid_{}", _target_xid));
+        //Table::trace tr(fmt::format("_mutable_table_update-xid_{}", _target_xid));
         if (extent_id == constant::UNKNOWN_EXTENT) {
             // note: cannot perform an update() with no primary key, should be split into a remove() and insert()
             assert(!_primary_key.empty());
@@ -844,26 +845,41 @@ namespace indexer_helpers {
     TableMetadata
     MutableTable::finalize()
     {
-        Table::trace tr(fmt::format("_mutable_table_finalize-xid_{}", _target_xid));
         // in the case of having an (initially) empty table, there are no invalidations... we can
         // flush the single Page and update the indexes
+        time_trace::Trace empty_page_trace;
+        TIME_TRACE_START(empty_page_trace);
         if (_empty_page) {
             _flush_and_populate_indexes(_empty_page->ptr());
             // this will release the page to the cache
             _empty_page.reset();
         }
+        TIME_TRACE_STOP(empty_page_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, "finalize_empty_page", empty_page_trace);
 
+        time_trace::Trace storage_flush_trace;
+        TIME_TRACE_START(storage_flush_trace);
         // flush the dirty data pages of the table to disk
         auto end_offset = StorageCache::get_instance()->flush(_data_file);
+        TIME_TRACE_STOP(storage_flush_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, "finalize_storage_flush", storage_flush_trace);
 
+        time_trace::Trace primary_index_finalize_trace;
+        TIME_TRACE_START(primary_index_finalize_trace);
         // now flush the indexes, capturing the roots
         TableMetadata metadata;
         metadata.roots.push_back({constant::INDEX_PRIMARY, _primary_index->finalize()});
+        TIME_TRACE_STOP(primary_index_finalize_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, "finalize_primary_index_finalize", primary_index_finalize_trace);
 
+        time_trace::Trace secondary_index_finalize_trace;
+        TIME_TRACE_START(secondary_index_finalize_trace);
         // now flush the indexes, capturing the roots
         for (auto secondary : _secondary_indexes) {
             metadata.roots.emplace_back(secondary.first, secondary.second.first->finalize());
         }
+        TIME_TRACE_STOP(secondary_index_finalize_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, "finalize_secondary_index_finalize", secondary_index_finalize_trace);
 
         metadata.stats = _stats;
         metadata.snapshot_xid = _snapshot_xid;
@@ -872,6 +888,8 @@ namespace indexer_helpers {
         // to be used later to catch-up index if needed
         metadata.stats.end_offset = end_offset;
 
+        time_trace::Trace extent_create_trace;
+        TIME_TRACE_START(extent_create_trace);
         // store the roots into a look-aside root file
         // XXX maybe we only need to do this for system tables?  or even just the table_roots table?
         auto extent = std::make_shared<Extent>(ExtentType(), _target_xid, _roots_schema->row_size());
@@ -883,16 +901,26 @@ namespace indexer_helpers {
         auto filename = fmt::format(constant::ROOTS_XID_FILE, _target_xid);
         auto root_handle = IOMgr::get_instance()->open(_table_dir / filename,
                                                        IOMgr::IO_MODE::APPEND, true);
+        TIME_TRACE_STOP(extent_create_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, "finalize_extent_create", extent_create_trace);
 
+        time_trace::Trace flush_trace;
+        TIME_TRACE_START(flush_trace);
         // flush and wait for completion
         extent->async_flush(root_handle).wait();
         root_handle->sync();
+        TIME_TRACE_STOP(flush_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, "finalize_flush", flush_trace);
 
+        time_trace::Trace swap_trace;
+        TIME_TRACE_START(swap_trace);
         // swap the symlink
         std::filesystem::create_symlink(_table_dir / filename,
                                         _table_dir / constant::ROOTS_TMP_FILE);
         std::filesystem::rename(_table_dir / constant::ROOTS_TMP_FILE,
                                 _table_dir / constant::ROOTS_FILE);
+        TIME_TRACE_STOP(swap_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, "finalize_swap", swap_trace);
 
         return metadata;
     }
@@ -922,7 +950,7 @@ namespace indexer_helpers {
     MutableTable::_insert_direct(TuplePtr value,
                                  uint64_t extent_id)
     {
-        Table::trace tr(fmt::format("_mutable_table_insert_direct-xid_{}", _target_xid));
+        Table::trace tr(fmt::format("_mutable_table_insert_direct"));
         // get the page from the cache
         auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false,
                                                       [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
@@ -963,7 +991,7 @@ namespace indexer_helpers {
     void
     MutableTable::_insert_append(TuplePtr value)
     {
-        Table::trace tr(fmt::format("_mutable_table_insert_append-xid_{}", _target_xid));
+        Table::trace tr(fmt::format("_mutable_table_insert_append"));
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
         if (_began_empty) {
@@ -991,7 +1019,7 @@ namespace indexer_helpers {
     void
     MutableTable::_insert_by_lookup(TuplePtr value)
     {
-        Table::trace tr(fmt::format("_mutable_table_insert_by_lookup-xid_{}", _target_xid));
+        Table::trace tr(fmt::format("_mutable_table_insert_by_lookup"));
         assert(!_primary_key.empty());
 
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
@@ -1154,7 +1182,7 @@ namespace indexer_helpers {
     void
     MutableTable::_update_direct(TuplePtr value, uint64_t extent_id)
     {
-        Table::trace tr(fmt::format("_mutable_table_update_direct-xid_{}", _target_xid));
+        //Table::trace tr(fmt::format("_mutable_table_update_direct-xid_{}", _target_xid));
         // get the page from the cache
         auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
                 false,
@@ -1184,7 +1212,7 @@ namespace indexer_helpers {
     void
     MutableTable::_update_by_lookup(TuplePtr value)
     {
-        Table::trace tr(fmt::format("_mutable_table_update_by_lookup-xid_{}", _target_xid));
+        //Table::trace tr(fmt::format("_mutable_table_update_by_lookup-xid_{}", _target_xid));
         assert(!_primary_key.empty());
 
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
@@ -1208,6 +1236,7 @@ namespace indexer_helpers {
     void
     MutableTable::_check_convert_page(StorageCache::SafePagePtr &page)
     {
+        Table::trace tr(fmt::format("_check_convert_page"));
 #if ENABLE_SCHEMA_MUTATES
         auto header = page->header();
         XidLsn access_xid(header.xid);
