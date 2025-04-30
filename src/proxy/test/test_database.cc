@@ -97,6 +97,15 @@ namespace {
             return _get_least_loaded_instance();
         }
 
+        void
+        release_expired_sessions() override
+        {
+            std::unique_lock lock(_base_mutex);
+            for (auto instance_item: _instance_sessions) {
+                instance_item.first->get_pool()->evict_expired_sessions();
+            }
+        }
+
         /** make public for testing */
         std::map<DatabaseInstancePtr, int> get_instance_sessions() { return _get_instance_sessions(); }
     };
@@ -165,11 +174,11 @@ namespace {
 
             TestServerSessionPtr next_session1 = std::make_shared<TestServerSession>(Session::Type::PRIMARY, 10, 1, "db1", "user1");
             pool->add_session(next_session1);
-            EXPECT_EQ(pool->size(), pool->get_timeout_limit());
+            EXPECT_EQ(pool->size(), pool->get_timeout_limit() + 1);
 
             TestServerSessionPtr next_session2 = std::make_shared<TestServerSession>(Session::Type::PRIMARY, 10, 1, "db1", "user2");
             pool->add_session(next_session2);
-            EXPECT_EQ(pool->size(), pool->get_timeout_limit());
+            EXPECT_EQ(pool->size(), pool->get_timeout_limit() + 1);
 
             std::vector<TestServerSessionPtr> more_sessions;
             create_sessions(db_ids, user_names, more_sessions);

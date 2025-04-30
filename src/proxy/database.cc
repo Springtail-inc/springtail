@@ -44,6 +44,25 @@ namespace springtail::pg_proxy
         }
     }
 
+    void
+    DatabasePool::evict_expired_sessions()
+    {
+        uint64_t now = common::get_time_in_millis() / 1000;
+        // cleanup based on the cache entry timestamp
+        if (_expiration_interval != 0) {
+            while (_cache.size() > _timeout_limit) {
+                // get last entry
+                SessionEntry &cache_entry = _cache.back();
+
+                if (cache_entry.expiration_time < now) {
+                    _remove_entry(cache_entry.key);
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
     size_t
     DatabasePool::size(uint64_t db_id, const std::string &username) const
     {
@@ -54,16 +73,6 @@ namespace springtail::pg_proxy
             return it->second.size();
         }
         return 0;
-    }
-
-    uint64_t
-    DatabasePool::_get_timestamp()
-    {
-        auto now = std::chrono::system_clock::now();
-        // Convert the current time to time since epoch
-        auto duration = now.time_since_epoch();
-        // Convert duration to milliseconds
-        return std::chrono::duration_cast<std::chrono::seconds>(duration).count();
     }
 
     void
@@ -95,21 +104,9 @@ namespace springtail::pg_proxy
     void
     DatabasePool::_insert(const SessionKey &key, ServerSessionWeakPtr value)
     {
-        uint64_t now = _get_timestamp();
+        uint64_t now = common::get_time_in_millis() / 1000;
         if (!_cache.empty()) {
-            // cleanup based on the cache entry timestamp
-            if (_timeout_limit != 0) {
-                while (_cache.size() >= _timeout_limit) {
-                    // get last entry
-                    SessionEntry &cache_entry = _cache.back();
-
-                    if (cache_entry.expiration_time < now) {
-                        _remove_entry(cache_entry.key);
-                    } else {
-                        break;
-                    }
-                }
-            }
+            evict_expired_sessions();
             if (_size_limit != 0  && _cache.size() == _size_limit) {
                 _evict_next();
             }
@@ -149,7 +146,7 @@ namespace springtail::pg_proxy
     void
     DatabaseSet::remove_instance(DatabaseInstancePtr instance)
     {
-        std::unique_lock lock(_mutex);
+        std::unique_lock lock(_base_mutex);
 
         // remove from sessions map
         auto instance_it = _sessions.find(instance);
@@ -170,7 +167,7 @@ namespace springtail::pg_proxy
     void
     DatabaseSet::remove_database(uint64_t db_id)
     {
-        std::unique_lock lock(_mutex);
+        std::unique_lock lock(_base_mutex);
 
         // remove from the session map, iterate over instances
         for (auto instance_it = _sessions.begin(); instance_it != _sessions.end();) {
@@ -221,7 +218,7 @@ namespace springtail::pg_proxy
             deallocate = true;
         }
 
-        std::unique_lock lock(_mutex);
+        std::unique_lock lock(_base_mutex);
 
         if (!deallocate) {
             DatabasePoolPtr pool = session->get_instance()->get_pool();
@@ -267,7 +264,7 @@ namespace springtail::pg_proxy
         // create a new session from instance
         auto session = instance->allocate_session(user, db_id, parameters, database);
 
-        std::unique_lock lock(_mutex); // lock after getting the session, since it is blocking
+        std::unique_lock lock(_base_mutex); // lock after getting the session, since it is blocking
 
         // add session to instance map
         _sessions[instance][db_id].push_back(session);
@@ -281,7 +278,7 @@ namespace springtail::pg_proxy
     DatabaseInstancePtr
     DatabaseSet::_get_least_loaded_instance()
     {
-        std::shared_lock lock(_mutex);
+        std::shared_lock lock(_base_mutex);
 
         if (_instance_sessions.empty()) {
             return nullptr;
@@ -333,6 +330,16 @@ namespace springtail::pg_proxy
         DatabaseSet::_release_session(session, _replicas.size(), deallocate);
     }
 
+    void
+    DatabaseReplicaSet::release_expired_sessions()
+    {
+        std::shared_lock lock(_mutex);
+        std::unique_lock base_lock(_base_mutex);
+        for (auto replica : _replicas) {
+            auto pool = replica->get_pool();
+            pool->evict_expired_sessions();
+        }
+    }
 
     ServerSessionPtr
     DatabaseReplicaSet::allocate_session(UserPtr user,
@@ -371,6 +378,19 @@ namespace springtail::pg_proxy
         }
 
         DatabaseSet::_release_session(session, 1, deallocate);
+    }
+
+    void
+    DatabasePrimarySet::release_expired_sessions()
+    {
+        std::shared_lock lock(_mutex);
+        std::unique_lock base_lock(_base_mutex);
+        if (_primary != nullptr) {
+            _primary->get_pool()->evict_expired_sessions();
+        }
+        if (_standby != nullptr) {
+            _standby->get_pool()->evict_expired_sessions();
+        }
     }
 
     ServerSessionPtr
@@ -539,7 +559,7 @@ namespace springtail::pg_proxy
         nlohmann::json json = Properties::get(Properties::PROXY_CONFIG);
         size_t pool_size_limit = Json::get_or<size_t>(json, "pool_size_limit", 0);
         size_t pool_timeout_limit = Json::get_or<size_t>(json, "pool_timeout_limit", 0);
-        uint64_t pool_expiration_interval = Json::get_or<size_t>(json, "pool_expiration_interval", 0);
+        uint64_t pool_expiration_interval = Json::get_or<size_t>(json, "pool_expiration_interval_secs", 0);
         if (pool_timeout_limit != 0 && pool_expiration_interval == 0) {
             LOG_ERROR("Pool timeout limit is set to {} while expiration interval is not defined", pool_timeout_limit);
             throw ProxyServerError();
@@ -586,6 +606,7 @@ namespace springtail::pg_proxy
 
         // start redis subscriber thread
         _data_sub_thread.start();
+        start_thread();
     }
 
     void DatabaseMgr::_handle_db_table_change(const std::string &msg)
@@ -818,6 +839,20 @@ namespace springtail::pg_proxy
         lock.unlock();
 
         _data_sub_thread.shutdown();
+    }
+
+    void
+    DatabaseMgr::_internal_run()
+    {
+        while (!_is_shutting_down()) {
+            if (_primary_set != nullptr) {
+                _primary_set->release_expired_sessions();
+            }
+            if (_replica_set != nullptr) {
+                _replica_set->release_expired_sessions();
+            }
+            sleep(5);
+        }
     }
 
 } // namespace springtail::pg_proxy
