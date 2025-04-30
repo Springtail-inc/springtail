@@ -4,25 +4,16 @@ CREATE TABLE balloons (
     id SERIAL PRIMARY KEY,
     color colors
 );
-INSERT INTO balloons (color) VALUES ('red'), ('green'), ('blue');
+INSERT INTO balloons (color) VALUES ('blue'), ('green'), ('red');
 
 ## verify
 SELECT * FROM balloons ORDER BY id;
 
 SELECT id FROM balloons WHERE color = 'blue';
 SELECT id FROM balloons WHERE color <> 'green' ORDER BY ID;
+SELECT id FROM balloons WHERE color > 'green' ORDER BY ID;
+SELECT color FROM balloons order by color;
 
 ## cleanup
 DROP TABLE IF EXISTS balloons;
 DROP TYPE IF EXISTS colors;
-
-
-create type mood as enum('good','bad', 'ok');
-
-create table person(name text primary key, mood mood);
-
-insert into person values('John','good'),('Joe','ok');
-
-alter type mood rename value 'ok' to 'sad';
-
-alter type mood add value 'great' before 'sad';
