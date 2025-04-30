@@ -14,6 +14,72 @@ namespace springtail::pg_log_mgr {
     class SyncTracker final : public Singleton<SyncTracker> {
     public:
         /**
+         * Helper object to return the data about a table swap from check_commit()
+         */
+        class SwapRequest {
+        public:
+            SwapRequest(committer::XidReady::Type type,
+                        uint64_t db_id,
+                        std::vector<PgCopyResult::TableInfoPtr> &&table_info)
+                : _type(type),
+                  _db(db_id),
+                  _table_info(std::move(table_info))
+            {}
+
+            committer::XidReady::Type type() const {
+                return _type;
+            }
+
+            uint64_t db() const {
+                return _db;
+            }
+
+            const std::vector<PgCopyResult::TableInfoPtr> &table_info() const {
+                return _table_info;
+            }
+
+        private:
+            committer::XidReady::Type _type;
+            uint64_t _db;
+            std::vector<PgCopyResult::TableInfoPtr> _table_info;
+        };
+
+        /**
+         * Helper object to return details about skipping a table via should_skip()
+         */
+        class SkipDetails {
+        public:
+            SkipDetails(bool is_syncing, bool should_skip)
+                : _is_syncing(is_syncing),
+                  _should_skip(should_skip)
+            { }
+
+            SkipDetails(bool is_syncing, bool should_skip, std::shared_ptr<ExtentSchema> schema)
+                : _is_syncing(is_syncing),
+                  _should_skip(should_skip),
+                  _schema(schema)
+            { }
+
+            bool is_syncing() const {
+                return _is_syncing;
+            }
+
+            bool should_skip() const {
+                return _should_skip;
+            }
+
+            std::shared_ptr<ExtentSchema> schema() const {
+                return _schema;
+            }
+
+        private:
+            bool _is_syncing;
+            bool _should_skip;
+            std::shared_ptr<ExtentSchema> _schema;
+        };
+
+    public:
+        /**
          * Marks that the LogParser has issued a resync request for the given table so that
          * mutations can be ignored.  Once picked up by the copy thread, it is moved to the inflight
          * map.
@@ -44,14 +110,13 @@ namespace springtail::pg_log_mgr {
          * @param pg_xid The pg_xid of the current transaction.
          * @return An optional XidReady containing the swap/commit details if available.
          */
-        std::shared_ptr<committer::XidReady> check_commit(uint64_t db_id, uint32_t pg_xid);
+        std::shared_ptr<SwapRequest> check_commit(uint64_t db_id, uint32_t pg_xid);
 
         /**
          * Clears any tables that were part of the swap/commit.
-         * @param db_id The database to clear.
-         * @param commit_msg The XidReady containing the swap/commit details.
+         * @param swap The details about the swap request.
          */
-        void clear_tables(uint64_t db_id, const committer::XidReady &commit_msg);
+        void clear_tables(std::shared_ptr<SwapRequest> swap);
 
         /**
          * Remove a given table from the sync tracker.  Called after we have passed all of the
@@ -70,11 +135,9 @@ namespace springtail::pg_log_mgr {
          *         requested table.  The second indicates if mutations should be skipped for that
          *         table given the pg_xid.
          */
-        std::pair<bool, bool> should_skip(uint64_t db_id, uint64_t table_id, uint32_t pg_xid) const;
+        SkipDetails should_skip(uint64_t db_id, uint64_t table_id, uint32_t pg_xid) const;
 
     private:
-        using TablePair = std::pair<int32_t, std::shared_ptr<proto::CopyTableInfo>>;
-
         /**
          * Internal class representing the XID metadata for an individual table sync.
          */
@@ -93,6 +156,8 @@ namespace springtail::pg_log_mgr {
             bool
             should_skip(uint32_t pg_xid) const
             {
+                LOG_DEBUG(LOG_PG_LOG_MGR, "pg_xid={} xmax={} inflight={}", pg_xid, _xmax, _inflight.size());
+
                 // do a guess-timate if the pgxid wrapped ahead of xmax
                 if (pg_xid < (1 << 26) && _xmax > (1 << 30)) {
                     // we assume that the pg_xid is ahead of xmax
@@ -124,7 +189,7 @@ namespace springtail::pg_log_mgr {
             /**
              * Retrieve the list of tables that were part of this sync.
              */
-            const std::vector<TablePair> &tids() const {
+            const std::vector<PgCopyResult::TableInfoPtr> &tids() const {
                 return _tids;
             }
 
@@ -139,7 +204,7 @@ namespace springtail::pg_log_mgr {
             uint32_t _pg_xid; ///< The PG xid at which the sync occurred
             uint32_t _xmax; ///< The XMAX at postgres for the sync transaction
             std::set<uint32_t> _inflight; ///< The in-flight PG xids for the sync txn
-            std::vector<TablePair> _tids; ///< The table ids being synced and their associated RPC data
+            std::vector<PgCopyResult::TableInfoPtr> _tids; ///< The table ids being synced and their associated RPC data
         };
 
     private:

@@ -46,8 +46,8 @@ namespace {
 
         PgCopyResultPtr copy_res = std::make_shared<PgCopyResult>(43534);
         copy_res->set_snapshot(234598, "1234:2345:3456,7893");
-        copy_res->add_table(54, nullptr);
-        copy_res->add_table(67, nullptr);
+        copy_res->add_table(std::make_shared<PgCopyResult::TableInfo>(54, nullptr, nullptr));
+        copy_res->add_table(std::make_shared<PgCopyResult::TableInfo>(67, nullptr, nullptr));
 
         PgXactMsg msg4(1, copy_res);
         PgXactMsg::TableSyncMsg msg6 = std::get<PgXactMsg::TableSyncMsg>(msg4.msg);
@@ -58,8 +58,8 @@ namespace {
         ASSERT_EQ(msg6.xmin, 1234);
         ASSERT_EQ(msg6.xmax, 2345);
         ASSERT_EQ(msg6.tids.size(), 2);
-        ASSERT_EQ(msg6.tids[0].first, 54);
-        ASSERT_EQ(msg6.tids[1].first, 67);
+        ASSERT_EQ(msg6.tids[0]->table_id, 54);
+        ASSERT_EQ(msg6.tids[1]->table_id, 67);
         ASSERT_EQ(msg6.xips.size(), 2);
         ASSERT_EQ(msg6.xips[0], 3456);
         ASSERT_EQ(msg6.xips[1], 7893);

@@ -21,6 +21,21 @@ namespace springtail
 {
     /** Stores the result of a copy operation */
     struct PgCopyResult {
+        struct TableInfo {
+            TableInfo(int32_t table_id,
+                      std::shared_ptr<proto::CopyTableInfo> info,
+                      std::shared_ptr<ExtentSchema> schema)
+                : table_id(table_id),
+                  info(info),
+                  schema(schema)
+            { }
+
+            int32_t table_id;
+            std::shared_ptr<proto::CopyTableInfo> info;
+            std::shared_ptr<ExtentSchema> schema;
+        };
+        using TableInfoPtr = std::shared_ptr<TableInfo>;
+
         uint64_t target_xid;         ///< target xid
 
         // see: https://www.postgresql.org/docs/current/functions-info.html#FUNCTIONS-PG-SNAPSHOT
@@ -30,7 +45,7 @@ namespace springtail
         uint32_t xmax_epoch;
         uint32_t pg_xid;
         uint32_t pg_epoch;
-        std::vector<std::pair<int32_t, std::shared_ptr<proto::CopyTableInfo>>> tids;   ///< table ids and associated rpc info
+        std::vector<TableInfoPtr> tids;   ///< table ids and associated rpc info
         std::vector<uint32_t> xips;  ///< transactions in progress: xmin <= X < xmax
         std::string pg_xids;         ///< pg_current_snapshot(); xmin:xmax:xids
 
@@ -40,9 +55,8 @@ namespace springtail
          * @brief Add table to result
          * @param tid table id
          */
-        void add_table(int32_t tid, std::shared_ptr<proto::CopyTableInfo> copy_info)
-        {
-            tids.push_back({tid, copy_info});
+        void add_table(TableInfoPtr info) {
+            tids.push_back(info);
         }
 
         /**
@@ -239,13 +253,13 @@ namespace springtail
         /**
          * @brief Copy table from remote system
          */
-        std::shared_ptr<proto::CopyTableInfo> _copy_table(uint64_t db_id,
-                                                          const springtail::XidLsn &xid,
-                                                          const std::map<int32_t, std::map<std::string, float>> &user_types,
-                                                          const std::string &table_name,
-                                                          const std::string &schema_name,
-                                                          uint64_t table_oid,
-                                                          uint64_t schema_oid);
+        PgCopyResult::TableInfoPtr _copy_table(uint64_t db_id,
+                                               const springtail::XidLsn &xid,
+                                               const std::map<int32_t, std::map<std::string, float>> &user_types,
+                                               const std::string &table_name,
+                                               const std::string &schema_name,
+                                               uint64_t table_oid,
+                                               uint64_t schema_oid);
 
         /**
          * @brief End the copy, commit the transaction
@@ -325,6 +339,12 @@ namespace springtail
          * @param db_name name of the database
          */
         PgCopyTable(const std::string &db_name) : _db_name(db_name) {}
+
+        // this object should be copied or moved
+        PgCopyTable(const PgCopyTable &) = delete;
+        PgCopyTable& operator=(const PgCopyTable &) = delete;
+        PgCopyTable(PgCopyTable &&) = delete;
+        PgCopyTable& operator=(PgCopyTable &&) = delete;
 
         ~PgCopyTable()
         {
