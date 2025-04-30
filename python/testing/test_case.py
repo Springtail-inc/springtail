@@ -806,9 +806,9 @@ class TestCase:
         self._result = 'SUCCESS'
         self._status = 'VERIFY_END'
 
-    def stop_background(self) -> None:
+    def stop_background(self) -> bool:
         if self._metadata['live_startup'] is None:
-            return False
+            return True
 
         logging.debug('Stop background mutations and verify')
         self._stop_thread.set()

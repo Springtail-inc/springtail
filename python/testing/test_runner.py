@@ -294,19 +294,21 @@ if __name__ == "__main__":
                                        default_config_file, build_dir, {})
 
     # run the tests
+    test_failure = False
     for test in tests:
         success = test.run()
         if not success:
+            test_failure = True
             break
 
     # generate the JUnit report, if requested
     try_generate_junit(args.junit, tests)
 
     # print a report for each test set
-    success = all([ test.report() for test in tests ])
+    [ test.report() for test in tests ]
 
     # exit with error on failure
-    if not success:
+    if test_failure:
         sys.exit(-1)
 
     # if we succeeded, clean up the configurations
