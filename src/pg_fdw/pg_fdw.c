@@ -401,6 +401,14 @@ springtail_BeginForeignScan(ForeignScanState *node, int eflags)
 
     node->fdw_state = planstate->pg_fdw_state;
 
+    TupleTableSlot *slot = node->ss.ss_ScanTupleSlot;
+    Form_pg_attribute attrs[slot->tts_tupleDescriptor->natts];
+
+    for (int i = 0; i < slot->tts_tupleDescriptor->natts; i++) {
+        Form_pg_attribute attr = TupleDescAttr(slot->tts_tupleDescriptor,i);
+        attrs[i] = attr;
+    }
+
     /* XXX Do nothing in EXPLAIN */
     if (eflags & EXEC_FLAG_EXPLAIN_ONLY) {
         return;
@@ -413,7 +421,8 @@ springtail_BeginForeignScan(ForeignScanState *node, int eflags)
     /* Those list must be copied, because their memory context can become */
     /* invalid during the execution (in particular with the cursor interface) */
     /* The copy occurs within the fdw_begin_scan() call */
-    fdw_begin_scan(planstate->pg_fdw_state, planstate->target_list, qual_list, planstate->pathkeys);
+    fdw_begin_scan(planstate->pg_fdw_state, slot->tts_tupleDescriptor->natts,
+            attrs, planstate->target_list, qual_list, planstate->pathkeys);
 
     return;
 }
@@ -431,19 +440,12 @@ springtail_IterateForeignScan(ForeignScanState *node)
 
     void *state = node->fdw_state;
 
-    Form_pg_attribute attrs[slot->tts_tupleDescriptor->natts];
-
-    for (int i = 0; i < slot->tts_tupleDescriptor->natts; i++) {
-        Form_pg_attribute attr = TupleDescAttr(slot->tts_tupleDescriptor,i);
-        attrs[i] = attr;
-    }
-
     // get next row, if true it was filled in successfully
     // if eos is false we return the empty slot
     bool row_valid = false;
     bool eos = false;
     while (!row_valid) {
-        row_valid = fdw_iterate_scan(state, slot->tts_tupleDescriptor->natts, attrs, slot->tts_values, slot->tts_isnull, &eos);
+        row_valid = fdw_iterate_scan(state, slot->tts_values, slot->tts_isnull, &eos);
         if (eos) {
             return slot;
         }

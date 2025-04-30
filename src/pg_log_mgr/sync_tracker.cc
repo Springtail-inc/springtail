@@ -61,7 +61,7 @@ namespace springtail::pg_log_mgr {
         auto inflight_i = _inflight_map.find(sync_msg.db_id);
         if (inflight_i != _inflight_map.end()) {
             for (auto &entry : sync_msg.tids) {
-                inflight_i->second.erase(entry.first); // remove the table from the resync map
+                inflight_i->second.erase(entry->table_id); // remove the table from the resync map
             }
 
             // remove the db from the map if the table set is empty
@@ -90,7 +90,7 @@ namespace springtail::pg_log_mgr {
 
         // check if we already have a record of a previous sync for this table
         for (const auto &entry : record->tids()) {
-            auto table_i = table_map.find(entry.first);
+            auto table_i = table_map.find(entry->table_id);
             if (table_i == table_map.end()) {
                 continue;
             }
@@ -104,7 +104,7 @@ namespace springtail::pg_log_mgr {
 
         // also keep a map to the record for each table being copied
         for (auto &entry : sync_msg.tids) {
-            table_map[entry.first] = record; // add the record to the sync map
+            table_map[entry->table_id] = record; // add the record to the sync map
         }
 
         // record the target XID of the sync
@@ -113,7 +113,7 @@ namespace springtail::pg_log_mgr {
         return first_table;
     }
 
-    std::shared_ptr<committer::XidReady>
+    std::shared_ptr<SyncTracker::SwapRequest>
     SyncTracker::check_commit(uint64_t db_id,
                               uint32_t pg_xid)
     {
@@ -167,34 +167,33 @@ namespace springtail::pg_log_mgr {
         }
 
         // construct an XidReady record from the XidRecord objects
-        std::vector<TablePair> tids;
+        std::vector<PgCopyResult::TableInfoPtr> tids;
         for (auto record : completed) {
             tids.insert(tids.end(), record->tids().begin(), record->tids().end());
         }
         LOG_DEBUG(LOG_PG_LOG_MGR, "Found {} tables", tids.size());
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Creating commit_queue message for committer queue db: {}, xid: {}, type: {}", db_id, xid, std::string(1,type));
-        return std::make_shared<committer::XidReady>(type, db_id, 0, committer::XidReady::SwapMsg(xid, std::move(tids)));
+        return std::make_shared<SwapRequest>(type, db_id, std::move(tids));
     }
 
     void
-    SyncTracker::clear_tables(uint64_t db_id,
-                              const committer::XidReady &commit_msg)
+    SyncTracker::clear_tables(std::shared_ptr<SwapRequest> swap)
     {
-        LOG_DEBUG(LOG_PG_LOG_MGR, "db {}", db_id);
+        LOG_DEBUG(LOG_PG_LOG_MGR, "db {}", swap->db());
         boost::unique_lock lock(_mutex);
 
         // get the table map for this database
-        auto db_i = _table_map.find(db_id);
+        auto db_i = _table_map.find(swap->db());
         assert(db_i != _table_map.end());
 
         // remove all of the tables referenced in the commit message
-        for (const auto &entry : commit_msg.swap().tids()) {
-            db_i->second.erase(entry.first);
+        for (const auto &entry : swap->table_info()) {
+            db_i->second.erase(entry->table_id);
         }
     }
 
-    std::pair<bool, bool>
+    SyncTracker::SkipDetails
     SyncTracker::should_skip(uint64_t db_id,
                              uint64_t table_id,
                              uint32_t pg_xid) const
@@ -230,6 +229,17 @@ namespace springtail::pg_log_mgr {
             return { false, false };
         }
 
-        return { true, table_i->second->should_skip(pg_xid) };
+        bool should_skip = table_i->second->should_skip(pg_xid);
+        if (should_skip) {
+            return { true, true };
+        } else {
+            // find the schema in the table entry
+            auto it = std::find_if(table_i->second->tids().begin(), table_i->second->tids().end(),
+                                   [table_id](const auto &entry) {
+                                       return (entry->table_id == table_id);
+                                   });
+            CHECK(it != table_i->second->tids().end());
+            return { true, false, (*it)->schema };
+        }
     }
 }

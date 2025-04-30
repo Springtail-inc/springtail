@@ -431,7 +431,7 @@ namespace springtail
         _connection.free_copy_buffer();
     }
 
-    std::shared_ptr<proto::CopyTableInfo>
+    PgCopyResult::TableInfoPtr
     PgCopyTable::_copy_table(uint64_t db_id,
                              const springtail::XidLsn &xid,
                              const std::string &table_name,
@@ -444,7 +444,7 @@ namespace springtail
 
         // validate the columns to see if there are invalid columns
         auto invalid_columns = TableValidator::get_instance()->validate_columns<SchemaColumn>(_schema.columns);
-        if ( invalid_columns.size() > 0 ){
+        if (invalid_columns.size() > 0) {
             LOG_DEBUG(LOG_PG_REPL, "Invalid columns found as part of _copy_table for table_oid {}", table_oid);
             nlohmann::json table_info = {
                 {"schema", schema_name},
@@ -453,7 +453,7 @@ namespace springtail
             };
 
             TableValidator::get_instance()->mark_invalid(table_oid, table_info);
-            return nullptr;
+            return std::make_shared<PgCopyResult::TableInfo>(table_oid, nullptr, nullptr);
         }
 
         // get secondary indexes
@@ -581,7 +581,7 @@ namespace springtail
         stats->set_end_offset(metadata.stats.end_offset);
         roots_req->set_snapshot_xid(metadata.snapshot_xid);
 
-        return copy_info;
+        return std::make_shared<PgCopyResult::TableInfo>(table_oid, copy_info, schema);
     }
 
     int32_t PgCopyTable::_verify_copy_header(const std::string_view &header)
@@ -884,7 +884,7 @@ namespace springtail
                                                    request->schema_oid);
 
                 // add the table oid to the result
-                result->add_table(request->table_oid, info);
+                result->add_table(info);
 
             } catch (PgTableNotFoundError &e) {
                 LOG_ERROR("Table not found: {}.{}", request->schema_name, request->table_name);
