@@ -228,11 +228,17 @@ namespace springtail::pg_fdw {
                                        int32_t oid,
                                        uint64_t xid);
 
-        /** Helper to convert an enum user type to a datum */
+        /** Helper to convert a springtail enum user type to a datum */
         Datum _get_enum_datum(PgFdwState *state,
                               int32_t springtail_oid,
                               Oid pg_oid,
                               float sort_order);
+
+        /** Helper to convert a postgres enum type to springtail enum id (index/sortorder) */
+        float _get_enum_id_from_pg(PgFdwState *state,
+                                   int32_t springtail_oid,
+                                   Oid pg_oid,
+                                   Oid label_oid);
 
         /** Helper to convert field to PG Datum */
         Datum _get_datum_from_field(PgFdwState *state,
@@ -241,6 +247,12 @@ namespace springtail::pg_fdw {
                                     int32_t springtail_oid,
                                     Oid pg_oid,
                                     int32_t atttypmod);
+
+        /** Helper to setup quals and scan iterator in state, called from begin_scan */
+        void _init_quals(PgFdwState *state, List *qual_list);
+
+        /** Helper to create constant field from qual and add to field array */
+        void _make_const_field(PgFdwState *state, int32_t springtail_oid, int idx, ConstQual *qual);
 
         // static methods
 
@@ -270,12 +282,6 @@ namespace springtail::pg_fdw {
 
         /** Helper to determine if a type can be used in a where clause */
         static bool _is_type_sortable(Oid pg_type, QualOpName op);
-
-        /** Helper to setup quals and scan iterator in state, called from begin_scan */
-        static void _init_quals(PgFdwState *state, List *qual_list);
-
-        /** Helper to create constant field from qual and add to field array */
-        static void _make_const_field(FieldArrayPtr fields, int idx, ConstQual *qual);
 
         /** Helper to compare a primary key const qual field to the data within a row */
         static bool _compare_field(const std::any &row,

@@ -460,7 +460,10 @@ namespace springtail::pg_fdw {
         // iterate through the quals and add them to the key fields
         for (int i = 0; i < state->filtered_quals.size(); i++) {
             // create a const field for the qual and add it to the field array
-            _make_const_field(state->qual_fields, i, state->filtered_quals[i]);
+            ConstQual *qual = state->filtered_quals[i];
+            auto &column = state->columns.at(state->attr_map.at(qual->base.varattno));
+
+            _make_const_field(state, column.pg_type, i, state->filtered_quals[i]);
         }
     }
 
@@ -823,6 +826,37 @@ namespace springtail::pg_fdw {
         error.log_backtrace();
         LOG_ERROR("Exception: {}", error.what());
         elog(ERROR, "Springtail exception: %s", error.what());
+    }
+
+    float
+    PgFdwMgr::_get_enum_id_from_pg(PgFdwState *state,
+                                   int32_t springtail_oid,
+                                   Oid pg_oid,
+                                   Oid label_oid)
+    {
+        // retrieve the type's entry from the pg_enum table
+        HeapTuple tup = SearchSysCache1(ENUMOID, ObjectIdGetDatum(label_oid));
+        if (!HeapTupleIsValid(tup)) {
+            elog(ERROR, "FDW: cache lookup failed for enum %u", label_oid);
+        }
+
+        // get the enum label
+        char *label = ((Form_pg_enum) GETSTRUCT(tup))->enumlabel.data;
+        ReleaseSysCache(tup);
+
+        // lookup the label in springtail enum cache
+        auto label_str = std::string(label);
+        UserTypePtr utp = _enum_cache_lookup(state->db_id, springtail_oid, state->xid);
+        CHECK_NE(utp, nullptr);
+
+        // lookup label and get the index
+        auto &&it = utp->enum_label_map.find(label_str);
+        if (it == utp->enum_label_map.end()) {
+            LOG_ERROR("Label {} not found for enum oid: {}", label_str, springtail_oid);
+            CHECK(false);
+        }
+
+        return it->second;
     }
 
     Datum
@@ -1341,13 +1375,21 @@ namespace springtail::pg_fdw {
                 // due to different collations/encodings we only support equality for text
                 return (op == EQUALS || op == NOT_EQUALS);
             default:
+                if (pg_type >= FirstNormalObjectId) {
+                    // enum type; ordering based on sort order, treat as float
+                    LOG_DEBUG(LOG_FDW, "Found user defined type for sorting: {}", pg_type);
+                    return true;
+                }
+                LOG_DEBUG(LOG_FDW, "Type not suitable for sorting: {}", pg_type);
                 return false;
         }
     }
 
     void
-    PgFdwMgr::_make_const_field(FieldArrayPtr fields, int idx, ConstQual *qual)
+    PgFdwMgr::_make_const_field(PgFdwState *state, int32_t springtail_oid, int idx, ConstQual *qual)
     {
+        FieldArrayPtr fields = state->qual_fields;
+
         // Generate a const field based on type; populate it into fields array
         switch (qual->base.typeoid) {
             case MONEYOID:
@@ -1389,6 +1431,16 @@ namespace springtail::pg_fdw {
                 break;
             }
             default:
+                // handle enum user defined type
+                if (qual->base.typeoid >= FirstNormalObjectId) {
+                    Oid oid = DatumGetObjectId(qual->value);
+                    LOG_DEBUG(LOG_FDW, "Found user defined type datum qual field: {}", oid);
+
+                    // do reverse mapping lookup to get the enum idx from springtail
+                    float enum_id = _get_enum_id_from_pg(state, springtail_oid, qual->base.typeoid, oid);
+                    fields->at(idx) = std::make_shared<ConstTypeField<float>>(enum_id);
+                    break;
+                }
                 elog(ERROR, "Unsupported type for constant field: %d", qual->base.typeoid);
                 break;
         }
