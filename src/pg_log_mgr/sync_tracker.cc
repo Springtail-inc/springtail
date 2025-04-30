@@ -150,9 +150,6 @@ namespace springtail::pg_log_mgr {
             return {};
         }
 
-        // We pass the target XID to the committer to be used if the completed XID is not ahead of the committed XID.
-        uint64_t xid = _target_xid_map[db_id];
-
         auto type = committer::XidReady::Type::TABLE_SYNC_SWAP;
         if (db_i->second.empty() &&
             _inflight_map.find(db_id) == _inflight_map.end() &&
@@ -173,7 +170,7 @@ namespace springtail::pg_log_mgr {
         }
         LOG_DEBUG(LOG_PG_LOG_MGR, "Found {} tables", tids.size());
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Creating commit_queue message for committer queue db: {}, xid: {}, type: {}", db_id, xid, std::string(1,type));
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Creating commit_queue message for committer queue db: {}, xid: {}, type: {}", db_id, _target_xid_map[db_id], std::string(1,type));
         return std::make_shared<SwapRequest>(type, db_id, std::move(tids));
     }
 

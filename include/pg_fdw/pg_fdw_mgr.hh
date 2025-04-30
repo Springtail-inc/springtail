@@ -80,12 +80,13 @@ namespace springtail::pg_fdw {
         };
         std::vector<PgAttr> _attrs; ///< Scan tuple attributes
 
-
         struct TargetColumn {
             int field_idx; ///< field idx in the fields array of PgFdwState
             PgAttr pg_attr; ///< PG attribute info
         };
-        std::vector<TargetColumn> target_columns; ///< vector of targets including filtered quals
+
+        ///< Map of targets including filtered quals keyed by attnum
+        absl::flat_hash_map<int, TargetColumn> target_columns;
 
         std::vector<ConstQualPtr> filtered_quals;     ///< List of quals (for where clause)
         std::vector<Index> indexes; ///< List of table indexes including the primary index.
