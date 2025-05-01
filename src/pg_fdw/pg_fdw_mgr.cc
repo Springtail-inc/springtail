@@ -275,7 +275,7 @@ namespace springtail::pg_fdw {
             CHECK_GT(attno, 0);
             CHECK_LE(attno, state->_attrs.size());
 
-            state->target_columns[attno] = {i++, state->_attrs[attno-1]};
+            state->target_columns.emplace(attno, PgFdwState::TargetColumn{i++, state->_attrs[attno-1]});
 
             LOG_DEBUG(LOG_FDW, "Target list column: {}:{}",
                                 attno, col_i->second.name);
@@ -295,7 +295,7 @@ namespace springtail::pg_fdw {
 
             if (it == state->target_columns.end()) {
                 target_colnames.push_back(state->columns.at(state->attr_map.at(attno)).name);
-                state->target_columns[attno] = {i++, state->_attrs[attno-1]};
+                state->target_columns.emplace(attno, PgFdwState::TargetColumn{i++, state->_attrs[attno-1]});
             }
         }
 
