@@ -8,6 +8,8 @@
 #include <common/redis.hh>
 #include <proxy/database.hh>
 
+#include <redis/redis_db_tables.hh>
+
 using namespace springtail;
 using namespace springtail::pg_proxy;
 using namespace testing;
