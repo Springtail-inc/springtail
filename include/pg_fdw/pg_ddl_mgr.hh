@@ -165,25 +165,8 @@ namespace springtail::pg_fdw {
          * @param xid transaction id
          * @return map of namespace id to map of type_id to pair <type_name, value_json>
          */
-        std::map<uint64_t, std::map<uint64_t, std::pair<std::string, std::string>>> _get_usertypes(uint64_t db_id, uint64_t xid);
-
-        /**
-         * @brief Helper to diff oid type set with keys from _type_map
-         * @param pg_types set of PG type OIDs
-         * @param mapped_types map of PG type OIDs to type names found in _type_map (output)
-         * @return set of type OIDs not in _type_map, but in pg_types
-         */
-        std::set<uint32_t> _type_map_difference(std::set<uint32_t> &pg_types,
-            std::map<uint32_t, std::string> &mapped_types);
-
-        /**
-         * @brief Helper to convert a set of PG type OIDs to type names via an external SQL query.
-         * @param conn LibPqConnectionPtr connection
-         * @param pg_types set of PG type OIDs
-         * @return map of PG type OIDs to type names
-         */
-        std::map<uint32_t, std::string>
-        _query_type_names(LibPqConnectionPtr conn, std::set<uint32_t> pg_types);
+        std::map<uint64_t, std::map<uint64_t, std::pair<std::string, std::string>>>
+        _get_usertypes(uint64_t db_id, uint64_t xid);
 
         /**
          * @brief Helper to generate sql statement from json.  Decodes the ddl json.

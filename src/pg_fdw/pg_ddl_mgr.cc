@@ -16,6 +16,8 @@
 
 #include <xid_mgr/xid_mgr_client.hh>
 
+#include <sys_tbl_mgr/system_tables.hh>
+
 #include <pg_fdw/exception.hh>
 #include <pg_fdw/pg_ddl_mgr.hh>
 
@@ -534,7 +536,8 @@ namespace springtail::pg_fdw {
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()));
         }
-
+#if ENABLE_SCHEMA_MUTATES
+        // XXX THIS CODE IS CURRENTLY DISABLED
         else if (action == "col_add") { // alter table add column
             auto &col = ddl.at("column");
 
@@ -550,7 +553,9 @@ namespace springtail::pg_fdw {
             }
 
             uint32_t type_oid = col.at("type").get<uint32_t>();
-            auto &&type_map = _query_type_names(conn, { type_oid });
+            // XXX a fix is required to pull type name from the trigger data
+            // see _gen_fdw_table_sql()
+            assert(false);
             return fmt::format("ALTER FOREIGN TABLE {}.{} ADD COLUMN {} {} {};",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
@@ -584,6 +589,7 @@ namespace springtail::pg_fdw {
                                conn->escape_identifier(col.at("name").get<std::string>()),
                                col.at("nullable").get<bool>() ? "DROP" : "SET");
         }
+#endif /* ENABLE_SCHEMA_MUTATES */
 
         else if (action == "create_index") {
             // TODO: do something?
@@ -671,77 +677,6 @@ namespace springtail::pg_fdw {
         CHECK(false);
     }
 
-    std::set<uint32_t>
-    PgDDLMgr::_type_map_difference(std::set<uint32_t> &pg_types,
-                                   std::map<uint32_t, std::string> &mapped_types)
-    {
-        std::set<uint32_t> diff;
-
-        // Iterators for map and set
-        auto map_it = _type_map.begin();
-        auto set_it = pg_types.begin();
-
-        // Loop through both containers
-        while (map_it != _type_map.end() && set_it != pg_types.end()) {
-            if (map_it->first < *set_it) {
-                // Key in map not in set
-                ++map_it;
-            } else if (map_it->first > *set_it) {
-                // Key in set not in map
-                diff.insert(*set_it);
-                ++set_it;
-            } else {
-                // Keys are equal, so they exist in both
-                mapped_types[map_it->first] = map_it->second;
-                ++map_it;
-                ++set_it;
-            }
-        }
-
-        // Add any remaining keys in the set
-        while (set_it != pg_types.end()) {
-            diff.insert(*set_it);
-            ++set_it;
-        }
-
-        return diff;
-    }
-
-    std::map<uint32_t, std::string>
-    PgDDLMgr::_query_type_names(LibPqConnectionPtr conn,
-                                std::set<uint32_t> pg_types)
-    {
-        std::map<uint32_t, std::string> type_map;
-
-        // lookup the type names from pg_types in the cached type map
-        // those that match are set in type_map, those that don't are returned as missing
-        auto &&missing_oids = _type_map_difference(pg_types, type_map);
-        if (missing_oids.empty()) {
-            // have them all return the map
-            return type_map;
-        }
-
-        // otherwise query the database for the missing type names
-        std::string &&query = fmt::format("SELECT oid, typname FROM pg_type WHERE oid IN ({})",
-                                          common::join_string(",", missing_oids.begin(), missing_oids.end()));
-
-        conn->exec(query);
-
-        // extract the type names from the result
-        int rows = conn->ntuples();
-        for (int i = 0; i < rows; ++i) {
-            uint32_t oid = conn->get_int32(i, 0);
-            std::string type_name = conn->get_string(i, 1);
-
-            // store the mapping
-            type_map[oid] = type_name;
-            _type_map[oid] = type_name;
-        }
-        conn->clear();
-
-        return type_map;
-    }
-
     std::string
     PgDDLMgr::_gen_fdw_table_sql(LibPqConnectionPtr conn,
                                  const std::string &server_name,
@@ -761,19 +696,6 @@ namespace springtail::pg_fdw {
         // name, type, is_nullable, default value
         int i = 0, num_cols = columns.size();
 
-        // generate a type map for normal column types
-        /*
-        std::set<uint32_t> pg_types;
-        for (const auto &col : columns) {
-            uint32_t type_oid = col.at("type").get<uint32_t>();
-            if (type_oid < constant::FIRST_USER_DEFINED_PG_OID) {
-                // this is a normal type, add it to the set
-                pg_types.insert(type_oid);
-            }
-        }
-        // resolve the types against the cached types and query the database for those missing
-        auto &&type_map = _query_type_names(conn, pg_types);
-*/
         // iterate over the columns again, adding each to the create statement
         for (const auto &col : columns) {
             // check for userdefined type
@@ -790,17 +712,6 @@ namespace springtail::pg_fdw {
                                                  conn->escape_identifier(type_name));
             }
 
-            /*
-            // the constant FirstNormalObjectId is defined in postgres include/access/transam.h
-            if (type_oid >= constant::FIRST_USER_DEFINED_PG_OID) {
-                // this is a user defined type, fully qualify it
-                type_name = fmt::format("{}.{}", escaped_schema,
-                                                 conn->escape_identifier(col.at("type_name")));
-            } else {
-                // this is a built in type, just use the name
-                type_name = type_map.at(type_oid);
-            }
-*/
             std::string column = fmt::format("{} {} {} {}", conn->escape_identifier(col.at("name")),
                                              type_name, col.at("nullable").get<bool>() ? "" : "NOT NULL",
                                              (i == num_cols - 1) ? "" : ",");
