@@ -272,8 +272,8 @@ namespace springtail::pg_fdw {
             }
 
             target_colnames.push_back(col_i->second.name);
-            CHECK_GT(attno, 0);
-            CHECK_LE(attno, state->_attrs.size());
+            DCHECK_GT(attno, 0);
+            DCHECK_LE(attno, state->_attrs.size());
 
             state->target_columns.emplace(attno, PgFdwState::TargetColumn{i++, state->_attrs[attno-1]});
 
