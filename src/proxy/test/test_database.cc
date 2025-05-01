@@ -80,6 +80,7 @@ namespace {
         /** allocate session from Test Instance and set the session's instance */
         ServerSessionPtr allocate_session(uint64_t db_id, const std::string &username, DatabaseInstancePtr instance, const std::string &database)
         {
+            std::unique_lock lock(_base_mutex);
             auto session = _allocate_session(std::make_shared<User>(username), db_id, {}, instance, database);
             TestServerSessionPtr test_session = std::dynamic_pointer_cast<TestServerSession>(session);
             test_session->set_instance(instance);
@@ -87,16 +88,30 @@ namespace {
         }
 
         /** override abstract method */
-        void release_session(ServerSessionPtr session, bool deallocate) override
+        void
+        release_session(ServerSessionPtr session, bool deallocate) override
         {
+            std::shared_lock lock(_base_mutex);
             DatabaseSet::_release_session(session, 1, deallocate);
         }
 
         /** make public for testing */
-        DatabaseInstancePtr get_least_loaded_instance() {
+        DatabaseInstancePtr
+        get_least_loaded_instance()
+        {
+            std::shared_lock lock(_base_mutex);
             return _get_least_loaded_instance();
         }
 
+        /** make public for testing */
+        void
+        remove_instance(DatabaseInstancePtr instance)
+        {
+            std::shared_lock lock(_base_mutex);
+            _remove_instance(instance);
+        }
+
+        /** override abstract method */
         void
         release_expired_sessions() override
         {
@@ -107,7 +122,11 @@ namespace {
         }
 
         /** make public for testing */
-        std::map<DatabaseInstancePtr, int> get_instance_sessions() { return _get_instance_sessions(); }
+        std::map<DatabaseInstancePtr, int>
+        get_instance_sessions() {
+            std::shared_lock lock(_base_mutex);
+            return _get_instance_sessions();
+        }
     };
     using TestableDatabaseSetPtr = std::shared_ptr<TestableDatabaseSet>;
 
@@ -172,9 +191,15 @@ namespace {
 
             sleep(4);
 
+            pool->evict_expired_sessions();
+            EXPECT_EQ(pool->size(), pool->get_timeout_limit());
+
             TestServerSessionPtr next_session1 = std::make_shared<TestServerSession>(Session::Type::PRIMARY, 10, 1, "db1", "user1");
             pool->add_session(next_session1);
             EXPECT_EQ(pool->size(), pool->get_timeout_limit() + 1);
+
+            pool->evict_expired_sessions();
+            EXPECT_EQ(pool->size(), pool->get_timeout_limit());
 
             TestServerSessionPtr next_session2 = std::make_shared<TestServerSession>(Session::Type::PRIMARY, 10, 1, "db1", "user2");
             pool->add_session(next_session2);

@@ -231,7 +231,6 @@ namespace springtail::pg_proxy {
         DatabasePoolPtr get_pool() { return _pool; }
     private:
         DatabasePoolPtr _pool{nullptr};               ///< free connections pool for this instance
-        mutable std::shared_mutex _mutex;    ///< mutex for instance
         Session::Type _type;                 ///< type of instance (primary, replica)
         std::string _hostname;               ///< hostname of instance
         std::string _replica_db_prefix;      ///< prefix to be used for replica database
@@ -284,12 +283,6 @@ namespace springtail::pg_proxy {
         }
 
         /**
-         * @brief Remove instance from the replica set
-         * @param instance database instance
-         */
-        void remove_instance(DatabaseInstancePtr instance);
-
-        /**
          * @brief Remove database from the replica set
          * @param db_id database id
          */
@@ -320,6 +313,11 @@ namespace springtail::pg_proxy {
             const std::string &database) = 0;
 
     protected:
+        /**
+         * @brief Remove instance from the replica set
+         * @param instance database instance
+         */
+         void _remove_instance(DatabaseInstancePtr instance);
 
         /**
          * @brief Release session back to pool if space, or deallocate session
@@ -386,9 +384,10 @@ namespace springtail::pg_proxy {
          * @brief Add a replica to the replica set
          * @param replica replica to add
          */
-        void add_replica(DatabaseInstancePtr replica)
+        void
+        add_replica(DatabaseInstancePtr replica)
         {
-            std::unique_lock lock(_mutex);
+            std::unique_lock lock(_base_mutex);
             _replicas.insert(replica);
         }
 
@@ -427,8 +426,6 @@ namespace springtail::pg_proxy {
             const std::string &database) override;
 
     private:
-        std::shared_mutex _mutex; ///< mutex for replicas set
-
         /** list of database instances */
         std::set<DatabaseInstancePtr> _replicas;
     };
@@ -449,7 +446,7 @@ namespace springtail::pg_proxy {
         void
         set_primary(DatabaseInstancePtr primary)
         {
-            std::unique_lock lock(_mutex);
+            std::unique_lock lock(_base_mutex);
             _primary = primary;
         }
 
@@ -457,7 +454,7 @@ namespace springtail::pg_proxy {
         void
         set_standby(DatabaseInstancePtr standby)
         {
-            std::unique_lock lock(_mutex);
+            std::unique_lock lock(_base_mutex);
             _standby = standby;
         }
 
@@ -492,8 +489,6 @@ namespace springtail::pg_proxy {
             const std::string &database) override;
 
     private:
-        std::shared_mutex _mutex; ///< mutex for primary set
-
         DatabaseInstancePtr _primary{nullptr}; ///< primary instance
         DatabaseInstancePtr _standby{nullptr}; ///< standby instance XXX not yet implemented
     };

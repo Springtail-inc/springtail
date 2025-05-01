@@ -47,6 +47,7 @@ namespace springtail::pg_proxy
     void
     DatabasePool::evict_expired_sessions()
     {
+        std::unique_lock lock(_mutex);
         uint64_t now = common::get_time_in_millis() / 1000;
         // cleanup based on the cache entry timestamp
         if (_expiration_interval != 0) {
@@ -106,7 +107,6 @@ namespace springtail::pg_proxy
     {
         uint64_t now = common::get_time_in_millis() / 1000;
         if (!_cache.empty()) {
-            evict_expired_sessions();
             if (_size_limit != 0  && _cache.size() == _size_limit) {
                 _evict_next();
             }
@@ -144,10 +144,8 @@ namespace springtail::pg_proxy
     /*********** Database Set *************/
 
     void
-    DatabaseSet::remove_instance(DatabaseInstancePtr instance)
+    DatabaseSet::_remove_instance(DatabaseInstancePtr instance)
     {
-        std::unique_lock lock(_base_mutex);
-
         // remove from sessions map
         auto instance_it = _sessions.find(instance);
         if (instance_it != _sessions.end()) {
@@ -218,8 +216,6 @@ namespace springtail::pg_proxy
             deallocate = true;
         }
 
-        std::unique_lock lock(_base_mutex);
-
         if (!deallocate) {
             DatabasePoolPtr pool = session->get_instance()->get_pool();
             PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Adding session back to pool: [S:{:d}]", session->id());
@@ -264,8 +260,6 @@ namespace springtail::pg_proxy
         // create a new session from instance
         auto session = instance->allocate_session(user, db_id, parameters, database);
 
-        std::unique_lock lock(_base_mutex); // lock after getting the session, since it is blocking
-
         // add session to instance map
         _sessions[instance][db_id].push_back(session);
 
@@ -303,15 +297,13 @@ namespace springtail::pg_proxy
     void
     DatabaseReplicaSet::remove_replica(DatabaseInstancePtr replica)
     {
-        std::unique_lock lock(_mutex);
+        std::unique_lock lock(_base_mutex);
 
         // Remove from list of replicas
         _replicas.erase(replica);
 
-        lock.unlock();
-
         // remove from the database set
-        DatabaseSet::remove_instance(replica);
+        DatabaseSet::_remove_instance(replica);
     }
 
     void
@@ -320,7 +312,7 @@ namespace springtail::pg_proxy
         PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Replica session released: [S:{:d}]", session->id());
         assert(session->type() == Session::Type::REPLICA);
 
-        std::shared_lock lock(_mutex);
+        std::shared_lock lock(_base_mutex);
 
         // check if replica instance is still alive, if so try to add back to pool
         if (_replicas.find(session->get_instance()) == _replicas.end()) {
@@ -333,8 +325,7 @@ namespace springtail::pg_proxy
     void
     DatabaseReplicaSet::release_expired_sessions()
     {
-        std::shared_lock lock(_mutex);
-        std::unique_lock base_lock(_base_mutex);
+        std::shared_lock lock(_base_mutex);
         for (auto replica : _replicas) {
             auto pool = replica->get_pool();
             pool->evict_expired_sessions();
@@ -347,13 +338,12 @@ namespace springtail::pg_proxy
                                          const std::unordered_map<std::string, std::string> &parameters,
                                          const std::string &database)
     {
-        std::shared_lock lock(_mutex);
+        std::shared_lock lock(_base_mutex);
 
         auto instance = _get_least_loaded_instance();
         if (instance == nullptr && !_replicas.empty()) {
             instance = *_replicas.begin();
         }
-        lock.unlock();
 
         if (instance == nullptr) {
             return nullptr;
@@ -370,7 +360,7 @@ namespace springtail::pg_proxy
         PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Primary Session released: [S:{:d}]", session->id());
         assert(session->type() == Session::Type::PRIMARY);
 
-        std::shared_lock lock(_mutex);
+        std::shared_lock lock(_base_mutex);
 
         // check if primary instance is still alive, if so try to add to pool
         if (session->get_instance() != _primary) {
@@ -383,8 +373,7 @@ namespace springtail::pg_proxy
     void
     DatabasePrimarySet::release_expired_sessions()
     {
-        std::shared_lock lock(_mutex);
-        std::unique_lock base_lock(_base_mutex);
+        std::shared_lock lock(_base_mutex);
         if (_primary != nullptr) {
             _primary->get_pool()->evict_expired_sessions();
         }
@@ -399,14 +388,13 @@ namespace springtail::pg_proxy
                                          const std::unordered_map<std::string, std::string> &parameters,
                                          const std::string &database)
     {
-        std::shared_lock lock(_mutex);
+        std::shared_lock lock(_base_mutex);
 
         // get primary instance
         auto instance = _primary;
         if (instance == nullptr) {
             return nullptr;
         }
-        lock.unlock();
 
         // allocate session
         auto session = DatabaseSet::_allocate_session(user, db_id, parameters, instance, database);
