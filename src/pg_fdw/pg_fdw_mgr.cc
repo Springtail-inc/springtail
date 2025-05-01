@@ -472,6 +472,11 @@ namespace springtail::pg_fdw {
     void
     PgFdwMgr::fdw_end_scan(PgFdwState *state)
     {
+#if SPRINGTAIL_INCLUDE_TIME_TRACES
+        LOG_WARN("{}", time_trace::traces.format());
+        time_trace::traces.reset();
+#endif
+
         LOG_DEBUG(LOG_FDW, "fdw_end: tid: {}, rows fetched: {}, rows skipped: {}",
                             state->tid, state->rows_fetched, state->rows_skipped);
         delete state;
