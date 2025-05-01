@@ -53,6 +53,31 @@ extern "C" {
 namespace springtail::pg_fdw {
     using springtail::Index;
 
+    bool
+    _check_type_compatibility(int32_t pg_type, int32_t pg_type2)
+    {
+        // XXX should handle coercion of like types, like float, int, etc.
+
+        // check if the types are compatible
+        if (pg_type == pg_type2) {
+            return true;
+        }
+
+        // check if the types are enums
+        if (pg_type >= constant::FIRST_USER_DEFINED_PG_OID &&
+            pg_type2 >= constant::FIRST_USER_DEFINED_PG_OID) {
+            return true;
+        }
+
+        // check if they are the same springtail schema type
+        // the type category doesn't matter for these checks
+        if (convert_pg_type(pg_type, 'N') == convert_pg_type(pg_type2, 'N')) {
+            return true;
+        }
+
+        return false;
+    }
+
     // This is to return an intersection between Index columns and quals.
     // The intersection must start at the first index column and be
     // continuous.
@@ -68,11 +93,11 @@ namespace springtail::pg_fdw {
                 ConstQualPtr qual = static_cast<ConstQualPtr>(lfirst(lc));
 
                 // must be of the same internal type
-                // XXX must handle user defined enum, the types won't match
-                //if (convert_pg_type(state->columns.at(pos).pg_type) != convert_pg_type(qual->base.typeoid)) {
-                //    continue;
-                //}
+                if (_check_type_compatibility(state->columns.at(pos).pg_type, qual->base.typeoid) == false) {
+                    continue;
+                }
 
+                // check if type is sortable
                 if (PgFdwMgr::_is_type_sortable(qual->base.typeoid, qual->base.op) &&
                         qual->base.isArray == false &&
                         qual->base.varattno == pos ) {

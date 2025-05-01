@@ -79,6 +79,7 @@ _gen_table_request(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
         column->set_is_nullable(col.is_nullable);
         column->set_is_generated(col.is_generated);
         column->set_type_name(col.type_name);
+        column->set_type_namespace(col.type_namespace);
         if (col.is_pkey) {
             column->set_pk_position(col.pk_position);
         }
@@ -286,8 +287,9 @@ Client::drop_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &ms
 {
     proto::UserTypeRequest request;
     _set_request_common(request, db_id, xid);
-    request.set_namespace_id(msg.oid);
+    request.set_type_id(msg.oid);
     request.set_name(msg.name);
+    request.set_namespace_name(msg.namespace_name);
 
     proto::DDLStatement response;
     grpc_client::retry_rpc("SysTblMgr", "DropUserType",

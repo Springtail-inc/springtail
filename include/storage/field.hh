@@ -1386,7 +1386,7 @@ namespace springtail {
                      const std::any &row)
             : Tuple(row),
               _array(array)
-        { }
+        { DCHECK_NE(_array, nullptr); }
 
         std::size_t size() const override {
             return _array->size();

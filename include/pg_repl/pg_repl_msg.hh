@@ -168,6 +168,7 @@ namespace springtail
         bool is_user_defined_type;
         char type_category;  // type category of 'E' represents enum
         std::string type_name;
+        std::string type_namespace;
         std::string collation;
     };
 

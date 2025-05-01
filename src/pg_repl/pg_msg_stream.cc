@@ -851,6 +851,7 @@ namespace springtail {
             json["is_pkey"].get_to(column.is_pkey);
             json["is_generated"].get_to(column.is_generated);
             json["type_name"].get_to(column.type_name);
+            json["type_namespace"].get_to(column.type_namespace);
 
             if (!json["collation"].is_null()) {
                 column.collation = json["collation"].get<std::string>();
@@ -1083,7 +1084,7 @@ namespace springtail {
         std::string object_type;
         json["obj"].get_to(object_type);
         if (object_type != "schema") {
-            LOG_ERROR("Create/alter namespace msg not for namespace object, for: {}\n", object_type);
+            LOG_ERROR("Drop namespace msg not for namespace object, for: {}\n", object_type);
             return nullptr;
         }
 
@@ -1157,8 +1158,8 @@ namespace springtail {
         // check object type, should be of type namespace
         std::string object_type;
         json["obj"].get_to(object_type);
-        if (object_type != "schema") {
-            LOG_ERROR("Create/alter namespace msg not for namespace object, for: {}\n", object_type);
+        if (object_type != "type") {
+            LOG_ERROR("Drop msg not for usertype object, for: {}\n", object_type);
             return nullptr;
         }
 
@@ -1166,6 +1167,7 @@ namespace springtail {
         usertype_msg.lsn = message.lsn;
         json["oid"].get_to(usertype_msg.oid);
         json["name"].get_to(usertype_msg.name);
+        json["schema"].get_to(usertype_msg.namespace_name);
 
         LOG_DEBUG(LOG_PG_REPL, "Decoded drop usertype: json: {}", json.dump());
 

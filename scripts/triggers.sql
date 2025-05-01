@@ -30,7 +30,8 @@ BEGIN
                 -- seems drop type does two drops, one for the type and one for the enum labels
                 -- ignore the enum labels, if obj.object_identity contains []
                 -- RAISE NOTICE 'springtail: drop type % % %', obj.schema_name, obj.object_name, obj.object_identity;
-                IF obj.object_identity LIKE '%[]' AND obj.object_name LIKE '_%' THEN
+                IF (obj.object_identity LIKE '%[]' AND obj.object_name LIKE '_%')
+                    OR obj.original IS FALSE OR obj.schema_name LIKE 'pg_%' THEN
                     CONTINUE;
                 END IF;
                 tag_name := 'DROP TYPE';
@@ -93,9 +94,10 @@ BEGIN
                 'is_generated', (pga.attgenerated = 's')::boolean,
                 'type_name', t.typname,
                 'collation', col.collname,
-                'is_user_defined_type', (t.typnamespace <> 'pg_catalog'::regnamespace)::boolean,
+                'is_user_defined_type', (t.typnamespace <> 'pg_catalog'::regnamespace AND t.typnamespace <> 'information_schema'::regnamespace)::boolean,
                 'is_non_standard_collation', coalesce((col.collname NOT IN ('C', 'en_US.UTF-8', 'default'))::boolean, false),
-                'type_category', t.typcategory
+                'type_category', t.typcategory,
+                'type_namespace', nsp.nspname
             ) AS json_col
             FROM pg_attribute pga
             JOIN information_schema.columns
@@ -104,6 +106,7 @@ BEGIN
             ON pga.attrelid=pgi.indrelid AND pgi.indisprimary
             LEFT JOIN pg_type t ON pga.atttypid = t.oid
             LEFT JOIN pg_collation col ON pga.attcollation = col.oid AND pga.attcollation <> 0
+            LEFT JOIN pg_catalog.pg_namespace nsp ON nsp.oid = t.typnamespace
             WHERE pga.attrelid=obj.objid
               AND quote_literal(table_schema) = quote_literal(obj.schema_name)
               AND quote_literal(table_name) = quote_literal(table_relname)

@@ -470,8 +470,8 @@ namespace springtail::pg_fdw {
             return true;
 
         } catch (Error &e) {
-            assert(0); // assert in debug
             e.log_backtrace();
+            assert(0); // assert in debug
             return false;
         }
     }
@@ -713,7 +713,8 @@ namespace springtail::pg_fdw {
     {
         std::map<uint32_t, std::string> type_map;
 
-        // find the missing type names
+        // lookup the type names from pg_types in the cached type map
+        // those that match are set in type_map, those that don't are returned as missing
         auto &&missing_oids = _type_map_difference(pg_types, type_map);
         if (missing_oids.empty()) {
             // have them all return the map
@@ -759,20 +760,49 @@ namespace springtail::pg_fdw {
         // iterate over the columns, adding each to the create statement
         // name, type, is_nullable, default value
         int i = 0, num_cols = columns.size();
+
+        // generate a type map for normal column types
+        /*
+        std::set<uint32_t> pg_types;
+        for (const auto &col : columns) {
+            uint32_t type_oid = col.at("type").get<uint32_t>();
+            if (type_oid < constant::FIRST_USER_DEFINED_PG_OID) {
+                // this is a normal type, add it to the set
+                pg_types.insert(type_oid);
+            }
+        }
+        // resolve the types against the cached types and query the database for those missing
+        auto &&type_map = _query_type_names(conn, pg_types);
+*/
+        // iterate over the columns again, adding each to the create statement
         for (const auto &col : columns) {
             // check for userdefined type
-            uint32_t type_oid = col.at("type");
-            std::string type_name = col.at("type_name");
+            uint32_t type_oid = col.at("type").get<uint32_t>();
+            std::string type_name = col.at("type_name").get<std::string>();
+            std::string type_namespace = col.at("type_namespace").get<std::string>();
+
+            CHECK(!type_name.empty());
 
             // the constant FirstNormalObjectId is defined in postgres include/access/transam.h
             if (type_oid >= constant::FIRST_USER_DEFINED_PG_OID) {
                 // this is a user defined type, fully qualify it
-                type_name = fmt::format("{}.{}", escaped_schema,
+                type_name = fmt::format("{}.{}", conn->escape_identifier(type_namespace),
                                                  conn->escape_identifier(type_name));
             }
 
+            /*
+            // the constant FirstNormalObjectId is defined in postgres include/access/transam.h
+            if (type_oid >= constant::FIRST_USER_DEFINED_PG_OID) {
+                // this is a user defined type, fully qualify it
+                type_name = fmt::format("{}.{}", escaped_schema,
+                                                 conn->escape_identifier(col.at("type_name")));
+            } else {
+                // this is a built in type, just use the name
+                type_name = type_map.at(type_oid);
+            }
+*/
             std::string column = fmt::format("{} {} {} {}", conn->escape_identifier(col.at("name")),
-                                             type_name, col.at("nullable") ? "" : "NOT NULL",
+                                             type_name, col.at("nullable").get<bool>() ? "" : "NOT NULL",
                                              (i == num_cols - 1) ? "" : ",");
 
             i++;

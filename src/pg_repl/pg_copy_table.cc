@@ -89,11 +89,13 @@ namespace springtail
         "SELECT column_name, ordinal_position, is_nullable::boolean, "
         "       column_default, atttypid, "
         "       pga.attgenerated = 's' AS is_generated, "
-        "       (t.typnamespace <> 'pg_catalog'::regnamespace)::boolean AS is_user_defined_type, "
+        "       (t.typnamespace <> 'pg_catalog'::regnamespace AND t.typnamespace <> 'information_schema'::regnamespace)::boolean AS is_user_defined_type, "
         "       coalesce((col.collname NOT IN ('C', 'en_US.UTF-8', 'default'))::boolean, false) AS is_non_standard_collation,"
         "       coalesce((pga.attnum=any(pgi.indkey))::boolean, false) as is_pkey, "
         "       array_position(pgi.indkey, pga.attnum), "
-        "       t.typcategory as type_category "
+        "       t.typcategory as type_category, "
+        "       t.typname as type_name, "
+        "       nsp.nspname AS type_namespace "
         "FROM pg_catalog.pg_attribute pga "
         "JOIN information_schema.columns "
         "ON column_name=pga.attname "
@@ -101,6 +103,7 @@ namespace springtail
         "ON pga.attrelid=pgi.indrelid AND pgi.indisprimary "
         "LEFT JOIN pg_collation col ON pga.attcollation = col.oid AND pga.attcollation <> 0 "
         "LEFT JOIN pg_type t ON pga.atttypid = t.oid "
+        "LEFT JOIN pg_catalog.pg_namespace nsp ON nsp.oid = t.typnamespace "
         "WHERE pga.attrelid={} "
         "AND table_schema='{}' "
         "AND table_name='{}' "
@@ -295,10 +298,10 @@ namespace springtail
                                   uint64_t table_oid,
                                   uint64_t schema_oid)
     {
-        std::string table_name_ptr = _connection.escape_identifier(table_name);
-        std::string schema_name_ptr = _connection.escape_identifier(schema_name);
+        std::string table_name_ptr = _connection.escape_string(table_name);
+        std::string schema_name_ptr = _connection.escape_string(schema_name);
 
-        _connection.exec(fmt::format(SCHEMA_QUERY, table_oid, schema_name, table_name));
+        _connection.exec(fmt::format(SCHEMA_QUERY, table_oid, schema_name_ptr, table_name_ptr));
 
         if (_connection.ntuples() == 0) {
             LOG_ERROR("Table not found: {}.{}", schema_name, table_name);
@@ -306,7 +309,7 @@ namespace springtail
             throw PgTableNotFoundError();
         }
 
-        if (_connection.nfields() != 11) {
+        if (_connection.nfields() != 13) {
             LOG_ERROR("Error: unexpected data from schema query or table not found");
             LOG_ERROR("fields: {}, tuples: {}", _connection.nfields(), _connection.ntuples());
             _connection.clear();
@@ -365,6 +368,12 @@ namespace springtail
 
                 // type category of 'E' represents enum
                 column.type_category = _connection.get_char(i, 10);
+
+                // column type name
+                column.type_name = _connection.get_string(i, 11);
+
+                // column type namespace
+                column.type_namespace = _connection.get_string(i, 12);
 
                 // springtail type
                 column.type = convert_pg_type(column.pg_type, column.type_category);
@@ -514,6 +523,8 @@ namespace springtail
             column->set_position(col.position);
             column->set_is_nullable(col.nullable);
             column->set_is_generated(false);
+            column->set_type_name(col.type_name);
+            column->set_type_namespace(col.type_namespace);
             if (col.pkey_position) {
                 column->set_pk_position(*col.pkey_position);
             }
@@ -952,6 +963,7 @@ namespace springtail
             } catch (PgTableNotFoundError &e) {
                 LOG_ERROR("Table not found: {}.{}", request->schema_name, request->table_name);
             } catch (PgQueryError &e) {
+                e.log_backtrace();
                 LOG_ERROR("Error copying table: {}.{}", request->schema_name, request->table_name);
                 assert(false);
             }

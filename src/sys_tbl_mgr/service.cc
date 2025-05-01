@@ -477,6 +477,7 @@ Service::_create_table(const proto::TableRequest& request)
         column_json["name"] = column.name();
         column_json["type"] = column.pg_type();
         column_json["type_name"] = column.type_name();
+        column_json["type_namespace"] = column.type_namespace();
         column_json["nullable"] = column.is_nullable();
         if (column.has_default_value()) {
             column_json["default"] = column.default_value();
@@ -617,9 +618,9 @@ nlohmann::json
 Service::_drop_table(const proto::DropTableRequest& request)
 {
     // retrieve the id of the namespace
-    // DROP SCHEMA in PG will automatically drop all tables 
+    // DROP SCHEMA in PG will automatically drop all tables
     // DropTable may be called after DropNamespace, so we
-    // don't check if the namespace was dropped and just use 
+    // don't check if the namespace was dropped and just use
     // the id of the dropped schema in this case
     auto ns_info = _get_namespace_info(request.db_id(), request.namespace_name(),
                                        XidLsn(request.xid(), request.lsn()), false);
@@ -1187,24 +1188,20 @@ Service::DropUserType(grpc::ServerContext* context,
     boost::shared_lock lock(_write_mutex);
 
     XidLsn xid(request->xid(), request->lsn());
+    nlohmann::json ddl;
     auto user_type_info = _get_usertype_info(request->db_id(), request->type_id(), xid);
     if (user_type_info == nullptr) {
         // drop could for a type we don't support, so ignore it here
         LOG_WARN("User type {} not found", request->type_id());
-        nlohmann::json ddl = {"action", "no_change"};
+        ddl["action"] = "no_change";
+    } else {
+        // update the user defined types table
+        ddl = _mutate_usertype(request->db_id(), request->type_id(), request->name(),
+            request->namespace_id(), request->type(), request->value_json(), xid, false);
 
-        // serialize the JSON and return
-        response->set_statement(nlohmann::to_string(ddl));
-        span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
-        return grpc::Status::OK;
+        ddl["action"] = "ut_drop";
+        ddl["schema"] = request->namespace_name();
     }
-
-    // update the user defined types table
-    auto ddl = _mutate_usertype(request->db_id(), request->type_id(), request->name(),
-        request->namespace_id(), request->type(), request->value_json(), xid, false);
-
-    ddl["action"] = "ut_drop";
-    ddl["schema"] = request->namespace_name();
 
     // serialize the JSON and return
     response->set_statement(nlohmann::to_string(ddl));
@@ -1259,9 +1256,13 @@ Service::_mutate_usertype(uint64_t db_id,
     ddl["xid"] = xid.xid;
     ddl["lsn"] = xid.lsn;
     ddl["name"] = name;
-    ddl["value"] = value_json;
-    ddl["type"] = type;
-    ddl["namespace_id"] = ns_id;
+
+    if (exists) {
+        // these are not set for drop when exists is false
+        ddl["value"] = value_json;
+        ddl["type"] = type;
+        ddl["namespace_id"] = ns_id;
+    }
 
     // record the user defined type info into the cache
     {
@@ -1338,6 +1339,9 @@ Service::Revert(grpc::ServerContext* context,
     // ensure that we don't have a partially committed XID currently in-memory
     CHECK(_write[request->db_id()].empty());
 
+    LOG_DEBUG(LOG_SCHEMA, "got Revert() -- db {} xid {}", request->db_id(),
+                request->xid());
+
     // get the base directory for table data
     std::filesystem::path table_base;
     nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
@@ -1352,6 +1356,11 @@ Service::Revert(grpc::ServerContext* context,
 
         // find all roots files and extract their XIDs
         std::map<uint64_t, std::filesystem::path> roots_files;
+        if (!std::filesystem::exists(table_dir)) {
+            LOG_WARN("Table directory {} does not exist", table_dir.string());
+            continue;
+        }
+
         for (const auto& entry : std::filesystem::directory_iterator(table_dir)) {
             // only process files
             if (!entry.is_regular_file()) {
@@ -1373,7 +1382,7 @@ Service::Revert(grpc::ServerContext* context,
             }
         }
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Found {} root files for system table {}",
+        LOG_DEBUG(LOG_SCHEMA, "Found {} root files for system table {}",
                   roots_files.size(), table_id);
 
         // find the largest valid XID
@@ -1383,13 +1392,13 @@ Service::Revert(grpc::ServerContext* context,
             auto root_i = std::make_reverse_iterator(del_i);
 
             if (root_i == roots_files.rend()) {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Clear system table {}", root_i->second, table_id);
+                LOG_DEBUG(LOG_SCHEMA, "Clear system table {}", root_i->second, table_id);
                 // there's no valid roots, clear *all* of the system table data
                 for (const auto& entry : std::filesystem::directory_iterator(table_dir)) {
                     std::filesystem::remove_all(entry.path());
                 }
             } else {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Picked root file {} for system table {}", root_i->second,
+                LOG_DEBUG(LOG_SCHEMA, "Picked root file {} for system table {}", root_i->second,
                           table_id);
 
                 // update the symlink
@@ -1402,7 +1411,7 @@ Service::Revert(grpc::ServerContext* context,
 
                 // remove any roots files with larger XIDs
                 for (; del_i != roots_files.end(); ++del_i) {
-                    LOG_DEBUG(LOG_PG_LOG_MGR, "Delete root file {} for system table {}",
+                    LOG_DEBUG(LOG_SCHEMA, "Delete root file {} for system table {}",
                               del_i->second, table_id);
                     std::filesystem::remove(del_i->second);
                 }
@@ -1608,7 +1617,7 @@ Service::_clear_table_info(uint64_t db_id)
     _table_cache.erase(db_id);
 }
 
-void 
+void
 Service::_clear_namespace_info(uint64_t db_id)
 {
     boost::unique_lock lock(_mutex);

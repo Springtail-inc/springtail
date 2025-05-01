@@ -16,8 +16,9 @@ message TableColumn {
   bool is_nullable = 5;
   bool is_generated = 6;
   string type_name = 7;
-  optional int32 pk_position = 8;
-  optional string default_value = 9;
+  string type_namespace = 8;
+  optional int32 pk_position = 9;
+  optional string default_value = 10;
 }
 
 message TableInfo {

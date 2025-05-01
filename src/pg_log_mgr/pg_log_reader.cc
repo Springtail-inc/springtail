@@ -154,6 +154,9 @@ namespace springtail::pg_log_mgr {
 
         op_f = schema->get_mutable_field("__springtail_op");
         lsn_f = schema->get_mutable_field("__springtail_lsn");
+
+        // reset fields; forces a resync of fields during add_mutation()
+        fields = nullptr;
     }
 
     FieldArrayPtr
@@ -207,9 +210,6 @@ namespace springtail::pg_log_mgr {
         // get the pg fields for the primary key columns
         auto pkey_pg_types = table_schema->get_sort_key_pg_types();
         pg_pkey_fields = get_pg_fields(batch, xid, pkey_fields, pkey_pg_types);
-
-        // reset fields; forces a resync of fields during add_mutation()
-        fields = nullptr;
     }
 
     template <int T>
@@ -265,6 +265,7 @@ namespace springtail::pg_log_mgr {
         if (entry.fields == nullptr) {
             entry.update_fields(this, xidlsn);
         }
+        CHECK_NE(entry.fields, nullptr);
 
         // add the mutation to the batch
         LOG_DEBUG(LOG_PG_LOG_MGR, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, T);
@@ -760,6 +761,8 @@ namespace springtail::pg_log_mgr {
                 auto &type_msg = std::get<PgMsgUserType>(change->msg);
                 std::string &&ddl_stmt = client->drop_usertype(_db, xidlsn, type_msg);
                 auto json = nlohmann::json::parse(ddl_stmt);
+                LOG_DEBUG(LOG_PG_LOG_MGR, "DROP TYPE: xid={}, pg_xid={}, tid={}, ddl={}", xidlsn.xid,
+                          type_msg.xid, type_msg.oid, json.dump());
                 if (json.at("action").get<std::string>() != "no_change") {
                     redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 }

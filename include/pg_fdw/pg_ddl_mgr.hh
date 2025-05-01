@@ -199,7 +199,7 @@ namespace springtail::pg_fdw {
                            const nlohmann::json &ddl);
 
         /** Helper to generate sql for FDW foreign table */
-        static std::string
+        std::string
         _gen_fdw_table_sql(LibPqConnectionPtr conn,
                            const std::string &server_name,
                            const std::string &schema,

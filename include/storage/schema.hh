@@ -50,6 +50,7 @@ namespace springtail {
         bool is_user_defined_type;
         char type_category;  ///< type category of 'E' represents enum
         std::string type_name;
+        std::string type_namespace;
         std::string collation;
         std::optional<uint32_t> pkey_position; ///< position in primary key, if any, 0 based no holes
         std::optional<std::string> default_value;

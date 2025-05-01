@@ -1,4 +1,5 @@
 ## test
+DROP TABLE IF EXISTS ddl_test_column;
 CREATE TABLE IF NOT EXISTS ddl_test_column (id SERIAL PRIMARY KEY, value TEXT);
 
 ALTER TABLE ddl_test_column ADD COLUMN extra_column TEXT;
