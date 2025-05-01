@@ -27,6 +27,9 @@
 #include <sys_tbl_mgr/shm_cache.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 
+//#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
+#include <common/time_trace.hh>
+
 extern "C" {
     #include <postgres.h>
     #include <postgres_ext.h>
@@ -310,6 +313,8 @@ namespace springtail::pg_fdw {
 
         // set the iterators for the scan taking quals into consideration
         _set_scan_iterators(state);
+
+        time_trace::traces.reset();
     }
 
 
@@ -485,6 +490,8 @@ namespace springtail::pg_fdw {
                                bool *nulls,
                                bool *eos)
     {
+        TIME_TRACE_SCOPED(time_trace::traces, iterate_scan_total);
+
         // Note: for now always scan up, so we don't need to check if we are scanning down
         LOG_DEBUG(LOG_FDW, "fdw_iterate_scan: tid: {}", state->tid);
 
@@ -562,11 +569,14 @@ namespace springtail::pg_fdw {
                 DCHECK(it != state->target_columns.end());
                 DCHECK_EQ(it->second.pg_attr.attnum, attno);
 
-                // compare the qual field to the field in the row
-                bool res = _compare_field(row, state->fields->at(it->second.field_idx),
-                                          state->qual_fields->at(i), qual->base.op);
-                if (res) {
-                    continue;
+                {
+                    TIME_TRACE_SCOPED(time_trace::traces, iterate_scan_compare);
+                    // compare the qual field to the field in the row
+                    bool res = _compare_field(row, state->fields->at(it->second.field_idx),
+                                              state->qual_fields->at(i), qual->base.op);
+                    if (res) {
+                        continue;
+                    }
                 }
 
                 // qual doesn't match, so this row must be skipped
@@ -592,18 +602,24 @@ namespace springtail::pg_fdw {
             LOG_DEBUG(LOG_FDW, "Fetching column: {}", attno);
 
             // get field idx that matches this attrno, then fetch the field and data
-            FieldPtr field = state->fields->at(c.field_idx);
+            const FieldPtr& field = state->fields->at(c.field_idx);
 
-            // set value
-            if (!field->is_null(row)) {
-                values[attno-1] = _get_datum_from_field(field, row, c.pg_attr.atttypid, c.pg_attr.atttypmod);
-                nulls[attno-1] = false;
+            {
+                TIME_TRACE_SCOPED(time_trace::traces, iterate_scan_datum);
+                // set value
+                if (!field->is_null(row)) {
+                    values[attno-1] = _get_datum_from_field(field.get(), row, c.pg_attr.atttypid, c.pg_attr.atttypmod);
+                    nulls[attno-1] = false;
+                }
             }
         }
 
         // increment iterator if scanning up
-        if (state->scan_asc) {
-            ++(*state->iter_start);
+        {
+            TIME_TRACE_SCOPED(time_trace::traces, iterate_scan_next);
+            if (state->scan_asc) {
+                ++(*state->iter_start);
+            }
         }
 
         return true;
@@ -813,7 +829,7 @@ namespace springtail::pg_fdw {
     }
 
     Datum
-    PgFdwMgr::_get_datum_from_field(const FieldPtr& field,
+    PgFdwMgr::_get_datum_from_field(const Field* field,
                                     const Extent::Row &row,
                                     int32_t pg_type,
                                     int32_t atttypmod)
@@ -843,8 +859,7 @@ namespace springtail::pg_fdw {
             return Float4GetDatum(field->get_float32(row));
         case SchemaType::TEXT: {
             const std::string_view value(field->get_text(row));
-            char *duped_str = pnstrdup(value.data(), value.size());
-            return CStringGetTextDatum(duped_str);
+            return PointerGetDatum(cstring_to_text_with_len(value.data(), value.size()));
         }
         case SchemaType::BINARY: {
             // retrieve the type's entry from the pg_type table
