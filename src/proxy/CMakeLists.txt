@@ -41,49 +41,59 @@ target_link_libraries(springtail_proxy
     PRIVATE xxHash::xxhash
 )
 
+## unit tests
 # test parser executable
-add_executable(test_parser test/test_parser.cc)
-target_include_directories(test_parser
-    PRIVATE ${CMAKE_SOURCE_DIR}/include
-    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/
-    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src
-    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src/postgres/include
-    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/vendor/include
+springtail_unit_test(test_parser
+  SOURCES test/test_parser.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+           ${CMAKE_SOURCE_DIR}/external/libpg_query/
+           ${CMAKE_SOURCE_DIR}/external/libpg_query/src
+           ${CMAKE_SOURCE_DIR}/external/libpg_query/src/postgres/include
+           ${CMAKE_SOURCE_DIR}/external/libpg_query/vendor/include
+  LIBS springtail_proxy GTest::gtest_main
 )
-target_link_libraries(test_parser
-    PRIVATE springtail_proxy
-    PRIVATE GTest::gtest_main
-)
-add_dsymutil_command(test_parser)
-gtest_discover_tests(test_parser)
 
 # test user manager executable
-add_executable(test_user_mgr test/test_user_mgr.cc)
-target_include_directories(test_user_mgr
-    PRIVATE ${CMAKE_SOURCE_DIR}/include
-    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/
-    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src
-    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src/postgres/include
-    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/vendor/include
+springtail_unit_test(test_user_mgr
+  SOURCES test/test_user_mgr.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+           ${CMAKE_SOURCE_DIR}/external/libpg_query/
+           ${CMAKE_SOURCE_DIR}/external/libpg_query/src
+           ${CMAKE_SOURCE_DIR}/external/libpg_query/src/postgres/include
+           ${CMAKE_SOURCE_DIR}/external/libpg_query/vendor/include
+  LIBS springtail_proxy GTest::gtest_main
 )
-target_link_libraries(test_user_mgr
-    PRIVATE springtail_proxy
-    PRIVATE GTest::gtest_main
-)
-add_dsymutil_command(test_user_mgr)
-gtest_discover_tests(test_user_mgr)
 
 # test database manager executable
-add_executable(test_database_mgr test/test_database_mgr.cc)
-target_include_directories(test_database_mgr
-    PRIVATE ${CMAKE_SOURCE_DIR}/include
+springtail_unit_test(test_database_mgr
+  SOURCES test/test_database_mgr.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_proxy GTest::gtest_main
 )
-target_link_libraries(test_database_mgr
-    PRIVATE springtail_proxy
-    PRIVATE GTest::gtest_main
+
+springtail_unit_test(test_database
+  SOURCES test/test_database.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_proxy GTest::gtest_main
 )
-add_dsymutil_command(test_database_mgr)
-gtest_discover_tests(test_database_mgr)
+
+springtail_unit_test(test_util
+  SOURCES test/test_util.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_common GTest::gtest_main
+)
+
+springtail_unit_test(test_msg_queue
+  SOURCES test/test_msg_queue.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_common GTest::gtest_main
+)
+
+springtail_unit_test(test_scram
+  SOURCES test/test_scram.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_proxy GTest::gtest_main
+)
 
 # test parsing executable
 add_executable(parsing test/parsing.cc)
@@ -120,48 +130,6 @@ target_link_libraries(test_logger
     PUBLIC springtail_common
 )
 add_dsymutil_command(test_logger)
-
-# test database
-add_executable(test_database test/test_database.cc)
-target_include_directories(test_database
-    PRIVATE ${CMAKE_SOURCE_DIR}/include
-)
-target_link_libraries(test_database
-    PUBLIC springtail_proxy
-    PRIVATE GTest::gtest_main
-)
-add_dsymutil_command(test_database)
-gtest_discover_tests(test_database)
-
-add_executable(test_util test/test_util.cc)
-target_include_directories(test_util
-    PRIVATE ${CMAKE_SOURCE_DIR}/include
-)
-target_link_libraries(test_util
-    PUBLIC springtail_common
-    PRIVATE GTest::gtest_main
-)
-gtest_discover_tests(test_util)
-
-add_executable(test_msg_queue test/test_msg_queue.cc)
-target_include_directories(test_msg_queue
-    PRIVATE ${CMAKE_SOURCE_DIR}/include
-)
-target_link_libraries(test_msg_queue
-    PUBLIC springtail_common
-    PRIVATE GTest::gtest_main
-)
-gtest_discover_tests(test_msg_queue)
-
-add_executable(test_scram test/test_scram.cc)
-target_include_directories(test_scram
-    PRIVATE ${CMAKE_SOURCE_DIR}/include
-)
-target_link_libraries(test_scram
-    PUBLIC springtail_common springtail_proxy
-    PRIVATE GTest::gtest_main
-)
-gtest_discover_tests(test_scram)
 
 # install proxy to install directory
 install(TARGETS

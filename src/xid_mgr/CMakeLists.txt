@@ -56,18 +56,7 @@ target_link_libraries(springtail_xid_mgr
     protobuf::libprotobuf
 )
 
-add_executable(threaded_test test/threaded_test.cc)
-target_include_directories(threaded_test PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
-target_link_libraries(threaded_test
-    PUBLIC springtail_common
-           springtail_test
-           springtail_xid_mgr
-           springtail_xid_mgr_client
-    PRIVATE Boost::program_options
-            GTest::gtest_main
-)
-add_dsymutil_command(threaded_test)
-
+## helpers
 add_executable(xid_client test/xid_client.cc)
 target_include_directories(xid_client PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
 target_link_libraries(xid_client
@@ -93,37 +82,38 @@ target_link_libraries(roll_back_xact_log
 target_include_directories(roll_back_xact_log PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_dsymutil_command(roll_back_xact_log)
 
-add_executable(test_xid_mgr_xact_log test/test_xact_log.cc)
-target_link_libraries(test_xid_mgr_xact_log
-    PUBLIC springtail_xid_mgr
-           springtail_common
-    PRIVATE GTest::gtest_main)
-target_include_directories(test_xid_mgr_xact_log PRIVATE ${CMAKE_SOURCE_DIR}/include)
-add_dsymutil_command(test_xid_mgr_xact_log)
-
-add_executable(test_ssl test/test_ssl.cc)
-target_include_directories(test_ssl
-    PUBLIC
-    ${CMAKE_BINARY_DIR}/src # for generated protobuf files
-    PRIVATE
-    ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH}
+## unit tests
+springtail_unit_test(threaded_test
+  SOURCES test/threaded_test.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH}
+  LIBS springtail_common
+       springtail_test
+       springtail_xid_mgr
+       springtail_xid_mgr_client
+       Boost::program_options
+       GTest::gtest_main
 )
-target_link_libraries(test_ssl
-    PUBLIC
-    springtail_common
-    springtail_test
-    springtail_xid_mgr
-    springtail_xid_mgr_client
-    PRIVATE
-    Boost::program_options
-    GTest::gtest_main
-)
-add_dsymutil_command(test_ssl)
 
-# gtests
-gtest_discover_tests(test_xid_mgr_xact_log)
-gtest_discover_tests(threaded_test)
-gtest_discover_tests(test_ssl)
+springtail_unit_test(test_xid_mgr_xact_log
+  SOURCES test/test_xact_log.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_common
+       springtail_xid_mgr
+       GTest::gtest_main
+)
+
+springtail_unit_test(test_ssl
+  SOURCES test/test_ssl.cc
+  INCLUDES ${CMAKE_BINARY_DIR}/src # for generated protobuf files
+           ${CMAKE_SOURCE_DIR}/include
+           ${VCPKG_INCLUDE_PATH}
+  LIBS springtail_common
+       springtail_test
+       springtail_xid_mgr
+       springtail_xid_mgr_client
+       Boost::program_options
+       GTest::gtest_main
+)
 
 # install utilities to install directory
 install(TARGETS

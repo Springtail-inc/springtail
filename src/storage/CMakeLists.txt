@@ -42,8 +42,6 @@ target_include_directories(dump_headers PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(dump_headers PUBLIC springtail_storage)
 add_dsymutil_command(dump_headers)
 
-## tests
-
 if(LINUX)
     set(GCOV_LIB "gcov")
 else()
@@ -58,67 +56,56 @@ target_link_libraries(benchmark_btree
     PRIVATE benchmark::benchmark ${GCOV_LIB})
 add_dsymutil_command(benchmark_btree)
 
+## unit tests
 # io test
-add_executable(test_io test/io_test.cc)
-target_include_directories(test_io PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_io
-  PUBLIC springtail_storage
-  PRIVATE GTest::gtest_main
+springtail_unit_test(test_io
+  SOURCES test/io_test.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_storage GTest::gtest_main
 )
-add_dsymutil_command(test_io)
 
 # btree test
-add_executable(test_btree test/test_btree.cc)
-target_include_directories(test_btree PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_options(test_btree PRIVATE "--coverage")
-target_link_libraries(test_btree
-    PUBLIC springtail_storage GTest::gtest_main
-    PRIVATE unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB})
-add_dsymutil_command(test_btree)
+springtail_unit_test(test_btree
+  SOURCES test/test_btree.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LINK_OPTIONS "--coverage"
+  LIBS springtail_storage GTest::gtest_main unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB}
+  WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
+)
 
 # table test
-add_executable(test_table test/test_table.cc)
-target_include_directories(test_table PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_options(test_table PRIVATE "--coverage")
-target_link_libraries(test_table
-    PUBLIC springtail_storage springtail_test GTest::gtest_main
-    PRIVATE unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB})
-add_dsymutil_command(test_table)
+springtail_unit_test(test_table
+  SOURCES test/test_table.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LINK_OPTIONS "--coverage"
+  LIBS springtail_storage springtail_test GTest::gtest_main unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB}
+  WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
+)
 
 # table_mgr test
-add_executable(test_table_mgr test/test_table_mgr.cc)
-target_include_directories(test_table_mgr PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_options(test_table_mgr PRIVATE "--coverage")
-target_link_libraries(test_table_mgr
-    PUBLIC springtail_storage springtail_test GTest::gtest_main
-    PRIVATE unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB})
-add_dsymutil_command(test_table_mgr)
+springtail_unit_test(test_table_mgr
+  SOURCES test/test_table_mgr.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LINK_OPTIONS "--coverage"
+  LIBS springtail_storage springtail_test GTest::gtest_main unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB}
+  WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
+)
 
 # cache test
-add_executable(test_cache test/test_cache.cc)
-target_include_directories(test_cache PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_options(test_cache PRIVATE "--coverage")
-target_link_libraries(test_cache
-    PUBLIC springtail_storage GTest::gtest_main
-    PRIVATE unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB})
-add_dsymutil_command(test_cache)
+springtail_unit_test(test_cache
+  SOURCES test/test_cache.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LINK_OPTIONS "--coverage"
+  LIBS springtail_storage GTest::gtest_main unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB}
+  WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
+)
 
 # extent test
-add_executable(test_extent test/test_extent.cc)
-target_include_directories(test_extent PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_extent PUBLIC springtail_storage GTest::gtest_main)
-add_dsymutil_command(test_extent)
-
-# hook tests into gtest framework
-gtest_discover_tests(test_extent)
-gtest_discover_tests(test_btree
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test)
-gtest_discover_tests(test_table
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test)
-gtest_discover_tests(test_table_mgr
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test)
-gtest_discover_tests(test_cache
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test)
-gtest_discover_tests(test_io)
+springtail_unit_test(test_extent
+  SOURCES test/test_extent.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_storage GTest::gtest_main
+  WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
+)
 
 install(TARGETS dump_system_tables dump_headers RUNTIME DESTINATION bin/utils)
