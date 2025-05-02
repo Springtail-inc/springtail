@@ -73,14 +73,26 @@ namespace springtail::pg_fdw {
         std::unordered_map<int, uint32_t> attr_map; ///< Map from FDW local attribute number to Springtail's column position
         std::unordered_map<std::string, uint32_t> name_map; ///< Map from column name to Springtail column position
 
-        std::map<int,int> target_columns;             ///< Map of target columns, from attno to field idx
+        struct PgAttr {
+            uint32_t atttypid;
+            uint32_t atttypmod;
+            uint32_t attnum;
+        };
+        std::vector<PgAttr> _attrs; ///< Scan tuple attributes
+
+        struct TargetColumn {
+            int field_idx; ///< field idx in the fields array of PgFdwState
+            PgAttr pg_attr; ///< PG attribute info
+        };
+
+        ///< Map of targets including filtered quals keyed by attnum
+        absl::flat_hash_map<int, TargetColumn> target_columns;
+
         std::vector<ConstQualPtr> filtered_quals;     ///< List of quals (for where clause)
         std::vector<Index> indexes; ///< List of table indexes including the primary index.
                                     /// Index columns are sorted by their position in the index.
         std::optional<Index> sortgroup_index; ///< Index matching the sortgroup.
         std::optional<Index> index; ///< The final index to use for scanning
-
-        std::vector<Form_pg_attribute> _attrs; ///< Scan tuple attributes
 
         /** Constructor */
         PgFdwState(TablePtr table, uint64_t tid, uint64_t xid);
@@ -212,7 +224,7 @@ namespace springtail::pg_fdw {
 
         // static methods
         /** Helper to convert field to PG Datum */
-        static Datum _get_datum_from_field(FieldPtr field,
+        static Datum _get_datum_from_field(const FieldPtr& field,
                                            const Extent::Row &row,
                                            int32_t pg_type,
                                            int32_t atttypmod);
