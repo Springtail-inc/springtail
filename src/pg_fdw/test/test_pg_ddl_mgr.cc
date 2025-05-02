@@ -16,6 +16,8 @@ using namespace springtail;
 using namespace springtail::pg_fdw;
 
 namespace {
+
+#if 0 // XXX This test is more of a system test than a unit test, ultimately it should be moved to a test suite
     static constexpr char VERIFY_TABLE_EXISTS[] =
         "SELECT foreign_table_schema, foreign_table_name "
         "FROM information_schema.foreign_tables "
@@ -240,7 +242,8 @@ namespace {
         };
     };
 
-    TEST_F(PgDDLMgr_Test, TestCreateTable) {
+    TEST_F(PgDDLMgr_Test, TestCreateTable)
+    {
         RedisNotification redis_notification(_subscriber);
         std::vector<std::tuple<std::string, uint32_t, bool>> columns = {
             {"col1", 25, true},
@@ -253,4 +256,69 @@ namespace {
 
         _verify_table_exists("public", "test");
     }
-};
+#endif
+
+    TEST(DDLMgrTest, EnumAlterSql)
+    {
+        LibPqConnectionPtr conn = std::make_shared<LibPqConnection>();
+        nlohmann::json from_json = nlohmann::json::array({
+            {{"red", 1}}
+        });
+        nlohmann::json to_json = nlohmann::json::array({
+            {{"red", 1}},
+            {{"blue", 2}}
+        });
+
+        std::string sql = PgDDLMgr::gen_alter_enum_sql("public", "color", from_json, to_json, conn);
+        EXPECT_EQ(sql, "ALTER TYPE \"public\".\"color\" ADD VALUE 'blue' AFTER 'red';");
+
+        to_json = nlohmann::json::array({
+            {{"blue", 0.5}},
+            {{"red", 1}}
+        });
+        sql = PgDDLMgr::gen_alter_enum_sql("public", "color", from_json, to_json, conn);
+        EXPECT_EQ(sql, "ALTER TYPE \"public\".\"color\" ADD VALUE 'blue' BEFORE 'red';");
+
+        to_json = nlohmann::json::array({
+            {{"blue", 1}}
+        });
+        sql = PgDDLMgr::gen_alter_enum_sql("public", "color", from_json, to_json, conn);
+        EXPECT_EQ(sql, "ALTER TYPE \"public\".\"color\" RENAME VALUE 'red' TO 'blue';");
+
+        from_json = nlohmann::json::array({
+            {{"red", 1}},
+            {{"blue", 2}}
+        });
+
+        to_json = nlohmann::json::array({
+            {{"red", 1}},
+            {{"blue", 2}},
+            {{"green", 3}},
+        });
+        sql = PgDDLMgr::gen_alter_enum_sql("public", "color", from_json, to_json, conn);
+        EXPECT_EQ(sql, "ALTER TYPE \"public\".\"color\" ADD VALUE 'green' AFTER 'blue';");
+
+        to_json = nlohmann::json::array({
+            {{"red", 1}},
+            {{"green", 1.5}},
+            {{"blue", 2}}
+        });
+        sql = PgDDLMgr::gen_alter_enum_sql("public", "color", from_json, to_json, conn);
+        EXPECT_EQ(sql, "ALTER TYPE \"public\".\"color\" ADD VALUE 'green' BEFORE 'blue';");
+
+        to_json = nlohmann::json::array({
+            {{"green", 0.5}},
+            {{"red", 1}},
+            {{"blue", 2}}
+        });
+        sql = PgDDLMgr::gen_alter_enum_sql("public", "color", from_json, to_json, conn);
+        EXPECT_EQ(sql, "ALTER TYPE \"public\".\"color\" ADD VALUE 'green' BEFORE 'red';");
+
+        to_json = nlohmann::json::array({
+            {{"red", 1}},
+            {{"green", 2}}
+        });
+        sql = PgDDLMgr::gen_alter_enum_sql("public", "color", from_json, to_json, conn);
+        EXPECT_EQ(sql, "ALTER TYPE \"public\".\"color\" RENAME VALUE 'blue' TO 'green';");
+    }
+} // namespace 

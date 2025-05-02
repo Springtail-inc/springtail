@@ -35,6 +35,9 @@ namespace springtail {
 
         // NamespaceNames
         _system_cache[{ sys_tbl::NamespaceNames::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::NamespaceNames::Data::SCHEMA);
+
+        // UserTypes
+        _system_cache[{ sys_tbl::UserTypes::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::UserTypes::Data::SCHEMA);
     }
 
     std::map<uint32_t, SchemaColumn>
@@ -69,6 +72,8 @@ namespace springtail {
                     return _convert_columns(sys_tbl::IndexNames::Data::SCHEMA);
                 case sys_tbl::NamespaceNames::ID:
                     return _convert_columns(sys_tbl::NamespaceNames::Data::SCHEMA);
+                case sys_tbl::UserTypes::ID:
+                    return _convert_columns(sys_tbl::UserTypes::Data::SCHEMA);
                 default:
                     assert(false);
                     break;
@@ -125,4 +130,12 @@ namespace springtail {
         return std::make_shared<ExtentSchema>(meta->columns);
     }
 
+    std::shared_ptr<UserType>
+    SchemaMgr::get_usertype(uint64_t db_id,
+                            uint64_t type_id,
+                            const XidLsn &xid)
+    {
+        // call into the SysTblMgr to get the user_type at the given XID/LSN
+        return sys_tbl_mgr::Client::get_instance()->get_usertype(db_id, type_id, xid);
+    }
 }

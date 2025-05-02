@@ -396,7 +396,7 @@ public:
         static const std::vector<SchemaColumn> SCHEMA;
 
         static TuplePtr tuple(
-            uint32_t namespace_id, const std::string &name, uint64_t xid, uint64_t lsn, bool exists)
+            uint64_t namespace_id, const std::string &name, uint64_t xid, uint64_t lsn, bool exists)
         {
             auto fields = std::make_shared<FieldArray>(5);
             fields->at(NAMESPACE_ID) = std::make_shared<ConstTypeField<uint64_t>>(namespace_id);
@@ -447,14 +447,98 @@ public:
     };
 };
 
-static constexpr std::array<uint32_t, 7> TABLE_IDS = {
+/**
+ * Helper functions and constants for the user defined types table -- used to store the
+ * user defined types information from Postgres.
+ */
+class UserTypes {
+public:
+    static constexpr uint32_t ID = 8;
+
+    struct Data {
+        static constexpr uint32_t TYPE_ID = 0;
+        static constexpr uint32_t NAMESPACE_ID = 1;
+        static constexpr uint32_t NAME = 2;
+        static constexpr uint32_t VALUE = 3;
+        static constexpr uint32_t XID = 4;
+        static constexpr uint32_t LSN = 5;
+        static constexpr uint32_t TYPE = 6;  // 'E'
+        static constexpr uint32_t EXISTS = 7;
+
+        static const std::vector<SchemaColumn> SCHEMA;
+
+        static TuplePtr tuple(
+            uint64_t type_id,
+            uint64_t namespace_id,
+            const std::string &name,
+            const std::string &value,
+            uint64_t xid,
+            uint64_t lsn,
+            uint8_t type,
+            bool exists)
+        {
+            auto fields = std::make_shared<FieldArray>(8);
+            fields->at(TYPE_ID) = std::make_shared<ConstTypeField<uint64_t>>(type_id);
+            fields->at(NAMESPACE_ID) = std::make_shared<ConstTypeField<uint64_t>>(namespace_id);
+            fields->at(NAME) = std::make_shared<ConstTypeField<std::string>>(name);
+            fields->at(VALUE) = std::make_shared<ConstTypeField<std::string>>(value);
+            fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
+            fields->at(LSN) = std::make_shared<ConstTypeField<uint64_t>>(lsn);
+            fields->at(TYPE) = std::make_shared<ConstTypeField<uint8_t>>(type);
+            fields->at(EXISTS) = std::make_shared<ConstTypeField<bool>>(exists);
+            return std::make_shared<FieldTuple>(fields, nullptr);
+        }
+    };
+
+    struct Primary {
+        static constexpr uint32_t TYPE_ID = 0;
+        static constexpr uint32_t XID = 1;
+        static constexpr uint32_t LSN = 2;
+
+        static const std::vector<SchemaColumn> SCHEMA;
+        static const std::vector<std::string> KEY;
+
+        static TuplePtr key_tuple(uint64_t type_id, uint64_t xid, uint64_t lsn)
+        {
+            auto key_fields = std::make_shared<FieldArray>(3);
+            key_fields->at(TYPE_ID) = std::make_shared<ConstTypeField<uint64_t>>(type_id);
+            key_fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
+            key_fields->at(LSN) = std::make_shared<ConstTypeField<uint64_t>>(lsn);
+            return std::make_shared<FieldTuple>(key_fields, nullptr);
+        }
+    };
+
+    struct Secondary {
+        static constexpr uint32_t NAME = 0;
+        static constexpr uint32_t XID = 1;
+        static constexpr uint32_t LSN = 2;
+        static constexpr uint32_t EXTENT_ID = 3;
+        static constexpr uint32_t ROW_ID = 4;
+
+        static const std::vector<SchemaColumn> SCHEMA;
+        static const std::vector<std::string> KEY;
+
+        static TuplePtr key_tuple(const std::string &name, uint64_t xid, uint64_t lsn)
+        {
+            auto key_fields = std::make_shared<FieldArray>(3);
+            key_fields->at(NAME) = std::make_shared<ConstTypeField<std::string>>(name);
+            key_fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
+            key_fields->at(LSN) = std::make_shared<ConstTypeField<uint64_t>>(lsn);
+            return std::make_shared<FieldTuple>(key_fields, nullptr);
+        }
+    };
+};
+
+
+static constexpr std::array<uint32_t, 8> TABLE_IDS = {
     TableNames::ID,
     TableRoots::ID,
     Indexes::ID,
     Schemas::ID,
     TableStats::ID,
     IndexNames::ID,
-    NamespaceNames::ID
+    NamespaceNames::ID,
+    UserTypes::ID
 };
 
 }  // namespace springtail::sys_tbl

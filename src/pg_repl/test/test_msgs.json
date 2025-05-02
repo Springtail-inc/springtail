@@ -1,6 +1,6 @@
 ### Do not modify in use by test_msg_stream.cc
 {"cmd":"begin"}
-{"cmd":"create table", "table": "table1", "columns":[{"name":"a", "is_nullable": false, "type": 5, "pg_type": 23, "is_pkey": true, "pk_position": 0},{"name":"b", "is_nullable": true, "type":1, "pg_type":25, "is_pkey": false, "pk_position": -1}]}
+{"cmd":"create table", "table": "table1", "columns":[{"name":"a", "is_nullable": false, "type": 5, "type_name": "int4", "type_category": "N", "type_namespace": "public", "pg_type": 23, "is_pkey": true, "pk_position": 0},{"name":"b", "is_nullable": true, "type":1, "type_name": "text", "type_category": "S", "type_namespace": "public", "pg_type":25, "is_pkey": false, "pk_position": -1}]}
 {"cmd":"create index","columns":[{"name":"a","position":1,"idx_position":1}],"identity":"public.table1_a_idx","is_unique":false,"obj":"index","oid":92604,"schema":"public","table_name":"table1","table_oid":92594,"xid":2014}
 {"cmd":"insert", "table": "table1", "row": ["1", "one"]}
 {"cmd":"insert", "table": "table1", "row": ["2", "two"]}
@@ -17,7 +17,7 @@
 {"cmd":"truncate", "table": "table1"}
 {"cmd":"commit"}
 {"cmd":"begin"}
-{"cmd":"alter table", "table": "table1", "columns":[{"name":"a", "is_nullable": false, "type": 5, "pg_type": 23, "is_pkey": true, "pk_position": 0},{"name":"b", "is_nullable": true, "type": 1, "pg_type": 25, "is_pkey": false, "pk_position": -1},{"name":"c", "is_nullable": true, "type": 10,"pg_type":16, "is_pkey": false, "pk_position": -1}]}
+{"cmd":"alter table", "table": "table1", "columns":[{"name":"a", "is_nullable": false, "type": 5, "pg_type": 23, "type_name": "int4", "type_category": "N", "type_namespace": "public", "is_pkey": true, "pk_position": 0},{"name":"b", "is_nullable": true, "type": 1, "pg_type": 25, "type_name": "text", "type_category": "S", "type_namespace": "public", "is_pkey": false, "pk_position": -1},{"name":"c", "is_nullable": true, "type": 10,"pg_type":16, "is_pkey": false, "pk_position": -1}]}
 {"cmd":"insert", "table": "table1", "row": ["4", null, true]}
 {"cmd":"commit"}
 {"cmd":"stream start"}

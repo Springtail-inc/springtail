@@ -193,6 +193,10 @@ HeapTuple SearchSysCache1(int cacheId, Datum key1) {
     return (HeapTuple)NULL;
 }
 
+HeapTuple SearchSysCache2(int cacheId, Datum key1, Datum key2) {
+    return (HeapTuple)NULL;
+}
+
 // For background worker
 void ProcessInterrupts(void) {}
 
@@ -245,4 +249,3 @@ void appendBinaryStringInfoNT(StringInfo str,
     str->len += datalen;
     str->data[str->len] = '\0';
 }
-
