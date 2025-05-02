@@ -43,6 +43,8 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::commit(uint64_t xid, PostgresTimestamp commit_ts)
     {
+        time_trace::Trace commit_trace;
+        TIME_TRACE_START(commit_trace);
         // update any changes in the table invalidation state
         for (const auto &entry : _table_validations) {
             if (entry.second) {
@@ -91,6 +93,8 @@ namespace springtail::pg_log_mgr {
         //     _span->SetAttribute("pg_xids", fmt::format("{}", fmt::join(pg_xids, ",")));
         // }
         // _span->End();
+        TIME_TRACE_STOP(commit_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("commit-xid_{}", xid), commit_trace);
     }
 
     void
@@ -178,6 +182,7 @@ namespace springtail::pg_log_mgr {
                                      int32_t tid,
                                      const PgMsgTupleData &data)
     {
+        trace add_mutation_trace(fmt::format("add_mutation-xid_{}", current_xid));
         XidLsn xidlsn(current_xid);
 
         // check if we should skip the mutation due to an invalid table
@@ -242,6 +247,9 @@ namespace springtail::pg_log_mgr {
             WriteCacheFuncImpl::add_extent(_db, tid, pg_xid, entry.start_lsn, entry.extent);
             entry.extent = nullptr;
         }
+
+        // TIME_TRACE_STOP(add_mutation_trace);
+        // TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("add_mutation-xid_{}", current_xid), add_mutation_trace);
     }
 
     void

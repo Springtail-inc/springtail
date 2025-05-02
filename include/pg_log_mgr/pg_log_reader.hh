@@ -21,6 +21,20 @@ namespace springtail::pg_log_mgr {
      */
     class PgLogReader {
     public:
+        struct trace
+        {
+            TIME_TRACE(xid);
+            std::string _n;
+
+            trace(std::string n): _n{std::move(n)} {
+                TIME_TRACE_START(xid);
+            }
+
+            ~trace() {
+                TIME_TRACE_STOP(xid);
+                TIME_TRACESET_UPDATE(time_trace::traces, _n, xid);
+            }
+        };
         /** convenience type for the shared msg queue */
         using PgMsgQueuePtr = std::shared_ptr<ConcurrentQueue<PgMsg>>;
 

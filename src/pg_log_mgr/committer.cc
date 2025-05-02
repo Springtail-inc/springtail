@@ -401,9 +401,12 @@ namespace springtail::committer {
                 // timed out, try again
                 continue;
             }
-
+            time_trace::Trace process_table_trace;
+            TIME_TRACE_START(process_table_trace);
             // process all of the mutations for a given table in a given XID
             _process_table(entry->db_id, entry->tid, entry->completed_xid, entry->xid);
+            TIME_TRACE_STOP(process_table_trace);
+            TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("process_table-xid_{}", entry->xid), process_table_trace);
 
             // mark the table processing as complete
             {
