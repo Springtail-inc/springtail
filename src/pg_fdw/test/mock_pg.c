@@ -129,9 +129,15 @@ List *lappend(List *list, void *datum) {
 text *
 cstring_to_text(const char *s)
 {
-    int len = strlen(s);
-    text *result = (text *) palloc(VARHDRSZ + len + 1);
-    SET_VARSIZE(result, VARHDRSZ + len);
+    return cstring_to_text_with_len(s, strlen(s));
+}
+
+text *
+cstring_to_text_with_len(const char *s, int len)
+{
+    text       *result = (text *) palloc(len + VARHDRSZ);
+
+    SET_VARSIZE(result, len + VARHDRSZ);
     memcpy(VARDATA(result), s, len);
 
     return result;
