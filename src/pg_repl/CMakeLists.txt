@@ -91,31 +91,17 @@ target_include_directories(gen_log
 )
 add_dsymutil_command(gen_log)
 
-add_executable(test_msg_stream test/test_msg_stream.cc)
-target_link_libraries(test_msg_stream
-    PUBLIC springtail_pg
-    PRIVATE GTest::gtest_main
-)
-target_include_directories(test_msg_stream
-    PRIVATE ${CMAKE_SOURCE_DIR}/include
-)
-add_dsymutil_command(test_msg_stream)
-
-gtest_discover_tests(test_msg_stream
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test
+## unit tests
+springtail_unit_test(test_msg_stream
+  SOURCES test/test_msg_stream.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_pg GTest::gtest_main
+  WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
 )
 
-# copy table test
-add_executable(test_pgcopy test/test_pgcopy.cc)
-target_include_directories(test_pgcopy
-    PUBLIC ${PROJECT_SOURCE_DIR}/include
-)
-target_link_libraries(test_pgcopy
-    PUBLIC springtail_pg springtail_test
-    PRIVATE GTest::gtest_main
-)
-add_dsymutil_command(test_pgcopy)
-
-gtest_discover_tests(test_pgcopy
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test
+springtail_unit_test(test_pgcopy
+  SOURCES test/test_pgcopy.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_pg springtail_test GTest::gtest_main
+  WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
 )

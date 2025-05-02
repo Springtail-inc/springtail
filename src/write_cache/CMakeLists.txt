@@ -33,15 +33,9 @@ target_link_libraries(springtail_write_cache
     Boost::thread
 )
 
-## tests
-add_executable(test_wc_index test/test_wc_index.cc)
-target_include_directories(test_wc_index PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_wc_index
-  PUBLIC springtail_write_cache
-  PRIVATE GTest::gtest_main
+## unit tests
+springtail_unit_test(test_wc_index
+  SOURCES test/test_wc_index.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_write_cache GTest::gtest_main
 )
-add_dsymutil_command(test_wc_index)
-
-
-# hook tests into gtest framework
-gtest_discover_tests(test_wc_index)
