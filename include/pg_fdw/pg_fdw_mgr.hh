@@ -242,20 +242,20 @@ namespace springtail::pg_fdw {
                                        uint64_t xid);
 
         /** Helper to convert a springtail enum user type to a datum */
-        Datum _get_enum_datum(PgFdwState *state,
+        Datum _get_enum_datum(const PgFdwState *state,
                               int32_t springtail_oid,
                               Oid pg_oid,
                               float sort_order);
 
         /** Helper to convert a postgres enum type to springtail enum id (index/sortorder) */
-        float _get_enum_id_from_pg(PgFdwState *state,
+        float _get_enum_id_from_pg(const PgFdwState *state,
                                    int32_t springtail_oid,
                                    Oid pg_oid,
                                    Oid label_oid);
 
         /** Helper to convert field to PG Datum */
-        Datum _get_datum_from_field(PgFdwState *state,
-                                    const FieldPtr *field,
+        Datum _get_datum_from_field(const PgFdwState *state,
+                                    const Field *field,
                                     const Extent::Row &row,
                                     int32_t springtail_oid,
                                     Oid pg_oid,
@@ -265,13 +265,13 @@ namespace springtail::pg_fdw {
         void _init_quals(PgFdwState *state, List *qual_list);
 
         /** Helper to create constant field from qual and add to field array */
-        void _make_const_field(PgFdwState *state, int32_t springtail_oid, int idx, ConstQual *qual);
+        void _make_const_field(const PgFdwState *state, const SchemaColumn &column, int idx, const ConstQual *qual);
 
         // static methods
 
         /** Helper to convert a PG type OID to a type name using the PG system cache. */
         static std::string _get_type_name(int32_t pg_type,
-                                          const std::map<uint64_t, std::string> &user_types);
+                                          const std::unordered_map<uint64_t, std::string> &user_types);
 
         /** Helper to generate create foreign table sql */
         static std::string _gen_fdw_table_sql(const std::string &server_name,
@@ -310,10 +310,10 @@ namespace springtail::pg_fdw {
                                              const FieldArrayPtr qual_fields);
 
         /** Helper to get the user type names for a namespace used by import foreign schema */
-        static std::map<uint64_t, std::string> _load_user_types(uint64_t db_id,
-                                                                const std::string &namespace_name,
-                                                                uint64_t namespace_id,
-                                                                uint64_t schema_xid);
+        static std::unordered_map<uint64_t, std::string> _load_user_types(uint64_t db_id,
+            const std::string &namespace_name,
+            uint64_t namespace_id,
+            uint64_t schema_xid);
 
         /** Helper to get the index quals for a given index */
         friend std::vector<ConstQualPtr>

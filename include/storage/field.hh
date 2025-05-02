@@ -1459,7 +1459,7 @@ namespace springtail {
         }
 
         bool is_null(const std::any &row) const override {
-            assert(row.type() == typeid(PgMsgTupleData const *));
+            DCHECK(row.type() == typeid(PgMsgTupleData const *));
             auto &&data = std::any_cast<PgMsgTupleData const *>(row);
 
             return data->tuple_data[_offset].type == 'n';
@@ -1610,7 +1610,7 @@ namespace springtail {
 
         bool is_null(const std::any &row) const override
         {
-            assert(row.type() == typeid(PgMsgTupleData const *));
+            DCHECK(row.type() == typeid(PgMsgTupleData const *));
             auto &&data = std::any_cast<PgMsgTupleData const *>(row);
 
             // check if the enum is null

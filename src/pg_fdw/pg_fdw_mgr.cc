@@ -57,25 +57,62 @@ namespace springtail::pg_fdw {
     using springtail::Index;
 
     bool
-    _check_type_compatibility(int32_t pg_type, int32_t pg_type2)
+    _check_type_compatibility(const SchemaColumn &column, int32_t pg_type)
     {
         // XXX should handle coercion of like types, like float, int, etc.
 
         // check if the types are compatible
-        if (pg_type == pg_type2) {
+        if (column.pg_type == pg_type) {
             return true;
         }
 
-        // check if the types are enums
-        if (pg_type >= constant::FIRST_USER_DEFINED_PG_OID &&
-            pg_type2 >= constant::FIRST_USER_DEFINED_PG_OID) {
+        // check if both types are enums
+        if (column.pg_type >= constant::FIRST_USER_DEFINED_PG_OID &&
+            pg_type >= constant::FIRST_USER_DEFINED_PG_OID) {
             return true;
+        }
+
+        // check if one type is a user defined type and the other is not
+        if ((column.pg_type >= constant::FIRST_USER_DEFINED_PG_OID &&
+            pg_type < constant::FIRST_USER_DEFINED_PG_OID) ||
+            (column.pg_type < constant::FIRST_USER_DEFINED_PG_OID &&
+            pg_type >= constant::FIRST_USER_DEFINED_PG_OID)) {
+            // one is a user defined type and the other is not
+            return false;
         }
 
         // check if they are the same springtail schema type
-        // the type category doesn't matter for these checks
-        if (convert_pg_type(pg_type, 'N') == convert_pg_type(pg_type2, 'N')) {
+        // the type category doesn't matter for these checks since enum check is done above
+        SchemaType pg_schema_type = convert_pg_type(pg_type, 'N');
+        if (column.type == pg_schema_type) {
             return true;
+        }
+
+        // check if the pg schema type can be upconverted to the column type
+        switch (column.type) {
+            case SchemaType::INT64:
+                if (pg_schema_type == SchemaType::INT16 ||
+                    pg_schema_type == SchemaType::INT32) {
+                    return true;
+                }
+                break;
+            case SchemaType::INT32:
+                if (pg_schema_type == SchemaType::INT16) {
+                    return true;
+                }
+                break;
+            case SchemaType::INT16:
+                if (pg_schema_type == SchemaType::INT8) {
+                    return true;
+                }
+                break;
+            case SchemaType::FLOAT64:
+                if (pg_schema_type == SchemaType::FLOAT32) {
+                    return true;
+                }
+                break;
+            default:
+                break;
         }
 
         return false;
@@ -96,7 +133,8 @@ namespace springtail::pg_fdw {
                 ConstQualPtr qual = static_cast<ConstQualPtr>(lfirst(lc));
 
                 // must be of the same internal type
-                if (_check_type_compatibility(state->columns.at(pos).pg_type, qual->base.typeoid) == false) {
+                auto column = state->columns.at(pos);
+                if (_check_type_compatibility(column, qual->base.typeoid) == false) {
                     continue;
                 }
 
@@ -501,7 +539,7 @@ namespace springtail::pg_fdw {
             ConstQual *qual = state->filtered_quals[i];
             auto &column = state->columns.at(state->attr_map.at(qual->base.varattno));
 
-            _make_const_field(state, column.pg_type, i, state->filtered_quals[i]);
+            _make_const_field(state, column, i, state->filtered_quals[i]);
         }
     }
 
@@ -649,7 +687,7 @@ namespace springtail::pg_fdw {
                 TIME_TRACE_SCOPED(time_trace::traces, iterate_scan_datum);
                 // set value
                 if (!field->is_null(row)) {
-                    values[attno-1] = _get_datum_from_field(state, field, row, c.sp_pg_type, c.pg_attr.atttypid, c.pg_attr.atttypmod);
+                    values[attno-1] = _get_datum_from_field(state, field.get(), row, c.sp_pg_type, c.pg_attr.atttypid, c.pg_attr.atttypmod);
                     nulls[attno-1] = false;
                 }
             }
@@ -870,7 +908,7 @@ namespace springtail::pg_fdw {
     }
 
     float
-    PgFdwMgr::_get_enum_id_from_pg(PgFdwState *state,
+    PgFdwMgr::_get_enum_id_from_pg(const PgFdwState *state,
                                    int32_t springtail_oid,
                                    Oid pg_oid,
                                    Oid label_oid)
@@ -901,7 +939,7 @@ namespace springtail::pg_fdw {
     }
 
     Datum
-    PgFdwMgr::_get_enum_datum(PgFdwState *state,
+    PgFdwMgr::_get_enum_datum(const PgFdwState *state,
                               int32_t springtail_oid,
                               Oid pg_oid,
                               float sort_order)
@@ -918,13 +956,12 @@ namespace springtail::pg_fdw {
         // convert label to datum for lookup
         auto label = it->second;
         char *name = pnstrdup(label.data(), label.size());
-
         auto tup = SearchSysCache2(ENUMTYPOIDNAME,
             ObjectIdGetDatum(pg_oid),
             CStringGetDatum(name));
 
         if (!HeapTupleIsValid(tup)) {
-            CHECK(false);
+            elog(ERROR, "FDW: cache lookup failed for enum %u", pg_oid);
         }
 
         // This comes from pg_enum.oid and stores system oids in user tables.
@@ -937,7 +974,7 @@ namespace springtail::pg_fdw {
     }
 
     Datum
-    PgFdwMgr::_get_datum_from_field(PgFdwState *state,
+    PgFdwMgr::_get_datum_from_field(const PgFdwState *state,
                                     const Field *field,
                                     const Extent::Row &row,
                                     int32_t springtail_oid,
@@ -1019,7 +1056,7 @@ namespace springtail::pg_fdw {
 
     std::string
     PgFdwMgr::_get_type_name(int32_t pg_type,
-                             const std::map<uint64_t, std::string> &user_types)
+                             const std::unordered_map<uint64_t, std::string> &user_types)
     {
         if (pg_type < FirstNormalObjectId) {
            // get the type name from the system cache
@@ -1130,13 +1167,13 @@ namespace springtail::pg_fdw {
         return commands;
     }
 
-    std::map<uint64_t, std::string>
+    std::unordered_map<uint64_t, std::string>
     PgFdwMgr::_load_user_types(uint64_t db_id,
                                const std::string &namespace_name,
                                uint64_t namespace_id,
                                uint64_t schema_xid)
     {
-        std::map<uint64_t, std::string> user_types;
+        std::unordered_map<uint64_t, std::string> user_types;
 
         // get the user types table to iterate over
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::UserTypes::ID,
@@ -1426,11 +1463,15 @@ namespace springtail::pg_fdw {
     }
 
     void
-    PgFdwMgr::_make_const_field(PgFdwState *state, int32_t springtail_oid, int idx, ConstQual *qual)
+    PgFdwMgr::_make_const_field(const PgFdwState *state,
+                                const SchemaColumn &column,
+                                int idx,
+                                const ConstQual *qual)
     {
         FieldArrayPtr fields = state->qual_fields;
 
         // Generate a const field based on type; populate it into fields array
+        // Upconvert types to schema type if possible; there is a check in
         switch (qual->base.typeoid) {
             case MONEYOID:
             case TIMESTAMPOID:
@@ -1441,16 +1482,37 @@ namespace springtail::pg_fdw {
                 break;
             case DATEOID:
             case INT4OID:
-                fields->at(idx) = std::make_shared<ConstTypeField<int32_t>>(DatumGetInt32(qual->value));
+                if (column.type == SchemaType::INT64) {
+                    // convert to int64
+                    fields->at(idx) = std::make_shared<ConstTypeField<int64_t>>(DatumGetInt32(qual->value));
+                } else {
+                    CHECK_EQ(column.type, SchemaType::INT32);
+                    fields->at(idx) = std::make_shared<ConstTypeField<int32_t>>(DatumGetInt32(qual->value));
+                }
                 break;
             case INT2OID:
-                fields->at(idx) = std::make_shared<ConstTypeField<int16_t>>(DatumGetInt16(qual->value));
+                if (column.type == SchemaType::INT64) {
+                    // convert to int64
+                    fields->at(idx) = std::make_shared<ConstTypeField<int64_t>>(DatumGetInt16(qual->value));
+                } else if (column.type == SchemaType::INT32) {
+                    // convert to int32
+                    fields->at(idx) = std::make_shared<ConstTypeField<int32_t>>(DatumGetInt16(qual->value));
+                } else {
+                    CHECK_EQ(column.type, SchemaType::INT16);
+                    fields->at(idx) = std::make_shared<ConstTypeField<int16_t>>(DatumGetInt16(qual->value));
+                }
                 break;
             case FLOAT8OID:
                 fields->at(idx) = std::make_shared<ConstTypeField<double>>(DatumGetFloat8(qual->value));
                 break;
             case FLOAT4OID:
-                fields->at(idx) = std::make_shared<ConstTypeField<float>>(DatumGetFloat4(qual->value));
+                if (column.type == SchemaType::FLOAT64) {
+                    // convert to float64
+                    fields->at(idx) = std::make_shared<ConstTypeField<double>>(DatumGetFloat4(qual->value));
+                } else {
+                    CHECK_EQ(column.type, SchemaType::FLOAT32);
+                    fields->at(idx) = std::make_shared<ConstTypeField<float>>(DatumGetFloat4(qual->value));
+                }
                 break;
             case BOOLOID:
                 fields->at(idx) = std::make_shared<ConstTypeField<bool>>(DatumGetBool(qual->value));
@@ -1477,7 +1539,7 @@ namespace springtail::pg_fdw {
                     LOG_DEBUG(LOG_FDW, "Found user defined type datum qual field: {}", oid);
 
                     // do reverse mapping lookup to get the enum idx from springtail
-                    float enum_id = _get_enum_id_from_pg(state, springtail_oid, qual->base.typeoid, oid);
+                    float enum_id = _get_enum_id_from_pg(state, column.pg_type, qual->base.typeoid, oid);
                     fields->at(idx) = std::make_shared<ConstTypeField<float>>(enum_id);
                     break;
                 }
