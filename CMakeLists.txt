@@ -41,6 +41,9 @@ include("${PROJECT_SOURCE_DIR}/external/vcpkg/scripts/buildsystems/vcpkg.cmake")
 ## add command add_dsymutil_command() to run dsymutil against an executable when on macOS
 include(DSymUtil)
 
+## add command to add unit tests more consistently
+include(SpringtailTest)
+
 ## add make install target to copy git hash to install directory
 include(GitInstall)
 
@@ -134,6 +137,14 @@ include(InstallLibs)
 
 ## configure CTestCustom.cmake for top level
 configure_file(${PROJECT_SOURCE_DIR}/scripts/CTestCustom.cmake.in ${PROJECT_BINARY_DIR}/CTestCustom.cmake @ONLY)
+
+## custom test target
+get_property(ALL_TESTS GLOBAL PROPERTY SPRINGTAIL_UNIT_TEST_TARGETS)
+add_custom_target(check
+    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target test
+    DEPENDS ${ALL_TESTS}
+    COMMENT "Running tests..."
+)
 
 ## Messages keep at end of file
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
