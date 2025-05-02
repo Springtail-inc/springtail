@@ -1,163 +1,151 @@
-#include <mutex>
-#include <shared_mutex>
-#include <memory>
-#include <unordered_map>
-#include <optional>
-
-#include <common/counter.hh>
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
-#include <common/constants.hh>
 
+#include <proxy/client_session.hh>
 #include <proxy/database.hh>
 #include <proxy/exception.hh>
-#include <proxy/session.hh>
-#include <proxy/client_session.hh>
-#include <proxy/server_session.hh>
 #include <proxy/logging.hh>
+
+#include <redis/redis_db_tables.hh>
 
 namespace springtail::pg_proxy
 {
 
     /*********** Database Pool *************/
+    void
+    DatabasePool::add_session(ServerSessionPtr session)
+    {
+        SessionKey key = std::make_pair(session->database_id(), session->username());
+        std::unique_lock lock(_mutex);
+        _insert(key, session);
+    }
+
+    ServerSessionPtr
+    DatabasePool::get_session(uint64_t db_id, const std::string &username)
+    {
+        SessionKey key = std::make_pair(db_id, username);
+        std::unique_lock lock(_mutex);
+        return _get(key);
+    }
 
     void
     DatabasePool::evict(uint64_t db_id)
     {
         std::unique_lock lock(_mutex);
-
-        // remove from free session map for whole db_id
-        auto db_it = _free_sessions.lower_bound({db_id, ""});
-        while (db_it != _free_sessions.end() && db_it->first.first == db_id) {
-            auto list = db_it->second;
-            count -= list.size();
-            db_it = _free_sessions.erase(db_it);
+        auto db_it = _lookup.lower_bound({db_id, ""});
+        while (db_it != _lookup.end() && db_it->first.first == db_id) {
+            auto &queue = db_it->second;
+            for (auto &cache_it: queue) {
+                _cache.erase(cache_it);
+            }
+            queue.clear();
+            db_it = _lookup.erase(db_it);
         }
     }
 
     void
-    DatabasePool::evict(ServerSessionPtr session)
+    DatabasePool::evict_expired_sessions()
     {
         std::unique_lock lock(_mutex);
+        uint64_t now = common::get_time_in_millis() / 1000;
+        // cleanup based on the cache entry timestamp
+        if (_expiration_interval != 0) {
+            while (_cache.size() > _timeout_limit) {
+                // get last entry
+                SessionEntry &cache_entry = _cache.back();
 
-        // remove from db session map
-        uint64_t db_id = session->database_id();
-        std::string username = session->username();
-
-        // lookup db_id and username in free session map
-        auto db_it = _free_sessions.find({db_id, username});
-        auto list = db_it->second;
-
-        // remove session from list if it exists, also prune any null sessions
-        auto start_count = list.size();
-        list.remove_if([session](const ServerSessionWeakPtr &s) {
-            return (s.lock() == session) || (s.lock() == nullptr);
-        });
-
-        // update count based on the difference in list size
-        count -= (start_count - list.size());
-
-        // remove db_id and username if list is empty
-        if (list.empty()) {
-            _free_sessions.erase(db_it);
-        }
-    }
-
-    void
-    DatabasePool::evict(DatabaseInstancePtr instance)
-    {
-        std::unique_lock lock(_mutex);
-
-        // remove from free sessions map for all sessions that have an instance that matches
-        auto db_it = _free_sessions.begin();
-        while (db_it != _free_sessions.end()) {
-            auto &list = db_it->second;
-            auto size = list.size();
-
-            list.remove_if([instance](const ServerSessionWeakPtr &s) {
-                auto session = s.lock();
-                if ((session != nullptr) && (session->get_instance() == instance)) {
-                    PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Evicting session from pool: [S:{:d}], db_id: {}, username: {}",
-                                session->id(), session->database_id(), session->username());
-                    PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Instance: {}", session->get_instance()->to_string());
+                if (cache_entry.expiration_time < now) {
+                    _remove_entry(cache_entry.key);
                 } else {
-                    PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Session not evicted from pool: [S:{:d}]", session->id());
-                    PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Instance: {}", session->get_instance()->to_string());
+                    break;
                 }
-                return (session == nullptr) || (session->get_instance() == instance);
-            });
-
-            // update count based on the difference in list size
-            count -= (size - list.size());
-
-            // remove db_id and username if list is empty
-            if (list.empty()) {
-                db_it = _free_sessions.erase(db_it);
-            } else {
-                db_it++;
             }
         }
     }
 
-    void
-    DatabasePool::add_session(ServerSessionPtr session)
+    size_t
+    DatabasePool::size(uint64_t db_id, const std::string &username) const
     {
-        uint64_t db_id = session->database_id();
-        std::string username = session->username();
-
-        std::unique_lock lock(_mutex);
-        // look up db_id and username in session map
-        auto it = _free_sessions.find({db_id, username});
-        if (it != _free_sessions.end()) {
-            it->second.push_front(session);
-        } else {
-            std::list<ServerSessionWeakPtr> sessions;
-            sessions.push_front(session);
-            _free_sessions[{db_id, username}] = sessions;
+        SessionKey key = std::make_pair(db_id, username);
+        std::shared_lock lock(_mutex);
+        auto it = _lookup.find(key);
+        if (it != _lookup.end()) {
+            return it->second.size();
         }
-        count++;
+        return 0;
+    }
+
+    void
+    DatabasePool::_remove_entry(const SessionKey &key)
+    {
+        // remove from hashmap
+        auto it = _lookup.find(key);
+        // check that _lookup map has the key
+        DCHECK(it != _lookup.end());
+        // check that deque for this key is not empty
+        DCHECK(!(it->second.empty()));
+        // check that the last element in deque points to the last element in cache
+        DCHECK(it->second.back() == (--_cache.end()));
+        // remove entry from _lookup
+        it->second.pop_back();
+
+        // remove entry from cache
+        _cache.pop_back();
+    }
+
+    void
+    DatabasePool::_evict_next()
+    {
+        // get last entry
+        SessionEntry &cache_entry = _cache.back();
+        _remove_entry(cache_entry.key);
+    }
+
+    void
+    DatabasePool::_insert(const SessionKey &key, ServerSessionWeakPtr value)
+    {
+        uint64_t now = common::get_time_in_millis() / 1000;
+        if (!_cache.empty()) {
+            if (_size_limit != 0  && _cache.size() == _size_limit) {
+                _evict_next();
+            }
+        }
+
+        auto it = _lookup.find(key);
+        if (it == _lookup.end()) {
+            auto result = _lookup.emplace(key, std::deque<typename std::list<SessionEntry>::iterator>());
+            DCHECK(result.second);
+            it = result.first;
+        }
+        uint64_t expiration_time = std::numeric_limits<uint64_t>::max();
+        if (_expiration_interval != 0) {
+            expiration_time = now + _expiration_interval;
+        }
+        SessionEntry entry = {key, value, expiration_time};
+        _cache.emplace_front(entry);
+        it->second.push_front(_cache.begin());
     }
 
     ServerSessionPtr
-    DatabasePool::get_session(uint64_t db_id,
-                              const std::string &username)
+    DatabasePool::_get(const SessionKey &key)
     {
-        std::unique_lock lock(_mutex);
-
-        // look up db_id and username in session map
-        auto it = _free_sessions.find({db_id, username});
-        if (it == _free_sessions.end()) {
+        auto it = _lookup.find(key);
+        if (it == _lookup.end() || it->second.empty()) {
             return nullptr;
         }
-
-        if (it->second.empty()) {
-            return nullptr;
-        }
-
-        ServerSessionPtr session = nullptr;
-        while (session == nullptr && !it->second.empty()) {
-            session = it->second.front().lock();
-            it->second.pop_front();
-            count--;
-        }
-
-        if (session != nullptr) {
-            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Session retrieved from pool: [S:{:d}]", session->id());
-            assert(session->database_id() == db_id);
-            assert(session->username() == username);
-        }
-
-        return session;
+        auto &&cache_it = it->second.front();
+        SessionEntry &entry = *(cache_it);
+        _cache.erase(cache_it);
+        it->second.pop_front();
+        return entry.value.lock();
     }
 
     /*********** Database Set *************/
 
     void
-    DatabaseSet::remove_instance(DatabaseInstancePtr instance)
+    DatabaseSet::_remove_instance(DatabaseInstancePtr instance)
     {
-        std::unique_lock lock(_mutex);
-
         // remove from sessions map
         auto instance_it = _sessions.find(instance);
         if (instance_it != _sessions.end()) {
@@ -170,9 +158,6 @@ namespace springtail::pg_proxy
             _instance_sessions.erase(session_it);
         }
 
-        // evict from pool
-        _pool->evict(instance);
-
         // XXX Not handling removing instance with in-use sessions
         // those should be handled by the session release
     }
@@ -180,10 +165,14 @@ namespace springtail::pg_proxy
     void
     DatabaseSet::remove_database(uint64_t db_id)
     {
-        std::unique_lock lock(_mutex);
+        std::unique_lock lock(_base_mutex);
 
         // remove from the session map, iterate over instances
         for (auto instance_it = _sessions.begin(); instance_it != _sessions.end();) {
+            // evict database from the pool
+            instance_it->first->get_pool()->evict(db_id);
+
+            // cleanup the rest
             auto& db_map = instance_it->second;
 
             // Find the database ID in the inner map and remove
@@ -213,9 +202,6 @@ namespace springtail::pg_proxy
                 ++instance_it;
             }
         }
-
-        // evict from the pool
-        _pool->evict(db_id);
     }
 
     void
@@ -230,12 +216,10 @@ namespace springtail::pg_proxy
             deallocate = true;
         }
 
-        std::unique_lock lock(_mutex);
-
-        // if not deallocating the session then add it back to the pool
-        if (!deallocate && (num_instances * _max_sessions_per_instance > _pool->size())) {
+        if (!deallocate) {
+            DatabasePoolPtr pool = session->get_instance()->get_pool();
             PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Adding session back to pool: [S:{:d}]", session->id());
-            _pool->add_session(session);
+            pool->add_session(session);
             return;
         }
 
@@ -276,8 +260,6 @@ namespace springtail::pg_proxy
         // create a new session from instance
         auto session = instance->allocate_session(user, db_id, parameters, database);
 
-        std::unique_lock lock(_mutex); // lock after getting the session, since it is blocking
-
         // add session to instance map
         _sessions[instance][db_id].push_back(session);
 
@@ -290,7 +272,7 @@ namespace springtail::pg_proxy
     DatabaseInstancePtr
     DatabaseSet::_get_least_loaded_instance()
     {
-        std::shared_lock lock(_mutex);
+        std::shared_lock lock(_base_mutex);
 
         if (_instance_sessions.empty()) {
             return nullptr;
@@ -315,15 +297,13 @@ namespace springtail::pg_proxy
     void
     DatabaseReplicaSet::remove_replica(DatabaseInstancePtr replica)
     {
-        std::unique_lock lock(_mutex);
+        std::unique_lock lock(_base_mutex);
 
         // Remove from list of replicas
         _replicas.erase(replica);
 
-        lock.unlock();
-
         // remove from the database set
-        DatabaseSet::remove_instance(replica);
+        DatabaseSet::_remove_instance(replica);
     }
 
     void
@@ -332,7 +312,7 @@ namespace springtail::pg_proxy
         PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Replica session released: [S:{:d}]", session->id());
         assert(session->type() == Session::Type::REPLICA);
 
-        std::shared_lock lock(_mutex);
+        std::shared_lock lock(_base_mutex);
 
         // check if replica instance is still alive, if so try to add back to pool
         if (_replicas.find(session->get_instance()) == _replicas.end()) {
@@ -342,6 +322,15 @@ namespace springtail::pg_proxy
         DatabaseSet::_release_session(session, _replicas.size(), deallocate);
     }
 
+    void
+    DatabaseReplicaSet::release_expired_sessions()
+    {
+        std::shared_lock lock(_base_mutex);
+        for (auto replica : _replicas) {
+            auto pool = replica->get_pool();
+            pool->evict_expired_sessions();
+        }
+    }
 
     ServerSessionPtr
     DatabaseReplicaSet::allocate_session(UserPtr user,
@@ -349,13 +338,12 @@ namespace springtail::pg_proxy
                                          const std::unordered_map<std::string, std::string> &parameters,
                                          const std::string &database)
     {
-        std::shared_lock lock(_mutex);
+        std::shared_lock lock(_base_mutex);
 
         auto instance = _get_least_loaded_instance();
         if (instance == nullptr && !_replicas.empty()) {
             instance = *_replicas.begin();
         }
-        lock.unlock();
 
         if (instance == nullptr) {
             return nullptr;
@@ -372,7 +360,7 @@ namespace springtail::pg_proxy
         PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Primary Session released: [S:{:d}]", session->id());
         assert(session->type() == Session::Type::PRIMARY);
 
-        std::shared_lock lock(_mutex);
+        std::shared_lock lock(_base_mutex);
 
         // check if primary instance is still alive, if so try to add to pool
         if (session->get_instance() != _primary) {
@@ -382,20 +370,31 @@ namespace springtail::pg_proxy
         DatabaseSet::_release_session(session, 1, deallocate);
     }
 
+    void
+    DatabasePrimarySet::release_expired_sessions()
+    {
+        std::shared_lock lock(_base_mutex);
+        if (_primary != nullptr) {
+            _primary->get_pool()->evict_expired_sessions();
+        }
+        if (_standby != nullptr) {
+            _standby->get_pool()->evict_expired_sessions();
+        }
+    }
+
     ServerSessionPtr
     DatabasePrimarySet::allocate_session(UserPtr user,
                                          uint64_t db_id,
                                          const std::unordered_map<std::string, std::string> &parameters,
                                          const std::string &database)
     {
-        std::shared_lock lock(_mutex);
+        std::shared_lock lock(_base_mutex);
 
         // get primary instance
         auto instance = _primary;
         if (instance == nullptr) {
             return nullptr;
         }
-        lock.unlock();
 
         // allocate session
         auto session = DatabaseSet::_allocate_session(user, db_id, parameters, instance, database);
@@ -545,12 +544,21 @@ namespace springtail::pg_proxy
     void
     DatabaseMgr::init()
     {
+        nlohmann::json json = Properties::get(Properties::PROXY_CONFIG);
+        size_t pool_size_limit = Json::get_or<size_t>(json, "pool_size_limit", 0);
+        size_t pool_timeout_limit = Json::get_or<size_t>(json, "pool_timeout_limit", 0);
+        uint64_t pool_expiration_interval = Json::get_or<size_t>(json, "pool_expiration_interval_secs", 0);
+        if (pool_timeout_limit != 0 && pool_expiration_interval == 0) {
+            LOG_ERROR("Pool timeout limit is set to {} while expiration interval is not defined", pool_timeout_limit);
+            throw ProxyServerError();
+        }
+
         // add primary
         uint64_t primary_instance_id = Properties::get_db_instance_id();
         std::string host, user, password;
         int port;
         Properties::get_primary_db_config(host, port, user, password);
-        set_primary(primary_instance_id, std::make_shared<DatabaseInstance>(Session::Type::PRIMARY, host, "", port));
+        set_primary(primary_instance_id, std::make_shared<DatabaseInstance>(pool_size_limit, pool_timeout_limit, pool_expiration_interval, Session::Type::PRIMARY, host, "", port));
 
         std::vector<std::string> fdw_id_list = Properties::get_fdw_ids();
         for (const auto & fdw_id: fdw_id_list) {
@@ -563,7 +571,7 @@ namespace springtail::pg_proxy
                 if (!db_prefix.has_value()) {
                     db_prefix = "";
                 }
-                add_replica(std::make_shared<DatabaseInstance>(Session::Type::REPLICA, host.value(), db_prefix.value(), port.value()));
+                add_replica(std::make_shared<DatabaseInstance>(pool_size_limit, pool_timeout_limit, pool_expiration_interval, Session::Type::REPLICA, host.value(), db_prefix.value(), port.value()));
             } else {
                 LOG_ERROR("Could not find the value for replica database {} either host or port", fdw_id);
                 throw ProxyServerError();
@@ -586,6 +594,7 @@ namespace springtail::pg_proxy
 
         // start redis subscriber thread
         _data_sub_thread.start();
+        start_thread();
     }
 
     void DatabaseMgr::_handle_db_table_change(const std::string &msg)
@@ -818,6 +827,20 @@ namespace springtail::pg_proxy
         lock.unlock();
 
         _data_sub_thread.shutdown();
+    }
+
+    void
+    DatabaseMgr::_internal_run()
+    {
+        while (!_is_shutting_down()) {
+            if (_primary_set != nullptr) {
+                _primary_set->release_expired_sessions();
+            }
+            if (_replica_set != nullptr) {
+                _replica_set->release_expired_sessions();
+            }
+            sleep(5);
+        }
     }
 
 } // namespace springtail::pg_proxy
