@@ -224,7 +224,7 @@ namespace springtail::pg_fdw {
 
         // static methods
         /** Helper to convert field to PG Datum */
-        static Datum _get_datum_from_field(const FieldPtr& field,
+        static Datum _get_datum_from_field(const Field* field,
                                            const Extent::Row &row,
                                            int32_t pg_type,
                                            int32_t atttypmod);
