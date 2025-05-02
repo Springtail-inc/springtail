@@ -40,30 +40,24 @@ target_link_libraries(pg_log_mgr_daemon
 )
 add_dsymutil_command(pg_log_mgr_daemon)
 
-add_executable(test_xact_log test/test_xact_log.cc)
-target_link_libraries(test_xact_log
-    PUBLIC springtail_pglog
-           springtail_common
-           springtail_storage
-    PRIVATE GTest::gtest_main)
-target_include_directories(test_xact_log PRIVATE ${CMAKE_SOURCE_DIR}/include)
-add_dsymutil_command(test_xact_log)
+## unit tests
+springtail_unit_test(test_xact_log
+  SOURCES test/test_xact_log.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_pglog GTest::gtest_main
+)
 
-add_executable(test_pg_log_redis test/test_redis.cc)
-target_link_libraries(test_pg_log_redis
-    PUBLIC springtail_pglog
-    PRIVATE GTest::gtest_main)
-target_include_directories(test_pg_log_redis PRIVATE ${CMAKE_SOURCE_DIR}/include)
-add_dsymutil_command(test_pg_log_redis)
+springtail_unit_test(test_pg_log_redis
+  SOURCES test/test_redis.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_pglog GTest::gtest_main
+)
 
-add_executable(test_pg_log_indexer test/test_indexer.cc)
-target_link_libraries(test_pg_log_indexer
-    PUBLIC springtail_pglog
-           springtail_test
-           springtail_sys_tbl_mgr
-    PRIVATE GTest::gtest_main)
-target_include_directories(test_pg_log_indexer PRIVATE ${CMAKE_SOURCE_DIR}/include)
-add_dsymutil_command(test_pg_log_indexer)
+springtail_unit_test(test_pg_log_indexer
+  SOURCES test/test_indexer.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_pglog springtail_test springtail_sys_tbl_mgr GTest::gtest_main
+)
 
 # dump_repl_log
 add_executable(dump_repl_log test/dump_repl_log.cc)
@@ -84,7 +78,3 @@ install(TARGETS
     dump_repl_log
     RUNTIME DESTINATION bin/utils
 )
-
-gtest_discover_tests(test_xact_log)
-gtest_discover_tests(test_pg_log_redis)
-gtest_discover_tests(test_pg_log_indexer)

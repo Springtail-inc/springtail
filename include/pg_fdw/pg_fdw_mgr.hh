@@ -255,7 +255,7 @@ namespace springtail::pg_fdw {
 
         /** Helper to convert field to PG Datum */
         Datum _get_datum_from_field(PgFdwState *state,
-                                    const FieldPtr &field,
+                                    const FieldPtr *field,
                                     const Extent::Row &row,
                                     int32_t springtail_oid,
                                     Oid pg_oid,

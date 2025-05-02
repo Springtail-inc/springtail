@@ -9,6 +9,9 @@
 
 #include <sys_tbl_mgr/system_tables.hh>
 
+//#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
+#include <common/time_trace.hh>
+
 namespace springtail {
 
     /* static member initialization must happen outside of class */
@@ -1512,6 +1515,8 @@ namespace springtail {
     StorageCache::DataCache::_read_extent(const CacheKey &key,
                                           std::function<void(CacheExtentPtr)> callback)
     {
+        TIME_TRACE_SCOPED(time_trace::traces, _read_extent);
+
         // extent not cached, check if someone is reading it from disk
         auto io_i = _io_map.find(key);
         if (io_i != _io_map.end()) {

@@ -6,6 +6,9 @@
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_client.hh>
 
+//#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
+#include <common/time_trace.hh>
+
 namespace springtail {
 
 namespace table_helpers {
@@ -1219,6 +1222,8 @@ namespace indexer_helpers {
 
     void Table::Iterator::Primary::next()
     {
+        TIME_TRACE_SCOPED(time_trace::traces, primary_index_iterator_next);
+
         // move to the next row in the data extent
         ++_page_i;
         if (_page_i != _page->end()) {
@@ -1265,6 +1270,8 @@ namespace indexer_helpers {
 
     void Table::Iterator::Secondary::next()
     {
+        TIME_TRACE_SCOPED(time_trace::traces, secondary_index_iterator_next);
+
         ++_btree_i;
         if (_btree_i == _btree->end()) {
             _page = {};

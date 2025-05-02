@@ -148,8 +148,17 @@ class BenchCase:
             replica_conn.commit()
             replica_time = time.time() - start
 
-            result["Primary test time"] = postgres_time
-            result["Replica test time"] = replica_time
+            result["First run: primary test time"] = postgres_time
+            result["First run: replica test time"] = replica_time
+
+            start = time.time()
+            with replica_conn.cursor() as cursor:
+                cursor.execute(self.test_sql)
+            replica_conn.commit()
+            replica_time = time.time() - start
+
+            result["Second run: primary test time"] = postgres_time
+            result["Second run: replica test time"] = replica_time
 
         # Clean up after benchmark (outside of timing)
         cleanup_path = os.path.join(os.path.dirname(__file__), "benchmark_cleanup.sql")
