@@ -41,20 +41,6 @@ namespace springtail::committer {
      */
     class Committer {
     public:
-        struct trace
-        {
-            TIME_TRACE(xid);
-            std::string _n;
-
-            trace(std::string n): _n{std::move(n)} {
-                TIME_TRACE_START(xid);
-            }
-
-            ~trace() {
-                TIME_TRACE_STOP(xid);
-                TIME_TRACESET_UPDATE(time_trace::traces, _n, xid);
-            }
-        };
         Committer(uint32_t worker_count, const std::shared_ptr<ConcurrentQueue<committer::XidReady>> &committer_queue,
                 const std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>> &index_reconciliation_queue)
             : _worker_count(worker_count),

@@ -106,20 +106,6 @@ namespace indexer_helpers {
      */
     class Table : public std::enable_shared_from_this<Table> {
     public:
-        struct trace
-        {
-            TIME_TRACE(xid);
-            std::string _n;
-
-            trace(std::string n): _n{std::move(n)} {
-                TIME_TRACE_START(xid);
-            }
-
-            ~trace() {
-                TIME_TRACE_STOP(xid);
-                TIME_TRACESET_UPDATE(time_trace::traces, _n, xid);
-            }
-        };
         /**
          * A forward iterator over the rows of a Table object.
          */

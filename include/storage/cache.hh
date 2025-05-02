@@ -6,6 +6,7 @@
 #include <boost/thread.hpp>
 
 #include <common/constants.hh>
+#include <common/time_trace.hh>
 #include <storage/extent.hh>
 #include <storage/field.hh>
 

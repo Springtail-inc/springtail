@@ -43,8 +43,6 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::commit(uint64_t xid, PostgresTimestamp commit_ts)
     {
-        time_trace::Trace commit_trace_table_validations;
-        TIME_TRACE_START(commit_trace_table_validations);
         // update any changes in the table invalidation state
         for (const auto &entry : _table_validations) {
             if (entry.second) {
@@ -53,15 +51,11 @@ namespace springtail::pg_log_mgr {
                 TableValidator::get_instance()->mark_valid(entry.first);
             }
         }
-        TIME_TRACE_STOP(commit_trace_table_validations);
-        TIME_TRACESET_UPDATE(time_trace::traces, "_batch_commit_table_validations", commit_trace_table_validations);
 
         // go through each subtxn and push it's outstanding batches to the WriteCache
         std::vector<uint64_t> pg_xids;
         std::map<uint64_t, ChangeListPtr> change_map;
 
-        time_trace::Trace commit_trace_write_cache;
-        TIME_TRACE_START(commit_trace_write_cache);
         for (const auto &txn_entry : _txns) {
             // XXX we need to sort the data by primary key if we want to perform efficient hurry-ups
 
@@ -82,20 +76,14 @@ namespace springtail::pg_log_mgr {
                                        txn_entry.second->changes);
             }
         }
-        TIME_TRACE_STOP(commit_trace_write_cache);
-        TIME_TRACESET_UPDATE(time_trace::traces, "_batch_commit_write_cache", commit_trace_write_cache);
 
         // apply any schema changes
         if (!change_map.empty()) {
             _apply_schema_changes(change_map, xid);
         }
 
-        time_trace::Trace commit_trace_write_cache_commit;
-        TIME_TRACE_START(commit_trace_write_cache_commit);
         // assign an XID to the committed transaction and update the mappings in the write cache
         WriteCacheFuncImpl::commit(_db, xid, pg_xids, commit_ts);
-        TIME_TRACE_STOP(commit_trace_write_cache_commit);
-        TIME_TRACESET_UPDATE(time_trace::traces, "_batch_commit_write_cache_commit", commit_trace_write_cache_commit);
 
         // stop timing for this transaction
         // if (_span->IsRecording()) {
@@ -161,11 +149,7 @@ namespace springtail::pg_log_mgr {
 
         std::vector<SchemaColumn> new_columns{op, lsn};
 
-        time_trace::Trace update_schema_trace;
-        TIME_TRACE_START(update_schema_trace);
         schema = table_schema->create_schema(columns, new_columns, sort_keys);
-        TIME_TRACE_STOP(update_schema_trace);
-        TIME_TRACESET_UPDATE(time_trace::traces, "_batch_update_schema_create_schema", update_schema_trace);
 
         fields = schema->get_mutable_fields(columns);
         if (has_primary) {
@@ -196,18 +180,12 @@ namespace springtail::pg_log_mgr {
     {
         XidLsn xidlsn(current_xid);
 
-        time_trace::Trace add_mutation_check_invalid_trace;
-        TIME_TRACE_START(add_mutation_check_invalid_trace);
         // check if we should skip the mutation due to an invalid table
         if (_check_invalid(tid)) {
             LOG_DEBUG(LOG_PG_REPL, "Skip mutation for invalid table with tid {}", tid);
             return;
         }
-        TIME_TRACE_STOP(add_mutation_check_invalid_trace);
-        TIME_TRACESET_UPDATE(time_trace::traces, "_batch_add_mutation_check_invalid", add_mutation_check_invalid_trace);
 
-        time_trace::Trace add_mutation_trace;
-        TIME_TRACE_START(add_mutation_trace);
         // check if we should skip the mutation due to ongoing table sync
         auto sync_skip = SyncTracker::get_instance()->should_skip(_db, tid, _pg_xid);
         if (sync_skip.should_skip()) {
@@ -216,25 +194,17 @@ namespace springtail::pg_log_mgr {
                       pg_xid);
             return;
         }
-        TIME_TRACE_STOP(add_mutation_trace);
-        TIME_TRACESET_UPDATE(time_trace::traces, "_batch_add_mutation_should_skip", add_mutation_trace);
 
-        time_trace::Trace add_mutation_table_exists_trace;
-        TIME_TRACE_START(add_mutation_table_exists_trace);
         // check if the system is aware of this table -- if not, need to skip this mutation
         if (!sync_skip.is_syncing() && !_table_exists(tid, xidlsn)) {
             LOG_DEBUG(LOG_PG_LOG_MGR, "Skip mutation due to unknown table: tid={} pg_xid={}\n", tid,
                       pg_xid);
             return;
         }
-        TIME_TRACE_STOP(add_mutation_table_exists_trace);
-        TIME_TRACESET_UPDATE(time_trace::traces, "_batch_add_mutation_table_exists", add_mutation_table_exists_trace);
 
         auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
         auto txn = _get_txn(pg_xid);
 
-        time_trace::Trace add_mutation_get_extent_trace;
-        TIME_TRACE_START(add_mutation_get_extent_trace);
         // get the Extent containing mutations
         auto &entry = txn->table_map[tid];
         if (entry.extent == nullptr) {
@@ -249,11 +219,7 @@ namespace springtail::pg_log_mgr {
             entry.extent = std::make_shared<Extent>(ExtentType{}, 0, entry.schema->row_size());
             entry.start_lsn = _lsn;
         }
-        TIME_TRACE_STOP(add_mutation_get_extent_trace);
-        TIME_TRACESET_UPDATE(time_trace::traces, "_batch_add_mutation_get_extent", add_mutation_get_extent_trace);
 
-        time_trace::Trace add_mutation_append_trace;
-        TIME_TRACE_START(add_mutation_append_trace);
         // add the mutation to the batch
         LOG_DEBUG(LOG_PG_LOG_MGR, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, T);
         auto row = entry.extent->append();
@@ -266,8 +232,6 @@ namespace springtail::pg_log_mgr {
         }
         entry.op_f->set_uint8(row, T);
         entry.lsn_f->set_uint64(row, _lsn++);
-        TIME_TRACE_STOP(add_mutation_append_trace);
-        TIME_TRACESET_UPDATE(time_trace::traces, "_batch_add_mutation_append", add_mutation_append_trace);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, entry.op_f->get_uint8(row));
 
@@ -368,13 +332,9 @@ namespace springtail::pg_log_mgr {
         }
         PgMsgTable &table_msg = std::get<PgMsgTable>(msg->msg);
 
-        time_trace::Trace validate_columns_trace;
-        TIME_TRACE_START(validate_columns_trace);
         // check if the table contains invalid columns -- if so we need to ignore this table
         auto invalid_columns =
             TableValidator::get_instance()->validate_columns<PgMsgSchemaColumn>(table_msg.columns);
-        TIME_TRACE_STOP(validate_columns_trace);
-        TIME_TRACESET_UPDATE(time_trace::traces, "_batch_validate_columns", validate_columns_trace);
 
         if (invalid_columns.size() > 0) {
             // mark the table as invalid in this batch
@@ -401,12 +361,8 @@ namespace springtail::pg_log_mgr {
                 return false;  // don't perform the CREATE_TABLE in this case
             }
         } else {
-            time_trace::Trace handle_validation_trace;
-            TIME_TRACE_START(handle_validation_trace);
             // Check if the table was previously in an invalid state
             bool was_invalid = _check_invalid(table_msg.oid);
-            TIME_TRACE_STOP(handle_validation_trace);
-            TIME_TRACESET_UPDATE(time_trace::traces, "_batch_handle_validation_check_invalid", handle_validation_trace);
 
             if (was_invalid) {
                 // The table is no longer invalid, remove the redis entry for the table
@@ -558,8 +514,6 @@ namespace springtail::pg_log_mgr {
         // construct a new txn entry for this subtxn
         auto sub_txn = std::make_shared<TxnEntry>(pg_xid);
 
-        time_trace::Trace start_subtxn_trace;
-        TIME_TRACE_START(start_subtxn_trace);
         // send the current txn's extents to the write cache and pull the schema forward to the subtxn
         if (_cur_txn != nullptr) {
             for (auto &entry : _cur_txn->table_map) {
@@ -575,8 +529,6 @@ namespace springtail::pg_log_mgr {
                 p.first->second.update_schema();
             }
         }
-        TIME_TRACE_STOP(start_subtxn_trace);
-        TIME_TRACESET_UPDATE(time_trace::traces, "_batch_start_subtxn", start_subtxn_trace);
 
         // record the subtransaction into the map
         _txns.try_emplace(pg_xid, sub_txn);
@@ -611,11 +563,7 @@ namespace springtail::pg_log_mgr {
             auto change = change_i->second->front().first;
             XidLsn xidlsn(xid, change_i->second->front().second);
 
-            time_trace::Trace apply_schema_change_trace;
-            TIME_TRACE_START(apply_schema_change_trace);
             _apply_schema_change(change, xidlsn);
-            TIME_TRACE_STOP(apply_schema_change_trace);
-            TIME_TRACESET_UPDATE(time_trace::traces, "_batch_apply_schema_change", apply_schema_change_trace);
 
             // remove the schema change we just applied
             change_i->second->pop_front();
