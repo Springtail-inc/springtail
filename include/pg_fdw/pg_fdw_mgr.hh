@@ -85,10 +85,17 @@ namespace springtail::pg_fdw {
             int field_idx; ///< field idx in the fields array of PgFdwState
             int32_t sp_pg_type; ///< Springtail column pg type
             PgAttr pg_attr; ///< PG attribute info
+
+            struct Filter {
+                QualOpName op;
+                FieldPtr field;
+            };
+
+            std::optional<Filter> filter; ///< The target has a filter
         };
 
-        ///< Map of targets including filtered quals keyed by attnum
-        absl::flat_hash_map<int, TargetColumn> target_columns;
+        ///< Vector of targets including filtered quals
+        std::vector<TargetColumn> target_columns;
 
         std::vector<ConstQualPtr> filtered_quals;     ///< List of quals (for where clause)
         std::vector<Index> indexes; ///< List of table indexes including the primary index.
@@ -298,8 +305,8 @@ namespace springtail::pg_fdw {
 
         /** Helper to compare a primary key const qual field to the data within a row */
         static bool _compare_field(const std::any &row,
-                                   FieldPtr row_field,
-                                   FieldPtr key_field,
+                                   const FieldPtr& row_field,
+                                   const FieldPtr& key_field,
                                    QualOpName op);
 
         /** Helper to set/reset scan iterators from beginning based on quals */

@@ -327,12 +327,43 @@ namespace springtail::pg_fdw {
         // init target list vector
         ListCell *lc;
         std::vector<std::string> target_colnames;
+
+        // init quals
+        CHECK_EQ(state->filtered_quals.empty(), true);
+        _init_quals(state, qual_list);
+
         int i = 0;
+        // we add filters at the beginning so that iterate_scan checks them first
+        // note: it is possible state->filtered_quals is empty if no quals are usable
+        // go through qual columns and make sure they are part of the target columns
+        for (int j = 0; j < state->filtered_quals.size(); j++) {
+            int attno = state->filtered_quals[j]->base.varattno;
+
+            PgFdwState::TargetColumn::Filter filter{state->filtered_quals[i]->base.op,
+                state->qual_fields->at(j)};
+
+            auto column = state->columns.at(state->attr_map.at(attno));
+            target_colnames.push_back(column.name);
+            state->target_columns.emplace_back(
+                   i++, column.pg_type, state->_attrs[attno-1], std::move(filter));
+        }
+
+
+        i = state->target_columns.size();
         foreach(lc, target_list) {
             // note: This is the attnum from the FDW's representation of the external table, not the
             //       column ID on the primary.  We need to map the local attnum to the primary's column ID.
             auto column = (SpringtailTargetColumn *)lfirst(lc);
             int attno = column->attnum;
+
+            auto it = std::ranges::find_if(state->target_columns,
+                    [attno](auto v) {return v == attno;},
+                    [](const auto& c) {return c.pg_attr.attnum;}
+            );
+
+            if (it != state->target_columns.end()) {
+                continue;
+            }
 
             auto col_i = state->columns.find(state->attr_map.at(attno));
             if (col_i == state->columns.end()) {
@@ -344,29 +375,11 @@ namespace springtail::pg_fdw {
             DCHECK_GT(attno, 0);
             DCHECK_LE(attno, state->_attrs.size());
 
-            state->target_columns.emplace(attno, PgFdwState::TargetColumn{i++, col_i->second.pg_type, state->_attrs[attno-1]});
+            state->target_columns.emplace_back(
+                    i++, col_i->second.pg_type, state->_attrs[attno-1]);
 
             LOG_DEBUG(LOG_FDW, "Target list column: {}:{}",
                                 attno, col_i->second.name);
-        }
-
-        // init quals
-        CHECK_EQ(state->filtered_quals.empty(), true);
-        _init_quals(state, qual_list);
-
-        // note: it is possible state->filtered_quals is empty if no quals are usable
-        // go through qual columns and make sure they are part of the target columns
-        i = state->target_columns.size();
-        for (int j = 0; j < state->filtered_quals.size(); j++) {
-            int attno = state->filtered_quals[j]->base.varattno;
-
-            auto it = state->target_columns.find(attno);
-
-            if (it == state->target_columns.end()) {
-                auto column = state->columns.at(state->attr_map.at(attno));
-                target_colnames.push_back(column.name);
-                state->target_columns.emplace(attno, PgFdwState::TargetColumn{i++, column.pg_type, state->_attrs[attno-1]});
-            }
         }
 
         // set target columns; will contain filtered qual columns as well
@@ -636,45 +649,11 @@ namespace springtail::pg_fdw {
         Extent::Row row{state->scan_asc? *(*state->iter_start) : *(*state->iter_end)};
         state->rows_fetched++;
 
-        // go through the qual fields and see how they compare to the values with in the row
-        // if they all match then we can return the row
-        if (state->qual_fields != nullptr) {
-            for (int i = 0; i < state->filtered_quals.size(); ++i) {
-                // extract the attrno and field index to find the field in the row
-                ConstQual *qual = state->filtered_quals[i];
-                int attno = qual->base.varattno;
-
-                auto it = state->target_columns.find(attno);
-                DCHECK(it != state->target_columns.end());
-                DCHECK_EQ(it->second.pg_attr.attnum, attno);
-
-                {
-                    TIME_TRACE_SCOPED(time_trace::traces, iterate_scan_compare);
-                    // compare the qual field to the field in the row
-                    bool res = _compare_field(row, state->fields->at(it->second.field_idx),
-                                              state->qual_fields->at(i), qual->base.op);
-                    if (res) {
-                        continue;
-                    }
-                }
-
-                // qual doesn't match, so this row must be skipped
-                // since it isn't the first qual, we can skip to the next row
-                LOG_DEBUG(LOG_FDW, "Qual not equal, skipping row");
-                state->rows_skipped++;
-                // increment iterator if scanning up
-                if (state->scan_asc) {
-                    ++(*state->iter_start);
-                }
-                return false;
-            }
-        }
-
         memset(nulls, true, num_attrs * sizeof(bool));
         memset(values, 0, num_attrs * sizeof(values[0]));
 
         // iterate through attributes passed in
-        for (const auto& [_, c]: state->target_columns) {
+        for (const auto& c: state->target_columns) {
             auto attno = c.pg_attr.attnum;
             DCHECK_LE(attno, num_attrs);
 
@@ -682,6 +661,24 @@ namespace springtail::pg_fdw {
 
             // get field idx that matches this attrno, then fetch the field and data
             const FieldPtr& field = state->fields->at(c.field_idx);
+
+            // check filter
+            if (c.filter.has_value()) {
+                TIME_TRACE_SCOPED(time_trace::traces, iterate_scan_compare);
+                // compare the qual field to the field in the row
+                bool res = _compare_field(row, field, c.filter->field, c.filter->op);
+                if (!res) {
+                    // qual doesn't match, so this row must be skipped
+                    // since it isn't the first qual, we can skip to the next row
+                    LOG_DEBUG(LOG_FDW, "Qual not equal, skipping row");
+                    state->rows_skipped++;
+                    // increment iterator if scanning up
+                    if (state->scan_asc) {
+                        ++(*state->iter_start);
+                    }
+                    return false;
+                }
+            }
 
             {
                 TIME_TRACE_SCOPED(time_trace::traces, iterate_scan_datum);
@@ -1550,8 +1547,8 @@ namespace springtail::pg_fdw {
 
     bool
     PgFdwMgr::_compare_field(const std::any &row,
-                             FieldPtr val_field,
-                             FieldPtr key_field,
+                             const FieldPtr& val_field,
+                             const FieldPtr& key_field,
                              QualOpName op)
     {
         // determine how the val field (from the row) compares to the key field from the qual
