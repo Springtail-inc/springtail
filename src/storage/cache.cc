@@ -608,7 +608,8 @@ namespace springtail {
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *tuple,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
                                              auto extent = ref.make_safe_extent(_file);
-                                             return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
+                                             auto &&row = (*extent)->back();
+                                             return FieldTuple(schema->get_sort_fields(), &row).less_than(key);
                                          });
         if (extent_i == _extents.end()) {
             return end();
@@ -622,7 +623,7 @@ namespace springtail {
                                                   return lhs.less_than(rhs);
                                               },
                                               [&schema](const Extent::Row &row) {
-                                                  return FieldTuple(schema->get_sort_fields(), row);
+                                                  return FieldTuple(schema->get_sort_fields(), &row);
                                               });
 
         // note: shouldn't be possible to hit end() given the above lower_bound() check to find the extent
@@ -642,7 +643,8 @@ namespace springtail {
         auto extent_i = std::upper_bound(_extents.begin(), _extents.end(), *tuple,
                                  [this, &schema](const Tuple &key, const ExtentRef &ref) {
                                      auto extent = ref.make_safe_extent(_file);
-                                     auto tuple = FieldTuple(schema->get_sort_fields(), (*extent)->back());
+                                     auto row = (*extent)->back();
+                                     auto tuple = FieldTuple(schema->get_sort_fields(), &row);
                                      return key.less_than(tuple);
                                  });
 
@@ -658,7 +660,7 @@ namespace springtail {
                                                   return lhs.less_than(rhs);
                                               },
                                               [&schema](const Extent::Row &row) {
-                                                  return FieldTuple(schema->get_sort_fields(), row);
+                                                  return FieldTuple(schema->get_sort_fields(), &row);
                                               });
 
         // note: shouldn't be possible to hit end() given the above upper_bound() check to find the extent
@@ -685,7 +687,7 @@ namespace springtail {
         }
 
         // if the key is equal, return it
-        auto key = FieldTuple(schema->get_sort_fields(), *i);
+        auto key = FieldTuple(schema->get_sort_fields(), &*i);
         if (tuple->equal_strict(key)) {
             return i;
         }
@@ -736,7 +738,7 @@ namespace springtail {
 
             // insert the tuple into the extent
             auto row = (*extent)->append();
-            MutableTuple(schema->get_mutable_fields(), row).assign(tuple);
+            MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
             return;
         }
 
@@ -747,7 +749,8 @@ namespace springtail {
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
                                              auto extent = ref.make_safe_extent(_file);
-                                             return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
+                                             auto &&row = (*extent)->back();
+                                             return FieldTuple(schema->get_sort_fields(), &row).less_than(key);
                                          });
 
         if (extent_i == _extents.end()) {
@@ -763,16 +766,16 @@ namespace springtail {
                                                   return lhs.less_than(rhs);
                                               },
                                               [&schema](const Extent::Row &row) {
-                                                  return FieldTuple(schema->get_sort_fields(), row);
+                                                  return FieldTuple(schema->get_sort_fields(), &row);
                                               });
 
         // note: row's key should *not* match the tuple's key
         CHECK(row_i == (*extent)->end() ||
-               !FieldTuple(schema->get_sort_fields(), *row_i).equal_strict(*key));
+               !FieldTuple(schema->get_sort_fields(), &*row_i).equal_strict(*key));
 
         // insert the tuple into the extent
         auto row = (*extent)->insert(row_i);
-        MutableTuple(schema->get_mutable_fields(), row).assign(tuple);
+        MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
 
         // check for split
         _check_split(extent_i, *extent, schema);
@@ -794,7 +797,7 @@ namespace springtail {
 
             // insert the tuple into the extent
             auto row = (*extent)->append();
-            MutableTuple(schema->get_mutable_fields(), row).assign(tuple);
+            MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
             return;
         }
 
@@ -807,7 +810,7 @@ namespace springtail {
         auto row = (*extent)->append();
 
         // set the value
-        MutableTuple(schema->get_mutable_fields(), row).assign(tuple);
+        MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
 
         // check for split
         _check_split(extent_i, *extent, schema);
@@ -829,7 +832,7 @@ namespace springtail {
 
             // insert the tuple into the extent
             auto row = (*extent)->append();
-            MutableTuple(schema->get_mutable_fields(), row).assign(tuple);
+            MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
 
             return true;
         }
@@ -841,7 +844,8 @@ namespace springtail {
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
                                              auto extent = ref.make_safe_extent(_file);
-                                             return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
+                                             auto &&row = (*extent)->back();
+                                             return FieldTuple(schema->get_sort_fields(), &row).less_than(key);
                                          });
         if (extent_i == _extents.end()) {
             extent_i = --_extents.end();
@@ -856,19 +860,20 @@ namespace springtail {
                                                   return lhs.less_than(rhs);
                                               },
                                               [&schema](const Extent::Row &row) {
-                                                  return FieldTuple(schema->get_sort_fields(), row);
+                                                  return FieldTuple(schema->get_sort_fields(), &row);
                                               });
 
         // see if the row's key matches the tuple's key
         bool did_insert = false;
-        if (row_i != (*extent)->end() && FieldTuple(schema->get_sort_fields(), *row_i).equal_strict(*key)) {
+        if (row_i != (*extent)->end() && FieldTuple(schema->get_sort_fields(), &*row_i).equal_strict(*key)) {
             // update the existing row
-            MutableTuple(schema->get_mutable_fields(), *row_i).assign(tuple);
+            auto row = *row_i;
+            MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
             did_insert = true;
         } else {
             // insert the tuple into the extent
             auto row = (*extent)->insert(row_i);
-            MutableTuple(schema->get_mutable_fields(), row).assign(tuple);
+            MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
         }
 
         // check for split
@@ -892,7 +897,8 @@ namespace springtail {
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
                                              auto extent = ref.make_safe_extent(_file);
-                                             return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
+                                             auto &&row = (*extent)->back();
+                                             return FieldTuple(schema->get_sort_fields(), &row).less_than(key);
                                          });
         // note: key should exist
         CHECK(extent_i != _extents.end());
@@ -906,15 +912,16 @@ namespace springtail {
                                                   return lhs.less_than(rhs);
                                               },
                                               [&schema](const Extent::Row &row) {
-                                                  return FieldTuple(schema->get_sort_fields(), row);
+                                                  return FieldTuple(schema->get_sort_fields(), &row);
                                               });
         CHECK(row_i != (**extent).end());
 
         // note: row's key should match the tuple's key
-        DCHECK(FieldTuple(schema->get_sort_fields(), *row_i).equal_strict(*key));
+        DCHECK(FieldTuple(schema->get_sort_fields(), &*row_i).equal_strict(*key));
 
         // update the existing row
-        MutableTuple(schema->get_mutable_fields(), *row_i).assign(tuple);
+        auto row = *row_i;
+        MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
 
         // check for split
         _check_split(extent_i, *extent, schema);
@@ -931,7 +938,8 @@ namespace springtail {
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
                                              auto extent = ref.make_safe_extent(_file);
-                                             return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
+                                             auto &&row = (*extent)->back();
+                                             return FieldTuple(schema->get_sort_fields(), &row).less_than(key);
                                          });
         // note: key should exist
         CHECK(extent_i != _extents.end());
@@ -945,11 +953,11 @@ namespace springtail {
                                                   return lhs.less_than(rhs);
                                               },
                                               [&schema](const Extent::Row &row) {
-                                                  return FieldTuple(schema->get_sort_fields(), row);
+                                                  return FieldTuple(schema->get_sort_fields(), &row);
                                               });
 
         // note: row's key should match the tuple's key
-        DCHECK(FieldTuple(schema->get_sort_fields(), *row_i).equal_strict(*key));
+        DCHECK(FieldTuple(schema->get_sort_fields(), const_cast<Extent::Row *>(&*row_i)).equal_strict(*key));
 
         // remove the row
         (*extent)->remove(row_i);
@@ -1013,10 +1021,10 @@ namespace springtail {
 
             // copy the data
             for (auto &row : **old_extent) {
-                FieldTuple source_tuple(source_fields, row);
+                FieldTuple source_tuple(source_fields, &row);
 
                 auto new_row = new_extent->append();
-                MutableTuple(target_fields, new_row).assign(source_tuple);
+                MutableTuple(target_fields, &new_row).assign(source_tuple);
             }
 
             new_extents.emplace_back(new_extent->cache_id(), false, new_extent);

@@ -42,7 +42,7 @@ class BenchmarkHelper {
             (*key_fields)[2] = std::make_shared<ConstTypeField<uint64_t>>(i % 1000);
             (*value_fields)[0] = std::make_shared<ConstTypeField<uint16_t>>(i % 1000);
 
-            auto kvt = std::make_shared<KeyValueTuple>(key_fields, value_fields, std::any{});
+            auto kvt = std::make_shared<KeyValueTuple>(key_fields, value_fields, nullptr);
             btree->insert(kvt);
         }
     }

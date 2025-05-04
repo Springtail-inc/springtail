@@ -52,7 +52,7 @@ main(int argc,
         std::cout << std::endl;
 
         for (auto row : (*table)) {
-            std::cout << FieldTuple(fields, row).to_string() << std::endl;
+            std::cout << FieldTuple(fields, &row).to_string() << std::endl;
         }
     }
     springtail_shutdown();

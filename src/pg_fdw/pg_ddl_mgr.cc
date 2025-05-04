@@ -171,7 +171,7 @@ namespace springtail::pg_fdw {
         auto fields = table->extent_schema()->get_fields();
 
         for (auto row : (*table)) {
-            std::string namespace_name(fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(row));
+            std::string namespace_name(fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&row));
             schemas.insert(namespace_name);
         }
 

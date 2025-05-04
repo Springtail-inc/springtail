@@ -54,7 +54,7 @@ namespace indexer_helpers {
         for (auto &row : *rows) {
             (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
 
-            auto kv = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
+            auto kv = std::make_shared<KeyValueTuple>(key_fields, value_fields, &row);
             if constexpr (op == IndexOperation::Insert) {
                 root->insert(kv);
             } else { /* op == IndexOperation::Remove */
@@ -176,8 +176,8 @@ namespace indexer_helpers {
                 auto extent = std::make_shared<Extent>(response->data);
                 for (auto &row : *extent) {
                     roots.push_back(
-                            {_roots_index_id_f->get_uint64(row),
-                            _roots_root_f->get_uint64(row)});
+                            {_roots_index_id_f->get_uint64(&row),
+                            _roots_root_f->get_uint64(&row)});
                 }
                 // XXX is this the right thing to do?  forces the XID to the known XID of the roots
                 xid = extent->header().xid;
@@ -268,7 +268,8 @@ namespace indexer_helpers {
         }
 
         // extract the extent_id and return it
-        return _primary_extent_id_f->get_uint64(*i);
+        auto &&row = *i;
+        return _primary_extent_id_f->get_uint64(&row);
     }
 
     ExtentSchemaPtr
@@ -484,7 +485,8 @@ namespace indexer_helpers {
     StorageCache::SafePagePtr
     Table::_read_page_via_primary(BTree::Iterator &pos) const
     {
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(*pos);
+        auto &&row = *pos;
+        uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
         return _read_page(extent_id);
     }
 
@@ -546,7 +548,7 @@ namespace indexer_helpers {
                 auto response = root_handle->read(0);
                 auto extent = std::make_shared<Extent>(response->data);
                 for (auto &row : *extent) {
-                    roots.push_back({_roots_index_id_f->get_uint64(row), _roots_root_f->get_uint64(row)});
+                    roots.push_back({_roots_index_id_f->get_uint64(&row), _roots_root_f->get_uint64(&row)});
                 }
             } else {
                 // fill the root offsets with UNKNOWN_EXTENT to indicate an empty tree
@@ -785,7 +787,8 @@ namespace indexer_helpers {
         } else {
             // has a primary key, get the last row of the original page for the primary index
             auto pkey_fields = _schema->get_fields(_primary_key);
-            pkey = std::make_shared<FieldTuple>(pkey_fields, *orig_page->last());
+            auto &&row = *orig_page->last();
+            pkey = std::make_shared<FieldTuple>(pkey_fields, &row);
         }
 
         // remove the old primary index entry
@@ -829,7 +832,8 @@ namespace indexer_helpers {
                 pkey = std::make_shared<FieldTuple>(value_fields, nullptr);
             } else {
                 // has a primary key, use the primary key fields
-                pkey = std::make_shared<KeyValueTuple>(pkey_fields, value_fields, *new_page->last());
+                auto &&row = *new_page->last();
+                pkey = std::make_shared<KeyValueTuple>(pkey_fields, value_fields, &row);
             }
 
             // insert the new primary index entry
@@ -877,8 +881,8 @@ namespace indexer_helpers {
         auto extent = std::make_shared<Extent>(ExtentType(), _target_xid, _roots_schema->row_size());
         for (auto root : metadata.roots) {
             auto &&row = extent->append();
-            _roots_root_f->set_uint64(row, root.extent_id);
-            _roots_index_id_f->set_uint64(row, root.index_id);
+            _roots_root_f->set_uint64(&row, root.extent_id);
+            _roots_index_id_f->set_uint64(&row, root.index_id);
         }
         auto filename = fmt::format(constant::ROOTS_XID_FILE, _target_xid);
         auto root_handle = IOMgr::get_instance()->open(_table_dir / filename,
@@ -971,8 +975,8 @@ namespace indexer_helpers {
 
         // note: in this case there is no explicit primary key, so we need to append the row to the
         //       end of the file
-        auto pos = _primary_index->last();
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(*pos);
+        auto &&row = *(_primary_index->last());
+        uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
 
         // get the page from the cache
         auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
@@ -1001,9 +1005,10 @@ namespace indexer_helpers {
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
         auto search_key = _schema->tuple_subset(value, _primary_key);
         auto i = _primary_index->lower_bound(search_key, true);
+        auto &&row = *i;
 
         // if the primary index is not empty, get the target extent
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
+        uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
 
         // then we can do a direct insert
         _insert_direct(value, extent_id);
@@ -1052,9 +1057,10 @@ namespace indexer_helpers {
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
         auto search_key = _schema->tuple_subset(value, _primary_key);
         auto i = _primary_index->lower_bound(search_key, true);
+        auto &&row = *i;
 
         // if the primary index is not empty, get the target extent
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
+        uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
 
         // then we can do a direct insert
         return _upsert_direct(value, extent_id);
@@ -1100,9 +1106,10 @@ namespace indexer_helpers {
 
         // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
         auto i = _primary_index->lower_bound(key, true);
+        auto &&row = *i;
 
         // if the primary index is not empty, get the target extent
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
+        uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
 
         // then we can do a direct removal
         _remove_direct(key, extent_id);
@@ -1123,8 +1130,9 @@ namespace indexer_helpers {
         bool found = false;
         auto i = _primary_index->begin();
         while (!found && i != _primary_index->end()) {
+            auto &&row = *i;
             // scan each extent, looking for a match
-            uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
+            uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
 
             auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false,
                 [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
@@ -1134,7 +1142,8 @@ namespace indexer_helpers {
 
             auto &&j = page->begin();
             while (!found && j != page->end()) {
-                if (value->equal_strict(FieldTuple(fields, *j))) {
+                auto &&vrow = *j;
+                if (value->equal_strict(FieldTuple(fields, &vrow))) {
                     page->remove(j);
                     found = true;
                 } else {
@@ -1192,9 +1201,10 @@ namespace indexer_helpers {
         // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
         auto search_key = _schema->tuple_subset(value, _primary_key);
         auto i = _primary_index->lower_bound(search_key, true);
+        auto &&row = *i;
 
         // if the primary index is not empty, get the target extent
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
+        uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
 
         // then we can do a direct update
         _update_direct(value, extent_id);
@@ -1288,13 +1298,13 @@ namespace indexer_helpers {
     void Table::Iterator::Secondary::update_page()
     {
         CHECK(_btree_i != _btree->end());
-
-        uint64_t eid = _extent_id_f->get_uint64(*_btree_i);
+        auto &&row = *_btree_i;
+        uint64_t eid = _extent_id_f->get_uint64(&row);
         if (_page.empty() || _extent_id != eid) {
             _extent_id = eid;
             _page = _table->_read_page(_extent_id);
         }
-        uint64_t row_id = _row_id_f->get_uint32(*_btree_i);
+        uint64_t row_id = _row_id_f->get_uint32(&row);
         _page_i = _page->at(row_id);
     }
 

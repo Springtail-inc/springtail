@@ -265,7 +265,7 @@ namespace springtail::pg_fdw {
         static void _make_const_field(FieldArrayPtr fields, int idx, ConstQual *qual);
 
         /** Helper to compare a primary key const qual field to the data within a row */
-        static bool _compare_field(const std::any &row,
+        static bool _compare_field(const void *row,
                                    FieldPtr row_field,
                                    FieldPtr key_field,
                                    QualOpName op);

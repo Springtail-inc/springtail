@@ -40,8 +40,8 @@ main(int argc,
 
     int count = 0;
     for (auto &&row : extent) {
-        std::cout << name_f->get_text(row) << ", "
-                  << child_f->get_uint64(row) << std::endl;
+        std::cout << name_f->get_text(&row) << ", "
+                  << child_f->get_uint64(&row) << std::endl;
         ++count;
     }
     std::cout << count << std::endl;

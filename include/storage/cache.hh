@@ -327,7 +327,7 @@ namespace springtail {
                 }
             }
 
-            const CacheExtentPtr& operator*() const {
+            CacheExtentPtr& operator*() {
                 return _extent;
             }
 

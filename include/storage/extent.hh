@@ -125,7 +125,7 @@ namespace springtail {
             Row(Extent *e, uint32_t o) : extent(e), offset(o) {}
 
             /** Retrieve text from the variable data. */
-            std::string_view get_text(uint32_t offset) {
+            std::string_view get_text(uint32_t offset) const {
                 return extent->get_text(offset);
             }
 
@@ -135,7 +135,7 @@ namespace springtail {
             }
 
             /** Retrieve binary data from the variable data. */
-            const std::span<const char> get_binary(uint32_t offset) {
+            const std::span<const char> get_binary(uint32_t offset) const {
                 return extent->get_binary(offset);
             }
 

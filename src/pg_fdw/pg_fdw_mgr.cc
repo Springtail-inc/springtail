@@ -577,7 +577,7 @@ namespace springtail::pg_fdw {
                 {
                     TIME_TRACE_SCOPED(time_trace::traces, iterate_scan_compare);
                     // compare the qual field to the field in the row
-                    bool res = _compare_field(row, state->fields->at(it->second.field_idx),
+                    bool res = _compare_field(&row, state->fields->at(it->second.field_idx),
                                               state->qual_fields->at(i), qual->base.op);
                     if (res) {
                         continue;
@@ -612,7 +612,7 @@ namespace springtail::pg_fdw {
             {
                 TIME_TRACE_SCOPED(time_trace::traces, iterate_scan_datum);
                 // set value
-                if (!field->is_null(row)) {
+                if (!field->is_null(&row)) {
                     values[attno-1] = _get_datum_from_field(field.get(), row, c.pg_attr.atttypid, c.pg_attr.atttypmod);
                     nulls[attno-1] = false;
                 }
@@ -841,29 +841,29 @@ namespace springtail::pg_fdw {
     {
         switch (field->get_type()) {
         case SchemaType::INT64:
-            return Int64GetDatum(field->get_int64(row));
+            return Int64GetDatum(field->get_int64(&row));
         case SchemaType::UINT64:
-            return UInt64GetDatum(field->get_uint64(row));
+            return UInt64GetDatum(field->get_uint64(&row));
         case SchemaType::INT32:
-            return Int32GetDatum(field->get_int32(row));
+            return Int32GetDatum(field->get_int32(&row));
         case SchemaType::UINT32:
-            return UInt32GetDatum(field->get_uint32(row));
+            return UInt32GetDatum(field->get_uint32(&row));
         case SchemaType::INT16:
-            return Int16GetDatum(field->get_int16(row));
+            return Int16GetDatum(field->get_int16(&row));
         case SchemaType::UINT16:
-            return UInt16GetDatum(field->get_uint16(row));
+            return UInt16GetDatum(field->get_uint16(&row));
         case SchemaType::INT8:
-            return Int8GetDatum(field->get_int8(row));
+            return Int8GetDatum(field->get_int8(&row));
         case SchemaType::UINT8:
-            return UInt8GetDatum(field->get_uint8(row));
+            return UInt8GetDatum(field->get_uint8(&row));
         case SchemaType::BOOLEAN:
-            return BoolGetDatum(field->get_bool(row));
+            return BoolGetDatum(field->get_bool(&row));
         case SchemaType::FLOAT64:
-            return Float8GetDatum(field->get_float64(row));
+            return Float8GetDatum(field->get_float64(&row));
         case SchemaType::FLOAT32:
-            return Float4GetDatum(field->get_float32(row));
+            return Float4GetDatum(field->get_float32(&row));
         case SchemaType::TEXT: {
-            const std::string_view value(field->get_text(row));
+            const std::string_view value(field->get_text(&row));
             return PointerGetDatum(cstring_to_text_with_len(value.data(), value.size()));
         }
         case SchemaType::BINARY: {
@@ -884,7 +884,7 @@ namespace springtail::pg_fdw {
 
             ReleaseSysCache(tuple);
 
-            auto &&value = field->get_binary(row);
+            auto &&value = field->get_binary(&row);
 
             // note: we need to store the data into a StringInfo so that the receive function can
             // unpack it for us
@@ -1048,19 +1048,20 @@ namespace springtail::pg_fdw {
         }
 
         auto ns_fields = ns_table->extent_schema()->get_fields();
-        if (schema != ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(*ns_i)) {
+        auto &&row = *ns_i;
+        if (schema != ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&row)) {
             LOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
                         schema, schema_xid, constant::MAX_LSN);
             return commands;
         }
-        if (!ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*ns_i)) {
+        if (!ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row)) {
             LOG_WARN("Namespace marked as not-exists {} @ {}:{}",
                         schema, schema_xid, constant::MAX_LSN);
             return commands;
         }
 
         // record the namespace ID
-        uint64_t namespace_id = ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(*ns_i);
+        uint64_t namespace_id = ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&row);
 
         // get the table names table to iterate over
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID,
@@ -1073,7 +1074,7 @@ namespace springtail::pg_fdw {
 
         // iterate over the table names table and populate the table map
         for (auto row : (*table)) {
-            auto table_ns_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(row);
+            auto table_ns_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
 
             // check for schema-namespace match
             if (table_ns_id != namespace_id) {
@@ -1082,7 +1083,7 @@ namespace springtail::pg_fdw {
                 continue;
             }
 
-            std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row));
+            std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row));
             // handle limit and exclude
             if (exclude && table_set.contains(table_name)) {
                 LOG_DEBUG(LOG_FDW, "Excluding table {}.{}", schema, table_name);
@@ -1095,10 +1096,10 @@ namespace springtail::pg_fdw {
                 continue;
             }
 
-            uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(row);
-            uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(row);
+            uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
+            uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
 
-            bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(row);
+            bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
             if (!exists) {
                 // find table and compare xids, remove if this xid is >= to the one in the map
                 auto entry = table_map.find(table_name);
@@ -1152,7 +1153,7 @@ namespace springtail::pg_fdw {
         // iterate through it
         fields = table->extent_schema()->get_fields();
         for (auto row : (*table)) {
-            uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(row);
+            uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(&row);
 
             LOG_DEBUG(LOG_FDW, "Found table in schemas table: {}", tid);
 
@@ -1183,8 +1184,8 @@ namespace springtail::pg_fdw {
                 current_table = std::get<1>(it->second);
             }
 
-            std::string column_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row));
-            bool exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(row);
+            std::string column_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(&row));
+            bool exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(&row);
             if (!exists) {
                 auto it = std::find_if(columns.begin(), columns.end(),
                 [&column_name](const std::tuple<std::string, std::string, bool> &column) {
@@ -1197,8 +1198,8 @@ namespace springtail::pg_fdw {
             }
 
             // add column if it exists
-            int32_t pg_type(fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(row));
-            bool nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(row);
+            int32_t pg_type(fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(&row));
+            bool nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(&row);
 
             columns.push_back({column_name, _get_type_name(pg_type), nullable});
         }
@@ -1299,7 +1300,7 @@ namespace springtail::pg_fdw {
     }
 
     bool
-    PgFdwMgr::_compare_field(const std::any &row,
+    PgFdwMgr::_compare_field(const void *row,
                              FieldPtr val_field,
                              FieldPtr key_field,
                              QualOpName op)

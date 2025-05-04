@@ -296,7 +296,7 @@ Service::_find_index(uint64_t db_id,
     // find the last XID for this index
     for (auto names_i = names_t->lower_bound(search_key); names_i != names_t->end(); ++names_i) {
         auto& row = *names_i;
-        uint64_t id = names_fields->at(sys_tbl::IndexNames::Data::INDEX_ID)->get_uint64(row);
+        uint64_t id = names_fields->at(sys_tbl::IndexNames::Data::INDEX_ID)->get_uint64(&row);
 
         if (id < index_id) {
             continue;
@@ -307,14 +307,14 @@ Service::_find_index(uint64_t db_id,
         }
 
         {
-            uint64_t xid = names_fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(row);
-            uint64_t lsn = names_fields->at(sys_tbl::IndexNames::Data::LSN)->get_uint64(row);
+            uint64_t xid = names_fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(&row);
+            uint64_t lsn = names_fields->at(sys_tbl::IndexNames::Data::LSN)->get_uint64(&row);
             index_xid = {xid, lsn};
             if (access_xid < index_xid) {
                 continue;
             }
         }
-        auto found_tid = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(row);
+        auto found_tid = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(&row);
         if (tid && tid != found_tid) {
             LOG_DEBUG(LOG_SCHEMA, "Found a dupoicate index id {} -- {}, {}/{}", db_id,
                                 index_id, tid, found_tid);
@@ -322,10 +322,10 @@ Service::_find_index(uint64_t db_id,
         }
 
         table_id = found_tid;
-        is_unique = names_fields->at(sys_tbl::IndexNames::Data::IS_UNIQUE)->get_bool(row);
-        name = names_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(row);
-        namespace_id = names_fields->at(sys_tbl::IndexNames::Data::NAMESPACE_ID)->get_uint64(row);
-        state = names_fields->at(sys_tbl::IndexNames::Data::STATE)->get_uint8(row);
+        is_unique = names_fields->at(sys_tbl::IndexNames::Data::IS_UNIQUE)->get_bool(&row);
+        name = names_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(&row);
+        namespace_id = names_fields->at(sys_tbl::IndexNames::Data::NAMESPACE_ID)->get_uint64(&row);
+        state = names_fields->at(sys_tbl::IndexNames::Data::STATE)->get_uint8(&row);
 
         found = true;
     }
@@ -1186,8 +1186,8 @@ Service::Revert(grpc::ServerContext* context,
         FieldPtr xid_f = table->extent_schema()->get_field("xid");
         auto primary_fields = table->extent_schema()->get_fields(table->primary_key());
         for (auto row : *table) {
-            if (xid_f->get_uint64(row) > request->xid()) {
-                mtable->remove(std::make_shared<FieldTuple>(primary_fields, row),
+            if (xid_f->get_uint64(&row) > request->xid()) {
+                mtable->remove(std::make_shared<FieldTuple>(primary_fields, &row),
                                constant::UNKNOWN_EXTENT);
             }
         }
@@ -1220,16 +1220,17 @@ Service::_get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
 
     // find the row that matches the name of the table_id at the given XID/LSN
     auto row_i = table_names_t->inverse_lower_bound(search_key);
+    auto &&row = *row_i;
 
     // make sure table ID exists at this XID/LSN
     if (row_i == table_names_t->end() ||
-        fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(*row_i) != table_id) {
+        fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row) != table_id) {
         LOG_WARN("No table info at xid {}:{}", xid.xid, xid.lsn);
         return nullptr;
     }
 
     // make sure that the table is marked as existing at this XID/LSN
-    bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(*row_i);
+    bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
     if (!exists) {
         LOG_WARN("Table marked non-existant at xid {}:{}", xid.xid, xid.lsn);
         return nullptr;
@@ -1237,11 +1238,11 @@ Service::_get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
 
     // read the row from the extent and retrieve the FQN
     auto info = std::make_shared<TableCacheRecord>();
-    info->id = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(*row_i);
-    info->xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(*row_i);
-    info->lsn = fields->at(sys_tbl::TableNames::Data::LSN)->get_uint64(*row_i);
-    info->namespace_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(*row_i);
-    info->name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(*row_i);
+    info->id = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
+    info->xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
+    info->lsn = fields->at(sys_tbl::TableNames::Data::LSN)->get_uint64(&row);
+    info->namespace_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
+    info->name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row);
     info->exists = exists;
 
     // note: we currently only keep un-finalized mutations in the cache, so don't cache here
@@ -1273,17 +1274,18 @@ Service::_get_namespace_info(uint64_t db_id, uint64_t namespace_id, const XidLsn
 
     // find the row that matches the namespace_id at the given XID/LSN
     auto row_i = table->inverse_lower_bound(search_key);
+    auto &&row = *row_i;
 
     // make sure table ID exists at this XID/LSN
     auto id_field = fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID);
-    if (row_i == table->end() || id_field->get_uint64(*row_i) != namespace_id) {
+    if (row_i == table->end() || id_field->get_uint64(&row) != namespace_id) {
         LOG_WARN("No namespace info at xid {}:{}", xid.xid, xid.lsn);
         return nullptr;
     }
 
     // make sure that the table is marked as existing at this XID/LSN
     if (check_exists) {
-        bool exists = fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*row_i);
+        bool exists = fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row);
         if (!exists) {
             LOG_WARN("Namespace marked non-existant at xid {}:{}", xid.xid, xid.lsn);
             return nullptr;
@@ -1292,8 +1294,8 @@ Service::_get_namespace_info(uint64_t db_id, uint64_t namespace_id, const XidLsn
 
     // create and populate the namespace info
     return std::make_shared<NamespaceCacheRecord>(
-        namespace_id, fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(*row_i),
-        fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*row_i));
+        namespace_id, fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&row),
+        fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row));
 }
 
 Service::NamespaceCacheRecordPtr
@@ -1331,6 +1333,7 @@ Service::_get_namespace_info(uint64_t db_id, const std::string& name, const XidL
 
     // find the row that matches the name at the given XID/LSN
     auto row_i = table->inverse_lower_bound(search_key, 1);
+    auto &&row = *row_i;
 
     // verify that the name is present and exists
     if (row_i == table->end(1)) {
@@ -1338,19 +1341,19 @@ Service::_get_namespace_info(uint64_t db_id, const std::string& name, const XidL
         return nullptr;
     }
 
-    if (name != fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(*row_i)) {
+    if (name != fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&row)) {
         LOG_WARN("Couldn't find entry for namespace {} @ {}:{}", name, xid.xid, xid.lsn);
         return nullptr;
     }
-    if (check_exists && !fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*row_i)) {
+    if (check_exists && !fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row)) {
         LOG_WARN("Namespace marked as not-exists {} @ {}:{}", name, xid.xid, xid.lsn);
         return nullptr;
     }
 
     // return the namespace ID
     return std::make_shared<NamespaceCacheRecord>(
-        fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(*row_i), name,
-        fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*row_i));
+        fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&row), name,
+        fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row));
 }
 
 void
@@ -1427,35 +1430,36 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     index_info_request.set_table_id(table_id);
 
     for (; rrow_i != roots_t->end(); ++rrow_i) {
-        if (table_id_f->get_uint64(*rrow_i) > table_id) {
+        auto &&row = *rrow_i;
+        if (table_id_f->get_uint64(&row) > table_id) {
             break;
         }
-        if (table_id_f->get_uint64(*rrow_i) != table_id) {
+        if (table_id_f->get_uint64(&row) != table_id) {
             continue;
         }
-        auto record_xid = xid_f->get_uint64(*rrow_i);
+        auto record_xid = xid_f->get_uint64(&row);
         if (xid.xid < record_xid) {
             continue;
         }
 
         // Allow roots to be picked up even for non-primary key tables
-        if (index_id_f->get_uint64(*rrow_i) != constant::INDEX_PRIMARY) {
-            index_info_request.set_index_id(index_id_f->get_uint64(*rrow_i));
+        if (index_id_f->get_uint64(&row) != constant::INDEX_PRIMARY) {
+            index_info_request.set_index_id(index_id_f->get_uint64(&row));
             auto index_info = _get_index_info(index_info_request);
 
             if (static_cast<sys_tbl::IndexNames::State>(index_info.state()) != sys_tbl::IndexNames::State::READY &&
                     static_cast<sys_tbl::IndexNames::State>(index_info.state()) != sys_tbl::IndexNames::State::BEING_DELETED) {
                 LOG_DEBUG(LOG_SCHEMA, "Index deleted or not-ready, so skipping the root {} -- {}",
-                          table_id, index_id_f->get_uint64(*rrow_i));
+                          table_id, index_id_f->get_uint64(&row));
                 continue;
             }
         }
 
         proto::RootInfo ri;
-        ri.set_index_id(index_id_f->get_uint64(*rrow_i));
-        ri.set_extent_id(eid_f->get_uint64(*rrow_i));
+        ri.set_index_id(index_id_f->get_uint64(&row));
+        ri.set_extent_id(eid_f->get_uint64(&row));
         // use snapshot_xid of the last row
-        snapshot_xid = sxid_f->get_uint64(*rrow_i);
+        snapshot_xid = sxid_f->get_uint64(&row);
         auto it = std::ranges::find_if(*roots_info->mutable_roots(), [&ri](auto const& v) {
             return v.index_id() == ri.index_id();
         });
@@ -1481,10 +1485,11 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
 
     search_key = sys_tbl::TableStats::Primary::key_tuple(table_id, xid.xid);
     auto srow_i = stats_t->inverse_lower_bound(search_key);
+    auto &&row = *srow_i;
 
     // need to confirm that the table ID matches, but the XID may not match
     table_id_f = stats_t->extent_schema()->get_field("table_id");
-    if (srow_i == stats_t->end() || table_id_f->get_uint64(*srow_i) != table_id) {
+    if (srow_i == stats_t->end() || table_id_f->get_uint64(&row) != table_id) {
         // no stats for this table?  seems like a potential error
         LOG_WARN("Couldn't find table_stats entry for {}@{}:{}", table_id, xid.xid, xid.lsn);
         return roots_info;
@@ -1493,8 +1498,8 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     // retrieve the stats from the row
     auto row_count_f = stats_t->extent_schema()->get_field("row_count");
     auto end_offset_f = stats_t->extent_schema()->get_field("end_offset");
-    roots_info->mutable_stats()->set_row_count(row_count_f->get_uint64(*srow_i));
-    roots_info->mutable_stats()->set_end_offset(end_offset_f->get_uint64(*srow_i));
+    roots_info->mutable_stats()->set_row_count(row_count_f->get_uint64(&row));
+    roots_info->mutable_stats()->set_end_offset(end_offset_f->get_uint64(&row));
 
     return roots_info;
 }
@@ -1615,15 +1620,15 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
 
     for (auto names_i = names_t->lower_bound(search_key); names_i != names_t->end(); ++names_i) {
         auto& row = *names_i;
-        uint64_t tid = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(row);
+        uint64_t tid = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(&row);
 
         if (tid != table_id) {
             LOG_DEBUG(LOG_SCHEMA, "No more indexes for table {} -- {}", table_id, tid);
             break;
         }
 
-        XidLsn index_xid(names_fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(row),
-                         names_fields->at(sys_tbl::IndexNames::Data::LSN)->get_uint64(row));
+        XidLsn index_xid(names_fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(&row),
+                         names_fields->at(sys_tbl::IndexNames::Data::LSN)->get_uint64(&row));
 
         if (access_xid < index_xid) {
             LOG_DEBUG(LOG_SCHEMA, "No more data for table indexes {}@{}:{}", tid,
@@ -1632,8 +1637,8 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
         }
 
         proto::IndexInfo info;
-        info.set_id(names_fields->at(sys_tbl::IndexNames::Data::INDEX_ID)->get_uint64(row));
-        info.set_state(names_fields->at(sys_tbl::IndexNames::Data::STATE)->get_uint8(row));
+        info.set_id(names_fields->at(sys_tbl::IndexNames::Data::INDEX_ID)->get_uint64(&row));
+        info.set_state(names_fields->at(sys_tbl::IndexNames::Data::STATE)->get_uint8(&row));
 
         if (static_cast<sys_tbl::IndexNames::State>(info.state()) ==
             sys_tbl::IndexNames::State::DELETED) {
@@ -1656,23 +1661,23 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
         }
 
         uint64_t namespace_id =
-            names_fields->at(sys_tbl::IndexNames::Data::NAMESPACE_ID)->get_uint64(row);
+            names_fields->at(sys_tbl::IndexNames::Data::NAMESPACE_ID)->get_uint64(&row);
         auto ns_info = _get_namespace_info(db_id, namespace_id, access_xid, false);
         CHECK(ns_info);
         info.set_namespace_name(ns_info->name);
 
-        info.set_name(names_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(row));
+        info.set_name(names_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(&row));
         info.set_table_id(tid);
-        info.set_is_unique(names_fields->at(sys_tbl::IndexNames::Data::IS_UNIQUE)->get_bool(row));
+        info.set_is_unique(names_fields->at(sys_tbl::IndexNames::Data::IS_UNIQUE)->get_bool(&row));
 
         auto index_key = sys_tbl::Indexes::Primary::key_tuple(table_id, info.id(), index_xid.xid,
                                                               index_xid.lsn, 0);
         for (auto index_i = indexes_t->lower_bound(index_key); index_i != indexes_t->end();
              ++index_i) {
             auto& row = *index_i;
-            uint64_t tid = indexes_fields->at(sys_tbl::Indexes::Data::TABLE_ID)->get_uint64(row);
+            uint64_t tid = indexes_fields->at(sys_tbl::Indexes::Data::TABLE_ID)->get_uint64(&row);
             uint64_t index_id =
-                indexes_fields->at(sys_tbl::Indexes::Data::INDEX_ID)->get_uint64(row);
+                indexes_fields->at(sys_tbl::Indexes::Data::INDEX_ID)->get_uint64(&row);
 
             if (tid != table_id || index_id != info.id()) {
                 LOG_DEBUG(LOG_SCHEMA, "No more indexes for table {} -- {}, {} -- {}",
@@ -1680,17 +1685,17 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
                 break;
             }
             // index_xid and xid's of index columns must match
-            uint64_t xid = indexes_fields->at(sys_tbl::Indexes::Data::XID)->get_uint64(row);
-            uint64_t lsn = indexes_fields->at(sys_tbl::Indexes::Data::LSN)->get_uint64(row);
+            uint64_t xid = indexes_fields->at(sys_tbl::Indexes::Data::XID)->get_uint64(&row);
+            uint64_t lsn = indexes_fields->at(sys_tbl::Indexes::Data::LSN)->get_uint64(&row);
             if (index_xid != XidLsn(xid, lsn)) {
                 break;
             }
 
             proto::IndexColumn* col = info.add_columns();
             col->set_position(
-                indexes_fields->at(sys_tbl::Indexes::Data::COLUMN_ID)->get_uint32(row));
+                indexes_fields->at(sys_tbl::Indexes::Data::COLUMN_ID)->get_uint32(&row));
             col->set_idx_position(
-                indexes_fields->at(sys_tbl::Indexes::Data::POSITION)->get_uint32(row));
+                indexes_fields->at(sys_tbl::Indexes::Data::POSITION)->get_uint32(&row));
         }
 
         // erase any of the previous info, we'll keep the last one only
@@ -1731,7 +1736,7 @@ Service::_read_schema_columns(SchemaInfoPtr info,
         auto& row = *table_i;
 
         // get the table_id from the entry
-        uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(row);
+        uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(&row);
         if (tid != table_id) {
             LOG_DEBUG(LOG_SCHEMA, "No more data for table {} -- {}", table_id, tid);
             // if we have read all of the entries for this table ID, stop processing
@@ -1740,8 +1745,8 @@ Service::_read_schema_columns(SchemaInfoPtr info,
         }
 
         // don't apply changes that are beyond the requested XID/LSN
-        uint64_t xid = fields->at(sys_tbl::Schemas::Data::XID)->get_uint64(row);
-        uint64_t lsn = fields->at(sys_tbl::Schemas::Data::LSN)->get_uint64(row);
+        uint64_t xid = fields->at(sys_tbl::Schemas::Data::XID)->get_uint64(&row);
+        uint64_t lsn = fields->at(sys_tbl::Schemas::Data::LSN)->get_uint64(&row);
         const XidLsn row_xid(xid, lsn);
         if (access_xid < row_xid) {
             const XidLsn end_xid(info->access_xid_end(), info->access_lsn_end());
@@ -1763,8 +1768,8 @@ Service::_read_schema_columns(SchemaInfoPtr info,
         }
 
         // remove the column if it doesn't exist
-        auto position = fields->at(sys_tbl::Schemas::Data::POSITION)->get_uint32(row);
-        bool exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(row);
+        auto position = fields->at(sys_tbl::Schemas::Data::POSITION)->get_uint32(&row);
+        bool exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(&row);
         if (!exists) {
             // Remove any existing column at this position
             for (int i = 0; i < info->columns_size(); i++) {
@@ -1795,15 +1800,15 @@ Service::_read_schema_columns(SchemaInfoPtr info,
                 column = info->mutable_columns(idx);
             }
 
-            column->set_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row));
-            column->set_type(fields->at(sys_tbl::Schemas::Data::TYPE)->get_uint8(row));
-            column->set_pg_type(fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(row));
+            column->set_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(&row));
+            column->set_type(fields->at(sys_tbl::Schemas::Data::TYPE)->get_uint8(&row));
+            column->set_pg_type(fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(&row));
             column->set_position(position);
-            column->set_is_nullable(fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(row));
+            column->set_is_nullable(fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(&row));
             column->set_is_generated(false);  // XXX
-            if (!fields->at(sys_tbl::Schemas::Data::DEFAULT)->is_null(row)) {
+            if (!fields->at(sys_tbl::Schemas::Data::DEFAULT)->is_null(&row)) {
                 column->set_default_value(
-                    fields->at(sys_tbl::Schemas::Data::DEFAULT)->get_text(row));
+                    fields->at(sys_tbl::Schemas::Data::DEFAULT)->get_text(&row));
             }
             // note: pk_position set via scan of Indexes system table later
         }
@@ -1834,22 +1839,23 @@ Service::_read_schema_columns(SchemaInfoPtr info,
     }
 
     // determine the XID we found and only read those entries
-    XidLsn index_xid(fields->at(sys_tbl::Indexes::Data::XID)->get_uint64(*index_i),
-                     fields->at(sys_tbl::Indexes::Data::LSN)->get_uint64(*index_i));
+    auto row = *index_i;
+    XidLsn index_xid(fields->at(sys_tbl::Indexes::Data::XID)->get_uint64(&row),
+                     fields->at(sys_tbl::Indexes::Data::LSN)->get_uint64(&row));
 
     bool done = false;
     while (!done) {
-        auto& row = *index_i;
+        row = *index_i;
 
         // ensure we are reading data for the requested table
-        uint64_t tid = fields->at(sys_tbl::Indexes::Data::TABLE_ID)->get_uint64(row);
+        uint64_t tid = fields->at(sys_tbl::Indexes::Data::TABLE_ID)->get_uint64(&row);
         if (tid != table_id) {
             // if we have read all of the entries for this table ID, stop processing
             break;
         }
 
-        uint64_t xid = fields->at(sys_tbl::Indexes::Data::XID)->get_uint64(row);
-        uint64_t lsn = fields->at(sys_tbl::Indexes::Data::LSN)->get_uint64(row);
+        uint64_t xid = fields->at(sys_tbl::Indexes::Data::XID)->get_uint64(&row);
+        uint64_t lsn = fields->at(sys_tbl::Indexes::Data::LSN)->get_uint64(&row);
 
         // ensure we are still reading the correct XID/LSN
         if (index_xid != XidLsn(xid, lsn)) {
@@ -1857,8 +1863,8 @@ Service::_read_schema_columns(SchemaInfoPtr info,
         }
 
         // update the primary key details in the schema columns
-        uint32_t column_id = fields->at(sys_tbl::Indexes::Data::COLUMN_ID)->get_uint32(row);
-        uint32_t index_pos = fields->at(sys_tbl::Indexes::Data::POSITION)->get_uint32(row);
+        uint32_t column_id = fields->at(sys_tbl::Indexes::Data::COLUMN_ID)->get_uint32(&row);
+        uint32_t index_pos = fields->at(sys_tbl::Indexes::Data::POSITION)->get_uint32(&row);
         bool found = false;
         for (auto& column : *info->mutable_columns()) {
             if (column.position() == column_id) {
@@ -2093,14 +2099,14 @@ Service::_read_schema_history(SchemaInfoPtr info,
         auto& row = *table_i;
 
         // get the table_id from the entry
-        uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(row);
+        uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(&row);
         if (tid != table_id) {
             // if we have read all of the entries for this table ID, stop processing
             break;
         }
 
-        uint64_t xid = fields->at(sys_tbl::Schemas::Data::XID)->get_uint64(row);
-        uint64_t lsn = fields->at(sys_tbl::Schemas::Data::LSN)->get_uint64(row);
+        uint64_t xid = fields->at(sys_tbl::Schemas::Data::XID)->get_uint64(&row);
+        uint64_t lsn = fields->at(sys_tbl::Schemas::Data::LSN)->get_uint64(&row);
         XidLsn row_xid(xid, lsn);
 
         // don't capture changes that are before the access_xid
@@ -2122,17 +2128,17 @@ Service::_read_schema_history(SchemaInfoPtr info,
         proto::ColumnHistory* entry = info->add_history();
         entry->set_xid(xid);
         entry->set_lsn(lsn);
-        entry->set_exists(fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(row));
-        entry->set_update_type(fields->at(sys_tbl::Schemas::Data::UPDATE_TYPE)->get_uint8(row));
+        entry->set_exists(fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(&row));
+        entry->set_update_type(fields->at(sys_tbl::Schemas::Data::UPDATE_TYPE)->get_uint8(&row));
         proto::TableColumn* column = entry->mutable_column();
-        column->set_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row));
-        column->set_type(fields->at(sys_tbl::Schemas::Data::TYPE)->get_uint8(row));
-        column->set_pg_type(fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(row));
-        column->set_position(fields->at(sys_tbl::Schemas::Data::POSITION)->get_uint32(row));
-        column->set_is_nullable(fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(row));
+        column->set_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(&row));
+        column->set_type(fields->at(sys_tbl::Schemas::Data::TYPE)->get_uint8(&row));
+        column->set_pg_type(fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(&row));
+        column->set_position(fields->at(sys_tbl::Schemas::Data::POSITION)->get_uint32(&row));
+        column->set_is_nullable(fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(&row));
         column->set_is_generated(false);  // XXX
-        if (!fields->at(sys_tbl::Schemas::Data::DEFAULT)->is_null(row)) {
-            column->set_default_value(fields->at(sys_tbl::Schemas::Data::DEFAULT)->get_text(row));
+        if (!fields->at(sys_tbl::Schemas::Data::DEFAULT)->is_null(&row)) {
+            column->set_default_value(fields->at(sys_tbl::Schemas::Data::DEFAULT)->get_text(&row));
         }
     }
 }
