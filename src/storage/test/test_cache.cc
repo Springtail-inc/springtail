@@ -89,7 +89,7 @@ namespace {
             auto extra = std::make_shared<FieldArray>();
             extra->push_back(std::make_shared<ConstTypeField<int16_t>>(0));
 
-            page->insert(std::make_shared<KeyValueTuple>(_csv_fields, extra, r), _schema);
+            page->insert(std::make_shared<KeyValueTuple>(_csv_fields, extra, &r), _schema);
         }
 
         ExtentHeader header(ExtentType(), xid++, _schema->row_size(), 0);
@@ -103,10 +103,10 @@ namespace {
 
             for (auto row : *page.ptr()) {
                 if (prev != "") {
-                    ASSERT_GT(_fields->at(1)->get_text(row), prev);
+                    ASSERT_GT(_fields->at(1)->get_text(&row), prev);
                 }
 
-                prev = _fields->at(1)->get_text(row);
+                prev = _fields->at(1)->get_text(&row);
                 ++count;
             }
         }
@@ -131,7 +131,7 @@ namespace {
                     auto extra = std::make_shared<FieldArray>();
                     extra->push_back(std::make_shared<ConstTypeField<int16_t>>(i));
 
-                    page->insert(std::make_shared<KeyValueTuple>(_csv_fields, extra, r), _schema);
+                    page->insert(std::make_shared<KeyValueTuple>(_csv_fields, extra, &r), _schema);
                     cache->validate();
                 }
             }
@@ -148,10 +148,10 @@ namespace {
 
             for (auto row : *page.ptr()) {
                 if (prev != "") {
-                    ASSERT_GE(_fields->at(1)->get_text(row), prev);
+                    ASSERT_GE(_fields->at(1)->get_text(&row), prev);
                 }
 
-                prev = _fields->at(1)->get_text(row);
+                prev = _fields->at(1)->get_text(&row);
                 ++count;
             }
         }

@@ -311,11 +311,10 @@ namespace springtail {
             }
 
             /**
-             * Return the current key of the last entry in the page.
+             * Return the key fields for the page.
              */
-            TuplePtr index_key() const {
-                auto &&row = back();
-                return std::make_shared<MutableTuple>(_key_fields, &row);
+            MutableFieldArrayPtr index_keys() const {
+                return _key_fields;
             }
 
             /**

@@ -1042,7 +1042,9 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
             // add pointers to the new root for each new page
             for (PagePtr child : new_pages) {
-                auto key = child->index_key();
+                auto child_keys = child->index_keys();
+                auto &&child_row = child->back();
+                auto key = std::make_shared<MutableTuple>(child_keys, &child_row);
 
                 LOG_DEBUG(LOG_BTREE, "Adding root entry to child extent_id: {}", child->extent_id);
 

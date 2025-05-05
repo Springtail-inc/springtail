@@ -643,7 +643,7 @@ namespace springtail {
         auto extent_i = std::upper_bound(_extents.begin(), _extents.end(), *tuple,
                                  [this, &schema](const Tuple &key, const ExtentRef &ref) {
                                      auto extent = ref.make_safe_extent(_file);
-                                     auto row = (*extent)->back();
+                                     auto &&row = (*extent)->back();
                                      auto tuple = FieldTuple(schema->get_sort_fields(), &row);
                                      return key.less_than(tuple);
                                  });
@@ -872,7 +872,7 @@ namespace springtail {
             did_insert = true;
         } else {
             // insert the tuple into the extent
-            auto row = (*extent)->insert(row_i);
+            auto &&row = (*extent)->insert(row_i);
             MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
         }
 
