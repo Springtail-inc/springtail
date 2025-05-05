@@ -7,13 +7,16 @@ CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for
 DECLARE
     obj record;
     msg json;
-    items record;
     tag_name text;
 BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_dropped_objects()
     LOOP
         -- Check for table or index drops
-        IF NOT obj.is_temporary AND (obj.object_type = 'table' OR obj.object_type = 'index' OR obj.object_type = 'schema') AND (obj.schema_name IS NULL OR obj.schema_name NOT LIKE 'pg_%') THEN
+        IF NOT obj.is_temporary AND (obj.object_type = 'table'
+                                     OR obj.object_type = 'index'
+                                     OR obj.object_type = 'schema'
+                                     OR obj.object_type = 'type')
+            AND (obj.schema_name IS NULL OR obj.schema_name NOT LIKE 'pg_%') THEN
 
             -- sometimes tg_tag is DROP TABLE even if type is index
             IF obj.object_type = 'table' THEN
@@ -22,6 +25,16 @@ BEGIN
                 tag_name := 'DROP INDEX';
             ELSIF obj.object_type = 'schema' THEN
                 tag_name := 'DROP SCHEMA';
+            ELSIF obj.object_type = 'type' THEN
+                -- the drop has already been done, so no way to check the type
+                -- seems drop type does two drops, one for the type and one for the enum labels
+                -- ignore the enum labels, if obj.object_identity contains []
+                -- RAISE NOTICE 'springtail: drop type % % %', obj.schema_name, obj.object_name, obj.object_identity;
+                IF (obj.object_identity LIKE '%[]' AND obj.object_name LIKE '_%')
+                    OR obj.original IS FALSE OR obj.schema_name LIKE 'pg_%' THEN
+                    CONTINUE;
+                END IF;
+                tag_name := 'DROP TYPE';
             END IF;
 
             -- generate message same for DROP TABLE/INDEX
@@ -32,7 +45,7 @@ BEGIN
                 'name', obj.object_name,
                 'identity', obj.object_identity);
 
-            --- RAISE NOTICE 'springtail: % op, %.%', tag_name, obj.schema_name, obj.object_name;
+            -- RAISE NOTICE 'springtail: % op, %', tag_name, msg::text;
 
             -- tag_name is DROP TABLE or DROP INDEX or DROP SCHEMA
             PERFORM pg_logical_emit_message(true, 'springtail:' || tag_name, msg::text);
@@ -81,8 +94,10 @@ BEGIN
                 'is_generated', (pga.attgenerated = 's')::boolean,
                 'type_name', t.typname,
                 'collation', col.collname,
-                'is_user_defined_type', (t.typnamespace = 'pg_catalog'::regnamespace)::boolean,
-                'is_non_standard_collation', coalesce((col.collname NOT IN ('C', 'en_US.UTF-8', 'default'))::boolean, false)
+                'is_user_defined_type', (t.typnamespace <> 'pg_catalog'::regnamespace AND t.typnamespace <> 'information_schema'::regnamespace)::boolean,
+                'is_non_standard_collation', coalesce((col.collname NOT IN ('C', 'en_US.UTF-8', 'default'))::boolean, false),
+                'type_category', t.typcategory,
+                'type_namespace', nsp.nspname
             ) AS json_col
             FROM pg_attribute pga
             JOIN information_schema.columns
@@ -91,6 +106,7 @@ BEGIN
             ON pga.attrelid=pgi.indrelid AND pgi.indisprimary
             LEFT JOIN pg_type t ON pga.atttypid = t.oid
             LEFT JOIN pg_collation col ON pga.attcollation = col.oid AND pga.attcollation <> 0
+            LEFT JOIN pg_catalog.pg_namespace nsp ON nsp.oid = t.typnamespace
             WHERE pga.attrelid=obj.objid
               AND quote_literal(table_schema) = quote_literal(obj.schema_name)
               AND quote_literal(table_name) = quote_literal(table_relname)
@@ -284,10 +300,48 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for_types_ddl()
+        RETURNS event_trigger LANGUAGE plpgsql AS $$
+DECLARE
+    obj record;
+    enum_obj record;
+    msg text;
+BEGIN
+    FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() as cmd
+    LOOP
+        SELECT t.oid::integer AS enum_type_oid,
+               n.oid::integer AS namespace_oid,
+               n.nspname::text AS schema,
+               t.typname::text AS enum_type_name,
+               json_agg(json_build_object(e.enumlabel::text, e.enumsortorder::real) ORDER BY e.enumsortorder)::text AS value
+        FROM pg_enum e
+        JOIN pg_type t ON t.oid = e.enumtypid
+        JOIN pg_namespace n ON n.oid = t.typnamespace
+        WHERE t.oid = obj.objid AND typcategory = 'E'
+        GROUP BY t.oid, n.oid, n.nspname, t.typname
+        INTO enum_obj;
+
+        IF (enum_obj IS NOT NULL) THEN
+            msg := json_build_object('xid', txid_current(),
+                'oid', enum_obj.enum_type_oid,
+                'type', 'E',
+                'ns_oid', enum_obj.namespace_oid,
+                'schema', enum_obj.schema,
+                'name', enum_obj.enum_type_name,
+                'value', enum_obj.value);
+
+            -- RAISE NOTICE 'springtail: %', msg::text;
+
+            PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
+        END IF;
+    END LOOP;
+END;
+$$;
+
 DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_drops;
 CREATE EVENT TRIGGER springtail_event_trigger_for_drops
    ON sql_drop
-   WHEN TAG IN ( 'DROP TABLE', 'DROP INDEX', 'DROP SCHEMA' )
+   WHEN TAG IN ( 'DROP TABLE', 'DROP INDEX', 'DROP SCHEMA', 'DROP TYPE' )
    EXECUTE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for_drops();
 
 DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_table_ddl;
@@ -308,6 +362,11 @@ CREATE EVENT TRIGGER springtail_event_trigger_for_index_ddl
    WHEN TAG IN ( 'CREATE INDEX' )
    EXECUTE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for_index_ddl();
 
+DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_types_ddl;
+CREATE EVENT TRIGGER springtail_event_trigger_for_types_ddl
+   ON ddl_command_end
+   WHEN TAG IN ( 'CREATE TYPE', 'ALTER TYPE' )
+   EXECUTE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for_types_ddl();
 
 -- Select all users and their databases with access to springtail
 -- If springtail_user role exists, only users with that role are returned

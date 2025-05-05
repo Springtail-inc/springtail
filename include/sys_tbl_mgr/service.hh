@@ -82,6 +82,27 @@ public:
                                const proto::NamespaceRequest* request,
                                proto::DDLStatement* response) override;
 
+
+    /** Creates a user defined type in the system tables. */
+    grpc::Status CreateUserType(grpc::ServerContext* context,
+                                const proto::UserTypeRequest* request,
+                                proto::DDLStatement* response) override;
+
+    /** Renames a user defined type in the system tables. */
+    grpc::Status AlterUserType(grpc::ServerContext* context,
+                               const proto::UserTypeRequest* request,
+                               proto::DDLStatement* response) override;
+
+    /** Drops a user defined type in the system tables. */
+    grpc::Status DropUserType(grpc::ServerContext* context,
+                              const proto::UserTypeRequest* request,
+                              proto::DDLStatement* response) override;
+
+    /** Retrieves the user defined type at a given XID/LSN. */
+    grpc::Status GetUserType(grpc::ServerContext* context,
+                             const proto::GetUserTypeRequest* request,
+                             proto::GetUserTypeResponse* response) override;
+
     /** Updates the roots extents of the indexes of the table as well as the table stats. */
     grpc::Status UpdateRoots(grpc::ServerContext* context,
                              const proto::UpdateRootsRequest* request,
@@ -395,6 +416,34 @@ private:
                                                 const XidLsn& xid,
                                                 bool check_exists = true);
 
+    /**
+     * Cache entry for the user defined types.
+     */
+    struct UserTypeCacheRecord {
+        uint64_t id;
+        uint64_t namespace_id;
+        std::string name;
+        std::string value_json;
+        int8_t type;
+        bool exists;
+
+        UserTypeCacheRecord(uint64_t id, std::string_view name, uint64_t ns_id,
+                            int8_t type, std::string_view value_json, bool exists)
+            : id(id), namespace_id(ns_id), name(name), value_json(value_json), type(type), exists(exists)
+        {
+        }
+        UserTypeCacheRecord() = default;
+    };
+    using UserTypeCacheRecordPtr = std::shared_ptr<UserTypeCacheRecord>;
+
+    /**
+     * Read the user defined type info from the UserType system table given it's ID and an
+     * XID/LSN.
+     */
+    UserTypeCacheRecordPtr _get_usertype_info(uint64_t db_id,
+        uint64_t type_id,
+        const XidLsn& xid);
+
     // HELPER FUNCTIONS
 
     /**
@@ -491,6 +540,19 @@ private:
         uint64_t db_id, uint64_t index_id, const XidLsn& xid, std::optional<uint64_t> tid);
 
     /**
+     * @brief Helper for updating the usertype table.
+     * @return nlohmann::json DDL json for ddl mgr
+     */
+    nlohmann::json _mutate_usertype(uint64_t db_id,
+                                    uint64_t type_id,
+                                    const std::string &name,
+                                    uint64_t ns_id,
+                                    int8_t type,
+                                    const std::string &value_json,
+                                    const XidLsn xid,
+                                    bool active);
+
+    /**
      * Retrieve the current read XID for a db.
      */
     XidLsn _get_read_xid(uint64_t db_id);
@@ -553,6 +615,15 @@ private:
         _namespace_name_cache;
 
     /**
+     * Cache of unapplied user defined type changes by type ID.
+     * Stored as a map of DB -> Type ID -> XID/LSN (in reverse order) -> UserTypeInfo
+     */
+    using XidLsnToUserTypeInfoMap =
+        std::map<XidLsn, UserTypeCacheRecordPtr, std::greater<XidLsn>>;
+    std::unordered_map<uint64_t, std::unordered_map<uint64_t, XidLsnToUserTypeInfoMap>>
+        _usertype_id_cache;
+
+    /**
      * Cache of unapplied table info changes.
      * Stored as a map of DB -> Table ID -> XID/LSN (in reverse order) -> TableCacheRecord
      */
@@ -594,5 +665,12 @@ private:
     // index cache per DB
     using DbId = uint64_t;
     std::map<DbId, TableIndexMap> _index_cache;
+
+    // Enum cache per DB
+    using EnumId = uint64_t;
+    using EnumIndex = float;
+    using EnumTypeCache = std::unordered_map<DbId,
+        std::unordered_map<EnumIndex,
+            std::map<std::string, float>>>;
 };
 }  // namespace springtail::sys_tbl_mgr

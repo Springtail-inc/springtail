@@ -95,16 +95,23 @@ namespace springtail {
             col["pkey_pos"] = c.pk_position;
             col["is_generated"] = c.is_generated;
             col["type_name"] = c.type_name;
+            col["type_namespace"] = c.type_namespace;
             col["collation"] = c.collation;
             col["is_non_standard_collation"] = c.is_non_standard_collation;
-            col["is_user_defined_type"] = c.is_user_defined_type;
+            col["type_category"] = c.type_category;
+
+            if (c.type_category == 'E') {
+                // enum type
+                col["is_user_defined_type"] = true;
+            } else {
+                col["is_user_defined_type"] = false;
+                assert(c.pg_type == BOOLOID ||
+                       c.pg_type == INT4OID ||
+                       c.pg_type == INT8OID ||
+                       c.pg_type == TEXTOID);
+            }
+
             columns_json.push_back(col);
-
-            assert(c.pg_type == BOOLOID ||
-                   c.pg_type == INT4OID ||
-                   c.pg_type == INT8OID ||
-                   c.pg_type == TEXTOID);
-
             _schema_map[table_id].push_back(c.pg_type);
             if (c.is_pkey) {
                 _pkey_map[table_id].push_back(c.pg_type);

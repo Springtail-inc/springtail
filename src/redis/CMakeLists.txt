@@ -14,15 +14,14 @@ target_link_libraries(springtail_redis
            nlohmann_json::nlohmann_json
 )
 
-add_executable(test_redis test/test_redis.cc)
-target_include_directories(test_redis PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_redis PRIVATE springtail_common Boost::thread GTest::gtest_main)
-add_dsymutil_command(test_redis)
+springtail_unit_test(test_redis
+  SOURCES test/test_redis.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_common Boost::thread GTest::gtest_main
+)
 
-add_executable(test_pubsub_thread test/test_pubsub_thread.cc)
-target_include_directories(test_pubsub_thread PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_pubsub_thread PRIVATE springtail_common Boost::thread GTest::gtest_main)
-add_dsymutil_command(test_pubsub_thread)
-
-gtest_discover_tests(test_redis)
-gtest_discover_tests(test_pubsub_thread)
+springtail_unit_test(test_pubsub_thread
+  SOURCES test/test_pubsub_thread.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_common Boost::thread GTest::gtest_main
+)

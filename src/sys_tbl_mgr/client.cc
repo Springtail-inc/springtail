@@ -78,6 +78,8 @@ _gen_table_request(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
         column->set_position(col.position);
         column->set_is_nullable(col.is_nullable);
         column->set_is_generated(col.is_generated);
+        column->set_type_name(col.type_name);
+        column->set_type_namespace(col.type_namespace);
         if (col.is_pkey) {
             column->set_pk_position(col.pk_position);
         }
@@ -178,7 +180,17 @@ Client::create_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace
     _set_request_common(request, db_id, xid);
     request.set_namespace_id(msg.oid);
     request.set_name(msg.name);
-    return create_namespace(request);
+
+    proto::DDLStatement response;
+    grpc_client::retry_rpc("SysTblMgr", "CreateNamespace",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->CreateNamespace(context, request, &response);
+                           });
+
+    if (response.statement().empty()) {
+        throw SysTblMgrError("No DDL statement");
+    }
+    return response.statement();
 }
 
 std::string
@@ -213,6 +225,76 @@ Client::drop_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &
     grpc_client::retry_rpc("SysTblMgr", "DropNamespace",
                            [this, &request, &response](grpc::ClientContext *context) {
                                return _stub->DropNamespace(context, request, &response);
+                           });
+
+    if (response.statement().empty()) {
+        throw SysTblMgrError("No DDL statement");
+    }
+    return response.statement();
+}
+
+std::string
+Client::create_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg)
+{
+    proto::UserTypeRequest request;
+    _set_request_common(request, db_id, xid);
+    request.set_type_id(msg.oid);
+    request.set_namespace_id(msg.namespace_id);
+    request.set_name(msg.name);
+    request.set_namespace_name(msg.namespace_name);
+    request.set_value_json(msg.value_json);
+    request.set_type(msg.type);
+
+    proto::DDLStatement response;
+
+    grpc_client::retry_rpc("SysTblMgr", "CreateUserType",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->CreateUserType(context, request, &response);
+                           });
+
+    if (response.statement().empty()) {
+        throw SysTblMgrError("No DDL statement");
+    }
+    return response.statement();
+}
+
+std::string
+Client::alter_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg)
+{
+    proto::UserTypeRequest request;
+    _set_request_common(request, db_id, xid);
+    request.set_type_id(msg.oid);
+    request.set_namespace_id(msg.namespace_id);
+    request.set_name(msg.name);
+    request.set_namespace_name(msg.namespace_name);
+    request.set_value_json(msg.value_json);
+    request.set_type(msg.type);
+
+    proto::DDLStatement response;
+    grpc_client::retry_rpc("SysTblMgr", "AlterUserType",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->AlterUserType(context, request, &response);
+                           });
+
+    if (response.statement().empty()) {
+        throw SysTblMgrError("No DDL statement");
+    }
+    return response.statement();
+}
+
+std::string
+Client::drop_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg)
+{
+    proto::UserTypeRequest request;
+    _set_request_common(request, db_id, xid);
+    request.set_type_id(msg.oid);
+    request.set_name(msg.name);
+    request.set_namespace_name(msg.namespace_name);
+
+    proto::DDLStatement response;
+    grpc_client::retry_rpc("SysTblMgr", "DropUserType",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->DropUserType(context, request, &response);
                            });
 
     if (response.statement().empty()) {
@@ -384,7 +466,7 @@ Client::get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
             found = response.ParseFromString(msg.value());
             CHECK(found);
         }
-    } 
+    }
 
     if (!found) {
         proto::GetRootsRequest request;
@@ -604,6 +686,75 @@ void
 Client::invalidate_db(uint64_t db_id, const XidLsn &xid)
 {
     _schema_cache->invalidate_db(db_id, xid);
+}
+
+std::string
+Client::create_usertype(const proto::UserTypeRequest &request)
+{
+    proto::DDLStatement response;
+    grpc_client::retry_rpc("SysTblMgr", "CreateUserType",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->CreateUserType(context, request, &response);
+                           });
+
+    if (response.statement().empty()) {
+        throw SysTblMgrError("No DDL statement");
+    }
+    return response.statement();
+}
+
+std::string
+Client::drop_usertype(const proto::UserTypeRequest &request)
+{
+    proto::DDLStatement response;
+    grpc_client::retry_rpc("SysTblMgr", "DropUserType",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->DropUserType(context, request, &response);
+                           });
+
+    if (response.statement().empty()) {
+        throw SysTblMgrError("No DDL statement");
+    }
+    return response.statement();
+}
+
+std::string
+Client::alter_usertype(const proto::UserTypeRequest &request)
+{
+    proto::DDLStatement response;
+    grpc_client::retry_rpc("SysTblMgr", "AlterUserType",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->AlterUserType(context, request, &response);
+                           });
+
+    if (response.statement().empty()) {
+        throw SysTblMgrError("No DDL statement");
+    }
+    return response.statement();
+}
+
+std::shared_ptr<UserType>
+Client::get_usertype(uint64_t db_id, uint64_t type_id, const XidLsn &xid)
+{
+    proto::GetUserTypeRequest request;
+    request.set_db_id(db_id);
+    request.set_type_id(type_id);
+    request.set_xid(xid.xid);
+    request.set_lsn(xid.lsn);
+
+    proto::GetUserTypeResponse response;
+    grpc_client::retry_rpc("SysTblMgr", "GetUserType",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->GetUserType(context, request, &response);
+                           });
+
+    auto user_type = std::make_shared<UserType>(response.type_id(),
+                                                response.namespace_id(),
+                                                response.type(),
+                                                response.name(),
+                                                response.value_json(),
+                                                response.exists());
+    return user_type;
 }
 
 }  // namespace springtail::sys_tbl_mgr

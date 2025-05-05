@@ -91,6 +91,17 @@ namespace springtail {
                 return;
             }
 
+            if constexpr (std::is_same_v<T, char>) {
+                if (json.is_string()) {
+                    std::string val;
+                    json.get_to(val);
+                    result = val[0];
+                } else {
+                    result = json.get<char>();
+                }
+                return;
+            }
+
             if constexpr(std::is_integral_v<T>) {
                 if (json.is_string()) {
                     std::string val;

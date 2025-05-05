@@ -15,8 +15,10 @@ message TableColumn {
   int32 position = 4;
   bool is_nullable = 5;
   bool is_generated = 6;
-  optional int32 pk_position = 7;
-  optional string default_value = 8;
+  string type_name = 7;
+  string type_namespace = 8;
+  optional int32 pk_position = 9;
+  optional string default_value = 10;
 }
 
 message TableInfo {
@@ -49,6 +51,18 @@ message NamespaceRequest {
   string name = 3;
   int64 xid = 4;
   int64 lsn = 5;
+}
+
+message UserTypeRequest {
+  int64 db_id = 1;
+  int64 xid = 2;
+  int64 lsn = 3;
+  int64 namespace_id = 4;
+  int64 type_id = 5;
+  string namespace_name = 6;
+  string name = 7;
+  string value_json = 8;
+  int32 type = 9;
 }
 
 message TableStats {
@@ -153,6 +167,22 @@ message GetTargetSchemaRequest {
   int64 target_lsn = 6;
 }
 
+message GetUserTypeRequest {
+  int64 db_id = 1;
+  int64 type_id = 2;
+  int64 xid = 3;
+  int64 lsn = 4;
+}
+
+message GetUserTypeResponse {
+  int64 type_id = 1;
+  int64 namespace_id = 2;
+  string name = 3;
+  string value_json = 4;
+  int32 type = 5;
+  bool exists = 6;
+}
+
 message ColumnHistory {
   int64 xid = 1;
   int64 lsn = 2;
@@ -253,4 +283,16 @@ service SysTblMgr {
 
   // Revert the system tables to a given XID
   rpc Revert(RevertRequest) returns (google.protobuf.Empty) {}
+
+  // Create user defined type
+  rpc CreateUserType(UserTypeRequest) returns (DDLStatement) {}
+
+  // Alter user defined type
+  rpc AlterUserType(UserTypeRequest) returns (DDLStatement) {}
+
+  // Drop user defined type
+  rpc DropUserType(UserTypeRequest) returns (DDLStatement) {}
+
+  // Get user defined type
+  rpc GetUserType(GetUserTypeRequest) returns (GetUserTypeResponse) {}
 }

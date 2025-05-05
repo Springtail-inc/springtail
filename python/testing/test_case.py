@@ -481,7 +481,9 @@ class TestCase:
                            WHERE n.nspname = '{command["schema"]}' AND t.relname = '{command["table"]}' AND c.contype = 'p';"""
                 results['primary'] = self._execute_sql(cursor, sql, True)
 
-                sql = f"""SELECT c.oid as table_id, i.indexrelid as index_id, unnest(string_to_array(i.indkey::text, ' '))::int as column_id
+                sql = f"""SELECT c.oid as table_id,
+                                 i.indexrelid as index_id,
+                                 unnest(string_to_array(i.indkey::text, ' '))::int as column_id
                     FROM pg_index i
                     JOIN pg_class c ON c.oid = i.indrelid
                     JOIN pg_namespace ns ON ns.oid = c.relnamespace

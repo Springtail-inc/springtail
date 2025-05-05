@@ -1,3 +1,4 @@
+#include <common/constants.hh>
 #include <pg_repl/pg_common.hh>
 
 extern "C" {
@@ -5,10 +6,10 @@ extern "C" {
     #include <catalog/pg_type.h>
 }
 
-namespace springtail 
+namespace springtail
 {
-    SchemaType 
-    convert_pg_type(int32_t pg_type)
+    SchemaType
+    convert_pg_type(int32_t pg_type, char pg_type_category)
     {
         switch (pg_type) {
             case INT4OID:
@@ -44,6 +45,10 @@ namespace springtail
                 return SchemaType::INT8;
 
             default:
+                if (pg_type_category == constant::USER_TYPE_ENUM) {
+                    // enum types; treat as REAL/FLOAT4, to store the enum index
+                    return SchemaType::FLOAT32;
+                }
                 // put all other types into BINARY data for now
                 return SchemaType::BINARY;
         }

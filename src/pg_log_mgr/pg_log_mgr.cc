@@ -278,6 +278,7 @@ namespace springtail::pg_log_mgr {
             auto token_init = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(_db_id)}, {"xid", std::to_string(xid)}});
 
             PgCopyTable::create_namespaces(_db_id, xid);
+            PgCopyTable::create_usertypes(_db_id, xid);
 
             _do_table_copies();
             _wal_buffer_flag = false;

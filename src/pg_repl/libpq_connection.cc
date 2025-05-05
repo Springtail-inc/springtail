@@ -220,7 +220,11 @@ namespace springtail {
             throw PgQueryError();
         }
 
-        int32_t r = std::stoi(value, nullptr, 10);
+        char *end;
+        int32_t r = std::strtol(value, &end, 10);
+        if (end == value) {
+            throw PgQueryError();
+        }
         return r;
     }
 
@@ -240,8 +244,27 @@ namespace springtail {
             throw PgQueryError();
         }
 
-        int64_t r = std::stoll(value, nullptr, 10);
+        char *end;
+        int64_t r = std::strtoll(value, &end, 10);
+        if (end == value) {
+            throw PgQueryError();
+        }
         return r;
+    }
+
+    float LibPqConnection::get_float(int row, int col)
+    {
+        char *value = PQgetvalue(_result, row, col);
+        if (value == nullptr) {
+            throw PgQueryError();
+        }
+
+        char *end;
+        float f = std::strtof(value, &end);
+        if (end == value) {
+            throw PgQueryError();
+        }
+        return f;
     }
 
     /**
@@ -304,6 +327,24 @@ namespace springtail {
         }
 
         return false;
+    }
+
+    /**
+     * @brief Get char value from query result
+     *
+     * @param res query result
+     * @param row row index
+     * @param col col index
+     * @return char value for row/col; null is mapped to '\0'
+     */
+    char LibPqConnection::get_char(int row, int col)
+    {
+        char *value = PQgetvalue(_result, row, col);
+        if (value == nullptr) {
+            throw PgQueryError();
+        }
+
+        return value[0];
     }
 
     /**

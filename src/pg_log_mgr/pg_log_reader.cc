@@ -149,12 +149,11 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::TableEntry::update_schema()
     {
-        auto sort_keys = table_schema->get_sort_keys();
-        bool has_primary = !sort_keys.empty();
-        sort_keys.push_back("__springtail_lsn");
-
         auto columns = table_schema->column_order();
         CHECK_GT(columns.size(), 0);
+
+        auto sort_keys = table_schema->get_sort_keys();
+        sort_keys.push_back("__springtail_lsn");
 
         SchemaColumn op("__springtail_op", 0, SchemaType::UINT8, 0, false);
         SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
@@ -167,24 +166,64 @@ namespace springtail::pg_log_mgr {
         TIME_TRACE_STOP(update_schema_trace);
         TIME_TRACESET_UPDATE(time_trace::traces, "_batch_update_schema_create_schema", update_schema_trace);
 
-        fields = schema->get_mutable_fields(columns);
-        if (has_primary) {
-            pkey_fields = schema->get_mutable_fields(table_schema->get_sort_keys());
-        } else {
-            pkey_fields = fields;
-        }
         op_f = schema->get_mutable_field("__springtail_op");
         lsn_f = schema->get_mutable_field("__springtail_lsn");
 
-        pg_fields = std::make_shared<FieldArray>();
+        // reset fields; forces a resync of fields during add_mutation()
+        fields = nullptr;
+    }
+
+    FieldArrayPtr
+    PgLogReader::Batch::TableEntry::get_pg_fields(Batch *batch,
+                                                  const XidLsn &xid,
+                                                  const MutableFieldArrayPtr fields,
+                                                  const std::vector<int32_t> &pg_types)
+    {
+        auto pg_fields = std::make_shared<FieldArray>();
         for (int i = 0; i < fields->size(); i++) {
-            pg_fields->push_back(std::make_shared<PgLogField>(fields->at(i)->get_type(), i));
+            // check if the pg_type is a user type
+            auto type = fields->at(i)->get_type();
+            if (pg_types[i] >= constant::FIRST_USER_DEFINED_PG_OID) {
+                auto utp = batch->_usertype_cache_lookup(pg_types[i], xid);
+                DCHECK(utp->exists);
+                pg_fields->push_back(std::make_shared<PgEnumField>(type, i, utp));
+            } else {
+                pg_fields->push_back(std::make_shared<PgLogField>(type, i));
+            }
+        }
+        return pg_fields;
+    }
+
+    void
+    PgLogReader::Batch::TableEntry::update_fields(Batch *batch,
+                                                  const XidLsn &xid)
+    {
+        DCHECK_NE(schema, nullptr);
+        auto sort_keys = table_schema->get_sort_keys();
+        bool has_primary = !sort_keys.empty();
+        auto columns = table_schema->column_order();
+
+        fields = schema->get_mutable_fields(columns);
+        if (has_primary) {
+            pkey_fields = schema->get_mutable_fields(sort_keys);
+        } else {
+            pkey_fields = fields;
         }
 
-        pg_pkey_fields = std::make_shared<FieldArray>();
-        for (int i = 0; i < pkey_fields->size(); i++) {
-            pg_pkey_fields->push_back(std::make_shared<PgLogField>(pkey_fields->at(i)->get_type(), i));
+        // get the pg fields for all columns
+        auto pg_types = table_schema->get_pg_types();
+        pg_fields = get_pg_fields(batch, xid, fields, pg_types);
+
+        // with no primary key; pg_fields and pg_key_fields are the same
+        if (fields == pkey_fields) {
+            pg_pkey_fields = pg_fields;
+            return;
         }
+
+        // primary keys are defined and different from the fields
+        // get the pg fields for the primary key columns
+        auto pkey_pg_types = table_schema->get_sort_key_pg_types();
+        pg_pkey_fields = get_pg_fields(batch, xid, pkey_fields, pkey_pg_types);
     }
 
     template <int T>
@@ -192,7 +231,7 @@ namespace springtail::pg_log_mgr {
     PgLogReader::Batch::add_mutation(uint64_t current_xid,
                                      int32_t pg_xid,
                                      int32_t tid,
-                                     const PgMsgTupleData &data)
+                                     PgMsgTupleData &data)
     {
         XidLsn xidlsn(current_xid);
 
@@ -254,13 +293,19 @@ namespace springtail::pg_log_mgr {
 
         time_trace::Trace add_mutation_append_trace;
         TIME_TRACE_START(add_mutation_append_trace);
+        // check if we need to update the fields
+        if (entry.fields == nullptr) {
+            entry.update_fields(this, xidlsn);
+        }
+        CHECK_NE(entry.fields, nullptr);
+
         // add the mutation to the batch
         LOG_DEBUG(LOG_PG_LOG_MGR, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, T);
         auto row = entry.extent->append();
         if constexpr (T == PgMsgEnum::INSERT || T == PgMsgEnum::UPDATE) {
-            MutableTuple(entry.fields, row).assign(FieldTuple(entry.pg_fields, &data));
+            MutableTuple(entry.fields, row).assign(FieldTuple(entry.pg_fields, static_cast<const PgMsgTupleData*>(&data)));
         } else if constexpr (T == PgMsgEnum::DELETE) {
-            MutableTuple(entry.pkey_fields, row).assign(FieldTuple(entry.pg_pkey_fields, &data));
+            MutableTuple(entry.pkey_fields, row).assign(FieldTuple(entry.pg_pkey_fields, static_cast<const PgMsgTupleData*>(&data)));
         } else {
             static_assert(false, "Invalid template parameter: PgLogReader::Batch::add_mutation");
         }
@@ -450,6 +495,26 @@ namespace springtail::pg_log_mgr {
             case PgMsgEnum::ALTER_NAMESPACE:
             case PgMsgEnum::DROP_NAMESPACE:
                 break;  // nothing to check for these
+
+            case PgMsgEnum::ALTER_TYPE:
+            case PgMsgEnum::CREATE_TYPE:
+            case PgMsgEnum::DROP_TYPE: {
+                // update the batch usertype cache appropriately
+                auto &user_type = std::get<PgMsgUserType>(msg->msg);
+                int32_t oid = user_type.oid;
+                if (msg->msg_type == PgMsgEnum::DROP_TYPE) {
+                    _user_types.erase(oid);
+                    _user_types[oid] = std::make_shared<UserType>(oid, false);
+                } else if (msg->msg_type == PgMsgEnum::CREATE_TYPE) {
+                    UserTypePtr utp = std::make_shared<UserType>(oid, user_type.namespace_id, user_type.type, user_type.name, user_type.value_json);
+                    _user_types[oid] = utp;
+                } else if (msg->msg_type == PgMsgEnum::ALTER_TYPE) {
+                    _user_types.erase(oid);
+                    UserTypePtr utp = std::make_shared<UserType>(oid, user_type.namespace_id, user_type.type, user_type.name, user_type.value_json);
+                    _user_types[oid] = utp;
+                }
+                break;
+            }
 
             case PgMsgEnum::DROP_INDEX:
                 break;  // XXX we should check both sync tracker and table existence against the
@@ -727,6 +792,32 @@ namespace springtail::pg_log_mgr {
                 redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 break;
             }
+        case PgMsgEnum::CREATE_TYPE:
+            {
+                auto &type_msg = std::get<PgMsgUserType>(change->msg);
+                std::string &&ddl_stmt = client->create_usertype(_db, xidlsn, type_msg);
+                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                break;
+            }
+        case PgMsgEnum::ALTER_TYPE:
+            {
+                auto &type_msg = std::get<PgMsgUserType>(change->msg);
+                std::string &&ddl_stmt = client->alter_usertype(_db, xidlsn, type_msg);
+                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                break;
+            }
+        case PgMsgEnum::DROP_TYPE:
+            {
+                auto &type_msg = std::get<PgMsgUserType>(change->msg);
+                std::string &&ddl_stmt = client->drop_usertype(_db, xidlsn, type_msg);
+                auto json = nlohmann::json::parse(ddl_stmt);
+                LOG_DEBUG(LOG_PG_LOG_MGR, "DROP TYPE: xid={}, pg_xid={}, tid={}, ddl={}", xidlsn.xid,
+                          type_msg.xid, type_msg.oid, json.dump());
+                if (json.at("action").get<std::string>() != "no_change") {
+                    redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                }
+                break;
+            }
         case PgMsgEnum::CREATE_INDEX:
             {
                 auto &index_msg = std::get<PgMsgIndex>(change->msg);
@@ -993,6 +1084,24 @@ namespace springtail::pg_log_mgr {
             {
                 PgMsgNamespace &namespace_msg = std::get<PgMsgNamespace>(msg->msg);
                 _process_ddl(std::nullopt, namespace_msg.oid, namespace_msg.xid, msg->is_streaming, msg);
+                break;
+            }
+        case PgMsgEnum::CREATE_TYPE:
+            {
+                PgMsgUserType &usertype_msg = std::get<PgMsgUserType>(msg->msg);
+                _process_ddl(std::nullopt, usertype_msg.oid, usertype_msg.xid, msg->is_streaming, msg);
+                break;
+            }
+        case PgMsgEnum::ALTER_TYPE:
+            {
+                PgMsgUserType &usertype_msg = std::get<PgMsgUserType>(msg->msg);
+                _process_ddl(std::nullopt, usertype_msg.oid, usertype_msg.xid, msg->is_streaming, msg);
+                break;
+            }
+        case PgMsgEnum::DROP_TYPE:
+            {
+                PgMsgUserType &usertype_msg = std::get<PgMsgUserType>(msg->msg);
+                _process_ddl(std::nullopt, usertype_msg.oid, usertype_msg.xid, msg->is_streaming, msg);
                 break;
             }
         case PgMsgEnum::CREATE_INDEX:

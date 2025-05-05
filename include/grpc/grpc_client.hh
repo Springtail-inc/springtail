@@ -147,7 +147,7 @@ retry_rpc(std::string_view service, std::string_view operation, Func&& func)
 {
     auto status = retry_rpc_status(service, operation, std::forward<Func>(func));
     if (!status.ok()) {
-        throw Error(fmt::format("{} failed: {}", operation, status.error_message()));
+        throw Error(fmt::format("RPC call {} failed: {} on server due to exception", operation, status.error_message()));
     }
 }
 
