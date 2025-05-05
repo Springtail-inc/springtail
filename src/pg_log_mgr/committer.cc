@@ -401,12 +401,8 @@ namespace springtail::committer {
                 // timed out, try again
                 continue;
             }
-            time_trace::Trace process_table_trace;
-            TIME_TRACE_START(process_table_trace);
-            // process all of the mutations for a given table in a given XID
+           // process all of the mutations for a given table in a given XID
             _process_table(entry->db_id, entry->tid, entry->completed_xid, entry->xid);
-            TIME_TRACE_STOP(process_table_trace);
-            TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("process_table-xid_{}", entry->xid), process_table_trace);
 
             // mark the table processing as complete
             {
@@ -434,6 +430,8 @@ namespace springtail::committer {
         // retrieve extents and apply the mutations to them
         uint64_t extent_cursor = 0;
         std::optional<PostgresTimestamp> min_commit_ts;
+        time_trace::Trace process_extents_trace;
+        TIME_TRACE_START(process_extents_trace);
         while (true) {
             // XXX would be better if we could perform an async prefetch to reduce IO latency
             PostgresTimestamp commit_ts;
@@ -452,6 +450,8 @@ namespace springtail::committer {
                 _process_extent(db_id, tid, table, wc_extent);
             }
         }
+        TIME_TRACE_STOP(process_extents_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("committer_process_extents-xid_{}", xid), process_extents_trace);
 
         // finalize the table
         auto &&metadata = table->finalize();
@@ -464,8 +464,12 @@ namespace springtail::committer {
             LOG_DEBUG(LOG_COMMITTER, "Processed table {} in {} milliseconds", tid, duration.count());
         }
 
+        time_trace::Trace update_roots_trace;
+        TIME_TRACE_START(update_roots_trace);
         // update the system table roots
         TableMgr::get_instance()->update_roots(table->db(), table->id(), xid, metadata);
+        TIME_TRACE_STOP(update_roots_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("committer_update_roots-xid_{}", xid), update_roots_trace);
     }
 
     void

@@ -9,11 +9,18 @@ logfile="$1"
 query_info="$2"
 
 ###############################################################################
+# STEP 0 ── Dump the traces in the log
+###############################################################################
+touch /tmp/output_trace.txt
+echo "Waiting for traces to be dumped"
+sleep 5
+
+###############################################################################
 # STEP 1A ── XID traces
 ###############################################################################
 grep '\[TRACE\] \[.*-xid_[0-9]\+,' "$logfile" |
 sed -E 's/.*\[(.*)-xid_([0-9]+),([^]]+)\].*/\1,\2,\3/' |
-sed 's/ms//g; s/us//g' |
+sed -E 's/([^,0-9])([0-9]+)(ms|us)/\1\2/g; s/([0-9]+)(ms|us)/\1/g' |
 awk -F',' '
 BEGIN { OFS=","; print "function,xid,totalms,totalmicros,counter,averagemicros,averagems" }
 {

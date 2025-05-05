@@ -848,23 +848,39 @@ namespace indexer_helpers {
     {
         // in the case of having an (initially) empty table, there are no invalidations... we can
         // flush the single Page and update the indexes
+        time_trace::Trace finalize_empty_page_trace;
+        TIME_TRACE_START(finalize_empty_page_trace);
         if (_empty_page) {
             _flush_and_populate_indexes(_empty_page->ptr());
             // this will release the page to the cache
             _empty_page.reset();
         }
+        TIME_TRACE_STOP(finalize_empty_page_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("table_finalize_flush_and_populate_indexes-xid_{}", _target_xid), finalize_empty_page_trace);
 
+        time_trace::Trace flush_data_pages_trace;
+        TIME_TRACE_START(flush_data_pages_trace);
         // flush the dirty data pages of the table to disk
         auto end_offset = StorageCache::get_instance()->flush(_data_file);
+        TIME_TRACE_STOP(flush_data_pages_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("table_finalize_flush_data_pages-xid_{}", _target_xid), flush_data_pages_trace);
 
+        time_trace::Trace finalize_indexes_trace;
+        TIME_TRACE_START(finalize_indexes_trace);
         // now flush the indexes, capturing the roots
         TableMetadata metadata;
         metadata.roots.push_back({constant::INDEX_PRIMARY, _primary_index->finalize()});
+        TIME_TRACE_STOP(finalize_indexes_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("table_finalize_finalize_primary_indexes-xid_{}", _target_xid), finalize_indexes_trace);
 
+        time_trace::Trace finalize_secondary_indexes_trace;
+        TIME_TRACE_START(finalize_secondary_indexes_trace);
         // now flush the indexes, capturing the roots
         for (auto secondary : _secondary_indexes) {
             metadata.roots.emplace_back(secondary.first, secondary.second.first->finalize());
         }
+        TIME_TRACE_STOP(finalize_secondary_indexes_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("table_finalize_finalize_secondary_indexes-xid_{}", _target_xid), finalize_secondary_indexes_trace);
 
         metadata.stats = _stats;
         metadata.snapshot_xid = _snapshot_xid;
@@ -873,6 +889,8 @@ namespace indexer_helpers {
         // to be used later to catch-up index if needed
         metadata.stats.end_offset = end_offset;
 
+        time_trace::Trace finalize_store_roots_trace;
+        TIME_TRACE_START(finalize_store_roots_trace);
         // store the roots into a look-aside root file
         // XXX maybe we only need to do this for system tables?  or even just the table_roots table?
         auto extent = std::make_shared<Extent>(ExtentType(), _target_xid, _roots_schema->row_size());
@@ -887,6 +905,10 @@ namespace indexer_helpers {
         // flush and wait for completion
         extent->async_flush(root_handle).wait();
         root_handle->sync();
+
+        TIME_TRACE_STOP(finalize_store_roots_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("table_finalize_finalize_extent_flush-xid_{}", _target_xid), finalize_store_roots_trace);
+
         // swap the symlink
         std::filesystem::create_symlink(_table_dir / filename,
                                         _table_dir / constant::ROOTS_TMP_FILE);
