@@ -123,7 +123,7 @@ jobs:
           set +e
           _LOG_FLAG="failed"
           # Per SPR-501: break upon test failures - "--gtest_break_on_failure"
-          make test ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose --stop-on-failure" 2>&1 | tee tmplog
+          make check ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose --stop-on-failure" 2>&1 | tee tmplog
           # Grab the success/failure status of the unit tests
           if [ $? -eq 0 ] &&  grep -qE "100% tests passed" tmplog
           then 
@@ -245,7 +245,7 @@ jobs:
           make install -j ${NUM_PROCS}
 
       - name: Run Proxy Tests
-        if: success() || failure()      # run this step even if previous step failed
+        if: success()
         env:
           LD_LIBRARY_PATH: /usr/lib/springtail
         run: |
