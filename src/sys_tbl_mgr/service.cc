@@ -1305,16 +1305,17 @@ Service::_get_usertype_info(uint64_t db_id, uint64_t type_id, const XidLsn& xid)
 
     // find the row that matches the type_id at the given XID/LSN
     auto row_i = table->inverse_lower_bound(search_key);
+    auto &&row = *row_i;
 
     // make sure type ID exists at this XID/LSN
     auto id_field = fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID);
-    if (row_i == table->end() || id_field->get_uint64(*row_i) != type_id) {
+    if (row_i == table->end() || id_field->get_uint64(&row) != type_id) {
         LOG_WARN("No user type info at xid {}:{}", xid.xid, xid.lsn);
         return nullptr;
     }
 
     // make sure that the usertype is marked as existing at this XID/LSN
-    bool exists = fields->at(sys_tbl::UserTypes::Data::EXISTS)->get_bool(*row_i);
+    bool exists = fields->at(sys_tbl::UserTypes::Data::EXISTS)->get_bool(&row);
     if (!exists) {
         LOG_WARN("User type marked non-existant at xid {}:{}", xid.xid, xid.lsn);
         return nullptr;
@@ -1323,11 +1324,11 @@ Service::_get_usertype_info(uint64_t db_id, uint64_t type_id, const XidLsn& xid)
     // create and populate the user type info
     return std::make_shared<UserTypeCacheRecord>(
         type_id,
-        fields->at(sys_tbl::UserTypes::Data::NAME)->get_text(*row_i),
-        fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID)->get_uint64(*row_i),
-        fields->at(sys_tbl::UserTypes::Data::TYPE)->get_int8(*row_i),
-        fields->at(sys_tbl::UserTypes::Data::VALUE)->get_text(*row_i),
-        fields->at(sys_tbl::UserTypes::Data::EXISTS)->get_bool(*row_i));
+        fields->at(sys_tbl::UserTypes::Data::NAME)->get_text(&row),
+        fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID)->get_uint64(&row),
+        fields->at(sys_tbl::UserTypes::Data::TYPE)->get_int8(&row),
+        fields->at(sys_tbl::UserTypes::Data::VALUE)->get_text(&row),
+        fields->at(sys_tbl::UserTypes::Data::EXISTS)->get_bool(&row));
 }
 
 

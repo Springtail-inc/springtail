@@ -1543,19 +1543,17 @@ namespace springtail {
             DCHECK_EQ(ut->type, UserType::ENUM);
         }
 
-        bool is_null(const std::any &row) const override
+        bool is_null(const void *row) const override
         {
-            DCHECK(row.type() == typeid(PgMsgTupleData const *));
-            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+            auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
 
             // check if the enum is null
             return (!_ut->exists || data->tuple_data[_offset].type == 'n');
         }
 
-        float get_float32(const std::any &row) const override
+        float get_float32(const void *row) const override
         {
-            assert(row.type() == typeid(PgMsgTupleData const *));
-            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+            auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
 
             // get the label from the tuple data
             std::string label = std::string(data->tuple_data[_offset].data.begin(),

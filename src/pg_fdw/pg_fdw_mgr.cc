@@ -1186,15 +1186,15 @@ namespace springtail::pg_fdw {
 
         // iterate over the user types table and populate the user type map
         for (auto row : (*table)) {
-            auto type_ns_id = fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID)->get_uint64(row);
+            auto type_ns_id = fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID)->get_uint64(&row);
 
             // check for schema-namespace match
             if (type_ns_id != namespace_id) {
                 continue;
             }
 
-            uint64_t pg_type = fields->at(sys_tbl::UserTypes::Data::TYPE_ID)->get_uint64(row);
-            bool exists = fields->at(sys_tbl::UserTypes::Data::EXISTS)->get_bool(row);
+            uint64_t pg_type = fields->at(sys_tbl::UserTypes::Data::TYPE_ID)->get_uint64(&row);
+            bool exists = fields->at(sys_tbl::UserTypes::Data::EXISTS)->get_bool(&row);
             if (!exists) {
                 // find type and remove if it exists
                 user_types.erase(pg_type);
@@ -1202,7 +1202,7 @@ namespace springtail::pg_fdw {
             }
 
             // generate a fully qualified quoted type name and add to map
-            std::string type_name(fields->at(sys_tbl::UserTypes::Data::NAME)->get_text(row));
+            std::string type_name(fields->at(sys_tbl::UserTypes::Data::NAME)->get_text(&row));
             std::string qualified_type_name = fmt::format("{}.{}", escaped_namespace, quote_identifier(type_name.c_str()));
             user_types.insert({pg_type, qualified_type_name});
         }
