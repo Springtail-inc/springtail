@@ -122,7 +122,7 @@ namespace springtail
                 // Validate if the table has an invalid column
                 for (const auto& column : columns) {
                     if (column.is_generated || column.is_non_standard_collation ||
-                        !column.is_user_defined_type) {
+                        (column.is_user_defined_type && column.type_category != 'E')) {
                         invalid_columns.push_back({{"name", column.name},
                                                    {"type_name", column.type_name},
                                                    {"collation", column.collation}});

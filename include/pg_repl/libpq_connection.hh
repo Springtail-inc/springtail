@@ -145,6 +145,15 @@ namespace springtail {
         int64_t get_int64(int row, int col);
 
         /**
+         * @brief Retreive a float column value from a query result
+         *
+         * @param row row index
+         * @param col col index
+         * @return float value for row/col
+         */
+        float get_float(int row, int col);
+
+        /**
          * @brief Retreive a string column value from a query result; maintains NULL value
          *
          * @param row row index
@@ -171,6 +180,15 @@ namespace springtail {
          * @return boolean value for row/col; null is mapped to false
          */
         bool get_boolean(int row, int col);
+
+        /**
+         * @brief Get char value from query result
+         *
+         * @param row row index
+         * @param col col index
+         * @return char value for row/col; null is mapped to '\0'
+         */
+        char get_char(int row, int col);
 
         /**
          * @brief escape a string; a literal not for identifiers

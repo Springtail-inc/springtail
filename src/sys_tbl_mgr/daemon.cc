@@ -40,10 +40,10 @@ main(int argc, char *argv[])
     runners->emplace_back(std::make_unique<TableMgrRunner>());
     runners->emplace_back(std::make_unique<sys_tbl_mgr::SysTblMgrRunner>());
 
-    springtail_init_daemon(runners, "sys_tbl_mgr", pidfile);
-
+    springtail_init_daemon(runners, "sys_tbl_mgr", pidfile, LOG_ALL);
     springtail_daemon_run();
 
     springtail_shutdown();
+
     return 0;
 }

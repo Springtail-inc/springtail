@@ -11,6 +11,7 @@
 
 #include <storage/extent.hh>
 #include <storage/schema_type.hh>
+#include <storage/schema.hh>
 
 namespace springtail {
 
@@ -270,10 +271,7 @@ namespace springtail {
             }
         }
     };
-
-    /** Pointer typedef for Field. */
-    typedef std::shared_ptr<Field> FieldPtr;
-
+    using FieldPtr = std::shared_ptr<Field>;
 
     /**
      * MutableField provies a set of set_* functions to modify the values of a column.  It is
@@ -435,7 +433,7 @@ namespace springtail {
     };
 
     /** Pointer typedef for MutableField. */
-    typedef std::shared_ptr<MutableField> MutableFieldPtr;
+    using MutableFieldPtr = std::shared_ptr<MutableField>;
 
     /**
      * Field on top of an Extent::Row.
@@ -747,7 +745,7 @@ namespace springtail {
         uint32_t _undefined_offset;
         uint8_t _undefined_bitmask;
     };
-    typedef std::shared_ptr<ExtentField> ExtentFieldPtr;
+    using ExtentFieldPtr = std::shared_ptr<ExtentField>;
 
 
     /**
@@ -757,7 +755,7 @@ namespace springtail {
     class ConstField : public Field {
         // intentionally empty
     };
-    typedef std::shared_ptr<ConstField> ConstFieldPtr;
+    using ConstFieldPtr = std::shared_ptr<ConstField>;
 
     /**
      * A typed constant value that is represented as a Field for use in conditionals and joins.
@@ -912,6 +910,8 @@ namespace springtail {
             }
         }
     };
+    template <class T>
+    using ConstTypeFieldPtr = std::shared_ptr<ConstTypeField<T>>;
 
     /**
      * A value that is always null represented as a Field for use in conditionals and joins.
@@ -1114,11 +1114,11 @@ namespace springtail {
 
     // FIELD ARRAYS
 
-    typedef std::vector<FieldPtr> FieldArray;
-    typedef std::shared_ptr<FieldArray> FieldArrayPtr;
+    using FieldArray = std::vector<FieldPtr>;
+    using FieldArrayPtr = std::shared_ptr<FieldArray>;
 
-    typedef std::vector<MutableFieldPtr> MutableFieldArray;
-    typedef std::shared_ptr<MutableFieldArray> MutableFieldArrayPtr;
+    using MutableFieldArray = std::vector<MutableFieldPtr>;
+    using MutableFieldArrayPtr = std::shared_ptr<MutableFieldArray>;
 
     /**
      * An array of values, encapsulated such that they can be compared even when coming from
@@ -1263,8 +1263,7 @@ namespace springtail {
             return true;
         }
     };
-
-    typedef std::shared_ptr<Tuple> TuplePtr;
+    using TuplePtr = std::shared_ptr<Tuple>;
 
     class FieldTuple : public Tuple {
     public:
@@ -1290,7 +1289,7 @@ namespace springtail {
     private:
         FieldArrayPtr _array;
     };
-    typedef std::shared_ptr<FieldTuple> FieldTuplePtr;
+    using FieldTuplePtr = std::shared_ptr<FieldTuple>;
 
 
     class KeyValueTuple : public Tuple {
@@ -1338,7 +1337,7 @@ namespace springtail {
                      void *row)
             : Tuple(row),
               _array(array)
-        { }
+        { DCHECK_NE(_array, nullptr); }
 
         void *mutable_row() const {
             return const_cast<void *>(this->row());
@@ -1382,7 +1381,7 @@ namespace springtail {
     private:
         MutableFieldArrayPtr _array;
     };
-    typedef std::shared_ptr<MutableTuple> MutableTuplePtr;
+    using MutableTuplePtr = std::shared_ptr<MutableTuple>;
 
 
     class PgLogField : public Field {
@@ -1414,10 +1413,7 @@ namespace springtail {
 
         bool is_null(const void *row) const override {
             auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
-            if (data->tuple_data[_offset].type == 'n') {
-                return true;
-            }
-            return false;
+            return data->tuple_data[_offset].type == 'n';
         }
 
         bool get_bool(const void *row) const override {
@@ -1528,11 +1524,52 @@ namespace springtail {
             return std::span<const char>(col.data.begin(), col.data.size());
         }
 
-    private:
+    protected:
         SchemaType _type;
         uint32_t _offset;
     };
-    typedef std::shared_ptr<PgLogField> PgLogFieldPtr;
+    using PgLogFieldPtr = std::shared_ptr<PgLogField>;
+
+    /**
+     * @brief Field class to wrap a Postgres enum user defined type
+     */
+    class PgEnumField : public PgLogField {
+    public:
+        PgEnumField(SchemaType type, uint32_t offset, UserTypePtr ut)
+            : PgLogField(type, offset), _ut(ut)
+        {
+            DCHECK_EQ(type, SchemaType::FLOAT32);
+            DCHECK_NE(ut, nullptr);
+            DCHECK_EQ(ut->type, UserType::ENUM);
+        }
+
+        bool is_null(const std::any &row) const override
+        {
+            DCHECK(row.type() == typeid(PgMsgTupleData const *));
+            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+
+            // check if the enum is null
+            return (!_ut->exists || data->tuple_data[_offset].type == 'n');
+        }
+
+        float get_float32(const std::any &row) const override
+        {
+            assert(row.type() == typeid(PgMsgTupleData const *));
+            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+
+            // get the label from the tuple data
+            std::string label = std::string(data->tuple_data[_offset].data.begin(),
+            data->tuple_data[_offset].data.end());
+
+            // lookup the label in the enum map
+            float index = _ut->enum_label_map.at(label);
+            return index;
+        }
+
+    private:
+        UserTypePtr _ut;
+    };
+    using PgEnumFieldPtr = std::shared_ptr<PgEnumField>;
 
     class ValueTuple : public Tuple {
         /** An array of ConstField objects. */

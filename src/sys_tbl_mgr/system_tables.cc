@@ -7,6 +7,7 @@ constexpr int32_t BOOLOID = 16;
 constexpr int32_t INT8OID = 20;
 constexpr int32_t INT4OID = 23;
 constexpr int32_t TEXTOID = 25;
+constexpr int32_t CHAROID = 18;
 
 namespace springtail::sys_tbl {
 
@@ -156,5 +157,34 @@ const std::vector<SchemaColumn> NamespaceNames::Secondary::SCHEMA = {
     {constant::INDEX_RID_FIELD, 5, SchemaType::UINT64, INT8OID, false}};
 
 const std::vector<std::string> NamespaceNames::Secondary::KEY = {"name", "xid", "lsn"};
+
+
+// User defined types
+const std::vector<SchemaColumn> UserTypes::Data::SCHEMA = {
+    {"type_id", 1, SchemaType::UINT64, INT8OID, false, 0},
+    {"namespace_id", 2, SchemaType::UINT64, INT8OID, false},
+    {"name", 3, SchemaType::TEXT, TEXTOID, false},
+    {"value", 4, SchemaType::TEXT, TEXTOID, false},
+    {"xid", 5, SchemaType::UINT64, INT8OID, false, 1},
+    {"lsn", 6, SchemaType::UINT64, INT8OID, false, 2},
+    {"type", 7, SchemaType::UINT8, CHAROID, false},
+    {"exists", 8, SchemaType::BOOLEAN, BOOLOID, false}};
+
+const std::vector<SchemaColumn> UserTypes::Primary::SCHEMA = {
+    {"type_id", 1, SchemaType::UINT64, INT8OID, false},
+    {"xid", 2, SchemaType::UINT64, INT8OID, false},
+    {"lsn", 3, SchemaType::UINT64, INT8OID, false},
+    {constant::INDEX_EID_FIELD, 4, SchemaType::UINT64, INT8OID, false}};
+
+const std::vector<std::string> UserTypes::Primary::KEY = {"type_id", "xid", "lsn"};
+
+const std::vector<SchemaColumn> UserTypes::Secondary::SCHEMA = {
+    {"name", 1, SchemaType::TEXT, TEXTOID, false},
+    {"xid", 2, SchemaType::UINT64, INT8OID, false},
+    {"lsn", 3, SchemaType::UINT64, INT8OID, false},
+    {constant::INDEX_EID_FIELD, 4, SchemaType::UINT64, INT8OID, false},
+    {constant::INDEX_RID_FIELD, 5, SchemaType::UINT64, INT8OID, false}};
+
+const std::vector<std::string> UserTypes::Secondary::KEY = {"name", "xid", "lsn"};
 
 }  // namespace springtail::sys_tbl

@@ -34,7 +34,9 @@ extern "C" {
     #include <postgres.h>
     #include <postgres_ext.h>
     #include <access/htup_details.h>
+    #include <access/transam.h>
     #include <catalog/pg_type.h>
+    #include <catalog/pg_enum.h>
     #include <utils/builtins.h>
     #include <utils/syscache.h>
     #include <utils/typcache.h>
@@ -54,6 +56,68 @@ extern "C" {
 namespace springtail::pg_fdw {
     using springtail::Index;
 
+    bool
+    _check_type_compatibility(const SchemaColumn &column, int32_t pg_type)
+    {
+        // XXX should handle coercion of like types, like float, int, etc.
+
+        // check if the types are compatible
+        if (column.pg_type == pg_type) {
+            return true;
+        }
+
+        // check if both types are enums
+        if (column.pg_type >= constant::FIRST_USER_DEFINED_PG_OID &&
+            pg_type >= constant::FIRST_USER_DEFINED_PG_OID) {
+            return true;
+        }
+
+        // check if one type is a user defined type and the other is not
+        if ((column.pg_type >= constant::FIRST_USER_DEFINED_PG_OID &&
+            pg_type < constant::FIRST_USER_DEFINED_PG_OID) ||
+            (column.pg_type < constant::FIRST_USER_DEFINED_PG_OID &&
+            pg_type >= constant::FIRST_USER_DEFINED_PG_OID)) {
+            // one is a user defined type and the other is not
+            return false;
+        }
+
+        // check if they are the same springtail schema type
+        // the type category doesn't matter for these checks since enum check is done above
+        SchemaType pg_schema_type = convert_pg_type(pg_type, 'N');
+        if (column.type == pg_schema_type) {
+            return true;
+        }
+
+        // check if the pg schema type can be upconverted to the column type
+        switch (column.type) {
+            case SchemaType::INT64:
+                if (pg_schema_type == SchemaType::INT16 ||
+                    pg_schema_type == SchemaType::INT32) {
+                    return true;
+                }
+                break;
+            case SchemaType::INT32:
+                if (pg_schema_type == SchemaType::INT16) {
+                    return true;
+                }
+                break;
+            case SchemaType::INT16:
+                if (pg_schema_type == SchemaType::INT8) {
+                    return true;
+                }
+                break;
+            case SchemaType::FLOAT64:
+                if (pg_schema_type == SchemaType::FLOAT32) {
+                    return true;
+                }
+                break;
+            default:
+                break;
+        }
+
+        return false;
+    }
+
     // This is to return an intersection between Index columns and quals.
     // The intersection must start at the first index column and be
     // continuous.
@@ -68,11 +132,13 @@ namespace springtail::pg_fdw {
             foreach(lc, qual_list) {
                 ConstQualPtr qual = static_cast<ConstQualPtr>(lfirst(lc));
 
-                //must be of the same internal type
-                if (convert_pg_type(state->columns.at(pos).pg_type) != convert_pg_type(qual->base.typeoid)) {
+                // must be of the same internal type
+                auto column = state->columns.at(pos);
+                if (_check_type_compatibility(column, qual->base.typeoid) == false) {
                     continue;
                 }
 
+                // check if type is sortable
                 if (PgFdwMgr::_is_type_sortable(qual->base.typeoid, qual->base.op) &&
                         qual->base.isArray == false &&
                         qual->base.varattno == pos ) {
@@ -241,13 +307,13 @@ namespace springtail::pg_fdw {
                             db_id, tid, xid, pg_xid, schema_xid);
 
         TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid);
-        PgFdwState *state = new PgFdwState{table, tid, xid};
+        PgFdwState *state = new PgFdwState{table, db_id, tid, xid};
 
         return state;
     }
 
     void
-    PgFdwMgr::fdw_begin_scan(PgFdwState *state, int num_attrs, const Form_pg_attribute* attrs,  
+    PgFdwMgr::fdw_begin_scan(PgFdwState *state, int num_attrs, const Form_pg_attribute* attrs,
             List *target_list, List *qual_list, List *sortgroup)
     {
         LOG_DEBUG(LOG_FDW, "fdw_begin_scan: tid: {}, {}", state->tid, num_attrs);
@@ -278,7 +344,7 @@ namespace springtail::pg_fdw {
             DCHECK_GT(attno, 0);
             DCHECK_LE(attno, state->_attrs.size());
 
-            state->target_columns.emplace(attno, PgFdwState::TargetColumn{i++, state->_attrs[attno-1]});
+            state->target_columns.emplace(attno, PgFdwState::TargetColumn{i++, col_i->second.pg_type, state->_attrs[attno-1]});
 
             LOG_DEBUG(LOG_FDW, "Target list column: {}:{}",
                                 attno, col_i->second.name);
@@ -297,8 +363,9 @@ namespace springtail::pg_fdw {
             auto it = state->target_columns.find(attno);
 
             if (it == state->target_columns.end()) {
-                target_colnames.push_back(state->columns.at(state->attr_map.at(attno)).name);
-                state->target_columns.emplace(attno, PgFdwState::TargetColumn{i++, state->_attrs[attno-1]});
+                auto column = state->columns.at(state->attr_map.at(attno));
+                target_colnames.push_back(column.name);
+                state->target_columns.emplace(attno, PgFdwState::TargetColumn{i++, column.pg_type, state->_attrs[attno-1]});
             }
         }
 
@@ -314,6 +381,10 @@ namespace springtail::pg_fdw {
         // set the iterators for the scan taking quals into consideration
         _set_scan_iterators(state);
 
+        // reset the user type cache since cached types may have changed
+        _user_type_cache.clear();
+
+        // reset the timer stats
         time_trace::traces.reset();
     }
 
@@ -465,7 +536,10 @@ namespace springtail::pg_fdw {
         // iterate through the quals and add them to the key fields
         for (int i = 0; i < state->filtered_quals.size(); i++) {
             // create a const field for the qual and add it to the field array
-            _make_const_field(state->qual_fields, i, state->filtered_quals[i]);
+            ConstQual *qual = state->filtered_quals[i];
+            auto &column = state->columns.at(state->attr_map.at(qual->base.varattno));
+
+            _make_const_field(state, column, i, state->filtered_quals[i]);
         }
     }
 
@@ -613,7 +687,7 @@ namespace springtail::pg_fdw {
                 TIME_TRACE_SCOPED(time_trace::traces, iterate_scan_datum);
                 // set value
                 if (!field->is_null(&row)) {
-                    values[attno-1] = _get_datum_from_field(field.get(), row, c.pg_attr.atttypid, c.pg_attr.atttypmod);
+                    values[attno-1] = _get_datum_from_field(state, field.get(), row, c.sp_pg_type, c.pg_attr.atttypid, c.pg_attr.atttypmod);
                     nulls[attno-1] = false;
                 }
             }
@@ -833,12 +907,88 @@ namespace springtail::pg_fdw {
         elog(ERROR, "Springtail exception: %s", error.what());
     }
 
+    float
+    PgFdwMgr::_get_enum_id_from_pg(const PgFdwState *state,
+                                   int32_t springtail_oid,
+                                   Oid pg_oid,
+                                   Oid label_oid)
+    {
+        // retrieve the type's entry from the pg_enum table
+        HeapTuple tup = SearchSysCache1(ENUMOID, ObjectIdGetDatum(label_oid));
+        if (!HeapTupleIsValid(tup)) {
+            elog(ERROR, "FDW: cache lookup failed for enum %u", label_oid);
+        }
+
+        // get the enum label
+        char *label = ((Form_pg_enum) GETSTRUCT(tup))->enumlabel.data;
+        ReleaseSysCache(tup);
+
+        // lookup the label in springtail enum cache
+        auto label_str = std::string(label);
+        UserTypePtr utp = _enum_cache_lookup(state->db_id, springtail_oid, state->xid);
+        CHECK_NE(utp, nullptr);
+
+        // lookup label and get the index
+        auto &&it = utp->enum_label_map.find(label_str);
+        if (it == utp->enum_label_map.end()) {
+            LOG_ERROR("Label {} not found for enum oid: {}", label_str, springtail_oid);
+            CHECK(false);
+        }
+
+        return it->second;
+    }
+
     Datum
-    PgFdwMgr::_get_datum_from_field(const Field* field,
+    PgFdwMgr::_get_enum_datum(const PgFdwState *state,
+                              int32_t springtail_oid,
+                              Oid pg_oid,
+                              float sort_order)
+    {
+        UserTypePtr utp = _enum_cache_lookup(state->db_id, springtail_oid, state->xid);
+
+        // lookup the index and get the string label
+        auto &&it = utp->enum_index_map.find(sort_order);
+        if (it == utp->enum_index_map.end()) {
+            LOG_ERROR("Index {} not found for enum oid: {}", sort_order, springtail_oid);
+            CHECK(false);
+        }
+
+        // convert label to datum for lookup
+        auto label = it->second;
+        char *name = pnstrdup(label.data(), label.size());
+        auto tup = SearchSysCache2(ENUMTYPOIDNAME,
+            ObjectIdGetDatum(pg_oid),
+            CStringGetDatum(name));
+
+        if (!HeapTupleIsValid(tup)) {
+            elog(ERROR, "FDW: cache lookup failed for enum %u", pg_oid);
+        }
+
+        // This comes from pg_enum.oid and stores system oids in user tables.
+        Oid enum_oid = ((Form_pg_enum) GETSTRUCT(tup))->oid;
+
+        ReleaseSysCache(tup);
+
+        // create a datum from the enum's entry oid
+        return ObjectIdGetDatum(enum_oid);
+    }
+
+    Datum
+    PgFdwMgr::_get_datum_from_field(const PgFdwState *state,
+                                    const Field *field,
                                     const Extent::Row &row,
-                                    int32_t pg_type,
+                                    int32_t springtail_oid,
+                                    Oid pg_oid,
                                     int32_t atttypmod)
     {
+        // check for user defined type
+        if (springtail_oid >= FirstNormalObjectId) {
+            // user type; enum, lookup index to label
+            assert(field->get_type() == SchemaType::FLOAT32);
+            return _get_enum_datum(state, springtail_oid, pg_oid, field->get_float32(&row));
+        }
+
+        // otherwise convert they row by the schema type
         switch (field->get_type()) {
         case SchemaType::INT64:
             return Int64GetDatum(field->get_int64(&row));
@@ -868,9 +1018,9 @@ namespace springtail::pg_fdw {
         }
         case SchemaType::BINARY: {
             // retrieve the type's entry from the pg_type table
-            HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_type));
+            HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_oid));
             if (!HeapTupleIsValid(tuple)) {
-                elog(ERROR, "FDW: cache lookup failed for type %u", pg_type);
+                elog(ERROR, "FDW: cache lookup failed for type %u", pg_oid);
             }
 
             // get the receive function
@@ -879,7 +1029,7 @@ namespace springtail::pg_fdw {
             // handle array types by retrieving the subscript element type
             Oid typelem = ((Form_pg_type) GETSTRUCT(tuple))->typelem;
             if (typelem != 0) {
-                pg_type = typelem;
+                pg_oid = typelem;
             }
 
             ReleaseSysCache(tuple);
@@ -894,7 +1044,7 @@ namespace springtail::pg_fdw {
             Datum datum = PointerGetDatum(&string);
 
             // call the recieve function
-            Datum value_datum = OidFunctionCall3(typeinput, datum, ObjectIdGetDatum(pg_type), Int32GetDatum(atttypmod));
+            Datum value_datum = OidFunctionCall3(typeinput, datum, ObjectIdGetDatum(pg_oid), Int32GetDatum(atttypmod));
 
             return value_datum;
         }
@@ -905,21 +1055,31 @@ namespace springtail::pg_fdw {
     }
 
     std::string
-    PgFdwMgr::_get_type_name(int32_t pg_type)
+    PgFdwMgr::_get_type_name(int32_t pg_type,
+                             const std::unordered_map<uint64_t, std::string> &user_types)
     {
-        // get the type name from the system cache
-        HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_type));
-        if (!HeapTupleIsValid(tuple)) {
-            elog(ERROR, "cache lookup failed for type%u", pg_type);
+        if (pg_type < FirstNormalObjectId) {
+           // get the type name from the system cache
+            HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_type));
+            if (!HeapTupleIsValid(tuple)) {
+                elog(ERROR, "cache lookup failed for type %u", pg_type);
+                ReleaseSysCache(tuple);
+
+                throw FdwError(fmt::format("Failed to find type name for {}", pg_type));
+            }
+            std::string type_name = ((Form_pg_type) GETSTRUCT(tuple))->typname.data;
             ReleaseSysCache(tuple);
 
-            throw FdwError(fmt::format("Failed to find type name for {}", pg_type));
+            return type_name;
         }
 
-        std::string type_name = ((Form_pg_type) GETSTRUCT(tuple))->typname.data;
-        ReleaseSysCache(tuple);
-
-        return type_name;
+        // otherwise, check if the type is a user type
+        auto it = user_types.find(pg_type);
+        if (it != user_types.end()) {
+            return it->second;
+        }
+        elog(ERROR, "cache lookup failed for type %u", pg_type);
+        throw FdwError(fmt::format("Failed to find type name for {}", pg_type));
     }
 
     std::string
@@ -972,7 +1132,7 @@ namespace springtail::pg_fdw {
         std::vector<std::tuple<std::string, std::string, bool>> columns;
 
         for (const auto &column : column_schema) {
-            std::string type_name = _get_type_name(column.pg_type);
+            std::string type_name = _get_type_name(column.pg_type, {});
             columns.push_back({ column.name, type_name, column.nullable });
         }
 
@@ -1002,13 +1162,57 @@ namespace springtail::pg_fdw {
         import_catalog.operator()<sys_tbl::TableStats>(CATALOG_TABLE_STATS);
         import_catalog.operator()<sys_tbl::IndexNames>(CATALOG_INDEX_NAMES);
         import_catalog.operator()<sys_tbl::NamespaceNames>(CATALOG_NAMESPACE_NAMES);
+        import_catalog.operator()<sys_tbl::UserTypes>(CATALOG_USER_TYPES);
 
         return commands;
     }
 
+    std::unordered_map<uint64_t, std::string>
+    PgFdwMgr::_load_user_types(uint64_t db_id,
+                               const std::string &namespace_name,
+                               uint64_t namespace_id,
+                               uint64_t schema_xid)
+    {
+        std::unordered_map<uint64_t, std::string> user_types;
+
+        // get the user types table to iterate over
+        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::UserTypes::ID,
+                                                         schema_xid);
+        // get field array
+        auto fields = table->extent_schema()->get_fields();
+
+        // escape the namespace name; used for qualified type names
+        std::string escaped_namespace = quote_identifier(namespace_name.c_str());
+
+        // iterate over the user types table and populate the user type map
+        for (auto row : (*table)) {
+            auto type_ns_id = fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID)->get_uint64(row);
+
+            // check for schema-namespace match
+            if (type_ns_id != namespace_id) {
+                continue;
+            }
+
+            uint64_t pg_type = fields->at(sys_tbl::UserTypes::Data::TYPE_ID)->get_uint64(row);
+            bool exists = fields->at(sys_tbl::UserTypes::Data::EXISTS)->get_bool(row);
+            if (!exists) {
+                // find type and remove if it exists
+                user_types.erase(pg_type);
+                continue;
+            }
+
+            // generate a fully qualified quoted type name and add to map
+            std::string type_name(fields->at(sys_tbl::UserTypes::Data::NAME)->get_text(row));
+            std::string qualified_type_name = fmt::format("{}.{}", escaped_namespace, quote_identifier(type_name.c_str()));
+            user_types.insert({pg_type, qualified_type_name});
+        }
+
+        return user_types;
+    }
+
     List *
     PgFdwMgr::fdw_import_foreign_schema(const std::string &server,
-                                        const std::string &schema,
+                                        const std::string &namespace_name,
                                         const List *table_list,
                                         bool exclude, bool limit,
                                         uint64_t db_id,
@@ -1028,40 +1232,43 @@ namespace springtail::pg_fdw {
             }
         }
 
-        LOG_DEBUG(LOG_FDW, "Importing schema: {} <=> {}\n", schema, CATALOG_SCHEMA_NAME);
+        LOG_DEBUG(LOG_FDW, "Importing schema: {} <=> {}\n", namespace_name, CATALOG_SCHEMA_NAME);
 
         // if we are importing the catalog schema, handle it separately
-        if (schema == std::string(CATALOG_SCHEMA_NAME)) {
+        if (namespace_name == std::string(CATALOG_SCHEMA_NAME)) {
             return _import_springtail_catalog(server, table_set, exclude, limit);
         }
 
         // lookup the namespace_id for the requested schema
         auto ns_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, schema_xid);
-        auto ns_key = sys_tbl::NamespaceNames::Secondary::key_tuple(schema, schema_xid, constant::MAX_LSN);
+        auto ns_key = sys_tbl::NamespaceNames::Secondary::key_tuple(namespace_name, schema_xid, constant::MAX_LSN);
         auto ns_i = ns_table->inverse_lower_bound(ns_key, 1);
 
         // verify that the name is present and exists
         if (ns_i == ns_table->end(1)) {
             LOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
-                        schema, schema_xid, constant::MAX_LSN);
+                        namespace_name, schema_xid, constant::MAX_LSN);
             return commands;
         }
 
         auto ns_fields = ns_table->extent_schema()->get_fields();
         auto &&row = *ns_i;
-        if (schema != ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&row)) {
+        if (namespace_name != ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&row)) {
             LOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
-                        schema, schema_xid, constant::MAX_LSN);
+                        namespace_name, schema_xid, constant::MAX_LSN);
             return commands;
         }
         if (!ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row)) {
             LOG_WARN("Namespace marked as not-exists {} @ {}:{}",
-                        schema, schema_xid, constant::MAX_LSN);
+                        namespace_name, schema_xid, constant::MAX_LSN);
             return commands;
         }
 
         // record the namespace ID
         uint64_t namespace_id = ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&row);
+
+        // load the user type map;  primary pg_oid -> type_name
+        auto user_types = _load_user_types(db_id, namespace_name, namespace_id, schema_xid);
 
         // get the table names table to iterate over
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID,
@@ -1086,13 +1293,13 @@ namespace springtail::pg_fdw {
             std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row));
             // handle limit and exclude
             if (exclude && table_set.contains(table_name)) {
-                LOG_DEBUG(LOG_FDW, "Excluding table {}.{}", schema, table_name);
+                LOG_DEBUG(LOG_FDW, "Excluding table {}.{}", namespace_name, table_name);
                 continue;
             }
 
             // XXX should really stop after we have found all tables in limit
             if (limit && !table_set.contains(table_name)) {
-                LOG_DEBUG(LOG_FDW, "Limit, skipping table {}.{}", schema, table_name);
+                LOG_DEBUG(LOG_FDW, "Limit, skipping table {}.{}", namespace_name, table_name);
                 continue;
             }
 
@@ -1110,16 +1317,16 @@ namespace springtail::pg_fdw {
                     }
                 }
                 LOG_DEBUG(LOG_FDW, "Removed non-existant table {}.{} tid={}, xid={}",
-                                    schema, table_name, tid, xid);
+                                    namespace_name, table_name, tid, xid);
                 continue;
             }
 
-            LOG_DEBUG(LOG_FDW, "Found table {}.{} tid={}, xid={}", schema, table_name, tid, xid);
+            LOG_DEBUG(LOG_FDW, "Found table {}.{} tid={}, xid={}", namespace_name, table_name, tid, xid);
 
             // lookup table in map, if found the xid if it is newer
             auto entry = table_map.insert({table_name, {tid, xid}});
             if (entry.second == false) {
-                LOG_DEBUG(LOG_FDW, "Table {} already exists in schema {}", table_name, schema);
+                LOG_DEBUG(LOG_FDW, "Table {} already exists in schema {}", table_name, namespace_name);
                 // update if xid is newer
                 if (xid > entry.first->second.second) {
                     entry.first->second = {tid, xid};
@@ -1162,7 +1369,7 @@ namespace springtail::pg_fdw {
 
                 if (!current_table.empty()) {
                     // dump this table
-                    std::string sql = _gen_fdw_table_sql(server, schema, current_table,
+                    std::string sql = _gen_fdw_table_sql(server, namespace_name, current_table,
                                                          current_tid, columns);
                     commands = lappend(commands, pstrdup(sql.c_str()));
                 }
@@ -1201,13 +1408,13 @@ namespace springtail::pg_fdw {
             int32_t pg_type(fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(&row));
             bool nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(&row);
 
-            columns.push_back({column_name, _get_type_name(pg_type), nullable});
+            columns.push_back({column_name, _get_type_name(pg_type, user_types), nullable});
         }
 
         // process last table
         if (columns.size() > 0) {
             // dump this table
-            std::string sql = _gen_fdw_table_sql(server, schema, current_table, current_tid, columns);
+            std::string sql = _gen_fdw_table_sql(server, namespace_name, current_table, current_tid, columns);
             commands = lappend(commands, pstrdup(sql.c_str()));
         }
 
@@ -1246,14 +1453,26 @@ namespace springtail::pg_fdw {
                 // due to different collations/encodings we only support equality for text
                 return (op == EQUALS || op == NOT_EQUALS);
             default:
+                if (pg_type >= FirstNormalObjectId) {
+                    // enum type; ordering based on sort order, treat as float
+                    LOG_DEBUG(LOG_FDW, "Found user defined type for sorting: {}", pg_type);
+                    return true;
+                }
+                LOG_DEBUG(LOG_FDW, "Type not suitable for sorting: {}", pg_type);
                 return false;
         }
     }
 
     void
-    PgFdwMgr::_make_const_field(FieldArrayPtr fields, int idx, ConstQual *qual)
+    PgFdwMgr::_make_const_field(const PgFdwState *state,
+                                const SchemaColumn &column,
+                                int idx,
+                                const ConstQual *qual)
     {
+        FieldArrayPtr fields = state->qual_fields;
+
         // Generate a const field based on type; populate it into fields array
+        // Upconvert types to schema type if possible; there is a check in
         switch (qual->base.typeoid) {
             case MONEYOID:
             case TIMESTAMPOID:
@@ -1264,16 +1483,37 @@ namespace springtail::pg_fdw {
                 break;
             case DATEOID:
             case INT4OID:
-                fields->at(idx) = std::make_shared<ConstTypeField<int32_t>>(DatumGetInt32(qual->value));
+                if (column.type == SchemaType::INT64) {
+                    // convert to int64
+                    fields->at(idx) = std::make_shared<ConstTypeField<int64_t>>(DatumGetInt32(qual->value));
+                } else {
+                    CHECK_EQ(column.type, SchemaType::INT32);
+                    fields->at(idx) = std::make_shared<ConstTypeField<int32_t>>(DatumGetInt32(qual->value));
+                }
                 break;
             case INT2OID:
-                fields->at(idx) = std::make_shared<ConstTypeField<int16_t>>(DatumGetInt16(qual->value));
+                if (column.type == SchemaType::INT64) {
+                    // convert to int64
+                    fields->at(idx) = std::make_shared<ConstTypeField<int64_t>>(DatumGetInt16(qual->value));
+                } else if (column.type == SchemaType::INT32) {
+                    // convert to int32
+                    fields->at(idx) = std::make_shared<ConstTypeField<int32_t>>(DatumGetInt16(qual->value));
+                } else {
+                    CHECK_EQ(column.type, SchemaType::INT16);
+                    fields->at(idx) = std::make_shared<ConstTypeField<int16_t>>(DatumGetInt16(qual->value));
+                }
                 break;
             case FLOAT8OID:
                 fields->at(idx) = std::make_shared<ConstTypeField<double>>(DatumGetFloat8(qual->value));
                 break;
             case FLOAT4OID:
-                fields->at(idx) = std::make_shared<ConstTypeField<float>>(DatumGetFloat4(qual->value));
+                if (column.type == SchemaType::FLOAT64) {
+                    // convert to float64
+                    fields->at(idx) = std::make_shared<ConstTypeField<double>>(DatumGetFloat4(qual->value));
+                } else {
+                    CHECK_EQ(column.type, SchemaType::FLOAT32);
+                    fields->at(idx) = std::make_shared<ConstTypeField<float>>(DatumGetFloat4(qual->value));
+                }
                 break;
             case BOOLOID:
                 fields->at(idx) = std::make_shared<ConstTypeField<bool>>(DatumGetBool(qual->value));
@@ -1294,6 +1534,16 @@ namespace springtail::pg_fdw {
                 break;
             }
             default:
+                // handle enum user defined type
+                if (qual->base.typeoid >= FirstNormalObjectId) {
+                    Oid oid = DatumGetObjectId(qual->value);
+                    LOG_DEBUG(LOG_FDW, "Found user defined type datum qual field: {}", oid);
+
+                    // do reverse mapping lookup to get the enum idx from springtail
+                    float enum_id = _get_enum_id_from_pg(state, column.pg_type, qual->base.typeoid, oid);
+                    fields->at(idx) = std::make_shared<ConstTypeField<float>>(enum_id);
+                    break;
+                }
                 elog(ERROR, "Unsupported type for constant field: %d", qual->base.typeoid);
                 break;
         }
@@ -1326,8 +1576,26 @@ namespace springtail::pg_fdw {
         }
     }
 
-    PgFdwState::PgFdwState(TablePtr table, uint64_t tid, uint64_t xid)
-            : table(table), tid(tid), xid(xid), stats(table->get_stats())
+    UserTypePtr
+    PgFdwMgr::_enum_cache_lookup(uint64_t db_id, int32_t oid, uint64_t xid)
+    {
+        // first check the _user_type_cache for the oid
+        LOG_DEBUG(LOG_FDW, "Enum cache lookup for oid: {}", oid);
+
+        // lookup oid in user type cache, if not there fetch from systbl mgr
+        UserTypePtr utp = _user_type_cache.get(oid);
+        if (utp == nullptr) {
+            XidLsn xidlsn{xid};
+            utp = SchemaMgr::get_instance()->get_usertype(db_id, oid, xidlsn);
+            CHECK_NE(utp, nullptr);
+            _user_type_cache.insert(oid, utp);
+        }
+
+        return utp;
+    }
+
+    PgFdwState::PgFdwState(TablePtr table, uint64_t db_id, uint64_t tid, uint64_t xid)
+            : table(table), db_id(db_id), tid(tid), xid(xid), stats(table->get_stats())
     {
         columns = SchemaMgr::get_instance()->get_columns(table->db(), tid, { xid, constant::MAX_LSN });
         for (const auto &entry : columns) {

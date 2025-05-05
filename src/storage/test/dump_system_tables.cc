@@ -38,7 +38,8 @@ main(int argc,
                            sys_tbl::Schemas::ID,
                            sys_tbl::TableStats::ID,
                            sys_tbl::IndexNames::ID,
-                           sys_tbl::NamespaceNames::ID }) {
+                           sys_tbl::NamespaceNames::ID,
+                           sys_tbl::UserTypes::ID }) {
         auto table = TableMgr::get_instance()->get_table(db_id,
                                                          table_id,
                                                          constant::LATEST_XID);

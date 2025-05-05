@@ -1,6 +1,3 @@
-#include <nlohmann/json.hpp>
-#include <libpq-fe.h>
-
 #include <common/counter.hh>
 #include <common/common.hh>
 #include <common/json.hh>
@@ -9,6 +6,7 @@
 #include <common/properties.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
+#include <common/constants.hh>
 
 #include <redis/db_state_change.hh>
 #include <redis/redis_ddl.hh>
@@ -18,15 +16,12 @@
 
 #include <xid_mgr/xid_mgr_client.hh>
 
+#include <sys_tbl_mgr/system_tables.hh>
+
 #include <pg_fdw/exception.hh>
 #include <pg_fdw/pg_ddl_mgr.hh>
 
-// clang-format off
-// This #include must come last, as it ends up including postgres
-// files that end up doing a #define ERROR, and the side effects
-// of this define break other c++ headers from being includable.
-#include <pg_fdw/pg_fdw_common.h>
-// clang-format on
+#include <pg_fdw/constants.hh>
 
 namespace springtail::pg_fdw {
 
@@ -131,14 +126,55 @@ namespace springtail::pg_fdw {
         _thread_manager->start();
     }
 
-    std::set<std::string>
-    PgDDLMgr::_get_schemas(uint64_t db_id, const std::string &db_name, uint64_t xid)
+    std::map<uint64_t, std::map<uint64_t, std::pair<std::string, std::string>>>
+    PgDDLMgr::_get_usertypes(uint64_t db_id, uint64_t xid)
+    {
+        // namespace id -> type_id -> <type_name, value_json>
+        std::map<uint64_t, std::map<uint64_t, std::pair<std::string, std::string>>> usertype_map;
+
+        // iterate through the user types and add them to the map
+        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::UserTypes::ID, xid);
+        auto fields = table->extent_schema()->get_fields();
+        for (auto row : (*table)) {
+            uint64_t namespace_id = fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID)->get_uint64(row);
+            uint64_t type_id = fields->at(sys_tbl::UserTypes::Data::TYPE_ID)->get_uint64(row);
+
+            // make sure entry exists at this xid
+            bool exists = fields->at(sys_tbl::UserTypes::Data::EXISTS)->get_bool(row);
+            if (!exists) {
+                // find type_id and remove it
+                auto it = usertype_map.find(namespace_id);
+                if (it != usertype_map.end()) {
+                    auto type_it = it->second.find(type_id);
+                    if (type_it != it->second.end()) {
+                        it->second.erase(type_it);
+                    }
+                }
+                continue;
+            }
+
+            std::string type_name(fields->at(sys_tbl::UserTypes::Data::NAME)->get_text(row));
+            std::string value_json(fields->at(sys_tbl::UserTypes::Data::VALUE)->get_text(row));
+
+            // only enums supported
+            DCHECK(fields->at(sys_tbl::UserTypes::Data::TYPE)->get_uint8(row) == constant::USER_TYPE_ENUM);
+
+            // insert into map by namespace_id
+            usertype_map[namespace_id][type_id] = std::make_pair(type_name, value_json);
+        }
+
+        return usertype_map;
+    }
+
+    std::map<uint64_t, std::string>
+    PgDDLMgr::_get_schemas(uint64_t db_id, uint64_t xid)
     {
         // get the db config and parse out the included schemas
         auto db_config = Properties::get_db_config(db_id);
 
         bool all_schemas = false;
         std::set<std::string> schemas;
+        std::map<uint64_t, std::string> schema_map;
 
         // scan through includes
         auto includes = db_config["include"];
@@ -161,21 +197,29 @@ namespace springtail::pg_fdw {
             }
         }
 
-        if (!all_schemas) {
-            return schemas;
+        if (!all_schemas && schemas.empty()) {
+            return {};
         }
 
-        // otherwise all schemas, need to query the primary
-        // use libpq to connect to the database
+        // iterate through the schemas and get the schema ids
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, xid);
         auto fields = table->extent_schema()->get_fields();
-
         for (auto row : (*table)) {
+            // make sure entry exists at this xid
+            uint64_t namespace_id = fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(row);
+            bool exists = fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row);
+            if (!exists) {
+                schema_map.erase(namespace_id);
+                continue;
+            }
+            // check if we have a schema name match, if so add it to the map
             std::string namespace_name(fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&row));
-            schemas.insert(namespace_name);
+            if (all_schemas || schemas.contains(namespace_name)) {
+                schema_map[namespace_id] = namespace_name;
+            }
         }
 
-        return schemas;
+        return schema_map;
     }
 
     void
@@ -237,6 +281,33 @@ namespace springtail::pg_fdw {
                 new_schema, _fdw_username,
                 new_schema, _fdw_username,
                 new_schema, _fdw_username);
+    }
+
+    std::string
+    PgDDLMgr::_get_create_type_query(std::string_view escaped_schema,
+                                     std::string_view escaped_name,
+                                     std::string_view value_json_str,
+                                     LibPqConnectionPtr conn)
+    {
+        nlohmann::json value_json = nlohmann::json::parse(value_json_str);
+        CHECK(value_json.is_array());
+
+        std::stringstream value_ss;
+        int i = 0;
+
+        // iterate through json array of form: [{'val1':1}, {'val2':2}, {'val3':3}]
+        for (const auto &obj : value_json) {
+            DCHECK(obj.is_object());
+            auto it = obj.begin();
+            if (i > 0) {
+                value_ss << ", ";
+            }
+            value_ss << "'" << conn->escape_string(it.key()) << "'";
+            i++;
+        }
+
+        return fmt::format("CREATE TYPE {}.{} AS ENUM ({})",
+                           escaped_schema, escaped_name, value_ss.str());
     }
 
     void
@@ -307,9 +378,12 @@ namespace springtail::pg_fdw {
                                 db_lock_unique.unlock();
 
                             } catch (Error &e) {
-                                LOG_ERROR("Springtail exception in thread manager task");
+                                LOG_ERROR("Springtail exception in ddl manager task: {}", e.what());
                                 DCHECK(false);  // assert in debug
                                 e.log_backtrace();
+                            } catch (std::exception &e) {
+                                LOG_ERROR("Caught std::exception in ddl mgr task: {}", e.what());
+                                DCHECK(false);  // assert in debug
                             } catch (...) {
                                 // handle exception
                                 LOG_ERROR("Exception in thread manager task");
@@ -398,8 +472,8 @@ namespace springtail::pg_fdw {
             return true;
 
         } catch (Error &e) {
-            assert(0); // assert in debug
             e.log_backtrace();
+            assert(0); // assert in debug
             return false;
         }
     }
@@ -431,32 +505,16 @@ namespace springtail::pg_fdw {
         assert(ddl.is_object());
         assert(ddl.contains("action"));
 
+        LOG_DEBUG(LOG_FDW, "DDL JSON: {}", ddl.dump(4));
+
         auto const &action = ddl.at("action");
-        if (action == "create") {
-            std::vector<std::tuple<std::string, std::string, bool>> columns;
-
-            // retrieve the column type names
-            std::set<uint32_t> type_set;
-            for (const auto &col : ddl.at("columns")) {
-                type_set.insert(col.at("type").get<uint32_t>());
-            }
-            auto &&type_map = _query_type_names(conn, type_set);
-
-            // save the column details
-            for (const auto &col : ddl.at("columns")) {
-                columns.push_back({
-                        col.at("name"),
-                        type_map.at(col.at("type").get<uint32_t>()),
-                        col.at("nullable")
-                    });
-            }
-
+        if (action == "create") { // create table
             // generate the CREATE TABLE statement
             return _gen_fdw_table_sql(conn, server_name, ddl.at("schema"), ddl.at("table"),
-                                      ddl.at("tid"), columns);
+                                      ddl.at("tid"), ddl.at("columns"));
         }
 
-        else if (action == "rename") {
+        else if (action == "rename") { // rename table
             std::string rename = fmt::format("ALTER FOREIGN TABLE {}.{} RENAME TO {};",
                                              conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
                                              conn->escape_identifier(ddl.at("old_table").get<std::string>()),
@@ -473,13 +531,14 @@ namespace springtail::pg_fdw {
             }
         }
 
-        else if (action == "drop") {
+        else if (action == "drop") {  // drop table
             return fmt::format("DROP FOREIGN TABLE IF EXISTS {}.{};",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()));
         }
-
-        else if (action == "col_add") {
+#if ENABLE_SCHEMA_MUTATES
+        // XXX THIS CODE IS CURRENTLY DISABLED
+        else if (action == "col_add") { // alter table add column
             auto &col = ddl.at("column");
 
             std::string constraints;
@@ -494,16 +553,20 @@ namespace springtail::pg_fdw {
             }
 
             uint32_t type_oid = col.at("type").get<uint32_t>();
-            auto &&type_map = _query_type_names(conn, { type_oid });
+            // XXX a fix is required to pull type name from the trigger data
+            // see _gen_fdw_table_sql()
+            assert(false);
             return fmt::format("ALTER FOREIGN TABLE {}.{} ADD COLUMN {} {} {};",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(col.at("name").get<std::string>()),
                                type_map.at(type_oid),
                                constraints);
+
+            CHECK(false); // XXX col["type_name"] must be added and checked
         }
 
-        else if (action == "col_drop") {
+        else if (action == "col_drop") {  // alter table drop column
             return fmt::format("ALTER FOREIGN TABLE {}.{} DROP COLUMN {};",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
@@ -526,6 +589,7 @@ namespace springtail::pg_fdw {
                                conn->escape_identifier(col.at("name").get<std::string>()),
                                col.at("nullable").get<bool>() ? "DROP" : "SET");
         }
+#endif /* ENABLE_SCHEMA_MUTATES */
 
         else if (action == "create_index") {
             // TODO: do something?
@@ -563,80 +627,54 @@ namespace springtail::pg_fdw {
             return fmt::format("ALTER FOREIGN TABLE {}.{} SET SCHEMA {};",
                                old_schema, table, schema);
         }
+        else if (action == "ut_create") {
+            LOG_DEBUG(LOG_FDW, "Creating user type with JSON: {}", ddl.dump());
+            const auto escaped_schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
+            const auto escaped_name = conn->escape_identifier(ddl.at("name").get<std::string>());
+            const auto value_json_str = ddl.at("value").get<std::string>();
+
+            return _get_create_type_query(escaped_schema, escaped_name, value_json_str, conn);
+        }
+        else if (action == "ut_drop") {
+            LOG_DEBUG(LOG_FDW, "Dropping user type with JSON: {}", ddl.dump());
+            const auto escaped_schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
+            const auto escaped_name = conn->escape_identifier(ddl.at("name").get<std::string>());
+
+            return fmt::format("DROP TYPE IF EXISTS {}.{} CASCADE", escaped_schema, escaped_name);
+        } else if (action == "ut_alter") {
+            LOG_DEBUG(LOG_FDW, "Altering user type with JSON: {}", ddl.dump());
+
+            // need to check if it is renamed
+            const auto old_name = conn->escape_identifier(ddl.at("old_name").get<std::string>());
+            const auto new_name = conn->escape_identifier(ddl.at("name").get<std::string>());
+            const auto escaped_schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
+            if (old_name != new_name) {
+                return fmt::format("ALTER TYPE {}.{} RENAME TO {}", escaped_schema, old_name, new_name);
+            }
+
+            // need to check if schema has changed
+            const auto old_schema = conn->escape_identifier(ddl.at("old_schema").get<std::string>());
+            const auto new_schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
+            if (old_schema != new_schema) {
+                return fmt::format("ALTER TYPE {}.{} SET SCHEMA {};",
+                                   old_schema, new_name, new_schema);
+            }
+
+            // need to check if value has changed
+            const auto value_json_str = ddl.at("value").get<std::string>();
+            const auto old_value_json_str = ddl.at("old_value").get<std::string>();
+            if (value_json_str != old_value_json_str) {
+                return gen_alter_enum_sql(ddl.at("schema").get<std::string>(),
+                                          ddl.at("name").get<std::string>(),
+                                          nlohmann::json::parse(old_value_json_str),
+                                          nlohmann::json::parse(value_json_str),
+                                          conn);
+            }
+        }
 
         // can't currently support other kinds of DDL mutations
         LOG_ERROR("Bad DDL statement: {}", action.get<std::string>());
         CHECK(false);
-    }
-
-    std::set<uint32_t>
-    PgDDLMgr::_type_map_difference(std::set<uint32_t> &pg_types,
-                                   std::map<uint32_t, std::string> &mapped_types)
-    {
-        std::set<uint32_t> diff;
-
-        // Iterators for map and set
-        auto map_it = _type_map.begin();
-        auto set_it = pg_types.begin();
-
-        // Loop through both containers
-        while (map_it != _type_map.end() && set_it != pg_types.end()) {
-            if (map_it->first < *set_it) {
-                // Key in map not in set
-                ++map_it;
-            } else if (map_it->first > *set_it) {
-                // Key in set not in map
-                diff.insert(*set_it);
-                ++set_it;
-            } else {
-                // Keys are equal, so they exist in both
-                mapped_types[map_it->first] = map_it->second;
-                ++map_it;
-                ++set_it;
-            }
-        }
-
-        // Add any remaining keys in the set
-        while (set_it != pg_types.end()) {
-            diff.insert(*set_it);
-            ++set_it;
-        }
-
-        return diff;
-    }
-
-    std::map<uint32_t, std::string>
-    PgDDLMgr::_query_type_names(LibPqConnectionPtr conn,
-                                std::set<uint32_t> pg_types)
-    {
-        std::map<uint32_t, std::string> type_map;
-
-        // find the missing type names
-        auto &&missing_oids = _type_map_difference(pg_types, type_map);
-        if (missing_oids.empty()) {
-            // have them all return the map
-            return type_map;
-        }
-
-        // otherwise query the database for the missing type names
-        std::string &&query = fmt::format("SELECT oid, typname FROM pg_type WHERE oid IN ({})",
-                                          common::join_string(",", missing_oids.begin(), missing_oids.end()));
-
-        conn->exec(query);
-
-        // extract the type names from the result
-        int rows = conn->ntuples();
-        for (int i = 0; i < rows; ++i) {
-            uint32_t oid = conn->get_int32(i, 0);
-            std::string type_name = conn->get_string(i, 1);
-
-            // store the mapping
-            type_map[oid] = type_name;
-            _type_map[oid] = type_name;
-        }
-        conn->clear();
-
-        return type_map;
     }
 
     std::string
@@ -645,21 +683,40 @@ namespace springtail::pg_fdw {
                                  const std::string &schema,
                                  const std::string &table,
                                  uint64_t tid,
-                                 std::vector<std::tuple<std::string, std::string, bool>> &columns)
+                                 const nlohmann::json &columns)
     {
+        std::string escaped_schema = conn->escape_identifier(schema);
+
         // no schema name needed
         std::string create = fmt::format("CREATE FOREIGN TABLE {}.{} (\n",
-                                         conn->escape_identifier(schema),
+                                         escaped_schema,
                                          conn->escape_identifier(table));
 
         // iterate over the columns, adding each to the create statement
         // name, type, is_nullable, default value
-        for (int i = 0; i < columns.size(); i++) {
-            const auto &[column_name, type_name, nullable] = columns[i];
-            std::string column = fmt::format("{} {} {} {}", conn->escape_identifier(column_name),
-                                             type_name, nullable ? "" : "NOT NULL",
-                                             (i == columns.size() - 1) ? "" : ",");
+        int i = 0, num_cols = columns.size();
 
+        // iterate over the columns again, adding each to the create statement
+        for (const auto &col : columns) {
+            // check for userdefined type
+            uint32_t type_oid = col.at("type").get<uint32_t>();
+            std::string type_name = col.at("type_name").get<std::string>();
+            std::string type_namespace = col.at("type_namespace").get<std::string>();
+
+            CHECK(!type_name.empty());
+
+            // the constant FirstNormalObjectId is defined in postgres include/access/transam.h
+            if (type_oid >= constant::FIRST_USER_DEFINED_PG_OID) {
+                // this is a user defined type, fully qualify it
+                type_name = fmt::format("{}.{}", conn->escape_identifier(type_namespace),
+                                                 conn->escape_identifier(type_name));
+            }
+
+            std::string column = fmt::format("{} {} {} {}", conn->escape_identifier(col.at("name")),
+                                             type_name, col.at("nullable").get<bool>() ? "" : "NOT NULL",
+                                             (i == num_cols - 1) ? "" : ",");
+
+            i++;
             create += column;
         }
 
@@ -706,7 +763,10 @@ namespace springtail::pg_fdw {
         uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
 
         // get schemas, parse include, fetch from primary db if necessary
-        auto &&schemas = _get_schemas(db_id, db_name, xid);
+        auto &&schemas = _get_schemas(db_id, xid);
+
+        // get user types from system tables
+        auto &&user_types = _get_usertypes(db_id, xid);
 
         // connect to the database on the fdw
         conn = _connect_fdw(db_id, _db_prefix + db_name);
@@ -730,9 +790,26 @@ namespace springtail::pg_fdw {
 
         for (const auto &schema: schemas) {
             // create schema if not exists
-            std::string escaped_schema = conn->escape_identifier(schema);
+            std::string escaped_schema = conn->escape_identifier(schema.second);
             conn->exec(fmt::format("CREATE SCHEMA IF NOT EXISTS {}", escaped_schema));
             conn->clear();
+
+            auto it = user_types.find(schema.first);
+            if (it != user_types.end()) {
+                // create the user defined types (enums)
+                // these need to be in a transaction as create type is
+                // not visible until the transaction is committed
+                conn->start_transaction();
+                for (const auto &entry : it->second) {
+                    const std::string &type_name = entry.second.first;
+                    const std::string &value_json_str = entry.second.second;
+                    std::string escaped_type = conn->escape_identifier(type_name);
+                    std::string create_type_query = _get_create_type_query(escaped_schema, escaped_type, value_json_str, conn);
+                    conn->exec(create_type_query);
+                    conn->clear();
+                }
+                conn->end_transaction();
+            }
 
             // import foreign schema
             conn->exec(fmt::format("IMPORT FOREIGN SCHEMA {} FROM SERVER {} INTO {}",
@@ -748,6 +825,7 @@ namespace springtail::pg_fdw {
             conn->exec(fmt::format("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {}", escaped_schema, _fdw_username));
             conn->clear();
         }
+
         // import catalog schema
         std::string escaped_schema = conn->escape_identifier(SPRINGTAIL_FDW_CATALOG_SCHEMA);
         conn->exec(fmt::format("CREATE SCHEMA IF NOT EXISTS {}", escaped_schema));
@@ -824,6 +902,88 @@ namespace springtail::pg_fdw {
         // remove it from internal storage
         std::unique_lock unique_lock(_db_mutex);
         _db_xid_map.erase(db_id);
+    }
+
+    std::string
+    PgDDLMgr::gen_alter_enum_sql(const std::string &schema_str,
+                                 const std::string &type_str,
+                                 const nlohmann::json &from,
+                                 const nlohmann::json &to,
+                                 const LibPqConnectionPtr conn)
+    {
+        size_t i = 0, j = 0;
+
+        std::string schema = conn->escape_identifier(schema_str);
+        std::string type_name = conn->escape_identifier(type_str);
+
+        CHECK(from.is_array());
+        CHECK(to.is_array());
+
+        LOG_DEBUG(LOG_FDW, "Comparing enum types: {}.{} from: {} to: {}", schema, type_name, from.dump(), to.dump());
+
+        while (i < from.size() && j < to.size()) {
+
+            LOG_DEBUG(LOG_FDW, "i={}, j={}", i, j);
+
+            float from_val = from[i].begin().value();
+            float to_val = to[j].begin().value();
+
+            LOG_DEBUG(LOG_FDW, "got from vals");
+
+            std::string from_key = from[i].begin().key();
+            std::string to_key = to[j].begin().key();
+
+            LOG_DEBUG(LOG_FDW, "From key: {}, From val: {}, To key: {}, To val: {}", from_key, from_val, to_key, to_val);
+
+            if (from_val == to_val) {
+                if (from_key == to_key) {
+                    ++i;
+                    ++j;
+                    continue;
+                } else {
+                    // key changed
+                    return fmt::format("ALTER TYPE {}.{} RENAME VALUE '{}' TO '{}';",
+                        schema, type_name, conn->escape_string(from_key), conn->escape_string(to_key));
+                }
+            }
+            else if ((i + 1 < from.size()) && (from[i + 1].begin().value() == to_val)) {
+                // from[i] was removed
+                CHECK(false);  // removal is not supported
+            }
+            else if ((j + 1 < to.size()) && (to[j + 1].begin().value() == from_val)) {
+                // to[j] was added before from[i]
+                return fmt::format("ALTER TYPE {}.{} ADD VALUE '{}' BEFORE '{}';",
+                    schema, type_name, conn->escape_string(to_key), conn->escape_string(from_key));
+            }
+            else {
+                // Otherwise treat as added after previous
+                if (i > 0) {
+                    return fmt::format("ALTER TYPE {}.{} ADD VALUE '{}' AFTER '{}';",
+                        schema, type_name, conn->escape_string(to_key), conn->escape_string(from[i - 1].begin().key()));
+                } else {
+                    return fmt::format("ALTER TYPE {}.{} ADD VALUE '{}' BEFORE '{}';",
+                        schema, type_name, conn->escape_string(to_key), conn->escape_string(from_key));
+                }
+            }
+
+            CHECK(false);
+        }
+
+        if (j < to.size()) {
+            // Some elements left in `to` -> must be addition
+            CHECK(!from.empty());
+            return fmt::format("ALTER TYPE {}.{} ADD VALUE '{}' AFTER '{}';",
+                schema, type_name, conn->escape_string(to[j].begin().key()), conn->escape_string(from.back().begin().key()));
+        }
+
+        // Check leftover elements
+        if (i < from.size()) {
+            // Some elements left in `from` -> must be removal
+            CHECK(false);  // removal is not supported
+        }
+
+        DCHECK(false);  // no changes
+        return {};
     }
 
 } // namespace springtail::pg_fdw

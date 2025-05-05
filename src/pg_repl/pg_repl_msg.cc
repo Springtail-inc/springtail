@@ -24,7 +24,7 @@ namespace pg_msg {
                std::stringstream &ss) noexcept
     {
         for (auto && c: tuple.tuple_data) {
-            ss << "  - type=" << std::to_string(c.type) << std::endl;
+            ss << "  - type=" << c.type << std::endl;
             ss << "  - data_len=" << c.data.size() << std::endl;
         }
     }
@@ -325,13 +325,52 @@ namespace pg_msg {
             }
 
             case DROP_NAMESPACE: {
-                PgMsgNamespace create_namespace = std::get<PgMsgNamespace>(msg.msg);
+                PgMsgNamespace drop_namespace = std::get<PgMsgNamespace>(msg.msg);
                 ss << "\nDROP SCHEMA" << std::endl;
                 if (msg.is_streaming) {
-                    ss << "  xid=" << create_namespace.xid << std::endl;
+                    ss << "  xid=" << drop_namespace.xid << std::endl;
                 }
-                ss << "  oid=" << create_namespace.oid << std::endl;
-                ss << "  LSN=" << create_namespace.lsn << std::endl;
+                ss << "  oid=" << drop_namespace.oid << std::endl;
+                ss << "  LSN=" << drop_namespace.lsn << std::endl;
+                break;
+            }
+
+            case CREATE_TYPE: {
+                PgMsgUserType create_type = std::get<PgMsgUserType>(msg.msg);
+                ss << "\nCREATE TYPE" << std::endl;
+                if (msg.is_streaming) {
+                    ss << "  xid=" << create_type.xid << std::endl;
+                }
+                ss << "  oid=" << create_type.oid << std::endl;
+                ss << "  LSN=" << create_type.lsn << std::endl;
+                ss << "  namespace=" << create_type.namespace_name << std::endl;
+                ss << "  name=" << create_type.name << std::endl;
+                ss << "  value=" << create_type.value_json << std::endl;
+                break;
+            }
+
+            case ALTER_TYPE: {
+                PgMsgUserType alter_type = std::get<PgMsgUserType>(msg.msg);
+                ss << "\nALTER TYPE" << std::endl;
+                if (msg.is_streaming) {
+                    ss << "  xid=" << alter_type.xid << std::endl;
+                }
+                ss << "  oid=" << alter_type.oid << std::endl;
+                ss << "  LSN=" << alter_type.lsn << std::endl;
+                ss << "  namespace=" << alter_type.namespace_name << std::endl;
+                ss << "  name=" << alter_type.name << std::endl;
+                ss << "  value=" << alter_type.value_json << std::endl;
+                break;
+            }
+
+            case DROP_TYPE: {
+                PgMsgUserType drop_type = std::get<PgMsgUserType>(msg.msg);
+                ss << "\nDROP TYPE" << std::endl;
+                if (msg.is_streaming) {
+                    ss << "  xid=" << drop_type.xid << std::endl;
+                }
+                ss << "  oid=" << drop_type.oid << std::endl;
+                ss << "  LSN=" << drop_type.lsn << std::endl;
                 break;
             }
 

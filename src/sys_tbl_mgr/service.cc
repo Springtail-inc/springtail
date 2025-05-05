@@ -476,6 +476,8 @@ Service::_create_table(const proto::TableRequest& request)
         nlohmann::json column_json;
         column_json["name"] = column.name();
         column_json["type"] = column.pg_type();
+        column_json["type_name"] = column.type_name();
+        column_json["type_namespace"] = column.type_namespace();
         column_json["nullable"] = column.is_nullable();
         if (column.has_default_value()) {
             column_json["default"] = column.default_value();
@@ -616,9 +618,9 @@ nlohmann::json
 Service::_drop_table(const proto::DropTableRequest& request)
 {
     // retrieve the id of the namespace
-    // DROP SCHEMA in PG will automatically drop all tables 
+    // DROP SCHEMA in PG will automatically drop all tables
     // DropTable may be called after DropNamespace, so we
-    // don't check if the namespace was dropped and just use 
+    // don't check if the namespace was dropped and just use
     // the id of the dropped schema in this case
     auto ns_info = _get_namespace_info(request.db_id(), request.namespace_name(),
                                        XidLsn(request.xid(), request.lsn()), false);
@@ -1101,6 +1103,234 @@ Service::SwapSyncTable(grpc::ServerContext* context,
     return grpc::Status::OK;
 }
 
+
+grpc::Status
+Service::CreateUserType(grpc::ServerContext* context,
+                        const proto::UserTypeRequest* request,
+                        proto::DDLStatement* response)
+{
+    ServerSpan span(context, "SysTblMgrService", "CreateUserType");
+
+    LOG_INFO("got CreateUserType() -- db {} namespace_id {} type_id {} name {} xid {} lsn {}",
+                request->db_id(), request->namespace_id(), request->type_id(), request->name(), request->xid(),
+                request->lsn());
+
+    // acquire a shared lock to ensure no one is doing a finalize
+    boost::shared_lock lock(_write_mutex);
+
+    // update the user_types table
+    XidLsn xid(request->xid(), request->lsn());
+    auto ddl = _mutate_usertype(request->db_id(), request->type_id(), request->name(),
+        request->namespace_id(), request->type(), request->value_json(), xid, true);
+
+    ddl["action"] = "ut_create";
+    ddl["schema"] = request->namespace_name();
+
+    // serialize the JSON and return
+    response->set_statement(nlohmann::to_string(ddl));
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
+    return grpc::Status::OK;
+}
+
+grpc::Status
+Service::AlterUserType(grpc::ServerContext* context,
+                       const proto::UserTypeRequest* request,
+                       proto::DDLStatement* response)
+{
+    ServerSpan span(context, "SysTblMgrService", "AlterUserType");
+
+    LOG_INFO("got AlterUserType() -- db {} namespace_id {} type_id {} name {} xid {} lsn {}",
+                request->db_id(), request->namespace_id(), request->type_id(), request->name(), request->xid(),
+                request->lsn());
+
+    // acquire a shared lock to ensure no one is doing a finalize
+    boost::shared_lock lock(_write_mutex);
+    XidLsn xid(request->xid(), request->lsn());
+
+    // retrieve the old user type name
+    auto user_type_info = _get_usertype_info(request->db_id(), request->type_id(), xid);
+    CHECK(user_type_info != nullptr);
+
+    // update the user defined types table
+    auto ddl = _mutate_usertype(request->db_id(), request->type_id(), request->name(),
+        request->namespace_id(), request->type(), request->value_json(), xid, true);
+
+    ddl["action"] = "ut_alter";
+    ddl["schema"] = request->namespace_name();
+    ddl["old_name"] = user_type_info->name;
+    ddl["old_value"] = user_type_info->value_json;
+
+    // need to get old namespace id and check if it has changed
+    if (user_type_info->namespace_id != request->namespace_id()) {
+        auto old_ns_info = _get_namespace_info(request->db_id(), user_type_info->namespace_id, xid);
+        ddl["old_schema"] = old_ns_info->name;
+    } else {
+        ddl["old_schema"] = request->namespace_name();
+    }
+
+    // serialize the JSON and return
+    response->set_statement(nlohmann::to_string(ddl));
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
+    return grpc::Status::OK;
+}
+
+grpc::Status
+Service::DropUserType(grpc::ServerContext* context,
+                      const proto::UserTypeRequest* request,
+                      proto::DDLStatement* response)
+{
+    ServerSpan span(context, "SysTblMgrService", "DropUserType");
+
+    LOG_INFO("got DropUserType() -- db {} namespace_id {} type_id {} xid {} lsn {}", request->db_id(),
+                request->namespace_id(), request->type_id(), request->xid(), request->lsn());
+
+    // acquire a shared lock to ensure no one is doing a finalize
+    boost::shared_lock lock(_write_mutex);
+
+    XidLsn xid(request->xid(), request->lsn());
+    nlohmann::json ddl;
+    auto user_type_info = _get_usertype_info(request->db_id(), request->type_id(), xid);
+    if (user_type_info == nullptr) {
+        // drop could for a type we don't support, so ignore it here
+        LOG_WARN("User type {} not found", request->type_id());
+        ddl["action"] = "no_change";
+    } else {
+        // update the user defined types table
+        ddl = _mutate_usertype(request->db_id(), request->type_id(), request->name(),
+            request->namespace_id(), request->type(), request->value_json(), xid, false);
+
+        ddl["action"] = "ut_drop";
+        ddl["schema"] = request->namespace_name();
+    }
+
+    // serialize the JSON and return
+    response->set_statement(nlohmann::to_string(ddl));
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
+    return grpc::Status::OK;
+}
+
+grpc::Status
+Service::GetUserType(grpc::ServerContext* context,
+                     const proto::GetUserTypeRequest* request,
+                     proto::GetUserTypeResponse* response)
+{
+    ServerSpan span(context, "SysTblMgrService", "GetUserType");
+
+    LOG_INFO("got GetUserType() -- db {} type_id {} xid {} lsn {}", request->db_id(),
+                request->type_id(), request->xid(), request->lsn());
+
+    boost::shared_lock lock(_read_mutex);
+
+    XidLsn xid(request->xid(), constant::MAX_LSN);
+    auto info = _get_usertype_info(request->db_id(), request->type_id(), xid);
+
+    if (info != nullptr) {
+        response->set_type_id(info->id);
+        response->set_name(info->name);
+        response->set_namespace_id(info->namespace_id);
+        response->set_type(info->type);
+        response->set_value_json(info->value_json);
+        response->set_exists(info->exists);
+    } else {
+        response->set_type_id(info->id);
+        response->set_exists(false);
+    }
+
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
+    return grpc::Status::OK;
+}
+
+nlohmann::json
+Service::_mutate_usertype(uint64_t db_id,
+                          uint64_t type_id,
+                          const std::string &name,
+                          uint64_t ns_id,
+                          int8_t type,
+                          const std::string &value_json,
+                          const XidLsn xid,
+                          bool exists)
+{
+    // construct the DDL to provide to the FDW
+    nlohmann::json ddl;
+    ddl["id"] = type_id;
+    ddl["xid"] = xid.xid;
+    ddl["lsn"] = xid.lsn;
+    ddl["name"] = name;
+
+    if (exists) {
+        // these are not set for drop when exists is false
+        ddl["value"] = value_json;
+        ddl["type"] = type;
+        ddl["namespace_id"] = ns_id;
+    }
+
+    // record the user defined type info into the cache
+    {
+        boost::unique_lock lock(_mutex);
+        auto entry = std::make_shared<UserTypeCacheRecord>(type_id, name, ns_id, type, value_json, exists);
+        _usertype_id_cache[db_id][type_id][xid] = entry;
+    }
+
+    // add the type to the user types table
+    auto table = _get_mutable_system_table(db_id, sys_tbl::UserTypes::ID);
+    auto tuple =
+        sys_tbl::UserTypes::Data::tuple(type_id, ns_id, name, value_json, xid.xid, xid.lsn, type, exists);
+    table->upsert(tuple, constant::UNKNOWN_EXTENT);
+
+    return ddl;
+}
+
+Service::UserTypeCacheRecordPtr
+Service::_get_usertype_info(uint64_t db_id, uint64_t type_id, const XidLsn& xid)
+{
+    // check the cache of un-finalized records
+    {
+        boost::unique_lock lock(_mutex);
+        auto user_type_i = _usertype_id_cache[db_id].find(type_id);
+        if (user_type_i != _usertype_id_cache[db_id].end()) {
+            // note: we keep XID/LSN in reverse order to allow use of lower_bound() for lookup
+            auto info_i = user_type_i->second.lower_bound(xid);
+            if (info_i != user_type_i->second.end()) {
+                return info_i->second;
+            }
+        }
+    }
+
+    // read from disk
+    auto table = _get_system_table(db_id, sys_tbl::UserTypes::ID);
+    auto schema = table->extent_schema();
+    auto fields = schema->get_fields();
+
+    auto search_key = sys_tbl::UserTypes::Primary::key_tuple(type_id, xid.xid, xid.lsn);
+
+    // find the row that matches the type_id at the given XID/LSN
+    auto row_i = table->inverse_lower_bound(search_key);
+
+    // make sure type ID exists at this XID/LSN
+    auto id_field = fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID);
+    if (row_i == table->end() || id_field->get_uint64(*row_i) != type_id) {
+        LOG_WARN("No user type info at xid {}:{}", xid.xid, xid.lsn);
+        return nullptr;
+    }
+
+    // make sure that the usertype is marked as existing at this XID/LSN
+    bool exists = fields->at(sys_tbl::UserTypes::Data::EXISTS)->get_bool(*row_i);
+    if (!exists) {
+        LOG_WARN("User type marked non-existant at xid {}:{}", xid.xid, xid.lsn);
+        return nullptr;
+    }
+
+    // create and populate the user type info
+    return std::make_shared<UserTypeCacheRecord>(
+        type_id,
+        fields->at(sys_tbl::UserTypes::Data::NAME)->get_text(*row_i),
+        fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID)->get_uint64(*row_i),
+        fields->at(sys_tbl::UserTypes::Data::TYPE)->get_int8(*row_i),
+        fields->at(sys_tbl::UserTypes::Data::VALUE)->get_text(*row_i),
+        fields->at(sys_tbl::UserTypes::Data::EXISTS)->get_bool(*row_i));
+}
+
+
 grpc::Status
 Service::Revert(grpc::ServerContext* context,
                 const proto::RevertRequest* request,
@@ -1108,6 +1338,9 @@ Service::Revert(grpc::ServerContext* context,
 {
     // ensure that we don't have a partially committed XID currently in-memory
     CHECK(_write[request->db_id()].empty());
+
+    LOG_DEBUG(LOG_SCHEMA, "got Revert() -- db {} xid {}", request->db_id(),
+                request->xid());
 
     // get the base directory for table data
     std::filesystem::path table_base;
@@ -1123,6 +1356,11 @@ Service::Revert(grpc::ServerContext* context,
 
         // find all roots files and extract their XIDs
         std::map<uint64_t, std::filesystem::path> roots_files;
+        if (!std::filesystem::exists(table_dir)) {
+            LOG_WARN("Table directory {} does not exist", table_dir.string());
+            continue;
+        }
+
         for (const auto& entry : std::filesystem::directory_iterator(table_dir)) {
             // only process files
             if (!entry.is_regular_file()) {
@@ -1144,7 +1382,7 @@ Service::Revert(grpc::ServerContext* context,
             }
         }
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Found {} root files for system table {}",
+        LOG_DEBUG(LOG_SCHEMA, "Found {} root files for system table {}",
                   roots_files.size(), table_id);
 
         // find the largest valid XID
@@ -1154,13 +1392,13 @@ Service::Revert(grpc::ServerContext* context,
             auto root_i = std::make_reverse_iterator(del_i);
 
             if (root_i == roots_files.rend()) {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Clear system table {}", root_i->second, table_id);
+                LOG_DEBUG(LOG_SCHEMA, "Clear system table {}", root_i->second, table_id);
                 // there's no valid roots, clear *all* of the system table data
                 for (const auto& entry : std::filesystem::directory_iterator(table_dir)) {
                     std::filesystem::remove_all(entry.path());
                 }
             } else {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Picked root file {} for system table {}", root_i->second,
+                LOG_DEBUG(LOG_SCHEMA, "Picked root file {} for system table {}", root_i->second,
                           table_id);
 
                 // update the symlink
@@ -1173,7 +1411,7 @@ Service::Revert(grpc::ServerContext* context,
 
                 // remove any roots files with larger XIDs
                 for (; del_i != roots_files.end(); ++del_i) {
-                    LOG_DEBUG(LOG_PG_LOG_MGR, "Delete root file {} for system table {}",
+                    LOG_DEBUG(LOG_SCHEMA, "Delete root file {} for system table {}",
                               del_i->second, table_id);
                     std::filesystem::remove(del_i->second);
                 }
@@ -1382,7 +1620,7 @@ Service::_clear_table_info(uint64_t db_id)
     _table_cache.erase(db_id);
 }
 
-void 
+void
 Service::_clear_namespace_info(uint64_t db_id)
 {
     boost::unique_lock lock(_mutex);
@@ -1968,7 +2206,7 @@ Service::_apply_index_cache_history(SchemaInfoPtr schema_info,
                                     uint64_t table_id,
                                     const XidLsn& xid)
 {
-    boost::unique_lock ulock(_mutex);
+    boost::shared_lock ulock(_mutex);
 
     auto db_it = _index_cache.find(db_id);
     if (db_it == _index_cache.end()) {
@@ -2410,6 +2648,7 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
                 if (new_col->has_default_value()) {
                     ddl["column"]["default"] = new_col->default_value();
                 }
+                CHECK(false); // XXX new_col->type_name must be added
             }
 #else
             ddl["action"] = "resync";
