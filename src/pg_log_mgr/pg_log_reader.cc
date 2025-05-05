@@ -271,16 +271,16 @@ namespace springtail::pg_log_mgr {
         LOG_DEBUG(LOG_PG_LOG_MGR, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, T);
         auto row = entry.extent->append();
         if constexpr (T == PgMsgEnum::INSERT || T == PgMsgEnum::UPDATE) {
-            MutableTuple(entry.fields, row).assign(FieldTuple(entry.pg_fields, static_cast<const PgMsgTupleData*>(&data)));
+            MutableTuple(entry.fields, &row).assign(FieldTuple(entry.pg_fields, &data));
         } else if constexpr (T == PgMsgEnum::DELETE) {
-            MutableTuple(entry.pkey_fields, row).assign(FieldTuple(entry.pg_pkey_fields, static_cast<const PgMsgTupleData*>(&data)));
+            MutableTuple(entry.pkey_fields, &row).assign(FieldTuple(entry.pg_pkey_fields, &data));
         } else {
             static_assert(false, "Invalid template parameter: PgLogReader::Batch::add_mutation");
         }
-        entry.op_f->set_uint8(row, T);
-        entry.lsn_f->set_uint64(row, _lsn++);
+        entry.op_f->set_uint8(&row, T);
+        entry.lsn_f->set_uint64(&row, _lsn++);
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, entry.op_f->get_uint8(row));
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, entry.op_f->get_uint8(&row));
 
         // XXX we need some way to limit the total memory used by a batch across all extents
 
@@ -345,8 +345,8 @@ namespace springtail::pg_log_mgr {
 
             // add a TRUNCATE row
             auto &&row = entry.extent->append();
-            entry.op_f->set_uint8(row, PgMsgEnum::TRUNCATE);
-            entry.lsn_f->set_uint64(row, _lsn++);
+            entry.op_f->set_uint8(&row, PgMsgEnum::TRUNCATE);
+            entry.lsn_f->set_uint64(&row, _lsn++);
         }
     }
 

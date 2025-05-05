@@ -38,11 +38,11 @@ list_tables(uint64_t db_id)
 
     // iterate over the table names table
     for (auto row : (*table)) {
-        uint64_t namespace_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(row);
-        std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row));
-        uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(row);
-        uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(row);
-        bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(row);
+        uint64_t namespace_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
+        std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row));
+        uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
+        uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
+        bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
 
         // check if table already exists in the map
         if (exists) {
@@ -63,23 +63,24 @@ find_namespace_id(uint64_t db_id, const std::string &name, const XidLsn &xid)
 
     // find the row that matches the name at the given XID/LSN
     auto row_i = table->inverse_lower_bound(search_key, 1);
+    auto &&row = *row_i;
 
     // make sure table ID exists at this XID/LSN
     auto name_f = fields->at(sys_tbl::NamespaceNames::Data::NAME);
-    if (row_i == table->end() || name_f->get_text(*row_i) != name) {
+    if (row_i == table->end() || name_f->get_text(&row) != name) {
         LOG_ERROR("No namespace name '{}' at xid {}:{}", name, xid.xid, xid.lsn);
         throw FdwError(fmt::format("No namespace name '{}' at xid {}:{}", name, xid.xid, xid.lsn));
     }
 
     // make sure that the table is marked as existing at this XID/LSN
-    bool exists = fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*row_i);
+    bool exists = fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row);
     if (!exists) {
         LOG_WARN("Namespace marked non-existant at xid {}:{}", xid.xid, xid.lsn);
         throw FdwError(fmt::format("Namespace '{}' marked non-existant at xid {}:{}",
                                    name, xid.xid, xid.lsn));
     }
 
-    return fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(*row_i);
+    return fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&row);
 }
 
 /** Lookup table ID from TableNames system table */
@@ -102,10 +103,10 @@ lookup_table(uint64_t db_id,
     // iterate over the table names table
     uint64_t found_tid = -1;
     for (auto row : (*table)) {
-        uint64_t ns_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(row);
-        std::string name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row));
-        uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(row);
-        uint64_t t_xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(row);
+        uint64_t ns_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
+        std::string name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row));
+        uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
+        uint64_t t_xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
 
         if (namespace_id == ns_id && table_name == name && t_xid <= xid) {
             found_tid = tid;

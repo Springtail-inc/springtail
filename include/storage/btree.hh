@@ -111,7 +111,7 @@ namespace springtail {
                 auto cache = StorageCache::get_instance();
                 while (depth > 0) {
                     // read the child's extent ID
-                    uint64_t extent_id = _btree->_branch_child_f->get_uint64(*(_node->row_i));
+                    uint64_t extent_id = _btree->_branch_child_f->get_uint64(&*(_node->row_i));
 
                     // read the child extent
                     LOG_DEBUG(LOG_BTREE, "Get page {}", extent_id);
@@ -150,7 +150,7 @@ namespace springtail {
                     // iterate down to the leaf
                     while (_node->page->header().type.is_branch()) {
                         // get the offset for the child
-                        uint64_t child_id = _btree->_branch_child_f->get_uint64(*(_node->row_i));
+                        uint64_t child_id = _btree->_branch_child_f->get_uint64(&*(_node->row_i));
 
                         // read the extent
                         auto child = cache->get(_btree->_file, child_id, _btree->_xid);
@@ -189,8 +189,7 @@ namespace springtail {
                 auto cache = StorageCache::get_instance();
                 while (depth > 0) {
                     // read the child's extent ID
-                    uint64_t extent_id = _btree->_branch_child_f->get_uint64(*(_node->row_i));
-
+                    uint64_t extent_id = _btree->_branch_child_f->get_uint64(&*(_node->row_i));
                     // read the child extent
                     auto child = cache->get(_btree->_file, extent_id, _btree->_xid);
 

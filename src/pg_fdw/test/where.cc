@@ -28,19 +28,19 @@ bool check_row(const std::any &row, FieldArrayPtr fields, FieldPtr key_field, Qu
 
     switch (op) {
         case EQUALS:
-            return key_field->equal(nullptr, val_field, row);
+            return key_field->equal(nullptr, val_field, &row);
         case NOT_EQUALS:
-            return !key_field->equal(nullptr, val_field, row);
+            return !key_field->equal(nullptr, val_field, &row);
         case LESS_THAN:
-            return val_field->less_than(row, key_field, nullptr);
+            return val_field->less_than(&row, key_field, nullptr);
         case LESS_THAN_EQUALS:
-            return (val_field->less_than(row, key_field, nullptr) ||
-                    key_field->equal(nullptr, val_field, row));
+            return (val_field->less_than(&row, key_field, nullptr) ||
+                    key_field->equal(nullptr, val_field, &row));
         case GREATER_THAN:
-            return (!val_field->less_than(row, key_field, nullptr) &&
-                    !key_field->equal(nullptr, val_field, row));
+            return (!val_field->less_than(&row, key_field, nullptr) &&
+                    !key_field->equal(nullptr, val_field, &row));
         case GREATER_THAN_EQUALS:
-            return !val_field->less_than(row, key_field, nullptr);
+            return !val_field->less_than(&row, key_field, nullptr);
         default:
             return false;
     }
@@ -78,9 +78,9 @@ void search(uint64_t db_id, int val, QualOpName op)
     while (*iter_start != *iter_end) {
         auto row = *(*iter_start);
         if (check_row(row, fields, key_field, op)) {
-            std::cout << fmt::format("Row: {} {} {}\n", fields->at(0)->get_int32(row), fields->at(1)->get_int32(row), fields->at(2)->get_text(row));
+            std::cout << fmt::format("Row: {} {} {}\n", fields->at(0)->get_int32(&row), fields->at(1)->get_int32(&row), fields->at(2)->get_text(&row));
         } else {
-            std::cout << fmt::format("Skipping row: {}\n", fields->at(0)->get_int32(row));
+            std::cout << fmt::format("Skipping row: {}\n", fields->at(0)->get_int32(&row));
         }
 
         ++(*iter_start);
@@ -94,9 +94,9 @@ void search(uint64_t db_id, int val, QualOpName op)
         while (*iter_start != *iter_end) {
             auto row = *(*iter_start);
             if (check_row(row, fields, key_field, op)) {
-                std::cout << fmt::format("Row: {} {} {}\n", fields->at(0)->get_int32(row), fields->at(1)->get_int32(row), fields->at(2)->get_text(row));
+                std::cout << fmt::format("Row: {} {} {}\n", fields->at(0)->get_int32(&row), fields->at(1)->get_int32(&row), fields->at(2)->get_text(&row));
             } else {
-                std::cout << fmt::format("Skipping row: {}\n", fields->at(0)->get_int32(row));
+                std::cout << fmt::format("Skipping row: {}\n", fields->at(0)->get_int32(&row));
             }
 
             ++(*iter_start);

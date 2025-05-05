@@ -123,7 +123,7 @@ namespace {
             auto extra = std::make_shared<FieldArray>();
             extra->push_back(std::make_shared<ConstTypeField<uint16_t>>(idx));
 
-            return std::make_shared<KeyValueTuple>(_csv_fields, extra, row);
+            return std::make_shared<KeyValueTuple>(_csv_fields, extra, &row);
         }
 
         void
@@ -146,10 +146,9 @@ namespace {
             for (; ib != ie; ++ib) {
                 auto row = *ib;
                 if (prev != "") {
-                    ASSERT_GE(_name_f->get_text(row), prev);
+                    ASSERT_GE(_name_f->get_text(&row), prev);
                 }
-
-                prev = _name_f->get_text(row);
+                prev = _name_f->get_text(&row);
                 ++count;
             }
 
@@ -163,15 +162,15 @@ namespace {
             std::string prev = "";
             std::map<std::string, int> counts;
             for (auto row : *tree) {
-                if (_name_f->get_text(row) < prev) {
-                    LOG_ERROR("{} < {}", _name_f->get_text(row), prev);
+                if (_name_f->get_text(&row) < prev) {
+                    LOG_ERROR("{} < {}", _name_f->get_text(&row), prev);
                 }
 
                 if (prev != "") {
-                    ASSERT_GE(_name_f->get_text(row), prev);
+                    ASSERT_GE(_name_f->get_text(&row), prev);
                 }
 
-                prev = _name_f->get_text(row);
+                prev = _name_f->get_text(&row);
                 ++counts[prev];
                 ++count;
             }
@@ -243,6 +242,7 @@ namespace {
 
         // finalize the tree
         uint64_t offset = btree->finalize();
+        CHECK(offset != constant::UNKNOWN_EXTENT);
 
         // now read the tree back and make sure there are the right number of entries and that they are in-order
         auto tree = std::make_shared<BTree>(_base_dir / "Insert10", xid, _schema, offset);
@@ -303,10 +303,11 @@ namespace {
             auto tuple = _create_key("aabbatini8y", 323, 0);
 
             auto find_i = tree->find(tuple);
+            auto &&row = *find_i;
 
-            ASSERT_EQ(_name_f->get_text(*find_i), "aabbatini8y");
-            ASSERT_EQ(_table_id_f->get_uint64(*find_i), 323);
-            ASSERT_EQ(_offset_f->get_uint64(*find_i), 6448);
+            ASSERT_EQ(_name_f->get_text(&row), "aabbatini8y");
+            ASSERT_EQ(_table_id_f->get_uint64(&row), 323);
+            ASSERT_EQ(_offset_f->get_uint64(&row), 6448);
 
             auto lb_i = tree->lower_bound(tuple);
             auto ffu_i = tree->lower_bound(tuple, true);
@@ -324,10 +325,11 @@ namespace {
             auto tuple = _create_key("mplainu", 31, 0);
 
             auto find_i = tree->find(tuple);
+            auto &&row = *find_i;
 
-            ASSERT_EQ(_table_id_f->get_uint64(*find_i), 31);
-            ASSERT_EQ(_name_f->get_text(*find_i), "mplainu");
-            ASSERT_EQ(_offset_f->get_uint64(*find_i), 30122);
+            ASSERT_EQ(_table_id_f->get_uint64(&row), 31);
+            ASSERT_EQ(_name_f->get_text(&row), "mplainu");
+            ASSERT_EQ(_offset_f->get_uint64(&row), 30122);
 
             auto lb_i = tree->lower_bound(tuple);
             auto ffu_i = tree->lower_bound(tuple, true);
@@ -351,15 +353,17 @@ namespace {
 
             ASSERT_EQ(find_i, end_i);
 
-            ASSERT_EQ(_table_id_f->get_uint64(*lb_i), 526);
-            ASSERT_EQ(_name_f->get_text(*lb_i), "mabrahimel");
-            ASSERT_EQ(_offset_f->get_uint64(*lb_i), 33466);
+            auto &&lb_row = *lb_i;
+            ASSERT_EQ(_table_id_f->get_uint64(&lb_row), 526);
+            ASSERT_EQ(_name_f->get_text(&lb_row), "mabrahimel");
+            ASSERT_EQ(_offset_f->get_uint64(&lb_row), 33466);
 
             ASSERT_EQ(ffu_i, lb_i);
 
-            ASSERT_EQ(_table_id_f->get_uint64(*iub_i), 997);
-            ASSERT_EQ(_name_f->get_text(*iub_i), "lzipsellro");
-            ASSERT_EQ(_offset_f->get_uint64(*iub_i), 86407);
+            auto &&iub_row = *iub_i;
+            ASSERT_EQ(_table_id_f->get_uint64(&iub_row), 997);
+            ASSERT_EQ(_name_f->get_text(&iub_row), "lzipsellro");
+            ASSERT_EQ(_offset_f->get_uint64(&iub_row), 86407);
         }
 
         // search for a non-existing entry past the last entry
@@ -374,9 +378,10 @@ namespace {
             ASSERT_EQ(find_i, end_i);
             ASSERT_EQ(lb_i, end_i);
 
-            ASSERT_EQ(_table_id_f->get_uint64(*ffu_i), 430);
-            ASSERT_EQ(_name_f->get_text(*ffu_i), "zwoolertonbx");
-            ASSERT_EQ(_offset_f->get_uint64(*ffu_i), 92729);
+            auto &&row = *ffu_i;
+            ASSERT_EQ(_table_id_f->get_uint64(&row), 430);
+            ASSERT_EQ(_name_f->get_text(&row), "zwoolertonbx");
+            ASSERT_EQ(_offset_f->get_uint64(&row), 92729);
 
             ASSERT_EQ(iub_i, ffu_i);
         }

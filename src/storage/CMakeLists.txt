@@ -56,6 +56,13 @@ target_link_libraries(benchmark_btree
     PRIVATE benchmark::benchmark ${GCOV_LIB})
 add_dsymutil_command(benchmark_btree)
 
+# extent benchmark
+add_executable(benchmark_extents test/benchmark_extents.cc)
+target_include_directories(benchmark_extents PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(benchmark_extents PRIVATE springtail_storage benchmark::benchmark)
+add_dsymutil_command(benchmark_extents)
+
+
 ## unit tests
 # io test
 springtail_unit_test(test_io
