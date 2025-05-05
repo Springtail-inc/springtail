@@ -221,7 +221,7 @@ namespace springtail::pg_log_mgr {
                                      int32_t tid,
                                      PgMsgTupleData &data)
     {
-        trace add_mutation_trace(fmt::format("add_mutation-xid_{}", current_xid));
+        trace add_mutation_trace(fmt::format("add_mutation-pgxid_{}", pg_xid));
         XidLsn xidlsn(current_xid);
 
         // check if we should skip the mutation due to an invalid table
