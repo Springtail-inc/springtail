@@ -297,7 +297,7 @@ namespace springtail::pg_fdw {
         static bool _is_type_sortable(Oid pg_type, QualOpName op);
 
         /** Helper to compare a primary key const qual field to the data within a row */
-        static bool _compare_field(const std::any &row,
+        static bool _compare_field(const void *row,
                                    FieldPtr row_field,
                                    FieldPtr key_field,
                                    QualOpName op);

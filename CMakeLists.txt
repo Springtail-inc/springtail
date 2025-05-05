@@ -140,9 +140,12 @@ configure_file(${PROJECT_SOURCE_DIR}/scripts/CTestCustom.cmake.in ${PROJECT_BINA
 
 ## custom test target
 get_property(ALL_TESTS GLOBAL PROPERTY SPRINGTAIL_UNIT_TEST_TARGETS)
+add_custom_target(build_tests
+  DEPENDS ${ALL_TESTS}
+)
 add_custom_target(check
     COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target test
-    DEPENDS ${ALL_TESTS}
+    DEPENDS build_tests
     COMMENT "Running tests..."
 )
 

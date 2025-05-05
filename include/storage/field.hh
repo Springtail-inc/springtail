@@ -37,70 +37,70 @@ namespace springtail {
 
         // functions to read values
 
-        virtual bool is_undefined(const std::any &row) const {
+        virtual bool is_undefined(const void *row) const {
             return false;
         }
 
-        virtual bool is_null(const std::any &row) const {
+        virtual bool is_null(const void *row) const {
             return false;
         }
 
-        virtual bool get_bool(const std::any &row) const {
+        virtual bool get_bool(const void *row) const {
             throw TypeError("Getting bool type unsupported for this field.");
         }
 
-        virtual int8_t get_int8(const std::any &row) const {
+        virtual int8_t get_int8(const void *row) const {
             throw TypeError("Getting int8 type unsupported for this field.");
         }
 
-        virtual uint8_t get_uint8(const std::any &row) const {
+        virtual uint8_t get_uint8(const void *row) const {
             throw TypeError("Getting uint8 type unsupported for this field.");
         }
 
-        virtual int16_t get_int16(const std::any &row) const {
+        virtual int16_t get_int16(const void *row) const {
             throw TypeError("Getting int16 type unsupported for this field.");
         }
 
-        virtual uint16_t get_uint16(const std::any &row) const {
+        virtual uint16_t get_uint16(const void *row) const {
             throw TypeError("Getting uint16 type unsupported for this field.");
         }
 
-        virtual int32_t get_int32(const std::any &row) const {
+        virtual int32_t get_int32(const void *row) const {
             throw TypeError("Getting int32 type unsupported for this field.");
         }
 
-        virtual uint32_t get_uint32(const std::any &row) const {
+        virtual uint32_t get_uint32(const void *row) const {
             throw TypeError("Getting uint32 type unsupported for this field.");
         }
 
-        virtual int64_t get_int64(const std::any &row) const {
+        virtual int64_t get_int64(const void *row) const {
             throw TypeError("Getting int64 type unsupported for this field.");
         }
 
-        virtual uint64_t get_uint64(const std::any &row) const {
+        virtual uint64_t get_uint64(const void *row) const {
             throw TypeError("Getting uint64 type unsupported for this field.");
         }
 
-        virtual float get_float32(const std::any &row) const {
+        virtual float get_float32(const void *row) const {
             throw TypeError("Getting float32 type unsupported for this field.");
         }
 
-        virtual double get_float64(const std::any &row) const {
+        virtual double get_float64(const void *row) const {
             throw TypeError("Getting float64 type unsupported for this field.");
         }
 
-        virtual std::string_view get_text(const std::any &row) const {
+        virtual std::string_view get_text(const void *row) const {
             throw TypeError("Getting text type unsupported for this field.");
         }
 
-        virtual const std::span<const char> get_binary(const std::any &row) const {
+        virtual const std::span<const char> get_binary(const void *row) const {
             throw TypeError("Getting binary type unsupported for this field.");
         }
 
         bool
-        less_than(const std::any &lhs_row,
+        less_than(const void *lhs_row,
                   std::shared_ptr<Field> rhs,
-                  const std::any &rhs_row,
+                  const void *rhs_row,
                   bool nulls_last=true) const
         {
             // types must match
@@ -190,9 +190,9 @@ namespace springtail {
         }
 
         bool
-        equal(const std::any &lhs_row,
+        equal(const void *lhs_row,
               std::shared_ptr<Field> rhs,
-              const std::any &rhs_row)
+              const void *rhs_row)
         {
             // types must match
             assert(this->get_type() == rhs->get_type());
@@ -282,68 +282,68 @@ namespace springtail {
         MutableField() = default;
 
         // functions to set values
-        virtual void set_undefined(const std::any &row, bool is_undefined) {
+        virtual void set_undefined(void *row, bool is_undefined) {
             throw TypeError("Setting undefined unsupported for this field.");
         }
 
-        virtual void set_null(const std::any &row, bool is_null) {
+        virtual void set_null(void *row, bool is_null) {
             throw TypeError("Setting null unsupported for this field.");
         }
 
-        virtual void set_bool(const std::any &row, bool value) {
+        virtual void set_bool(void *row, bool value) {
             throw TypeError("Setting bool unsupported for this field.");
         }
 
-        virtual void set_int8(const std::any &row, int8_t value) {
+        virtual void set_int8(void *row, int8_t value) {
             throw TypeError("Setting int8 unsupported for this field.");
         }
 
-        virtual void set_uint8(const std::any &row, uint8_t value) {
+        virtual void set_uint8(void *row, uint8_t value) {
             throw TypeError("Setting uint8 unsupported for this field.");
         }
 
-        virtual void set_int16(const std::any &row, int16_t value) {
+        virtual void set_int16(void *row, int16_t value) {
             throw TypeError("Setting int16 unsupported for this field.");
         }
 
-        virtual void set_uint16(const std::any &row, uint16_t value) {
+        virtual void set_uint16(void *row, uint16_t value) {
             throw TypeError("Setting uint16 unsupported for this field.");
         }
 
-        virtual void set_int32(const std::any &row, int32_t value) {
+        virtual void set_int32(void *row, int32_t value) {
             throw TypeError("Setting int32 unsupported for this field.");
         }
 
-        virtual void set_uint32(const std::any &row, uint32_t value) {
+        virtual void set_uint32(void *row, uint32_t value) {
             throw TypeError("Setting uint32 unsupported for this field.");
         }
 
-        virtual void set_int64(const std::any &row, int64_t value) {
+        virtual void set_int64(void *row, int64_t value) {
             throw TypeError("Setting int64 unsupported for this field.");
         }
 
-        virtual void set_uint64(const std::any &row, uint64_t value) {
+        virtual void set_uint64(void *row, uint64_t value) {
             throw TypeError("Setting uint64 unsupported for this field.");
         }
 
-        virtual void set_float32(const std::any &row, float value) {
+        virtual void set_float32(void *row, float value) {
             throw TypeError("Setting float32 unsupported for this field.");
         }
 
-        virtual void set_float64(const std::any &row, double value) {
+        virtual void set_float64(void *row, double value) {
             throw TypeError("Setting float64 unsupported for this field.");
         }
 
-        virtual void set_text(const std::any &row, const std::string_view &value) {
+        virtual void set_text(void *row, const std::string_view &value) {
             throw TypeError("Setting string unsupported for this field.");
         }
 
-        virtual void set_binary(const std::any &row, const std::span<const char> &val) {
+        virtual void set_binary(void *row, const std::span<const char> &val) {
             throw TypeError("Setting binary type unsupported for this field.");
         }
 
         // set this field from the value of another field
-        void set_field(const std::any &lhs, FieldPtr field, const std::any &rhs) {
+        void set_field(void *lhs, FieldPtr field, const void *rhs) {
             // field types must match
             DCHECK_EQ(this->get_type(), field->get_type());
 
@@ -355,7 +355,7 @@ namespace springtail {
                     return; // no more processing to do since we don't need the value
                 }
             } else {
-                assert(field->is_undefined(rhs) == false);
+                DCHECK_EQ(field->is_undefined(rhs), false);
             }
 
             // handle NULL data cases
@@ -368,7 +368,7 @@ namespace springtail {
                     this->set_null(lhs, false);
                 }
             } else {
-                assert(field->is_null(rhs) == false);
+                DCHECK_EQ(field->is_null(rhs), false);
             }
 
             // handle core data types
@@ -487,268 +487,220 @@ namespace springtail {
             return _can_null;
         }
 
-        bool is_null(const std::any &row) const override {
-            assert(row.type() == typeid(Extent::Row));
-
+        bool is_null(const void *row) const override {
             // if we can't set undefined, then always has a value
             if (!_can_null) {
                 return false;
             }
 
             // return the null bit
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            return _get_bit(e_row, _null_offset, _null_bitmask);
+            auto e_row = reinterpret_cast<const Extent::Row *>(row);
+            return _get_bit(*e_row, _null_offset, _null_bitmask);
         }
 
-        bool is_undefined(const std::any &row) const override {
-            assert(row.type() == typeid(Extent::Row));
-
+        bool is_undefined(const void *row) const override {
             // if we can't set undefined, then always has a value
             if (!_can_undefined) {
                 return false;
             }
 
             // return the undefined bit
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            return _get_bit(e_row, _undefined_offset, _undefined_bitmask);
+            auto e_row = reinterpret_cast<const Extent::Row *>(row);
+            return _get_bit(*e_row, _undefined_offset, _undefined_bitmask);
         }
 
-        bool get_bool(const std::any &row) const override {
+        bool get_bool(const void *row) const override {
             // must be boolean type
             DCHECK_EQ(_type, SchemaType::BOOLEAN);
-            assert(row.type() == typeid(Extent::Row));
 
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            return _get_bit(e_row, _offset, _bool_bitmask);
+            auto e_row = reinterpret_cast<const Extent::Row *>(row);
+            return _get_bit(*e_row, _offset, _bool_bitmask);
         }
 
-        int8_t get_int8(const std::any &row) const override {
+        int8_t get_int8(const void *row) const override {
             // must be int8 type
             DCHECK_EQ(_type, SchemaType::INT8);
-            assert(row.type() == typeid(Extent::Row));
 
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            return *reinterpret_cast<const int8_t *>(e_row.data() + _offset);
+            auto e_row = reinterpret_cast<const Extent::Row *>(row);
+            return *reinterpret_cast<const int8_t *>(e_row->data() + _offset);
         }
 
-        uint8_t get_uint8(const std::any &row) const override {
+        uint8_t get_uint8(const void *row) const override {
             // must be uint8 type
             DCHECK_EQ(_type, SchemaType::UINT8);
-            assert(row.type() == typeid(Extent::Row));
 
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            return *reinterpret_cast<const uint8_t *>(e_row.data() + _offset);
+            auto e_row = reinterpret_cast<const Extent::Row *>(row);
+            return *reinterpret_cast<const uint8_t *>(e_row->data() + _offset);
         }
 
-        int16_t get_int16(const std::any &row) const override {
+        int16_t get_int16(const void *row) const override {
             // must be int16 type
             DCHECK_EQ(_type, SchemaType::INT16);
-            assert(row.type() == typeid(Extent::Row));
 
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            return recvint16(e_row.data() + _offset);
+            auto e_row = reinterpret_cast<const Extent::Row *>(row);
+            return *reinterpret_cast<const int16_t *>(e_row->data() + _offset);
         }
 
-        uint16_t get_uint16(const std::any &row) const override {
+        uint16_t get_uint16(const void *row) const override {
             // must be uint16 type
             DCHECK_EQ(_type, SchemaType::UINT16);
-            assert(row.type() == typeid(Extent::Row));
 
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            int16_t val = recvint16(e_row.data() + _offset);
-            return *reinterpret_cast<int16_t *>(&val);
+            auto e_row = reinterpret_cast<const Extent::Row *>(row);
+            return *reinterpret_cast<const uint16_t *>(e_row->data() + _offset);
         }
 
-        int32_t get_int32(const std::any &row) const override {
+        int32_t get_int32(const void *row) const override {
             // must be int32 type
             DCHECK_EQ(_type, SchemaType::INT32);
-            assert(row.type() == typeid(Extent::Row));
 
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            return recvint32(e_row.data() + _offset);
+            auto e_row = reinterpret_cast<const Extent::Row *>(row);
+            return *reinterpret_cast<const int32_t *>(e_row->data() + _offset);
         }
 
-        uint32_t get_uint32(const std::any &row) const override {
+        uint32_t get_uint32(const void *row) const override {
             // must be uint32 type
             DCHECK_EQ(_type, SchemaType::UINT32);
-            assert(row.type() == typeid(Extent::Row));
 
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            int32_t val = recvint32(e_row.data() + _offset);
-            return *reinterpret_cast<int32_t *>(&val);
+            auto e_row = reinterpret_cast<const Extent::Row *>(row);
+            return *reinterpret_cast<const uint32_t *>(e_row->data() + _offset);
         }
 
-        int64_t get_int64(const std::any &row) const override {
+        int64_t get_int64(const void *row) const override {
             // must be int64 type
             DCHECK_EQ(_type, SchemaType::INT64);
-            assert(row.type() == typeid(Extent::Row));
 
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            return recvint64(e_row.data() + _offset);
+            auto e_row = reinterpret_cast<const Extent::Row *>(row);
+            return *reinterpret_cast<const int64_t *>(e_row->data() + _offset);
         }
 
-        uint64_t get_uint64(const std::any &row) const override {
+        uint64_t get_uint64(const void *row) const override {
             // must be uint64 type
             DCHECK_EQ(_type, SchemaType::UINT64);
-            assert(row.type() == typeid(Extent::Row));
 
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            int64_t val = recvint64(e_row.data() + _offset);
-            return *reinterpret_cast<int64_t *>(&val);
+            auto e_row = reinterpret_cast<const Extent::Row *>(row);
+            return *reinterpret_cast<const uint64_t *>(e_row->data() + _offset);
         }
 
-        float get_float32(const std::any &row) const override {
+        float get_float32(const void *row) const override {
             // must be float32 type
             DCHECK_EQ(_type, SchemaType::FLOAT32);
-            assert(row.type() == typeid(Extent::Row));
 
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            uint32_t value = recvint32(e_row.data() + _offset);
+            auto e_row = reinterpret_cast<const Extent::Row *>(row);
+            uint32_t value = *reinterpret_cast<const uint32_t *>(e_row->data() + _offset);
             return std::bit_cast<float>(value);
         }
 
-        double get_float64(const std::any &row) const override {
+        double get_float64(const void *row) const override {
             // must be float64 type
             DCHECK_EQ(_type, SchemaType::FLOAT64);
-            assert(row.type() == typeid(Extent::Row));
 
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            uint64_t value = recvint64(e_row.data() + _offset);
+            auto e_row = reinterpret_cast<const Extent::Row *>(row);
+            uint64_t value = *reinterpret_cast<const uint64_t *>(e_row->data() + _offset);
             return std::bit_cast<double>(value);
         }
 
-        std::string_view get_text(const std::any &row) const override {
+        std::string_view get_text(const void *row) const override {
             // must be text type
             DCHECK_EQ(_type, SchemaType::TEXT);
-            assert(row.type() == typeid(Extent::Row));
 
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            uint32_t var_off = recvint32(e_row.data() + _offset);
-            return e_row.get_text(var_off);
+            auto e_row = reinterpret_cast<const Extent::Row *>(row);
+            uint32_t var_off = *reinterpret_cast<const uint32_t *>(e_row->data() + _offset);
+            return e_row->get_text(var_off);
         }
 
-        const std::span<const char> get_binary(const std::any &row) const override {
+        const std::span<const char> get_binary(const void *row) const override {
             // must be binary type
             DCHECK_EQ(_type, SchemaType::BINARY);
-            assert(row.type() == typeid(Extent::Row));
 
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            uint32_t var_off = recvint32(e_row.data() + _offset);
-            return e_row.get_binary(var_off);
+            auto e_row = reinterpret_cast<const Extent::Row *>(row);
+            uint32_t var_off = *reinterpret_cast<const uint32_t *>(e_row->data() + _offset);
+            return e_row->get_binary(var_off);
         }
 
-        void set_null(const std::any &row, bool is_null) override {
-            assert(row.type() == typeid(Extent::Row));
-
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            _set_bit(e_row, _null_offset, _null_bitmask, is_null);
+        void set_null(void *row, bool is_null) override {
+            auto e_row = reinterpret_cast<Extent::Row *>(row);
+            _set_bit(*e_row, _null_offset, _null_bitmask, is_null);
         }
 
-        void set_bool(const std::any &row, bool val) override {
-            assert(row.type() == typeid(Extent::Row));
-
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            _set_bit(e_row, _offset, _bool_bitmask, val);
+        void set_bool(void *row, bool val) override {
+            auto e_row = reinterpret_cast<Extent::Row *>(row);
+            _set_bit(*e_row, _offset, _bool_bitmask, val);
         }
 
-        void set_int8(const std::any &row, int8_t val) override {
-            assert(row.type() == typeid(Extent::Row));
-
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            *(e_row.data() + _offset) = *reinterpret_cast<char *>(&val);
+        void set_int8(void *row, int8_t val) override {
+            auto e_row = reinterpret_cast<Extent::Row *>(row);
+            *(e_row->data() + _offset) = *reinterpret_cast<char *>(&val);
         }
 
-        void set_uint8(const std::any &row, uint8_t val) override {
-            assert(row.type() == typeid(Extent::Row));
-
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            *(e_row.data() + _offset) = *reinterpret_cast<char *>(&val);
+        void set_uint8(void *row, uint8_t val) override {
+            auto e_row = reinterpret_cast<Extent::Row *>(row);
+            *(e_row->data() + _offset) = *reinterpret_cast<char *>(&val);
         }
 
-        void set_int16(const std::any &row, int16_t val) override {
-            assert(row.type() == typeid(Extent::Row));
-
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            sendint16(val, e_row.data() + _offset);
+        void set_int16(void *row, int16_t val) override {
+            auto e_row = reinterpret_cast<Extent::Row *>(row);
+            *reinterpret_cast<int16_t *>(e_row->data() + _offset) = val;
         }
 
-        void set_uint16(const std::any &row, uint16_t val) override {
-            assert(row.type() == typeid(Extent::Row));
-
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            sendint16(*reinterpret_cast<int16_t *>(&val), e_row.data() + _offset);
+        void set_uint16(void *row, uint16_t val) override {
+            auto e_row = reinterpret_cast<Extent::Row *>(row);
+            *reinterpret_cast<uint16_t *>(e_row->data() + _offset) = val;
         }
 
-        void set_int32(const std::any &row, int32_t val) override {
-            assert(row.type() == typeid(Extent::Row));
-
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            sendint32(val, e_row.data() + _offset);
+        void set_int32(void *row, int32_t val) override {
+            auto e_row = reinterpret_cast<Extent::Row *>(row);
+            *reinterpret_cast<int32_t *>(e_row->data() + _offset) = val;
         }
 
-        void set_uint32(const std::any &row, uint32_t val) override {
-            assert(row.type() == typeid(Extent::Row));
-
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            sendint32(*reinterpret_cast<int32_t *>(&val), e_row.data() + _offset);
+        void set_uint32(void *row, uint32_t val) override {
+            auto e_row = reinterpret_cast<Extent::Row *>(row);
+            *reinterpret_cast<uint32_t *>(e_row->data() + _offset) = val;
         }
 
-        void set_int64(const std::any &row, int64_t val) override {
-            assert(row.type() == typeid(Extent::Row));
-
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            sendint64(val, e_row.data() + _offset);
+        void set_int64(void *row, int64_t val) override {
+            auto e_row = reinterpret_cast<Extent::Row *>(row);
+            *reinterpret_cast<int64_t *>(e_row->data() + _offset) = val;
         }
 
-        void set_uint64(const std::any &row, uint64_t val) override {
-            assert(row.type() == typeid(Extent::Row));
-
-            auto &&e_row = std::any_cast<Extent::Row>(row);
-            sendint64(*reinterpret_cast<int64_t *>(&val), e_row.data() + _offset);
+        void set_uint64(void *row, uint64_t val) override {
+            auto e_row = reinterpret_cast<Extent::Row *>(row);
+            *reinterpret_cast<uint64_t *>(e_row->data() + _offset) = val;
         }
 
-        void set_float32(const std::any &row, float val) override {
-            assert(row.type() == typeid(Extent::Row));
-
-            auto &&e_row = std::any_cast<Extent::Row>(row);
+        void set_float32(void *row, float val) override {
+            auto e_row = reinterpret_cast<Extent::Row *>(row);
             uint32_t cast_val = std::bit_cast<uint32_t>(val);
-            sendint32(cast_val, e_row.data() + _offset);
+            *reinterpret_cast<uint32_t *>(e_row->data() + _offset) = cast_val;
         }
 
-        void set_float64(const std::any &row, double val) override {
-            assert(row.type() == typeid(Extent::Row));
-
-            auto &&e_row = std::any_cast<Extent::Row>(row);
+        void set_float64(void *row, double val) override {
+            auto e_row = reinterpret_cast<Extent::Row *>(row);
             uint64_t cast_val = std::bit_cast<uint64_t>(val);
-            sendint64(cast_val, e_row.data() + _offset);
+            *reinterpret_cast<uint64_t *>(e_row->data() + _offset) = cast_val;
         }
 
-        void set_text(const std::any &row, const std::string_view &value) override {
+        void set_text(void *row, const std::string_view &value) override {
             DCHECK_EQ(_type, SchemaType::TEXT);
-            assert(row.type() == typeid(Extent::Row));
 
-            auto &&e_row = std::any_cast<Extent::Row>(row);
+            auto e_row = reinterpret_cast<Extent::Row *>(row);
 
             // store the string into the variable data
-            uint32_t offset = e_row.set_text(value);
+            uint32_t offset = e_row->set_text(value);
 
             // store the offset into the fixed data
-            char *fixed = e_row.data() + _offset;
-            sendint32(offset, fixed);
+            *reinterpret_cast<uint32_t *>(e_row->data() + _offset) = offset;
         }
 
-        void set_binary(const std::any &row, const std::span<const char> &value) override {
+        void set_binary(void *row, const std::span<const char> &value) override {
             DCHECK_EQ(_type, SchemaType::BINARY);
-            assert(row.type() == typeid(Extent::Row));
 
-            auto &&e_row = std::any_cast<Extent::Row>(row);
+            auto e_row = reinterpret_cast<Extent::Row *>(row);
 
             // store the string into the variable data
-            uint32_t offset = e_row.set_binary(value);
+            uint32_t offset = e_row->set_binary(value);
 
             // store the offset into the fixed data
-            char *fixed = e_row.data() + _offset;
-            sendint32(offset, fixed);
+            *reinterpret_cast<uint32_t *>(e_row->data() + _offset) = offset;
         }
 
 
@@ -854,7 +806,7 @@ namespace springtail {
             throw TypeError();
         }
 
-        bool get_bool(const std::any &row) const override {
+        bool get_bool(const void *row) const override {
             if constexpr(std::is_same_v<T, bool>) {
                 return _value;
             } else {
@@ -862,7 +814,7 @@ namespace springtail {
             }
         }
 
-        int8_t get_int8(const std::any &row) const override {
+        int8_t get_int8(const void *row) const override {
             if constexpr(std::is_same_v<T, int8_t>) {
                 return _value;
             } else {
@@ -870,7 +822,7 @@ namespace springtail {
             }
         }
 
-        uint8_t get_uint8(const std::any &row) const override {
+        uint8_t get_uint8(const void *row) const override {
             if constexpr(std::is_same_v<T, uint8_t>) {
                 return _value;
             } else {
@@ -878,7 +830,7 @@ namespace springtail {
             }
         }
 
-        int16_t get_int16(const std::any &row) const override {
+        int16_t get_int16(const void *row) const override {
             if constexpr(std::is_same_v<T, int16_t>) {
                 return _value;
             } else {
@@ -886,7 +838,7 @@ namespace springtail {
             }
         }
 
-        uint16_t get_uint16(const std::any &row) const override {
+        uint16_t get_uint16(const void *row) const override {
             if constexpr(std::is_same_v<T, uint16_t>) {
                 return _value;
             } else {
@@ -894,7 +846,7 @@ namespace springtail {
             }
         }
 
-        int32_t get_int32(const std::any &row) const override {
+        int32_t get_int32(const void *row) const override {
             if constexpr(std::is_same_v<T, int32_t>) {
                 return _value;
             } else {
@@ -902,7 +854,7 @@ namespace springtail {
             }
         }
 
-        uint32_t get_uint32(const std::any &row) const override {
+        uint32_t get_uint32(const void *row) const override {
             if constexpr(std::is_same_v<T, uint32_t>) {
                 return _value;
             } else {
@@ -910,7 +862,7 @@ namespace springtail {
             }
         }
 
-        int64_t get_int64(const std::any &row) const override {
+        int64_t get_int64(const void *row) const override {
             if constexpr(std::is_same_v<T, int64_t>) {
                 return _value;
             } else {
@@ -918,7 +870,7 @@ namespace springtail {
             }
         }
 
-        uint64_t get_uint64(const std::any &row) const override {
+        uint64_t get_uint64(const void *row) const override {
             if constexpr(std::is_same_v<T, uint64_t>) {
                 return _value;
             } else {
@@ -926,7 +878,7 @@ namespace springtail {
             }
         }
 
-        float get_float32(const std::any &row) const override {
+        float get_float32(const void *row) const override {
             if constexpr(std::is_same_v<T, float>) {
                 return _value;
             } else {
@@ -934,7 +886,7 @@ namespace springtail {
             }
         }
 
-        double get_float64(const std::any &row) const override {
+        double get_float64(const void *row) const override {
             if constexpr(std::is_same_v<T, double>) {
                 return _value;
             } else {
@@ -942,7 +894,7 @@ namespace springtail {
             }
         }
 
-        std::string_view get_text(const std::any &row) const override {
+        std::string_view get_text(const void *row) const override {
             if constexpr(std::is_same_v<T, std::string>) {
                 return _value;
             } else {
@@ -950,7 +902,7 @@ namespace springtail {
             }
         }
 
-        const std::span<const char> get_binary(const std::any &row) const override {
+        const std::span<const char> get_binary(const void *row) const override {
             if constexpr(std::is_same_v<T, std::vector<char>>) {
                 return _value;
             } else {
@@ -981,7 +933,7 @@ namespace springtail {
             return true;
         }
 
-        bool is_null(const std::any &row) const override {
+        bool is_null(const void *row) const override {
             return true;
         }
     };
@@ -1012,11 +964,11 @@ namespace springtail {
             return false;
         }
 
-        bool is_null(const std::any &row) const override {
+        bool is_null(const void *row) const override {
             return false;
         }
 
-        bool get_bool(const std::any &row) const override {
+        bool get_bool(const void *row) const override {
             if constexpr(std::is_same_v<T, bool>) {
                 if (_field->is_null(row)) {
                     return _default;
@@ -1027,7 +979,7 @@ namespace springtail {
             }
         }
 
-        int8_t get_int8(const std::any &row) const override {
+        int8_t get_int8(const void *row) const override {
             if constexpr(std::is_same_v<T, int8_t>) {
                 if (_field->is_null(row)) {
                     return _default;
@@ -1038,7 +990,7 @@ namespace springtail {
             }
         }
 
-        uint8_t get_uint8(const std::any &row) const override {
+        uint8_t get_uint8(const void *row) const override {
             if constexpr(std::is_same_v<T, uint8_t>) {
                 if (_field->is_null(row)) {
                     return _default;
@@ -1049,7 +1001,7 @@ namespace springtail {
             }
         }
 
-        int16_t get_int16(const std::any &row) const override {
+        int16_t get_int16(const void *row) const override {
             if constexpr(std::is_same_v<T, int16_t>) {
                 if (_field->is_null(row)) {
                     return _default;
@@ -1060,7 +1012,7 @@ namespace springtail {
             }
         }
 
-        uint16_t get_uint16(const std::any &row) const override {
+        uint16_t get_uint16(const void *row) const override {
             if constexpr(std::is_same_v<T, uint16_t>) {
                 if (_field->is_null(row)) {
                     return _default;
@@ -1071,7 +1023,7 @@ namespace springtail {
             }
         }
 
-        int32_t get_int32(const std::any &row) const override {
+        int32_t get_int32(const void *row) const override {
             if constexpr(std::is_same_v<T, int32_t>) {
                 if (_field->is_null(row)) {
                     return _default;
@@ -1082,7 +1034,7 @@ namespace springtail {
             }
         }
 
-        uint32_t get_uint32(const std::any &row) const override {
+        uint32_t get_uint32(const void *row) const override {
             if constexpr(std::is_same_v<T, uint32_t>) {
                 if (_field->is_null(row)) {
                     return _default;
@@ -1093,7 +1045,7 @@ namespace springtail {
             }
         }
 
-        int64_t get_int64(const std::any &row) const override {
+        int64_t get_int64(const void *row) const override {
             if constexpr(std::is_same_v<T, int64_t>) {
                 if (_field->is_null(row)) {
                     return _default;
@@ -1104,7 +1056,7 @@ namespace springtail {
             }
         }
 
-        uint64_t get_uint64(const std::any &row) const override {
+        uint64_t get_uint64(const void *row) const override {
             if constexpr(std::is_same_v<T, uint64_t>) {
                 if (_field->is_null(row)) {
                     return _default;
@@ -1115,7 +1067,7 @@ namespace springtail {
             }
         }
 
-        float get_float32(const std::any &row) const override {
+        float get_float32(const void *row) const override {
             if constexpr(std::is_same_v<T, float>) {
                 if (_field->is_null(row)) {
                     return _default;
@@ -1126,7 +1078,7 @@ namespace springtail {
             }
         }
 
-        double get_float64(const std::any &row) const override {
+        double get_float64(const void *row) const override {
             if constexpr(std::is_same_v<T, double>) {
                 if (_field->is_null(row)) {
                     return _default;
@@ -1137,7 +1089,7 @@ namespace springtail {
             }
         }
 
-        std::string_view get_text(const std::any &row) const override {
+        std::string_view get_text(const void *row) const override {
             if constexpr(std::is_same_v<T, std::string>) {
                 if (_field->is_null(row)) {
                     return _default;
@@ -1148,7 +1100,7 @@ namespace springtail {
             }
         }
 
-        const std::span<const char> get_binary(const std::any &row) const override {
+        const std::span<const char> get_binary(const void *row) const override {
             if constexpr(std::is_same_v<T, std::vector<char>>) {
                 if (_field->is_null(row)) {
                     return _default;
@@ -1159,7 +1111,6 @@ namespace springtail {
             }
         }
     };
-
 
     // FIELD ARRAYS
 
@@ -1175,12 +1126,12 @@ namespace springtail {
      */
     class Tuple {
     public:
-        explicit Tuple(const std::any &row)
+        explicit Tuple(const void *row)
             : _row(row)
         { }
         virtual ~Tuple() = default;
 
-        std::any row() const
+        const void *row() const
         {
             return _row;
         }
@@ -1297,7 +1248,7 @@ namespace springtail {
         }
 
     private:
-        std::any _row;
+        const void *_row;
 
         bool _equal(const Tuple &rhs, size_t size) const {
             assert(size);
@@ -1318,7 +1269,7 @@ namespace springtail {
     public:
         FieldTuple(const FieldTuple &tuple) = default;
         FieldTuple(FieldTuple &&tuple) noexcept = default;
-        FieldTuple(FieldArrayPtr array, const std::any &row)
+        FieldTuple(FieldArrayPtr array, const void *row)
             : Tuple(row),
               _array(array)
         { }
@@ -1343,7 +1294,7 @@ namespace springtail {
 
     class KeyValueTuple : public Tuple {
     public:
-        KeyValueTuple(FieldArrayPtr key, FieldArrayPtr value, const std::any &row)
+        KeyValueTuple(FieldArrayPtr key, FieldArrayPtr value, const void *row)
             : Tuple(row),
               _key(key),
               _value(value)
@@ -1383,10 +1334,14 @@ namespace springtail {
     class MutableTuple : public Tuple {
     public:
         MutableTuple(MutableFieldArrayPtr array,
-                     const std::any &row)
+                     void *row)
             : Tuple(row),
               _array(array)
         { DCHECK_NE(_array, nullptr); }
+
+        void *mutable_row() const {
+            return const_cast<void *>(this->row());
+        }
 
         std::size_t size() const override {
             return _array->size();
@@ -1412,14 +1367,14 @@ namespace springtail {
         void assign(TuplePtr other)
         {
             for (int i = 0; i < size(); i++) {
-                mutable_field(i)->set_field(this->row(), other->field(i), other->row());
+                mutable_field(i)->set_field(this->mutable_row(), other->field(i), other->row());
             }
         }
 
         void assign(const Tuple &other)
         {
             for (int i = 0; i < size(); i++) {
-                mutable_field(i)->set_field(this->row(), other.field(i), other.row());
+                mutable_field(i)->set_field(this->mutable_row(), other.field(i), other.row());
             }
         }
 
@@ -1448,27 +1403,21 @@ namespace springtail {
             return true;
         }
 
-        bool is_undefined(const std::any &row) const override {
-            assert(row.type() == typeid(PgMsgTupleData const *));
-
-            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+        bool is_undefined(const void *row) const override {
+            auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
             if (data->tuple_data[_offset].type == 'u') {
                 return true;
             }
             return false;
         }
 
-        bool is_null(const std::any &row) const override {
-            DCHECK(row.type() == typeid(PgMsgTupleData const *));
-            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
-
+        bool is_null(const void *row) const override {
+            auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
             return data->tuple_data[_offset].type == 'n';
         }
 
-        bool get_bool(const std::any &row) const override {
-            assert(row.type() == typeid(PgMsgTupleData const *));
-
-            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+        bool get_bool(const void *row) const override {
+            auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
             const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
@@ -1481,10 +1430,8 @@ namespace springtail {
             return (col.data[0] == 1);
         }
 
-        int16_t get_int16(const std::any &row) const override {
-            assert(row.type() == typeid(PgMsgTupleData const *));
-
-            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+        int16_t get_int16(const void *row) const override {
+            auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
             const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
@@ -1497,10 +1444,8 @@ namespace springtail {
             return recvint16(col.data.data());
         }
 
-        int32_t get_int32(const std::any &row) const override {
-            assert(row.type() == typeid(PgMsgTupleData const *));
-
-            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+        int32_t get_int32(const void *row) const override {
+            auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
             const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
@@ -1513,10 +1458,8 @@ namespace springtail {
             return recvint32(col.data.data());
         }
 
-        int64_t get_int64(const std::any &row) const override {
-            assert(row.type() == typeid(PgMsgTupleData const *));
-
-            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+        int64_t get_int64(const void *row) const override {
+            auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
             const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
@@ -1529,10 +1472,8 @@ namespace springtail {
             return recvint64(col.data.data());
         }
 
-        float get_float32(const std::any &row) const override {
-            assert(row.type() == typeid(PgMsgTupleData const *));
-
-            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+        float get_float32(const void *row) const override {
+            auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
             const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
@@ -1546,10 +1487,8 @@ namespace springtail {
             return std::bit_cast<float>(value);
         }
 
-        double get_float64(const std::any &row) const override {
-            assert(row.type() == typeid(PgMsgTupleData const *));
-
-            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+        double get_float64(const void *row) const override {
+            auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
             const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
@@ -1563,10 +1502,8 @@ namespace springtail {
             return std::bit_cast<double>(value);
         }
 
-        std::string_view get_text(const std::any &row) const override {
-            assert(row.type() == typeid(PgMsgTupleData const *));
-
-            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+        std::string_view get_text(const void *row) const override {
+            auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
             const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
@@ -1576,10 +1513,8 @@ namespace springtail {
             return std::string_view(col.data.data(), col.data.size());
         }
 
-        const std::span<const char> get_binary(const std::any &row) const override {
-            assert(row.type() == typeid(PgMsgTupleData const *));
-
-            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+        const std::span<const char> get_binary(const void *row) const override {
+            auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
             const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
@@ -1608,19 +1543,17 @@ namespace springtail {
             DCHECK_EQ(ut->type, UserType::ENUM);
         }
 
-        bool is_null(const std::any &row) const override
+        bool is_null(const void *row) const override
         {
-            DCHECK(row.type() == typeid(PgMsgTupleData const *));
-            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+            auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
 
             // check if the enum is null
             return (!_ut->exists || data->tuple_data[_offset].type == 'n');
         }
 
-        float get_float32(const std::any &row) const override
+        float get_float32(const void *row) const override
         {
-            assert(row.type() == typeid(PgMsgTupleData const *));
-            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+            auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
 
             // get the label from the tuple data
             std::string label = std::string(data->tuple_data[_offset].data.begin(),
@@ -1733,4 +1666,5 @@ namespace springtail {
         }
     };
     typedef std::shared_ptr<ValueTuple> ValueTuplePtr;
+
 }

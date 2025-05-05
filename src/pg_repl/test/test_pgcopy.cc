@@ -140,13 +140,13 @@ namespace {
         int count = 0;
         std::string prev = "";
         for (auto &row : *table) {
-            std::cout << fields->at(1)->get_text(row) << std::endl;
+            std::cout << fields->at(1)->get_text(&row) << std::endl;
 
             if (prev != "") {
-                ASSERT_GT(fields->at(1)->get_text(row), prev);
+                ASSERT_GT(fields->at(1)->get_text(&row), prev);
             }
 
-            prev = fields->at(1)->get_text(row);
+            prev = fields->at(1)->get_text(&row);
             ++count;
         }
         ASSERT_EQ(count, 5000);
