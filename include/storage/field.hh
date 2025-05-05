@@ -99,7 +99,7 @@ namespace springtail {
 
         bool
         less_than(const std::any &lhs_row,
-                  std::shared_ptr<Field> rhs,
+                  const std::shared_ptr<Field>& rhs,
                   const std::any &rhs_row,
                   bool nulls_last=true) const
         {
@@ -191,7 +191,7 @@ namespace springtail {
 
         bool
         equal(const std::any &lhs_row,
-              std::shared_ptr<Field> rhs,
+              const std::shared_ptr<Field>& rhs,
               const std::any &rhs_row)
         {
             // types must match
