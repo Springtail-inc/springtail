@@ -24,8 +24,9 @@ namespace springtail
     /**
      * @brief Convert the postgres type system (also known as typeoid) to SchemaTypes.
      * @param pg_type postgres type such as BOOLOID
+     * @param pg_type_category category of the postgres type
      */
-    SchemaType convert_pg_type(int32_t pg_type);
+    SchemaType convert_pg_type(int32_t pg_type, char pg_type_category);
 }
 
 

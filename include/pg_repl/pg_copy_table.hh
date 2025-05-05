@@ -216,9 +216,12 @@ namespace springtail
         /**
          * @brief Parse row received from copy table command
          * @param row input row (copy buffer)
+         * @param user_types user defined type map <type_oid, <type_name, sort_order>>
          * @param pos position in row to start parsing (in/out)
          */
-        FieldArrayPtr _parse_row(const std::string_view &row, size_t &pos);
+        FieldArrayPtr _parse_row(const std::string_view &row,
+                                 const std::map<int32_t, std::map<std::string, float>> &type_map,
+                                 size_t &pos);
 
         /**
          * Validate copy header
@@ -252,6 +255,7 @@ namespace springtail
          */
         PgCopyResult::TableInfoPtr _copy_table(uint64_t db_id,
                                                const springtail::XidLsn &xid,
+                                               const std::map<int32_t, std::map<std::string, float>> &user_types,
                                                const std::string &table_name,
                                                const std::string &schema_name,
                                                uint64_t table_oid,
@@ -280,12 +284,33 @@ namespace springtail
                      CopyQueuePtr copy_queue,
                      PgCopyResultPtr result);
 
+        /** Get where clause condition for inclusion of schemas */
+       static std::string _get_schema_condition(LibPqConnection &connection, uint64_t db_id);
+
         /**
          * @brief Get namespaces, returns a pair of namespace name and oid
          * @param db_id database id
          * @param xid xid
          */
         std::vector<std::pair<uint64_t, std::string>> _get_namespaces(uint64_t db_id, uint64_t xid);
+
+        /**
+         * @brief Get user defined types
+         * @param db_id database id
+         * @returns std::map<type_oid, std::map<type_name, sort_order>>
+         */
+        std::map<int32_t, std::map<std::string, float>> _get_user_types();
+
+        /**
+         * @brief Get enum field for user defined type; converts label to sortorder index
+         * @param pg_type pg type oid
+         * @param label enum label
+         * @param type_map map of enum labels to so order
+         * @return ConstTypeFieldPtr<float>
+         */
+        static ConstTypeFieldPtr<float> _get_enum_field(int32_t pg_type,
+                                                        const std::string &label,
+                                                        const std::map<int32_t, std::map<std::string, float>> &type_map);
 
         /**
          * @brief Internall helper called from copy_db, copy_schema, copy_table
@@ -365,6 +390,13 @@ namespace springtail
          * @param xid xid
          */
         static void create_namespaces(uint64_t db_id, uint64_t xid);
+
+        /**
+         * @brief Create user defined types
+         * @param db_id database id
+         * @param xid xid
+         */
+        static void create_usertypes(uint64_t db_id, uint64_t xid);
 
         /**
          * @brief Copy all tables in single schema from remote system

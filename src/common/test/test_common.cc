@@ -86,7 +86,8 @@ TEST(JsonTest, Json)
             "key2": 2,
             "key3": true,
             "key4": "false",
-            "key5": "45"
+            "key5": "45",
+            "key6": "s"
         }
     )"_json;
     ASSERT_EQ(Json::get_or<std::string>(json, "key1", "test"), "value1");
@@ -95,4 +96,5 @@ TEST(JsonTest, Json)
     ASSERT_EQ(Json::get_or<bool>(json, "key4", true), false);
     ASSERT_EQ(Json::get_or<int>(json, "key5", 0), 45);
     ASSERT_EQ(Json::get_or<std::string>(json, "key5", "0"), "45");
+    ASSERT_EQ(Json::get_or<char>(json, "key6", 'a'), 's');
 }

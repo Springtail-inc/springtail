@@ -11,6 +11,7 @@
 #include <common/common.hh>
 #include <common/exception.hh>
 #include <common/logging.hh>
+#include <common/json.hh>
 
 #include <pg_repl/pg_common.hh>
 #include <pg_repl/pg_msg_stream.hh>
@@ -849,14 +850,16 @@ namespace springtail {
             json["is_nullable"].get_to(column.is_nullable);
             json["is_pkey"].get_to(column.is_pkey);
             json["is_generated"].get_to(column.is_generated);
-            if (!json["type_name"].is_null()) {
-                column.type_name = json["type_name"].get<std::string>();
-            }
+            json["type_name"].get_to(column.type_name);
+            json["type_namespace"].get_to(column.type_namespace);
+
             if (!json["collation"].is_null()) {
                 column.collation = json["collation"].get<std::string>();
             }
+
             json["is_non_standard_collation"].get_to(column.is_non_standard_collation);
             json["is_user_defined_type"].get_to(column.is_user_defined_type);
+            Json::get_to<char>(json, "type_category", column.type_category);
 
             if (!json["pkey_pos"].is_null()) {
                 json["pkey_pos"].get_to(column.pk_position);
@@ -868,7 +871,7 @@ namespace springtail {
                 column.default_value = json["default"].get<std::string>();
             }
 
-            column.type = static_cast<uint8_t>(convert_pg_type(column.pg_type));
+            column.type = static_cast<uint8_t>(convert_pg_type(column.pg_type, column.type_category));
             columns.push_back(column);
         }
     }
@@ -1081,7 +1084,7 @@ namespace springtail {
         std::string object_type;
         json["obj"].get_to(object_type);
         if (object_type != "schema") {
-            LOG_ERROR("Create/alter namespace msg not for namespace object, for: {}\n", object_type);
+            LOG_ERROR("Drop namespace msg not for namespace object, for: {}\n", object_type);
             return nullptr;
         }
 
@@ -1097,6 +1100,83 @@ namespace springtail {
 
         return msg;
     }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_create_usertype(const PgMsgMessage &message, char *buffer, int len)
+    {
+        PgMsgUserType usertype_msg;
+
+        // convert msg data to string (it is not null terminated)
+        // and convert string to json
+        std::string_view data_str(buffer, len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        usertype_msg.xid = message.xid; // only valid in streaming mode
+        usertype_msg.lsn = message.lsn;
+
+        Json::get_to<char>(json, "type", usertype_msg.type); // convert string to char
+        json["name"].get_to(usertype_msg.name);
+        json["oid"].get_to(usertype_msg.oid);
+        json["schema"].get_to(usertype_msg.namespace_name);
+        json["ns_oid"].get_to(usertype_msg.namespace_id);
+        json["value"].get_to(usertype_msg.value_json);
+
+        CHECK_EQ(usertype_msg.type, 'E');
+
+        LOG_DEBUG(LOG_PG_REPL, "Decoded create/alter usertype: json: {}", json.dump());
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_TYPE);
+        msg->msg.emplace<PgMsgUserType>(usertype_msg);
+
+        return msg;
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_alter_usertype(const PgMsgMessage &message, char *buffer, int len)
+    {
+        // same data as in create usertype, call that to do the decode and then just switch the
+        // type so we know it is an alter usertype
+        PgMsgPtr msg = _decode_create_usertype(message, buffer, len);
+        if (msg == nullptr) {
+            return msg;
+        }
+
+        msg->msg_type = PgMsgEnum::ALTER_TYPE;
+        return msg;
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_drop_usertype(const PgMsgMessage &message, char *buffer, int len)
+    {
+        PgMsgUserType usertype_msg;
+
+        // convert msg data to string (it is not null terminated)
+        // and convert string to json
+        std::string data_str(buffer, len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        // check object type, should be of type namespace
+        std::string object_type;
+        json["obj"].get_to(object_type);
+        if (object_type != "type") {
+            LOG_ERROR("Drop msg not for usertype object, for: {}\n", object_type);
+            return nullptr;
+        }
+
+        usertype_msg.xid = message.xid; // only valid in streaming mode
+        usertype_msg.lsn = message.lsn;
+        json["oid"].get_to(usertype_msg.oid);
+        json["name"].get_to(usertype_msg.name);
+        json["schema"].get_to(usertype_msg.namespace_name);
+
+        LOG_DEBUG(LOG_PG_REPL, "Decoded drop usertype: json: {}", json.dump());
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_TYPE);
+        msg->msg.emplace<PgMsgUserType>(usertype_msg);
+
+        return msg;
+    }
+
 
     PgMsgPtr
     PgMsgStreamReader::_decode_copy_sync(const PgMsgMessage &message, char *buffer, int len)
@@ -1175,6 +1255,12 @@ namespace springtail {
             return _decode_drop_index(msg, buffer.data(), data_len);
         } else if (msg.prefix_str == pg_msg::MSG_PREFIX_COPY_SYNC) {
             return _decode_copy_sync(msg, buffer.data(), data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_CREATE_TYPE) {
+            return _decode_create_usertype(msg, buffer.data(), data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_ALTER_TYPE) {
+            return _decode_alter_usertype(msg, buffer.data(), data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_DROP_TYPE) {
+            return _decode_drop_usertype(msg, buffer.data(), data_len);
         } else {
             LOG_INFO("Unknown message prefix: {}", msg.prefix_str);
             return nullptr;

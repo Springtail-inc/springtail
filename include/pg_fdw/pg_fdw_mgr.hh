@@ -55,6 +55,7 @@ namespace springtail::pg_fdw {
     /** Internal state used to track table scan */
     struct PgFdwState {
         TablePtr table;
+        uint64_t db_id;
         uint64_t tid;
         uint64_t xid;
         FieldArrayPtr fields = nullptr;       ///< Fields for the columns from the target list
@@ -82,6 +83,7 @@ namespace springtail::pg_fdw {
 
         struct TargetColumn {
             int field_idx; ///< field idx in the fields array of PgFdwState
+            int32_t sp_pg_type; ///< Springtail column pg type
             PgAttr pg_attr; ///< PG attribute info
         };
 
@@ -95,7 +97,7 @@ namespace springtail::pg_fdw {
         std::optional<Index> index; ///< The final index to use for scanning
 
         /** Constructor */
-        PgFdwState(TablePtr table, uint64_t tid, uint64_t xid);
+        PgFdwState(TablePtr table, uint64_t db_id, uint64_t tid, uint64_t xid);
     };
     using PgFdwStatePtr = std::shared_ptr<PgFdwState>;
 
@@ -109,9 +111,12 @@ namespace springtail::pg_fdw {
         static constexpr char CATALOG_TABLE_SCHEMAS[] = "schemas";        ///< Table name for system table schemas
         static constexpr char CATALOG_TABLE_STATS[] = "table_stats";      ///< Table name for system table stats
         static constexpr char CATALOG_INDEX_NAMES[] = "index_names";      ///< Table name for system index names
-        static constexpr char CATALOG_NAMESPACE_NAMES[] = "namespace_names";      ///< Table name for system index names
+        static constexpr char CATALOG_NAMESPACE_NAMES[] = "namespace_names";      ///< Table name for namespace schema names
+        static constexpr char CATALOG_USER_TYPES[] = "user_types";        ///< Table name for system user defined types
+        static constexpr char PG_FDW_LOG_FILE_PREFIX[] = "pg_fdw";        ///< Log file prefix
 
-        static constexpr char PG_FDW_LOG_FILE_PREFIX[] = "pg_fdw";         ///< Log file prefix
+        /** Maximum number of user type definitions to cache */
+        static constexpr int MAX_USER_TYPE_CACHE = 100;
 
         /** Get singleton instance */
         static PgFdwMgr* get_instance() {
@@ -207,7 +212,7 @@ namespace springtail::pg_fdw {
 
     private:
         /** Delete constructor */
-        PgFdwMgr() {};
+        PgFdwMgr() : _user_type_cache(MAX_USER_TYPE_CACHE) {};
         PgFdwMgr(const PgFdwMgr&) = delete;
         PgFdwMgr& operator=(const PgFdwMgr&) = delete;
 
@@ -222,15 +227,51 @@ namespace springtail::pg_fdw {
 
         std::shared_ptr<sys_tbl_mgr::ShmCache> _roots_cache; ///< An IPC cache shared by pg_xid_subscriber_daemon
 
-        // static methods
+        LruObjectCache<int32_t, UserType> _user_type_cache; ///< cache of user types
+
+        /**
+         * @brief Lookup enum user type from cache based on oid and index
+         * @param db_id db_id of the database
+         * @param oid pg oid of type (in springtail)
+         * @param index enum index
+         * @param xid xid for this request
+         * @return user type pointer
+         */
+        UserTypePtr _enum_cache_lookup(uint64_t db_id,
+                                       int32_t oid,
+                                       uint64_t xid);
+
+        /** Helper to convert a springtail enum user type to a datum */
+        Datum _get_enum_datum(const PgFdwState *state,
+                              int32_t springtail_oid,
+                              Oid pg_oid,
+                              float sort_order);
+
+        /** Helper to convert a postgres enum type to springtail enum id (index/sortorder) */
+        float _get_enum_id_from_pg(const PgFdwState *state,
+                                   int32_t springtail_oid,
+                                   Oid pg_oid,
+                                   Oid label_oid);
+
         /** Helper to convert field to PG Datum */
-        static Datum _get_datum_from_field(const FieldPtr& field,
-                                           const Extent::Row &row,
-                                           int32_t pg_type,
-                                           int32_t atttypmod);
+        Datum _get_datum_from_field(const PgFdwState *state,
+                                    const Field *field,
+                                    const Extent::Row &row,
+                                    int32_t springtail_oid,
+                                    Oid pg_oid,
+                                    int32_t atttypmod);
+
+        /** Helper to setup quals and scan iterator in state, called from begin_scan */
+        void _init_quals(PgFdwState *state, List *qual_list);
+
+        /** Helper to create constant field from qual and add to field array */
+        void _make_const_field(const PgFdwState *state, const SchemaColumn &column, int idx, const ConstQual *qual);
+
+        // static methods
 
         /** Helper to convert a PG type OID to a type name using the PG system cache. */
-        static std::string _get_type_name(int32_t pg_type);
+        static std::string _get_type_name(int32_t pg_type,
+                                          const std::unordered_map<uint64_t, std::string> &user_types);
 
         /** Helper to generate create foreign table sql */
         static std::string _gen_fdw_table_sql(const std::string &server_name,
@@ -255,15 +296,6 @@ namespace springtail::pg_fdw {
         /** Helper to determine if a type can be used in a where clause */
         static bool _is_type_sortable(Oid pg_type, QualOpName op);
 
-        /** Helper to setup quals and scan iterator in state, called from begin_scan */
-        static void _init_quals(PgFdwState *state, List *qual_list);
-
-        /** Helper to setup itertor based on filtered qual list */
-        static void _init_qual_fields(PgFdwState *state);
-
-        /** Helper to create constant field from qual and add to field array */
-        static void _make_const_field(FieldArrayPtr fields, int idx, ConstQual *qual);
-
         /** Helper to compare a primary key const qual field to the data within a row */
         static bool _compare_field(const std::any &row,
                                    FieldPtr row_field,
@@ -277,6 +309,13 @@ namespace springtail::pg_fdw {
         static FieldTuplePtr _gen_qual_tuple(const std::vector<ConstQualPtr> &quals,
                                              const FieldArrayPtr qual_fields);
 
+        /** Helper to get the user type names for a namespace used by import foreign schema */
+        static std::unordered_map<uint64_t, std::string> _load_user_types(uint64_t db_id,
+            const std::string &namespace_name,
+            uint64_t namespace_id,
+            uint64_t schema_xid);
+
+        /** Helper to get the index quals for a given index */
         friend std::vector<ConstQualPtr>
         _get_index_quals(const PgFdwState *state, Index const& idx, List const* qual_list);
 

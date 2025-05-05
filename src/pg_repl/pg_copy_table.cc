@@ -47,6 +47,27 @@ extern "C" {
 
 namespace springtail
 {
+    /** Query enum user defined types */
+    static constexpr char ENUM_QUERY[] =
+        "SELECT t.oid::integer AS enum_type_oid, "
+        "       n.oid::integer AS namespace_oid, "
+        "       n.nspname::text AS schema, "
+        "       t.typname::text AS enum_type_name, "
+        "       json_agg(json_build_object(e.enumlabel::text, e.enumsortorder::float) ORDER BY e.enumsortorder)::text AS value "
+        "FROM pg_enum e "
+        "JOIN pg_type t ON t.oid = e.enumtypid "
+        "JOIN pg_namespace n ON n.oid = t.typnamespace "
+        "WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') "
+        "{}" // Placeholder for namespace condition
+        "GROUP BY t.oid, t.typname, n.nspname, n.oid";
+
+    /** Enum lookup query */
+    static constexpr char ENUM_LOOKUP_QUERY[] =
+        "SELECT enumtypid::integer, "
+        "       enumsortorder::float, "
+        "       enumlabel::text "
+        "FROM pg_enum";
+
     /** Query all namespaces except pg_catalog and information_schema */
     static constexpr char NAMESPACE_QUERY[] =
         "SELECT oid::integer, nspname::text "
@@ -68,10 +89,13 @@ namespace springtail
         "SELECT column_name, ordinal_position, is_nullable::boolean, "
         "       column_default, atttypid, "
         "       pga.attgenerated = 's' AS is_generated, "
-        "       (t.typnamespace = 'pg_catalog'::regnamespace)::boolean AS is_user_defined_type, "
+        "       (t.typnamespace <> 'pg_catalog'::regnamespace AND t.typnamespace <> 'information_schema'::regnamespace)::boolean AS is_user_defined_type, "
         "       coalesce((col.collname NOT IN ('C', 'en_US.UTF-8', 'default'))::boolean, false) AS is_non_standard_collation,"
         "       coalesce((pga.attnum=any(pgi.indkey))::boolean, false) as is_pkey, "
-        "       array_position(pgi.indkey, pga.attnum) "
+        "       array_position(pgi.indkey, pga.attnum), "
+        "       t.typcategory as type_category, "
+        "       t.typname as type_name, "
+        "       nsp.nspname AS type_namespace "
         "FROM pg_catalog.pg_attribute pga "
         "JOIN information_schema.columns "
         "ON column_name=pga.attname "
@@ -79,6 +103,7 @@ namespace springtail
         "ON pga.attrelid=pgi.indrelid AND pgi.indisprimary "
         "LEFT JOIN pg_collation col ON pga.attcollation = col.oid AND pga.attcollation <> 0 "
         "LEFT JOIN pg_type t ON pga.atttypid = t.oid "
+        "LEFT JOIN pg_catalog.pg_namespace nsp ON nsp.oid = t.typnamespace "
         "WHERE pga.attrelid={} "
         "AND table_schema='{}' "
         "AND table_name='{}' "
@@ -273,10 +298,10 @@ namespace springtail
                                   uint64_t table_oid,
                                   uint64_t schema_oid)
     {
-        std::string table_name_ptr = _connection.escape_identifier(table_name);
-        std::string schema_name_ptr = _connection.escape_identifier(schema_name);
+        std::string table_name_ptr = _connection.escape_string(table_name);
+        std::string schema_name_ptr = _connection.escape_string(schema_name);
 
-        _connection.exec(fmt::format(SCHEMA_QUERY, table_oid, schema_name, table_name));
+        _connection.exec(fmt::format(SCHEMA_QUERY, table_oid, schema_name_ptr, table_name_ptr));
 
         if (_connection.ntuples() == 0) {
             LOG_ERROR("Table not found: {}.{}", schema_name, table_name);
@@ -284,7 +309,7 @@ namespace springtail
             throw PgTableNotFoundError();
         }
 
-        if (_connection.nfields() != 10) {
+        if (_connection.nfields() != 13) {
             LOG_ERROR("Error: unexpected data from schema query or table not found");
             LOG_ERROR("fields: {}, tuples: {}", _connection.nfields(), _connection.ntuples());
             _connection.clear();
@@ -322,9 +347,6 @@ namespace springtail
                 // atttypid oid
                 column.pg_type = _connection.get_int32(i, 4);
 
-                // springtail type
-                column.type = convert_pg_type(column.pg_type);
-
                 // is primary key
                 column.is_generated = _connection.get_boolean(i, 5);
 
@@ -343,6 +365,18 @@ namespace springtail
                     CHECK(is_pkey);
                     column.pkey_position = (*pkey_pos);
                 }
+
+                // type category of 'E' represents enum
+                column.type_category = _connection.get_char(i, 10);
+
+                // column type name
+                column.type_name = _connection.get_string(i, 11);
+
+                // column type namespace
+                column.type_namespace = _connection.get_string(i, 12);
+
+                // springtail type
+                column.type = convert_pg_type(column.pg_type, column.type_category);
 
                 LOG_DEBUG(LOG_PG_REPL,
                                     "Column: {} type={} position={} nullable={} default_value={} pkey={} is_generated={} is_non_standard_collation={} is_user_defined_type={}",
@@ -434,6 +468,7 @@ namespace springtail
     PgCopyResult::TableInfoPtr
     PgCopyTable::_copy_table(uint64_t db_id,
                              const springtail::XidLsn &xid,
+                             const std::map<int32_t, std::map<std::string, float>> &user_types,
                              const std::string &table_name,
                              const std::string &schema_name,
                              uint64_t table_oid,
@@ -488,6 +523,8 @@ namespace springtail
             column->set_position(col.position);
             column->set_is_nullable(col.nullable);
             column->set_is_generated(false);
+            column->set_type_name(col.type_name);
+            column->set_type_namespace(col.type_namespace);
             if (col.pkey_position) {
                 column->set_pk_position(*col.pkey_position);
             }
@@ -549,7 +586,7 @@ namespace springtail
                 continue; // got more data, keep processing
             }
 
-            auto fields = _parse_row(*data, pos);
+            auto fields = _parse_row(*data, user_types, pos);
             if (!fields) {
                 break; // saw footer, finished with the COPY
             }
@@ -604,8 +641,32 @@ namespace springtail
         return recvint32(header.data() + 15);
     }
 
+    ConstTypeFieldPtr<float>
+    PgCopyTable::_get_enum_field(int32_t pg_type,
+                                 const std::string &label,
+                                 const std::map<int32_t, std::map<std::string, float>> &type_map)
+    {
+        // lookup type oid
+        auto it = type_map.find(pg_type);
+        if (it == type_map.end()) {
+            LOG_ERROR("Enum type {} not found in user types", pg_type);
+            throw TypeError(fmt::format("Enum type not found: {}", pg_type));
+        }
+
+        // lookup enum value (label)
+        auto enum_it = it->second.find(label);
+        if (enum_it == it->second.end()) {
+            LOG_ERROR("Enum value {} not found in user types", label);
+            throw TypeError(fmt::format("Enum value not found: {}", label));
+        }
+
+        return std::make_shared<ConstTypeField<float>>(enum_it->second);
+    }
+
     FieldArrayPtr
-    PgCopyTable::_parse_row(const std::string_view &row, size_t &pos)
+    PgCopyTable::_parse_row(const std::string_view &row,
+                            const std::map<int32_t, std::map<std::string, float>> &type_map,
+                            size_t &pos)
     {
         // start with 16 bit integer -- number of fields
         int16_t num_columns = recvint16(row.data() + pos);
@@ -628,11 +689,20 @@ namespace springtail
 
             // get the underlying springtail type
             int32_t pg_type = _schema.columns[i].pg_type;
-            auto type = convert_pg_type(pg_type);
+            char pg_type_category = _schema.columns[i].type_category;
+            auto type = convert_pg_type(pg_type, pg_type_category);
 
             // check if null
             if (length == -1) {
                 fields->push_back(std::make_shared<ConstNullField>(type));
+                continue;
+            }
+
+            // handle user defined types, enums
+            if (pg_type_category == constant::USER_TYPE_ENUM) {
+                CHECK(type == SchemaType::FLOAT32);
+                fields->push_back(_get_enum_field(pg_type, std::string(row.data() + pos, length), type_map));
+                pos += length;
                 continue;
             }
 
@@ -694,8 +764,8 @@ namespace springtail
             case (SchemaType::BINARY): {
                 std::string_view tmp(row.data() + pos, length);
 
-                LOG_WARN("Converting unsupported type '{}' into BINARY -- {}",
-                            pg_type, tmp);
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Converting unsupported type '{}' into BINARY -- {}",
+                          pg_type, tmp);
                 // XXX print out the binary data here
                 std::vector<char> data(tmp.begin(), tmp.end());
                 fields->push_back(std::make_shared<ConstTypeField<std::vector<char>>>(data));
@@ -863,6 +933,9 @@ namespace springtail
         std::pair<uint64_t, std::string> snapshot_info = copy_table._get_xact_xids();
         result->set_snapshot(snapshot_info.first, snapshot_info.second);
 
+        // get the list of user defined types
+        auto &&user_type_map = copy_table._get_user_types();
+
         // iterate through the copy queue
         while (true) {
             // get the next copy request
@@ -878,6 +951,7 @@ namespace springtail
                 // copy the table
                 auto info = copy_table._copy_table(db_id,
                                                    xid,
+                                                   user_type_map,
                                                    request->table_name,
                                                    request->schema_name,
                                                    request->table_oid,
@@ -889,6 +963,7 @@ namespace springtail
             } catch (PgTableNotFoundError &e) {
                 LOG_ERROR("Table not found: {}.{}", request->schema_name, request->table_name);
             } catch (PgQueryError &e) {
+                e.log_backtrace();
                 LOG_ERROR("Error copying table: {}.{}", request->schema_name, request->table_name);
                 assert(false);
             }
@@ -919,8 +994,8 @@ namespace springtail
         _connection.clear();
     }
 
-    std::vector<std::pair<uint64_t, std::string>>
-    PgCopyTable::_get_namespaces(uint64_t db_id, uint64_t xid)
+    std::string
+    PgCopyTable::_get_schema_condition(LibPqConnection &connection, uint64_t db_id)
     {
         auto db_config = Properties::get_db_config(db_id);
         auto include_json = db_config["include"];
@@ -936,7 +1011,7 @@ namespace springtail
                 }
 
                 // Get the list of schema names for the query
-                schema_names.push_back(fmt::format("'{}'", _connection.escape_string(schema)));
+                schema_names.push_back(fmt::format("'{}'", connection.escape_string(schema)));
             }
         }
 
@@ -944,7 +1019,7 @@ namespace springtail
             for (const auto &table : include_json["tables"]) {
                 if (table.contains("schema") && table.contains("table")) {
                     std::string schema = table["schema"].get<std::string>();
-                    schema_names.push_back(fmt::format("'{}'", _connection.escape_string(schema)));
+                    schema_names.push_back(fmt::format("'{}'", connection.escape_string(schema)));
                 }
             }
         }
@@ -954,7 +1029,14 @@ namespace springtail
             schema_condition = fmt::format("AND nspname IN ({})", common::join_string(",", schema_names.begin(), schema_names.end()));
         }
 
+        return schema_condition;
+    }
+
+    std::vector<std::pair<uint64_t, std::string>>
+    PgCopyTable::_get_namespaces(uint64_t db_id, uint64_t xid)
+    {
         // get the namespaces
+        std::string schema_condition = _get_schema_condition(_connection, db_id);
         _connection.exec(fmt::format(NAMESPACE_QUERY, schema_condition));
 
         if (_connection.ntuples() == 0) {
@@ -977,6 +1059,54 @@ namespace springtail
     }
 
     void
+    PgCopyTable::create_usertypes(uint64_t db_id, uint64_t xid)
+    {
+        PgCopyTable copy_table;
+
+        // connect to the database
+        copy_table.connect(db_id);
+
+        // get the list of user defined types
+        std::string schema_condition = _get_schema_condition(copy_table._connection, db_id);
+        copy_table._connection.exec(fmt::format(ENUM_QUERY, schema_condition));
+
+        if (copy_table._connection.ntuples() == 0) {
+            LOG_INFO("No user defined types found for db_id: {}", db_id);
+            copy_table._connection.clear();
+            copy_table.disconnect();
+            return;
+        }
+
+        auto client = sys_tbl_mgr::Client::get_instance();
+        // iterate through the results and get the user defined types
+        for (int i = 0; i < copy_table._connection.ntuples(); i++) {
+            uint32_t enum_type_oid = copy_table._connection.get_int32(i, 0);
+            uint32_t namespace_oid = copy_table._connection.get_int32(i, 1);
+            std::string namespace_name = copy_table._connection.get_string(i, 2);
+            std::string enum_type_name = copy_table._connection.get_string(i, 3);
+            std::string enum_value_json = copy_table._connection.get_string(i, 4);
+
+            proto::UserTypeRequest udt_req;
+            udt_req.set_db_id(db_id);
+            udt_req.set_xid(xid);
+            udt_req.set_lsn(0);
+            udt_req.set_name(enum_type_name);
+            udt_req.set_type_id(enum_type_oid);
+            udt_req.set_namespace_id(namespace_oid);
+            udt_req.set_namespace_name(namespace_name);
+            udt_req.set_value_json(enum_value_json);
+            udt_req.set_type(constant::USER_TYPE_ENUM); // only support enum types
+
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Creating user defined type: {}, values: {}", enum_type_name, enum_value_json);
+
+            client->create_usertype(udt_req);
+        }
+
+        // disconnect from the database
+        copy_table.disconnect();
+    }
+
+    void
     PgCopyTable::create_namespaces(uint64_t db_id, uint64_t xid)
     {
         PgCopyTable copy_table;
@@ -993,7 +1123,7 @@ namespace springtail
         auto client = sys_tbl_mgr::Client::get_instance();
         // create the namespaces
         for (const auto &namespace_info : namespaces) {
-            LOG_DEBUG(LOG_ALL, "Creating namespace: {}", namespace_info.second);
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Creating namespace: {}", namespace_info.second);
 
             proto::NamespaceRequest ns_req;
             ns_req.set_db_id(db_id);
@@ -1006,6 +1136,35 @@ namespace springtail
             client->create_namespace(ns_req);
         }
     }
+
+    std::map<int32_t, std::map<std::string, float>>
+    PgCopyTable::_get_user_types()
+    {
+        std::map<int32_t, std::map<std::string, float>> user_types;
+
+        // get the list of user defined types
+        _connection.exec(fmt::format(ENUM_LOOKUP_QUERY));
+
+        if (_connection.ntuples() == 0) {
+            LOG_INFO("No user defined types found");
+            _connection.clear();
+            return user_types;
+        }
+
+        // iterate through the results and get the user defined types
+        for (int i = 0; i < _connection.ntuples(); i++) {
+            uint32_t enum_type_oid = _connection.get_int32(i, 0);
+            std::string enum_label = _connection.get_string(i, 1);
+            float enum_sortorder = _connection.get_float(i, 2);
+
+            // add the enum type to the map
+            user_types[enum_type_oid][enum_label] = enum_sortorder;
+        }
+
+        _connection.clear();
+        return user_types;
+    }
+
 
     std::vector<PgCopyResultPtr>
     PgCopyTable::_internal_copy(uint64_t db_id,
@@ -1062,7 +1221,7 @@ namespace springtail
 
         // iterate through the tables and copy them
         for (const auto &table_md : table_oids) {
-            LOG_DEBUG(LOG_ALL, "Dumping table {}", table_md.table_name);
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Dumping table {}", table_md.table_name);
 
             // add the table to the copy queue
             copy_queue->push(std::make_shared<CopyRequest>(table_md.table_name,

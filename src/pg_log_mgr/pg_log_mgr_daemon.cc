@@ -50,7 +50,7 @@ int main(int argc, char *argv[])
     runners->emplace_back(std::make_unique<pg_log_mgr::SyncTrackerRunner>());
     runners->emplace_back(std::make_unique<pg_log_mgr::PgLogCoordinatorRunner>());
 
-    springtail_init_daemon(runners, "pg_log_mgr", pidfile, LOG_ALL ^ LOG_PG_REPL);
+    springtail_init_daemon(runners, "pg_log_mgr", pidfile, LOG_ALL);
 
     springtail_daemon_run();
 

@@ -191,7 +191,7 @@ namespace springtail::pg_log_mgr {
              * Adds a mutation to a given table's batch.
              */
             template <int T>
-            void add_mutation(uint64_t current_xid, int32_t pg_xid, int32_t tid, const PgMsgTupleData &data);
+            void add_mutation(uint64_t current_xid, int32_t pg_xid, int32_t tid, PgMsgTupleData &data);
 
             /**
              * Records a truncation of a given set of tables into the batch.
@@ -232,8 +232,29 @@ namespace springtail::pg_log_mgr {
                     : table_schema(table_schema)
                 { }
 
-                /** Updates the schema and related fields from the table_schema. */
+                /**
+                 * Updates the schema and related fields from the table_schema.
+                 */
                 void update_schema();
+
+                /**
+                 * Update the fields and pkey fields for the table.
+                 * Called by add_mutation()
+                 * @param batch The current batch.
+                 * @param xid The XID and LSN of the mutation.
+                 */
+                void update_fields(Batch *batch, const XidLsn &xid);
+
+                /**
+                 * Helper to update a field array.
+                 * @param batch The current batch.
+                 * @param xid The XID and LSN of the mutation.
+                 * @param fields The field array to update.
+                 */
+                FieldArrayPtr get_pg_fields(Batch *batch,
+                                            const XidLsn &xid,
+                                            const MutableFieldArrayPtr fields,
+                                            const std::vector<int32_t> &pg_types);
             };
             using TableMap = std::map<int32_t, TableEntry>;
 
@@ -288,7 +309,6 @@ namespace springtail::pg_log_mgr {
             /**
              * Helper to handle the table validation management.  Updates the Batch-local view of
              * the invalid tables and also updates the msg object as needed.
-             *
              * @param msg The postgres message object.
              */
             bool _handle_validation(PgMsgPtr msg);
@@ -306,6 +326,21 @@ namespace springtail::pg_log_mgr {
                 return _exists_cache->exists(_db, table_id, xid);
             }
 
+            /**
+             * Lookup a user type in the batch and return the schema.
+             * @param pg_type The pg type of the field.
+             * @param xidlsn The XID and LSN of the message.
+             * @return UserTypePtr The user type schema.
+             */
+            UserTypePtr _usertype_cache_lookup(int32_t pg_type, const XidLsn &xidlsn) {
+                auto it = _user_types.find(pg_type);
+                if (it != _user_types.end()) {
+                    return it->second;
+                }
+                auto utp = SchemaMgr::get_instance()->get_usertype(_db, pg_type, xidlsn);
+                _user_types[pg_type] = utp;
+                return utp;
+            }
 
             //// MEMBER VARIABLES
             std::map<int32_t, TxnEntryPtr> _txns; ///< Map of pgxid to txn details.
@@ -327,6 +362,9 @@ namespace springtail::pg_log_mgr {
                 table contains std::nullopt, while an invalid one contains a JSON describing the
                 invalid columns.  */
             std::unordered_map<uint32_t, std::optional<nlohmann::json>> _table_validations;
+
+            /** Simple map of pg_type to user defined type.  Currently invalidated on any alteration */
+            std::unordered_map<int32_t, UserTypePtr> _user_types; ///< Map of user types to their schema
         };
         using BatchPtr = std::shared_ptr<Batch>;
 

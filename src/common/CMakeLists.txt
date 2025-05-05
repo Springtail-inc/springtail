@@ -47,6 +47,8 @@ target_link_libraries(springtail_common
         ${AWSSDK_LIBRARIES}
 )
 
+## helpers
+
 add_executable(log_tester test/log_tester.cc)
 target_include_directories(log_tester
      PUBLIC ${PROJECT_SOURCE_DIR}/include
@@ -54,81 +56,81 @@ target_include_directories(log_tester
 target_link_libraries(log_tester PRIVATE springtail_common)
 add_dsymutil_command(log_tester)
 
-add_executable(test_thread test/test_thread.cc)
-target_include_directories(test_thread PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_thread PRIVATE springtail_common GTest::gtest_main)
-add_dsymutil_command(test_thread)
+## unit tests
+springtail_unit_test(test_thread
+  SOURCES test/test_thread.cc
+  INCLUDES ${PROJECT_SOURCE_DIR}/include
+  LIBS springtail_common GTest::gtest_main
+)
 
-add_executable(test_queue test/test_queue.cc)
-target_include_directories(test_queue PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_queue PRIVATE springtail_common GTest::gtest_main)
-add_dsymutil_command(test_queue)
+springtail_unit_test(test_queue
+  SOURCES test/test_queue.cc
+  INCLUDES ${PROJECT_SOURCE_DIR}/include
+  LIBS springtail_common GTest::gtest_main
+)
 
-add_executable(test_common test/test_common.cc)
-target_include_directories(test_common PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_common PRIVATE springtail_common GTest::gtest_main)
-add_dsymutil_command(test_common)
+springtail_unit_test(test_common
+  SOURCES test/test_common.cc
+  INCLUDES ${PROJECT_SOURCE_DIR}/include
+  LIBS springtail_common GTest::gtest_main
+)
 
-add_executable(test_filesystem test/test_filesystem.cc)
-target_include_directories(test_filesystem PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_filesystem PRIVATE springtail_common GTest::gtest_main)
-add_dsymutil_command(test_filesystem)
+springtail_unit_test(test_filesystem
+  SOURCES test/test_filesystem.cc
+  INCLUDES ${PROJECT_SOURCE_DIR}/include
+  LIBS springtail_common GTest::gtest_main
+)
 
-add_executable(test_counter test/test_counter.cc)
-target_include_directories(test_counter PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_counter PRIVATE springtail_common Boost::thread GTest::gtest_main)
-add_dsymutil_command(test_counter)
+springtail_unit_test(test_counter
+  SOURCES test/test_counter.cc
+  INCLUDES ${PROJECT_SOURCE_DIR}/include
+  LIBS springtail_common Boost::thread GTest::gtest_main
+)
 
-add_executable(test_dns test/test_dns.cc)
-target_include_directories(test_dns PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_dns PRIVATE springtail_common Boost::thread GTest::gtest_main)
-add_dsymutil_command(test_dns)
+springtail_unit_test(test_dns
+  SOURCES test/test_dns.cc
+  INCLUDES ${PROJECT_SOURCE_DIR}/include
+  LIBS springtail_common Boost::thread GTest::gtest_main
+)
 
-add_executable(test_synchronizer test/test_synchronizer.cc)
-target_include_directories(test_synchronizer PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_synchronizer PRIVATE springtail_common Boost::thread GTest::gtest_main)
-add_dsymutil_command(test_synchronizer)
+springtail_unit_test(test_synchronizer
+  SOURCES test/test_synchronizer.cc
+  INCLUDES ${PROJECT_SOURCE_DIR}/include
+  LIBS springtail_common Boost::thread GTest::gtest_main
+)
 
-add_executable(test_exception test/test_exception.cc)
-target_include_directories(test_exception PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_exception GTest::gtest_main)
-add_dsymutil_command(test_exception)
+springtail_unit_test(test_exception
+  SOURCES test/test_exception.cc
+  INCLUDES ${PROJECT_SOURCE_DIR}/include
+  LIBS springtail_common GTest::gtest_main
+)
 
-add_executable(test_coordinator test/test_coordinator.cc)
-target_include_directories(test_coordinator PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_coordinator PRIVATE springtail_common GTest::gtest_main)
-add_dsymutil_command(test_coordinator)
+springtail_unit_test(test_coordinator
+  SOURCES test/test_coordinator.cc
+  INCLUDES ${PROJECT_SOURCE_DIR}/include
+  LIBS springtail_common GTest::gtest_main
+)
 
-add_executable(test_redis_cache test/test_redis_cache.cc)
-target_include_directories(test_redis_cache PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_redis_cache PRIVATE springtail_common Boost::thread GTest::gtest_main)
-add_dsymutil_command(test_redis_cache)
+springtail_unit_test(test_redis_cache
+  SOURCES test/test_redis_cache.cc
+  INCLUDES ${PROJECT_SOURCE_DIR}/include
+  LIBS springtail_common Boost::thread GTest::gtest_main
+)
 
-add_executable(test_thread_manager test/test_thread_manager.cc multi_queue_thread_manager.cc)
-target_include_directories(test_thread_manager PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_thread_manager PRIVATE springtail_common GTest::gtest_main)
-add_dsymutil_command(test_thread_manager)
+springtail_unit_test(test_thread_manager
+  SOURCES test/test_thread_manager.cc
+  INCLUDES ${PROJECT_SOURCE_DIR}/include
+  LIBS springtail_common GTest::gtest_main
+)
 
-add_executable(test_timestamp test/test_timestamp.cc)
-target_include_directories(test_timestamp PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_timestamp PRIVATE springtail_common GTest::gtest_main)
-add_dsymutil_command(test_timestamp)
+springtail_unit_test(test_timestamp
+  SOURCES test/test_timestamp.cc
+  INCLUDES ${PROJECT_SOURCE_DIR}/include
+  LIBS springtail_common GTest::gtest_main
+)
 
-add_executable(test_time_trace test/test_time_trace.cc)
-target_include_directories(test_time_trace PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_time_trace PRIVATE springtail_common GTest::gtest_main)
-add_dsymutil_command(test_time_trace)
-
-gtest_discover_tests(test_thread)
-gtest_discover_tests(test_queue)
-gtest_discover_tests(test_common)
-gtest_discover_tests(test_filesystem)
-gtest_discover_tests(test_counter)
-gtest_discover_tests(test_dns)
-gtest_discover_tests(test_synchronizer)
-gtest_discover_tests(test_exception)
-gtest_discover_tests(test_coordinator)
-gtest_discover_tests(test_redis_cache)
-gtest_discover_tests(test_thread_manager)
-gtest_discover_tests(test_timestamp)
-gtest_discover_tests(test_time_trace)
+springtail_unit_test(test_time_trace
+  SOURCES test/test_time_trace.cc
+  INCLUDES ${PROJECT_SOURCE_DIR}/include
+  LIBS springtail_common GTest::gtest_main
+)

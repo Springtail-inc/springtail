@@ -271,7 +271,7 @@ namespace {
 
             // don't call create state as it calls xid mgr, just create state
             auto table = TableMgr::get_instance()->get_table(_db_id, _tid, _table_xid);
-            PgFdwState *state = new PgFdwState{table, _tid, _table_xid};
+            PgFdwState *state = new PgFdwState{table, _db_id, _tid, _table_xid};
 
             // populate the attr_map -- usually done in fdw_get_rel_size()
             ListCell *lc;

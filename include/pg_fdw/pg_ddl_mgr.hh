@@ -47,15 +47,28 @@ namespace springtail::pg_fdw {
 
         /**
          * @brief This function runs the main loop of DDL manager
-         *
          */
         void run();
 
         /**
          * @brief This function notifies DDL manager to exit the main loop
-         *
          */
         void notify_shutdown() { _is_shutting_down = true; }
+
+        /**
+         * @brief Generate enum alter type sql statement
+         * It is public due for testing
+         * @param escaped_schema schema name
+         * @param escaped_name type name
+         * @param old_value_json_str json array of value strings
+         * @param new_value_json_str json array of new value strings
+         * @param conn connection
+         */
+        static std::string gen_alter_enum_sql(const std::string &escaped_schema,
+                                              const std::string &escaped_name,
+                                              const nlohmann::json &from,
+                                              const nlohmann::json &to,
+                                              const LibPqConnectionPtr conn);
     private:
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections
         RedisCache::RedisChangeWatcherPtr _cache_watcher;           ///< redis cache callback object
@@ -98,11 +111,21 @@ namespace springtail::pg_fdw {
          */
         std::string _get_alter_schema_with_grants_query(std::string_view old_schema, std::string_view new_schema);
 
+        /**
+         * @brief Helper to generate a create type query
+         * @param escaped_schema schema name
+         * @param escaped_name type name
+         * @param value_json_str json array of value strings
+         * @param conn connection
+         * @return std::string create type query string
+         */
+        std::string _get_create_type_query(std::string_view escaped_schema,
+                                           std::string_view escaped_name,
+                                           std::string_view value_json_str,
+                                           LibPqConnectionPtr conn);
+
         /** Helper to connect to fdw db */
         LibPqConnectionPtr _connect_fdw(std::optional<uint64_t> db_id, const std::string &db_name);
-
-        /** Helper to connect to primary db */
-        LibPqConnectionPtr _connect_primary(uint64_t db_id, const std::string &db_name);
 
         /**
          * @brief Helper to apply outstanding DDL changes to the FDW tables.
@@ -129,31 +152,21 @@ namespace springtail::pg_fdw {
                           const std::vector<std::string> &sql);
 
         /**
-         * @brief Helper to get schemas from db config
+         * @brief Helper to get schemas from the system tables
          * @param db_id db id
-         * @param db_name db name
          * @param xid transaction id
-         * @return set of schemas
+         * @return map of schemas <ns_id, schema name>
          */
-        std::set<std::string> _get_schemas(uint64_t db_id, const std::string &db_name, uint64_t xid);
+        std::map<uint64_t, std::string> _get_schemas(uint64_t db_id, uint64_t xid);
 
         /**
-         * @brief Helper to diff oid type set with keys from _type_map
-         * @param pg_types set of PG type OIDs
-         * @param mapped_types map of PG type OIDs to type names found in _type_map (output)
-         * @return set of type OIDs not in _type_map, but in pg_types
+         * @brief Helper to get user defined types from the system tables
+         * @param db_id db id
+         * @param xid transaction id
+         * @return map of namespace id to map of type_id to pair <type_name, value_json>
          */
-        std::set<uint32_t> _type_map_difference(std::set<uint32_t> &pg_types,
-            std::map<uint32_t, std::string> &mapped_types);
-
-        /**
-         * @brief Helper to convert a set of PG type OIDs to type names via an external SQL query.
-         * @param conn LibPqConnectionPtr connection
-         * @param pg_types set of PG type OIDs
-         * @return map of PG type OIDs to type names
-         */
-        std::map<uint32_t, std::string>
-        _query_type_names(LibPqConnectionPtr conn, std::set<uint32_t> pg_types);
+        std::map<uint64_t, std::map<uint64_t, std::pair<std::string, std::string>>>
+        _get_usertypes(uint64_t db_id, uint64_t xid);
 
         /**
          * @brief Helper to generate sql statement from json.  Decodes the ddl json.
@@ -169,13 +182,13 @@ namespace springtail::pg_fdw {
                            const nlohmann::json &ddl);
 
         /** Helper to generate sql for FDW foreign table */
-        static std::string
+        std::string
         _gen_fdw_table_sql(LibPqConnectionPtr conn,
                            const std::string &server_name,
                            const std::string &schema,
                            const std::string &table,
                            uint64_t tid,
-                           std::vector<std::tuple<std::string, std::string, bool>> &columns);
+                           const nlohmann::json &columns);
 
         /**
          * @brief Function for creating a replicated database
