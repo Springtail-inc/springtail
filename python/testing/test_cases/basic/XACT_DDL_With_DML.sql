@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS countries (
 
 COMMIT;
 
--- INSERTIN REGIONS --
+-- INSERTING REGIONS --
 BEGIN;
 INSERT INTO regions (region_id, region_name) VALUES (1, 'Europe');
 INSERT INTO regions (region_id, region_name) VALUES (2, 'North America');
@@ -164,6 +164,65 @@ UPDATE countries SET area = 1964375, population = 128933195 WHERE country_id = '
 
 -- alter column type
 ALTER TABLE countries DROP COLUMN population;
+ALTER TABLE countries DROP COLUMN area;
+
+COMMIT;
+
+-- add another table
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS locations (
+    location_id SERIAL PRIMARY KEY,
+    street_address CHARACTER VARYING (40),
+    postal_code CHARACTER VARYING (12),
+    city CHARACTER VARYING (30) NOT NULL,
+    state_province CHARACTER VARYING (35),
+    country_id CHARACTER (2) NOT NULL,
+    FOREIGN KEY (country_id) REFERENCES countries (country_id) ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+COMMIT;
+
+-- DDLs with DMLs with resync and other table DMLs --
+BEGIN;
+
+-- INSERTING LOCATION for Denmark --
+INSERT INTO locations (location_id, street_address, postal_code, city, state_province, country_id) VALUES (12, 'Østerbrogade 45', '2100', 'Copenhagen', 'Capital Region', 'DK');
+
+-- add columns
+ALTER TABLE countries
+    ADD COLUMN area INTEGER CHECK (area >= 0) DEFAULT 0 NOT NULL,
+    ADD COLUMN population BIGINT CHECK (population >= 0) DEFAULT 0 NOT NULL;
+
+-- INSERTING LOCATION for Estonia --
+INSERT INTO locations (location_id, street_address, postal_code, city, state_province, country_id) VALUES (13, 'Pärnu mnt 18', '10141', 'Tallinn', 'Harju County', 'EE');
+
+UPDATE countries SET area = 429, population = 5831404 WHERE country_id = 'DK';
+UPDATE countries SET area = 45227, population = 1326535 WHERE country_id = 'EE';
+UPDATE countries SET area = 41833, population = 17019800 WHERE country_id = 'NL';
+
+-- INSERTING LOCATION for Netherlands --
+INSERT INTO locations (location_id, street_address, postal_code, city, state_province, country_id) VALUES (32, 'Damrak 70', '1012 LM', 'Amsterdam', 'North Holland', 'NL');
+
+-- remove columns
+ALTER TABLE countries ALTER COLUMN area SET DATA TYPE BIGINT;
+
+ -- UPDATING LOCATION for Denmark --
+UPDATE locations SET street_address = 'Østerbrogade 50' WHERE country_id = 'DK';
+
+UPDATE countries SET area = 9833517, population = 331002651 WHERE country_id = 'US';
+UPDATE countries SET area = 9984670, population = 37742154 WHERE country_id = 'CA';
+UPDATE countries SET area = 1964375, population = 128933195 WHERE country_id = 'MX';
+
+ -- UPDATING LOCATION for Estonia --
+UPDATE locations SET street_address = 'Pärnu mnt 18' WHERE country_id = 'EE';
+
+-- alter column type
+ALTER TABLE countries DROP COLUMN population;
+ALTER TABLE countries DROP COLUMN area;
+
+ -- UPDATING LOCATION for Netherlands --
+UPDATE locations SET street_address = 'Damrak 70' WHERE country_id = 'NL';
 
 COMMIT;
 
