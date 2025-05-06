@@ -497,9 +497,13 @@ namespace springtail::committer {
 
         auto wc_schema = schema->create_schema(columns, new_columns, sort_keys);
 
+        time_trace::Trace process_extent_trace;
+        TIME_TRACE_START(process_extent_trace);
         // Get the extent from the write cache index
         Extent extent(*wc_extent->data);
         LOG_DEBUG(LOG_COMMITTER, "xid={} rows={}", xid.xid, extent.row_count());
+        TIME_TRACE_STOP(process_extent_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("committer_write_extent-xid_{}", xid.xid), process_extent_trace);
 
         // process the rows
         auto op_f = wc_schema->get_field("__springtail_op");
@@ -512,13 +516,19 @@ namespace springtail::committer {
         //     which must always appear first in a batch (although not necessarily first in
         //     the transaction).
         for (auto &row : extent) {
+            time_trace::Trace process_row_trace;
+            TIME_TRACE_START(process_row_trace);
             uint8_t op = op_f->get_uint8(row);
             switch (op) {
             case INSERT:
                 {
                     auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
                     LOG_DEBUG(LOG_COMMITTER, "INSERT value={}", tuple->to_string());
+                    time_trace::Trace table_insert_trace;
+                    TIME_TRACE_START(table_insert_trace);
                     table->insert(tuple, constant::UNKNOWN_EXTENT);
+                    TIME_TRACE_STOP(table_insert_trace);
+                    TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("committer_insert-xid_{}", xid.xid), table_insert_trace);
                     break;
                 }
             case UPDATE:
@@ -556,6 +566,8 @@ namespace springtail::committer {
                     CHECK(false);
                 }
             }
+            TIME_TRACE_STOP(process_row_trace);
+            TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("committer_process_row-xid_{}", xid.xid), process_row_trace);
         }
     }
 }  // namespace springtail::gc

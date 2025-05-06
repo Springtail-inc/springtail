@@ -951,7 +951,11 @@ namespace indexer_helpers {
         _check_convert_page(page);
 
         // add the row to the page
+        time_trace::Trace insert_trace;
+        TIME_TRACE_START(insert_trace);
         page->insert(value, _schema);
+        TIME_TRACE_STOP(insert_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("table_insert_direct-xid_{}", _target_xid), insert_trace);
     }
 
     void
@@ -1019,9 +1023,13 @@ namespace indexer_helpers {
             return;
         }
 
+        time_trace::Trace insert_primary_key_lookup_trace;
+        TIME_TRACE_START(insert_primary_key_lookup_trace);
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
         auto search_key = _schema->tuple_subset(value, _primary_key);
         auto i = _primary_index->lower_bound(search_key, true);
+        TIME_TRACE_STOP(insert_primary_key_lookup_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("table_insert_primary_key_lookup-xid_{}", _target_xid), insert_primary_key_lookup_trace);
 
         // if the primary index is not empty, get the target extent
         uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
