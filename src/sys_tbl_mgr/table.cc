@@ -1216,9 +1216,6 @@ namespace indexer_helpers {
 #if ENABLE_SCHEMA_MUTATES
         auto header = page->header();
         XidLsn access_xid(header.xid);
-#else
-        XidLsn access_xid(_access_xid);
-#endif
         XidLsn target_xid(_target_xid);
 
         auto schema = SchemaMgr::get_instance()->get_schema(_db_id, _id, access_xid, target_xid);
@@ -1228,6 +1225,9 @@ namespace indexer_helpers {
         if (virtual_schema) {
             page->convert(virtual_schema, _schema, _target_xid);
         }
+#else
+        // don't need to convert pages if we aren't supporting schema layout mutations
+#endif
     }
 
     void Table::Iterator::Primary::next()
