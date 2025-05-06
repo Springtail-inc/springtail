@@ -79,6 +79,8 @@ ALTER TABLE new_countries RENAME COLUMN new_country_name TO country_name;
 
 CREATE INDEX country_name_index ON new_countries (country_name);
 
+SELECT pg_sleep(3);
+
 DROP INDEX country_name_index;
 
 COMMIT;
@@ -135,6 +137,8 @@ INSERT INTO countries (country_id, country_name, region_id) VALUES ('AZ', 'Azerb
 INSERT INTO countries (country_id, country_name, region_id) VALUES ('CI', 'Côte d''Ivoire', 6);
 
 CREATE INDEX country_name_index ON countries (country_name);
+
+SELECT pg_sleep(3);
 
 DELETE FROM countries WHERE country_name = 'Azerbaijan';
 UPDATE countries SET country_name = 'Free Republic of North Korea' WHERE country_id = 'KP';
