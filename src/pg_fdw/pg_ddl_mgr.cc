@@ -572,6 +572,7 @@ namespace springtail::pg_fdw {
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(ddl.at("column").get<std::string>()));
         }
+#endif /* ENABLE_SCHEMA_MUTATES */
 
         else if (action == "col_rename") {
             return fmt::format("ALTER FOREIGN TABLE {}.{} RENAME COLUMN {} TO {};",
@@ -581,6 +582,7 @@ namespace springtail::pg_fdw {
                                conn->escape_identifier(ddl.at("new_name").get<std::string>()));
         }
 
+#if ENABLE_SCHEMA_MUTATES
         else if (action == "col_nullable") {
             auto &col = ddl.at("column");
             return fmt::format("ALTER FOREIGN TABLE {}.{} ALTER COLUMN {} {} NOT NULL;",
