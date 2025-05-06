@@ -266,12 +266,12 @@ namespace springtail::pg_log_mgr {
             /**
              * Applies the schema changes from txns / subtxns in LSN order to the SysTblMgr.
              */
-            void _apply_schema_changes(const LsnChangeMap &change_map, uint64_t xid);
+            void _apply_schema_changes(const LsnChangeMap &change_map, uint64_t xid, const std::vector<uint64_t> &pg_xids);
 
             /**
              * Apply a single schema change to the SysTblMgr.
              */
-            void _apply_schema_change(PgMsgPtr change, const XidLsn &xidlsn);
+            void _apply_schema_change(PgMsgPtr change, const XidLsn &xidlsn, const std::vector<uint64_t> &pg_xids);
 
             /**
              * @brief Helper method to mark the table for resync. Internally calls sync_tracker->mark_resync
@@ -279,7 +279,7 @@ namespace springtail::pg_log_mgr {
              * @param table_oid Table OID
              * @param xidlsn XID LSN
              */
-            void _mark_table_resync(uint64_t table_oid, const XidLsn &xidlsn);
+            void _mark_table_resync(uint64_t table_oid, const XidLsn &xidlsn, const std::vector<uint64_t> &pg_xids);
 
             /**
              * Helper to check if a given table is invalid as visible within this Batch.
