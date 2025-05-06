@@ -716,7 +716,8 @@ MutableBTree::lower_bound(TuplePtr search_key,
             {
                 // currently looks evictable and requires a flush; acquire the parent disk_mutex to
                 // ensure it doesn't get flushed
-                boost::shared_lock parent_lock(parent->disk_mutex);
+                // note: not actually required since the parent would attempt to flush the dirty child before itself
+                // boost::shared_lock parent_lock(parent->disk_mutex);
 
                 // lock the page's disk_mutex since we are about to flush
                 // note: should never block since we removed the entry from the cache while it wasn't in use
