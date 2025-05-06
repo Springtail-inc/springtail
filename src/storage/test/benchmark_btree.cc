@@ -42,7 +42,7 @@ class BenchmarkHelper {
             (*key_fields)[2] = std::make_shared<ConstTypeField<uint64_t>>(i % 1000);
             (*value_fields)[0] = std::make_shared<ConstTypeField<uint16_t>>(i % 1000);
 
-            auto kvt = std::make_shared<KeyValueTuple>(key_fields, value_fields, std::any{});
+            auto kvt = std::make_shared<KeyValueTuple>(key_fields, value_fields, nullptr);
             btree->insert(kvt);
         }
     }
@@ -146,9 +146,14 @@ BENCHMARK(BM_BTreeInsert)
 
 int main(int argc, char **argv) {
     benchmark::Initialize(&argc, argv);
-    auto logging = LOG_NONE;
-    springtail_init(std::nullopt, false, std::nullopt, logging);
+
+    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+    runners.emplace();
+    runners->emplace_back(std::make_unique<IOMgrRunner>());
+    springtail_init(runners, false, std::nullopt, LOG_NONE);
+
     benchmark::RunSpecifiedBenchmarks();
+
     springtail_shutdown();
     return 0;
 }

@@ -505,18 +505,18 @@ namespace springtail::committer {
         //     which must always appear first in a batch (although not necessarily first in
         //     the transaction).
         for (auto &row : extent) {
-            uint8_t op = op_f->get_uint8(row);
+            uint8_t op = op_f->get_uint8(&row);
             switch (op) {
             case INSERT:
                 {
-                    auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
+                    auto tuple = std::make_shared<FieldTuple>(wc_fields, &row);
                     LOG_DEBUG(LOG_COMMITTER, "INSERT value={}", tuple->to_string());
                     table->insert(tuple, constant::UNKNOWN_EXTENT);
                     break;
                 }
             case UPDATE:
                 {
-                    auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
+                    auto tuple = std::make_shared<FieldTuple>(wc_fields, &row);
                     LOG_DEBUG(LOG_COMMITTER, "UPDATE value={}", tuple->to_string());
                     table->update(tuple, constant::UNKNOWN_EXTENT);
                     break;
@@ -525,11 +525,11 @@ namespace springtail::committer {
                 {
                     if (wc_key_fields->empty()) {
                         // no sort key, so need to handle non-primary key by using the entire row
-                        auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
+                        auto tuple = std::make_shared<FieldTuple>(wc_fields, &row);
                         LOG_DEBUG(LOG_COMMITTER, "DELETE value={}", tuple->to_string());
                         table->remove(tuple, constant::UNKNOWN_EXTENT);
                     } else {
-                        auto tuple = std::make_shared<FieldTuple>(wc_key_fields, row);
+                        auto tuple = std::make_shared<FieldTuple>(wc_key_fields, &row);
                         LOG_DEBUG(LOG_COMMITTER, "DELETE value={}", tuple->to_string());
                         table->remove(tuple, constant::UNKNOWN_EXTENT);
                     }

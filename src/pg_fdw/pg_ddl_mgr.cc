@@ -136,11 +136,11 @@ namespace springtail::pg_fdw {
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::UserTypes::ID, xid);
         auto fields = table->extent_schema()->get_fields();
         for (auto row : (*table)) {
-            uint64_t namespace_id = fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID)->get_uint64(row);
-            uint64_t type_id = fields->at(sys_tbl::UserTypes::Data::TYPE_ID)->get_uint64(row);
+            uint64_t namespace_id = fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID)->get_uint64(&row);
+            uint64_t type_id = fields->at(sys_tbl::UserTypes::Data::TYPE_ID)->get_uint64(&row);
 
             // make sure entry exists at this xid
-            bool exists = fields->at(sys_tbl::UserTypes::Data::EXISTS)->get_bool(row);
+            bool exists = fields->at(sys_tbl::UserTypes::Data::EXISTS)->get_bool(&row);
             if (!exists) {
                 // find type_id and remove it
                 auto it = usertype_map.find(namespace_id);
@@ -153,11 +153,11 @@ namespace springtail::pg_fdw {
                 continue;
             }
 
-            std::string type_name(fields->at(sys_tbl::UserTypes::Data::NAME)->get_text(row));
-            std::string value_json(fields->at(sys_tbl::UserTypes::Data::VALUE)->get_text(row));
+            std::string type_name(fields->at(sys_tbl::UserTypes::Data::NAME)->get_text(&row));
+            std::string value_json(fields->at(sys_tbl::UserTypes::Data::VALUE)->get_text(&row));
 
             // only enums supported
-            DCHECK(fields->at(sys_tbl::UserTypes::Data::TYPE)->get_uint8(row) == constant::USER_TYPE_ENUM);
+            DCHECK(fields->at(sys_tbl::UserTypes::Data::TYPE)->get_uint8(&row) == constant::USER_TYPE_ENUM);
 
             // insert into map by namespace_id
             usertype_map[namespace_id][type_id] = std::make_pair(type_name, value_json);
@@ -206,14 +206,14 @@ namespace springtail::pg_fdw {
         auto fields = table->extent_schema()->get_fields();
         for (auto row : (*table)) {
             // make sure entry exists at this xid
-            uint64_t namespace_id = fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(row);
-            bool exists = fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(row);
+            uint64_t namespace_id = fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&row);
+            bool exists = fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row);
             if (!exists) {
                 schema_map.erase(namespace_id);
                 continue;
             }
             // check if we have a schema name match, if so add it to the map
-            std::string namespace_name(fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(row));
+            std::string namespace_name(fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&row));
             if (all_schemas || schemas.contains(namespace_name)) {
                 schema_map[namespace_id] = namespace_name;
             }
