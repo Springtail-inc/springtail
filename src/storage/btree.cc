@@ -51,7 +51,7 @@ namespace springtail {
         // iterate down to the leaf
         while (node->page->header().type.is_branch()) {
             // get the offset for the child
-            uint64_t child_id = _branch_child_f->get_uint64(*(node->row_i));
+            uint64_t child_id = _branch_child_f->get_uint64(&*(node->row_i));
 
             // read the extent
             LOG_DEBUG(LOG_BTREE, "Get child page: {}", child_id);
@@ -97,7 +97,7 @@ namespace springtail {
             }
 
             // retrieve the child offset
-            uint64_t extent_id = _branch_child_f->get_uint64(*child_i);
+            uint64_t extent_id = _branch_child_f->get_uint64(&*child_i);
 
             // read the child extent
             auto child = StorageCache::get_instance()->get(_file, extent_id, _xid);
@@ -152,7 +152,7 @@ namespace springtail {
             }
 
             // retrieve the child offset
-            uint64_t extent_id = _branch_child_f->get_uint64(*child_i);
+            uint64_t extent_id = _branch_child_f->get_uint64(&*child_i);
 
             // read the child extent
             auto child = StorageCache::get_instance()->get(_file, extent_id, _xid);
@@ -215,7 +215,7 @@ namespace springtail {
         }
 
         // generate the key of the provided row
-        auto key = std::make_shared<FieldTuple>(_leaf_keys, *i);
+        auto key = std::make_shared<FieldTuple>(_leaf_keys, &*i);
 
         // if the search key is < found key from lower_bound, then does not exist
         if (search_key->less_than(key)) {

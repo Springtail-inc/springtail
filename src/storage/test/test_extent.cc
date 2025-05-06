@@ -62,13 +62,13 @@ namespace {
                   int32_t nullable,
                   bool is_null)
         {
-            _variable_f->set_text(row, variable);
-            _fixed_f->set_uint64(row, fixed);
-            _bit_f->set_bool(row, bit);
+            _variable_f->set_text(&row, variable);
+            _fixed_f->set_uint64(&row, fixed);
+            _bit_f->set_bool(&row, bit);
             if (is_null) {
-                _nullable_f->set_null(row, true);
+                _nullable_f->set_null(&row, true);
             } else {
-                _nullable_f->set_int32(row, nullable);
+                _nullable_f->set_int32(&row, nullable);
             }
         }
 
@@ -80,12 +80,12 @@ namespace {
                 int32_t nullable,
                 bool is_null)
         {
-            EXPECT_EQ(_variable_f->get_text(row).compare(variable), 0);
-            EXPECT_EQ(_fixed_f->get_uint64(row), fixed);
-            EXPECT_EQ(_bit_f->get_bool(row), bit);
-            EXPECT_EQ(_nullable_f->is_null(row), is_null);
+            EXPECT_EQ(_variable_f->get_text(&row).compare(variable), 0);
+            EXPECT_EQ(_fixed_f->get_uint64(&row), fixed);
+            EXPECT_EQ(_bit_f->get_bool(&row), bit);
+            EXPECT_EQ(_nullable_f->is_null(&row), is_null);
             if (!is_null) {
-                EXPECT_EQ(_nullable_f->get_int32(row), nullable);
+                EXPECT_EQ(_nullable_f->get_int32(&row), nullable);
             }
         }
 
@@ -160,12 +160,13 @@ namespace {
 
         // check that the iterator works as expected
         auto i = extent->begin();
+        auto &&row = *i;
 
-        EXPECT_EQ(variable_f->get_text(*i).compare("duplicate"), 0);
-        EXPECT_EQ(fixed_f->get_uint64(*i), 321837248973189LL);
-        EXPECT_TRUE(bit_f->get_bool(*i));
-        EXPECT_FALSE(nullable_f->is_null(*i));
-        EXPECT_EQ(nullable_f->get_int32(*i), 15);
+        EXPECT_EQ(variable_f->get_text(&row).compare("duplicate"), 0);
+        EXPECT_EQ(fixed_f->get_uint64(&row), 321837248973189LL);
+        EXPECT_TRUE(bit_f->get_bool(&row));
+        EXPECT_FALSE(nullable_f->is_null(&row));
+        EXPECT_EQ(nullable_f->get_int32(&row), 15);
 
         ++i; // test increment
         i += 3; // test addition
@@ -173,30 +174,30 @@ namespace {
 
         // check that the data of the second entry matches
         {
-            auto row = extent->at(1);
-            EXPECT_EQ(variable_f->get_text(*row).compare("duplicate"), 0);
-            EXPECT_EQ(fixed_f->get_uint64(*row), 15);
-            EXPECT_FALSE(bit_f->get_bool(*row));
-            EXPECT_TRUE(nullable_f->is_null(*row));
+            auto row = *(extent->at(1));
+            EXPECT_EQ(variable_f->get_text(&row).compare("duplicate"), 0);
+            EXPECT_EQ(fixed_f->get_uint64(&row), 15);
+            EXPECT_FALSE(bit_f->get_bool(&row));
+            EXPECT_TRUE(nullable_f->is_null(&row));
         }
 
         // check that the data of the third entry matches
         {
-            auto row = extent->at(2);
-            EXPECT_EQ(variable_f->get_text(*row).compare("different"), 0);
-            EXPECT_EQ(fixed_f->get_uint64(*row), 4372895);
-            EXPECT_TRUE(bit_f->get_bool(*row));
-            EXPECT_FALSE(nullable_f->is_null(*row));
-            EXPECT_EQ(nullable_f->get_int32(*row), 12);
+            auto row = *(extent->at(2));
+            EXPECT_EQ(variable_f->get_text(&row).compare("different"), 0);
+            EXPECT_EQ(fixed_f->get_uint64(&row), 4372895);
+            EXPECT_TRUE(bit_f->get_bool(&row));
+            EXPECT_FALSE(nullable_f->is_null(&row));
+            EXPECT_EQ(nullable_f->get_int32(&row), 12);
         }
 
         // check the data of the last entry matches
         Extent::Row back_row = extent->back();
-        EXPECT_EQ(variable_f->get_text(back_row).compare(""), 0);
-        EXPECT_EQ(fixed_f->get_uint64(back_row), 4372896);
-        EXPECT_TRUE(bit_f->get_bool(back_row));
-        EXPECT_FALSE(nullable_f->is_null(back_row));
-        EXPECT_EQ(nullable_f->get_int32(back_row), 15);
+        EXPECT_EQ(variable_f->get_text(&back_row).compare(""), 0);
+        EXPECT_EQ(fixed_f->get_uint64(&back_row), 4372896);
+        EXPECT_TRUE(bit_f->get_bool(&back_row));
+        EXPECT_FALSE(nullable_f->is_null(&back_row));
+        EXPECT_EQ(nullable_f->get_int32(&back_row), 15);
     }
 
     TEST_F(Extent_Test, WriteAndReadViaDisk) {
@@ -225,9 +226,12 @@ namespace {
         auto j = disk_extent->begin();
         for (auto i = extent->begin(); i != extent->end(); ++i, ++j)
         {
+            auto &&i_row = *i;
+            auto &&j_row = *j;
+
             // compare less_than() both directions to check for equality
-            ASSERT_FALSE(FieldTuple(fs, *i).less_than(FieldTuple(fs, *j)));
-            ASSERT_FALSE(FieldTuple(fs, *j).less_than(FieldTuple(fs, *i)));
+            ASSERT_FALSE(FieldTuple(fs, &i_row).less_than(FieldTuple(fs, &j_row)));
+            ASSERT_FALSE(FieldTuple(fs, &j_row).less_than(FieldTuple(fs, &i_row)));
         }
     }
 
@@ -300,9 +304,10 @@ namespace {
                 on_first = false;
                 i = pair.second->begin();
             }
+            auto &&i_row = *i;
 
-            ASSERT_FALSE(FieldTuple(fs, row).less_than(FieldTuple(fs, *i)));
-            ASSERT_FALSE(FieldTuple(fs, *i).less_than(FieldTuple(fs, row)));
+            ASSERT_FALSE(FieldTuple(fs, &row).less_than(FieldTuple(fs, &i_row)));
+            ASSERT_FALSE(FieldTuple(fs, &i_row).less_than(FieldTuple(fs, &row)));
 
             ++i;
         }

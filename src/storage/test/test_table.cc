@@ -210,7 +210,7 @@ namespace {
             csv::CSVReader reader("test_btree_simple.csv");
             for (auto &&r : reader) {
                 // insert data to the tree
-                mtable->insert(std::make_shared<FieldTuple>(_csv_fields, r), constant::UNKNOWN_EXTENT);
+                mtable->insert(std::make_shared<FieldTuple>(_csv_fields, &r), constant::UNKNOWN_EXTENT);
             }
         }
 
@@ -317,10 +317,10 @@ namespace {
         std::string prev = "";
         for (auto &row : *table) {
             if (prev != "") {
-                ASSERT_GT(_fields->at(1)->get_text(row), prev);
+                ASSERT_GT(_fields->at(1)->get_text(&row), prev);
             }
 
-            prev = _fields->at(1)->get_text(row);
+            prev = _fields->at(1)->get_text(&row);
             ++count;
         }
         ASSERT_EQ(count, 5000);
@@ -332,7 +332,7 @@ namespace {
         uint64_t table_id = 0;
         auto table_id_f = secondary->get_schema()->get_field("table_id");
         for (auto row : *secondary) {
-            auto current = table_id_f->get_uint64(row);
+            auto current = table_id_f->get_uint64(&row);
             ASSERT_LE(table_id, current);
             table_id = current;
             ++count;
@@ -422,23 +422,23 @@ namespace {
         std::string prev = "";
         for (auto &row : *table) {
             if (prev != "") {
-                ASSERT_GT(_fields->at(1)->get_text(row), prev);
+                ASSERT_GT(_fields->at(1)->get_text(&row), prev);
             }
 
             // check that the removes and updates occurred correctly
-            uint64_t table_id = _fields->at(0)->get_uint64(row);
+            uint64_t table_id = _fields->at(0)->get_uint64(&row);
             ASSERT_NE(table_id, 1); // all table_id == 1 should be removed
             if (table_id == 6) {
-                ASSERT_EQ(_fields->at(2)->get_uint64(row), 100); // updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(&row), 100); // updates
             }
             if (table_id == 1500) {
-                ASSERT_EQ(_fields->at(2)->get_uint64(row), 1); // upsert inserts
+                ASSERT_EQ(_fields->at(2)->get_uint64(&row), 1); // upsert inserts
             }
             if (table_id == 3) {
-                ASSERT_EQ(_fields->at(2)->get_uint64(row), 103); // upsert updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(&row), 103); // upsert updates
             }
 
-            prev = _fields->at(1)->get_text(row);
+            prev = _fields->at(1)->get_text(&row);
             ++count;
         }
         ASSERT_EQ(count, 5000); // removed 5, upserted 5
@@ -449,7 +449,7 @@ namespace {
         uint64_t table_id = 0;
         auto table_id_f = secondary->get_schema()->get_field("table_id");
         for (auto row : *secondary) {
-            auto current = table_id_f->get_uint64(row);
+            auto current = table_id_f->get_uint64(&row);
             ASSERT_LE(table_id, current);
             table_id = current;
             ++count;
@@ -527,14 +527,14 @@ namespace {
         // verify the data at this point
         int count = 0;
         std::string prev = "";
-        for (auto &row : *table) {
+        for (auto row : *table) {
             if (prev != "") {
-                ASSERT_GT(_fields->at(1)->get_text(row), prev);
+                ASSERT_GT(_fields->at(1)->get_text(&row), prev);
             }
-            prev = _fields->at(1)->get_text(row);
+            prev = _fields->at(1)->get_text(&row);
 
             // check that the removes and updates occurred correctly
-            uint64_t table_id = _fields->at(0)->get_uint64(row);
+            uint64_t table_id = _fields->at(0)->get_uint64(&row);
             ASSERT_NE(table_id, 1); // all table_id == 1 should be removed
             ASSERT_NE(table_id, 2); // all table_id == 2 should be removed
 
@@ -548,7 +548,7 @@ namespace {
         uint64_t table_id = 0;
         auto table_id_f = secondary->get_schema()->get_field("table_id");
         for (auto row : *secondary) {
-            auto current = table_id_f->get_uint64(row);
+            auto current = table_id_f->get_uint64(&row);
             ASSERT_LE(table_id, current);
             table_id = current;
             ++count;
@@ -606,21 +606,21 @@ namespace {
         // verify the data at this point
         count = 0;
         prev = "";
-        for (auto &row : *table) {
+        for (auto row : *table) {
             if (prev != "") {
-                ASSERT_GT(_fields->at(1)->get_text(row), prev);
+                ASSERT_GT(_fields->at(1)->get_text(&row), prev);
             }
-            prev = _fields->at(1)->get_text(row);
+            prev = _fields->at(1)->get_text(&row);
 
             // check that the removes and updates occurred correctly
-            uint64_t table_id = _fields->at(0)->get_uint64(row);
+            uint64_t table_id = _fields->at(0)->get_uint64(&row);
             ASSERT_NE(table_id, 1); // all table_id == 1 should be removed
             ASSERT_NE(table_id, 2); // all table_id == 2 should be removed
             if (table_id == 6) {
-                ASSERT_EQ(_fields->at(2)->get_uint64(row), 100); // updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(&row), 100); // updates
             }
             if (table_id == 7) {
-                ASSERT_EQ(_fields->at(2)->get_uint64(row), 101); // updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(&row), 101); // updates
             }
 
             ++count;
@@ -632,7 +632,7 @@ namespace {
         count = 0;
         table_id = 0;
         for (auto row : *secondary) {
-            auto current = secondary->get_schema()->get_field("table_id")->get_uint64(row);
+            auto current = secondary->get_schema()->get_field("table_id")->get_uint64(&row);
             ASSERT_LE(table_id, current);
             table_id = current;
             ++count;
@@ -689,27 +689,27 @@ namespace {
 
         count = 0;
         prev = "";
-        for (auto &row : *table) {
+        for (auto row : *table) {
             if (prev != "") {
-                ASSERT_GT(_fields->at(1)->get_text(row), prev);
+                ASSERT_GT(_fields->at(1)->get_text(&row), prev);
             }
-            prev = _fields->at(1)->get_text(row);
+            prev = _fields->at(1)->get_text(&row);
 
             // check that the removes and updates occurred correctly
-            uint64_t table_id = _fields->at(0)->get_uint64(row);
+            uint64_t table_id = _fields->at(0)->get_uint64(&row);
             ASSERT_NE(table_id, 1); // all table_id == 1 should be removed
             ASSERT_NE(table_id, 2); // all table_id == 2 should be removed
             if (table_id == 6) {
-                ASSERT_EQ(_fields->at(2)->get_uint64(row), 100); // updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(&row), 100); // updates
             }
             if (table_id == 7) {
-                ASSERT_EQ(_fields->at(2)->get_uint64(row), 101); // updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(&row), 101); // updates
             }
             if (table_id == 1500) {
-                ASSERT_EQ(_fields->at(2)->get_uint64(row), 1); // upsert inserts
+                ASSERT_EQ(_fields->at(2)->get_uint64(&row), 1); // upsert inserts
             }
             if (table_id == 1501) {
-                ASSERT_EQ(_fields->at(2)->get_uint64(row), 2); // known upsert inserts
+                ASSERT_EQ(_fields->at(2)->get_uint64(&row), 2); // known upsert inserts
             }
 
             ++count;
@@ -721,7 +721,7 @@ namespace {
         count = 0;
         table_id = 0;
         for (auto row : *secondary) {
-            auto current = secondary->get_schema()->get_field("table_id")->get_uint64(row);
+            auto current = secondary->get_schema()->get_field("table_id")->get_uint64(&row);
             ASSERT_LE(table_id, current);
             table_id = current;
             ++count;
@@ -780,33 +780,33 @@ namespace {
         // and that everything else works as expected (find, lower_bound, etc)
         count = 0;
         prev = "";
-        for (auto &row : *table) {
+        for (auto row : *table) {
             if (prev != "") {
-                ASSERT_GT(_fields->at(1)->get_text(row), prev);
+                ASSERT_GT(_fields->at(1)->get_text(&row), prev);
             }
-            prev = _fields->at(1)->get_text(row);
+            prev = _fields->at(1)->get_text(&row);
 
             // check that the removes and updates occurred correctly
-            uint64_t table_id = _fields->at(0)->get_uint64(row);
+            uint64_t table_id = _fields->at(0)->get_uint64(&row);
             ASSERT_NE(table_id, 1); // all table_id == 1 should be removed
             ASSERT_NE(table_id, 2); // all table_id == 2 should be removed
             if (table_id == 6) {
-                ASSERT_EQ(_fields->at(2)->get_uint64(row), 100); // updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(&row), 100); // updates
             }
             if (table_id == 7) {
-                ASSERT_EQ(_fields->at(2)->get_uint64(row), 101); // updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(&row), 101); // updates
             }
             if (table_id == 1500) {
-                ASSERT_EQ(_fields->at(2)->get_uint64(row), 1); // upsert inserts
+                ASSERT_EQ(_fields->at(2)->get_uint64(&row), 1); // upsert inserts
             }
             if (table_id == 1501) {
-                ASSERT_EQ(_fields->at(2)->get_uint64(row), 2); // known upsert inserts
+                ASSERT_EQ(_fields->at(2)->get_uint64(&row), 2); // known upsert inserts
             }
             if (table_id == 3) {
-                ASSERT_EQ(_fields->at(2)->get_uint64(row), 103); // upsert updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(&row), 103); // upsert updates
             }
             if (table_id == 4) {
-                ASSERT_EQ(_fields->at(2)->get_uint64(row), 104); // upsert updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(&row), 104); // upsert updates
             }
 
             ++count;
@@ -818,7 +818,7 @@ namespace {
         count = 0;
         table_id = 0;
         for (auto row : *secondary) {
-            auto current = secondary->get_schema()->get_field("table_id")->get_uint64(row);
+            auto current = secondary->get_schema()->get_field("table_id")->get_uint64(&row);
             ASSERT_LE(table_id, current);
             table_id = current;
             ++count;
@@ -858,7 +858,7 @@ namespace {
         csv::CSVReader reader2("test_btree_simple.csv");
         int count = 0;
         for (auto &&r : reader2) {
-            auto csvtuple = std::make_shared<FieldTuple>(_csv_fields, r);
+            auto csvtuple = std::make_shared<FieldTuple>(_csv_fields, &r);
             auto search_key = _schema->tuple_subset(csvtuple, _primary_keys);
 
             uint64_t extent_id = table->primary_lookup(search_key);
@@ -895,13 +895,13 @@ namespace {
             // and that everything else works as expected (find, lower_bound, etc)
             int count = 0;
             std::string prev = "";
-            for (auto &row : *table) {
+            for (auto row : *table) {
                 if (prev != "") {
-                    ASSERT_GT(_fields->at(1)->get_text(row), prev);
+                    ASSERT_GT(_fields->at(1)->get_text(&row), prev);
                 }
-                prev = _fields->at(1)->get_text(row);
+                prev = _fields->at(1)->get_text(&row);
 
-                uint64_t offset = _fields->at(2)->get_uint64(row);
+                uint64_t offset = _fields->at(2)->get_uint64(&row);
                 ASSERT_EQ(offset, 20000);
 
                 ++count;
@@ -914,7 +914,7 @@ namespace {
             uint64_t table_id = 0;
             auto table_id_f = secondary->get_schema()->get_field("table_id");
             for (auto row : *secondary) {
-                auto current = table_id_f->get_uint64(row);
+                auto current = table_id_f->get_uint64(&row);
                 ASSERT_LE(table_id, current);
                 table_id = current;
                 ++count;
@@ -960,12 +960,12 @@ namespace {
         // and that everything else works as expected (find, lower_bound, etc)
         int counter = 0;
         std::string prev = "";
-        for (auto &row : *table) {
+        for (auto row : *table) {
             if (prev != "") {
-                ASSERT_GT(_fields->at(1)->get_text(row), prev);
+                ASSERT_GT(_fields->at(1)->get_text(&row), prev);
             }
 
-            prev = _fields->at(1)->get_text(row);
+            prev = _fields->at(1)->get_text(&row);
             ++counter;
         }
         ASSERT_EQ(counter, 5000);
@@ -979,8 +979,8 @@ namespace {
         uint64_t test_value_down = 0;
 
 
-        for (auto &row : *table) {
-            auto value = _fields->at(0)->get_uint64(row);
+        for (auto row : *table) {
+            auto value = _fields->at(0)->get_uint64(&row);
             if (value == test_value) {
                 ++equal_count;
             }
@@ -1024,7 +1024,7 @@ namespace {
             int equal = 0;
             for (; it != end_it; ++it) {
                 auto row = *it;
-                auto value = _fields->at(0)->get_uint64(row);
+                auto value = _fields->at(0)->get_uint64(&row);
                 if (value == test_value) {
                     ++equal;
                 }
@@ -1049,7 +1049,7 @@ namespace {
             int equal = 0;
             for (; it != end_it; ++it) {
                 auto row = *it;
-                auto value = _fields->at(0)->get_uint64(row);
+                auto value = _fields->at(0)->get_uint64(&row);
                 if (value == test_value) {
                     ++equal;
                 }
@@ -1080,7 +1080,7 @@ namespace {
             auto end_it = table->end(1);
             for (; it != end_it; ++it) {
                 auto row = *it;
-                auto txt = _fields->at(1)->get_text(row);
+                auto txt = _fields->at(1)->get_text(&row);
                 ASSERT_LE(test_value[0], txt[0]);
             }
         }
