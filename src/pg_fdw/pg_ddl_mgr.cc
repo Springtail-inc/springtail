@@ -599,11 +599,13 @@ namespace springtail::pg_fdw {
         else if (action == "create_index") {
             // TODO: do something?
             LOG_ERROR("CREATE INDEX");
+            CHECK(false);
             return "";
         }
         else if (action == "drop_index") {
             // TODO: do something?
             LOG_ERROR("DROP INDEX");
+            CHECK(false);
             return "";
         }
         else if (action == "ns_create") {
