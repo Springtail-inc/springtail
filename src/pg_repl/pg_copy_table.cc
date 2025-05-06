@@ -1154,8 +1154,8 @@ namespace springtail
         // iterate through the results and get the user defined types
         for (int i = 0; i < _connection.ntuples(); i++) {
             uint32_t enum_type_oid = _connection.get_int32(i, 0);
-            std::string enum_label = _connection.get_string(i, 1);
-            float enum_sortorder = _connection.get_float(i, 2);
+            float enum_sortorder = _connection.get_float(i, 1);
+            std::string enum_label = _connection.get_string(i, 2);
 
             // add the enum type to the map
             user_types[enum_type_oid][enum_label] = enum_sortorder;
