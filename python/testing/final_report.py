@@ -43,10 +43,11 @@ def write_csv_to_worksheet(worksheet, csv_file):
         reader = csv.reader(f)
         for r, row in enumerate(reader):
             for c, col in enumerate(row):
-                if r == 0:
-                    worksheet.write(r, c, col, bold)
-                else:
-                    worksheet.write(r, c, col)
+                try:
+                    float(col)
+                    worksheet.write_number(r, c, float(col), bold if r == 0 else None)
+                except ValueError:
+                    worksheet.write(r, c, col, bold if r == 0 else None)
                 # Expand col_widths if needed
                 if len(col_widths) <= c:
                     col_widths.extend([0] * (c - len(col_widths) + 1))
