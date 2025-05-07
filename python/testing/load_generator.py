@@ -27,7 +27,6 @@ NUM_TABLES_PER_SCHEMA = 25
 NUM_INSERTS = 5
 NUM_UPDATES = 5
 NUM_DELETES = 2
-RUN_TIME_SECONDS = 5
 BATCHED_INSERTS = False
 RUN_TS = int(time.time())
 
@@ -164,7 +163,7 @@ def create_index(conn, schema_name: str, table_name: str, csv_file: str):
         """, csv_file)
         print(f"[+] Created index on: {schema_name}.{table_name}({index_name})")
 
-def generate_values_list(columns: list, batch_size: int) -> list:
+def generate_values_list(columns: list, batch_size: int = 1) -> list:
     values_list = []
 
     for _ in range(batch_size):
@@ -240,27 +239,23 @@ def update_data(conn, schema_name: str, table_name: str, csv_file: str):
         print(f"[!] No columns found in {schema_name}.{table_name}")
         return
 
-    for _ in range(NUM_UPDATES):
-        # Generate UPDATE statement with 1-3 random columns
-        num_columns_to_update = random.randint(1, min(3, len(columns)))
-        columns_to_update = random.sample(columns, num_columns_to_update)
-        update_column_where = random.sample(columns, 1)
-        column_names = [col[0] for col in columns_to_update]
-        placeholders = ['%s'] * len(column_names)
-        update_sql = f"""
-            UPDATE {schema_name}.{table_name}
-            SET {', '.join(f'{col[0]} = %s' for col in columns_to_update)}
-            WHERE {' AND '.join(f'{col[0]} = %s' for col in update_column_where)}
-        """
+    # Generate UPDATE statement with 1-3 random columns
+    num_columns_to_update = random.randint(1, min(3, len(columns)))
+    columns_to_update = random.sample(columns, num_columns_to_update)
+    column_names = [col[0] for col in columns_to_update]
+    placeholders = ['%s'] * len(column_names)
+    order_by_column = random.choice(columns)[0]
+    update_sql = f"""
+        UPDATE {schema_name}.{table_name}
+        SET {', '.join(f'{col[0]} = %s' for col in columns_to_update)}
+        WHERE id IN (SELECT id FROM {schema_name}.{table_name} ORDER BY {order_by_column} LIMIT {NUM_UPDATES})
+    """
 
-        value_columns = columns_to_update + update_column_where
-        values_list = generate_values_list(value_columns, 1)
+    value_columns = columns_to_update
+    values_list = generate_values_list(value_columns)
+    out = time_and_log_query(conn, "update_data", update_sql, csv_file, values_list)
 
-        out = time_and_log_query(conn, "update_data", update_sql, csv_file, values_list)
-
-        print(f"[+] Updated {out} rows in {schema_name}.{table_name}")
-
-    print(f"[+] Total {NUM_UPDATES} updates in {schema_name}.{table_name}")
+    print(f"[+] Updated {out} rows in {schema_name}.{table_name}")
 
 def delete_data(conn, schema_name: str, table_name: str, csv_file: str):
     full_table_name = f"{schema_name}.{table_name}"
@@ -276,8 +271,12 @@ def delete_data(conn, schema_name: str, table_name: str, csv_file: str):
     delete_column = random.choice(columns)
 
     values_list = generate_values_list([delete_column], 1)
+    order_by_column = random.choice(columns)[0]
 
-    delete_sql = f"DELETE FROM {schema_name}.{table_name} WHERE {delete_column[0]} = %s"
+    delete_sql = f"""
+        DELETE FROM {schema_name}.{table_name}
+        WHERE id IN (SELECT id FROM {schema_name}.{table_name} ORDER BY {order_by_column} LIMIT {NUM_DELETES})
+    """
 
     out = time_and_log_query(conn, "delete_data", delete_sql, csv_file, values_list)
 
@@ -290,7 +289,7 @@ def create_schema_and_tables(conn, csv_file: str, schema_name: str):
     for i in range(NUM_TABLES_PER_SCHEMA):
         table_name = f"table_{i}_{random.randint(1000, 9999)}"
 
-        for func in [create_table, create_index, insert_data]: # update_data, delete_data
+        for func in [create_table, create_index, insert_data, update_data, delete_data]: # update_data, delete_data
             try:
                 func(conn, schema_name, table_name, csv_file)
             except Exception as e:
@@ -332,7 +331,6 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('--num-inserts', type=int, default=NUM_INSERTS, help='Number of inserts per table')
     parser.add_argument('--num-updates', type=int, default=NUM_UPDATES, help='Number of updates per table')
     parser.add_argument('--num-deletes', type=int, default=NUM_DELETES, help='Number of deletes per table')
-    parser.add_argument('--run-time-seconds', type=int, default=RUN_TIME_SECONDS, help='Duration to run the data load (seconds)')
 
     parser.add_argument('--batched_inserts', type=bool, default=BATCHED_INSERTS, help='Use batched inserts')
     return parser.parse_args()
@@ -344,7 +342,12 @@ if __name__ == "__main__":
     NUM_SCHEMAS = args.num_schemas
     NUM_TABLES_PER_SCHEMA = args.num_tables_per_schema
     NUM_INSERTS = args.num_inserts
-    RUN_TIME_SECONDS = args.run_time_seconds
+    if NUM_INSERTS <= 0:
+        print(f"[-] NUM_INSERTS should be greater than 0")
+        sys.exit(1)
+    NUM_UPDATES = min(args.num_updates, NUM_INSERTS // 2)
+    NUM_DELETES = min(args.num_deletes, NUM_INSERTS // 2)
+    BATCHED_INSERTS = args.batched_inserts
 
     try:
         load_data(args.config_file, args.output_file)
