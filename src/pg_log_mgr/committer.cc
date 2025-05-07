@@ -518,11 +518,11 @@ namespace springtail::committer {
         for (auto &row : extent) {
             time_trace::Trace process_row_trace;
             TIME_TRACE_START(process_row_trace);
-            uint8_t op = op_f->get_uint8(row);
+            uint8_t op = op_f->get_uint8(&row);
             switch (op) {
             case INSERT:
                 {
-                    auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
+                    auto tuple = std::make_shared<FieldTuple>(wc_fields, &row);
                     LOG_DEBUG(LOG_COMMITTER, "INSERT value={}", tuple->to_string());
                     time_trace::Trace table_insert_trace;
                     TIME_TRACE_START(table_insert_trace);
@@ -533,7 +533,7 @@ namespace springtail::committer {
                 }
             case UPDATE:
                 {
-                    auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
+                    auto tuple = std::make_shared<FieldTuple>(wc_fields, &row);
                     LOG_DEBUG(LOG_COMMITTER, "UPDATE value={}", tuple->to_string());
                     table->update(tuple, constant::UNKNOWN_EXTENT);
                     break;
@@ -542,11 +542,11 @@ namespace springtail::committer {
                 {
                     if (wc_key_fields->empty()) {
                         // no sort key, so need to handle non-primary key by using the entire row
-                        auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
+                        auto tuple = std::make_shared<FieldTuple>(wc_fields, &row);
                         LOG_DEBUG(LOG_COMMITTER, "DELETE value={}", tuple->to_string());
                         table->remove(tuple, constant::UNKNOWN_EXTENT);
                     } else {
-                        auto tuple = std::make_shared<FieldTuple>(wc_key_fields, row);
+                        auto tuple = std::make_shared<FieldTuple>(wc_key_fields, &row);
                         LOG_DEBUG(LOG_COMMITTER, "DELETE value={}", tuple->to_string());
                         table->remove(tuple, constant::UNKNOWN_EXTENT);
                     }

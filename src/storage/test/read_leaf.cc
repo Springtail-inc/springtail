@@ -35,7 +35,7 @@ main(int argc,
 
     int count = 0;
     for (auto &&row : extent) {
-        std::cout << field->get_text(row) << std::endl;
+        std::cout << field->get_text(&row) << std::endl;
         ++count;
     }
     std::cout << count << std::endl;

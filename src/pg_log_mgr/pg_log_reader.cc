@@ -81,7 +81,7 @@ namespace springtail::pg_log_mgr {
 
         // apply any schema changes
         if (!change_map.empty()) {
-            _apply_schema_changes(change_map, xid);
+            _apply_schema_changes(change_map, xid, pg_xids);
         }
 
         // assign an XID to the committed transaction and update the mappings in the write cache
@@ -191,6 +191,9 @@ namespace springtail::pg_log_mgr {
         bool has_primary = !sort_keys.empty();
         auto columns = table_schema->column_order();
 
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Sort keys={} columns={}",
+                  fmt::join(sort_keys, ":"), fmt::join(columns, ":"));
+
         fields = schema->get_mutable_fields(columns);
         if (has_primary) {
             pkey_fields = schema->get_mutable_fields(sort_keys);
@@ -260,6 +263,7 @@ namespace springtail::pg_log_mgr {
                 entry.update_schema();
             }
 
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Create extent with row width: {}", entry.schema->row_size());
             entry.extent = std::make_shared<Extent>(ExtentType{}, 0, entry.schema->row_size());
             entry.start_lsn = _lsn;
         }
@@ -274,16 +278,16 @@ namespace springtail::pg_log_mgr {
         LOG_DEBUG(LOG_PG_LOG_MGR, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, T);
         auto row = entry.extent->append();
         if constexpr (T == PgMsgEnum::INSERT || T == PgMsgEnum::UPDATE) {
-            MutableTuple(entry.fields, row).assign(FieldTuple(entry.pg_fields, static_cast<const PgMsgTupleData*>(&data)));
+            MutableTuple(entry.fields, &row).assign(FieldTuple(entry.pg_fields, &data));
         } else if constexpr (T == PgMsgEnum::DELETE) {
-            MutableTuple(entry.pkey_fields, row).assign(FieldTuple(entry.pg_pkey_fields, static_cast<const PgMsgTupleData*>(&data)));
+            MutableTuple(entry.pkey_fields, &row).assign(FieldTuple(entry.pg_pkey_fields, &data));
         } else {
             static_assert(false, "Invalid template parameter: PgLogReader::Batch::add_mutation");
         }
-        entry.op_f->set_uint8(row, T);
-        entry.lsn_f->set_uint64(row, _lsn++);
+        entry.op_f->set_uint8(&row, T);
+        entry.lsn_f->set_uint64(&row, _lsn++);
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, entry.op_f->get_uint8(row));
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, entry.op_f->get_uint8(&row));
 
         // XXX we need some way to limit the total memory used by a batch across all extents
 
@@ -351,8 +355,8 @@ namespace springtail::pg_log_mgr {
 
             // add a TRUNCATE row
             auto &&row = entry.extent->append();
-            entry.op_f->set_uint8(row, PgMsgEnum::TRUNCATE);
-            entry.lsn_f->set_uint64(row, _lsn++);
+            entry.op_f->set_uint8(&row, PgMsgEnum::TRUNCATE);
+            entry.lsn_f->set_uint64(&row, _lsn++);
         }
     }
 
@@ -540,13 +544,18 @@ namespace springtail::pg_log_mgr {
             auto &table = std::get<PgMsgTable>(msg->msg);
             std::vector<SchemaColumn> columns;
             for (auto column : table.columns) {
+                std::optional<uint32_t> pkey;
+                if (column.is_pkey) {
+                    pkey = column.pk_position;
+                }
                 columns.emplace_back(SchemaColumn{
                         column.name,
                         column.position,
                         static_cast<SchemaType>(column.type),
                         column.pg_type,
-                        column.is_nullable
-                    });
+                        column.is_nullable,
+                        pkey
+                        });
             }
 
             entry.table_schema = std::make_shared<ExtentSchema>(columns);
@@ -615,7 +624,8 @@ namespace springtail::pg_log_mgr {
 
     void
     PgLogReader::Batch::_apply_schema_changes(const LsnChangeMap &change_map,
-                                              uint64_t xid)
+                                              uint64_t xid,
+                                              const std::vector<uint64_t> &pg_xids)
     {
         // apply any schema changes in LSN order to the SysTblMgr
         auto next_i = change_map.begin();
@@ -636,7 +646,7 @@ namespace springtail::pg_log_mgr {
             auto change = change_i->second->front().first;
             XidLsn xidlsn(xid, change_i->second->front().second);
 
-            _apply_schema_change(change, xidlsn);
+            _apply_schema_change(change, xidlsn, pg_xids);
 
             // remove the schema change we just applied
             change_i->second->pop_front();
@@ -652,7 +662,9 @@ namespace springtail::pg_log_mgr {
     }
 
     void
-    PgLogReader::Batch::_mark_table_resync(uint64_t table_oid, const XidLsn &xidlsn)
+    PgLogReader::Batch::_mark_table_resync(uint64_t table_oid,
+                                           const XidLsn &xidlsn,
+                                           const std::vector<uint64_t> &pg_xids)
     {
         // mark the table as syncing to ensure we properly skip messages
         bool is_first = SyncTracker::get_instance()->mark_resync(_db, table_oid, xidlsn);
@@ -663,6 +675,11 @@ namespace springtail::pg_log_mgr {
         RedisQueue<TableSyncRequest> table_sync_queue(key);
         TableSyncRequest request(table_oid, xidlsn);
         table_sync_queue.push(request);
+
+        // drop any mutations that are in the WriteCache for this TID at this XID
+        for (auto pg_xid : pg_xids) {
+            WriteCacheFuncImpl::drop_table(_db, table_oid, pg_xid);
+        }
 
         // Add a message to skip indexes for this table
         // for the currently building indexes and the ones
@@ -682,7 +699,8 @@ namespace springtail::pg_log_mgr {
 
     void
     PgLogReader::Batch::_apply_schema_change(PgMsgPtr change,
-                                             const XidLsn &xidlsn)
+                                             const XidLsn &xidlsn,
+                                             const std::vector<uint64_t> &pg_xids)
     {
         RedisDDL redis_ddl;
         auto client = sys_tbl_mgr::Client::get_instance();
@@ -702,7 +720,7 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::ALTER_TABLE:
             {
                 auto &table_msg = std::get<PgMsgTable>(change->msg);
-                LOG_DEBUG(LOG_PG_LOG_MGR, "ALTER TABLE: xid={}, pg_xid={}, tid={}", xidlsn.xid,
+                LOG_DEBUG(LOG_PG_LOG_MGR, "ALTER TABLE: xid={}, lsn={}, pg_xid={}, tid={}", xidlsn.xid, xidlsn.lsn,
                           table_msg.xid, table_msg.oid);
 
                 std::string &&ddl_stmt = client->alter_table(_db, xidlsn, table_msg);
@@ -710,7 +728,7 @@ namespace springtail::pg_log_mgr {
                 // check for re-sync
                 nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
                 if (action.get<std::string>() == "resync") {
-                    _mark_table_resync(table_msg.oid, xidlsn);
+                    _mark_table_resync(table_msg.oid, xidlsn, pg_xids);
                 } else if (action.get<std::string>() != "no_change") {
                     redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 }
@@ -797,7 +815,7 @@ namespace springtail::pg_log_mgr {
             {
                 // process the resync caused by an ALTER_TABLE
                 auto &table_msg = std::get<PgMsgTable>(change->msg);
-                _mark_table_resync(table_msg.oid, xidlsn);
+                _mark_table_resync(table_msg.oid, xidlsn, pg_xids);
                 break;
             }
 

@@ -327,12 +327,43 @@ namespace springtail::pg_fdw {
         // init target list vector
         ListCell *lc;
         std::vector<std::string> target_colnames;
+
+        // init quals
+        CHECK_EQ(state->filtered_quals.empty(), true);
+        _init_quals(state, qual_list);
+
         int i = 0;
+        // we add filters at the beginning so that iterate_scan checks them first
+        // note: it is possible state->filtered_quals is empty if no quals are usable
+        // go through qual columns and make sure they are part of the target columns
+        for (int j = 0; j < state->filtered_quals.size(); j++) {
+            int attno = state->filtered_quals[j]->base.varattno;
+
+            PgFdwState::TargetColumn::Filter filter{state->filtered_quals[i]->base.op,
+                state->qual_fields->at(j)};
+
+            auto column = state->columns.at(state->attr_map.at(attno));
+            target_colnames.push_back(column.name);
+            state->target_columns.emplace_back(
+                   i++, column.pg_type, state->_attrs[attno-1], std::move(filter));
+        }
+
+
+        i = state->target_columns.size();
         foreach(lc, target_list) {
             // note: This is the attnum from the FDW's representation of the external table, not the
             //       column ID on the primary.  We need to map the local attnum to the primary's column ID.
             auto column = (SpringtailTargetColumn *)lfirst(lc);
             int attno = column->attnum;
+
+            auto it = std::ranges::find_if(state->target_columns,
+                    [attno](auto v) {return v == attno;},
+                    [](const auto& c) {return c.pg_attr.attnum;}
+            );
+
+            if (it != state->target_columns.end()) {
+                continue;
+            }
 
             auto col_i = state->columns.find(state->attr_map.at(attno));
             if (col_i == state->columns.end()) {
@@ -344,29 +375,11 @@ namespace springtail::pg_fdw {
             DCHECK_GT(attno, 0);
             DCHECK_LE(attno, state->_attrs.size());
 
-            state->target_columns.emplace(attno, PgFdwState::TargetColumn{i++, col_i->second.pg_type, state->_attrs[attno-1]});
+            state->target_columns.emplace_back(
+                    i++, col_i->second.pg_type, state->_attrs[attno-1]);
 
             LOG_DEBUG(LOG_FDW, "Target list column: {}:{}",
                                 attno, col_i->second.name);
-        }
-
-        // init quals
-        CHECK_EQ(state->filtered_quals.empty(), true);
-        _init_quals(state, qual_list);
-
-        // note: it is possible state->filtered_quals is empty if no quals are usable
-        // go through qual columns and make sure they are part of the target columns
-        i = state->target_columns.size();
-        for (int j = 0; j < state->filtered_quals.size(); j++) {
-            int attno = state->filtered_quals[j]->base.varattno;
-
-            auto it = state->target_columns.find(attno);
-
-            if (it == state->target_columns.end()) {
-                auto column = state->columns.at(state->attr_map.at(attno));
-                target_colnames.push_back(column.name);
-                state->target_columns.emplace(attno, PgFdwState::TargetColumn{i++, column.pg_type, state->_attrs[attno-1]});
-            }
         }
 
         // set target columns; will contain filtered qual columns as well
@@ -636,45 +649,11 @@ namespace springtail::pg_fdw {
         Extent::Row row{state->scan_asc? *(*state->iter_start) : *(*state->iter_end)};
         state->rows_fetched++;
 
-        // go through the qual fields and see how they compare to the values with in the row
-        // if they all match then we can return the row
-        if (state->qual_fields != nullptr) {
-            for (int i = 0; i < state->filtered_quals.size(); ++i) {
-                // extract the attrno and field index to find the field in the row
-                ConstQual *qual = state->filtered_quals[i];
-                int attno = qual->base.varattno;
-
-                auto it = state->target_columns.find(attno);
-                DCHECK(it != state->target_columns.end());
-                DCHECK_EQ(it->second.pg_attr.attnum, attno);
-
-                {
-                    TIME_TRACE_SCOPED(time_trace::traces, iterate_scan_compare);
-                    // compare the qual field to the field in the row
-                    bool res = _compare_field(row, state->fields->at(it->second.field_idx),
-                                              state->qual_fields->at(i), qual->base.op);
-                    if (res) {
-                        continue;
-                    }
-                }
-
-                // qual doesn't match, so this row must be skipped
-                // since it isn't the first qual, we can skip to the next row
-                LOG_DEBUG(LOG_FDW, "Qual not equal, skipping row");
-                state->rows_skipped++;
-                // increment iterator if scanning up
-                if (state->scan_asc) {
-                    ++(*state->iter_start);
-                }
-                return false;
-            }
-        }
-
         memset(nulls, true, num_attrs * sizeof(bool));
         memset(values, 0, num_attrs * sizeof(values[0]));
 
         // iterate through attributes passed in
-        for (const auto& [_, c]: state->target_columns) {
+        for (const auto& c: state->target_columns) {
             auto attno = c.pg_attr.attnum;
             DCHECK_LE(attno, num_attrs);
 
@@ -683,10 +662,28 @@ namespace springtail::pg_fdw {
             // get field idx that matches this attrno, then fetch the field and data
             const FieldPtr& field = state->fields->at(c.field_idx);
 
+            // check filter
+            if (c.filter.has_value()) {
+                TIME_TRACE_SCOPED(time_trace::traces, iterate_scan_compare);
+                // compare the qual field to the field in the row
+                bool res = _compare_field(&row, field, c.filter->field, c.filter->op);
+                if (!res) {
+                    // qual doesn't match, so this row must be skipped
+                    // since it isn't the first qual, we can skip to the next row
+                    LOG_DEBUG(LOG_FDW, "Qual not equal, skipping row");
+                    state->rows_skipped++;
+                    // increment iterator if scanning up
+                    if (state->scan_asc) {
+                        ++(*state->iter_start);
+                    }
+                    return false;
+                }
+            }
+
             {
                 TIME_TRACE_SCOPED(time_trace::traces, iterate_scan_datum);
                 // set value
-                if (!field->is_null(row)) {
+                if (!field->is_null(&row)) {
                     values[attno-1] = _get_datum_from_field(state, field.get(), row, c.sp_pg_type, c.pg_attr.atttypid, c.pg_attr.atttypmod);
                     nulls[attno-1] = false;
                 }
@@ -985,35 +982,35 @@ namespace springtail::pg_fdw {
         if (springtail_oid >= FirstNormalObjectId) {
             // user type; enum, lookup index to label
             assert(field->get_type() == SchemaType::FLOAT32);
-            return _get_enum_datum(state, springtail_oid, pg_oid, field->get_float32(row));
+            return _get_enum_datum(state, springtail_oid, pg_oid, field->get_float32(&row));
         }
 
         // otherwise convert they row by the schema type
         switch (field->get_type()) {
         case SchemaType::INT64:
-            return Int64GetDatum(field->get_int64(row));
+            return Int64GetDatum(field->get_int64(&row));
         case SchemaType::UINT64:
-            return UInt64GetDatum(field->get_uint64(row));
+            return UInt64GetDatum(field->get_uint64(&row));
         case SchemaType::INT32:
-            return Int32GetDatum(field->get_int32(row));
+            return Int32GetDatum(field->get_int32(&row));
         case SchemaType::UINT32:
-            return UInt32GetDatum(field->get_uint32(row));
+            return UInt32GetDatum(field->get_uint32(&row));
         case SchemaType::INT16:
-            return Int16GetDatum(field->get_int16(row));
+            return Int16GetDatum(field->get_int16(&row));
         case SchemaType::UINT16:
-            return UInt16GetDatum(field->get_uint16(row));
+            return UInt16GetDatum(field->get_uint16(&row));
         case SchemaType::INT8:
-            return Int8GetDatum(field->get_int8(row));
+            return Int8GetDatum(field->get_int8(&row));
         case SchemaType::UINT8:
-            return UInt8GetDatum(field->get_uint8(row));
+            return UInt8GetDatum(field->get_uint8(&row));
         case SchemaType::BOOLEAN:
-            return BoolGetDatum(field->get_bool(row));
+            return BoolGetDatum(field->get_bool(&row));
         case SchemaType::FLOAT64:
-            return Float8GetDatum(field->get_float64(row));
+            return Float8GetDatum(field->get_float64(&row));
         case SchemaType::FLOAT32:
-            return Float4GetDatum(field->get_float32(row));
+            return Float4GetDatum(field->get_float32(&row));
         case SchemaType::TEXT: {
-            const std::string_view value(field->get_text(row));
+            const std::string_view value(field->get_text(&row));
             return PointerGetDatum(cstring_to_text_with_len(value.data(), value.size()));
         }
         case SchemaType::BINARY: {
@@ -1034,7 +1031,7 @@ namespace springtail::pg_fdw {
 
             ReleaseSysCache(tuple);
 
-            auto &&value = field->get_binary(row);
+            auto &&value = field->get_binary(&row);
 
             // note: we need to store the data into a StringInfo so that the receive function can
             // unpack it for us
@@ -1186,15 +1183,15 @@ namespace springtail::pg_fdw {
 
         // iterate over the user types table and populate the user type map
         for (auto row : (*table)) {
-            auto type_ns_id = fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID)->get_uint64(row);
+            auto type_ns_id = fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID)->get_uint64(&row);
 
             // check for schema-namespace match
             if (type_ns_id != namespace_id) {
                 continue;
             }
 
-            uint64_t pg_type = fields->at(sys_tbl::UserTypes::Data::TYPE_ID)->get_uint64(row);
-            bool exists = fields->at(sys_tbl::UserTypes::Data::EXISTS)->get_bool(row);
+            uint64_t pg_type = fields->at(sys_tbl::UserTypes::Data::TYPE_ID)->get_uint64(&row);
+            bool exists = fields->at(sys_tbl::UserTypes::Data::EXISTS)->get_bool(&row);
             if (!exists) {
                 // find type and remove if it exists
                 user_types.erase(pg_type);
@@ -1202,7 +1199,7 @@ namespace springtail::pg_fdw {
             }
 
             // generate a fully qualified quoted type name and add to map
-            std::string type_name(fields->at(sys_tbl::UserTypes::Data::NAME)->get_text(row));
+            std::string type_name(fields->at(sys_tbl::UserTypes::Data::NAME)->get_text(&row));
             std::string qualified_type_name = fmt::format("{}.{}", escaped_namespace, quote_identifier(type_name.c_str()));
             user_types.insert({pg_type, qualified_type_name});
         }
@@ -1252,19 +1249,20 @@ namespace springtail::pg_fdw {
         }
 
         auto ns_fields = ns_table->extent_schema()->get_fields();
-        if (namespace_name != ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(*ns_i)) {
+        auto &&row = *ns_i;
+        if (namespace_name != ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&row)) {
             LOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
                         namespace_name, schema_xid, constant::MAX_LSN);
             return commands;
         }
-        if (!ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*ns_i)) {
+        if (!ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row)) {
             LOG_WARN("Namespace marked as not-exists {} @ {}:{}",
                         namespace_name, schema_xid, constant::MAX_LSN);
             return commands;
         }
 
         // record the namespace ID
-        uint64_t namespace_id = ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(*ns_i);
+        uint64_t namespace_id = ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&row);
 
         // load the user type map;  primary pg_oid -> type_name
         auto user_types = _load_user_types(db_id, namespace_name, namespace_id, schema_xid);
@@ -1280,7 +1278,7 @@ namespace springtail::pg_fdw {
 
         // iterate over the table names table and populate the table map
         for (auto row : (*table)) {
-            auto table_ns_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(row);
+            auto table_ns_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
 
             // check for schema-namespace match
             if (table_ns_id != namespace_id) {
@@ -1289,7 +1287,7 @@ namespace springtail::pg_fdw {
                 continue;
             }
 
-            std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row));
+            std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row));
             // handle limit and exclude
             if (exclude && table_set.contains(table_name)) {
                 LOG_DEBUG(LOG_FDW, "Excluding table {}.{}", namespace_name, table_name);
@@ -1302,10 +1300,10 @@ namespace springtail::pg_fdw {
                 continue;
             }
 
-            uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(row);
-            uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(row);
+            uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
+            uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
 
-            bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(row);
+            bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
             if (!exists) {
                 // find table and compare xids, remove if this xid is >= to the one in the map
                 auto entry = table_map.find(table_name);
@@ -1359,7 +1357,7 @@ namespace springtail::pg_fdw {
         // iterate through it
         fields = table->extent_schema()->get_fields();
         for (auto row : (*table)) {
-            uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(row);
+            uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(&row);
 
             LOG_DEBUG(LOG_FDW, "Found table in schemas table: {}", tid);
 
@@ -1390,8 +1388,8 @@ namespace springtail::pg_fdw {
                 current_table = std::get<1>(it->second);
             }
 
-            std::string column_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row));
-            bool exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(row);
+            std::string column_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(&row));
+            bool exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(&row);
             if (!exists) {
                 auto it = std::find_if(columns.begin(), columns.end(),
                 [&column_name](const std::tuple<std::string, std::string, bool> &column) {
@@ -1404,8 +1402,8 @@ namespace springtail::pg_fdw {
             }
 
             // add column if it exists
-            int32_t pg_type(fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(row));
-            bool nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(row);
+            int32_t pg_type(fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(&row));
+            bool nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(&row);
 
             columns.push_back({column_name, _get_type_name(pg_type, user_types), nullable});
         }
@@ -1549,9 +1547,9 @@ namespace springtail::pg_fdw {
     }
 
     bool
-    PgFdwMgr::_compare_field(const std::any &row,
-                             FieldPtr val_field,
-                             FieldPtr key_field,
+    PgFdwMgr::_compare_field(const void *row,
+                             const FieldPtr& val_field,
+                             const FieldPtr& key_field,
                              QualOpName op)
     {
         // determine how the val field (from the row) compares to the key field from the qual

@@ -272,7 +272,8 @@ namespace springtail::committer {
             (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(current_row_id);
 
             // insert key
-            auto&& svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, *row_i);
+            auto &&row = *row_i;
+            auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, &row);
             root->insert(svalue);
 
             ++current_row_id;

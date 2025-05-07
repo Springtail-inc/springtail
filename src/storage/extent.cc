@@ -33,16 +33,16 @@ namespace springtail {
         for (auto i = 0; i < half; i++) {
             Row &&insert_row = first->append();
 
-            MutableTuple tuple(mutable_array, insert_row);
-            tuple.assign(FieldTuple(array, *(this->at(i))));
+            MutableTuple tuple(mutable_array, &insert_row);
+            tuple.assign(FieldTuple(array, &*(this->at(i))));
         }
 
         // copy the remaining rows from this extent to the first half extent
         for (auto i = half; i < row_count(); i++) {
             Row &&insert_row = second->append();
 
-            MutableTuple tuple(mutable_array, insert_row);
-            tuple.assign(FieldTuple(array, *(this->at(i))));
+            MutableTuple tuple(mutable_array, &insert_row);
+            tuple.assign(FieldTuple(array, &*(this->at(i))));
         }
 
         return std::pair<ExtentPtr, ExtentPtr>(first, second);

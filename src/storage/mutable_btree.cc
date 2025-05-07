@@ -251,7 +251,7 @@ MutableBTree::_next_leaf(NodePtr node)
             node = node->parent;
         } else {
             // we found the next branch to follow, setup the node for the page
-            uint64_t extent_id = _branch_child_f->get_uint64(*parent_i);
+            uint64_t extent_id = _branch_child_f->get_uint64(&*parent_i);
 
             // read the next child page
             NodePtr child = _read_page(extent_id, node, parent_lock);
@@ -281,7 +281,7 @@ MutableBTree::_next_leaf(NodePtr node)
         auto &&i = node->page->begin();
 
         // retrieve the child offset
-        uint64_t extent_id = _branch_child_f->get_uint64(*i);
+        uint64_t extent_id = _branch_child_f->get_uint64(&*i);
 
         // read the child page; will handle updating the locks
         // note: this will release the page_lock once it has a pointer to the child in memory
@@ -320,7 +320,7 @@ MutableBTree::begin()
         auto &&i = node->page->begin();
 
         // retrieve the child offset
-        uint64_t extent_id = _branch_child_f->get_uint64(*i);
+        uint64_t extent_id = _branch_child_f->get_uint64(&*i);
 
         // read the child page; will handle updating the locks
         // note: this will release the page_lock once it has a pointer to the child in memory
@@ -359,7 +359,7 @@ MutableBTree::last()
         auto &&i = node->page->last();
 
         // retrieve the child offset
-        uint64_t extent_id = _branch_child_f->get_uint64(*i);
+        uint64_t extent_id = _branch_child_f->get_uint64(&*i);
 
         // read the child page; will handle updating the locks
         // note: this will release the page_lock once it has a pointer to the child in memory
@@ -427,7 +427,8 @@ MutableBTree::lower_bound(TuplePtr search_key,
         }
 
         // if the key is < the returned row, then there is no matching entry, return end()
-        auto key = std::make_shared<MutableTuple>(_key_fields, *i);
+        auto row = *i;
+        auto key = std::make_shared<MutableTuple>(_key_fields, &row);
         if (search_key->less_than(key)) {
             return this->end();
         }
@@ -539,7 +540,8 @@ MutableBTree::lower_bound(TuplePtr search_key,
             auto cache_page = StorageCache::get_instance()->get(_btree->_file, id, _btree->_xid);
 
             // XXX need a better way to create these combined tuples
-            auto key = std::make_shared<MutableTuple>(_key_fields, *(cache_page->last()));
+            auto row = *(cache_page->last());
+            auto key = std::make_shared<MutableTuple>(_key_fields, &row);
             ValueTuplePtr value_key = std::make_shared<ValueTuple>(key);
 
             auto page = std::make_shared<Page>(_btree, id, value_key, std::move(cache_page), _schema);
@@ -571,7 +573,8 @@ MutableBTree::lower_bound(TuplePtr search_key,
         // if the page is not the root then we store the key of the entry we used to find this page
         if (!this->type.is_root()) {
             // force a copy of the values into a ValueTuple
-            auto key = std::make_shared<MutableTuple>(_key_fields, *(cache_page->last()));
+            auto row = *(cache_page->last());
+            auto key = std::make_shared<MutableTuple>(_key_fields, &row);
             this->prev_key = std::make_shared<ValueTuple>(key);
         }
 
@@ -713,7 +716,8 @@ MutableBTree::lower_bound(TuplePtr search_key,
             {
                 // currently looks evictable and requires a flush; acquire the parent disk_mutex to
                 // ensure it doesn't get flushed
-                boost::shared_lock parent_lock(parent->disk_mutex);
+                // note: not actually required since the parent would attempt to flush the dirty child before itself
+                // boost::shared_lock parent_lock(parent->disk_mutex);
 
                 // lock the page's disk_mutex since we are about to flush
                 // note: should never block since we removed the entry from the cache while it wasn't in use
@@ -897,7 +901,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
             Extent::Row row = (i == node->page->end()) ? node->page->back() : *i;
 
             // retrieve the child offset
-            uint64_t extent_id = _branch_child_f->get_uint64(row);
+            uint64_t extent_id = _branch_child_f->get_uint64(&row);
 
             // read the child page; will handle updating the locks
             // note: this will release the page_lock once it has a pointer to the child in memory
@@ -1039,7 +1043,9 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
             // add pointers to the new root for each new page
             for (PagePtr child : new_pages) {
-                auto key = child->index_key();
+                auto child_keys = child->index_keys();
+                auto &&child_row = child->back();
+                auto key = std::make_shared<MutableTuple>(child_keys, &child_row);
 
                 LOG_DEBUG(LOG_BTREE, "Adding root entry to child extent_id: {}", child->extent_id);
 
@@ -1057,7 +1063,8 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
             // construct a new root page based on the new extent
             uint64_t extent_id = ids[0];
-            auto key = std::make_shared<MutableTuple>(_branch_keys, *(cache_page->last()));
+            auto row = *(cache_page->last());
+            auto key = std::make_shared<MutableTuple>(_branch_keys, &row);
             ValueTuplePtr value_key = std::make_shared<ValueTuple>(key);
 
             new_root = std::make_shared<Page>(this, extent_id,
