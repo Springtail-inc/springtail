@@ -18,7 +18,8 @@ def main(mapping_file, trace_file, query_info_file, output_file):
                 "query_type": row.get("query_type", ""),
                 "duration_ms": row.get("duration_ms", ""),
                 "pg_timestamp": row.get("pg_timestamp", ""),
-                "rows_affected": row.get("rows_affected", "")
+                "rows_affected": row.get("rows_affected", ""),
+                "table_name": row.get("table_name", "")
             }
 
     # Merge traces
@@ -26,7 +27,7 @@ def main(mapping_file, trace_file, query_info_file, output_file):
         reader = csv.DictReader(tracesfile)
         fieldnames = (
             ['pg_xid'] + reader.fieldnames +
-            ['query_type', 'duration_ms', 'pg_timestamp', 'rows_affected']
+            ['query_type', 'duration_ms', 'pg_timestamp', 'rows_affected', 'table_name']
         )
         writer = csv.DictWriter(outputfile, fieldnames=fieldnames)
 
@@ -42,7 +43,8 @@ def main(mapping_file, trace_file, query_info_file, output_file):
                 'query_type': query_info.get('query_type', ''),
                 'duration_ms': query_info.get('duration_ms', ''),
                 'pg_timestamp': query_info.get('pg_timestamp', ''),
-                'rows_affected': query_info.get('rows_affected', '')
+                'rows_affected': query_info.get('rows_affected', ''),
+                'table_name': query_info.get('table_name', '')
             }
             writer.writerow(row_with_pg_and_query)
 
