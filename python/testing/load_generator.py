@@ -28,6 +28,7 @@ NUM_INSERTS = 5
 NUM_UPDATES = 5
 NUM_DELETES = 2
 BATCHED_INSERTS = False
+OPERATIONS = 'TIAUD'
 RUN_TS = int(time.time())
 
 # Global dictionary to store table column information
@@ -289,13 +290,29 @@ def create_schema_and_tables(conn, csv_file: str, schema_name: str):
     for i in range(NUM_TABLES_PER_SCHEMA):
         table_name = f"table_{i}_{random.randint(1000, 9999)}"
 
-        for func in [create_table, create_index, insert_data, update_data, delete_data]: # update_data, delete_data
+        for func in parse_operations():
             try:
                 func(conn, schema_name, table_name, csv_file)
             except Exception as e:
                 print(f"[-] Got an error while {func.__name__} {schema_name}.{table_name}: {e}")
 
     return schema_name
+
+def parse_operations():
+    operations = []
+    for char in OPERATIONS:
+        if char == 'T':
+            operations.append(create_table)
+        elif char == 'I':
+            operations.append(create_index)
+        elif char == 'A':
+            operations.append(insert_data)
+        elif char == 'U':
+            operations.append(update_data)
+        elif char == 'D':
+            operations.append(delete_data)
+    return operations
+
 
 def drop_schema(conn, schema_name):
     time_and_log_query(conn, "drop_schema", f"DROP SCHEMA IF EXISTS {schema_name} CASCADE")
@@ -332,6 +349,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('--num-updates', type=int, default=NUM_UPDATES, help='Number of updates per table')
     parser.add_argument('--num-deletes', type=int, default=NUM_DELETES, help='Number of deletes per table')
 
+    parser.add_argument('--operations', type=str, default=OPERATIONS, help='Use batched inserts')
     parser.add_argument('--batched_inserts', type=bool, default=BATCHED_INSERTS, help='Use batched inserts')
     return parser.parse_args()
 
@@ -347,6 +365,7 @@ if __name__ == "__main__":
         sys.exit(1)
     NUM_UPDATES = min(args.num_updates, NUM_INSERTS // 2)
     NUM_DELETES = min(args.num_deletes, NUM_INSERTS // 2)
+    OPERATIONS = args.operations
     BATCHED_INSERTS = args.batched_inserts
 
     try:
