@@ -35,7 +35,8 @@ PG_XID_SUMMARY_FILE = '/tmp/pg_xid_summary.csv'
 FINAL_TRACES_FILE = '/tmp/final_traces.csv'
 
 workbook = xlsxwriter.Workbook('final_report.xlsx', {'constant_memory': True})
-bold = workbook.add_format({'bold': True})
+normal_fmt = workbook.add_format({'font_name': 'Trebuchet MS', 'font_size': 10})
+bold_fmt = workbook.add_format({'bold': True, 'font_name': 'Trebuchet MS', 'font_size': 10})
 
 def write_csv_to_worksheet(worksheet, csv_file):
     col_widths = []
@@ -45,9 +46,9 @@ def write_csv_to_worksheet(worksheet, csv_file):
             for c, col in enumerate(row):
                 try:
                     float(col)
-                    worksheet.write_number(r, c, float(col), bold if r == 0 else None)
+                    worksheet.write_number(r, c, float(col), bold_fmt if r == 0 else normal_fmt)
                 except ValueError:
-                    worksheet.write(r, c, col, bold if r == 0 else None)
+                    worksheet.write(r, c, col, bold_fmt if r == 0 else normal_fmt)
                 # Expand col_widths if needed
                 if len(col_widths) <= c:
                     col_widths.extend([0] * (c - len(col_widths) + 1))
@@ -108,8 +109,8 @@ def write_aggregates_to_worksheet():
         label_str = str(label)
         value_str = str(value)
 
-        worksheet5.write(r, 0, label_str, bold)
-        worksheet5.write(r, 1, value)
+        worksheet5.write(r, 0, label_str, bold_fmt)
+        worksheet5.write(r, 1, value, normal_fmt)
 
         col_widths[0] = max(col_widths[0], len(label_str))
         col_widths[1] = max(col_widths[1], len(value_str))
