@@ -56,8 +56,10 @@ SELECT col3, col4 FROM nulls_ordering ORDER BY col3 ASC NULLS LAST, col4 ASC NUL
 SELECT col3, col4 FROM nulls_ordering ORDER BY col3 DESC NULLS FIRST, col4 DESC NULLS FIRST;
 SELECT col3, col4 FROM nulls_ordering ORDER BY col3 DESC NULLS LAST, col4 DESC NULLS LAST;
 
-SELECT col3, col4, col6 FROM nulls_ordering ORDER BY col1 ASC, col6 ASC NULLS FIRST;
-SELECT col3, col4, col6 FROM nulls_ordering ORDER BY col1 ASC, col6 DESC NULLS FIRST;
+SELECT col3, col4, col6 FROM nulls_ordering ORDER BY col6 ASC, col1 ASC NULLS FIRST;
+SELECT col3, col4, col6 FROM nulls_ordering ORDER BY col6 DESC, col1 ASC NULLS FIRST;
+SELECT col3, col4, col6 FROM nulls_ordering ORDER BY col6 ASC, col1 ASC NULLS LAST;
+SELECT col3, col4, col6 FROM nulls_ordering ORDER BY col6 DESC, col1 ASC NULLS LAST;
 
 ## cleanup
 DROP TABLE IF EXISTS nulls_ordering;
