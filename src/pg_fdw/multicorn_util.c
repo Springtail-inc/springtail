@@ -155,7 +155,7 @@ findPaths(PlannerInfo *root,
 #if PG_VERSION_NUM >= 160000
                 OuterJoinClauseInfo *ojcinfo;
 
-                if (nodeTag(node) != T_OuterJoinClauseInfo)
+                if (nodeTag(node) != T_OuterJoinClauseInfo) //NOSONAR reason: third-party code
                 {
                     elog(ERROR, "join clause was not a T_OuterJoinClauseInfo; but was a %d", nodeTag(node));
                     continue;
@@ -165,14 +165,14 @@ findPaths(PlannerInfo *root,
                 node = (Node *) ojcinfo->rinfo;
 #endif
 
-                if (nodeTag(node) != T_RestrictInfo)
+                if (nodeTag(node) != T_RestrictInfo) //NOSONAR reason: third-party code
                 {
                     elog(ERROR, "join clause was not a T_RestrictInfo; but was a %d", nodeTag(node));
                     continue;
                 }
                 ri = (RestrictInfo *) node;
 
-                if (isAttrInRestrictInfo(baserel->relid, attnum, ri))
+                if (isAttrInRestrictInfo(baserel->relid, attnum, ri)) //NOSONAR reason: third-party code
                 {
                     clauses = lappend(clauses, ri);
                     outer_relids = bms_union(outer_relids,
