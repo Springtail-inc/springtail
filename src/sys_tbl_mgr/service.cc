@@ -1087,8 +1087,9 @@ Service::SwapSyncTable(grpc::ServerContext* context,
                             index.index().id(), index.xid(), index.lsn());
 
         CHECK_EQ(index.lsn(), constant::RESYNC_CREATE_LSN);
-        auto&& index_ddl = this->_create_index(index);
-        ddls.push_back(index_ddl);
+
+        // note: we don't store the create_index DDL since it doesn't need to be replayed at the FDW
+        this->_create_index(index);
     }
 
     // 6. update the metadata of the table
