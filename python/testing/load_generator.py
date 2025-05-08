@@ -28,7 +28,7 @@ NUM_INSERTS = 5
 NUM_UPDATES = 5
 NUM_DELETES = 2
 BATCHED_INSERTS = False
-OPERATIONS = 'TIAUD'
+OPERATIONS = 'TIA'
 RUN_TS = int(time.time())
 NUM_COLUMNS = '3-10'
 NUM_INDEXES = '1-2'
@@ -188,7 +188,7 @@ def create_index(conn, schema_name: str, table_name: str, csv_file: str):
         return
 
     # Filter out columns that are not suitable for indexing
-    indexable_columns = [col[0] for col in columns if col[1] not in ['jsonb', 'bytea', 'uuid']]
+    indexable_columns = [col[0] for col in columns if col[0] not in ['id', 'created_at'] and col[1] not in ['jsonb', 'bytea', 'uuid']]
 
     if not indexable_columns:
         print(f"[!] No indexable columns found in {full_table_name}")
@@ -399,7 +399,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('--num-columns', type=str, default=NUM_COLUMNS, help='Number of columns per table')
     parser.add_argument('--num-indexes', type=str, default=NUM_INDEXES, help='Number of indexes per table')
 
-    parser.add_argument('--operations', type=str, default=OPERATIONS, help='Use batched inserts')
+    parser.add_argument('--operations', type=str, default=OPERATIONS, help='List of operations to perform T - create_table, I - create_index, A - insert_data, U - update_data, D - delete_data')
     parser.add_argument('--batched_inserts', type=bool, default=BATCHED_INSERTS, help='Use batched inserts')
     return parser.parse_args()
 
