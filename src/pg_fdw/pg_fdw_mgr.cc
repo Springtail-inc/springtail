@@ -838,16 +838,22 @@ namespace springtail::pg_fdw {
 
         // let's see if we have an unique index in qual_list
         for (auto const& idx: state->indexes) {
-            if (!idx.is_unique) {
-                continue;
-            }
             DCHECK_GT(idx.columns.size(), 0);
             auto index_quals = _get_index_quals(state, idx, qual_list);
             // check for the full match
             if (index_quals.size() == idx.columns.size() &&
                     // ... and all must be EQUALS
                 std::ranges::find_if(index_quals, [](const auto& v) {return v->base.op != EQUALS;}) == index_quals.end()) {
-                *rows = 1;
+                if (!idx.is_unique) {
+                    // We don't know cardinality stats. Just set to a number that
+                    // is less than the total rows.
+                    *rows = *rows/10;
+                    if (*rows == 0) {
+                        *rows = 2;
+                    }
+                } else {
+                    *rows = 1;
+                }
                 break;
             }
         }
