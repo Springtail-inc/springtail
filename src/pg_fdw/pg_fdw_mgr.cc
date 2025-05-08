@@ -836,6 +836,22 @@ namespace springtail::pg_fdw {
         PgFdwState *state = static_cast<PgFdwState *>(planstate->pg_fdw_state);
         *rows = state->stats.row_count;
 
+        // let's see if we have an unique index in qual_list
+        for (auto const& idx: state->indexes) {
+            if (!idx.is_unique) {
+                continue;
+            }
+            DCHECK_GT(idx.columns.size(), 0);
+            auto index_quals = _get_index_quals(state, idx, qual_list);
+            // check for the full match
+            if (index_quals.size() == idx.columns.size() &&
+                    // ... and all must be EQUALS
+                std::ranges::find_if(index_quals, [](const auto& v) {return v->base.op != EQUALS;}) == index_quals.end()) {
+                *rows = 1;
+                break;
+            }
+        }
+
         // estimate width based on target list using most common types
         ListCell *lc;
         *width = 0;
