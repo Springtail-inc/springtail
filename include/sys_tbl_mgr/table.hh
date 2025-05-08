@@ -186,6 +186,7 @@ namespace indexer_helpers {
 
                 StorageCache::SafePagePtr _page; ///< A pointer to the data page currently being processed.
                 StorageCache::Page::Iterator _page_i; ///< An iterator into the Extent.
+                std::optional<StorageCache::Page::Iterator> _end;
             };
 
             /**

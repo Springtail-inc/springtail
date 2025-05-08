@@ -1263,11 +1263,17 @@ namespace indexer_helpers {
     {
         TIME_TRACE_SCOPED(time_trace::traces, primary_index_iterator_next);
 
+        if (!_end) {
+            _end = _page->end();
+        }
+
         // move to the next row in the data extent
         ++_page_i;
-        if (_page_i != _page->end()) {
+        if (_page_i != *_end) {
             return;
         }
+
+        _end = {};
 
         // no more rows in the extent, so need to move to the next data extent
         ++_btree_i;
