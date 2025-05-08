@@ -424,11 +424,11 @@ if __name__ == "__main__":
     NUM_COLUMNS = args.num_columns
     NUM_INDEXES = args.num_indexes
 
-    parsed_operations = parse_operations()
+    parsed_operations = parse_operations(parse_names=True)
     # If no updates or deletes are specified, set them to 0
-    if ( 'U' not in parsed_operations ):
+    if ( 'update_data' not in parsed_operations ):
         NUM_UPDATES = 0
-    if ( 'D' not in parsed_operations ):
+    if ( 'delete_data' not in parsed_operations ):
         NUM_DELETES = 0
 
     try:
