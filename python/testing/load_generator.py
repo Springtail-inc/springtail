@@ -32,6 +32,7 @@ OPERATIONS = 'TIA'
 RUN_TS = int(time.time())
 NUM_COLUMNS = '3-10'
 NUM_INDEXES = '1-2'
+NUM_COLUMNS_PER_INDEX = '1-2'
 
 # Global dictionary to store table column information
 table_columns = {}
@@ -197,8 +198,9 @@ def create_index(conn, schema_name: str, table_name: str, csv_file: str):
     # Create a random number of indexes with a random number of columns
     min_indexes, max_indexes = map(int, NUM_INDEXES.split('-'))
     num_indexes = random.randint(min_indexes, max_indexes)
+    min_cols_per_index, max_cols_per_index = map(int, NUM_COLUMNS_PER_INDEX.split('-'))
     for i in range(num_indexes):
-        index_columns = random.sample(indexable_columns, random.randint(1, 2))
+        index_columns = random.sample(indexable_columns, random.randint(min_cols_per_index, max_cols_per_index))
         index_name = f"idx_{table_name}_{i}_{('_'.join(index_columns))}"
 
         create_index_sql = f"""
@@ -398,6 +400,7 @@ def parse_arguments() -> argparse.Namespace:
 
     parser.add_argument('--num-columns', type=str, default=NUM_COLUMNS, help='Number of columns per table')
     parser.add_argument('--num-indexes', type=str, default=NUM_INDEXES, help='Number of indexes per table')
+    parser.add_argument('--num-columns-per-index', type=str, default=NUM_COLUMNS_PER_INDEX, help='Number of columns per index')
 
     parser.add_argument('--operations', type=str, default=OPERATIONS, help='List of operations to perform T - create_table, I - create_index, A - insert_data, U - update_data, D - delete_data')
     parser.add_argument('--batched_inserts', type=bool, default=BATCHED_INSERTS, help='Use batched inserts')
@@ -423,6 +426,7 @@ if __name__ == "__main__":
     # Table values
     NUM_COLUMNS = args.num_columns
     NUM_INDEXES = args.num_indexes
+    NUM_COLUMNS_PER_INDEX = args.num_columns_per_index
 
     parsed_operations = parse_operations(parse_names=True)
     # If no updates or deletes are specified, set them to 0
