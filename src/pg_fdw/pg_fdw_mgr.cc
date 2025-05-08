@@ -559,7 +559,7 @@ namespace springtail::pg_fdw {
     void
     PgFdwMgr::fdw_end_scan(PgFdwState *state)
     {
-#if SPRINGTAIL_INCLUDE_TIME_TRACES
+#ifdef SPRINGTAIL_INCLUDE_TIME_TRACES
         LOG_WARN("{}", time_trace::traces.format());
         time_trace::traces.reset();
 #endif
