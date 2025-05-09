@@ -19,6 +19,8 @@
 
 #include <redis/redis_containers.hh>
 
+#include <pg_log_mgr/sync_tracker.hh>
+
 #include <pg_repl/exception.hh>
 #include <pg_repl/pg_types.hh>
 #include <pg_repl/pg_copy_table.hh>
@@ -472,7 +474,8 @@ namespace springtail
                              const std::string &table_name,
                              const std::string &schema_name,
                              uint64_t table_oid,
-                             uint64_t schema_oid)
+                             uint64_t schema_oid,
+                             const PgCopyResultPtr &snapshot_details)
     {
         // set the schema
         _set_schema(table_name, schema_name, table_oid, schema_oid);
@@ -487,7 +490,14 @@ namespace springtail
                 {"columns", invalid_columns}
             };
 
+            // mark the table as invalid, we won't copy it
             TableValidator::get_instance()->mark_invalid(table_oid, table_info);
+
+            // mark the copy as "in-flight" to wake up the log reader
+            // note: we don't need a schema since we are going to ignore this table
+            pg_log_mgr::SyncTracker::get_instance()->mark_inflight(db_id, _schema.table_oid, xid,
+                                                                   snapshot_details, nullptr);
+
             return std::make_shared<PgCopyResult::TableInfo>(table_oid, nullptr, nullptr);
         }
 
@@ -556,7 +566,12 @@ namespace springtail
         }
 
         auto schema = std::make_shared<ExtentSchema>(_schema.columns);
-        auto table = TableMgr::get_instance()->get_snapshot_table(db_id, _schema.table_oid, xid.xid, schema, _schema.secondary_keys);
+        auto table = TableMgr::get_instance()->get_snapshot_table(db_id, _schema.table_oid, xid.xid,
+                                                                  schema, _schema.secondary_keys);
+
+        // mark the copy as inflight and record the snapshot details
+        pg_log_mgr::SyncTracker::get_instance()->mark_inflight(db_id, _schema.table_oid, xid,
+                                                               snapshot_details, schema);
 
         // start the COPY
         _prepare_copy();
@@ -764,8 +779,7 @@ namespace springtail
             case (SchemaType::BINARY): {
                 std::string_view tmp(row.data() + pos, length);
 
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Converting unsupported type '{}' into BINARY -- {}",
-                          pg_type, tmp);
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Converting unsupported type '{}' into BINARY", pg_type);
                 // XXX print out the binary data here
                 std::vector<char> data(tmp.begin(), tmp.end());
                 fields->push_back(std::make_shared<ConstTypeField<std::vector<char>>>(data));
@@ -955,7 +969,8 @@ namespace springtail
                                                    request->table_name,
                                                    request->schema_name,
                                                    request->table_oid,
-                                                   request->schema_oid);
+                                                   request->schema_oid,
+                                                   result);
 
                 // add the table oid to the result
                 result->add_table(info);
@@ -1154,8 +1169,8 @@ namespace springtail
         // iterate through the results and get the user defined types
         for (int i = 0; i < _connection.ntuples(); i++) {
             uint32_t enum_type_oid = _connection.get_int32(i, 0);
-            std::string enum_label = _connection.get_string(i, 1);
-            float enum_sortorder = _connection.get_float(i, 2);
+            float enum_sortorder = _connection.get_float(i, 1);
+            std::string enum_label = _connection.get_string(i, 2);
 
             // add the enum type to the map
             user_types[enum_type_oid][enum_label] = enum_sortorder;
