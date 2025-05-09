@@ -259,7 +259,8 @@ namespace springtail
                                                const std::string &table_name,
                                                const std::string &schema_name,
                                                uint64_t table_oid,
-                                               uint64_t schema_oid);
+                                               uint64_t schema_oid,
+                                               const PgCopyResultPtr &snapshot_details);
 
         /**
          * @brief End the copy, commit the transaction

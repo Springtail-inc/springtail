@@ -298,7 +298,6 @@ namespace springtail::pg_log_mgr {
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Table sync queue: {}@{}:{}", request->table_id(),
                                     request->xid().xid, request->xid().lsn);
                 table_ids.insert(request->table_id());
-                SyncTracker::get_instance()->mark_inflight(_db_id, request->table_id(), request->xid()); // shift from resyncing to inflight
 
                 request = _redis_sync_queue.try_pop(REDIS_WORKER_ID);
             } while (request != nullptr);
@@ -306,6 +305,12 @@ namespace springtail::pg_log_mgr {
             CHECK(!table_ids.empty());
 
             auto token_commit_worker = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(_db_id)}});
+
+            // ensure we've stopped committing
+            // note: there's a race condition that could result in this being called multiple times
+            //       prior to the first copy actually starting, but there's no harm
+            SyncTracker::get_instance()->block_commits(_db_id, _committer_queue);
+
             // copy tables
             _do_table_copies(table_ids);
 
@@ -329,9 +334,6 @@ namespace springtail::pg_log_mgr {
         // set db state to syncing
         Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_SYNCING);
 
-        // wait for pipeline stall to complete
-        _internal_state.wait_for_state(STATE_SYNCING);
-
         LOG_DEBUG(LOG_PG_LOG_MGR, "Copying tables; state=synchronizing");
 
         // copy tables
@@ -345,6 +347,9 @@ namespace springtail::pg_log_mgr {
         } else {
             res = PgCopyTable::copy_db(_db_id, xid);
         }
+
+        // ensure the pipeline was stalled before we complete
+        _internal_state.wait_for_state(STATE_SYNCING);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; res size={}", res.size());
         if (res.size() > 0) {
@@ -386,13 +391,7 @@ namespace springtail::pg_log_mgr {
             LOG_DEBUG(LOG_PG_LOG_MGR, "Recording table sync msgs: target_xid={}", r->target_xid);
             PgXactMsg redis_xact(_db_id, r);
 
-            bool sync_start = SyncTracker::get_instance()->add_sync(std::get<pg_log_mgr::PgXactMsg::TableSyncMsg>(redis_xact.msg));
-
-            // notify the Committer to stop committing XIDs
-            if (sync_start) {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Stop committing XIDs for db: {}", _db_id);
-                _committer_queue->push(std::make_shared<committer::XidReady>(_db_id));
-            }
+            SyncTracker::get_instance()->add_sync(std::get<pg_log_mgr::PgXactMsg::TableSyncMsg>(redis_xact.msg));
         }
 
         // process stalled messages; set state to replaying
