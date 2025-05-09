@@ -28,6 +28,7 @@ BEGIN;
 CREATE INDEX index_col_ordering_idx_col6_col2 ON index_col_ordering (col6, col2);
 COMMIT;
 
+-- Allow index reconciliation to be completed
 SELECT pg_sleep(1);
 
 BEGIN;
