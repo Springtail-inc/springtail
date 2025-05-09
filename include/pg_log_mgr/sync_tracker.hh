@@ -79,14 +79,17 @@ namespace springtail::pg_log_mgr {
         };
 
     public:
+        using CommitterQueuePtr = std::shared_ptr<ConcurrentQueue<committer::XidReady>>;
+
         /**
-         * Marks that the LogParser has issued a resync request for the given table so that
-         * mutations can be ignored.  Once picked up by the copy thread, it is moved to the inflight
-         * map.
-         *
-         * @return true if this is the first table from this sync-set
+         * Block the committer from issuing commits during a table sync.
          */
-        bool mark_resync(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+        void block_commits(uint64_t db_id, CommitterQueuePtr committer_queue);
+
+        /**
+         * Issue's a resync request for a table and waits for the table copy to start.
+         */
+        void issue_resync_and_wait(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
         /**
          * Marks that the coppy thread has started the COPY request for this table.  This record is
@@ -95,14 +98,15 @@ namespace springtail::pg_log_mgr {
          *
          * @return true if this is the first table from this sync-set
          */
-        void mark_inflight(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+        void mark_inflight(uint64_t db_id, uint64_t table_id, const XidLsn &xid,
+                           const PgCopyResultPtr &copy, ExtentSchemaPtr schema);
 
         /**
          * Add the metadata for a given table sync into the tracker.
          *
          * @return true if this is the first table from this sync-set
          */
-        bool add_sync(const PgXactMsg::TableSyncMsg &sync_msg);
+        void add_sync(const PgXactMsg::TableSyncMsg &sync_msg);
 
         /**
          * Check if there are any sync'd tables to swap/commit.
@@ -139,15 +143,15 @@ namespace springtail::pg_log_mgr {
 
     private:
         /**
-         * Internal class representing the XID metadata for an individual table sync.
+         * Internal class representing the PG snapshot details
          */
-        class XidRecord {
+        class Snapshot {
         public:
-            explicit XidRecord(const PgXactMsg::TableSyncMsg &sync_msg)
-                : _pg_xid(sync_msg.pg_xid),
-                  _xmax(sync_msg.xmax),
-                  _inflight(sync_msg.xips.begin(), sync_msg.xips.end()),
-                  _tids(sync_msg.tids)
+            Snapshot() = default;
+            Snapshot(uint32_t pg_xid, uint32_t xmax, const std::vector<uint32_t> &xips)
+                : _pg_xid(pg_xid),
+                  _xmax(xmax),
+                  _inflight(xips.begin(), xips.end())
             { }
 
             /**
@@ -186,6 +190,26 @@ namespace springtail::pg_log_mgr {
                 return true;
             }
 
+            const uint32_t pg_xid() const {
+                return _pg_xid;
+            }
+
+        protected:
+            uint32_t _pg_xid = 0; ///< The PG xid at which the sync occurred
+            uint32_t _xmax = 0; ///< The XMAX at postgres for the sync transaction
+            std::set<uint32_t> _inflight; ///< The in-flight PG xids for the sync txn
+        };
+
+        /**
+         * Internal class representing the XID metadata for an individual table sync.
+         */
+        class XidRecord : public Snapshot {
+        public:
+            explicit XidRecord(const PgXactMsg::TableSyncMsg &sync_msg)
+                : Snapshot(sync_msg.pg_xid, sync_msg.xmax, sync_msg.xips),
+                  _tids(sync_msg.tids)
+            { }
+
             /**
              * Retrieve the list of tables that were part of this sync.
              */
@@ -193,40 +217,58 @@ namespace springtail::pg_log_mgr {
                 return _tids;
             }
 
-            /**
-             * Retrieve the PG xid at which this sync occurred.
-             */
-            const uint32_t pg_xid() const {
-                return _pg_xid;
-            }
-
         private:
-            uint32_t _pg_xid; ///< The PG xid at which the sync occurred
-            uint32_t _xmax; ///< The XMAX at postgres for the sync transaction
-            std::set<uint32_t> _inflight; ///< The in-flight PG xids for the sync txn
             std::vector<PgCopyResult::TableInfoPtr> _tids; ///< The table ids being synced and their associated RPC data
         };
 
+        /** Object to track individual in-flight table copies. */
+        class Inflight : public Snapshot {
+        public:
+            Inflight(uint32_t pg_xid,
+                     uint32_t xmax,
+                     const std::vector<uint32_t> &xips,
+                     ExtentSchemaPtr schema)
+                : Snapshot(pg_xid, xmax, xips), _schema(schema)
+            { }
+
+            const ExtentSchemaPtr &schema() const {
+                return _schema;
+            }
+
+        private:
+            ExtentSchemaPtr _schema; ///< Schema of the table being synced
+        };
+
+        /** Helper object for notifying the log reader. */
+        struct Wait {
+            bool notified = false;
+            std::condition_variable condition;
+        };
+
     private:
-        /** Mutex to protect access to the _sync_map */
-        mutable boost::shared_mutex _mutex;
+        template<class T>
+        using DbMap = absl::flat_hash_map<uint64_t, T>;
 
-        /** db -> table -> XidRecord containing table sync details. */
-        std::map<uint64_t, std::map<uint64_t, std::shared_ptr<XidRecord>>> _table_map;
+        template<class T>
+        using TableMap = absl::flat_hash_map<uint64_t, T>;
 
-        /** db -> pgxid -> XidRecord. */
-        std::map<uint64_t, std::map<uint32_t, std::shared_ptr<XidRecord>>> _sync_map;
+        template<class T>
+        using PgXidMap = absl::flat_hash_map<uint32_t, T>;
 
-        /** db -> target XID of sync. */
-        std::map<uint64_t, uint64_t> _target_xid_map;
+        /** Mutex to protect access. */
+        mutable std::mutex _mutex;
 
-        /** db-> table indicating that a resync was issued but it hasn't been picked up by the copy
-            thread yet. */
-        std::map<uint64_t, std::map<uint64_t, std::set<XidLsn>>> _resync_map;
+        /** Used to track all of the tables that have completed their sync. */
+        DbMap<TableMap<std::shared_ptr<XidRecord>>> _table_map;
 
-        /** db-> table indicating that a copy for the table is in-flight but hasn't completed,
-            meaning we haven't seen the TABLE_SYNC_MSG log entry for the table yet. */
-        std::map<uint64_t, std::set<uint64_t>> _inflight_map;
+        /** Used to track all of the table syncs operating at a given snapshot XID. */
+        DbMap<PgXidMap<std::shared_ptr<XidRecord>>> _sync_map;
+
+        /** Entry is added here when a copy for the table is in-flight but hasn't completed. */
+        DbMap<TableMap<std::shared_ptr<Inflight>>> _inflight_map;
+
+        /** PgLogReader waits for copy to start here. */
+        DbMap<std::shared_ptr<Wait>> _wait_map;
     };
 
     class SyncTrackerRunner : public ServiceRunner {
