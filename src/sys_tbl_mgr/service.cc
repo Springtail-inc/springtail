@@ -209,7 +209,10 @@ Service::_create_index(const proto::IndexRequest& request)
         column_json["position"] = column.position();
         column_json["name"] = column.name();
 
-        ddl["columns"].push_back(column_json);
+        if (ddl["columns"].size() <= column.idx_position()) {
+            ddl["columns"].get_ref<nlohmann::json::array_t&>().resize(column.idx_position() + 1);
+        }
+        ddl["columns"][column.idx_position()] = column_json;
     }
 
     // update index names
