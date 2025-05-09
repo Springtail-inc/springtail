@@ -600,8 +600,6 @@ namespace springtail {
     StorageCache::Page::Iterator
     StorageCache::Page::lower_bound(TuplePtr tuple, ExtentSchemaPtr schema)
     {
-        boost::shared_lock lock(_mutex);
-
         // perform a lower-bound check to find the appropriate extent
         // note: we don't use std::ranges::lower_bound() here because the projection causes the
         //       SafeExtent to go out of scope before it is used in the comparison
@@ -635,8 +633,6 @@ namespace springtail {
     StorageCache::Page::Iterator
     StorageCache::Page::upper_bound(TuplePtr tuple, ExtentSchemaPtr schema)
     {
-        boost::shared_lock lock(_mutex);
-
         // perform a upper-bound check to find the appropriate extent
         // note: we don't use std::ranges::upper_bound() here because the projection causes the
         //       SafeExtent to go out of scope before it is used in the comparison
