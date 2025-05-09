@@ -779,8 +779,7 @@ namespace springtail
             case (SchemaType::BINARY): {
                 std::string_view tmp(row.data() + pos, length);
 
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Converting unsupported type '{}' into BINARY -- {}",
-                          pg_type, tmp);
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Converting unsupported type '{}' into BINARY", pg_type);
                 // XXX print out the binary data here
                 std::vector<char> data(tmp.begin(), tmp.end());
                 fields->push_back(std::make_shared<ConstTypeField<std::vector<char>>>(data));

@@ -57,6 +57,7 @@ DELETE FROM table3
 WHERE table1_id IN (SELECT id FROM table1 ORDER BY RANDOM() LIMIT 1000);
 
 ## verify
+SELECT * from table2 LEFT JOIN table1 ON table1.id=table2.table1_id where table2.id=2;
 SELECT
     (SELECT COUNT(*) FROM table1) AS count_table1,
     (SELECT COUNT(*) FROM table2) AS count_table2,
