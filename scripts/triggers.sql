@@ -54,6 +54,65 @@ BEGIN
 END;
 $$;
 
+CREATE TYPE table_info AS (
+    persistence "char",
+    replident "char",
+    relname text,
+    columns json
+);
+
+CREATE OR REPLACE FUNCTION springtail_get_table_name_and_columns(obj record)
+        RETURNS table_info LANGUAGE plpgsql AS $$
+DECLARE
+    json_columns json;
+    table_persistence "char";
+    table_replident "char";
+    table_relname text;
+    result table_info;
+BEGIN
+    SELECT relname, relreplident, relpersistence
+    FROM pg_class
+    WHERE oid = obj.objid
+    INTO table_relname, table_replident, table_persistence;
+
+    SELECT json_agg(json_col)
+    FROM (
+        SELECT json_build_object('name', column_name,
+            'is_nullable', is_nullable::boolean,
+            'pg_type', atttypid::int,
+            'default', column_default,
+            'is_pkey', coalesce((pga.attnum=any(pgi.indkey))::boolean, false),
+            'position', ordinal_position,
+            'pkey_pos', array_position(pgi.indkey, pga.attnum),
+            'is_generated', (pga.attgenerated = 's')::boolean,
+            'type_name', t.typname,
+            'collation', col.collname,
+            'is_user_defined_type', (t.typnamespace <> 'pg_catalog'::regnamespace AND t.typnamespace <> 'information_schema'::regnamespace)::boolean,
+            'is_non_standard_collation', coalesce((col.collname NOT IN ('C', 'en_US.UTF-8', 'default'))::boolean, false),
+            'type_category', t.typcategory,
+            'type_namespace', nsp.nspname
+        ) AS json_col
+        FROM pg_attribute pga
+        JOIN information_schema.columns
+        ON column_name=pga.attname
+        LEFT OUTER JOIN pg_index pgi
+        ON pga.attrelid=pgi.indrelid AND pgi.indisprimary
+        LEFT JOIN pg_type t ON pga.atttypid = t.oid
+        LEFT JOIN pg_collation col ON pga.attcollation = col.oid AND pga.attcollation <> 0
+        LEFT JOIN pg_catalog.pg_namespace nsp ON nsp.oid = t.typnamespace
+        WHERE pga.attrelid=obj.objid
+            AND quote_literal(table_schema) = quote_literal(obj.schema_name)
+            AND quote_literal(table_name) = quote_literal(table_relname)
+            AND atttypid > 0
+        ORDER BY ordinal_position
+    ) AS obj_select
+    INTO json_columns;
+
+    result := ROW(table_persistence, table_replident, table_relname, json_columns);
+    RETURN result;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for_table_ddl()
         RETURNS event_trigger LANGUAGE plpgsql AS $$
 DECLARE
@@ -72,48 +131,14 @@ BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() AS cmd
         WHERE cmd.command_tag IN ('ALTER TABLE', 'CREATE TABLE')
     LOOP
-        SELECT relname, relreplident, relpersistence
-        FROM pg_class
-        WHERE oid = obj.objid
-        INTO table_relname, table_replident, table_persistence;
+        SELECT persistence, replident, relname, columns
+            INTO table_persistence, table_replident, table_relname, json_columns
+            FROM springtail_get_table_name_and_columns(obj);
 
         IF table_persistence <> 'p' THEN
             --- RAISE NOTICE 'springtail: skipping operation %, on object %, with identity %, due to wrong persistence type: %', obj.command_tag, obj.object_type, obj.object_identity, table_persistence;
             RETURN;
         END IF;
-
-        SELECT json_agg(json_col)
-        FROM (
-            SELECT json_build_object('name', column_name,
-                'is_nullable', is_nullable::boolean,
-                'pg_type', atttypid::int,
-                'default', column_default,
-                'is_pkey', coalesce((pga.attnum=any(pgi.indkey))::boolean, false),
-                'position', ordinal_position,
-                'pkey_pos', array_position(pgi.indkey, pga.attnum),
-                'is_generated', (pga.attgenerated = 's')::boolean,
-                'type_name', t.typname,
-                'collation', col.collname,
-                'is_user_defined_type', (t.typnamespace <> 'pg_catalog'::regnamespace AND t.typnamespace <> 'information_schema'::regnamespace)::boolean,
-                'is_non_standard_collation', coalesce((col.collname NOT IN ('C', 'en_US.UTF-8', 'default'))::boolean, false),
-                'type_category', t.typcategory,
-                'type_namespace', nsp.nspname
-            ) AS json_col
-            FROM pg_attribute pga
-            JOIN information_schema.columns
-            ON column_name=pga.attname
-            LEFT OUTER JOIN pg_index pgi
-            ON pga.attrelid=pgi.indrelid AND pgi.indisprimary
-            LEFT JOIN pg_type t ON pga.atttypid = t.oid
-            LEFT JOIN pg_collation col ON pga.attcollation = col.oid AND pga.attcollation <> 0
-            LEFT JOIN pg_catalog.pg_namespace nsp ON nsp.oid = t.typnamespace
-            WHERE pga.attrelid=obj.objid
-              AND quote_literal(table_schema) = quote_literal(obj.schema_name)
-              AND quote_literal(table_name) = quote_literal(table_relname)
-              AND atttypid > 0
-            ORDER BY ordinal_position
-        ) AS obj_select
-        INTO json_columns;
 
         -- Note: obj.object_name is not available
         msg := json_build_object('xid', txid_current(),
@@ -208,58 +233,72 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION springtail_generate_index_message(obj record)
+        RETURNS text LANGUAGE plpgsql AS $$
+DECLARE
+    ind_obj record;
+    msg text;
+    json_columns json;
+BEGIN
+    -- additionl index and table info
+    EXECUTE format('SELECT
+            c.oid AS table_oid,
+            c.relname AS table_name,
+            i.indisunique AS is_unique,
+            i.indisprimary AS primary_idx,
+            i.indkey AS indkey
+        FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid
+        WHERE i.indexrelid = %s', obj.objid) INTO ind_obj;
+
+    IF ind_obj.primary_idx IS true THEN
+        RETURN msg;
+    END IF;
+
+    -- get index columns
+    SELECT json_agg(json_col)
+    FROM (
+        SELECT json_build_object('name', pga.attname,
+            'position', pga.attnum,
+            'idx_position', array_position(ind_obj.indkey, pga.attnum)
+        ) AS json_col
+        FROM pg_attribute pga
+        WHERE
+            pga.attrelid=ind_obj.table_oid
+            AND (array_position(ind_obj.indkey, pga.attnum) IS NOT NULL)
+            AND attisdropped=false
+    ) AS obj_select
+    INTO json_columns;
+
+    -- build msg json object
+    msg := json_build_object('xid', txid_current(),
+        'cmd', obj.command_tag,
+        'oid', obj.objid::bigint,
+        'obj', obj.object_type,
+        'schema', obj.schema_name,
+        'identity', obj.object_identity,
+        'table_oid', ind_obj.table_oid::bigint,
+        'table_name', ind_obj.table_name,
+        'is_unique', ind_obj.is_unique,
+        'columns', json_columns);
+
+    RETURN msg;
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for_index_ddl()
         RETURNS event_trigger LANGUAGE plpgsql AS $$
 DECLARE
     obj record;
-    ind_obj record;
     msg text;
-    json_columns json;
 BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() as cmd
         WHERE cmd.object_type = 'index'
     LOOP
-        -- additionl index and table info
-        EXECUTE format('SELECT
-                c.oid AS table_oid,
-                c.relname AS table_name,
-                i.indisunique AS is_unique,
-                i.indisprimary AS primary_idx,
-                i.indkey AS indkey
-            FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid
-            WHERE i.indexrelid = %s', obj.objid) INTO ind_obj;
+        msg := springtail_generate_index_message(obj);
 
-        IF ind_obj.primary_idx is true THEN
-            RETURN;
+        IF msg IS NULL THEN
+            CONTINUE;
         END IF;
-
-        -- get index columns
-        SELECT json_agg(json_col)
-        FROM (
-            SELECT json_build_object('name', pga.attname,
-                'position', pga.attnum,
-                'idx_position', array_position(ind_obj.indkey, pga.attnum)
-            ) AS json_col
-            FROM pg_attribute pga
-            WHERE
-                pga.attrelid=ind_obj.table_oid
-                AND (array_position(ind_obj.indkey, pga.attnum) IS NOT NULL)
-                AND attisdropped=false
-        ) AS obj_select
-        INTO json_columns;
-
-        -- build msg json object
-        msg := json_build_object('xid', txid_current(),
-            'cmd', obj.command_tag,
-            'oid', obj.objid::bigint,
-            'obj', obj.object_type,
-            'schema', obj.schema_name,
-            'identity', obj.object_identity,
-            'table_oid', ind_obj.table_oid::bigint,
-            'table_name', ind_obj.table_name,
-            'is_unique', ind_obj.is_unique,
-            'columns', json_columns);
 
         -- command_tag is CREATE TABLE or ALTER TABLE
         PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
@@ -275,7 +314,10 @@ DECLARE
     obj record;
     schema_obj record;
     msg text;
+    table_persistence "char";
+    table_replident "char";
     table_relname text;
+    ind_obj record;
     json_columns json;
 BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() as cmd
@@ -298,47 +340,17 @@ BEGIN
                 'name', schema_obj.schema_name);
 
             -- command_tag is CREATE SCHEMA or ALTER SCHEMA
-            RAISE NOTICE 'springtail springtail_event_trigger_for_schema_ddl: %', msg::text;
+            -- RAISE NOTICE 'springtail springtail_event_trigger_for_schema_ddl: %', msg::text;
 
         ELSIF obj.command_tag = 'CREATE TABLE' THEN
 
             -- RAISE NOTICE 'springtail springtail_event_trigger_for_schema_ddl: obj.command_tag %, obj.type %, obj.object_identity %, obj.objid %, obj.schema_name %',
             --     obj.command_tag, obj.object_type, obj.object_identity, obj.objid, obj.schema_name;
 
-            SELECT split_part(obj.object_identity, '.', 2) INTO table_relname;
+            SELECT persistence, replident, relname, columns
+                INTO table_persistence, table_replident, table_relname, json_columns
+                FROM springtail_get_table_name_and_columns(obj);
 
-            SELECT json_agg(json_col)
-            FROM (
-                SELECT json_build_object('name', column_name,
-                    'is_nullable', is_nullable::boolean,
-                    'pg_type', atttypid::int,
-                    'default', column_default,
-                    'is_pkey', coalesce((pga.attnum=any(pgi.indkey))::boolean, false),
-                    'position', ordinal_position,
-                    'pkey_pos', array_position(pgi.indkey, pga.attnum),
-                    'is_generated', (pga.attgenerated = 's')::boolean,
-                    'type_name', t.typname,
-                    'collation', col.collname,
-                    'is_user_defined_type', (t.typnamespace <> 'pg_catalog'::regnamespace AND t.typnamespace <> 'information_schema'::regnamespace)::boolean,
-                    'is_non_standard_collation', coalesce((col.collname NOT IN ('C', 'en_US.UTF-8', 'default'))::boolean, false),
-                    'type_category', t.typcategory,
-                    'type_namespace', nsp.nspname
-                ) AS json_col
-                FROM pg_attribute pga
-                JOIN information_schema.columns
-                ON column_name=pga.attname
-                LEFT OUTER JOIN pg_index pgi
-                ON pga.attrelid=pgi.indrelid AND pgi.indisprimary
-                LEFT JOIN pg_type t ON pga.atttypid = t.oid
-                LEFT JOIN pg_collation col ON pga.attcollation = col.oid AND pga.attcollation <> 0
-                LEFT JOIN pg_catalog.pg_namespace nsp ON nsp.oid = t.typnamespace
-                WHERE pga.attrelid=obj.objid
-                AND quote_literal(table_schema) = quote_literal(obj.schema_name)
-                AND quote_literal(table_name) = quote_literal(table_relname)
-                AND atttypid > 0
-                ORDER BY ordinal_position
-            ) AS obj_select
-            INTO json_columns;
 
             msg := json_build_object('xid', txid_current(),
                 'cmd', obj.command_tag,
@@ -351,6 +363,19 @@ BEGIN
 
             -- command_tag is CREATE TABLE inside CREATE SCHEMA
             -- RAISE NOTICE 'springtail springtail_event_trigger_for_schema_ddl: %', msg::text;
+        ELSIF obj.command_tag = 'CREATE INDEX' THEN
+            -- RAISE NOTICE 'springtail springtail_event_trigger_for_schema_ddl: obj.command_tag %, obj.type %, obj.object_identity %, obj.objid %, obj.schema_name %',
+            --     obj.command_tag, obj.object_type, obj.object_identity, obj.objid, obj.schema_name;
+
+            msg := springtail_generate_index_message(obj);
+
+            IF msg IS NULL THEN
+                CONTINUE;
+            END IF;
+
+            -- command_tag is CREATE INDEX inside CREATE SCHEMA
+            -- RAISE NOTICE 'springtail springtail_event_trigger_for_schema_ddl: %', msg::text;
+
         END IF;
 
         PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
