@@ -209,6 +209,9 @@ Service::_create_index(const proto::IndexRequest& request)
         column_json["position"] = column.position();
         column_json["name"] = column.name();
 
+        // Insert columns in the order specified by idx_position.
+        // This ensures the index columns are arranged correctly,
+        // as their order may differ from the table column order.
         if (ddl["columns"].size() <= column.idx_position()) {
             ddl["columns"].get_ref<nlohmann::json::array_t&>().resize(column.idx_position() + 1);
         }
