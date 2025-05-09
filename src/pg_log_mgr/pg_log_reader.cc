@@ -660,15 +660,8 @@ namespace springtail::pg_log_mgr {
                                            const XidLsn &xidlsn,
                                            const std::vector<uint64_t> &pg_xids)
     {
-        // mark the table as syncing to ensure we properly skip messages
-        bool is_first = SyncTracker::get_instance()->mark_resync(_db, table_oid, xidlsn);
-
-        // notify the PgLogParser to resync the table
-        auto key = fmt::format(redis::QUEUE_SYNC_TABLES,
-                                Properties::get_db_instance_id(), _db);
-        RedisQueue<TableSyncRequest> table_sync_queue(key);
-        TableSyncRequest request(table_oid, xidlsn);
-        table_sync_queue.push(request);
+        // block until we have the snapshot details
+        SyncTracker::get_instance()->issue_resync_and_wait(_db, table_oid, xidlsn);
 
         // drop any mutations that are in the WriteCache for this TID at this XID
         for (auto pg_xid : pg_xids) {
@@ -683,12 +676,6 @@ namespace springtail::pg_log_mgr {
         ddl["action"] = "abort_index";
         ddl["table_id"] = table_oid;
         redis_ddl.add_index_ddl(_db, xidlsn.xid, ddl.dump());
-
-        // notify the Committer to stop committing XIDs
-        if (is_first) {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Stop committing XIDs for db: {}", _db);
-            _committer_queue->push(std::make_shared<committer::XidReady>(_db));
-        }
     }
 
     void
