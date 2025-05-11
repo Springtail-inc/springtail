@@ -216,8 +216,6 @@ main(int argc,
     std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
     runners.emplace();
     runners->emplace_back(std::make_unique<IOMgrRunner>());
-    // runners->emplace_back(std::make_unique<SchemaMgrRunner>());
-    // runners->emplace_back(std::make_unique<TableMgrRunner>());
 
     // no logging
     springtail_init(runners, false, std::nullopt, LOG_NONE);
