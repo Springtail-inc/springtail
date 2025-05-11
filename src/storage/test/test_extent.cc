@@ -93,7 +93,7 @@ namespace {
         _create_and_populate(bool add_empty_variable=false)
         {
             // create an extent
-            ExtentPtr extent = std::make_shared<Extent>(ExtentType{false}, 0, _schema->row_size());
+            ExtentPtr extent = std::make_shared<Extent>(ExtentType{false}, 0, _schema->row_size(), _schema->field_types());
 
             // fill it with data
             _populate(extent->append(),
@@ -114,7 +114,7 @@ namespace {
 
     TEST_F(Extent_Test, StartsEmpty) {
         // create an extent
-        ExtentPtr extent = std::make_shared<Extent>(ExtentType{false}, 0, _schema->row_size());
+        ExtentPtr extent = std::make_shared<Extent>(ExtentType{false}, 0, _schema->row_size(), _schema->field_types());
 
         // make sure it starts empty
         ASSERT_TRUE(extent->empty());
@@ -133,7 +133,7 @@ namespace {
         std::string temp = extent->serialize();
 
         // create an empty extent
-        ExtentPtr new_extent = std::make_shared<Extent>(ExtentType{false}, 0, _schema->row_size());
+        ExtentPtr new_extent = std::make_shared<Extent>(ExtentType{false}, 0, _schema->row_size(), _schema->field_types());
         new_extent->deserialize(temp);
 
         // make sure that the data matches exepctations
