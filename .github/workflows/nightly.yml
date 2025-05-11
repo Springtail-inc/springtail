@@ -60,6 +60,7 @@ jobs:
         with:
           role-to-assume: ${{ secrets.DEV_AWS_ROLE_ARN }}
           role-session-name: tempSession
+          role-duration-seconds: 12960
           aws-region: us-east-1
 
       - name: Prepare Tests
