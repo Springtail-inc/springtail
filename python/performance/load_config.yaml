@@ -1,0 +1,51 @@
+system_json_path: '../../system.json.test'
+
+# Number of schemas to create
+num_schemas: 10
+
+# Table configuration
+table_configuration:
+  # Number of tables per schema
+  num_tables: 10
+  # Number of columns per table (range)
+  min_columns: 3
+  max_columns: 10
+
+# Index configuration
+index_configuration:
+  # Number of indexes per table (range)
+  min_indexes: 0
+  max_indexes: 2
+  # Number of columns per index (range)
+  min_columns_per_index: 1
+  max_columns_per_index: 2
+
+# Load configuration
+load_configuration:
+  # Number of inserts per table
+  num_inserts: 500
+  # Number of updates per table
+  num_updates: 250
+  # Number of deletes per table
+  num_deletes: 125
+
+# Whether to batch inserts
+batched_inserts: false
+
+# Operations to perform
+operations: ['create_table', 'create_index', 'insert_data', 'update_data', 'delete_data']
+
+# Whether to use the previous configuration to load tables
+use_existing_config: true
+
+# Output file for load data
+output_file: /tmp/load.csv
+
+# Output file for table columns
+table_columns_file: /tmp/table_columns.json
+
+# Output file for run configuration
+run_config_file: /tmp/run_config.csv
+
+# Output file for SQL
+sql_file: /tmp/load.sql
