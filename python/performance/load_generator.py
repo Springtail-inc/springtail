@@ -672,12 +672,12 @@ def parse_operations(operations: str, parse_names: bool = False):
         return ",".join([func.__name__ for func in ops])
     return ops
 
-def load_data(system_config_file: str, run_config: dict) -> None:
+def load_data(run_config: dict) -> None:
     """
     Load data into the database according to configuration.
 
     Args:
-        system_config_file (str): Path to system configuration file
+        run_config (dict): Run configuration
         run_config (dict): Run configuration
 
     Process:
@@ -693,7 +693,7 @@ def load_data(system_config_file: str, run_config: dict) -> None:
         - Creates metrics files in /tmp/
         - Closes database connection on completion
     """
-    config_file = os.path.abspath(system_config_file)
+    config_file = os.path.abspath(run_config['system_json_path'])
     props = Properties(config_file)
     print_sys_props(props, config_file)
 
@@ -735,7 +735,6 @@ def parse_arguments() -> argparse.Namespace:
         argparse.Namespace: Parsed arguments
     """
     parser = argparse.ArgumentParser(description="Run ingestion metrics logger")
-    parser.add_argument('-f', '--system-config-file', type=str, required=True, help='Path to the system configuration file')
     parser.add_argument('-c', '--load-config-file', type=str, required=True, help='Path to the load configuration file')
 
     return parser.parse_args()
@@ -746,7 +745,7 @@ if __name__ == "__main__":
         run_config = yaml.safe_load(f)
 
     try:
-        load_data(args.system_config_file, run_config)
+        load_data(run_config)
     except Exception as e:
         print(f"Caught error: {e}")
         sys.exit(1)
