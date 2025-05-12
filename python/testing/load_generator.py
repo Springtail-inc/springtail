@@ -1,3 +1,15 @@
+"""
+Springtail Load Generator
+=========================
+
+This module generates database load by creating schemas, tables, indexes, and performing
+various database operations (inserts, updates, deletes) according to configurable parameters.
+
+Usage:
+------
+python load_generator.py -f config.yaml -c load_config.yaml
+"""
+
 import os
 import sys
 import random
@@ -5,6 +17,7 @@ import argparse
 import traceback
 import time
 import csv
+import yaml
 import psycopg2
 from datetime import datetime
 
@@ -22,21 +35,31 @@ from common import (
 )
 
 # Load simulation parameters
-NUM_SCHEMAS = 10
-NUM_TABLES_PER_SCHEMA = 25
-NUM_INSERTS = 5
-NUM_UPDATES = 5
-NUM_DELETES = 2
-BATCHED_INSERTS = False
-OPERATIONS = 'TIA'
 RUN_TS = int(time.time())
-NUM_COLUMNS = '3-10'
-NUM_INDEXES = '1-2'
-NUM_COLUMNS_PER_INDEX = '1-2'
 
 # Global dictionary to store table column information
 table_columns = {}
+
+# Global dictionary to store the run configuration
+run_config = {}
+
 def print_table_columns_to_csv(file: str) -> None:
+    """
+    Write table column information to a CSV file.
+
+    Args:
+        file (str): Path to the output CSV file
+
+    The CSV file will contain:
+        - Table name
+        - Column names (up to max_columns)
+        - Index names (up to max_indexes)
+
+    Notes:
+        - Empty cells are filled with empty strings
+        - Column names are padded to max_columns
+        - Index names are padded to max_indexes
+    """
     max_columns = 0
     max_indexes = 0
     for table_name in table_columns:
@@ -59,6 +82,23 @@ def print_table_columns_to_csv(file: str) -> None:
             writer.writerow(columns)
 
 def connect_db_instance(props: Properties, db_name: str = 'postgres') -> psycopg2.extensions.connection:
+    """
+    Connect to a PostgreSQL database instance.
+
+    Args:
+        props (Properties): Properties object containing database configuration
+        db_name (str): Name of the database to connect to (default: 'postgres')
+
+    Returns:
+        psycopg2.extensions.connection: Database connection object
+
+    Raises:
+        psycopg2.Error: If connection fails
+
+    Notes:
+        - Uses replication user credentials from properties
+        - Connection is not autocommit
+    """
     db_instance_config = props.get_db_instance_config()
     db_host = db_instance_config['host']
     db_port = db_instance_config['port']
@@ -67,6 +107,23 @@ def connect_db_instance(props: Properties, db_name: str = 'postgres') -> psycopg
     return connect_db(db_name, db_user, db_password, db_host, db_port, False)
 
 def print_sys_props(props: Properties, config_file: str) -> None:
+    """
+    Print system properties to the console.
+
+    Args:
+        props (Properties): Properties object containing system configuration
+        config_file (str): Path to the configuration file
+
+    Prints:
+        - Config file path
+        - Mount path
+        - Pid path
+        - DB instance ID
+        - Primary DB name and ID
+
+    Notes:
+        - Uses first database configuration from props
+    """
     db_config = props.get_db_configs()[0]
     print("\nSystem properties:")
     print(f"  Config file       : {config_file}")
@@ -77,25 +134,83 @@ def print_sys_props(props: Properties, config_file: str) -> None:
     print(f"  Primary DB ID     : {db_config['id']}")
 
 def print_run_config_to_csv(file: str) -> None:
+    """
+    Write run configuration parameters to a CSV file.
+
+    Args:
+        file (str): Path to the output CSV file
+
+    The CSV file will contain:
+        - Number of schemas
+        - Number of tables per schema
+        - Number of inserts/updates/deletes
+        - Batched inserts setting
+        - Operations
+        - Column/index configuration
+
+    Notes:
+        - Overwrites existing file
+        - Uses global configuration variables
+    """
     with open(file, mode='w', newline='') as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(["Parameter", "Value"])
-        writer.writerow(["Number of schemas", NUM_SCHEMAS])
-        writer.writerow(["Number of tables per schema", NUM_TABLES_PER_SCHEMA])
-        writer.writerow(["Number of inserts", NUM_INSERTS])
-        writer.writerow(["Number of updates", NUM_UPDATES])
-        writer.writerow(["Number of deletes", NUM_DELETES])
-        writer.writerow(["Batched inserts", BATCHED_INSERTS])
-        writer.writerow(["Operations", parse_operations(True)])
-        writer.writerow(["Number of columns", NUM_COLUMNS])
-        writer.writerow(["Number of indexes", NUM_INDEXES])
+        writer.writerow(["Number of schemas", run_config['num_schemas']])
+        writer.writerow(["Number of tables per schema", run_config['num_tables_per_schema']])
+        writer.writerow(["Number of inserts", run_config['num_inserts']])
+        writer.writerow(["Number of updates", run_config['num_updates']])
+        writer.writerow(["Number of deletes", run_config['num_deletes']])
+        writer.writerow(["Batched inserts", run_config['batched_inserts']])
+        writer.writerow(["Operations", parse_operations(run_config['operations'], True)])
+        writer.writerow(["Number of columns", run_config['num_columns']])
+        writer.writerow(["Number of indexes", run_config['num_indexes']])
 
-def write_metrics_to_csv(csv_file: str, _type: str, duration_ms: float, txid: int, pg_ts: str, rows: int, full_table_name: str = None) -> None:
-    with open(csv_file, mode='a', newline='') as file:
+def write_sql_to_txt(sql_file: str, sql_str: str):
+    with open(sql_file, mode='a', newline='') as file:
+        file.write(str)
+
+def write_metrics_to_csv(_type: str, duration_ms: float, txid: int, pg_ts: str, rows: int, full_table_name: str = None) -> None:
+    """
+    Write query metrics to a CSV file.
+
+    Args:
+        _type (str): Type of operation (e.g., 'create_table', 'insert_data')
+        duration_ms (float): Duration of the operation in milliseconds
+        txid (int): PostgreSQL transaction ID
+        pg_ts (str): PostgreSQL timestamp
+        rows (int): Number of rows affected
+        full_table_name (str, optional): Full table name in format schema.table
+
+    Notes:
+        - Appends to existing file
+        - Creates file if it doesn't exist
+    """
+    with open(run_config['output_file'], mode='a', newline='') as file:
         writer = csv.writer(file)
         writer.writerow([_type, txid, duration_ms, pg_ts, rows, full_table_name])
 
-def time_and_log_query(conn, _type: str, query: str, csv_file: str, params=None, full_table_name: str = None) -> int:
+def time_and_log_query(conn, _type: str, query: str, params=None, full_table_name: str = None) -> int:
+    """
+    Execute a query with timing and logging.
+
+    Args:
+        conn: Database connection object
+        _type (str): Type of operation (e.g., 'create_table', 'insert_data')
+        query (str): SQL query to execute
+        params (list, optional): Parameters for SQL query
+        full_table_name (str, optional): Full table name in format schema.table
+
+    Returns:
+        int: Number of rows affected by the query
+
+    Raises:
+        psycopg2.Error: If query execution fails
+
+    Notes:
+        - Automatically wraps query in transaction
+        - Logs metrics to CSV file
+        - Returns affected row count
+    """
     start = time.time()
 
     with conn.cursor() as cur:
@@ -115,10 +230,27 @@ def time_and_log_query(conn, _type: str, query: str, csv_file: str, params=None,
 
     end = time.time()
     duration_ms = round((end - start) * 1000, 2)
-    write_metrics_to_csv(csv_file, _type, duration_ms, txid, pg_ts_epoch_ms, rows_affected, full_table_name)
+    write_metrics_to_csv(_type, duration_ms, txid, pg_ts_epoch_ms, rows_affected, full_table_name)
     return rows_affected
 
-def create_table(conn, schema_name: str, table_name: str, csv_file: str):
+def create_table(conn, schema_name: str, table_name: str):
+    """
+    Create a new table with random columns and store column information.
+
+    Args:
+        conn: Database connection object
+        schema_name (str): Name of the schema
+        table_name (str): Name of the table
+
+    The table will have:
+        - id SERIAL PRIMARY KEY
+        - created_at TIMESTAMP
+        - Random number of columns with random types
+
+    Notes:
+        - Stores column information in global table_columns dict
+        - Uses time_and_log_query for execution and metrics
+    """
     full_table_name = f"{schema_name}.{table_name}"
     # List of PostgreSQL data types to choose from
     # XXX Need to add other possible types too
@@ -143,7 +275,7 @@ def create_table(conn, schema_name: str, table_name: str, csv_file: str):
     ]
 
     # Add NUM_COLUMNS random columns with random types
-    min_columns, max_columns = map(int, NUM_COLUMNS.split('-'))
+    min_columns, max_columns = map(int, run_config['num_columns'].split('-'))
     num_columns = random.randint(min_columns, max_columns)
     for i in range(num_columns):
         column_type = random.choice(column_types)
@@ -174,10 +306,28 @@ def create_table(conn, schema_name: str, table_name: str, csv_file: str):
         )
     """
 
-    time_and_log_query(conn, "create_table", create_table_sql, csv_file, full_table_name=full_table_name)
+    time_and_log_query(conn, "create_table", create_table_sql, full_table_name=full_table_name)
+    write_sql_to_txt(run_config['sql_file'], create_table_sql)
+
     print(f"[+] Created table: {full_table_name} with {num_columns} random columns")
 
-def create_index(conn, schema_name: str, table_name: str, csv_file: str):
+def create_index(conn, schema_name: str, table_name: str):
+    """
+    Create random indexes on the table.
+
+    Args:
+        conn: Database connection object
+        schema_name (str): Name of the schema
+        table_name (str): Name of the table
+
+    Creates:
+        - Random number of indexes (1-2)
+        - Each index with random number of columns (1-2)
+
+    Notes:
+        - Skips non-indexable columns (id, created_at, jsonb, bytea, uuid)
+        - Updates global table_columns dict with index information
+    """
     full_table_name = f"{schema_name}.{table_name}"
     if full_table_name not in table_columns:
         print(f"[!] No column information found for {full_table_name}")
@@ -196,9 +346,9 @@ def create_index(conn, schema_name: str, table_name: str, csv_file: str):
         return
 
     # Create a random number of indexes with a random number of columns
-    min_indexes, max_indexes = map(int, NUM_INDEXES.split('-'))
+    min_indexes, max_indexes = map(int, run_config['num_indexes'].split('-'))
     num_indexes = random.randint(min_indexes, max_indexes)
-    min_cols_per_index, max_cols_per_index = map(int, NUM_COLUMNS_PER_INDEX.split('-'))
+    min_cols_per_index, max_cols_per_index = map(int, run_config['num_columns_per_index'].split('-'))
     for i in range(num_indexes):
         index_columns = random.sample(indexable_columns, random.randint(min_cols_per_index, max_cols_per_index))
         index_name = f"idx_{table_name}_{i}_{('_'.join(index_columns))}"
@@ -207,12 +357,33 @@ def create_index(conn, schema_name: str, table_name: str, csv_file: str):
             CREATE INDEX IF NOT EXISTS {index_name}
             ON {full_table_name} ({', '.join(index_columns)})
         """
-        time_and_log_query(conn, "create_index", create_index_sql, csv_file, full_table_name=full_table_name)
+        time_and_log_query(conn, "create_index", create_index_sql, full_table_name=full_table_name)
+        write_sql_to_txt(run_config['sql_file'], create_index_sql)
+
         print(f"[+] Created index on: {full_table_name}({index_name})")
 
         table_columns[full_table_name]["indexes"].append(index_name)
 
 def generate_values_list(columns: list, batch_size: int = 1) -> list:
+    """
+    Generate random values for table columns.
+
+    Args:
+        columns (list): List of (column_name, column_type) tuples
+        batch_size (int): Number of value sets to generate
+
+    Returns:
+        list: List of tuples containing random values for each column
+
+    Value generation rules:
+        - TEXT/VARCHAR/CHAR: Random string "value_[1-100]"
+        - INT/BIGINT: Random integer 1-1000
+        - NUMERIC/DOUBLE/FLOAT: Random float 0-1000
+        - BOOLEAN: Random boolean
+        - DATE: Random date between 2000-2025
+        - TIME: Random time
+        - Other types: None
+    """
     values_list = []
 
     for _ in range(batch_size):
@@ -236,7 +407,27 @@ def generate_values_list(columns: list, batch_size: int = 1) -> list:
 
     return values_list
 
-def insert_data(conn, schema_name: str, table_name: str, csv_file: str):
+def insert_data(conn, schema_name: str, table_name: str):
+    """
+    Insert data into a table.
+
+    Args:
+        conn: Database connection object
+        schema_name (str): Name of the schema
+        table_name (str): Name of the table
+
+    Insert behavior:
+        - If BATCHED_INSERTS is True:
+            - Inserts data in random batch sizes
+            - Batch size ranges from 5% to 70% of remaining inserts
+            - Minimum batch size is 1, maximum is remaining inserts
+        - Otherwise:
+            - Inserts all data in a single batch
+
+    Notes:
+        - Uses generate_values_list for value generation
+        - Uses time_and_log_query for execution and metrics
+    """
     full_table_name = f"{schema_name}.{table_name}"
     if full_table_name not in table_columns:
         print(f"[!] No column information found for {full_table_name}")
@@ -256,8 +447,8 @@ def insert_data(conn, schema_name: str, table_name: str, csv_file: str):
         VALUES ({', '.join(placeholders)})
     """
 
-    if BATCHED_INSERTS:
-        remaining_inserts = NUM_INSERTS
+    if run_config['batched_inserts']:
+        remaining_inserts = run_config['num_inserts']
         while remaining_inserts > 0:
             if remaining_inserts <= 10:  # For small remaining, just insert them all
                 batch_size = remaining_inserts
@@ -268,18 +459,38 @@ def insert_data(conn, schema_name: str, table_name: str, csv_file: str):
 
             values_list = generate_values_list(columns, batch_size)
 
-            time_and_log_query(conn, "insert_data", insert_sql, csv_file, values_list, full_table_name=full_table_name)
+            time_and_log_query(conn, "insert_data", insert_sql, values_list, full_table_name=full_table_name)
+            write_sql_to_txt(run_config['sql_file'], insert_sql)
 
             remaining_inserts -= batch_size
             print(f"[+] Inserted batch of {batch_size} rows into {full_table_name} (remaining: {remaining_inserts})")
     else:
         # Generate random batch sizes that add up to NUM_INSERTS
-        values_list = generate_values_list(columns, NUM_INSERTS)
-        time_and_log_query(conn, "insert_data", insert_sql, csv_file, values_list, full_table_name=full_table_name)
+        values_list = generate_values_list(columns, run_config['num_inserts'])
+        time_and_log_query(conn, "insert_data", insert_sql, values_list, full_table_name=full_table_name)
+        write_sql_to_txt(run_config['sql_file'], insert_sql)
 
-    print(f"[+] Total {NUM_INSERTS} rows inserted into {full_table_name}")
+    print(f"[+] Total {run_config['num_inserts']} rows inserted into {full_table_name}")
 
-def update_data(conn, schema_name: str, table_name: str, csv_file: str):
+def update_data(conn, schema_name: str, table_name: str):
+    """
+    Update random rows in the table.
+
+    Args:
+        conn: Database connection object
+        schema_name (str): Name of the schema
+        table_name (str): Name of the table
+
+    Update behavior:
+        - Randomly selects 1-3 columns to update
+        - Updates run_config['num_updates'] rows
+        - Uses ORDER BY with random column
+        - Uses generate_values_list for new values
+
+    Notes:
+        - Uses time_and_log_query for execution and metrics
+        - Skips if no columns found
+    """
     full_table_name = f"{schema_name}.{table_name}"
     if full_table_name not in table_columns:
         print(f"[!] No column information found for {full_table_name}")
@@ -299,16 +510,33 @@ def update_data(conn, schema_name: str, table_name: str, csv_file: str):
     update_sql = f"""
         UPDATE {full_table_name}
         SET {', '.join(f'{col[0]} = %s' for col in columns_to_update)}
-        WHERE id IN (SELECT id FROM {full_table_name} ORDER BY {order_by_column} LIMIT {NUM_UPDATES})
+        WHERE id IN (SELECT id FROM {full_table_name} ORDER BY {order_by_column} LIMIT {run_config['num_updates']})
     """
 
     value_columns = columns_to_update
     values_list = generate_values_list(value_columns)
-    out = time_and_log_query(conn, "update_data", update_sql, csv_file, values_list, full_table_name=full_table_name)
+    out = time_and_log_query(conn, "update_data", update_sql, values_list, full_table_name=full_table_name)
+    write_sql_to_txt(run_config['sql_file'], update_sql)
 
     print(f"[+] Updated {out} rows in {full_table_name}")
 
-def delete_data(conn, schema_name: str, table_name: str, csv_file: str):
+def delete_data(conn, schema_name: str, table_name: str):
+    """
+    Delete random rows from the table.
+
+    Args:
+        conn: Database connection object
+        schema_name (str): Name of the schema
+        table_name (str): Name of the table
+
+    Delete behavior:
+        - Deletes run_config['num_deletes'] rows
+        - Uses ORDER BY with random column
+
+    Notes:
+        - Uses time_and_log_query for execution and metrics
+        - Skips if no columns found
+    """
     full_table_name = f"{schema_name}.{table_name}"
     if full_table_name not in table_columns:
         print(f"[!] No column information found for {full_table_name}")
@@ -326,117 +554,153 @@ def delete_data(conn, schema_name: str, table_name: str, csv_file: str):
 
     delete_sql = f"""
         DELETE FROM {full_table_name}
-        WHERE id IN (SELECT id FROM {full_table_name} ORDER BY {order_by_column} LIMIT {NUM_DELETES})
+        WHERE id IN (SELECT id FROM {full_table_name} ORDER BY {order_by_column} LIMIT {run_config['num_deletes']})
     """
 
-    out = time_and_log_query(conn, "delete_data", delete_sql, csv_file, values_list, full_table_name=full_table_name)
+    out = time_and_log_query(conn, "delete_data", delete_sql, values_list, full_table_name=full_table_name)
+    write_sql_to_txt(run_config['sql_file'], delete_sql)
 
     print(f"[+] Deleted {out} rows from {full_table_name}")
 
-def create_schema_and_tables(conn, csv_file: str, schema_name: str):
-    time_and_log_query(conn, "create_schema", f"CREATE SCHEMA IF NOT EXISTS {schema_name}", csv_file, full_table_name=schema_name)
+def create_schema_and_tables(conn, schema_name: str):
+    """
+    Create a schema and its tables.
+
+    Args:
+        conn: Database connection object
+        schema_name (str): Name of the schema
+
+    Process:
+        1. Creates the schema if it doesn't exist
+        2. Creates run_config['num_tables'] tables
+        3. For each table:
+            - Applies operations from run_config['operations'] string
+            - Handles errors gracefully
+
+    Returns:
+        str: Name of the created schema
+
+    Notes:
+        - Uses time_and_log_query for schema creation
+        - Logs errors but continues with next table
+    """
+
+    create_schema_sql = f"CREATE SCHEMA IF NOT EXISTS {schema_name}"
+    time_and_log_query(conn, "create_schema", create_schema_sql, full_table_name=schema_name)
+    write_sql_to_txt(run_config['sql_file'], create_schema_sql)
+
     print(f"[+] Created schema: {schema_name}")
 
-    for i in range(NUM_TABLES_PER_SCHEMA):
+    for i in range(run_config['num_tables']):
         table_name = f"table_{i}_{random.randint(1000, 9999)}"
 
-        for func in parse_operations():
+        for func in parse_operations(run_config['operations']):
             try:
-                func(conn, schema_name, table_name, csv_file)
+                func(conn, schema_name, table_name)
             except Exception as e:
                 print(f"[-] Got an error while {func.__name__} {schema_name}.{table_name}: {e}")
 
     return schema_name
 
-def parse_operations(parse_names: bool = False):
-    operations = []
-    for char in OPERATIONS:
-        if char == 'T':
-            operations.append(create_table)
-        elif char == 'I':
-            operations.append(create_index)
-        elif char == 'A':
-            operations.append(insert_data)
-        elif char == 'U':
-            operations.append(update_data)
-        elif char == 'D':
-            operations.append(delete_data)
-    if parse_names:
-        return ",".join([func.__name__ for func in operations])
-    return operations
+def parse_operations(operations: str, parse_names: bool = False):
+    """
+    Parse operations string into function list.
 
-def load_data(config_file: str, csv_file: str) -> None:
+    Args:
+        operations (str): String of operations to parse
+        parse_names (bool): If True, return comma-separated function names
+
+    Operations mapping:
+        'T' -> create_table
+        'I' -> create_index
+        'A' -> insert_data
+        'U' -> update_data
+        'D' -> delete_data
+
+    Returns:
+        list: List of operation functions or string of function names
+
+    Notes:
+        - Validates operation characters
+        - Returns empty list if no valid operations found
+    """
+    ops = []
+    for char in operations:
+        if char == 'T':
+            ops.append(create_table)
+        elif char == 'I':
+            ops.append(create_index)
+        elif char == 'A':
+            ops.append(insert_data)
+        elif char == 'U':
+            ops.append(update_data)
+        elif char == 'D':
+            ops.append(delete_data)
+    if parse_names:
+        return ",".join([func.__name__ for func in ops])
+    return ops
+
+def load_data(system_config_file: str, run_config: dict) -> None:
+    """
+    Load data into the database according to configuration.
+
+    Args:
+        system_config_file (str): Path to system configuration file
+        run_config (dict): Run configuration
+
+    Process:
+        1. Parse configuration
+        2. Create database connection
+        3. Create run_config['num_schemas'] schemas
+        4. For each schema:
+            - Create run_config['num_tables'] tables
+            - Perform operations based on run_config['operations'] string
+        5. Generate metrics files
+
+    Notes:
+        - Creates metrics files in /tmp/
+        - Closes database connection on completion
+    """
     config_file = os.path.abspath(config_file)
     props = Properties(config_file)
     print_sys_props(props, config_file)
 
-    with open(csv_file, mode='w', newline='') as file:
+    with open(run_config['output_file'], mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow(["query_type", "pg_xid", "duration_ms", "pg_timestamp", "rows_affected", "table_name"])
 
     conn = connect_db_instance(props, "springtail")
     start_time = time.time()
 
-    # Create NUM_SCHEMAS schemas
-    for schema_idx in range(NUM_SCHEMAS):
+    # Create run_config['num_schemas'] schemas
+    for schema_idx in range(run_config['num_schemas']):
         schema_name = f"test_schema_{schema_idx}_{RUN_TS}"
-        create_schema_and_tables(conn, csv_file, schema_name)
+        create_schema_and_tables(conn, schema_name)
 
-    print_table_columns_to_csv('/tmp/table_columns.csv')
-    print_run_config_to_csv('/tmp/run_config.csv')
+    print_table_columns_to_csv(run_config['table_columns_file'])
+    print_run_config_to_csv(run_config['run_config_file'])
     conn.close()
 
 def parse_arguments() -> argparse.Namespace:
+    """
+    Parse command line arguments.
+
+    Returns:
+        argparse.Namespace: Parsed arguments
+    """
     parser = argparse.ArgumentParser(description="Run ingestion metrics logger")
-    parser.add_argument('-f', '--config-file', type=str, required=True, help='Path to the configuration file')
-    parser.add_argument('-o', '--output-file', type=str, required=True, help='Path to the CSV output file')
+    parser.add_argument('-f', '--system-config-file', type=str, required=True, help='Path to the system configuration file')
+    parser.add_argument('-c', '--load-config-file', type=str, required=True, help='Path to the load configuration file')
 
-    # Add arguments for custom parameters
-    parser.add_argument('--num-schemas', type=int, default=NUM_SCHEMAS, help='Number of schemas to create')
-    parser.add_argument('--num-tables-per-schema', type=int, default=NUM_TABLES_PER_SCHEMA, help='Number of tables per schema')
-    parser.add_argument('--num-inserts', type=int, default=NUM_INSERTS, help='Number of inserts per table')
-    parser.add_argument('--num-updates', type=int, default=NUM_UPDATES, help='Number of updates per table')
-    parser.add_argument('--num-deletes', type=int, default=NUM_DELETES, help='Number of deletes per table')
-
-    parser.add_argument('--num-columns', type=str, default=NUM_COLUMNS, help='Number of columns per table')
-    parser.add_argument('--num-indexes', type=str, default=NUM_INDEXES, help='Number of indexes per table')
-    parser.add_argument('--num-columns-per-index', type=str, default=NUM_COLUMNS_PER_INDEX, help='Number of columns per index')
-
-    parser.add_argument('--operations', type=str, default=OPERATIONS, help='List of operations to perform T - create_table, I - create_index, A - insert_data, U - update_data, D - delete_data')
-    parser.add_argument('--batched_inserts', type=bool, default=BATCHED_INSERTS, help='Use batched inserts')
     return parser.parse_args()
 
 if __name__ == "__main__":
     args = parse_arguments()
-
-    # Update global variables with parsed arguments
-    NUM_SCHEMAS = args.num_schemas
-    NUM_TABLES_PER_SCHEMA = args.num_tables_per_schema
-
-    # DML counts
-    NUM_INSERTS = args.num_inserts
-    if NUM_INSERTS <= 0:
-        print(f"[-] NUM_INSERTS should be greater than 0")
-        sys.exit(1)
-    NUM_UPDATES = min(args.num_updates, NUM_INSERTS // 2)
-    NUM_DELETES = min(args.num_deletes, NUM_INSERTS // 2)
-    OPERATIONS = args.operations
-    BATCHED_INSERTS = args.batched_inserts
-
-    # Table values
-    NUM_COLUMNS = args.num_columns
-    NUM_INDEXES = args.num_indexes
-    NUM_COLUMNS_PER_INDEX = args.num_columns_per_index
-
-    parsed_operations = parse_operations(parse_names=True)
-    # If no updates or deletes are specified, set them to 0
-    if ( 'update_data' not in parsed_operations ):
-        NUM_UPDATES = 0
-    if ( 'delete_data' not in parsed_operations ):
-        NUM_DELETES = 0
+    with open(args.load_config_file) as f:
+        run_config = yaml.safe_load(f)
 
     try:
-        load_data(args.config_file, args.output_file)
+        load_data(args.system_config_file, run_config)
     except Exception as e:
         print(f"Caught error: {e}")
         sys.exit(1)

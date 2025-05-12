@@ -1,0 +1,41 @@
+# Number of schemas to create
+num_schemas: 10
+
+# Number of tables per schema
+num_tables: 25
+
+# Number of columns per table (range)
+num_columns: '3-10'
+
+# Number of indexes per table (range)
+num_indexes: '1-2'
+
+# Number of columns per index (range)
+num_columns_per_index: '1-2'
+
+# Number of inserts per table
+num_inserts: 500
+
+# Number of updates per table
+num_updates: 250
+
+# Number of deletes per table
+num_deletes: 125
+
+# Whether to batch inserts
+batched_inserts: false
+
+# Operations to perform
+operations: 'TIA'
+
+# Output file for load data
+output_file: /tmp/load.csv
+
+# Output file for table columns
+table_columns_file: /tmp/table_columns.csv
+
+# Output file for run configuration
+run_config_file: /tmp/run_config.csv
+
+# Output file for SQL
+sql_file: /tmp/load.sql
