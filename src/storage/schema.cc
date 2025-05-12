@@ -59,6 +59,13 @@ namespace springtail {
             // add the sql types in column order
             _pg_types.push_back(column.pg_type);
 
+            // add the field types in column order
+            uint8_t type = static_cast<uint8_t>(column.type);
+            if (column.nullable) {
+                type |= 0x80;
+            }
+            _field_types.push_back(type);
+
             // save the pkey mappings
             if (column.pkey_position) {
                 ++pkey_count;
