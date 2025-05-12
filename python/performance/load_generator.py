@@ -163,8 +163,12 @@ def print_run_config_to_csv(file: str) -> None:
         writer.writerow(["Number of deletes", run_config['load_configuration']['num_deletes']])
         writer.writerow(["Batched inserts", run_config['batched_inserts']])
         writer.writerow(["Operations", parse_operations(run_config['operations'], True)])
-        writer.writerow(["Number of columns", run_config['table_configuration']['min_columns']])
-        writer.writerow(["Number of indexes", run_config['index_configuration']['min_indexes']])
+        writer.writerow(["Number of columns (min)", run_config['table_configuration']['min_columns']])
+        writer.writerow(["Number of columns (max)", run_config['table_configuration']['max_columns']])
+        writer.writerow(["Number of indexes (min)", run_config['index_configuration']['min_indexes']])
+        writer.writerow(["Number of indexes (max)", run_config['index_configuration']['max_indexes']])
+        writer.writerow(["Number of columns per index (min)", run_config['index_configuration']['min_columns_per_index']])
+        writer.writerow(["Number of columns per index (max)", run_config['index_configuration']['max_columns_per_index']])
         writer.writerow(["Running with existing table set", run_config['use_existing_config']])
 
 def write_sql_to_txt(sql_file: str, sql_str: str):
