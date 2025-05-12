@@ -261,7 +261,8 @@ namespace springtail::pg_log_mgr {
             }
 
             LOG_DEBUG(LOG_PG_LOG_MGR, "Create extent with row width: {}", entry.schema->row_size());
-            entry.extent = std::make_shared<Extent>(ExtentType{}, 0, entry.schema->row_size());
+            entry.extent = std::make_shared<Extent>(ExtentType{}, 0, entry.schema->row_size(),
+                                                    entry.schema->field_types());
             entry.start_lsn = _lsn;
         }
 
@@ -344,7 +345,8 @@ namespace springtail::pg_log_mgr {
                 entry.update_schema();
             }
 
-            entry.extent = std::make_shared<Extent>(ExtentType{}, 0, entry.schema->row_size());
+            entry.extent = std::make_shared<Extent>(ExtentType{}, 0, entry.schema->row_size(),
+                                                    entry.schema->field_types());
             entry.start_lsn = _lsn;
 
             // add a TRUNCATE row

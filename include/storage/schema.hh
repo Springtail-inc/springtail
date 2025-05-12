@@ -192,6 +192,9 @@ namespace springtail {
         /** The set of SQL types in column order. */
         std::vector<int32_t> _pg_types;
 
+        /** The set of Springtail types in column order. */
+        std::vector<uint8_t> _field_types;
+
         /** The sort columns of the schema. */
         std::shared_ptr<std::vector<FieldPtr>> _sort_fields;
 
@@ -232,6 +235,11 @@ namespace springtail {
         /** Returns the fixed width for a single row. */
         uint32_t row_size() const {
             return _row_size;
+        }
+
+        /** Returns a vector with the column types. */
+        const std::vector<uint8_t> &field_types() const {
+            return _field_types;
         }
 
         /**
