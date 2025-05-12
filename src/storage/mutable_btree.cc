@@ -510,7 +510,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
         assert(_cache_page->empty());
 
         // flushing an empty Page will write an empty extent to disk
-        ExtentHeader header(this->type, xid, _schema->row_size(), this->extent_id);
+        ExtentHeader header(this->type, xid, _schema->row_size(), _schema->field_types(), this->extent_id);
         auto extent_id = _cache_page->flush_empty(header);
 
         // XXX how to handle the XIDs?
@@ -533,7 +533,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
             : this->type;
 
         // flush the backing page
-        ExtentHeader header(type, xid, _schema->row_size(), this->extent_id);
+        ExtentHeader header(type, xid, _schema->row_size(), _schema->field_types(), this->extent_id);
         auto ids = _cache_page->flush(header);
         for (auto id : ids) {
             // XXX how to handle XIDs?
@@ -1058,7 +1058,8 @@ MutableBTree::lower_bound(TuplePtr search_key,
             }
 
             // write the new extent to disk
-            ExtentHeader header(ExtentType(true, true), _xid, _branch_schema->row_size(), page->extent_id);
+            ExtentHeader header(ExtentType(true, true), _xid, _branch_schema->row_size(),
+                                _branch_schema->field_types(), page->extent_id);
             auto &&ids = cache_page->flush(header);
 
             // construct a new root page based on the new extent

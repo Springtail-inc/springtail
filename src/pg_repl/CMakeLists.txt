@@ -102,6 +102,6 @@ springtail_unit_test(test_msg_stream
 springtail_unit_test(test_pgcopy
   SOURCES test/test_pgcopy.cc
   INCLUDES ${CMAKE_SOURCE_DIR}/include
-  LIBS springtail_pg springtail_test GTest::gtest_main
+  LIBS springtail_pg springtail_pglog springtail_test GTest::gtest_main
   WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
 )

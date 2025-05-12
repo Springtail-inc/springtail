@@ -42,10 +42,24 @@ VALUES
 (10, 'Order J', '2025-02-10', 450.25, NULL, 'Tenth order details', 'N', 45.2),
 (11, 'Order K', NULL, NULL, NULL, NULL, 'Y', NULL);
 
+-- Insert some empty values in column 6 (the column without an indes)
+INSERT INTO nulls_ordering (col1, col2, col3, col4, col5, col6, col8, col9)
+VALUES
+(12, 'Order E', '2025-05-08', 13.13, TRUE, NULL, 'B', 42.0),
+(13, 'Order E', '2025-05-09', 13.13, FALSE, NULL, 'B', 42.0),
+(14, 'Order E', '2025-05-10', 13.13, NULL, 'Fourteenth order summary', 'B', 42.0);
+
 ## verify
 ### schema_check public nulls_ordering
 SELECT col3, col4 FROM nulls_ordering ORDER BY col3 ASC NULLS FIRST, col4 ASC NULLS FIRST;
 SELECT col3, col4 FROM nulls_ordering ORDER BY col3 ASC NULLS LAST, col4 ASC NULLS LAST;
+SELECT col3, col4 FROM nulls_ordering ORDER BY col3 DESC NULLS FIRST, col4 DESC NULLS FIRST;
+SELECT col3, col4 FROM nulls_ordering ORDER BY col3 DESC NULLS LAST, col4 DESC NULLS LAST;
+
+SELECT col3, col4, col6 FROM nulls_ordering ORDER BY col6 ASC, col1 ASC NULLS FIRST;
+SELECT col3, col4, col6 FROM nulls_ordering ORDER BY col6 DESC, col1 ASC NULLS FIRST;
+SELECT col3, col4, col6 FROM nulls_ordering ORDER BY col6 ASC, col1 ASC NULLS LAST;
+SELECT col3, col4, col6 FROM nulls_ordering ORDER BY col6 DESC, col1 ASC NULLS LAST;
 
 ## cleanup
 DROP TABLE IF EXISTS nulls_ordering;

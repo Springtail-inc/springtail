@@ -816,7 +816,7 @@ namespace indexer_helpers {
         auto pkey_fields = _schema->get_fields(_primary_key);
 
         // retrieve the extent offsets of the new page
-        ExtentHeader header(ExtentType(), _target_xid, _schema->row_size(), old_eid);
+        ExtentHeader header(ExtentType(), _target_xid, _schema->row_size(), _schema->field_types(), old_eid);
         auto &&offsets = page->flush(header);
 
         auto value_fields = std::make_shared<FieldArray>(1);
@@ -897,7 +897,7 @@ namespace indexer_helpers {
         TIME_TRACE_START(finalize_store_roots_trace);
         // store the roots into a look-aside root file
         // XXX maybe we only need to do this for system tables?  or even just the table_roots table?
-        auto extent = std::make_shared<Extent>(ExtentType(), _target_xid, _roots_schema->row_size());
+        auto extent = std::make_shared<Extent>(ExtentType(), _target_xid, _roots_schema->row_size(), _roots_schema->field_types());
         for (auto root : metadata.roots) {
             auto &&row = extent->append();
             _roots_root_f->set_uint64(&row, root.extent_id);
