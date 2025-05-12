@@ -120,6 +120,20 @@ TEST(ShmTest, Lifecycle) {
             ASSERT_EQ(os.str(), r.value());
         }
 
+        auto db_tables = c.get_db_tables(10000);
+        ASSERT_EQ(db_tables.size(), 1);
+
+        // drop the table at some future xid
+        c.insert(10000, 20000, 500, "", true);
+
+        db_tables = c.get_db_tables(10000);
+        // no tables now
+        ASSERT_EQ(db_tables.size(), 0);
+
+        // but should still be able to access previous xid's
+        auto r = c.find(10000, 20000, 105);
+        ASSERT_TRUE(r.has_value());
+
         // kill the parent
         parent.reset();
 

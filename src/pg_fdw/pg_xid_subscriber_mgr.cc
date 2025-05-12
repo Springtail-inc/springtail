@@ -140,6 +140,7 @@ PgXidSubscriberMgr::_populate_worker(std::stop_token st)
 
             auto client = sys_tbl_mgr::Client::get_instance();
             if (!client->exists(db, tid, x)) {
+                _cache->insert(db, tid, xid, "", true);
                 continue;
             }
             // the client will cache data in _cache
