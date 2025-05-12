@@ -56,6 +56,35 @@ extern "C" {
 namespace springtail::pg_fdw {
     using springtail::Index;
 
+    template<typename From, typename To>
+    static bool
+    check_roundtrip_conversion(From from, ConstQualPtr qual)
+    {
+        // check if the value can be converted to the other type
+        if (std::is_same_v<From, To>) {
+            return true;
+        }
+
+        To temp = static_cast<To>(from);
+        From temp2 = static_cast<From>(temp);
+        if (temp2 != from) {
+            // value cannot be represented
+            return false;
+        }
+
+        // handle conversions for float/double inline
+        if constexpr (std::is_same_v<To, float>) {
+            qual->base.typeoid = FLOAT4OID;
+            qual->value = Float4GetDatum(temp);
+        } else if constexpr(std::is_same_v<To, double>) {
+            qual->base.typeoid = FLOAT8OID;
+            qual->value = Float8GetDatum(temp);
+        }
+
+        return true;
+    }
+
+
     bool
     PgFdwMgr::convert_qual(ConstQualPtr qual, SchemaType from, SchemaType to)
     {
@@ -81,6 +110,10 @@ namespace springtail::pg_fdw {
                 case SchemaType::INT64:
                     qual->base.typeoid = INT8OID;
                     return true;
+                case SchemaType::FLOAT32:
+                    return check_roundtrip_conversion<int64_t, float>(DatumGetInt64(qual->value), qual);
+                case SchemaType::FLOAT64:
+                    return check_roundtrip_conversion<int64_t, double>(DatumGetInt64(qual->value), qual);
                 default:
                     break;
             }
@@ -95,47 +128,8 @@ namespace springtail::pg_fdw {
 
         // converting from double to float; check if value can be represented
         if (from == SchemaType::FLOAT64 && to == SchemaType::FLOAT32) {
-            double value = DatumGetFloat8(qual->value);
-            // check if the value is within the range of float
-            float temp = static_cast<float>(value);
-            double temp2 = static_cast<double>(temp);
-            if (temp2 != value) {
-                // value cannot be represented as float
-                return false;
-            }
-            qual->base.typeoid = FLOAT4OID;
-            qual->value = Float4GetDatum(temp);
-            return true;
-        }
-
-        // if converting to float then check if value can be represented
-        if ((to == SchemaType::FLOAT32 || to == SchemaType::FLOAT64) &&
-            (from == SchemaType::INT8 || from == SchemaType::INT16 ||
-             from == SchemaType::INT32 || from == SchemaType::INT64)) {
-            int64_t value = DatumGetInt64(qual->value);
-            // check if the value is within the range of float
-            if (to == SchemaType::FLOAT32) {
-                float temp = static_cast<float>(value);
-                int64_t temp2 = static_cast<int64_t>(temp);
-                if (temp2 != value) {
-                    // value cannot be represented as float
-                    return false;
-                }
-                qual->base.typeoid = FLOAT4OID;
-                qual->value = Float4GetDatum(temp);
-                return true;
-            }
-            if (to == SchemaType::FLOAT64) {
-                double temp = static_cast<double>(value);
-                int64_t temp2 = static_cast<int64_t>(temp);
-                if (temp2 != value) {
-                    // value cannot be represented as double
-                    return false;
-                }
-                qual->base.typeoid = FLOAT8OID;
-                qual->value = Float8GetDatum(temp);
-                return true;
-            }
+            auto value = DatumGetFloat8(qual->value);
+            return check_roundtrip_conversion<double, float>(value, qual);
         }
 
         return false;
@@ -208,17 +202,12 @@ namespace springtail::pg_fdw {
                 if (pg_schema_type == SchemaType::INT8) {
                     return convert_qual(qual, pg_schema_type, column.type);
                 }
-                if (pg_schema_type == SchemaType::INT32) {
-                    int32_t value = DatumGetInt32(qual->value);
-                    // check if the value is within the range of int16
-                    if (value >= INT16_MIN && value <= INT16_MAX) {
-                        return PgFdwMgr::convert_qual(qual, pg_schema_type, column.type);
-                    }
-                } else if (pg_schema_type == SchemaType::INT64) {
+                if (pg_schema_type == SchemaType::INT32 ||
+                    pg_schema_type == SchemaType::INT64) {
                     int64_t value = DatumGetInt64(qual->value);
                     // check if the value is within the range of int16
                     if (value >= INT16_MIN && value <= INT16_MAX) {
-                        return convert_qual(qual, pg_schema_type, column.type);
+                        return PgFdwMgr::convert_qual(qual, pg_schema_type, column.type);
                     }
                 }
                 break;
@@ -258,6 +247,7 @@ namespace springtail::pg_fdw {
                 // check if type is sortable
                 if (qual->base.varattno != pos ||
                     qual->base.isArray == true ||
+                    qual->base.useOr == true ||
                     !PgFdwMgr::_is_type_sortable(qual->base.typeoid, qual->base.op)) {
                     continue;
                 }
@@ -1613,6 +1603,12 @@ namespace springtail::pg_fdw {
         FieldArrayPtr fields = state->qual_fields;
 
         DCHECK_EQ(column.pg_type, qual->base.typeoid);
+
+        if (qual->isnull) {
+            // NULL constant; set to null
+            fields->at(idx) = std::make_shared<ConstNullField>(column.type);
+            return;
+        }
 
         // Generate a const field based on type; populate it into fields array
         // Upconvert types to schema type if possible; there is a check in
