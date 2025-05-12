@@ -2,7 +2,7 @@
 num_schemas: 10
 
 # Number of tables per schema
-num_tables: 25
+num_tables: 10
 
 # Number of columns per table (range)
 num_columns: '3-10'
@@ -28,11 +28,14 @@ batched_inserts: false
 # Operations to perform
 operations: 'TIA'
 
+# Whether to use the previous configuration to load tables
+use_existing_config: true
+
 # Output file for load data
 output_file: /tmp/load.csv
 
 # Output file for table columns
-table_columns_file: /tmp/table_columns.csv
+table_columns_file: /tmp/table_columns.json
 
 # Output file for run configuration
 run_config_file: /tmp/run_config.csv

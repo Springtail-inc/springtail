@@ -19,6 +19,7 @@ import time
 import csv
 import yaml
 import psycopg2
+import json
 from datetime import datetime
 
 # Get the parent directory of the current script (i.e., the project root directory)
@@ -156,7 +157,7 @@ def print_run_config_to_csv(file: str) -> None:
         writer = csv.writer(csvfile)
         writer.writerow(["Parameter", "Value"])
         writer.writerow(["Number of schemas", run_config['num_schemas']])
-        writer.writerow(["Number of tables per schema", run_config['num_tables_per_schema']])
+        writer.writerow(["Number of tables per schema", run_config['num_tables']])
         writer.writerow(["Number of inserts", run_config['num_inserts']])
         writer.writerow(["Number of updates", run_config['num_updates']])
         writer.writerow(["Number of deletes", run_config['num_deletes']])
@@ -164,10 +165,18 @@ def print_run_config_to_csv(file: str) -> None:
         writer.writerow(["Operations", parse_operations(run_config['operations'], True)])
         writer.writerow(["Number of columns", run_config['num_columns']])
         writer.writerow(["Number of indexes", run_config['num_indexes']])
+        writer.writerow(["Running with existing table set", run_config['use_existing_config']])
 
 def write_sql_to_txt(sql_file: str, sql_str: str):
+    """
+    Write DDL SQL to a text file.
+
+    Args:
+        sql_file (str): Path to the output SQL file
+        sql_str (str): SQL string to write
+    """
     with open(sql_file, mode='a', newline='') as file:
-        file.write(str)
+        file.write(sql_str)
 
 def write_metrics_to_csv(_type: str, duration_ms: float, txid: int, pg_ts: str, rows: int, full_table_name: str = None) -> None:
     """
@@ -233,25 +242,13 @@ def time_and_log_query(conn, _type: str, query: str, params=None, full_table_nam
     write_metrics_to_csv(_type, duration_ms, txid, pg_ts_epoch_ms, rows_affected, full_table_name)
     return rows_affected
 
-def create_table(conn, schema_name: str, table_name: str):
+def generate_random_table_data(full_table_name: str):
     """
-    Create a new table with random columns and store column information.
+    Generate random table data.
 
-    Args:
-        conn: Database connection object
-        schema_name (str): Name of the schema
-        table_name (str): Name of the table
-
-    The table will have:
-        - id SERIAL PRIMARY KEY
-        - created_at TIMESTAMP
-        - Random number of columns with random types
-
-    Notes:
-        - Stores column information in global table_columns dict
-        - Uses time_and_log_query for execution and metrics
+    Returns:
+        list: List of column definitions
     """
-    full_table_name = f"{schema_name}.{table_name}"
     # List of PostgreSQL data types to choose from
     # XXX Need to add other possible types too
     column_types = [
@@ -268,12 +265,6 @@ def create_table(conn, schema_name: str, table_name: str):
         "NUMERIC(10,2)"
     ]
 
-    # Always include id as SERIAL PRIMARY KEY and created_at as TIMESTAMP
-    columns = [
-        "id SERIAL PRIMARY KEY",
-        "created_at TIMESTAMP DEFAULT NOW()"
-    ]
-
     # Add NUM_COLUMNS random columns with random types
     min_columns, max_columns = map(int, run_config['num_columns'].split('-'))
     num_columns = random.randint(min_columns, max_columns)
@@ -284,10 +275,15 @@ def create_table(conn, schema_name: str, table_name: str):
         columns.append(f"{column_name} {column_type}")
 
     # Store column information in the global dictionary
-    table_columns[full_table_name] = {
-        "columns": [],
-        "indexes": []
-    }
+    schema_name, table_name = full_table_name.split('.')
+    if schema_name not in table_columns:
+        table_columns[schema_name] = {}
+    if table_name not in table_columns[schema_name]:
+        table_columns[schema_name][table_name] = {
+            "columns": [],
+            "indexes": []
+        }
+
     for col in columns:
         if col.startswith("id") or col.startswith("created_at"):
             continue
@@ -297,7 +293,40 @@ def create_table(conn, schema_name: str, table_name: str):
         if '(' in col_type:
             col_type = col_type.split('(')[0]
 
-        table_columns[full_table_name]["columns"].append((col_name, col_type.lower()))
+        table_columns[schema_name][table_name]["columns"].append((col_name, col_type.lower()))
+
+    return columns
+
+def create_table(conn, schema_name: str, table_name: str):
+    """
+    Create a new table with random columns and store column information.
+
+    Args:
+        conn: Database connection object
+        schema_name (str): Name of the schema
+        table_name (str): Name of the table
+
+    The table will have:
+        - id SERIAL PRIMARY KEY
+        - created_at TIMESTAMP
+        - Random number of columns with random types
+
+    Notes:
+        - Stores column information in global table_columns dict (or)
+        - Retrieves the column information from the JSON file if it exists
+        - Uses time_and_log_query for execution and metrics
+    """
+    full_table_name = f"{schema_name}.{table_name}"
+
+    # Always include id as SERIAL PRIMARY KEY and created_at as TIMESTAMP
+    columns = [
+        "id SERIAL PRIMARY KEY",
+        "created_at TIMESTAMP DEFAULT NOW()"
+    ]
+    if run_config['use_existing_config']:
+        columns.extend([f"{col_name} {col_type}" for col_name, col_type in table_columns[schema_name][table_name]["columns"]])
+    else:
+        columns.extend(generate_random_table_data(full_table_name))
 
     # Create the CREATE TABLE statement
     create_table_sql = f"""
@@ -309,7 +338,7 @@ def create_table(conn, schema_name: str, table_name: str):
     time_and_log_query(conn, "create_table", create_table_sql, full_table_name=full_table_name)
     write_sql_to_txt(run_config['sql_file'], create_table_sql)
 
-    print(f"[+] Created table: {full_table_name} with {num_columns} random columns")
+    print(f"[+] Created table: {full_table_name} with {len(columns)} random columns")
 
 def create_index(conn, schema_name: str, table_name: str):
     """
@@ -329,30 +358,28 @@ def create_index(conn, schema_name: str, table_name: str):
         - Updates global table_columns dict with index information
     """
     full_table_name = f"{schema_name}.{table_name}"
-    if full_table_name not in table_columns:
-        print(f"[!] No column information found for {full_table_name}")
-        return
 
-    columns = table_columns[full_table_name]["columns"]
-    if not columns:
-        print(f"[!] No suitable columns found for indexing in {full_table_name}")
-        return
+    columns = table_columns[schema_name][table_name]["columns"]
 
     # Filter out columns that are not suitable for indexing
-    indexable_columns = [col[0] for col in columns if col[0] not in ['id', 'created_at'] and col[1] not in ['jsonb', 'bytea', 'uuid']]
+    indexable_columns = [col_name for col_name, col_type in columns if col_name not in ['id', 'created_at'] and col_type not in ['jsonb', 'bytea', 'uuid']]
 
-    if not indexable_columns:
-        print(f"[!] No indexable columns found in {full_table_name}")
-        return
+    if not run_config['use_existing_config']:
+        # If the prev run flag isn't set, create new indexes
+        if not indexable_columns:
+            print(f"[!] No indexable columns found in {full_table_name}")
+            return
 
-    # Create a random number of indexes with a random number of columns
-    min_indexes, max_indexes = map(int, run_config['num_indexes'].split('-'))
-    num_indexes = random.randint(min_indexes, max_indexes)
-    min_cols_per_index, max_cols_per_index = map(int, run_config['num_columns_per_index'].split('-'))
-    for i in range(num_indexes):
-        index_columns = random.sample(indexable_columns, random.randint(min_cols_per_index, max_cols_per_index))
-        index_name = f"idx_{table_name}_{i}_{('_'.join(index_columns))}"
+        # Create a random number of indexes with a random number of columns
+        min_indexes, max_indexes = map(int, run_config['num_indexes'].split('-'))
+        num_indexes = random.randint(min_indexes, max_indexes)
+        min_cols_per_index, max_cols_per_index = map(int, run_config['num_columns_per_index'].split('-'))
+        for i in range(num_indexes):
+            index_columns = random.sample(indexable_columns, random.randint(min_cols_per_index, max_cols_per_index))
+            index_name = f"idx_{table_name}_{i}_{('_'.join(index_columns))}"
+            table_columns[schema_name][table_name]["indexes"].append([index_name, index_columns])
 
+    for index_name, index_columns in table_columns[schema_name][table_name]["indexes"]:
         create_index_sql = f"""
             CREATE INDEX IF NOT EXISTS {index_name}
             ON {full_table_name} ({', '.join(index_columns)})
@@ -361,8 +388,6 @@ def create_index(conn, schema_name: str, table_name: str):
         write_sql_to_txt(run_config['sql_file'], create_index_sql)
 
         print(f"[+] Created index on: {full_table_name}({index_name})")
-
-        table_columns[full_table_name]["indexes"].append(index_name)
 
 def generate_values_list(columns: list, batch_size: int = 1) -> list:
     """
@@ -429,11 +454,11 @@ def insert_data(conn, schema_name: str, table_name: str):
         - Uses time_and_log_query for execution and metrics
     """
     full_table_name = f"{schema_name}.{table_name}"
-    if full_table_name not in table_columns:
+    if schema_name not in table_columns or table_name not in table_columns[schema_name]:
         print(f"[!] No column information found for {full_table_name}")
         return
 
-    columns = table_columns[full_table_name]["columns"]
+    columns = table_columns[schema_name][table_name]["columns"]
     if not columns:
         print(f"[!] No columns found in {full_table_name}")
         return
@@ -460,7 +485,7 @@ def insert_data(conn, schema_name: str, table_name: str):
             values_list = generate_values_list(columns, batch_size)
 
             time_and_log_query(conn, "insert_data", insert_sql, values_list, full_table_name=full_table_name)
-            write_sql_to_txt(run_config['sql_file'], insert_sql)
+            # write_sql_to_txt(run_config['sql_file'], insert_sql)
 
             remaining_inserts -= batch_size
             print(f"[+] Inserted batch of {batch_size} rows into {full_table_name} (remaining: {remaining_inserts})")
@@ -468,7 +493,7 @@ def insert_data(conn, schema_name: str, table_name: str):
         # Generate random batch sizes that add up to NUM_INSERTS
         values_list = generate_values_list(columns, run_config['num_inserts'])
         time_and_log_query(conn, "insert_data", insert_sql, values_list, full_table_name=full_table_name)
-        write_sql_to_txt(run_config['sql_file'], insert_sql)
+        # write_sql_to_txt(run_config['sql_file'], insert_sql)
 
     print(f"[+] Total {run_config['num_inserts']} rows inserted into {full_table_name}")
 
@@ -492,11 +517,11 @@ def update_data(conn, schema_name: str, table_name: str):
         - Skips if no columns found
     """
     full_table_name = f"{schema_name}.{table_name}"
-    if full_table_name not in table_columns:
+    if schema_name not in table_columns or table_name not in table_columns[schema_name]:
         print(f"[!] No column information found for {full_table_name}")
         return
 
-    columns = table_columns[full_table_name]["columns"]
+    columns = table_columns[schema_name][table_name]["columns"]
     if not columns:
         print(f"[!] No columns found in {full_table_name}")
         return
@@ -516,7 +541,7 @@ def update_data(conn, schema_name: str, table_name: str):
     value_columns = columns_to_update
     values_list = generate_values_list(value_columns)
     out = time_and_log_query(conn, "update_data", update_sql, values_list, full_table_name=full_table_name)
-    write_sql_to_txt(run_config['sql_file'], update_sql)
+    # write_sql_to_txt(run_config['sql_file'], update_sql)
 
     print(f"[+] Updated {out} rows in {full_table_name}")
 
@@ -538,11 +563,11 @@ def delete_data(conn, schema_name: str, table_name: str):
         - Skips if no columns found
     """
     full_table_name = f"{schema_name}.{table_name}"
-    if full_table_name not in table_columns:
+    if schema_name not in table_columns or table_name not in table_columns[schema_name]:
         print(f"[!] No column information found for {full_table_name}")
         return
 
-    columns = table_columns[full_table_name]["columns"]
+    columns = table_columns[schema_name][table_name]["columns"]
     if not columns:
         print(f"[!] No columns found in {full_table_name}")
         return
@@ -558,7 +583,7 @@ def delete_data(conn, schema_name: str, table_name: str):
     """
 
     out = time_and_log_query(conn, "delete_data", delete_sql, values_list, full_table_name=full_table_name)
-    write_sql_to_txt(run_config['sql_file'], delete_sql)
+    # write_sql_to_txt(run_config['sql_file'], delete_sql)
 
     print(f"[+] Deleted {out} rows from {full_table_name}")
 
@@ -584,16 +609,21 @@ def create_schema_and_tables(conn, schema_name: str):
         - Uses time_and_log_query for schema creation
         - Logs errors but continues with next table
     """
-
+    # Create the main schema
     create_schema_sql = f"CREATE SCHEMA IF NOT EXISTS {schema_name}"
     time_and_log_query(conn, "create_schema", create_schema_sql, full_table_name=schema_name)
     write_sql_to_txt(run_config['sql_file'], create_schema_sql)
 
     print(f"[+] Created schema: {schema_name}")
 
-    for i in range(run_config['num_tables']):
-        table_name = f"table_{i}_{random.randint(1000, 9999)}"
+    # Create the tables under the schema
+    table_names = []
+    if run_config['use_existing_config']:
+        table_names = table_columns.get(schema_name)
+    else:
+        table_names = [f"table_{table_idx}_{random.randint(1000, 9999)}" for table_idx in range(run_config['num_tables'])]
 
+    for table_name in table_names:
         for func in parse_operations(run_config['operations']):
             try:
                 func(conn, schema_name, table_name)
@@ -661,7 +691,7 @@ def load_data(system_config_file: str, run_config: dict) -> None:
         - Creates metrics files in /tmp/
         - Closes database connection on completion
     """
-    config_file = os.path.abspath(config_file)
+    config_file = os.path.abspath(system_config_file)
     props = Properties(config_file)
     print_sys_props(props, config_file)
 
@@ -672,12 +702,26 @@ def load_data(system_config_file: str, run_config: dict) -> None:
     conn = connect_db_instance(props, "springtail")
     start_time = time.time()
 
-    # Create run_config['num_schemas'] schemas
-    for schema_idx in range(run_config['num_schemas']):
-        schema_name = f"test_schema_{schema_idx}_{RUN_TS}"
+    global table_columns
+    if run_config['use_existing_config']:
+        with open(run_config['table_columns_file'], 'r') as table_columns_file:
+            table_columns = json.load(table_columns_file)
+
+    # Create the schema and the tables
+    schema_names = []
+    if run_config['use_existing_config']:
+        schema_names = table_columns.keys()
+    else:
+        schema_names = [f"test_schema_{schema_idx}_{RUN_TS}" for schema_idx in range(run_config['num_schemas'])]
+
+    for schema_name in schema_names:
         create_schema_and_tables(conn, schema_name)
 
-    print_table_columns_to_csv(run_config['table_columns_file'])
+    # Dumping table columns into JSON file
+    with open(run_config['table_columns_file'], 'w') as file:
+        json.dump(table_columns, file, indent=4)
+
+    # Dumping run config to CSV file
     print_run_config_to_csv(run_config['run_config_file'])
     conn.close()
 
