@@ -20,7 +20,7 @@ VALUES
 CREATE SCHEMA world
     CREATE TABLE countries (
         country_id CHARACTER (2) PRIMARY KEY,
-        country_name CHARACTER VARYING (40),
+        country_name CHARACTER VARYING (40) UNIQUE NOT NULL,
         region_id INTEGER NOT NULL
     )
     CREATE INDEX ON countries(country_name ASC);

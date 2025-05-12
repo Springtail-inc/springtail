@@ -54,23 +54,18 @@ BEGIN
 END;
 $$;
 
-CREATE TYPE table_info AS (
-    persistence "char",
-    replident "char",
-    relname text,
-    columns json
-);
-
 CREATE OR REPLACE FUNCTION springtail_get_table_name_and_columns(obj record)
-        RETURNS table_info LANGUAGE plpgsql AS $$
+        RETURNS RECORD
+        LANGUAGE plpgsql AS $$
 DECLARE
     json_columns json;
+    has_pkey boolean;
     table_persistence "char";
     table_replident "char";
     table_relname text;
-    result table_info;
+    result RECORD;
 BEGIN
-    SELECT relname, relreplident, relpersistence
+    SELECT pg_class.relname, pg_class.relreplident, pg_class.relpersistence
     FROM pg_class
     WHERE oid = obj.objid
     INTO table_relname, table_replident, table_persistence;
@@ -108,7 +103,14 @@ BEGIN
     ) AS obj_select
     INTO json_columns;
 
-    result := ROW(table_persistence, table_replident, table_relname, json_columns);
+    SELECT true WHERE json_columns::jsonb @> '[{"is_pkey": true}]'::jsonb INTO has_pkey;
+
+    -- If a table is created or altered, and it doesn't have a primary key, set REPLICA IDENTITY to FULL
+    IF table_replident <> 'f' AND has_pkey IS NULL THEN
+        EXECUTE format('ALTER TABLE %s.%s REPLICA IDENTITY %s', quote_ident(obj.schema_name), quote_ident(table_relname), 'FULL');
+    END IF;
+
+    SELECT table_persistence, table_replident, table_relname, has_pkey, json_columns INTO result;
     RETURN result;
 END;
 $$;
@@ -125,19 +127,27 @@ DECLARE
     table_persistence "char";
     table_replident "char";
     table_relname text;
-    full_ident boolean;
-    update_replica_ident text;
+    table_info RECORD;
 BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() AS cmd
         WHERE cmd.command_tag IN ('ALTER TABLE', 'CREATE TABLE')
     LOOP
-        SELECT persistence, replident, relname, columns
-            INTO table_persistence, table_replident, table_relname, json_columns
-            FROM springtail_get_table_name_and_columns(obj);
+        -- RAISE NOTICE 'springtail: % op, %, %', obj.command_tag, obj.object_identity, obj.objid;
+        -- IF obj.command_tag NOT IN ('ALTER TABLE', 'CREATE TABLE') THEN
+        --     CONTINUE;
+        -- END IF;
+
+        table_info := springtail_get_table_name_and_columns(obj);
+
+        table_persistence := table_info.table_persistence;
+        table_replident := table_info.table_replident;
+        table_relname := table_info.table_relname;
+        has_pkey := table_info.has_pkey;
+        json_columns := table_info.json_columns;
 
         IF table_persistence <> 'p' THEN
             --- RAISE NOTICE 'springtail: skipping operation %, on object %, with identity %, due to wrong persistence type: %', obj.command_tag, obj.object_type, obj.object_identity, table_persistence;
-            RETURN;
+            CONTINUE;
         END IF;
 
         -- Note: obj.object_name is not available
@@ -154,26 +164,9 @@ BEGIN
 
         -- RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objid, table_replident;
 
-        SELECT true WHERE json_columns::jsonb @> '[{"is_pkey": true}]'::jsonb INTO has_pkey;
-
-
-        full_ident := false;
-        update_replica_ident := NULL;
-
-        -- If a table is created or altered, and it doesn't have a primary key, set REPLICA IDENTITY to FULL
-        IF table_replident <> 'f' AND has_pkey IS NULL THEN
-            full_ident := true;
-            update_replica_ident := 'FULL';
-        END IF;
-
         -- If a table is altered, and it has a primary key, set REPLICA IDENTITY to DEFAULT
         IF table_replident = 'f' AND has_pkey IS TRUE THEN
-            full_ident := false;
-            update_replica_ident := 'DEFAULT';
-        END IF;
-
-        IF update_replica_ident IS NOT NULL THEN
-            EXECUTE format('ALTER TABLE %s.%s REPLICA IDENTITY %s', quote_ident(obj.schema_name), quote_ident(table_relname), update_replica_ident);
+            EXECUTE format('ALTER TABLE %s.%s REPLICA IDENTITY %s', quote_ident(obj.schema_name), quote_ident(table_relname), 'DEFAULT');
         END IF;
 
         -- XXX To fix for ALTER TABLE later
@@ -319,6 +312,7 @@ DECLARE
     table_relname text;
     ind_obj record;
     json_columns json;
+    table_info RECORD;
 BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() as cmd
     LOOP
@@ -347,10 +341,11 @@ BEGIN
             -- RAISE NOTICE 'springtail springtail_event_trigger_for_schema_ddl: obj.command_tag %, obj.type %, obj.object_identity %, obj.objid %, obj.schema_name %',
             --     obj.command_tag, obj.object_type, obj.object_identity, obj.objid, obj.schema_name;
 
-            SELECT persistence, replident, relname, columns
-                INTO table_persistence, table_replident, table_relname, json_columns
-                FROM springtail_get_table_name_and_columns(obj);
-
+            table_info := springtail_get_table_name_and_columns(obj);
+            table_persistence := table_info.table_persistence;
+            table_replident := table_info.table_replident;
+            table_relname := table_info.table_relname;
+            json_columns := table_info.json_columns;
 
             msg := json_build_object('xid', txid_current(),
                 'cmd', obj.command_tag,
