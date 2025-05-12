@@ -165,7 +165,7 @@ BEGIN
         -- RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objid, table_replident;
 
         -- If a table is altered, and it has a primary key, set REPLICA IDENTITY to DEFAULT
-        IF table_replident = 'f' AND has_pkey IS TRUE THEN
+        IF obj.command_tag = 'ALTER TABLE' AND table_replident = 'f' AND has_pkey IS TRUE THEN
             EXECUTE format('ALTER TABLE %s.%s REPLICA IDENTITY %s', quote_ident(obj.schema_name), quote_ident(table_relname), 'DEFAULT');
         END IF;
 
