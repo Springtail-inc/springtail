@@ -42,6 +42,11 @@ target_include_directories(dump_headers PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(dump_headers PUBLIC springtail_storage)
 add_dsymutil_command(dump_headers)
 
+add_executable(dump_file test/dump_file.cc)
+target_include_directories(dump_file PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(dump_file PUBLIC springtail_storage)
+add_dsymutil_command(dump_file)
+
 if(LINUX)
     set(GCOV_LIB "gcov")
 else()

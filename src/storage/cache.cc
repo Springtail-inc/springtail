@@ -728,7 +728,7 @@ namespace springtail {
         // if the page is empty, create an empty extent to back it
         if (_extents.empty()) {
             // create an empty extent
-            ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
+            ExtentHeader header(ExtentType(), _end_xid, schema->row_size(), schema->field_types());
             auto extent = SafeExtent(_file, std::move(header));
             _extents.emplace_back( extent.get_ref() );
 
@@ -787,7 +787,7 @@ namespace springtail {
         // if the page is empty, create an empty extent to back it
         if (_extents.empty()) {
             // create an empty extent
-            ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
+            ExtentHeader header(ExtentType(), _end_xid, schema->row_size(), schema->field_types());
             auto extent = SafeExtent(_file, std::move(header));
             _extents.emplace_back(extent.get_ref());
 
@@ -822,7 +822,7 @@ namespace springtail {
         // if the page is empty, create an empty extent to back it
         if (_extents.empty()) {
             // create an empty extent
-            ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
+            ExtentHeader header(ExtentType(), _end_xid, schema->row_size(), schema->field_types());
             auto extent = SafeExtent(_file, std::move(header));
             _extents.emplace_back(extent.get_ref());
 
@@ -1001,7 +1001,7 @@ namespace springtail {
         std::vector<ExtentRef> new_extents;
         for (auto &ref : _extents) {
             // get a new extent
-            ExtentHeader new_header(_header().type, target_xid, target_schema->row_size());
+            ExtentHeader new_header(_header().type, target_xid, target_schema->row_size(), target_schema->field_types());
             auto new_extent = cache->_data_cache->get_empty(_file, new_header);
 
             // get the old extent
