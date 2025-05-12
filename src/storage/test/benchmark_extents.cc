@@ -95,8 +95,12 @@ static void BM_RawAccess(benchmark::State &state) {
 BENCHMARK(BM_RawAccess)->Arg(4096)->MinTime(1.0)->UseRealTime();
 
 static void BM_FieldAccess(benchmark::State &state) {
+    std::vector<uint8_t> types;
+    types.push_back(static_cast<uint8_t>(SchemaType::INT32));
+    types.push_back(static_cast<uint8_t>(SchemaType::INT32));
+
     // construct the extent values
-    auto extent = std::make_shared<Extent>(ExtentType(), 0, 8);
+    auto extent = std::make_shared<Extent>(ExtentType(), 0, 8, types);
     std::vector<MutableFieldPtr> fields;
     fields.push_back(std::make_shared<ExtentField>(SchemaType::INT32, 0));
     fields.push_back(std::make_shared<ExtentField>(SchemaType::INT32, 4));
@@ -120,8 +124,12 @@ static void BM_FieldAccess(benchmark::State &state) {
 BENCHMARK(BM_FieldAccess)->Arg(4096)->MinTime(1.0)->UseRealTime();
 
 static void BM_NewFieldAccess(benchmark::State &state) {
+    std::vector<uint8_t> types;
+    types.push_back(static_cast<uint8_t>(SchemaType::INT32));
+    types.push_back(static_cast<uint8_t>(SchemaType::INT32));
+
     // construct the extent values
-    auto extent = std::make_shared<Extent>(ExtentType(), 0, 8);
+    auto extent = std::make_shared<Extent>(ExtentType(), 0, 8, types);
     std::vector<std::shared_ptr<MParent>> fields;
     fields.push_back(std::make_shared<Int32Field>(SchemaType::INT32, 0));
     fields.push_back(std::make_shared<Int32Field>(SchemaType::INT32, 4));

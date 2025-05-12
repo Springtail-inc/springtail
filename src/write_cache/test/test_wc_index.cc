@@ -41,7 +41,7 @@ namespace {
         uint64_t xid = 150;
         uint64_t lsn = 200;
         PostgresTimestamp commit_ts(300);
-        ExtentHeader header(ExtentType(), xid, 100);
+        ExtentHeader header(ExtentType(), xid, 100, {});
         ExtentPtr data = std::make_shared<Extent>(header);
 
         index->add_extent(tid, pg_xid, lsn, data);
@@ -65,7 +65,7 @@ namespace {
         uint64_t xid = 150;
         uint64_t lsn = 200;
         PostgresTimestamp commit_ts(300);
-        ExtentHeader header(ExtentType(), xid, 100);
+        ExtentHeader header(ExtentType(), xid, 100, {});
         ExtentPtr data = std::make_shared<Extent>(header);
 
         index->add_extent(tid, pg_xid, lsn, data);
@@ -82,7 +82,7 @@ namespace {
     {
         uint64_t tid = 1;
         uint64_t pg_xid = 100;
-        ExtentHeader header(ExtentType(), pg_xid, 100);
+        ExtentHeader header(ExtentType(), pg_xid, 100, {});
         ExtentPtr data = std::make_shared<Extent>(header);
 
         index->add_extent(tid, pg_xid, 200, data);
@@ -100,7 +100,7 @@ namespace {
     {
         uint64_t tid = 1;
         uint64_t pg_xid = 100;
-        ExtentHeader header(ExtentType(), pg_xid, 100);
+        ExtentHeader header(ExtentType(), pg_xid, 100, {});
         ExtentPtr data = std::make_shared<Extent>(header);
 
         index->add_extent(tid, pg_xid, 200, data);
@@ -120,7 +120,7 @@ namespace {
         uint64_t xid = 200;
         uint64_t pg_xid = 100;
         PostgresTimestamp commit_ts(300);
-        ExtentHeader header(ExtentType(), xid, 100);
+        ExtentHeader header(ExtentType(), xid, 100, {});
         ExtentPtr data = std::make_shared<Extent>(header);
 
         index->add_extent(tid, pg_xid, 200, data);
@@ -147,7 +147,7 @@ namespace {
         uint64_t xid = 200;
         uint64_t pg_xid = 100;
         PostgresTimestamp commit_ts(300);
-        ExtentHeader header(ExtentType(), xid, 100);
+        ExtentHeader header(ExtentType(), xid, 100, {});
         ExtentPtr data = std::make_shared<Extent>(header);
 
         index->add_extent(tid, pg_xid, 200, data);
@@ -171,7 +171,7 @@ namespace {
 
     void add_extent_thread(WriteCacheIndexPtr index, uint64_t tid, uint64_t pg_xid, uint64_t lsn_start, uint64_t count, std::mutex &mtx) {
         for (uint64_t i = 0; i < count; ++i) {
-            ExtentHeader header(ExtentType(), 200 + i, 100);
+            ExtentHeader header(ExtentType(), 200 + i, 100, {});
             ExtentPtr data = std::make_shared<Extent>(header);
             {
                 std::unique_lock<std::mutex> lock(mtx);
@@ -237,7 +237,7 @@ namespace {
         // Add extents with different table IDs (tid)
         for (uint64_t tid = 1; tid <= num_tids; ++tid) {
             for (uint64_t i = 0; i < count; ++i) {
-                ExtentHeader header(ExtentType(), 200 + i, 100);
+                ExtentHeader header(ExtentType(), 200 + i, 100, {});
                 ExtentPtr data = std::make_shared<Extent>(header);
                 index->add_extent(tid, pg_xid, lsn_start + i, data);
             }
@@ -274,7 +274,7 @@ namespace {
         uint64_t lsn = 200;
         PostgresTimestamp commit_ts(300);
         int xid_count = 7;
-        ExtentHeader header(ExtentType(), xid, 100);
+        ExtentHeader header(ExtentType(), xid, 100, {});
         ExtentPtr data = std::make_shared<Extent>(header);
 
         std::vector<uint64_t> pg_xids;
@@ -316,7 +316,7 @@ namespace {
         uint64_t lsn = 200;
         PostgresTimestamp commit_ts(300);
         int xid_count = 7;
-        ExtentHeader header(ExtentType(), xid, 100);
+        ExtentHeader header(ExtentType(), xid, 100, {});
         ExtentPtr data = std::make_shared<Extent>(header);
 
         std::vector<uint64_t> pg_xids;
