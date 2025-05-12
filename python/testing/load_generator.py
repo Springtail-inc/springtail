@@ -157,14 +157,14 @@ def print_run_config_to_csv(file: str) -> None:
         writer = csv.writer(csvfile)
         writer.writerow(["Parameter", "Value"])
         writer.writerow(["Number of schemas", run_config['num_schemas']])
-        writer.writerow(["Number of tables per schema", run_config['num_tables']])
-        writer.writerow(["Number of inserts", run_config['num_inserts']])
-        writer.writerow(["Number of updates", run_config['num_updates']])
-        writer.writerow(["Number of deletes", run_config['num_deletes']])
+        writer.writerow(["Number of tables per schema", run_config['table_configuration']['num_tables']])
+        writer.writerow(["Number of inserts", run_config['load_configuration']['num_inserts']])
+        writer.writerow(["Number of updates", run_config['load_configuration']['num_updates']])
+        writer.writerow(["Number of deletes", run_config['load_configuration']['num_deletes']])
         writer.writerow(["Batched inserts", run_config['batched_inserts']])
         writer.writerow(["Operations", parse_operations(run_config['operations'], True)])
-        writer.writerow(["Number of columns", run_config['num_columns']])
-        writer.writerow(["Number of indexes", run_config['num_indexes']])
+        writer.writerow(["Number of columns", run_config['table_configuration']['min_columns']])
+        writer.writerow(["Number of indexes", run_config['index_configuration']['min_indexes']])
         writer.writerow(["Running with existing table set", run_config['use_existing_config']])
 
 def write_sql_to_txt(sql_file: str, sql_str: str):
@@ -266,7 +266,8 @@ def generate_random_table_data(full_table_name: str):
     ]
 
     # Add NUM_COLUMNS random columns with random types
-    min_columns, max_columns = map(int, run_config['num_columns'].split('-'))
+    table_configuration = run_config['table_configuration']
+    min_columns, max_columns = table_configuration['min_columns'], table_configuration['max_columns']
     num_columns = random.randint(min_columns, max_columns)
     for i in range(num_columns):
         column_type = random.choice(column_types)
@@ -370,10 +371,11 @@ def create_index(conn, schema_name: str, table_name: str):
             print(f"[!] No indexable columns found in {full_table_name}")
             return
 
+        indexes_config = run_config['index_configuration']
         # Create a random number of indexes with a random number of columns
-        min_indexes, max_indexes = map(int, run_config['num_indexes'].split('-'))
+        min_indexes, max_indexes = indexes_config['min_indexes'], indexes_config['max_indexes']
         num_indexes = random.randint(min_indexes, max_indexes)
-        min_cols_per_index, max_cols_per_index = map(int, run_config['num_columns_per_index'].split('-'))
+        min_cols_per_index, max_cols_per_index = indexes_config['min_columns_per_index'], indexes_config['max_columns_per_index']
         for i in range(num_indexes):
             index_columns = random.sample(indexable_columns, random.randint(min_cols_per_index, max_cols_per_index))
             index_name = f"idx_{table_name}_{i}_{('_'.join(index_columns))}"
@@ -490,12 +492,12 @@ def insert_data(conn, schema_name: str, table_name: str):
             remaining_inserts -= batch_size
             print(f"[+] Inserted batch of {batch_size} rows into {full_table_name} (remaining: {remaining_inserts})")
     else:
-        # Generate random batch sizes that add up to NUM_INSERTS
-        values_list = generate_values_list(columns, run_config['num_inserts'])
+        # Generate random batch sizes that add up to run_config['load_configuration']['num_inserts']
+        values_list = generate_values_list(columns, run_config['load_configuration']['num_inserts'])
         time_and_log_query(conn, "insert_data", insert_sql, values_list, full_table_name=full_table_name)
         # write_sql_to_txt(run_config['sql_file'], insert_sql)
 
-    print(f"[+] Total {run_config['num_inserts']} rows inserted into {full_table_name}")
+    print(f"[+] Total {run_config['load_configuration']['num_inserts']} rows inserted into {full_table_name}")
 
 def update_data(conn, schema_name: str, table_name: str):
     """
@@ -508,7 +510,7 @@ def update_data(conn, schema_name: str, table_name: str):
 
     Update behavior:
         - Randomly selects 1-3 columns to update
-        - Updates run_config['num_updates'] rows
+        - Updates run_config['load_configuration']['num_updates'] rows
         - Uses ORDER BY with random column
         - Uses generate_values_list for new values
 
@@ -535,7 +537,7 @@ def update_data(conn, schema_name: str, table_name: str):
     update_sql = f"""
         UPDATE {full_table_name}
         SET {', '.join(f'{col[0]} = %s' for col in columns_to_update)}
-        WHERE id IN (SELECT id FROM {full_table_name} ORDER BY {order_by_column} LIMIT {run_config['num_updates']})
+        WHERE id IN (SELECT id FROM {full_table_name} ORDER BY {order_by_column} LIMIT {run_config['load_configuration']['num_updates']})
     """
 
     value_columns = columns_to_update
@@ -555,7 +557,7 @@ def delete_data(conn, schema_name: str, table_name: str):
         table_name (str): Name of the table
 
     Delete behavior:
-        - Deletes run_config['num_deletes'] rows
+        - Deletes run_config['load_configuration']['num_deletes'] rows
         - Uses ORDER BY with random column
 
     Notes:
@@ -579,7 +581,7 @@ def delete_data(conn, schema_name: str, table_name: str):
 
     delete_sql = f"""
         DELETE FROM {full_table_name}
-        WHERE id IN (SELECT id FROM {full_table_name} ORDER BY {order_by_column} LIMIT {run_config['num_deletes']})
+        WHERE id IN (SELECT id FROM {full_table_name} ORDER BY {order_by_column} LIMIT {run_config['load_configuration']['num_deletes']})
     """
 
     out = time_and_log_query(conn, "delete_data", delete_sql, values_list, full_table_name=full_table_name)
@@ -621,7 +623,7 @@ def create_schema_and_tables(conn, schema_name: str):
     if run_config['use_existing_config']:
         table_names = table_columns.get(schema_name)
     else:
-        table_names = [f"table_{table_idx}_{random.randint(1000, 9999)}" for table_idx in range(run_config['num_tables'])]
+        table_names = [f"table_{table_idx}_{random.randint(1000, 9999)}" for table_idx in range(run_config['table_configuration']['num_tables'])]
 
     for table_name in table_names:
         for func in parse_operations(run_config['operations']):

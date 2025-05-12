@@ -1,26 +1,31 @@
 # Number of schemas to create
 num_schemas: 10
 
-# Number of tables per schema
-num_tables: 10
+# Table configuration
+table_configuration:
+  # Number of tables per schema
+  num_tables: 10
+  # Number of columns per table (range)
+  min_columns: 3
+  max_columns: 10
 
-# Number of columns per table (range)
-num_columns: '3-10'
+# Index configuration
+index_configuration:
+  # Number of indexes per table (range)
+  min_indexes: 0
+  max_indexes: 2
+  # Number of columns per index (range)
+  min_columns_per_index: 1
+  max_columns_per_index: 2
 
-# Number of indexes per table (range)
-num_indexes: '1-2'
-
-# Number of columns per index (range)
-num_columns_per_index: '1-2'
-
-# Number of inserts per table
-num_inserts: 500
-
-# Number of updates per table
-num_updates: 250
-
-# Number of deletes per table
-num_deletes: 125
+# Load configuration
+load_configuration:
+  # Number of inserts per table
+  num_inserts: 500
+  # Number of updates per table
+  num_updates: 250
+  # Number of deletes per table
+  num_deletes: 125
 
 # Whether to batch inserts
 batched_inserts: false
