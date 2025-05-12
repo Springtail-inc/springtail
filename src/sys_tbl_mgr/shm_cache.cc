@@ -201,6 +201,14 @@ ShmCache::insert(DbId db, TableId tid, Xid xid, const std::string& msg, bool dro
 
     bool key_exists = it != _cache->end();
 
+    // get the last cached message for the table
+    // and make sure that it wasn't dropped
+    if (!drop_table && key_exists && !it->second.empty()) {
+        auto msg_it = it->second.end();
+        --msg_it;
+        DCHECK(!msg_it->dropped);
+    }
+
     check_free_space_locked();
 
     while (true) {
