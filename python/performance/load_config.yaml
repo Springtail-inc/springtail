@@ -33,7 +33,7 @@ load_configuration:
 batched_inserts: false
 
 # Operations to perform
-operations: 'TIA'
+operations: ['create_table', 'create_index', 'insert_data', 'update_data', 'delete_data']
 
 # Whether to use the previous configuration to load tables
 use_existing_config: true

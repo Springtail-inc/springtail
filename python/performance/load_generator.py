@@ -634,20 +634,13 @@ def create_schema_and_tables(conn, schema_name: str):
 
     return schema_name
 
-def parse_operations(operations: str, parse_names: bool = False):
+def parse_operations(operations: list, parse_names: bool = False):
     """
     Parse operations string into function list.
 
     Args:
-        operations (str): String of operations to parse
+        operations (list): List of operations to parse
         parse_names (bool): If True, return comma-separated function names
-
-    Operations mapping:
-        'T' -> create_table
-        'I' -> create_index
-        'A' -> insert_data
-        'U' -> update_data
-        'D' -> delete_data
 
     Returns:
         list: List of operation functions or string of function names
@@ -657,16 +650,16 @@ def parse_operations(operations: str, parse_names: bool = False):
         - Returns empty list if no valid operations found
     """
     ops = []
-    for char in operations:
-        if char == 'T':
+    for op in operations:
+        if op == 'create_table':
             ops.append(create_table)
-        elif char == 'I':
+        elif op == 'create_index':
             ops.append(create_index)
-        elif char == 'A':
+        elif op == 'insert_data':
             ops.append(insert_data)
-        elif char == 'U':
+        elif op == 'update_data':
             ops.append(update_data)
-        elif char == 'D':
+        elif op == 'delete_data':
             ops.append(delete_data)
     if parse_names:
         return ",".join([func.__name__ for func in ops])
