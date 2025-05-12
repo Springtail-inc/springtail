@@ -85,7 +85,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
             if (subscriber) {
                 // GRPC is supposed to delete it after cancel()
                 auto p = subscriber.release();
-                p->cancel();
+                CHECK(p);
                 // try to reconnect after 200ms
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
             }
@@ -99,7 +99,9 @@ PgXidSubscriberMgr::task(std::stop_token st)
     if (subscriber) {
         // GRPC is supposed to delete it after cancel()
         auto p = subscriber.release();
-        p->cancel();
+        if (connected) {
+            p->cancel();
+        }
     }
     LOG_DEBUG(LOG_XID_MGR, "PgXidSubscriberMgr thread stopping");
     workers.clear();
