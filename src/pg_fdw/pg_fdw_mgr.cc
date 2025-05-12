@@ -40,6 +40,8 @@ extern "C" {
     #include <utils/builtins.h>
     #include <utils/syscache.h>
     #include <utils/typcache.h>
+    #include <utils/numeric.h>
+    #include <utils/lsyscache.h>
     #include <nodes/pg_list.h>
     #include <nodes/primnodes.h>
     #include <varatt.h>
@@ -166,6 +168,17 @@ namespace springtail::pg_fdw {
         // the type category doesn't matter for these checks since enum check is done above
         SchemaType pg_schema_type = convert_pg_type(pg_type, 'N');
         if (column.type == pg_schema_type) {
+            if (pg_schema_type == SchemaType::BINARY) {
+                if (pg_type == NUMERICOID &&
+                    (qual->base.op == QualOpName::EQUALS || qual->base.op == QualOpName::NOT_EQUALS)) {
+                    // only support equality of NUMERICOID binary types
+                    return true;
+                } else {
+                    // don't support comparisons of binary types
+                    return false;
+                }
+            }
+
             return true;
         }
 
@@ -254,7 +267,12 @@ namespace springtail::pg_fdw {
 
                 // must be of the same internal type
                 auto column = state->columns.at(pos);
+                LOG_DEBUG(LOG_FDW, "Checking qual {}:{} against column {} {}:{}, for op {}",
+                         qual->base.typeoid, to_string(convert_pg_type(qual->base.typeoid, 'N')),
+                         column.name, column.pg_type, to_string(column.type), (int)qual->base.op);
+
                 if (PgFdwMgr::check_type_compatibility(column, qual)) {
+                    LOG_DEBUG(LOG_FDW, "Qual match successful");
                     return qual;
                 }
             }
@@ -1576,9 +1594,9 @@ namespace springtail::pg_fdw {
             case CHAROID:
             case UUIDOID:
                 return true;
-            case NUMERICOID: //DECIMAL(x,y)
+            case NUMERICOID: // DECIMAL(x,y)
                 //TODO: https://linear.app/springtail/issue/SPR-556/
-                return false;
+                return (op == EQUALS || op == NOT_EQUALS);
             case VARCHAROID:
             case TEXTOID:
                 // due to different collations/encodings we only support equality for text
@@ -1594,6 +1612,33 @@ namespace springtail::pg_fdw {
         }
     }
 
+    std::vector<char>
+    PgFdwMgr::_numeric_datum_to_vector(Datum value)
+    {
+        // Get the send function for the numeric type
+        Oid numeric_type_id = NUMERICOID;
+        bool is_varlena;
+        Oid numeric_out_func;
+
+        // Look up the send function for NUMERICOID
+        getTypeBinaryOutputInfo(numeric_type_id, &numeric_out_func, &is_varlena);
+
+        // Use the send function (typically numeric_send) to convert to binary format
+        bytea *output_bytes = OidSendFunctionCall(numeric_out_func, value);
+
+        // Extract data and length from the bytea structure
+        uint8_t *data = reinterpret_cast<uint8_t *>(VARDATA(output_bytes));
+        size_t length = VARSIZE(output_bytes) - VARHDRSZ;
+
+        // Copy to std::vector
+        std::vector<char> result(data, data + length);
+
+        // Free the bytea result
+        pfree(output_bytes);
+
+        return result;
+    }
+
     void
     PgFdwMgr::_make_const_field(const PgFdwState *state,
                                 const SchemaColumn &column,
@@ -1601,8 +1646,6 @@ namespace springtail::pg_fdw {
                                 const ConstQual *qual)
     {
         FieldArrayPtr fields = state->qual_fields;
-
-        DCHECK_EQ(column.pg_type, qual->base.typeoid);
 
         if (qual->isnull) {
             // NULL constant; set to null
@@ -1654,6 +1697,9 @@ namespace springtail::pg_fdw {
                 fields->at(idx) = std::make_shared<ConstTypeField<std::string>>(str);
                 break;
             }
+            case NUMERICOID: // DECIMAL(x,y)
+                fields->at(idx) = std::make_shared<ConstTypeField<std::vector<char>>>(std::move(_numeric_datum_to_vector(qual->value)));
+                break;
             default:
                 // handle enum user defined type
                 if (qual->base.typeoid >= FirstNormalObjectId) {

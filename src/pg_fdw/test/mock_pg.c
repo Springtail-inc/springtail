@@ -249,3 +249,23 @@ void appendBinaryStringInfoNT(StringInfo str,
     str->len += datalen;
     str->data[str->len] = '\0';
 }
+
+void getTypeBinaryOutputInfo(Oid type_id, Oid *out_func, bool *is_varlena)
+{
+    // Dummy implementation, just set the output function to 0 and is_varlena to false
+    *out_func = 0;
+    *is_varlena = false;
+}
+
+void pfree(void *ptr)
+{
+    free(ptr);
+}
+
+bytea *OidSendFunctionCall(Oid functionId, Datum arg1)
+{
+    bytea *result = (bytea *) palloc(sizeof(bytea));
+    // Dummy implementation, just return a dummy bytea
+    memset(result, 0, sizeof(bytea));
+    return result;
+}
