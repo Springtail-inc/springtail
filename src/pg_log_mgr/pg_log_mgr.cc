@@ -261,7 +261,7 @@ namespace springtail::pg_log_mgr {
                 //      can stay in the queue forever until the log_mgr is up
                 if (_db_id != request->db_id()) {
                     LOG_DEBUG(LOG_PG_LOG_MGR, "Request not for this db: {}, hence pushing back to the queue", _db_id);
-                    _index_reconciliation_queue->push(request);
+                    _index_reconciliation_queue->push(std::move(request));
                 } else {
                     //Pass it to log reader to notify committer
                     LOG_DEBUG(LOG_PG_LOG_MGR, "Request received for index reconciliation for XID: {} @ {}", request->db_id(), request->reconcile_xid());
