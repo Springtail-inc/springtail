@@ -106,7 +106,7 @@ BEGIN
     SELECT true WHERE json_columns::jsonb @> '[{"is_pkey": true}]'::jsonb INTO has_pkey;
 
     -- If a table is created or altered, and it doesn't have a primary key, set REPLICA IDENTITY to FULL
-    IF table_replident <> 'f' AND has_pkey IS NULL AND table_persistence <> 'p' THEN
+    IF table_replident <> 'f' AND has_pkey IS NULL AND table_persistence = 'p' THEN
         EXECUTE format('ALTER TABLE %s.%s REPLICA IDENTITY %s', quote_ident(obj.schema_name), quote_ident(table_relname), 'FULL');
     END IF;
 
