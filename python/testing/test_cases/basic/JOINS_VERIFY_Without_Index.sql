@@ -2,12 +2,12 @@
 
 CREATE TABLE IF NOT EXISTS fruit_basket_one (
     id INT PRIMARY KEY,
-    fruit_name VARCHAR (100) NOT NULL
+    fruit_name VARCHAR (100)
 );
 
 CREATE TABLE IF NOT EXISTS fruit_basket_two (
     id INT PRIMARY KEY,
-    fruit_name VARCHAR (100) NOT NULL
+    fruit_name VARCHAR (100)
 );
 
 INSERT INTO fruit_basket_one (id, fruit_name) VALUES
@@ -30,7 +30,13 @@ INSERT INTO fruit_basket_one (id, fruit_name) VALUES
     (17, 'strawberry'),
     (18, 'tangerine'),
     (19, 'ugli fruit'),
-    (20, 'vanilla bean');
+    (20, 'vanilla bean'),
+    (21, NULL),
+    (22, NULL),
+    (23, NULL),
+    (24, NULL),
+    (25, NULL);
+
 
 INSERT INTO fruit_basket_two(id, fruit_name) VALUES
     (1, 'apple'),
@@ -52,7 +58,12 @@ INSERT INTO fruit_basket_two(id, fruit_name) VALUES
     (17, 'raspberry'),
     (18, 'starfruit'),
     (19, 'tangerine'),
-    (20, 'ugli fruit');
+    (20, 'ugli fruit'),
+    (26, NULL),
+    (27, NULL),
+    (28, NULL),
+    (29, NULL),
+    (30, NULL);
 
 ## verify
 
