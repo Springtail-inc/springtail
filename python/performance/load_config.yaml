@@ -28,6 +28,10 @@ load_configuration:
   num_updates: 250
   # Number of deletes per table
   num_deletes: 125
+  # Whether to allow nulls in the data for inserts
+  allow_nulls:
+    rows: true
+    cols: true
 
 # Whether to batch inserts
 batched_inserts: false

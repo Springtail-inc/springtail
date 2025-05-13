@@ -295,9 +295,12 @@ def generate_random_table_data(full_table_name: str):
         if col.startswith("id") or col.startswith("created_at"):
             continue
 
-        col_name, col_type = col.split()[0], col.split()[1]
+        # Extract the column data and store it in the table_columns array
+        col_data = col.split()
+        col_name = col_data[0]
+        col_type = ' '.join(col_data[1:])
 
-        table_columns[schema_name][table_name]["columns"].append((col_name, col_type.lower()))
+        table_columns[schema_name][table_name]["columns"].append((col_name, col_type))
 
     return columns
 
@@ -416,10 +419,31 @@ def generate_values_list(columns: list, batch_size: int = 1) -> list:
     """
     values_list = []
 
-    for _ in range(batch_size):
+    allow_nulls = run_config['load_configuration']['allow_nulls']
+    null_rows = 0
+    if allow_nulls.get("rows", False):
+        # Randomly select a percentage of rows to be null
+        null_rows = random.randint(int(batch_size * 0.1), int(batch_size * 0.15))
+        # Generate NULL rows first
+        null_row_indices = random.sample(range(batch_size), min(null_rows, batch_size))
+
+    for i in range(batch_size):
         values = []
-        for col_name, col_type in columns:
-            if col_type in ['text', 'varchar', 'char']:
+
+        if i in null_row_indices:
+            values_list.append(tuple([None] * len(columns)))
+            continue
+
+        if allow_nulls.get("cols", False):
+            # Out of all the columns, select the indices of 10-15% of columns for setting the value as null
+            num_null_cols = random.randint(int(len(columns) * 0.1), int(len(columns) * 0.15))
+            # Get indices of columns to be NULL
+            null_col_indices = random.sample(range(len(columns)), num_null_cols)
+
+        for col_idx, (col_name, col_type) in enumerate(columns):
+            if col_idx in null_col_indices:
+                values.append(None)
+            elif col_type in ['text', 'varchar', 'char']:
                 values.append(f"value_{random.randint(1, 100)}")
             elif col_type in ['int', 'bigint']:
                 values.append(random.randint(1, 1000))
@@ -701,6 +725,9 @@ def load_data(run_config: dict) -> None:
 
     conn = connect_db_instance(props, "springtail")
     start_time = time.time()
+
+    # Clean the previous SQL file
+    write_sql_to_txt(run_config['sql_file'], "")
 
     global table_columns
     if run_config['use_existing_config']:
