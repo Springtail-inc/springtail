@@ -253,6 +253,8 @@ def generate_random_table_data(full_table_name: str):
     Returns:
         list: List of column definitions
     """
+    columns = []  # Initialize the columns list
+
     # List of PostgreSQL data types to choose from
     # XXX Need to add other possible types too
     column_types = [
@@ -294,9 +296,6 @@ def generate_random_table_data(full_table_name: str):
             continue
 
         col_name, col_type = col.split()[0], col.split()[1]
-        # Handle special cases like VARCHAR(255)
-        if '(' in col_type:
-            col_type = col_type.split('(')[0]
 
         table_columns[schema_name][table_name]["columns"].append((col_name, col_type.lower()))
 
@@ -479,7 +478,7 @@ def insert_data(conn, schema_name: str, table_name: str):
     """
 
     if run_config['batched_inserts']:
-        remaining_inserts = run_config['num_inserts']
+        remaining_inserts = run_config['load_configuration']['num_inserts']
         while remaining_inserts > 0:
             if remaining_inserts <= 10:  # For small remaining, just insert them all
                 batch_size = remaining_inserts
@@ -616,7 +615,7 @@ def create_schema_and_tables(conn, schema_name: str):
         - Logs errors but continues with next table
     """
     # Create the main schema
-    create_schema_sql = f"CREATE SCHEMA IF NOT EXISTS {schema_name}"
+    create_schema_sql = f"CREATE SCHEMA IF NOT EXISTS {schema_name};"
     time_and_log_query(conn, "create_schema", create_schema_sql, full_table_name=schema_name)
     write_sql_to_txt(run_config['sql_file'], create_schema_sql)
 
@@ -635,6 +634,8 @@ def create_schema_and_tables(conn, schema_name: str):
                 func(conn, schema_name, table_name)
             except Exception as e:
                 print(f"[-] Got an error while {func.__name__} {schema_name}.{table_name}: {e}")
+                bt = traceback.format_exc()
+                print(bt)
 
     return schema_name
 
@@ -703,8 +704,13 @@ def load_data(run_config: dict) -> None:
 
     global table_columns
     if run_config['use_existing_config']:
-        with open(run_config['table_columns_file'], 'r') as table_columns_file:
-            table_columns = json.load(table_columns_file)
+        if os.path.exists(run_config['table_columns_file']):
+            with open(run_config['table_columns_file'], 'r') as table_columns_file:
+                table_columns = json.load(table_columns_file)
+        else:
+            print(f"[!] Warning: {run_config['table_columns_file']} does not exist. Using empty table_columns.")
+            table_columns = {}
+            run_config['use_existing_config'] = False
 
     # Create the schema and the tables
     schema_names = []
