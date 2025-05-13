@@ -455,7 +455,10 @@ namespace springtail::pg_fdw {
             std::vector<std::string> txn;
             for (auto &[xid, ddls] : xid_map) {
                 for (const auto &ddl : ddls) {
-                    txn.push_back(_gen_sql_from_json(conn, SPRINGTAIL_FDW_SERVER_NAME, ddl));
+                    auto query_string = _gen_sql_from_json(conn, SPRINGTAIL_FDW_SERVER_NAME, ddl);
+                    if (!query_string.empty()) {
+                        txn.push_back(query_string);
+                    }
                 }
             }
 
@@ -596,11 +599,13 @@ namespace springtail::pg_fdw {
         else if (action == "create_index") {
             // TODO: do something?
             LOG_ERROR("CREATE INDEX");
+            CHECK(false);
             return "";
         }
         else if (action == "drop_index") {
             // TODO: do something?
             LOG_ERROR("DROP INDEX");
+            CHECK(false);
             return "";
         }
         else if (action == "ns_create") {

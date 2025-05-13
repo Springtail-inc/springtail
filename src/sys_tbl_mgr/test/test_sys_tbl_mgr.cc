@@ -452,6 +452,7 @@ namespace {
         uint64_t tid = 100001;
         uint64_t index_id = 5003;
 
+        sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_ROOTS);
         auto cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS, 100*1024);
         _client->use_roots_cache(cache);
 

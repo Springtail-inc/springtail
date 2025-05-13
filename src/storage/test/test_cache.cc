@@ -92,7 +92,7 @@ namespace {
             page->insert(std::make_shared<KeyValueTuple>(_csv_fields, extra, &r), _schema);
         }
 
-        ExtentHeader header(ExtentType(), xid++, _schema->row_size(), 0);
+        ExtentHeader header(ExtentType(), xid++, _schema->row_size(), _schema->field_types(), 0);
         auto &&offsets = page->flush(header);
 
         // verify the contents
@@ -136,7 +136,7 @@ namespace {
                 }
             }
 
-            ExtentHeader header(ExtentType(), xid++, _schema->row_size(), 0);
+            ExtentHeader header(ExtentType(), xid++, _schema->row_size(), _schema->field_types(), 0);
             offsets = page->flush(header);
         }
 

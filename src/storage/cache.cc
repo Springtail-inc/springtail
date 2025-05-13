@@ -600,8 +600,6 @@ namespace springtail {
     StorageCache::Page::Iterator
     StorageCache::Page::lower_bound(TuplePtr tuple, ExtentSchemaPtr schema)
     {
-        boost::shared_lock lock(_mutex);
-
         // perform a lower-bound check to find the appropriate extent
         // note: we don't use std::ranges::lower_bound() here because the projection causes the
         //       SafeExtent to go out of scope before it is used in the comparison
@@ -635,8 +633,6 @@ namespace springtail {
     StorageCache::Page::Iterator
     StorageCache::Page::upper_bound(TuplePtr tuple, ExtentSchemaPtr schema)
     {
-        boost::shared_lock lock(_mutex);
-
         // perform a upper-bound check to find the appropriate extent
         // note: we don't use std::ranges::upper_bound() here because the projection causes the
         //       SafeExtent to go out of scope before it is used in the comparison
@@ -732,7 +728,7 @@ namespace springtail {
         // if the page is empty, create an empty extent to back it
         if (_extents.empty()) {
             // create an empty extent
-            ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
+            ExtentHeader header(ExtentType(), _end_xid, schema->row_size(), schema->field_types());
             auto extent = SafeExtent(_file, std::move(header));
             _extents.emplace_back( extent.get_ref() );
 
@@ -791,7 +787,7 @@ namespace springtail {
         // if the page is empty, create an empty extent to back it
         if (_extents.empty()) {
             // create an empty extent
-            ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
+            ExtentHeader header(ExtentType(), _end_xid, schema->row_size(), schema->field_types());
             auto extent = SafeExtent(_file, std::move(header));
             _extents.emplace_back(extent.get_ref());
 
@@ -826,7 +822,7 @@ namespace springtail {
         // if the page is empty, create an empty extent to back it
         if (_extents.empty()) {
             // create an empty extent
-            ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
+            ExtentHeader header(ExtentType(), _end_xid, schema->row_size(), schema->field_types());
             auto extent = SafeExtent(_file, std::move(header));
             _extents.emplace_back(extent.get_ref());
 
@@ -1005,7 +1001,7 @@ namespace springtail {
         std::vector<ExtentRef> new_extents;
         for (auto &ref : _extents) {
             // get a new extent
-            ExtentHeader new_header(_header().type, target_xid, target_schema->row_size());
+            ExtentHeader new_header(_header().type, target_xid, target_schema->row_size(), target_schema->field_types());
             auto new_extent = cache->_data_cache->get_empty(_file, new_header);
 
             // get the old extent

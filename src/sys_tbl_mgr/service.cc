@@ -209,7 +209,13 @@ Service::_create_index(const proto::IndexRequest& request)
         column_json["position"] = column.position();
         column_json["name"] = column.name();
 
-        ddl["columns"].push_back(column_json);
+        // Insert columns in the order specified by idx_position.
+        // This ensures the index columns are arranged correctly,
+        // as their order may differ from the table column order.
+        if (ddl["columns"].size() <= column.idx_position()) {
+            ddl["columns"].get_ref<nlohmann::json::array_t&>().resize(column.idx_position() + 1);
+        }
+        ddl["columns"][column.idx_position()] = column_json;
     }
 
     // update index names
@@ -1087,8 +1093,9 @@ Service::SwapSyncTable(grpc::ServerContext* context,
                             index.index().id(), index.xid(), index.lsn());
 
         CHECK_EQ(index.lsn(), constant::RESYNC_CREATE_LSN);
-        auto&& index_ddl = this->_create_index(index);
-        ddls.push_back(index_ddl);
+
+        // note: we don't store the create_index DDL since it doesn't need to be replayed at the FDW
+        this->_create_index(index);
     }
 
     // 6. update the metadata of the table
