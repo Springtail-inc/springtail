@@ -171,16 +171,28 @@ def print_run_config_to_csv(file: str) -> None:
         writer.writerow(["Number of columns per index (max)", run_config['index_configuration']['max_columns_per_index']])
         writer.writerow(["Running with existing table set", run_config['use_existing_config']])
 
-def write_sql_to_txt(sql_file: str, sql_str: str):
+def write_sql_to_txt(query: str, params: list = None):
     """
-    Write DDL SQL to a text file.
+    Write SQL to a text file.
 
     Args:
-        sql_file (str): Path to the output SQL file
-        sql_str (str): SQL string to write
+        query (str): SQL string to write
+        params (list, optional): Parameters for SQL query
     """
-    with open(sql_file, mode='a', newline='') as file:
-        file.write(sql_str)
+    # Write the SQL query to the file
+    if params:
+        # Format the query with None values represented as NULL
+        formatted_query = query
+        for param in params:
+            if param is None:
+                formatted_query = formatted_query.replace('%s', 'NULL', 1)
+            else:
+                formatted_query = formatted_query.replace('%s', str(param), 1)
+        with open(run_config['sql_file'], mode='a', newline='') as file:
+            file.write(formatted_query + "\n")
+    else:
+        with open(run_config['sql_file'], mode='a', newline='') as file:
+            file.write(query + "\n")
 
 def write_metrics_to_csv(_type: str, duration_ms: float, txid: int, pg_ts: str, rows: int, full_table_name: str = None) -> None:
     """
@@ -244,6 +256,10 @@ def time_and_log_query(conn, _type: str, query: str, params=None, full_table_nam
     end = time.time()
     duration_ms = round((end - start) * 1000, 2)
     write_metrics_to_csv(_type, duration_ms, txid, pg_ts_epoch_ms, rows_affected, full_table_name)
+
+    # Write the SQL query to the file
+    write_sql_to_txt(query, params)
+
     return rows_affected
 
 def generate_random_table_data(full_table_name: str):
@@ -292,12 +308,15 @@ def generate_random_table_data(full_table_name: str):
         }
 
     for col in columns:
-        if col.startswith("id") or col.startswith("created_at"):
+        if col.startswith("id") or col.startswith("created_at") or col.startswith("updated_at"):
             continue
 
-        col_name, col_type = col.split()[0], col.split()[1]
+        # Extract the column data and store it in the table_columns array
+        col_data = col.split()
+        col_name = col_data[0]
+        col_type = ' '.join(col_data[1:])
 
-        table_columns[schema_name][table_name]["columns"].append((col_name, col_type.lower()))
+        table_columns[schema_name][table_name]["columns"].append((col_name, col_type))
 
     return columns
 
@@ -313,6 +332,7 @@ def create_table(conn, schema_name: str, table_name: str):
     The table will have:
         - id SERIAL PRIMARY KEY
         - created_at TIMESTAMP
+        - updated_at TIMESTAMP
         - Random number of columns with random types
 
     Notes:
@@ -322,10 +342,11 @@ def create_table(conn, schema_name: str, table_name: str):
     """
     full_table_name = f"{schema_name}.{table_name}"
 
-    # Always include id as SERIAL PRIMARY KEY and created_at as TIMESTAMP
+    # Always include id as SERIAL PRIMARY KEY and created_at as TIMESTAMP and updated_at as TIMESTAMP
     columns = [
         "id SERIAL PRIMARY KEY",
-        "created_at TIMESTAMP DEFAULT NOW()"
+        "created_at TIMESTAMP DEFAULT NOW()",
+        "updated_at TIMESTAMP DEFAULT NOW()"
     ]
     if run_config['use_existing_config']:
         columns.extend([f"{col_name} {col_type}" for col_name, col_type in table_columns[schema_name][table_name]["columns"]])
@@ -333,14 +354,9 @@ def create_table(conn, schema_name: str, table_name: str):
         columns.extend(generate_random_table_data(full_table_name))
 
     # Create the CREATE TABLE statement
-    create_table_sql = f"""
-        CREATE TABLE IF NOT EXISTS {full_table_name} (
-            {',\n            '.join(columns)}
-        )
-    """
+    create_table_sql = f"""CREATE TABLE IF NOT EXISTS {full_table_name} ({', '.join(columns)});"""
 
     time_and_log_query(conn, "create_table", create_table_sql, full_table_name=full_table_name)
-    write_sql_to_txt(run_config['sql_file'], create_table_sql)
 
     print(f"[+] Created table: {full_table_name} with {len(columns)} random columns")
 
@@ -358,7 +374,7 @@ def create_index(conn, schema_name: str, table_name: str):
         - Each index with random number of columns (1-2)
 
     Notes:
-        - Skips non-indexable columns (id, created_at, jsonb, bytea, uuid)
+        - Skips non-indexable columns (id, created_at, updated_at, jsonb, bytea, uuid)
         - Updates global table_columns dict with index information
     """
     full_table_name = f"{schema_name}.{table_name}"
@@ -366,7 +382,7 @@ def create_index(conn, schema_name: str, table_name: str):
     columns = table_columns[schema_name][table_name]["columns"]
 
     # Filter out columns that are not suitable for indexing
-    indexable_columns = [col_name for col_name, col_type in columns if col_name not in ['id', 'created_at'] and col_type not in ['jsonb', 'bytea', 'uuid']]
+    indexable_columns = [col_name for col_name, col_type in columns if col_name not in ['id', 'created_at', 'updated_at'] and col_type not in ['jsonb', 'bytea', 'uuid']]
 
     if not run_config['use_existing_config']:
         # If the prev run flag isn't set, create new indexes
@@ -385,12 +401,8 @@ def create_index(conn, schema_name: str, table_name: str):
             table_columns[schema_name][table_name]["indexes"].append([index_name, index_columns])
 
     for index_name, index_columns in table_columns[schema_name][table_name]["indexes"]:
-        create_index_sql = f"""
-            CREATE INDEX IF NOT EXISTS {index_name}
-            ON {full_table_name} ({', '.join(index_columns)})
-        """
+        create_index_sql = f"""CREATE INDEX IF NOT EXISTS {index_name} ON {full_table_name} ({', '.join(index_columns)});"""
         time_and_log_query(conn, "create_index", create_index_sql, full_table_name=full_table_name)
-        write_sql_to_txt(run_config['sql_file'], create_index_sql)
 
         print(f"[+] Created index on: {full_table_name}({index_name})")
 
@@ -416,20 +428,42 @@ def generate_values_list(columns: list, batch_size: int = 1) -> list:
     """
     values_list = []
 
-    for _ in range(batch_size):
+    allow_nulls = run_config['load_configuration']['allow_nulls']
+    null_row_indices = []
+    if allow_nulls.get("rows", False):
+        # Randomly select a percentage of rows to be null
+        null_rows = random.randint(int(batch_size * 0.1), int(batch_size * 0.15))
+        # Generate NULL rows first
+        null_row_indices = random.sample(range(batch_size), min(null_rows, batch_size))
+
+    for i in range(batch_size):
         values = []
-        for col_name, col_type in columns:
-            if col_type in ['text', 'varchar', 'char']:
+
+        if i in null_row_indices:
+            values_list.append(tuple([None] * len(columns)))
+            continue
+
+        null_col_indices = []
+        if allow_nulls.get("cols", False):
+            # Out of all the columns, select the indices of 10-15% of columns for setting the value as null
+            num_null_cols = random.randint(int(len(columns) * 0.1), int(len(columns) * 0.15))
+            # Get indices of columns to be NULL
+            null_col_indices = random.sample(range(len(columns)), num_null_cols)
+
+        for col_idx, (col_name, col_type) in enumerate(columns):
+            if col_idx in null_col_indices:
+                values.append(None)
+            elif col_type in ['TEXT', 'VARCHAR(255)', 'CHAR(10)']:
                 values.append(f"value_{random.randint(1, 100)}")
-            elif col_type in ['int', 'bigint']:
+            elif col_type in ['INT', 'BIGINT']:
                 values.append(random.randint(1, 1000))
-            elif col_type in ['numeric', 'double', 'float']:
+            elif col_type in ['NUMERIC(10,2)', 'DOUBLE PRECISION', 'FLOAT']:
                 values.append(random.random() * 1000)
-            elif col_type == 'boolean':
+            elif col_type == 'BOOLEAN':
                 values.append(random.choice([True, False]))
-            elif col_type == 'date':
+            elif col_type == 'DATE':
                 values.append(f"{random.randint(2000, 2025)}-0{random.randint(1, 9)}-0{random.randint(1, 9)}")
-            elif col_type == 'time':
+            elif col_type == 'TIME':
                 values.append(f"{random.randint(0, 23)}:{random.randint(0, 59)}:{random.randint(0, 59)}")
             else:
                 values.append(None)
@@ -472,10 +506,8 @@ def insert_data(conn, schema_name: str, table_name: str):
     column_names = [col[0] for col in columns]
     placeholders = ['%s'] * len(column_names)
 
-    insert_sql = f"""
-        INSERT INTO {full_table_name} ({', '.join(column_names)})
-        VALUES ({', '.join(placeholders)})
-    """
+    insert_sql = f"""INSERT INTO {full_table_name} ({', '.join(column_names)})
+    VALUES ({', '.join(placeholders)});"""
 
     if run_config['batched_inserts']:
         remaining_inserts = run_config['load_configuration']['num_inserts']
@@ -490,7 +522,6 @@ def insert_data(conn, schema_name: str, table_name: str):
             values_list = generate_values_list(columns, batch_size)
 
             time_and_log_query(conn, "insert_data", insert_sql, values_list, full_table_name=full_table_name)
-            # write_sql_to_txt(run_config['sql_file'], insert_sql)
 
             remaining_inserts -= batch_size
             print(f"[+] Inserted batch of {batch_size} rows into {full_table_name} (remaining: {remaining_inserts})")
@@ -498,7 +529,6 @@ def insert_data(conn, schema_name: str, table_name: str):
         # Generate random batch sizes that add up to run_config['load_configuration']['num_inserts']
         values_list = generate_values_list(columns, run_config['load_configuration']['num_inserts'])
         time_and_log_query(conn, "insert_data", insert_sql, values_list, full_table_name=full_table_name)
-        # write_sql_to_txt(run_config['sql_file'], insert_sql)
 
     print(f"[+] Total {run_config['load_configuration']['num_inserts']} rows inserted into {full_table_name}")
 
@@ -537,16 +567,16 @@ def update_data(conn, schema_name: str, table_name: str):
     column_names = [col[0] for col in columns_to_update]
     placeholders = ['%s'] * len(column_names)
     order_by_column = random.choice(columns)[0]
-    update_sql = f"""
-        UPDATE {full_table_name}
-        SET {', '.join(f'{col[0]} = %s' for col in columns_to_update)}
-        WHERE id IN (SELECT id FROM {full_table_name} ORDER BY {order_by_column} LIMIT {run_config['load_configuration']['num_updates']})
-    """
+    update_sql = f"""UPDATE {full_table_name}
+    SET {', '.join(f'{col[0]} = %s' for col in columns_to_update)}
+    WHERE id IN
+    (SELECT id FROM {full_table_name}
+    ORDER BY {order_by_column}
+    LIMIT {run_config['load_configuration']['num_updates']})"""
 
     value_columns = columns_to_update
     values_list = generate_values_list(value_columns)
     out = time_and_log_query(conn, "update_data", update_sql, values_list, full_table_name=full_table_name)
-    # write_sql_to_txt(run_config['sql_file'], update_sql)
 
     print(f"[+] Updated {out} rows in {full_table_name}")
 
@@ -582,13 +612,14 @@ def delete_data(conn, schema_name: str, table_name: str):
     values_list = generate_values_list([delete_column], 1)
     order_by_column = random.choice(columns)[0]
 
-    delete_sql = f"""
-        DELETE FROM {full_table_name}
-        WHERE id IN (SELECT id FROM {full_table_name} ORDER BY {order_by_column} LIMIT {run_config['load_configuration']['num_deletes']})
+    delete_sql = f"""DELETE FROM {full_table_name}
+    WHERE id IN
+    (SELECT id FROM {full_table_name}
+    ORDER BY {order_by_column}
+    LIMIT {run_config['load_configuration']['num_deletes']})
     """
 
     out = time_and_log_query(conn, "delete_data", delete_sql, values_list, full_table_name=full_table_name)
-    # write_sql_to_txt(run_config['sql_file'], delete_sql)
 
     print(f"[+] Deleted {out} rows from {full_table_name}")
 
@@ -617,7 +648,6 @@ def create_schema_and_tables(conn, schema_name: str):
     # Create the main schema
     create_schema_sql = f"CREATE SCHEMA IF NOT EXISTS {schema_name};"
     time_and_log_query(conn, "create_schema", create_schema_sql, full_table_name=schema_name)
-    write_sql_to_txt(run_config['sql_file'], create_schema_sql)
 
     print(f"[+] Created schema: {schema_name}")
 
@@ -701,6 +731,10 @@ def load_data(run_config: dict) -> None:
 
     conn = connect_db_instance(props, "springtail")
     start_time = time.time()
+
+    # Clean the previous SQL file
+    with open(run_config['sql_file'], mode='w', newline='') as file:
+        file.write("")
 
     global table_columns
     if run_config['use_existing_config']:
