@@ -18,7 +18,7 @@ namespace springtail {
          *                  true - use config db
          *                  false - use data db
          */
-        PubSubThread(int timeout, bool config_db) : _subscriber_counter(0) {
+        PubSubThread(int timeout, bool config_db) {
             _subscriber = RedisMgr::get_instance()->get_subscriber(timeout, config_db);
         }
 
@@ -45,7 +45,6 @@ namespace springtail {
         void add_subscriber(std::string &channel, SubscriberInitCBFn init_fn, SubscriberConsumeCBFn consume_fn) {
             assert(!_is_up);
             _channels.insert(std::pair(channel, std::pair(init_fn, consume_fn)));
-            _subscriber_counter.increment();
             LOG_DEBUG(LOG_ALL, "Added subscriber channel: {}", channel);
         }
 
@@ -56,6 +55,7 @@ namespace springtail {
          */
         void shutdown() {
             LOG_DEBUG(LOG_ALL, "Stopping subscriber thread {}", _id);
+            _tear_down();
             _shutdown = true;
             _subscriber_thread.join();
             LOG_DEBUG(LOG_ALL, "Joined subscriber thread {}", _id);
@@ -66,8 +66,11 @@ namespace springtail {
          *
          */
         void start() {
+            _subscriber->on_meta([this](sw::redis::Subscriber::MsgType type, sw::redis::OptionalString channel, long long num){
+                _process_meta(type, channel, num);
+            });
             _subscriber_thread = std::thread(&PubSubThread::_run, this);
-            _subscriber_counter.wait();
+            _set_up();
         }
 
         /**
@@ -86,19 +89,42 @@ namespace springtail {
         RedisMgr::SubscriberPtr _subscriber;    ///< redis subscriber object
         std::thread _subscriber_thread;         ///< subscriber thread
         std::thread::id _id;                    ///< subscriber thread id
-        Counter _subscriber_counter;            ///< total number of subscriber
+        std::atomic<bool> _subscriber_action_confirmed{true};   ///< atomic for confirming subscriber action by meta message processor
 
         /**
-         * @brief Setup function is run inside the subscriber thread right after it starts and before it executes
-         *          the main loop. It subscribes to all registered channels and calls init callback for each channel.
-         *          This specific order is required to ensure that we do not miss any notifications after the data
-         *          initialization.
+         * @brief Process meta notification for given message type, channel, and number of registrations.
+         *
+         * @param type - message type
+         * @param channel - channel name
+         * @param num - number of registrations
+         */
+        void _process_meta(sw::redis::Subscriber::MsgType type, sw::redis::OptionalString channel, long long num)
+        {
+            LOG_DEBUG(LOG_ALL, "received meta notification: message type: {}; channel: {}; num = {}",
+                    static_cast<int>(type), channel, num);
+            if (!_subscriber_action_confirmed) {
+                LOG_DEBUG(LOG_ALL, "received meta notification: processing");
+                if ((type == sw::redis::Subscriber::MsgType::SUBSCRIBE ||
+                     type == sw::redis::Subscriber::MsgType::UNSUBSCRIBE) &&
+                            channel.has_value() && _channels.contains(channel.value())) {
+                    _subscriber_action_confirmed = true;
+                    _subscriber_action_confirmed.notify_one();
+                }
+            }
+        }
+
+        /**
+         * @brief Setup function is called by start function. For each channel it calls init callback,
+         *          subscribes to the channel, and waits for
+         *          confirmation of subscription before moving to the next channel.
          *
          */
         virtual void _set_up() {
             for(const auto &_channel_pair: _channels) {
+                _subscriber_action_confirmed = false;
                 auto &channel = _channel_pair.first;
                 SubscriberInitCBFn init_fn = _channel_pair.second.first;
+                init_fn();
                 _subscriber->subscribe(channel);
                 _subscriber->on_message([this](const std::string &channel, const std::string &msg) {
                     LOG_DEBUG(LOG_ALL, "Received notification on channel: {}, thread: {}", channel, _id);
@@ -109,23 +135,23 @@ namespace springtail {
                     SubscriberConsumeCBFn consume_fn = it->second.second;
                     consume_fn(msg);
                 });
-                init_fn();
-                _subscriber_counter.decrement();
+                _subscriber_action_confirmed.wait(false);
             }
             _is_up = true;
         };
 
         /**
-         * @brief This function is called after the main loop is terminated. It usubscribes all registered the channels
-         *          and performs cleanup.
+         * @brief This function is called after the main loop is terminated. It usubscribes all registered the channels.
+         *         This function is called by shutdown function.
          *
          */
         virtual void _tear_down() {
             _is_up = false;
             for(const auto &_channel_pair: _channels) {
+                _subscriber_action_confirmed = false;
                 _subscriber->unsubscribe(_channel_pair.first);
+                _subscriber_action_confirmed.wait(false);
             }
-            _channels.clear();
         };
 
         /**
@@ -136,7 +162,6 @@ namespace springtail {
         void _run() {
             _id = std::this_thread::get_id();
             LOG_DEBUG(LOG_ALL, "Started subscriber thread {}", _id);
-            _set_up();
             while (!_shutdown) {
                 try {
                     // consume from subscriber, timeout is set above
@@ -149,7 +174,6 @@ namespace springtail {
                     break;
                 }
             }
-            _tear_down();
             LOG_DEBUG(LOG_ALL, "Ended subscriber thread {}", _id);
         }
     };
