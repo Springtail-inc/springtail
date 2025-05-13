@@ -80,6 +80,17 @@ public:
     bool insert(DbId db, TableId tid, Xid xid, const std::string& msg, bool drop_table = false);
 
     /** 
+     * Mark the table as dropped. 
+     * @param db The DB ID.
+     * @param tid The table ID.
+     * @param xid The XID.
+     */
+    bool mark_dropped(DbId db, TableId tid, Xid xid) 
+    {
+        return insert(db, tid, xid, "", true); 
+    }
+
+    /** 
      * Get the cached string if present based on a key.
      * @param db The DB ID.
      * @param tid The table ID.
@@ -119,6 +130,7 @@ public:
 
     /**
      * Return all tables that are tracked by the cache.
+     * The least used tables will be at the front.
      */
     std::vector<TableId> get_db_tables(DbId db, bool exclude_dropped=true);
 

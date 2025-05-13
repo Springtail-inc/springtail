@@ -142,7 +142,11 @@ PgXidSubscriberMgr::_populate_worker(std::stop_token st)
 
             auto client = sys_tbl_mgr::Client::get_instance();
             if (!client->exists(db, tid, x)) {
-                _cache->insert(db, tid, xid, "", true);
+                // After the table is marked as dropped
+                // the above call to get_db_tables()
+                // won't return it. So exists() should be called
+                // only once after the table is dropped.
+                _cache->mark_dropped(db, tid, xid);
                 continue;
             }
             // the client will cache data in _cache

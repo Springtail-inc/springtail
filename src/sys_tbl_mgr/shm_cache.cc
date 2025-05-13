@@ -173,6 +173,8 @@ ShmCache::get_db_tables(DbId db, bool exclude_dropped)
             }
         }
     }
+    // least used tables are at the front of the list
+    std::ranges::reverse(r);
 
     return r;
 }
