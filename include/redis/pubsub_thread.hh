@@ -55,9 +55,9 @@ namespace springtail {
          */
         void shutdown() {
             LOG_DEBUG(LOG_ALL, "Stopping subscriber thread {}", _id);
-            _tear_down();
             _shutdown = true;
             _subscriber_thread.join();
+            _tear_down();
             LOG_DEBUG(LOG_ALL, "Joined subscriber thread {}", _id);
         }
 
@@ -69,8 +69,8 @@ namespace springtail {
             _subscriber->on_meta([this](sw::redis::Subscriber::MsgType type, sw::redis::OptionalString channel, long long num){
                 _process_meta(type, channel, num);
             });
-            _subscriber_thread = std::thread(&PubSubThread::_run, this);
             _set_up();
+            _subscriber_thread = std::thread(&PubSubThread::_run, this);
         }
 
         /**
@@ -89,7 +89,7 @@ namespace springtail {
         RedisMgr::SubscriberPtr _subscriber;    ///< redis subscriber object
         std::thread _subscriber_thread;         ///< subscriber thread
         std::thread::id _id;                    ///< subscriber thread id
-        std::atomic<bool> _subscriber_action_confirmed{true};   ///< atomic for confirming subscriber action by meta message processor
+        uint32_t _unconfirmed_channels{0};       ///< number of unconfirmed channels
 
         /**
          * @brief Process meta notification for given message type, channel, and number of registrations.
@@ -102,13 +102,12 @@ namespace springtail {
         {
             LOG_DEBUG(LOG_ALL, "received meta notification: message type: {}; channel: {}; num = {}",
                     static_cast<int>(type), channel, num);
-            if (!_subscriber_action_confirmed) {
+            if (_unconfirmed_channels > 0) {
                 LOG_DEBUG(LOG_ALL, "received meta notification: processing");
                 if ((type == sw::redis::Subscriber::MsgType::SUBSCRIBE ||
                      type == sw::redis::Subscriber::MsgType::UNSUBSCRIBE) &&
                             channel.has_value() && _channels.contains(channel.value())) {
-                    _subscriber_action_confirmed = true;
-                    _subscriber_action_confirmed.notify_one();
+                    _unconfirmed_channels--;
                 }
             }
         }
@@ -120,11 +119,10 @@ namespace springtail {
          *
          */
         virtual void _set_up() {
+            _unconfirmed_channels = _channels.size();
             for(const auto &_channel_pair: _channels) {
-                _subscriber_action_confirmed = false;
                 auto &channel = _channel_pair.first;
                 SubscriberInitCBFn init_fn = _channel_pair.second.first;
-                init_fn();
                 _subscriber->subscribe(channel);
                 _subscriber->on_message([this](const std::string &channel, const std::string &msg) {
                     LOG_DEBUG(LOG_ALL, "Received notification on channel: {}, thread: {}", channel, _id);
@@ -135,7 +133,10 @@ namespace springtail {
                     SubscriberConsumeCBFn consume_fn = it->second.second;
                     consume_fn(msg);
                 });
-                _subscriber_action_confirmed.wait(false);
+                init_fn();
+            }
+            while (_unconfirmed_channels > 0) {
+                _subscriber->consume();
             }
             _is_up = true;
         };
@@ -147,10 +148,12 @@ namespace springtail {
          */
         virtual void _tear_down() {
             _is_up = false;
+            _unconfirmed_channels = _channels.size();
             for(const auto &_channel_pair: _channels) {
-                _subscriber_action_confirmed = false;
                 _subscriber->unsubscribe(_channel_pair.first);
-                _subscriber_action_confirmed.wait(false);
+            }
+            while (_unconfirmed_channels > 0) {
+                _subscriber->consume();
             }
         };
 
