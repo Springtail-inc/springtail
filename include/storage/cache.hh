@@ -773,7 +773,6 @@ namespace springtail {
              * Returns an iterator to the first row of the page.
              */
             Iterator begin() {
-                boost::shared_lock lock(_mutex);
                 return Iterator(this, _extents.begin());
             }
 
@@ -781,7 +780,6 @@ namespace springtail {
              * Returns an iterator to the last row of the page.
              */
             Iterator last() {
-                boost::shared_lock lock(_mutex);
                 assert(!_extents.empty());
                 SafeExtent extent{ _extents.back().make_safe_extent(_file) };
                 auto row_i = (*extent)->last();
@@ -792,7 +790,6 @@ namespace springtail {
              * Returns an iterator past the last row of the page.
              */
             Iterator end() {
-                boost::shared_lock lock(_mutex);
                 return Iterator(this, _extents.end());
             }
 
