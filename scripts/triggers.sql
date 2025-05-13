@@ -106,7 +106,7 @@ BEGIN
     SELECT true WHERE json_columns::jsonb @> '[{"is_pkey": true}]'::jsonb INTO has_pkey;
 
     -- If a table is created or altered, and it doesn't have a primary key, set REPLICA IDENTITY to FULL
-    IF table_replident <> 'f' AND has_pkey IS NULL THEN
+    IF table_replident <> 'f' AND has_pkey IS NULL AND table_persistence <> 'p' THEN
         EXECUTE format('ALTER TABLE %s.%s REPLICA IDENTITY %s', quote_ident(obj.schema_name), quote_ident(table_relname), 'FULL');
     END IF;
 
@@ -169,12 +169,14 @@ BEGIN
             EXECUTE format('ALTER TABLE %s.%s REPLICA IDENTITY %s', quote_ident(obj.schema_name), quote_ident(table_relname), 'DEFAULT');
         END IF;
 
-        -- XXX To fix for ALTER TABLE later
+        -- XXX To fix for ALTER TABLE later; right now indexes dropped or alters in alter table are not modified
         IF obj.command_tag = 'CREATE TABLE' THEN
             -- Runs a query to get the list of indexes on a table
             -- Only retrieve the secondary indexes
+            -- NOTE: this is very similar to the springtail_generate_index_message function
+            -- but we don't have the index oids here so we need to get them.
             FOR ind_obj IN SELECT
-                    n.nspname || '.' || ci.relname AS index_identity,
+                    quote_ident(n.nspname) || '.' || quote_ident(ci.relname) AS index_identity,
                     n.nspname AS schema_name,
                     i.indexrelid AS index_oid,
                     c.oid AS table_oid,
@@ -244,7 +246,7 @@ BEGIN
         WHERE i.indexrelid = %s', obj.objid) INTO ind_obj;
 
     IF ind_obj.primary_idx IS true THEN
-        RETURN msg;
+        RETURN NULL;
     END IF;
 
     -- get index columns
@@ -316,7 +318,10 @@ DECLARE
 BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() as cmd
     LOOP
+        msg := NULL;
+
         IF obj.command_tag IN ('CREATE SCHEMA', 'ALTER SCHEMA') THEN
+            -- command_tag is CREATE SCHEMA or ALTER SCHEMA
             -- RAISE NOTICE 'springtail springtail_event_trigger_for_schema_ddl: obj.command_tag %, obj.objid %, obj.type %, obj.object_identity %',
             --     obj.command_tag, obj.objid, obj.object_type, obj.object_identity;
 
@@ -326,18 +331,14 @@ BEGIN
             FROM pg_catalog.pg_namespace nsp
             WHERE nsp.oid = obj.objid;
 
-
             msg := json_build_object('xid', txid_current(),
                 'cmd', obj.command_tag,
                 'oid', schema_obj.schema_oid::bigint,
                 'obj', obj.object_type,
                 'name', schema_obj.schema_name);
 
-            -- command_tag is CREATE SCHEMA or ALTER SCHEMA
-            -- RAISE NOTICE 'springtail springtail_event_trigger_for_schema_ddl: %', msg::text;
-
         ELSIF obj.command_tag = 'CREATE TABLE' THEN
-
+            -- command_tag is CREATE TABLE inside CREATE SCHEMA
             -- RAISE NOTICE 'springtail springtail_event_trigger_for_schema_ddl: obj.command_tag %, obj.type %, obj.object_identity %, obj.objid %, obj.schema_name %',
             --     obj.command_tag, obj.object_type, obj.object_identity, obj.objid, obj.schema_name;
 
@@ -356,24 +357,19 @@ BEGIN
                 'columns', json_columns
             );
 
-            -- command_tag is CREATE TABLE inside CREATE SCHEMA
-            -- RAISE NOTICE 'springtail springtail_event_trigger_for_schema_ddl: %', msg::text;
         ELSIF obj.command_tag = 'CREATE INDEX' THEN
+            -- command_tag is CREATE INDEX inside CREATE SCHEMA
             -- RAISE NOTICE 'springtail springtail_event_trigger_for_schema_ddl: obj.command_tag %, obj.type %, obj.object_identity %, obj.objid %, obj.schema_name %',
             --     obj.command_tag, obj.object_type, obj.object_identity, obj.objid, obj.schema_name;
 
             msg := springtail_generate_index_message(obj);
 
-            IF msg IS NULL THEN
-                CONTINUE;
-            END IF;
-
-            -- command_tag is CREATE INDEX inside CREATE SCHEMA
-            -- RAISE NOTICE 'springtail springtail_event_trigger_for_schema_ddl: %', msg::text;
-
         END IF;
 
-        PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
+        IF msg IS NOT NULL THEN
+            PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
+        END IF;
+
     END LOOP;
 END;
 $$;
@@ -399,19 +395,22 @@ BEGIN
         GROUP BY t.oid, n.oid, n.nspname, t.typname
         INTO enum_obj;
 
-        IF (enum_obj IS NOT NULL) THEN
-            msg := json_build_object('xid', txid_current(),
-                'oid', enum_obj.enum_type_oid,
-                'type', 'E',
-                'ns_oid', enum_obj.namespace_oid,
-                'schema', enum_obj.schema,
-                'name', enum_obj.enum_type_name,
-                'value', enum_obj.value);
-
-            -- RAISE NOTICE 'springtail: %', msg::text;
-
-            PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
+        IF (enum_obj IS NULL) THEN
+            CONTINUE;
         END IF;
+
+        msg := json_build_object('xid', txid_current(),
+            'oid', enum_obj.enum_type_oid,
+            'type', 'E',
+            'ns_oid', enum_obj.namespace_oid,
+            'schema', enum_obj.schema,
+            'name', enum_obj.enum_type_name,
+            'value', enum_obj.value);
+
+        -- RAISE NOTICE 'springtail: %', msg::text;
+
+        PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
+
     END LOOP;
 END;
 $$;
