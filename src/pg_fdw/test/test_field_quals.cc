@@ -105,8 +105,6 @@ namespace {
         column.pg_type = FLOAT4OID;
 
         EXPECT_FALSE(PgFdwMgr::check_type_compatibility(column, qual));
-        //EXPECT_EQ(qual->base.typeoid, FLOAT4OID);
-        //EXPECT_FLOAT_EQ(DatumGetFloat4(qual->value), 123.456f);
     }
 
     TEST_F(PgFdwCheckTypeCompatibilityTest, Float64ToFloat32Invalid) {
