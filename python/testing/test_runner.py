@@ -12,6 +12,12 @@ from test_set import TestSet
 
 # Get the parent directory of the current script (i.e., the project root directory)
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(project_root, 'shared')) # Add the /shared directory to the Python path
+
+from s3data import sync_data_files
+
+# Get the parent directory of the current script (i.e., the project root directory)
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # add shared code to the import path
 sys.path.append(os.path.join(project_root, 'shared'))
@@ -167,18 +173,6 @@ def generate_report(test_cases: list) -> None:
     </html>
     ''')
 
-#         {% if error_logs %}
-#         <div class="error-logs">
-#             <h2>Log File Errors</h2>
-#             <pre>
-#             {% for error in errors %}
-# {{ error }}
-#             {% endfor %}
-#             </pre>
-#         </div>
-#         {% endif %}
-
-
     results = [ c.get_result() for c in test_cases ]
 
     total_tests = len(results)
@@ -292,6 +286,9 @@ if __name__ == "__main__":
             else:
                 tests = gen_test_cases(os.path.join(test_folder, args.test_set), args.test_case,
                                        default_config_file, build_dir, {})
+
+    # sync the test data files
+    sync_data_files('test_data')
 
     # run the tests
     test_failure = False

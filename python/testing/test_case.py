@@ -440,7 +440,8 @@ class TestCase:
                         self._fdw,
                         f"SELECT MAX(sync) FROM sync_control WHERE test = '{self._name}'",
                         (self._sync_step,),
-                        timeout=self._metadata['sync_timeout']
+                        timeout=self._metadata['sync_timeout'],
+                        poll_interval=1.0
                     )
                 except Exception as e:
                     self._raise_failure(f'Sync control error: {e}')
