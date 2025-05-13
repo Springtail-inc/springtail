@@ -73,10 +73,22 @@ public:
      * @param tid The table ID.
      * @param xid The XID.
      * @param msg The message to cache. Usually it's a serialized proto message.
+     * @param drop_table Mark the table as dropped,
      * @return true if the element has been actually inserted 
      *         and false if it was already in the cache.
      */
-    bool insert(DbId db, TableId tid, Xid xid, const std::string& msg);
+    bool insert(DbId db, TableId tid, Xid xid, const std::string& msg, bool drop_table = false);
+
+    /** 
+     * Mark the table as dropped. 
+     * @param db The DB ID.
+     * @param tid The table ID.
+     * @param xid The XID.
+     */
+    bool mark_dropped(DbId db, TableId tid, Xid xid) 
+    {
+        return insert(db, tid, xid, "", true); 
+    }
 
     /** 
      * Get the cached string if present based on a key.
@@ -116,11 +128,11 @@ public:
 
     bool is_alive();
 
-
     /**
      * Return all tables that are tracked by the cache.
+     * The least used tables will be at the front.
      */
-    std::vector<TableId> get_db_tables(DbId db);
+    std::vector<TableId> get_db_tables(DbId db, bool exclude_dropped=true);
 
 private:
     void _init();
@@ -155,6 +167,7 @@ private:
         {}
         Xid xid = 0;
         String msg;
+        bool dropped = false;
     };
 
     struct LruKey
