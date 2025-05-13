@@ -288,7 +288,7 @@ if __name__ == "__main__":
                                        default_config_file, build_dir, {})
 
     # sync the test data files
-    sync_data_files('test_data')
+    sync_data_files('test_data', s3_path='test_files')
 
     # run the tests
     test_failure = False

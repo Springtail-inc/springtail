@@ -189,6 +189,10 @@ if __name__ == "__main__":
     if not build_dir or not system_config:
         raise ValueError("Missing required config: build_dir or system_json_path")
 
+    # sync the benchmark data files
+    # XXX will add this in with my next PR
+    # sync_data_files('bench_data', s3_path='bench_files')
+
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
