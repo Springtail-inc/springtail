@@ -269,7 +269,7 @@ namespace springtail::pg_log_mgr {
                     reconcile_index_msg.reconcile_xid = request->reconcile_xid();
                     auto msg = std::make_shared<PgMsg>(PgMsgEnum::RECONCILE_INDEX);
                     msg->msg.emplace<PgMsgReconcileIndex>(reconcile_index_msg);
-                    _pg_log_reader->enqueue_msg(msg);
+                    _pg_log_reader->enqueue_msg(std::move(msg));
                 }
             }
         }
