@@ -132,7 +132,6 @@ TEST(ShmTest, Lifecycle) {
 
         // include dropped tables
         db_tables = c.get_db_tables(10000, false);
-        // no tables now
         ASSERT_EQ(db_tables.size(), 1);
 
         // but should still be able to access previous xid's
