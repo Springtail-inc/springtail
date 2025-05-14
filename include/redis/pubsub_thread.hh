@@ -56,8 +56,8 @@ namespace springtail {
         void shutdown() {
             LOG_DEBUG(LOG_ALL, "Stopping subscriber thread {}", _id);
             _shutdown = true;
+            _is_up.wait(true);
             _subscriber_thread.join();
-            _tear_down();
             LOG_DEBUG(LOG_ALL, "Joined subscriber thread {}", _id);
         }
 
@@ -66,11 +66,8 @@ namespace springtail {
          *
          */
         void start() {
-            _subscriber->on_meta([this](sw::redis::Subscriber::MsgType type, sw::redis::OptionalString channel, long long num){
-                _process_meta(type, channel, num);
-            });
-            _set_up();
             _subscriber_thread = std::thread(&PubSubThread::_run, this);
+            _is_up.wait(false);
         }
 
         /**
@@ -119,6 +116,9 @@ namespace springtail {
          *
          */
         virtual void _set_up() {
+            _subscriber->on_meta([this](sw::redis::Subscriber::MsgType type, sw::redis::OptionalString channel, long long num){
+                _process_meta(type, channel, num);
+            });
             _unconfirmed_channels = _channels.size();
             for(const auto &_channel_pair: _channels) {
                 auto &channel = _channel_pair.first;
@@ -139,6 +139,7 @@ namespace springtail {
                 _subscriber->consume();
             }
             _is_up = true;
+            _is_up.notify_one();
         };
 
         /**
@@ -147,7 +148,6 @@ namespace springtail {
          *
          */
         virtual void _tear_down() {
-            _is_up = false;
             _unconfirmed_channels = _channels.size();
             for(const auto &_channel_pair: _channels) {
                 _subscriber->unsubscribe(_channel_pair.first);
@@ -155,6 +155,8 @@ namespace springtail {
             while (_unconfirmed_channels > 0) {
                 _subscriber->consume();
             }
+            _is_up = false;
+            _is_up.notify_one();
         };
 
         /**
@@ -163,6 +165,7 @@ namespace springtail {
          *
          */
         void _run() {
+            _set_up();
             _id = std::this_thread::get_id();
             LOG_DEBUG(LOG_ALL, "Started subscriber thread {}", _id);
             while (!_shutdown) {
@@ -177,6 +180,7 @@ namespace springtail {
                     break;
                 }
             }
+            _tear_down();
             LOG_DEBUG(LOG_ALL, "Ended subscriber thread {}", _id);
         }
     };
