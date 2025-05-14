@@ -14,14 +14,9 @@ from test_set import TestSet
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(project_root, 'shared')) # Add the /shared directory to the Python path
 
-from s3data import sync_data_files
-
-# Get the parent directory of the current script (i.e., the project root directory)
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-# add shared code to the import path
-sys.path.append(os.path.join(project_root, 'shared'))
+from aws import sync_s3_data
 from common import merge_json
+
 
 def gen_test_cases(test_set: str,
                    test_files: list,
@@ -288,7 +283,7 @@ if __name__ == "__main__":
                                        default_config_file, build_dir, {})
 
     # sync the test data files
-    sync_data_files('test_data', s3_path='test_files')
+    sync_s3_data('test_data', s3_path='test_files')
 
     # run the tests
     test_failure = False

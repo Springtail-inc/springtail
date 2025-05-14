@@ -1,7 +1,10 @@
 import boto3
+import botocore
+import gzip
 import logging
 import json
 import os
+import shutil
 from typing import Optional, Dict, Any, Callable
 from botocore.exceptions import ClientError
 
@@ -169,3 +172,60 @@ class AwsHelper:
         except Exception as e:
             self.logger.error(f"Error retrieving secret: {e}")
             return None
+
+
+def sync_s3_data(local_dir: str,
+                 s3_path: str,
+                 bucket_name: str = 'public-share.springtail.io') -> None:
+    """
+    Synchronizes the compressed data files from an S3
+    bucket/directory to uncompressed files in a local directory.
+    """
+    s3_client = boto3.client('s3',
+                             config=botocore.config.Config(
+                                 signature_version=botocore.UNSIGNED
+                             ),
+                             region_name="us-east-1")
+
+    # Ensure local directory exists
+    os.makedirs(local_dir, exist_ok=True)
+
+    # List objects in S3 bucket within test_files directory (all should be .gz files)
+    logging.info('Retrieve test file list from S3')
+    if s3_path[-1] != '/':
+        s3_path += '/'
+    response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=s3_path)
+
+    # Filter for only .gz files in S3 bucket
+    logging.info('Filtering for .gz files from S3')
+    s3_files = {obj['Key'] for obj in response.get('Contents', []) if obj['Key'].endswith('.gz')}
+
+    # Get the expected uncompressed file names
+    expected_local_files = {s3_file[:-3].split('/')[-1] for s3_file in s3_files}  # Remove .gz extension
+
+    # Delete any local files that don't correspond to S3 files
+    local_files = set(os.listdir(local_dir))
+    for file in local_files:
+        if file not in expected_local_files:
+            os.remove(os.path.join(local_dir, file))
+
+    # Download and decompress any missing files
+    for s3_file in s3_files:
+        local_file = s3_file[:-3].split('/')[-1]  # Remove .gz extension
+        local_path = os.path.join(local_dir, local_file)
+
+        if not os.path.exists(local_path):
+            logging.info(f'Downloading {s3_file} from S3 ...')
+
+            # Download to temporary .gz file
+            temp_gz_path = local_path + '.gz'
+            s3_client.download_file(bucket_name, s3_file, temp_gz_path)
+
+            # Decompress and remove the temporary .gz file
+            logging.info(f'Decompressing {temp_gz_path} ...')
+            with gzip.open(temp_gz_path, 'rb') as f_in:
+                with open(local_path, 'wb') as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+            os.remove(temp_gz_path)
+
+    logging.info('Test files synchronized')

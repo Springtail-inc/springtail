@@ -5,12 +5,17 @@ import sys
 import yaml
 import time
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../testing")))
+from bench_case import BenchCase
+
+# Get the parent directory of the current script (i.e., the project root directory)
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(project_root, 'shared')) # Add the /shared directory to the Python path
+sys.path.append(os.path.join(project_root, 'testing')) # Add the /testing directory to the Python path
 
 import springtail
 import common
 
-from bench_case import BenchCase
+from aws import sync_s3_data
 
 
 def wait_for_springtail_ready(props: springtail.Properties) -> None:
@@ -191,7 +196,7 @@ if __name__ == "__main__":
 
     # sync the benchmark data files
     # XXX will add this in with my next PR
-    # sync_data_files('bench_data', s3_path='bench_files')
+    # sync_s3_data('test_data', s3_path='test_files')
 
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
