@@ -12,15 +12,17 @@ create index test_data_b_idx on test_data(b);
 create index test_data_c_idx on test_data(c);
 
 -- Insert
-INSERT INTO test_data (a, b, c)
+INSERT INTO test_data (a, b, c, aa)
 SELECT
     (g % 32000)::int2,
     g::int4,
-    g::int8
+    g::int8,
+    (g % 32000)::int2
 FROM generate_series(1, 1000) AS g;
 
-INSERT INTO test_data (a, b, c)
+INSERT INTO test_data (a, b, c, aa)
 SELECT
+    NULL,
     NULL,
     NULL,
     NULL
