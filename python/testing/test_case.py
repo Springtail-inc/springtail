@@ -42,7 +42,8 @@ class TestCase:
             'sync_timeout': 200,
             'default_txn': 'default',
             'query_timeout': 5,
-            'live_startup': None
+            'live_startup': None,
+            'poll_interval': 0.001
         }
 
         fdw_config = props.get_fdw_config()
@@ -286,6 +287,11 @@ class TestCase:
                             self._raise_error(f'{line_num}: "query_timeout" must be specified in the "metadata" section')
                         self._metadata['query_timeout'] = int(directive[1])
 
+                    elif directive[0] == 'poll_interval':
+                        if section != 'metadata':
+                            self._raise_error(f'{line_num}: "poll_interval" must be specified in the "metadata" section')
+                        self._metadata['poll_interval'] = float(directive[1])
+
                     elif directive[0] == 'default_txn':
                         if section != 'metadata':
                             self._raise_error(f'{line_num}: "default_txn" must be specified in the "metadata" section')
@@ -440,7 +446,8 @@ class TestCase:
                         self._fdw,
                         f"SELECT MAX(sync) FROM sync_control WHERE test = '{self._name}'",
                         (self._sync_step,),
-                        timeout=self._metadata['sync_timeout']
+                        timeout=self._metadata['sync_timeout'],
+                        poll_interval=self._metadata['poll_interval']
                     )
                 except Exception as e:
                     self._raise_failure(f'Sync control error: {e}')
