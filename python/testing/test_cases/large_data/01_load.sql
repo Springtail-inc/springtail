@@ -1,4 +1,10 @@
+## metadata
+### sync_timeout 3600
+### query_timeout 300
+### poll_interval 1
+
 ## test
+
 -- load a large CSV file
 CREATE TABLE mushroom_overload ("class" CHAR NOT NULL,
        	                        "cap-diameter" FLOAT NOT NULL,

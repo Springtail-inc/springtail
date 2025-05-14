@@ -80,14 +80,20 @@ namespace springtail
 
 
     void
-    PgReplConnection::reconnect()
+    PgReplConnection::reconnect(LSN_t lsn)
     {
         // close streaming and non-streaming connection
         close();
         // reconnect non-streaming connection
         connect();
+
+        // set the lsn if not provided
+        if (lsn == INVALID_LSN) {
+            lsn = _last_flushed_lsn;
+        }
+
         // restart streaming
-        start_streaming(_last_flushed_lsn, false);
+        start_streaming(lsn, false);
     }
 
 
@@ -299,6 +305,9 @@ namespace springtail
         msg_header[0] = cmd;
         // add 4 to length, since length includes length field
         sendint32(length + 4, &msg_header[1]);
+
+        // ensure there is only one writer at a time
+        std::unique_lock lock(_write_mutex);
 
         // send the header and then the operation
         int r = _stream_connection->write(msg_header, COPY_MSG_HDR_SIZE);

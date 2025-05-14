@@ -478,7 +478,7 @@ namespace springtail::pg_log_mgr {
             LOG_ERROR("Error reading data from pg: {}", e.what());
             // try reconnecting
             try {
-                _pg_conn.reconnect();
+                _pg_conn.reconnect(logger->get_latest_synced_lsn());
             } catch (const PgConnectionError &e) {
                 LOG_ERROR("Error reconnecting to pg: {}", e.what());
                 // shutdown
