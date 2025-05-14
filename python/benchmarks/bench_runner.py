@@ -196,7 +196,9 @@ if __name__ == "__main__":
 
     # sync the benchmark data files
     # XXX will add this in with my next PR
-    # sync_s3_data('test_data', s3_path='test_files')
+    # helper = AwsHelper(config=botocore.config.Config(signature_version=botocore.UNSIGNED),
+    #                    region="us-east-1")
+    # helper.sync_s3_data('test_data', s3_path='test_files')
 
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"

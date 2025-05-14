@@ -1,4 +1,5 @@
 import argparse
+import botocore
 import jinja2
 import json
 import logging
@@ -14,7 +15,7 @@ from test_set import TestSet
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(project_root, 'shared')) # Add the /shared directory to the Python path
 
-from aws import sync_s3_data
+from aws import AwsHelper
 from common import merge_json
 
 
@@ -118,92 +119,6 @@ def try_generate_junit(junit_file: str, test_sets: list[TestSet]) -> None:
         tree.write(f, pretty_print=True, xml_declaration=True, encoding='UTF-8')
 
 
-def generate_report(test_cases: list) -> None:
-    """
-    Generate an HTML report for the test results.
-
-    Args:
-        results (TestResult): Object containing the test results.
-    """
-    template = jinja2.Template('''
-    <html>
-    <head>
-        <title>Test Report</title>
-        <style>
-            body { font-family: Arial, sans-serif; }
-            table { border-collapse: collapse; width: 100%; }
-            th, td { border: 1px solid #ddd; padding: 8px; }
-            tr:nth-child(even) { background-color: #f2f2f2; }
-            .success { color: green; }
-            .failed { color: red; }
-            .unknown { color: gray; }
-            .error-logs { margin-top: 20px; }
-        </style>
-    </head>
-    <body>
-        <h1>Test Report</h1>
-        <p>Total tests: {{ total_tests }}</p>
-        <p>Passed: {{ passed_tests }}</p>
-        <p>Failed: {{ failed_tests }}</p>
-
-        <h2>Test Cases</h2>
-        <table>
-            <tr>
-                <th>Test Case</th>
-                <th>Result</th>
-                <th>Duration (s)</th>
-                <th>Error</th>
-            </tr>
-            {% for test_case in test_cases %}
-            <tr>
-                <td>{{ test_case['name'] }}</td>
-                <td class="{{ test_case['result'].lower() }}">{{ test_case['result'] }}</td>
-                <td>{{ "%.2f ms"|format(test_case['duration'] * 1000) }}</td>
-                <td>{{ test_case['error'] }}</td>
-            </tr>
-            {% endfor %}
-        </table>
-
-    </body>
-    </html>
-    ''')
-
-    results = [ c.get_result() for c in test_cases ]
-
-    total_tests = len(results)
-    passed_tests = sum(1 for r in results if r['result'] == 'SUCCESS')
-    failed_tests = sum(1 for r in results if r['result'] == 'FAILED')
-    skipped_tests = sum(1 for r in results if r['result'] == 'SKIPPED')
-
-    report = template.render(
-        total_tests=total_tests,
-        passed_tests=passed_tests,
-        failed_tests=failed_tests,
-        skipped_tests=skipped_tests,
-        test_cases=results
-    )
-
-    os.makedirs('reports', exist_ok=True)
-    report_file = os.path.join('reports', 'test_report.html')
-    with open(report_file, 'w') as f:
-        f.write(report)
-
-    logging.info(f"Test report generated: {report_file}")
-
-    logging.info("\n--- Test Summary ---")
-    logging.info(f"Total tests found: {total_tests}")
-    logging.info(f"Total tests run: {passed_tests + failed_tests}")
-    logging.info(f"Tests passed: {passed_tests}")
-    logging.info(f"Tests failed: {failed_tests}")
-    logging.info(f"Tests skipped: {skipped_tests}")
-    logging.info(f"Tests details:")
-    for result in results:
-        if result['result'] == 'SUCCESS':
-            logging.info(f'Duration: {result["duration"]}')
-        if result['error']:
-            logging.info(f'Errors: {result["error"]}')
-
-
 def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Run Springtail tests")
@@ -213,6 +128,7 @@ def parse_arguments():
     parser.add_argument('test_set', type=str, nargs='?', help='Limit to a specific test set')
     parser.add_argument('test_case', type=str, nargs='*', help='Limit to a specific test case from the test set')
     return parser.parse_args()
+
 
 ## main()
 if __name__ == "__main__":
@@ -283,7 +199,9 @@ if __name__ == "__main__":
                                        default_config_file, build_dir, {})
 
     # sync the test data files
-    sync_s3_data('test_data', s3_path='test_files')
+    helper = AwsHelper(config=botocore.config.Config(signature_version=botocore.UNSIGNED),
+                       region="us-east-1")
+    helper.sync_s3_data('test_data', s3_path='test_files')
 
     # run the tests
     test_failure = False
