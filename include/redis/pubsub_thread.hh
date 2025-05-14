@@ -7,6 +7,16 @@
 #include <common/redis.hh>
 
 namespace springtail {
+    /**
+     * @brief The intention of this class is to provide a conveniet way to receive notifications
+     *      from redis. It handles channel subscriptions by calling provided callbacks on a
+     *      background thread. Only a single subscription per channel is allowed.
+     *      This class provides the following guarantees:
+     *          1. All calls to redis::Subscriber must be done from one threads.
+     *          2. All user callbacks must be called from internal thread(s).
+     *          3. Functions start() and shutdown() will block until redis acknowledged
+     *              all channel subscribe and unsubscribe actions respectively.
+     */
     class PubSubThread {
     public:
 
