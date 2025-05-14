@@ -55,7 +55,7 @@ namespace springtail {
         void add_subscriber(std::string &channel, SubscriberInitCBFn init_fn, SubscriberConsumeCBFn consume_fn) {
             assert(!_is_up);
             _channels.insert(std::pair(channel, std::pair(init_fn, consume_fn)));
-            LOG_DEBUG(LOG_ALL, "Added subscriber channel: {}", channel);
+            LOG_DEBUG(LOG_COMMON, "Added subscriber channel: {}", channel);
         }
 
         /**
@@ -64,11 +64,11 @@ namespace springtail {
          *
          */
         void shutdown() {
-            LOG_DEBUG(LOG_ALL, "Stopping subscriber thread {}", _id);
+            LOG_DEBUG(LOG_COMMON, "Stopping subscriber thread {}", _id);
             _shutdown = true;
             _is_up.wait(true);
             _subscriber_thread.join();
-            LOG_DEBUG(LOG_ALL, "Joined subscriber thread {}", _id);
+            LOG_DEBUG(LOG_COMMON, "Joined subscriber thread {}", _id);
         }
 
         /**
@@ -107,10 +107,10 @@ namespace springtail {
          */
         void _process_meta(sw::redis::Subscriber::MsgType type, sw::redis::OptionalString channel, long long num)
         {
-            LOG_DEBUG(LOG_ALL, "received meta notification: message type: {}; channel: {}; num = {}",
+            LOG_DEBUG(LOG_COMMON, "received meta notification: message type: {}; channel: {}; num = {}",
                     static_cast<int>(type), channel, num);
             if (_unconfirmed_channels > 0) {
-                LOG_DEBUG(LOG_ALL, "received meta notification: processing");
+                LOG_DEBUG(LOG_COMMON, "received meta notification: processing");
                 if ((type == sw::redis::Subscriber::MsgType::SUBSCRIBE ||
                      type == sw::redis::Subscriber::MsgType::UNSUBSCRIBE) &&
                             channel.has_value() && _channels.contains(channel.value())) {
@@ -135,7 +135,7 @@ namespace springtail {
                 SubscriberInitCBFn init_fn = _channel_pair.second.first;
                 _subscriber->subscribe(channel);
                 _subscriber->on_message([this](const std::string &channel, const std::string &msg) {
-                    LOG_DEBUG(LOG_ALL, "Received notification on channel: {}, thread: {}", channel, _id);
+                    LOG_DEBUG(LOG_COMMON, "Received notification on channel: {}, thread: {}", channel, _id);
                     auto it = this->_channels.find(channel);
                     if (it == this->_channels.end()) {
                         return;
@@ -177,7 +177,7 @@ namespace springtail {
         void _run() {
             _set_up();
             _id = std::this_thread::get_id();
-            LOG_DEBUG(LOG_ALL, "Started subscriber thread {}", _id);
+            LOG_DEBUG(LOG_COMMON, "Started subscriber thread {}", _id);
             while (!_shutdown) {
                 try {
                     // consume from subscriber, timeout is set above
@@ -191,7 +191,7 @@ namespace springtail {
                 }
             }
             _tear_down();
-            LOG_DEBUG(LOG_ALL, "Ended subscriber thread {}", _id);
+            LOG_DEBUG(LOG_COMMON, "Ended subscriber thread {}", _id);
         }
     };
 };
