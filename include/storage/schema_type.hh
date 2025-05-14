@@ -23,4 +23,23 @@ namespace springtail {
             default: return os << "UNKNOWN";
         }
     }
+
+    inline std::string to_string(SchemaType type) {
+        switch (type) {
+            case SchemaType::TEXT: return "TEXT";
+            case SchemaType::UINT64: return "UINT64";
+            case SchemaType::INT64: return "INT64";
+            case SchemaType::UINT32: return "UINT32";
+            case SchemaType::INT32: return "INT32";
+            case SchemaType::UINT16: return "UINT16";
+            case SchemaType::INT16: return "INT16";
+            case SchemaType::UINT8: return "UINT8";
+            case SchemaType::INT8: return "INT8";
+            case SchemaType::BOOLEAN: return "BOOLEAN";
+            case SchemaType::FLOAT64: return "FLOAT64";
+            case SchemaType::FLOAT32: return "FLOAT32";
+            case SchemaType::BINARY: return "BINARY";
+            default: return "UNKNOWN";
+        }
+    }
 }

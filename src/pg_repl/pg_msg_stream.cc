@@ -142,7 +142,7 @@ namespace springtail {
             bool skip_msg = !_is_message_filtered(msg_type, filter);
             PgMsgPtr msg = nullptr;
 
-            LOG_DEBUG(LOG_PG_REPL, "Reading message type: {}, current_offset: {}, end_offset: {}, skip_msg: {}",
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Reading message type: {}, current_offset: {}, end_offset: {}, skip_msg: {}",
                         msg_type, _current_offset, _end_offset, skip_msg);
 
             if (skip_msg) {
@@ -971,7 +971,7 @@ namespace springtail {
 
         _decode_schema_columns(json["columns"], table_msg.columns);
 
-        LOG_DEBUG(LOG_PG_REPL, "Decoded create table: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded create table: json: {}", json.dump());
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_TABLE);
         msg->msg.emplace<PgMsgTable>(table_msg);
@@ -1000,7 +1000,7 @@ namespace springtail {
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
-        LOG_DEBUG(LOG_PG_REPL, "Decoded drop table: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded drop table: json: {}", json.dump());
 
         // check object type, could be an index, default value or something other
         // than a table; if so we skip decoding
@@ -1048,7 +1048,7 @@ namespace springtail {
         json["name"].get_to(ns_msg.name);
         json["oid"].get_to(ns_msg.oid);
 
-        LOG_DEBUG(LOG_PG_REPL, "Decoded create/alter namespace: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded create/alter namespace: json: {}", json.dump());
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_NAMESPACE);
         msg->msg.emplace<PgMsgNamespace>(ns_msg);
@@ -1093,7 +1093,7 @@ namespace springtail {
         json["oid"].get_to(ns_msg.oid);
         json["name"].get_to(ns_msg.name);
 
-        LOG_DEBUG(LOG_PG_REPL, "Decoded drop namespace: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded drop namespace: json: {}", json.dump());
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_NAMESPACE);
         msg->msg.emplace<PgMsgNamespace>(ns_msg);
@@ -1123,7 +1123,7 @@ namespace springtail {
 
         CHECK_EQ(usertype_msg.type, 'E');
 
-        LOG_DEBUG(LOG_PG_REPL, "Decoded create/alter usertype: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded create/alter usertype: json: {}", json.dump());
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_TYPE);
         msg->msg.emplace<PgMsgUserType>(usertype_msg);
@@ -1169,7 +1169,7 @@ namespace springtail {
         json["name"].get_to(usertype_msg.name);
         json["schema"].get_to(usertype_msg.namespace_name);
 
-        LOG_DEBUG(LOG_PG_REPL, "Decoded drop usertype: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded drop usertype: json: {}", json.dump());
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_TYPE);
         msg->msg.emplace<PgMsgUserType>(usertype_msg);

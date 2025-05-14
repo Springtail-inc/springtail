@@ -295,7 +295,7 @@ BEGIN
             CONTINUE;
         END IF;
 
-        -- command_tag is CREATE TABLE or ALTER TABLE
+        -- command_tag is CREATE INDEX
         PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
 
         -- RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objsubid, tab_obj.primary_idx;

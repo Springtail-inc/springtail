@@ -40,6 +40,8 @@ extern "C" {
     #include <utils/builtins.h>
     #include <utils/syscache.h>
     #include <utils/typcache.h>
+    #include <utils/numeric.h>
+    #include <utils/lsyscache.h>
     #include <nodes/pg_list.h>
     #include <nodes/primnodes.h>
     #include <varatt.h>
@@ -56,11 +58,114 @@ extern "C" {
 namespace springtail::pg_fdw {
     using springtail::Index;
 
-    bool
-    _check_type_compatibility(const SchemaColumn &column, int32_t pg_type)
+    template<typename From, typename To>
+    static bool
+    check_roundtrip_conversion(From from, ConstQualPtr qual)
     {
-        // XXX should handle coercion of like types, like float, int, etc.
+        // check if the value can be converted to the other type
+        if (std::is_same_v<From, To>) {
+            return true;
+        }
 
+        To temp = static_cast<To>(from);
+        From temp2 = static_cast<From>(temp);
+        if (temp2 != from) {
+            // value cannot be represented
+            return false;
+        }
+
+        // handle conversions for float/double inline
+        if constexpr (std::is_same_v<To, float>) {
+            qual->base.typeoid = FLOAT4OID;
+            qual->value = Float4GetDatum(temp);
+        } else if constexpr(std::is_same_v<To, double>) {
+            qual->base.typeoid = FLOAT8OID;
+            qual->value = Float8GetDatum(temp);
+        }
+
+        return true;
+    }
+
+    bool
+    PgFdwMgr::convert_qual(ConstQualPtr qual, SchemaType from, SchemaType to)
+    {
+    #ifndef USE_FLOAT8_BYVAL  // used by get datum
+        #error "USE_FLOAT8_BYVAL must be defined"
+    #endif
+
+        LOG_DEBUG(LOG_FDW, "Converting qual from {} to {}", to_string(from), to_string(to));
+
+        // if switching between int types no need to convert the underlying datum
+        if (from == SchemaType::INT8 || from == SchemaType::INT16 ||
+            from == SchemaType::INT32 || from == SchemaType::INT64) {
+
+                int64_t value;
+                switch (from) {
+                    case SchemaType::INT8:
+                        value = DatumGetChar(qual->value);
+                        break;
+                    case SchemaType::INT16:
+                        value = DatumGetInt16(qual->value);
+                        break;
+                    case SchemaType::INT32:
+                        value = DatumGetInt32(qual->value);
+                        break;
+                    case SchemaType::INT64:
+                        value = DatumGetInt64(qual->value);
+                        break;
+                    default:
+                        return false;
+                }
+
+                switch (to) {
+                case SchemaType::INT8:
+                    qual->value = Int8GetDatum(static_cast<int8_t>(value));
+                    qual->base.typeoid = CHAROID;
+                    return true;
+                case SchemaType::INT16:
+                    qual->value = Int16GetDatum(static_cast<int16_t>(value));
+                    qual->base.typeoid = INT2OID;
+                    return true;
+                case SchemaType::INT32:
+                    qual->value = Int32GetDatum(static_cast<int32_t>(value));
+                    qual->base.typeoid = INT4OID;
+                    return true;
+                case SchemaType::INT64:
+                    qual->value = Int64GetDatum(static_cast<int64_t>(value));
+                    qual->base.typeoid = INT8OID;
+                    return true;
+                case SchemaType::FLOAT32:
+                    return check_roundtrip_conversion<int64_t, float>(value, qual);
+                case SchemaType::FLOAT64:
+                    return check_roundtrip_conversion<int64_t, double>(value, qual);
+                default:
+                    break;
+            }
+        }
+
+        // converting from float to double; should always be safe
+        if (from == SchemaType::FLOAT32 && to == SchemaType::FLOAT64) {
+            qual->base.typeoid = FLOAT8OID;
+            qual->value = Float8GetDatum(DatumGetFloat4(qual->value));
+            return true;
+        }
+
+        // converting from double to float; check if value can be represented
+        if (from == SchemaType::FLOAT64 && to == SchemaType::FLOAT32) {
+            auto value = DatumGetFloat8(qual->value);
+            return check_roundtrip_conversion<double, float>(value, qual);
+        }
+
+        return false;
+    }
+
+    bool
+    PgFdwMgr::check_type_compatibility(const SchemaColumn &column, ConstQualPtr qual)
+    {
+        LOG_DEBUG(LOG_FDW, "Checking type compatibility for column {}:{} and qual oid: {}, is_null: {}",
+                  column.name, to_string(column.type), qual->base.typeoid, qual->isnull);
+
+        int32_t pg_type = qual->base.typeoid;
         // check if the types are compatible
         if (column.pg_type == pg_type) {
             return true;
@@ -85,6 +190,24 @@ namespace springtail::pg_fdw {
         // the type category doesn't matter for these checks since enum check is done above
         SchemaType pg_schema_type = convert_pg_type(pg_type, 'N');
         if (column.type == pg_schema_type) {
+            if (pg_schema_type == SchemaType::BINARY) {
+                if (pg_type == NUMERICOID &&
+                    (qual->base.op == QualOpName::EQUALS || qual->base.op == QualOpName::NOT_EQUALS)) {
+                    // only support equality of NUMERICOID binary types
+                    return true;
+                } else {
+                    // don't support comparisons of binary types
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        // if the qual is null then it can be converted to any type
+        if (qual->isnull) {
+            qual->base.typeoid = column.pg_type;
+            qual->value = (Datum) 0;
             return true;
         }
 
@@ -92,25 +215,48 @@ namespace springtail::pg_fdw {
         switch (column.type) {
             case SchemaType::INT64:
                 if (pg_schema_type == SchemaType::INT16 ||
-                    pg_schema_type == SchemaType::INT32) {
-                    return true;
+                    pg_schema_type == SchemaType::INT32 ||
+                    pg_schema_type == SchemaType::INT8) {
+                    return PgFdwMgr::convert_qual(qual, pg_schema_type, column.type);
                 }
                 break;
             case SchemaType::INT32:
-                if (pg_schema_type == SchemaType::INT16) {
-                    return true;
+                if (pg_schema_type == SchemaType::INT16 ||
+                    pg_schema_type == SchemaType::INT8) {
+                    return PgFdwMgr::convert_qual(qual, pg_schema_type, column.type);
+                }
+                if (pg_schema_type == SchemaType::INT64) {
+                    int64_t value = DatumGetInt64(qual->value);
+                    // check if the value is within the range of int32
+                    if (value >= INT32_MIN && value <= INT32_MAX) {
+                        return PgFdwMgr::convert_qual(qual, pg_schema_type, column.type);
+                    }
                 }
                 break;
             case SchemaType::INT16:
                 if (pg_schema_type == SchemaType::INT8) {
-                    return true;
+                    return convert_qual(qual, pg_schema_type, column.type);
+                }
+                if (pg_schema_type == SchemaType::INT32 ||
+                    pg_schema_type == SchemaType::INT64) {
+                    int64_t value = DatumGetInt64(qual->value);
+                    // check if the value is within the range of int16
+                    if (value >= INT16_MIN && value <= INT16_MAX) {
+                        return PgFdwMgr::convert_qual(qual, pg_schema_type, column.type);
+                    }
                 }
                 break;
+
+            case SchemaType::FLOAT32:
             case SchemaType::FLOAT64:
-                if (pg_schema_type == SchemaType::FLOAT32) {
-                    return true;
+                if (pg_schema_type == SchemaType::FLOAT64 ||
+                    pg_schema_type == SchemaType::FLOAT32 ||
+                    pg_schema_type == SchemaType::INT64 ||
+                    pg_schema_type == SchemaType::INT32 ||
+                    pg_schema_type == SchemaType::INT16 ||
+                    pg_schema_type == SchemaType::INT8) {
+                    return PgFdwMgr::convert_qual(qual, pg_schema_type, column.type);
                 }
-                break;
             default:
                 break;
         }
@@ -122,7 +268,8 @@ namespace springtail::pg_fdw {
     // The intersection must start at the first index column and be
     // continuous.
     std::vector<ConstQualPtr>
-    _get_index_quals(const PgFdwState *state, Index const& idx, List const* qual_list) {
+    _get_index_quals(const PgFdwState *state, Index const& idx, List const* qual_list)
+    {
         if (!qual_list) {
             return {};
         }
@@ -132,19 +279,24 @@ namespace springtail::pg_fdw {
             foreach(lc, qual_list) {
                 ConstQualPtr qual = static_cast<ConstQualPtr>(lfirst(lc));
 
-                // must be of the same internal type
-                auto column = state->columns.at(pos);
-                if (_check_type_compatibility(column, qual->base.typeoid) == false) {
+                // check if type is sortable
+                if (qual->base.varattno != pos ||
+                    qual->base.isArray == true ||
+                    qual->base.useOr == true ||
+                    !PgFdwMgr::_is_type_sortable(qual->base.typeoid, qual->base.op)) {
                     continue;
                 }
 
-                // check if type is sortable
-                if (PgFdwMgr::_is_type_sortable(qual->base.typeoid, qual->base.op) &&
-                        qual->base.isArray == false &&
-                        qual->base.varattno == pos ) {
+                // must be of the same internal type
+                auto column = state->columns.at(pos);
+                LOG_DEBUG(LOG_FDW, "Checking qual {}:{} against column {} {}:{}, for op {}",
+                         qual->base.typeoid, to_string(convert_pg_type(qual->base.typeoid, 'N')),
+                         column.name, column.pg_type, to_string(column.type), (int)qual->base.op);
+
+                if (PgFdwMgr::check_type_compatibility(column, qual)) {
+                    LOG_DEBUG(LOG_FDW, "Qual match successful");
                     return qual;
                 }
-
             }
             return nullptr;
         };
@@ -1464,9 +1616,9 @@ namespace springtail::pg_fdw {
             case CHAROID:
             case UUIDOID:
                 return true;
-            case NUMERICOID: //DECIMAL(x,y)
+            case NUMERICOID: // DECIMAL(x,y)
                 //TODO: https://linear.app/springtail/issue/SPR-556/
-                return false;
+                return (op == EQUALS || op == NOT_EQUALS);
             case VARCHAROID:
             case TEXTOID:
                 // due to different collations/encodings we only support equality for text
@@ -1482,6 +1634,33 @@ namespace springtail::pg_fdw {
         }
     }
 
+    std::vector<char>
+    PgFdwMgr::_numeric_datum_to_vector(Datum value)
+    {
+        // Get the send function for the numeric type
+        Oid numeric_type_id = NUMERICOID;
+        bool is_varlena;
+        Oid numeric_out_func;
+
+        // Look up the send function for NUMERICOID
+        getTypeBinaryOutputInfo(numeric_type_id, &numeric_out_func, &is_varlena);
+
+        // Use the send function (typically numeric_send) to convert to binary format
+        bytea *output_bytes = OidSendFunctionCall(numeric_out_func, value);
+
+        // Extract data and length from the bytea structure
+        uint8_t *data = reinterpret_cast<uint8_t *>(VARDATA(output_bytes));
+        size_t length = VARSIZE(output_bytes) - VARHDRSZ;
+
+        // Copy to std::vector
+        std::vector<char> result(data, data + length);
+
+        // Free the bytea result
+        pfree(output_bytes);
+
+        return result;
+    }
+
     void
     PgFdwMgr::_make_const_field(const PgFdwState *state,
                                 const SchemaColumn &column,
@@ -1489,6 +1668,12 @@ namespace springtail::pg_fdw {
                                 const ConstQual *qual)
     {
         FieldArrayPtr fields = state->qual_fields;
+
+        if (qual->isnull) {
+            // NULL constant; set to null
+            fields->at(idx) = std::make_shared<ConstNullField>(column.type);
+            return;
+        }
 
         // Generate a const field based on type; populate it into fields array
         // Upconvert types to schema type if possible; there is a check in
@@ -1502,37 +1687,19 @@ namespace springtail::pg_fdw {
                 break;
             case DATEOID:
             case INT4OID:
-                if (column.type == SchemaType::INT64) {
-                    // convert to int64
-                    fields->at(idx) = std::make_shared<ConstTypeField<int64_t>>(DatumGetInt32(qual->value));
-                } else {
-                    CHECK_EQ(column.type, SchemaType::INT32);
-                    fields->at(idx) = std::make_shared<ConstTypeField<int32_t>>(DatumGetInt32(qual->value));
-                }
+                CHECK_EQ(column.type, SchemaType::INT32);
+                fields->at(idx) = std::make_shared<ConstTypeField<int32_t>>(DatumGetInt32(qual->value));
                 break;
             case INT2OID:
-                if (column.type == SchemaType::INT64) {
-                    // convert to int64
-                    fields->at(idx) = std::make_shared<ConstTypeField<int64_t>>(DatumGetInt16(qual->value));
-                } else if (column.type == SchemaType::INT32) {
-                    // convert to int32
-                    fields->at(idx) = std::make_shared<ConstTypeField<int32_t>>(DatumGetInt16(qual->value));
-                } else {
-                    CHECK_EQ(column.type, SchemaType::INT16);
-                    fields->at(idx) = std::make_shared<ConstTypeField<int16_t>>(DatumGetInt16(qual->value));
-                }
+                CHECK_EQ(column.type, SchemaType::INT16);
+                fields->at(idx) = std::make_shared<ConstTypeField<int16_t>>(DatumGetInt16(qual->value));
                 break;
             case FLOAT8OID:
                 fields->at(idx) = std::make_shared<ConstTypeField<double>>(DatumGetFloat8(qual->value));
                 break;
             case FLOAT4OID:
-                if (column.type == SchemaType::FLOAT64) {
-                    // convert to float64
-                    fields->at(idx) = std::make_shared<ConstTypeField<double>>(DatumGetFloat4(qual->value));
-                } else {
-                    CHECK_EQ(column.type, SchemaType::FLOAT32);
-                    fields->at(idx) = std::make_shared<ConstTypeField<float>>(DatumGetFloat4(qual->value));
-                }
+                CHECK_EQ(column.type, SchemaType::FLOAT32);
+                fields->at(idx) = std::make_shared<ConstTypeField<float>>(DatumGetFloat4(qual->value));
                 break;
             case BOOLOID:
                 fields->at(idx) = std::make_shared<ConstTypeField<bool>>(DatumGetBool(qual->value));
@@ -1552,6 +1719,9 @@ namespace springtail::pg_fdw {
                 fields->at(idx) = std::make_shared<ConstTypeField<std::string>>(str);
                 break;
             }
+            case NUMERICOID: // DECIMAL(x,y)
+                fields->at(idx) = std::make_shared<ConstTypeField<std::vector<char>>>(std::move(_numeric_datum_to_vector(qual->value)));
+                break;
             default:
                 // handle enum user defined type
                 if (qual->base.typeoid >= FirstNormalObjectId) {

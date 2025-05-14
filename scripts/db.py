@@ -148,6 +148,19 @@ def get_database_info(conn) -> dict:
     database_info['collation'] = encoding_info[1]
     database_info['ctype'] = encoding_info[2]
 
+    cursor.execute("""
+        SELECT
+        COUNT(DISTINCT p.polrelid) AS tables_with_policies
+        FROM
+        pg_policy p
+        JOIN
+        pg_class c ON c.oid = p.polrelid
+        WHERE
+        c.relkind = 'r';  -- only ordinary tables
+    """)
+    tables_with_policies = cursor.fetchone()[0]
+    database_info['tables_with_policies'] = tables_with_policies
+
     cursor.close()
     return database_info
 
@@ -173,7 +186,7 @@ def get_db_options(conn) -> dict:
         SELECT name, setting
         FROM pg_settings
         WHERE name IN ('server_version', 'max_connections', 'max_slot_wal_keep_size',
-            'max_replication_slots', , 'wal_level', 'server_encoding', 'ssl,
+            'max_replication_slots', 'wal_level', 'server_encoding', 'ssl',
             'max_logical_replication_workers', 'max_worker_processes', 'max_wal_senders');
     """)
     config_options = cursor.fetchall()
@@ -198,7 +211,6 @@ def get_db_options(conn) -> dict:
             db_options['active_replication_slots'] = row[1]
         else:
             db_options['inactive_replication_slots'] = row[1]
-
 
     cursor.close()
     return db_options
@@ -271,6 +283,7 @@ def main():
         print(f"Database encoding: {db_info['encoding']}, collation: {db_info['collation']}, ctype: {db_info['ctype']}")
         print(f"Number of tables: {db_info['num_tables']}")
         print(f"Tables without primary key: {db_info['tables_without_primary_key']}")
+        print(f"Tables with policies: {db_info['tables_with_policies']}")
         print("Largest tables:")
         for table, size in db_info['top_tables']:
             print(f"  {table}: {size}")
