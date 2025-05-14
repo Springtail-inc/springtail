@@ -142,7 +142,7 @@ jobs:
           cd python/testing
           service postgresql start
           ./startup.sh -s data_init.sql
-	  sleep infinity
+          sleep infinity
           set +e
           _LOG_FLAG="failed"          
           python3 test_runner.py -c config.yaml -j /__w/springtail/springtail/integration-test-report.xml 2>&1 | tee tmplog
