@@ -31,6 +31,9 @@
 #include <redis/db_state_change.hh>
 
 namespace springtail::pg_log_mgr {
+
+    using IndexReconcileQueuePtr = std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>>;
+
     /**
      * @brief Postgres log manager
      * Manages pipeline of postgres replication messages.
@@ -91,7 +94,7 @@ namespace springtail::pg_log_mgr {
                  int port,
                  bool archive_logs,
                  std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
-                 std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>> index_reconciliation_queue);
+                 const std::shared_ptr<std::unordered_map<uint64_t, IndexReconcileQueuePtr>>& index_reconciliation_queues);
 
         /**
          * @brief Construct a new Pg Log Mgr object (for testing only)
@@ -106,7 +109,7 @@ namespace springtail::pg_log_mgr {
           _committer_queue(std::make_shared<ConcurrentQueue<committer::XidReady>>()),
           _xact_log_path(xact_log_path),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
-          _index_reconciliation_queue(std::make_shared<ConcurrentQueue<IndexReconcileRequest>>())
+          _index_reconciliation_queues(std::make_shared<std::unordered_map<uint64_t, IndexReconcileQueuePtr>>())
         {
             _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, _committer_queue, false);
         }
@@ -234,7 +237,10 @@ namespace springtail::pg_log_mgr {
 
         // Index reconciliation
 
-        std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>> _index_reconciliation_queue; ///< Queue where index reconciliation requests are received
+        /**
+         * Map of <db_id, index_reconciliation_queue> where index reconciliation requests are received
+         */
+        std::shared_ptr<std::unordered_map<uint64_t, IndexReconcileQueuePtr>> _index_reconciliation_queues;
         std::thread _reconciliation_thread;            ///< Index reconciliation thread
         /*
          * Index reconciliation thread; waits on index reconciliation requests

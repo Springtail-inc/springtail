@@ -44,9 +44,9 @@ namespace springtail::pg_log_mgr {
         std::shared_ptr<ConcurrentQueue<committer::XidReady>> _committer_queue;
 
         /*
-         * @brief A queue for indexer to notify committer to trigger index reconciliation
+         * @brief map <db_id, index_reconcile_queue> for indexer to notify committer to trigger index reconciliation
          **/
-        std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>> _index_reconciliation_queue;
+        std::shared_ptr<std::unordered_map<uint64_t, IndexReconcileQueuePtr>> _index_reconciliation_queues;
 
         /**
          * @brief Function for performing shutdown that is called by Singleton

@@ -33,7 +33,7 @@ namespace springtail::pg_log_mgr {
                        int port,
                        bool archive_logs,
                        std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
-                       std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>> index_reconciliation_queue)
+                       const std::shared_ptr<std::unordered_map<uint64_t, IndexReconcileQueuePtr>>& index_reconciliation_queues)
     : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
       _host(host), _db_name(db_name), _user_name(user_name),
       _password(password), _pub_name(pub_name), _slot_name(slot_name),
@@ -43,7 +43,7 @@ namespace springtail::pg_log_mgr {
       _committer_queue(committer_queue),
       _xact_log_path(xact_log_path),
       _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
-      _index_reconciliation_queue(index_reconciliation_queue)
+      _index_reconciliation_queues(index_reconciliation_queues)
     {
         _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, _committer_queue, archive_logs);
 
@@ -254,23 +254,14 @@ namespace springtail::pg_log_mgr {
         while (!_shutdown) {
             // block on index reconciliation queue w/timeout for shutdown
             LOG_DEBUG(LOG_PG_LOG_MGR, "Waiting for index reconciliation request");
-            if (auto request = _index_reconciliation_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT); request) {
-                // Check if this is the correct pg_log_mgr for the request,
-                // otherwise push that back to the index reconcile queue
-                // XXX: If the actual pg_log_mgr for the db is deleted, message
-                //      can stay in the queue forever until the log_mgr is up
-                if (_db_id != request->db_id()) {
-                    LOG_DEBUG(LOG_PG_LOG_MGR, "Request not for this db: {}, hence pushing back to the queue", _db_id);
-                    _index_reconciliation_queue->push(std::move(request));
-                } else {
-                    //Pass it to log reader to notify committer
-                    LOG_DEBUG(LOG_PG_LOG_MGR, "Request received for index reconciliation for XID: {} @ {}", request->db_id(), request->reconcile_xid());
-                    reconcile_index_msg.db_id = request->db_id();
-                    reconcile_index_msg.reconcile_xid = request->reconcile_xid();
-                    auto msg = std::make_shared<PgMsg>(PgMsgEnum::RECONCILE_INDEX);
-                    msg->msg.emplace<PgMsgReconcileIndex>(reconcile_index_msg);
-                    _pg_log_reader->enqueue_msg(std::move(msg));
-                }
+            if (auto request = _index_reconciliation_queues->at(_db_id)->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT); request) {
+                //Pass it to log reader to notify committer
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Request received for index reconciliation for XID: {} @ {}", request->db_id(), request->reconcile_xid());
+                reconcile_index_msg.db_id = request->db_id();
+                reconcile_index_msg.reconcile_xid = request->reconcile_xid();
+                auto msg = std::make_shared<PgMsg>(PgMsgEnum::RECONCILE_INDEX);
+                msg->msg.emplace<PgMsgReconcileIndex>(reconcile_index_msg);
+                _pg_log_reader->enqueue_msg(std::move(msg));
             }
         }
     }

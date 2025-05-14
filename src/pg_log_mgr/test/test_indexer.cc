@@ -59,10 +59,14 @@ namespace {
                 {"col5", static_cast<uint8_t>(SchemaType::INT32), INT4OID, std::nullopt, 5, 0, false, false, false},
             };
 
-            _indexer = std::make_unique<Indexer>(1, std::make_shared<ConcurrentQueue<IndexReconcileRequest>>());
+            _index_reconciliation_queues = std::make_shared<std::unordered_map<uint64_t, IndexReconcileQueuePtr>>();
+            _index_reconciliation_queues->try_emplace(_db_id, std::make_shared<ConcurrentQueue<IndexReconcileRequest>>());
+
+            _indexer = std::make_unique<Indexer>(1, _index_reconciliation_queues);
         }
 
         static void TearDownTestSuite() {
+            _index_reconciliation_queues->erase(_db_id);
             _indexer.reset();
             springtail_shutdown();
         }
@@ -84,6 +88,9 @@ namespace {
         static constexpr int32_t INT4OID = 23;
 
         inline static std::unique_ptr<Indexer> _indexer;
+
+        using IndexReconcileQueuePtr = std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>>;
+        inline static std::shared_ptr<std::unordered_map<uint64_t, IndexReconcileQueuePtr>> _index_reconciliation_queues;
 
         void _populate_table_with_data(uint64_t table_id, uint64_t table_xid,
                 uint64_t data_xid, int num_rows, int num_cols, int start_value = 0) {

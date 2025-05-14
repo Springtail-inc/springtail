@@ -39,10 +39,10 @@ namespace springtail::committer {
     class Committer {
     public:
         Committer(uint32_t worker_count, const std::shared_ptr<ConcurrentQueue<committer::XidReady>> &committer_queue,
-                const std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>> &index_reconciliation_queue)
+                const std::shared_ptr<std::unordered_map<uint64_t, IndexReconcileQueuePtr>> &index_reconciliation_queues)
             : _worker_count(worker_count),
               _committer_queue(committer_queue),
-              _index_reconciliation_queue(index_reconciliation_queue)
+              _index_reconciliation_queues(index_reconciliation_queues)
         {
             _worker_id = fmt::format("{}_{}_0", THREAD_TYPE, THREAD_MAIN);
         }
@@ -118,7 +118,12 @@ namespace springtail::committer {
         uint32_t _worker_count;
         ConcurrentQueue<WorkerEntry> _worker_queue; ///< The queue of work for the worker threads.
         std::shared_ptr<ConcurrentQueue<XidReady>> _committer_queue;
-        std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>> _index_reconciliation_queue; ///< Queue where index reconciliation requests are received
+
+        /**
+         * @brief Map of <db_id, index_reconciliation_queue> where respective index reconciliation requests are received
+         */
+        std::shared_ptr<std::unordered_map<uint64_t, IndexReconcileQueuePtr>> _index_reconciliation_queues;
+
         std::vector<std::thread> _worker_threads; ///< The worker threads.
 
         std::atomic<uint64_t> _shutdown = false; ///< Causes the committer to shut down when set to true.
