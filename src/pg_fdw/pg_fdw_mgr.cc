@@ -86,7 +86,6 @@ namespace springtail::pg_fdw {
         return true;
     }
 
-
     bool
     PgFdwMgr::convert_qual(ConstQualPtr qual, SchemaType from, SchemaType to)
     {
@@ -99,23 +98,46 @@ namespace springtail::pg_fdw {
         // if switching between int types no need to convert the underlying datum
         if (from == SchemaType::INT8 || from == SchemaType::INT16 ||
             from == SchemaType::INT32 || from == SchemaType::INT64) {
-            switch (to) {
+
+                int64_t value;
+                switch (from) {
+                    case SchemaType::INT8:
+                        value = DatumGetChar(qual->value);
+                        break;
+                    case SchemaType::INT16:
+                        value = DatumGetInt16(qual->value);
+                        break;
+                    case SchemaType::INT32:
+                        value = DatumGetInt32(qual->value);
+                        break;
+                    case SchemaType::INT64:
+                        value = DatumGetInt64(qual->value);
+                        break;
+                    default:
+                        return false;
+                }
+
+                switch (to) {
                 case SchemaType::INT8:
+                    qual->value = Int8GetDatum(static_cast<int8_t>(value));
                     qual->base.typeoid = CHAROID;
                     return true;
                 case SchemaType::INT16:
+                    qual->value = Int16GetDatum(static_cast<int16_t>(value));
                     qual->base.typeoid = INT2OID;
                     return true;
                 case SchemaType::INT32:
+                    qual->value = Int32GetDatum(static_cast<int32_t>(value));
                     qual->base.typeoid = INT4OID;
                     return true;
                 case SchemaType::INT64:
+                    qual->value = Int64GetDatum(static_cast<int64_t>(value));
                     qual->base.typeoid = INT8OID;
                     return true;
                 case SchemaType::FLOAT32:
-                    return check_roundtrip_conversion<int64_t, float>(DatumGetInt64(qual->value), qual);
+                    return check_roundtrip_conversion<int64_t, float>(value, qual);
                 case SchemaType::FLOAT64:
-                    return check_roundtrip_conversion<int64_t, double>(DatumGetInt64(qual->value), qual);
+                    return check_roundtrip_conversion<int64_t, double>(value, qual);
                 default:
                     break;
             }

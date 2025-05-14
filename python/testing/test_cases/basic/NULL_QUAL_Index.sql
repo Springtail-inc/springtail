@@ -35,6 +35,8 @@ SELECT * FROM test_data WHERE b IS NOT NULL ORDER BY id;
 SELECT * FROM test_data WHERE b IS NULL ORDER BY id;
 SELECT * FROM test_data WHERE b IS NOT NULL ORDER BY id;
 
+SELECT * FROM test_data WHERE a = 1::int2;
+SELECT * FROM test_data WHERE a = 1::int4;
 SELECT * FROM test_data WHERE a = 1::int8;
 SELECT * FROM test_data WHERE a = 4560050::int4;
 SELECT * FROM test_data WHERE b = 23::int2;
