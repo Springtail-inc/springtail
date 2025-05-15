@@ -330,6 +330,7 @@ namespace springtail::committer {
             // Index building was attempted, finalize and process build/abort
             auto extent_id = root->finalize();
             if (work_item.is_status(IndexStatus::BUILDING)) {
+                std::unique_lock g(_root_mutex);
                 auto meta = client->get_roots(db_id, tid, end_xid);
                 meta->roots.emplace_back(key.second, extent_id);
                 client->update_roots(db_id, tid, end_xid, *meta);
