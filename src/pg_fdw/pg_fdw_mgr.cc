@@ -59,6 +59,93 @@ extern "C" {
 namespace springtail::pg_fdw {
     using springtail::Index;
 
+    std::string
+    _get_value_string(const ConstQual& qual)
+    {
+        if (qual.isnull) {
+            return "NULL";
+        }
+
+        std::ostringstream ss;
+
+        switch (qual.base.typeoid) {
+            case MONEYOID:
+            case TIMESTAMPOID:
+            case TIMESTAMPTZOID:
+            case TIMEOID:
+            case INT8OID:
+                ss << DatumGetInt64(qual.value);
+                break;
+
+            case DATEOID:
+            case INT4OID:
+                ss << DatumGetInt32(qual.value);
+                break;
+
+            case INT2OID:
+                ss << DatumGetInt16(qual.value);
+                break;
+            case FLOAT8OID:
+                ss << DatumGetFloat8(qual.value);
+                break;
+            case FLOAT4OID:
+                ss << DatumGetFloat4(qual.value);
+                break;
+            case BOOLOID:
+                ss << DatumGetBool(qual.value);
+                break;
+            case CHAROID:
+                ss << DatumGetBool(qual.value);
+                break;
+            case UUIDOID: {
+                const char* p = reinterpret_cast<const char*>(DatumGetPointer(qual.value));
+                for (int i = 0; i != 16; ++i) {
+                    ss << p[i];
+                }
+                ss << "::UUID";
+                break;
+            }
+            case VARCHAROID:
+            case TEXTOID: {
+                const char *str = TextDatumGetCString(qual.value);
+                ss << "'" << str << "'";
+                break;
+            }
+            case NUMERICOID: // DECIMAL(x,y)
+                {
+                    auto v = DatumGetNumeric(qual.value);
+                    ss << numeric_normalize(v);
+                    ss << "::NUMERIC";
+                }
+                break;
+            default:
+                // handle enum user defined type
+                if (qual.base.typeoid >= FirstNormalObjectId) {
+                    Oid oid = DatumGetObjectId(qual.value);
+                    ss << oid << "::USER";
+                    break;
+                }
+                break;
+        }
+        return ss.str();
+    }
+
+    const std::map<QualOpName, std::string>&
+    _op_symbols()
+    {
+        static const std::map<QualOpName, std::string> ops =
+        {
+            {UNSUPPORTED, "~~~"},
+            {EQUALS, "="},
+            {NOT_EQUALS, "!="},
+            {LESS_THAN, "<"},
+            {LESS_THAN_EQUALS, "<="},
+            {GREATER_THAN, ">"},
+            {GREATER_THAN_EQUALS, ">="}
+        };
+        return ops;
+    }
+
     template<typename From, typename To>
     static bool
     check_roundtrip_conversion(From from, ConstQualPtr qual)
@@ -1115,6 +1202,19 @@ namespace springtail::pg_fdw {
         // scan index
         if (state->index) {
             r.emplace_back("   Scan index", state->index->name);
+        }
+
+        // collect quals
+        ss.str("");
+
+        for (const ConstQual *qual: state->filtered_quals) {
+            const auto& column = state->columns.at(state->attr_map.at(qual->base.varattno));
+            (ss.tellp()? ss << ", ": ss) <<
+                std::format("({} {} {})", column.name, _op_symbols().at(qual->base.op), _get_value_string(*qual));
+        }
+
+        if (!ss.str().empty()) {
+            r.emplace_back("   Filters", ss.str());
         }
 
         return r;
