@@ -71,6 +71,11 @@ jobs:
           mkdir -p $(dirname $fdw_config_file_path)
           cp system.json.settings $fdw_config_file_path
 
+      - name: Setup interactive ssh session
+        uses: Warpbuilds/action-debugger@v1.3
+        with:
+          limit-access-to-actor: true
+
       - name: Build
         run: |
           ln -s /home/dev/external external
