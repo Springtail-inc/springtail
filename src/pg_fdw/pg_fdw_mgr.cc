@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <memory>
 #include <shared_mutex>
+#include <sstream>
 
 #include <fmt/core.h>
 #include <nlohmann/json.hpp>
@@ -497,7 +498,7 @@ namespace springtail::pg_fdw {
             auto column = state->columns.at(state->attr_map.at(attno));
             target_colnames.push_back(column.name);
             state->target_columns.emplace_back(
-                   i++, column.pg_type, state->_attrs[attno-1], std::move(filter));
+                   i++, column.pg_type, state->_attrs[attno-1], column.name, std::move(filter));
         }
 
 
@@ -528,7 +529,7 @@ namespace springtail::pg_fdw {
             DCHECK_LE(attno, state->_attrs.size());
 
             state->target_columns.emplace_back(
-                    i++, col_i->second.pg_type, state->_attrs[attno-1]);
+                    i++, col_i->second.pg_type, state->_attrs[attno-1], col_i->second.name);
 
             LOG_DEBUG(LOG_FDW, "Target list column: {}:{}",
                                 attno, col_i->second.name);
@@ -1068,6 +1069,55 @@ namespace springtail::pg_fdw {
         // remove transaction ID mapping on a commit or rollback
         LOG_DEBUG(LOG_FDW, "fdw_commit_rollback: pg_xid: {}, commit: {}", pg_xid, commit);
         _xid_map.erase(pg_xid);
+    }
+
+    std::vector<std::pair<std::string, std::string>>
+    PgFdwMgr::fdw_explain_scan(const PgFdwState *state) 
+    {
+        std::vector<std::pair<std::string, std::string>> r;
+        r.emplace_back("FDW name", "springtail");
+
+        std::ostringstream ss;
+
+        // collect target columns
+        for (const auto& c: state->target_columns) {
+            (ss.tellp()? ss << ", ": ss) << c.name;
+
+        }
+
+        if (!ss.str().empty()) {
+            r.emplace_back("   Targets", ss.str());
+        }
+
+        // collect indexes
+        ss.str("");
+        for (const auto& idx: state->indexes) {
+            if (ss.tellp())
+                ss << ", ";
+            ss << idx.name;
+            ss << "[unique:";
+            if (idx.is_unique) {
+                ss << "true";
+            } else {
+                ss << "false";
+            }
+            ss << "]";
+        }
+        if (!ss.str().empty()) {
+            r.emplace_back("   All indexes", ss.str());
+        }
+
+        // sortgroup index
+        if (state->sortgroup_index) {
+            r.emplace_back("   Sort index", state->sortgroup_index->name);
+        }
+
+        // scan index
+        if (state->index) {
+            r.emplace_back("   Scan index", state->index->name);
+        }
+
+        return r;
     }
 
     void

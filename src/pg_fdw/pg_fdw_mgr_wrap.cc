@@ -1,8 +1,101 @@
+#include <sstream>
 #include <pg_fdw/pg_fdw_mgr.hh>
+
+extern "C" {
+    #include <postgres.h>
+    #include <utils/numeric.h>
+}
 
 /** Wrapper around PgFdwMgr class for use in C code */
 
 using namespace springtail::pg_fdw;
+
+namespace {
+    std::string _get_value_string(const ConstQual& qual)
+    {
+        if (qual.isnull) {
+            return "NULL";
+        }
+
+        std::ostringstream ss;
+
+        switch (qual.base.typeoid) {
+            case MONEYOID:
+            case TIMESTAMPOID:
+            case TIMESTAMPTZOID:
+            case TIMEOID:
+            case INT8OID:
+                ss << DatumGetInt64(qual.value);
+                break;
+
+            case DATEOID:
+            case INT4OID:
+                ss << DatumGetInt32(qual.value);
+                break;
+
+            case INT2OID:
+                ss << DatumGetInt16(qual.value);
+                break;
+            case FLOAT8OID:
+                ss << DatumGetFloat8(qual.value);
+                break;
+            case FLOAT4OID:
+                ss << DatumGetFloat4(qual.value);
+                break;
+            case BOOLOID:
+                ss << DatumGetBool(qual.value);
+                break;
+            case CHAROID:
+                ss << DatumGetBool(qual.value);
+                break;
+            case UUIDOID: {
+                const char* p = reinterpret_cast<const char*>(DatumGetPointer(qual.value));
+                for (int i = 0; i != 16; ++i) {
+                    ss << p[i];
+                }
+                ss << "::UUID";
+                break;
+            }
+            case VARCHAROID:
+            case TEXTOID: {
+                const char *str = TextDatumGetCString(qual.value);
+                ss << "'" << str << "'";
+                break;
+            }
+            case NUMERICOID: // DECIMAL(x,y)
+                {
+                    auto v = DatumGetNumeric(qual.value);
+                    ss << numeric_normalize(v);
+                    ss << "::NUMERIC";
+                }
+                break;
+            default:
+                // handle enum user defined type
+                if (qual.base.typeoid >= FirstNormalObjectId) {
+                    Oid oid = DatumGetObjectId(qual.value);
+                    ss << oid << "::USER";
+                    break;
+                }
+                break;
+        }
+        return ss.str();
+    }
+
+    const std::map<QualOpName, std::string>& _op_symbols()
+    {
+        static const std::map<QualOpName, std::string> ops =
+        {
+            {UNSUPPORTED, "~~~"},
+            {EQUALS, "="},
+            {NOT_EQUALS, "!="},
+            {LESS_THAN, "<"},
+            {LESS_THAN_EQUALS, "<="},
+            {GREATER_THAN, ">"},
+            {GREATER_THAN_EQUALS, ">="}
+        };
+        return ops;
+    }
+}
 
 extern "C" {
     #include <postgres.h>
@@ -102,4 +195,31 @@ extern "C" {
     {
         get_fdw_mgr()->fdw_commit_rollback(pg_xid, commit);
     }
+
+    void 
+    fdw_explain_scan(ForeignScanState *node, ExplainState *es)
+    {
+        const PgFdwState* state = static_cast<PgFdwState*>(node->fdw_state);
+        auto v = get_fdw_mgr()->fdw_explain_scan(state);
+
+        for (auto const& [name, value]: v) {
+            ExplainPropertyText(name.c_str(), value.c_str(), es);
+        }
+
+        // collect quals
+        std::ostringstream ss;
+
+        ss.str("");
+
+        for (const ConstQual *qual: state->filtered_quals) {
+            const auto& column = state->columns.at(state->attr_map.at(qual->base.varattno));
+            (ss.tellp()? ss << ", ": ss) <<
+                std::format("({} {} {})", column.name, _op_symbols().at(qual->base.op), _get_value_string(*qual));
+        }
+
+        if (!ss.str().empty()) {
+            ExplainPropertyText("   Filters", ss.str().c_str(), es);
+        }
+    }
 }
+
