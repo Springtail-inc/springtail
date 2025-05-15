@@ -228,6 +228,7 @@ namespace springtail {
                 return (this->get_uint16(lhs_row) == rhs->get_uint16(rhs_row));
 
             case SchemaType::INT16:
+                LOG_DEBUG(LOG_FDW, "Comparing int16: {} == {}", this->get_int16(lhs_row), rhs->get_int16(rhs_row));
                 return (this->get_int16(lhs_row) == rhs->get_int16(rhs_row));
 
             case SchemaType::UINT32:
@@ -787,6 +788,10 @@ namespace springtail {
         explicit ConstTypeField(T &&value)
             : _value(std::move(value))
         { }
+
+        T get_value() const {
+            return _value;
+        }
 
         SchemaType get_type() const override {
             if constexpr(std::is_same_v<T, bool>) {

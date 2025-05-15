@@ -295,7 +295,7 @@ namespace springtail::pg_fdw {
         void _init_quals(PgFdwState *state, List *qual_list);
 
         /** Helper to create constant field from qual and add to field array */
-        void _make_const_field(const PgFdwState *state, const SchemaColumn &column, int idx, const ConstQual *qual);
+        void _make_const_field(const PgFdwState *state, const SchemaColumn &column, int idx, const ConstQualPtr qual);
 
         // static methods
 

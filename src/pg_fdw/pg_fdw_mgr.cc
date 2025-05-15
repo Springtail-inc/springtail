@@ -58,6 +58,56 @@ extern "C" {
 namespace springtail::pg_fdw {
     using springtail::Index;
 
+    static std::string
+    to_string(QualOpName op)
+    {
+        switch (op) {
+            case QualOpName::EQUALS:
+                return "==";
+            case QualOpName::NOT_EQUALS:
+                return "!=";
+            case QualOpName::LESS_THAN:
+                return "<";
+            case QualOpName::LESS_THAN_EQUALS:
+                return "<=";
+            case QualOpName::GREATER_THAN:
+                return ">";
+            case QualOpName::GREATER_THAN_EQUALS:
+                return ">=";
+            default:
+                return "unknown";
+        }
+    }
+
+    static void
+    log_qual(const ConstQualPtr qual)
+    {
+        switch (qual->base.typeoid) {
+            case INT2OID:
+                LOG_DEBUG(LOG_FDW, "Qual: typeoid: {}, op: {}, value: {}, isnull: {}",
+                          qual->base.typeoid, to_string(qual->base.op), DatumGetInt16(qual->value), qual->isnull);
+                break;
+            case INT4OID:
+                LOG_DEBUG(LOG_FDW, "Qual: typeoid: {}, op: {}, value: {}, isnull: {}",
+                          qual->base.typeoid, to_string(qual->base.op), DatumGetInt32(qual->value), qual->isnull);
+                break;
+            case INT8OID:
+                LOG_DEBUG(LOG_FDW, "Qual: typeoid: {}, op: {}, value: {}, isnull: {}",
+                          qual->base.typeoid, to_string(qual->base.op), DatumGetInt64(qual->value), qual->isnull);
+                break;
+            case FLOAT4OID:
+                LOG_DEBUG(LOG_FDW, "Qual: typeoid: {}, op: {}, value: {}, isnull: {}",
+                          qual->base.typeoid, to_string(qual->base.op), DatumGetFloat4(qual->value), qual->isnull);
+                break;
+            case FLOAT8OID:
+                LOG_DEBUG(LOG_FDW, "Qual: typeoid: {}, op: {}, value: {}, isnull: {}",
+                          qual->base.typeoid, to_string(qual->base.op), DatumGetFloat8(qual->value), qual->isnull);
+                break;
+            default:
+                break;
+        }
+    }
+
     template<typename From, typename To>
     static bool
     check_roundtrip_conversion(From from, ConstQualPtr qual)
@@ -295,6 +345,7 @@ namespace springtail::pg_fdw {
 
                 if (PgFdwMgr::check_type_compatibility(column, qual)) {
                     LOG_DEBUG(LOG_FDW, "Qual match successful");
+                    log_qual(qual);
                     return qual;
                 }
             }
@@ -1665,7 +1716,7 @@ namespace springtail::pg_fdw {
     PgFdwMgr::_make_const_field(const PgFdwState *state,
                                 const SchemaColumn &column,
                                 int idx,
-                                const ConstQual *qual)
+                                const ConstQualPtr qual)
     {
         FieldArrayPtr fields = state->qual_fields;
 
@@ -1736,6 +1787,8 @@ namespace springtail::pg_fdw {
                 elog(ERROR, "Unsupported type for constant field: %d", qual->base.typeoid);
                 break;
         }
+        LOG_DEBUG(LOG_FDW, "Created const field for column {}", column.name);
+        log_qual(qual);
     }
 
     bool
