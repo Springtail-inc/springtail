@@ -60,7 +60,7 @@ namespace springtail {
 
         // construct the table and return it
         auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id,
-                                                                   {xid, constant::MAX_LSN});
+                                                                   {xid, constant::MAX_LSN}, skip_schema_cache);
 
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid}, skip_schema_cache);
 

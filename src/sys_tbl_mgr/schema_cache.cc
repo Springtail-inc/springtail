@@ -8,7 +8,7 @@ SchemaCache::get(uint64_t db, uint64_t tid, const XidLsn &xid, PopulateFn popula
     std::unique_lock lock(_mutex);
     auto key = std::make_pair(db, tid);
 
-    LOG_DEBUG(LOG_SCHEMA, "SCHEMACACHE: db {}, table {}, xid {}:{}", db, tid, xid.xid, xid.lsn);
+    LOG_DEBUG(LOG_SCHEMA, "db {}, table {}, xid {}:{}", db, tid, xid.xid, xid.lsn);
 
     while (true) {
         // check for the schema at the access key
@@ -74,7 +74,7 @@ SchemaCache::_fetch_locked(std::unique_lock<std::mutex> &lock,
                            const XidLsn &xid,
                            PopulateFn populate)
 {
-    LOG_DEBUG(LOG_SCHEMA, "SCHEMACACHE: CALL TO SERVICE: db {}, table {}, xid {}:{}", db, tid, xid.xid, xid.lsn);
+    LOG_DEBUG(LOG_SCHEMA, "db {}, table {}, xid {}:{}", db, tid, xid.xid, xid.lsn);
 
     // create a dummy entry in the fetching state
     auto key = std::make_pair(db, tid);
@@ -184,8 +184,6 @@ SchemaCache::invalidate_by_index(uint64_t db, uint64_t index_id, const XidLsn &x
 void
 SchemaCache::_invalidate_locked(uint64_t db, uint64_t tid, const XidLsn &xid)
 {
-    LOG_DEBUG(LOG_SCHEMA, "SCHEMACACHE: invalidated_locked: current-in-cache: {}, received to invalidate: {} and comparison-result {}",
-            _latest_xid[db].xid, _latest_xid[db].lsn, xid.xid, xid.lsn, (_latest_xid[db] < xid));
     // update the latest known XID with a schema change
     if (_latest_xid[db] < xid) {
         _latest_xid[db] = xid;
