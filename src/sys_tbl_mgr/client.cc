@@ -571,6 +571,7 @@ Client::get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
         request.set_xid(xid.xid);
         request.set_lsn(xid.lsn);
 
+        LOG_INFO("RETURNING FROM SERVICE FOR: TID: {} XID: {}, LSN: {}", tid, xid.xid, xid.lsn);
         proto::GetSchemaResponse response;
         grpc_client::retry_rpc("SysTblMgr", "GetSchema",
                                [this, &request, &response](grpc::ClientContext *context) {
