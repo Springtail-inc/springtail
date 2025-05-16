@@ -105,6 +105,7 @@ private:
     uint64_t _capacity;  ///< Max number of entries in the cache
 
     std::map<uint64_t, XidLsn> _latest_xid;  ///< Map from db -> latest known XID with a DDL change
+    std::map<uint64_t, XidLsn> _latest_xid_in_cache;  ///< Map from db -> latest known XID seen in the cache
 };
 
 }  // namespace springtail::sys_tbl_mgr

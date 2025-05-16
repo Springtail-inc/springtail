@@ -38,6 +38,9 @@ SchemaCache::get(uint64_t db, uint64_t tid, const XidLsn &xid, PopulateFn popula
             entry->lru_i = _lru.insert(_lru.end(), schema_i);
 
             return entry->schema;
+        } else if (xid < _latest_xid_in_cache[db]) {
+            // the requested XID is not the latest, so fetch, but don't cache
+            return populate(db, tid, xid);
         }
 
         // not in the cache, retrieve it and try to cache it
@@ -121,6 +124,9 @@ SchemaCache::_fetch_locked(std::unique_lock<std::mutex> &lock,
     entry->schema = metadata;
     entry->start_xid = metadata->access_range.start;
 
+    if (entry->start_xid > _latest_xid_in_cache[db]) {
+        _latest_xid_in_cache[db] = entry->start_xid;
+    }
     // notify anyone waiting for the entry fetch
     entry->fetching = false;
     entry->cond.notify_all();
