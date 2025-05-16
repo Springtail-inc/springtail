@@ -59,7 +59,7 @@ extern "C" {
 namespace springtail::pg_fdw {
     using springtail::Index;
 
-    std::string
+    static std::string
     _get_value_string(const ConstQual& qual)
     {
         if (qual.isnull) {
@@ -130,7 +130,7 @@ namespace springtail::pg_fdw {
         return ss.str();
     }
 
-    const std::map<QualOpName, std::string>&
+    static const std::map<QualOpName, std::string>&
     _op_symbols()
     {
         static const std::map<QualOpName, std::string> ops =

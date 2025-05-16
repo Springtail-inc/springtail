@@ -1,4 +1,3 @@
-#include <sstream>
 #include <pg_fdw/pg_fdw_mgr.hh>
 
 /** Wrapper around PgFdwMgr class for use in C code */
