@@ -102,4 +102,16 @@ extern "C" {
     {
         get_fdw_mgr()->fdw_commit_rollback(pg_xid, commit);
     }
+
+    void 
+    fdw_explain_scan(ForeignScanState *node, ExplainState *es)
+    {
+        const PgFdwState* state = static_cast<PgFdwState*>(node->fdw_state);
+        auto v = get_fdw_mgr()->fdw_explain_scan(state);
+
+        for (auto const& [name, value]: v) {
+            ExplainPropertyText(name.c_str(), value.c_str(), es);
+        }
+    }
 }
+

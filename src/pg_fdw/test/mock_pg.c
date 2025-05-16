@@ -1,6 +1,8 @@
+#include <assert.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <postgres.h>
+#include <utils/numeric.h>
 #include <varatt.h>
 #include <utils/builtins.h>
 #include <access/htup_details.h>
@@ -8,6 +10,7 @@
 #include <nodes/value.h>
 #include <nodes/primnodes.h>
 #include <storage/pmsignal.h>
+
 
 static inline Node *
 newNode_mock(size_t size, NodeTag tag)
@@ -269,3 +272,18 @@ bytea *OidSendFunctionCall(Oid functionId, Datum arg1)
     memset(result, 0, sizeof(bytea));
     return result;
 }
+
+// used by FDW only
+char *numeric_normalize(Numeric num)
+{
+    assert(false);
+    return "";
+}
+
+// used by FDW only
+extern struct varlena *pg_detoast_datum(struct varlena *datum)
+{
+    assert(false);
+    return 0;
+}
+
