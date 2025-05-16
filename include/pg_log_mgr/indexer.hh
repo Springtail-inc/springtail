@@ -203,8 +203,5 @@ namespace springtail::committer {
          * @brief A queue for indexer to notify committer to trigger index reconciliation
          */
         ReconciliationQueuePtr _index_reconciliation_queue;
-
-
-        std::mutex _root_mutex;
     };
 }
