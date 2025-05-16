@@ -10,7 +10,7 @@ SyncTracker::block_commits(uint64_t db_id,
     LOG_DEBUG(LOG_PG_LOG_MGR, "db {}", db_id);
     std::unique_lock lock(_mutex);
 
-    if (_inflight_map.contains(db_id) || _sync_map.contains(db_id)) {
+    if (!_inflight_map.contains(db_id) && !_sync_map.contains(db_id)) {
         LOG_DEBUG(LOG_PG_LOG_MGR, "Stop committing XIDs for db: {}", db_id);
         committer_queue->push(std::make_shared<committer::XidReady>(db_id));
     }
