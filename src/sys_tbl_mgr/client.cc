@@ -562,7 +562,7 @@ Client::_pack_metadata(const proto::GetSchemaResponse &result)
 }
 
 std::shared_ptr<const SchemaMetadata>
-Client::get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
+Client::get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid, bool skip_cache)
 {
     auto populate = [this](uint64_t db, uint64_t tid, const XidLsn &xid) {
         proto::GetSchemaRequest request;
@@ -581,8 +581,12 @@ Client::get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
         return _pack_metadata(response);
     };
 
-    // Retrieve through the schema cache
-    return _schema_cache->get(db_id, table_id, xid, populate);
+    if (skip_cache) {
+        return populate(db_id, table_id, xid);
+    } else {
+        // Retrieve through the schema cache
+        return _schema_cache->get(db_id, table_id, xid, populate);
+    }
 }
 
 SchemaMetadataPtr

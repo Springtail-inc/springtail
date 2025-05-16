@@ -184,7 +184,8 @@ SchemaCache::invalidate_by_index(uint64_t db, uint64_t index_id, const XidLsn &x
 void
 SchemaCache::_invalidate_locked(uint64_t db, uint64_t tid, const XidLsn &xid)
 {
-    LOG_DEBUG(LOG_SCHEMA, "SCHEMACACHE: invalidated_locked: current-in-cache: {}, received to invalidate: {}", _latest_xid[db].xid, xid.xid);
+    LOG_DEBUG(LOG_SCHEMA, "SCHEMACACHE: invalidated_locked: current-in-cache: {}, received to invalidate: {} and comparison-result {}",
+            _latest_xid[db].xid, _latest_xid[db].lsn, xid.xid, xid.lsn, (_latest_xid[db] < xid));
     // update the latest known XID with a schema change
     if (_latest_xid[db] < xid) {
         _latest_xid[db] = xid;

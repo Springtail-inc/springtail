@@ -236,7 +236,7 @@ namespace springtail::committer {
 
         std::shared_ptr<std::vector<FieldPtr>> key_fields;
 
-        auto mutable_table = TableMgr::get_instance()->get_mutable_table(db_id, tid, idx._xid, idx._xid);
+        auto mutable_table = TableMgr::get_instance()->get_mutable_table(db_id, tid, idx._xid, idx._xid, false, true);
         MutableBTreePtr root = mutable_table->create_index_root(index_id, idx_cols);
         root->init_empty();
         key_fields = mutable_table->schema()->get_fields(mutable_table->schema()->get_column_names(idx_cols));
@@ -248,7 +248,7 @@ namespace springtail::committer {
         uint32_t current_row_id = 0;
 
         LOG_DEBUG(LOG_COMMITTER, "Indexing build in progress: {}:{}", db_id, index_id);
-        auto table = TableMgr::get_instance()->get_table(db_id, tid, idx._xid);
+        auto table = TableMgr::get_instance()->get_table(db_id, tid, idx._xid, true);
         for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
             if (st.stop_requested()) {
                 root->truncate();

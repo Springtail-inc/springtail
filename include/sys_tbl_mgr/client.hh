@@ -56,7 +56,7 @@ public:
     void revert(uint64_t db_id, uint64_t xid);
     TableMetadataPtr get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid);
 
-    std::shared_ptr<const SchemaMetadata> get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+    std::shared_ptr<const SchemaMetadata> get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid, bool skip_cache=false);
     SchemaMetadataPtr get_target_schema(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
 
     bool exists(uint64_t db_id, uint64_t table_id, const XidLsn &xid);

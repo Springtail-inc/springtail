@@ -45,7 +45,8 @@ namespace springtail {
     TablePtr
     TableMgr::get_table(uint64_t db_id,
                         uint64_t table_id,
-                        uint64_t xid)
+                        uint64_t xid,
+                        bool skip_schema_cache)
     {
         boost::shared_lock lock(_mutex);
 
@@ -61,7 +62,7 @@ namespace springtail {
         auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id,
                                                                    {xid, constant::MAX_LSN});
 
-        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
+        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid}, skip_schema_cache);
 
         // pass secondary indexes only
         auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY; });
@@ -87,7 +88,8 @@ namespace springtail {
                                 uint64_t table_id,
                                 uint64_t access_xid,
                                 uint64_t target_xid,
-                                bool for_gc)
+                                bool for_gc,
+                                bool skip_schema_cache)
     {
         boost::shared_lock lock(_mutex);
 
@@ -103,7 +105,7 @@ namespace springtail {
         XidLsn xid(target_xid);
         auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id, xid);
 
-        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
+        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid}, skip_schema_cache);
 
         // pass secondary indexes only
         auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY; });

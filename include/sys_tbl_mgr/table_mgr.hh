@@ -34,7 +34,7 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base,
          * Read the table metadata for the requested table ID.  Note that Table objects's are always
          * constructed at lsn == MAX_LSN within the provided xid.
          */
-        TablePtr get_table(uint64_t db_id, uint64_t table_id, uint64_t xid);
+        TablePtr get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, bool skip_schema_cache=false);
 
         /**
          * Returns a boolean indicating if the table exists at a given xid/lsn.
@@ -44,7 +44,7 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base,
         /**
          * Returns the MutableTable interface for the requested table ID.
          */
-        MutableTablePtr get_mutable_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid, bool for_gc = false);
+        MutableTablePtr get_mutable_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid, bool for_gc = false, bool skip_schema_cache=false);
 
         /**
          * Returns a MutableTable that can be used to populate a new snapshot of the given table.
