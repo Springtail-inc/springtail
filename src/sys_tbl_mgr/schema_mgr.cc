@@ -113,7 +113,8 @@ namespace springtail {
     std::shared_ptr<ExtentSchema>
     SchemaMgr::get_extent_schema(uint64_t db_id,
                                  uint64_t table_id,
-                                 const XidLsn &xid)
+                                 const XidLsn &xid,
+                                 bool skip_schema_cache)
     {
         // first check if it's an immutable system table schema
         auto &&system_i = _system_cache.find({ table_id, constant::INDEX_DATA, true });
@@ -124,7 +125,7 @@ namespace springtail {
         // XXX keep some kind of local cache?  how to keep it valid given the XID progression?
 
         // call into the SysTblMgr to get the schema at the given XID/LSN
-        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, xid);
+        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, xid, skip_schema_cache);
 
         // construct the schema from the provided schema metadata
         return std::make_shared<ExtentSchema>(meta->columns);

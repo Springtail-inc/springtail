@@ -46,7 +46,7 @@ namespace springtail {
          * @param xid The XID/LSN that we need the schema at. Defaults to the MAX_LSN, providing the
          *            schema at the point after all changes in the XID have been applied.
          */
-        std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+        std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid, bool skip_schema_cache=false);
 
         /**
          * @brief Get the usertype object

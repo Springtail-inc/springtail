@@ -103,7 +103,7 @@ namespace springtail {
 
         // construct the mutable table and return it
         XidLsn xid(target_xid);
-        auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id, xid);
+        auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id, xid, skip_schema_cache);
 
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid}, skip_schema_cache);
 
