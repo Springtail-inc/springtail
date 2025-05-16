@@ -68,14 +68,18 @@ DECLARE
     rel_kind "char";
     table_relname text;
     table_info RECORD;
+    command_tag text;
 BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() AS cmd
-        WHERE cmd.command_tag IN ('ALTER TABLE', 'CREATE TABLE')
+        WHERE cmd.command_tag IN ('ALTER TABLE', 'CREATE TABLE', 'ALTER INDEX')
     LOOP
-        -- RAISE NOTICE 'springtail: % op, %, %', obj.command_tag, obj.object_identity, obj.objid;
+        -- RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objid, obj.object_type;
         -- IF obj.command_tag NOT IN ('ALTER TABLE', 'CREATE TABLE') THEN
         --     CONTINUE;
         -- END IF;
+        IF obj.object_type <> 'table' THEN
+            CONTINUE;
+        END IF;
 
         -- BEGIN of what should have been a function, if you change it here,
         -- it should also be change in the springtail_event_trigger_for_schema_ddl()
@@ -87,7 +91,8 @@ BEGIN
         -- This is a corner case when an index is renamed through "ALTER TABLE" statement
         -- In this case our object is an index, not a table. So, we can't do anything with it here.
         -- 'i' - normal index, 'I' - partitioned index
-        IF rel_kind <> 'r' THEN
+        -- 'r' - normal table, 'p' - partitioned table
+        IF rel_kind <> 'r' AND rel_kind <> 'p' THEN
             CONTINUE;
         END IF;
 
@@ -138,9 +143,15 @@ BEGIN
             CONTINUE;
         END IF;
 
+        IF obj.command_tag = 'ALTER INDEX' THEN
+            command_tag := 'ALTER TABLE';
+        ELSE
+            command_tag := obj.command_tag;
+        END IF;
+
         -- Note: obj.object_name is not available
         msg := json_build_object('xid', txid_current(),
-            'cmd', obj.command_tag,
+            'cmd', command_tag,
             'oid', obj.objid::bigint,
             'obj', obj.object_type,
             'schema', obj.schema_name,
@@ -148,12 +159,12 @@ BEGIN
             'columns', json_columns);
 
         -- command_tag is CREATE TABLE or ALTER TABLE
-        PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
+        PERFORM pg_logical_emit_message(true, 'springtail:' || command_tag, msg::text);
 
         -- RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objid, table_replident;
 
         -- If a table is altered, and it has a primary key, set REPLICA IDENTITY to DEFAULT
-        IF obj.command_tag = 'ALTER TABLE' AND table_replident = 'f' AND has_pkey IS TRUE THEN
+        IF obj.command_tag IN ('ALTER TABLE', 'ALTER INDEX') AND table_replident = 'f' AND has_pkey IS TRUE THEN
             EXECUTE format('ALTER TABLE %s.%s REPLICA IDENTITY %s', quote_ident(obj.schema_name), quote_ident(table_relname), 'DEFAULT');
         END IF;
 
@@ -227,6 +238,8 @@ BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() as cmd
         WHERE cmd.object_type = 'index'
     LOOP
+
+        -- RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_type, obj.object_identity, obj.objid;
 
         -- BEGIN of what should have been a function, if you change it here,
         -- it should also be change in the springtail_event_trigger_for_schema_ddl()
@@ -334,7 +347,8 @@ BEGIN
             -- This is a corner case when an index is renamed through "ALTER TABLE" statement
             -- In this case our object is an index, not a table. So, we can't do anything with it here.
             -- 'i' - normal index, 'I' - partitioned index
-            IF rel_kind <> 'r' THEN
+            -- 'r' - normal table, 'p' - partitioned table
+            IF rel_kind <> 'r' AND rel_kind <> 'p' THEN
                 CONTINUE;
             END IF;
 
@@ -501,7 +515,7 @@ CREATE EVENT TRIGGER springtail_event_trigger_for_drops
 DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_table_ddl;
 CREATE EVENT TRIGGER springtail_event_trigger_for_table_ddl
    ON ddl_command_end
-   WHEN TAG IN ( 'CREATE TABLE', 'ALTER TABLE' )
+   WHEN TAG IN ( 'CREATE TABLE', 'ALTER TABLE', 'ALTER INDEX' )
    EXECUTE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for_table_ddl();
 
 DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_schema_ddl;
