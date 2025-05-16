@@ -9,6 +9,8 @@ SchemaCache::get(uint64_t db, uint64_t tid, const XidLsn &xid, PopulateFn popula
     auto key = std::make_pair(db, tid);
 
     LOG_DEBUG(LOG_SCHEMA, "db {}, table {}, xid {}:{}", db, tid, xid.xid, xid.lsn);
+    LOG_DEBUG(LOG_SCHEMA, "SCHEMACACHE: REQUESTED XID - {}:{}, LATEST_XID - {}:{}, LATEST_XID_IN_CACHE - {}:{}",
+            xid.xid, xid.lsn, _latest_xid[db].xid, _latest_xid[db].lsn, _latest_xid_in_cache[db].xid, _latest_xid_in_cache[db].lsn);
 
     while (true) {
         // check for the schema at the access key
@@ -77,7 +79,7 @@ SchemaCache::_fetch_locked(std::unique_lock<std::mutex> &lock,
                            const XidLsn &xid,
                            PopulateFn populate)
 {
-    LOG_DEBUG(LOG_SCHEMA, "db {}, table {}, xid {}:{}", db, tid, xid.xid, xid.lsn);
+    LOG_DEBUG(LOG_SCHEMA, "SCHEMACACHE: CALL TO SERVICE TO CACHE: db {}, table {}, xid {}:{}", db, tid, xid.xid, xid.lsn);
 
     // create a dummy entry in the fetching state
     auto key = std::make_pair(db, tid);
