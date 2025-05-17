@@ -232,6 +232,19 @@ springtail_unit_test(test_pg_ddl_mgr
         GTest::gtest_main
 )
 
+springtail_unit_test(test_field_quals
+    SOURCES test/test_field_quals.cc
+    INCLUDES ${PROJECT_SOURCE_DIR}/include ${PostgreSQL_INCLUDE_DIRS}
+    LIBS springtail_test_fdw
+         springtail_pg
+         springtail_common
+         springtail_test
+         ${START_GROUP}
+           ${POSTGRES_DEP_LIBS}
+         ${END_GROUP}
+         GTest::gtest_main
+)
+
 # dependencies for copying fdw files to postgres shared directory
 add_dependencies(copy_fdw_files springtail_pg_fdw)
 add_dependencies(test_pg_ddl_mgr copy_fdw_files)

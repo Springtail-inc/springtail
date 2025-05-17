@@ -15,7 +15,6 @@ from bench_case import BenchCase
 import springtail
 import common
 
-
 def wait_for_springtail_ready(props: springtail.Properties) -> None:
     """Wait for Springtail to be ready by checking sentinel value"""
     # Get database names
@@ -191,6 +190,12 @@ if __name__ == "__main__":
 
     if not build_dir or not system_config:
         raise ValueError("Missing required config: build_dir or system_json_path")
+
+    # sync the benchmark data files
+    # XXX will add this in with my next PR
+    # helper = AwsHelper(config=botocore.config.Config(signature_version=botocore.UNSIGNED),
+    #                    region="us-east-1")
+    # helper.sync_s3_data('test_data', s3_path='test_files')
 
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
