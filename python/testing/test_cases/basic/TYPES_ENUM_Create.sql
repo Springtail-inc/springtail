@@ -7,7 +7,8 @@ FROM pg_type
 JOIN pg_enum ON pg_enum.enumtypid = pg_type.oid
 WHERE typname = 'colors'
 AND typtype = 'e'
-GROUP BY typname, typtype;
+GROUP BY typname, typtype
+ORDER BY pg_type.oid;
 
 ## cleanup
 DROP TYPE IF EXISTS colors;

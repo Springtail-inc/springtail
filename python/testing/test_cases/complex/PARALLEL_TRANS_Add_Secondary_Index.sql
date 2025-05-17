@@ -23,7 +23,7 @@ CREATE INDEX idx_item_name_category ON parallel_trans_add_secondary_index (item_
 
 ## verify
 ### schema_check public parallel_trans_add_secondary_index
-SELECT * FROM parallel_trans_add_secondary_index;
+SELECT * FROM parallel_trans_add_secondary_index ORDER BY id;
 
 ## cleanup
 DROP TABLE IF EXISTS parallel_trans_add_secondary_index;
