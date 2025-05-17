@@ -510,6 +510,9 @@ Service::AlterTable(grpc::ServerContext* context,
 
     LOG_INFO("got AlterTable()");
 
+    // acquire a shared lock to ensure no one is doing a finalize
+    boost::shared_lock lock(_write_mutex);
+
     // retrieve the id of the namespace
     // this function is called by drop table, so we don't check if
     // the namespace exists
@@ -523,8 +526,6 @@ Service::AlterTable(grpc::ServerContext* context,
     ddl["lsn"] = request->lsn();
     ddl["schema"] = request->table().namespace_name();
     ddl["table"] = request->table().name();
-
-    boost::shared_lock lock(_write_mutex);
 
     // retrieve the name of the table at the point of alteration
     XidLsn xid(request->xid(), request->lsn());
