@@ -22,7 +22,7 @@ INSERT INTO parallel_trans_ddl (second_column) VALUES ('Second column value 4');
 ALTER TABLE parallel_trans_ddl DROP COLUMN second_column;
 
 ## verify
-SELECT * FROM parallel_trans_ddl;
+SELECT * FROM parallel_trans_ddl ORDER BY id;
 
 ## cleanup
 DROP TABLE IF EXISTS parallel_trans_ddl;

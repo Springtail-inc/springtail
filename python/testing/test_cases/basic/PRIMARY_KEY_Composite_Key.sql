@@ -12,7 +12,7 @@ INSERT INTO test_pkey_3 (id1, id2, id3, value) VALUES (1, 2, 3, 'test_value_1');
 INSERT INTO test_pkey_3 (id1, id2, id3, value) VALUES (4, 5, 6, 'test_value_2');
 
 ## verify
-SELECT * FROM test_pkey_3;
+SELECT * FROM test_pkey_3 ORDER BY id1, id2, id3;
 
 ## cleanup
 -- Cleanup

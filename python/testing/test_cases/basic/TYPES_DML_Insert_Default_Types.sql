@@ -22,7 +22,7 @@ INSERT INTO table_with_default_types_insert (col1, col2, col3, col4, col5, col6,
 VALUES (3, 'Test String 3', '2025-03-20', NULL, TRUE, 'Sample text 3', 'C', 7.89);
 
 ## verify
-SELECT * FROM table_with_default_types_insert;
+SELECT * FROM table_with_default_types_insert ORDER BY serial_id;
 
 ## cleanup
 DROP TABLE IF EXISTS table_with_default_types_insert;

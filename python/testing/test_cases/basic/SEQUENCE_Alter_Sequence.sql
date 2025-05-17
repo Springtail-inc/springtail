@@ -19,7 +19,7 @@ INSERT INTO table_with_test_seq (name) VALUES ('Second Entry');
 
 ## verify
 -- Verify the table data
-SELECT * FROM table_with_test_seq;
+SELECT * FROM table_with_test_seq ORDER BY id;
 
 ## cleanup
 DROP TABLE IF EXISTS table_with_test_seq;
