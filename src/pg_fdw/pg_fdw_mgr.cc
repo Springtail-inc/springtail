@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <memory>
 #include <shared_mutex>
+#include <sstream>
 
 #include <fmt/core.h>
 #include <nlohmann/json.hpp>
@@ -57,6 +58,93 @@ extern "C" {
 
 namespace springtail::pg_fdw {
     using springtail::Index;
+
+    static std::string
+    _get_value_string(const ConstQual& qual)
+    {
+        if (qual.isnull) {
+            return "NULL";
+        }
+
+        std::ostringstream ss;
+
+        switch (qual.base.typeoid) {
+            case MONEYOID:
+            case TIMESTAMPOID:
+            case TIMESTAMPTZOID:
+            case TIMEOID:
+            case INT8OID:
+                ss << DatumGetInt64(qual.value);
+                break;
+
+            case DATEOID:
+            case INT4OID:
+                ss << DatumGetInt32(qual.value);
+                break;
+
+            case INT2OID:
+                ss << DatumGetInt16(qual.value);
+                break;
+            case FLOAT8OID:
+                ss << DatumGetFloat8(qual.value);
+                break;
+            case FLOAT4OID:
+                ss << DatumGetFloat4(qual.value);
+                break;
+            case BOOLOID:
+                ss << DatumGetBool(qual.value);
+                break;
+            case CHAROID:
+                ss << DatumGetBool(qual.value);
+                break;
+            case UUIDOID: {
+                const char* p = reinterpret_cast<const char*>(DatumGetPointer(qual.value));
+                for (int i = 0; i != 16; ++i) {
+                    ss << p[i];
+                }
+                ss << "::UUID";
+                break;
+            }
+            case VARCHAROID:
+            case TEXTOID: {
+                const char *str = TextDatumGetCString(qual.value);
+                ss << "'" << str << "'";
+                break;
+            }
+            case NUMERICOID: // DECIMAL(x,y)
+                {
+                    auto v = DatumGetNumeric(qual.value);
+                    ss << numeric_normalize(v);
+                    ss << "::NUMERIC";
+                }
+                break;
+            default:
+                // handle enum user defined type
+                if (qual.base.typeoid >= FirstNormalObjectId) {
+                    Oid oid = DatumGetObjectId(qual.value);
+                    ss << oid << "::USER";
+                    break;
+                }
+                break;
+        }
+        return ss.str();
+    }
+
+    static const std::map<QualOpName, std::string>&
+    _op_symbols()
+    {
+        static const std::map<QualOpName, std::string> ops =
+        {
+            {UNSUPPORTED, "~~~"},
+            {EQUALS, "="},
+            {NOT_EQUALS, "!="},
+            {LESS_THAN, "<"},
+            {LESS_THAN_EQUALS, "<="},
+            {GREATER_THAN, ">"},
+            {GREATER_THAN_EQUALS, ">="}
+        };
+        return ops;
+    }
 
     template<typename From, typename To>
     static bool
@@ -497,7 +585,7 @@ namespace springtail::pg_fdw {
             auto column = state->columns.at(state->attr_map.at(attno));
             target_colnames.push_back(column.name);
             state->target_columns.emplace_back(
-                   i++, column.pg_type, state->_attrs[attno-1], std::move(filter));
+                   i++, column.pg_type, state->_attrs[attno-1], column.name, std::move(filter));
         }
 
 
@@ -528,7 +616,7 @@ namespace springtail::pg_fdw {
             DCHECK_LE(attno, state->_attrs.size());
 
             state->target_columns.emplace_back(
-                    i++, col_i->second.pg_type, state->_attrs[attno-1]);
+                    i++, col_i->second.pg_type, state->_attrs[attno-1], col_i->second.name);
 
             LOG_DEBUG(LOG_FDW, "Target list column: {}:{}",
                                 attno, col_i->second.name);
@@ -1068,6 +1156,68 @@ namespace springtail::pg_fdw {
         // remove transaction ID mapping on a commit or rollback
         LOG_DEBUG(LOG_FDW, "fdw_commit_rollback: pg_xid: {}, commit: {}", pg_xid, commit);
         _xid_map.erase(pg_xid);
+    }
+
+    std::vector<std::pair<std::string, std::string>>
+    PgFdwMgr::fdw_explain_scan(const PgFdwState *state) 
+    {
+        std::vector<std::pair<std::string, std::string>> r;
+        r.emplace_back("FDW name", "springtail");
+
+        std::ostringstream ss;
+
+        // collect target columns
+        for (const auto& c: state->target_columns) {
+            (ss.tellp()? ss << ", ": ss) << c.name;
+
+        }
+
+        if (!ss.str().empty()) {
+            r.emplace_back("   Targets", ss.str());
+        }
+
+        // collect indexes
+        ss.str("");
+        for (const auto& idx: state->indexes) {
+            if (ss.tellp())
+                ss << ", ";
+            ss << idx.name;
+            ss << "[unique:";
+            if (idx.is_unique) {
+                ss << "true";
+            } else {
+                ss << "false";
+            }
+            ss << "]";
+        }
+        if (!ss.str().empty()) {
+            r.emplace_back("   All indexes", ss.str());
+        }
+
+        // sortgroup index
+        if (state->sortgroup_index) {
+            r.emplace_back("   Sort index", state->sortgroup_index->name);
+        }
+
+        // scan index
+        if (state->index) {
+            r.emplace_back("   Scan index", state->index->name);
+        }
+
+        // collect quals
+        ss.str("");
+
+        for (const ConstQual *qual: state->filtered_quals) {
+            const auto& column = state->columns.at(state->attr_map.at(qual->base.varattno));
+            (ss.tellp()? ss << ", ": ss) <<
+                std::format("({} {} {})", column.name, _op_symbols().at(qual->base.op), _get_value_string(*qual));
+        }
+
+        if (!ss.str().empty()) {
+            r.emplace_back("   Filters", ss.str());
+        }
+
+        return r;
     }
 
     void

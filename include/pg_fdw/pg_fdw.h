@@ -54,6 +54,9 @@ List *fdw_can_sort(SpringtailPlanState *state, List *sortgroup);
 /** Helper to get list of path keys (key name, num rows) */
 List *fdw_get_path_keys(SpringtailPlanState *state);
 
+/** Explain scan */
+void fdw_explain_scan(ForeignScanState *node, ExplainState *es);
+
 #ifdef __cplusplus
 }
 #endif

@@ -85,6 +85,7 @@ namespace springtail::pg_fdw {
             int field_idx; ///< field idx in the fields array of PgFdwState
             int32_t sp_pg_type; ///< Springtail column pg type
             PgAttr pg_attr; ///< PG attribute info
+            std::string name; ///< column name to be used in EXPLAIN
 
             struct Filter {
                 QualOpName op;
@@ -216,6 +217,13 @@ namespace springtail::pg_fdw {
          * @param commit True if commit, false if rollback
          */
         void fdw_commit_rollback(uint64_t pg_xid, bool commit);
+
+        /** Explain scan
+         * @param state PgFdwState
+         * @return Vector of name:description pairs that should be added by PG to its output
+         */
+        std::vector<std::pair<std::string, std::string>> fdw_explain_scan(const PgFdwState *state);
+
 
         // public for testing...
         /**
