@@ -59,6 +59,10 @@ namespace springtail::pg_log_mgr {
         /** coordinator thread worker ids arg=db_id */
         static constexpr char const * const WRITER_WORKER_ID = "writer_{}";
         static constexpr char const * const READER_WORKER_ID = "reader_{}";
+        static constexpr char const * const COPY_WORKER_ID = "copy_{}";
+        static constexpr char const * const RECONCILIATION_WORKER_ID = "reconciliation_{}";
+        static constexpr char const * const MSG_WORKER_ID = "msg_{}";
+        static constexpr char const * const FSYNC_WORKER_ID = "fsync_{}";
         static constexpr char const * const XACT_WORKER_ID = "xact_{}";
 
         static constexpr int QUEUE_SIZE = 256;

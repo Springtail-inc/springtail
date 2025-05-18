@@ -3,17 +3,18 @@
 #include <common/common.hh>
 #include <common/logging.hh>
 #include <common/exception.hh>
+#include <common/coordinator.hh>
 
 #include <pg_repl/pg_types.hh>
+#include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_log_writer.hh>
-
 
 namespace springtail::pg_log_mgr {
 
-    PgLogWriter::PgLogWriter(const std::filesystem::path &file,
+    PgLogWriter::PgLogWriter(uint64_t db_id,
+                             const std::filesystem::path &file,
                              std::function<void (uint64_t)> lsn_callback_fn)
-        : _writer(file), _file(file), _lsn_callback_fn(lsn_callback_fn)
-
+        : _db_id(db_id), _writer(file), _file(file), _lsn_callback_fn(lsn_callback_fn)
     {
         _fsync_thread = std::thread(&PgLogWriter::_fsync_worker, this);
     }
@@ -21,7 +22,14 @@ namespace springtail::pg_log_mgr {
     void
     PgLogWriter::_fsync_worker()
     {
+        std::string coordinator_id = fmt::format(PgLogMgr::FSYNC_WORKER_ID, _db_id);
+        auto coordinator = Coordinator::get_instance();
+        coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
         while (!_shutdown) {
+            // mark alive with coordinator
+            coordinator->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
             // sleep for at least PG_LOG_MIN_FSYNC_MS
             std::this_thread::sleep_for(std::chrono::milliseconds(PG_LOG_MIN_FSYNC_MS));
             if (_shutdown) {
@@ -40,6 +48,9 @@ namespace springtail::pg_log_mgr {
 
             _update_lsn_from_queue();
         }
+
+        // unregister thread before exiting
+        coordinator->unregister_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
     }
 
     void
