@@ -300,6 +300,27 @@ def install_fdw(build_dir : str) -> None:
     start_postgres()
 
 
+def _install_triggers(conn: psycopg2.extensions.connection, build_dir: str) -> None:
+    """Install the triggers in the database using an existing connection."""
+    # Trigger scripts
+    parent_dir = os.path.dirname(build_dir)
+    trigger_sql = os.path.join(parent_dir, 'scripts/triggers.sql')
+    execute_sql_script(conn, trigger_sql)
+
+def install_triggers(props: Properties, build_dir: str) -> None:
+    """Install the triggers in the database."""
+    # Get db config
+    db_config = props.get_db_configs()[0]
+    db_name = db_config['name']
+
+    # Connect to the primary database
+    conn = connect_db_instance(props, db_name)
+    try:
+        _install_triggers(conn, build_dir)
+    finally:
+        conn.close()
+
+
 def start_replication(props : Properties, build_dir : str) -> None:
     """Start the replication process."""
     # Get db config
@@ -318,10 +339,8 @@ def start_replication(props : Properties, build_dir : str) -> None:
     # NOTE: it the slot name needs to be globally unique
     execute_sql(conn, "SELECT pg_create_logical_replication_slot(%s, 'pgoutput');", slot_name)
 
-    # Trigger scripts
-    parent_dir = os.path.dirname(build_dir)
-    trigger_sql = os.path.join(parent_dir, 'scripts/triggers.sql')
-    execute_sql_script(conn, trigger_sql)
+    # Install triggers using existing connection
+    _install_triggers(conn, build_dir)
 
     # Close the connection
     conn.close()
@@ -817,18 +836,18 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('--dump', action=argparse.BooleanOptionalAction, help="Dump the log files into a tarball")
     parser.add_argument('--report', action=argparse.BooleanOptionalAction, help="Create a new bug report")
     parser.add_argument('--load-redis', action=argparse.BooleanOptionalAction, help="Load redis from the system file")
+    parser.add_argument('--install-triggers', action='store_true', help="Install triggers in the database")
 
     # Parse the arguments and return them
     args = parser.parse_args()
     return args
 
-
-if __name__ == "__main__":
+def main() -> None:
     """Main function to run the Springtail system."""
     # Parse command line arguments
     args = parse_arguments()
 
-    if not args.start and not args.status and not args.kill and not args.dump and not args.check and not args.report and not args.load_redis:
+    if not args.start and not args.status and not args.kill and not args.dump and not args.check and not args.report and not args.load_redis and not args.install_triggers:
         print("No action specified. Use --start, --status, --dump, --check, --report, --load-redis or --kill.")
         sys.exit(1)
 
@@ -843,6 +862,11 @@ if __name__ == "__main__":
                             handlers=logging.StreamHandler(sys.stdout))
 
     try:
+        if args.install_triggers:
+            props = Properties(args.config_file)
+            install_triggers(props, args.build_dir)
+            sys.exit(0)
+
         if args.status:
             status()
             sys.exit(0)
@@ -878,3 +902,7 @@ if __name__ == "__main__":
         if (args.debug):
             traceback.print_exc()
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
