@@ -64,15 +64,12 @@ Service::_get_unfinished_indexes_info(uint64_t db_id)
     auto search_key = sys_tbl::IndexNames::Primary::key_tuple(0, 0, 0, 0);
     struct IndexBasicInfo {
         uint64_t index_id;
-        uint8_t state;
         XidLsn xid_lsn;
         uint64_t table_id;
-        bool is_unique;
-        std::string name;
-        uint64_t namespace_id;
     };
 
-    // Map <index_id, <xid, IndexBasicInfo>>
+    // Build a map <index_id, <xid, IndexBasicInfo>>
+    // containing map of unfinished indexes
     std::unordered_map<uint64_t, std::unordered_map<uint64_t, IndexBasicInfo>> unfinished_indexes_map;
 
     for (auto names_i = names_t->lower_bound(search_key); names_i != names_t->end(); ++names_i) {
@@ -92,14 +89,10 @@ Service::_get_unfinished_indexes_info(uint64_t db_id)
                  sys_tbl::IndexNames::State::NOT_READY)) {
             IndexBasicInfo info;
             info.index_id = index_id;
-            info.state = state;
             XidLsn index_xid_lsn(names_fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(&row),
                     names_fields->at(sys_tbl::IndexNames::Data::LSN)->get_uint64(&row));
             info.xid_lsn = index_xid_lsn;
-            info.name = names_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(&row);
             info.table_id = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(&row);
-            info.is_unique = names_fields->at(sys_tbl::IndexNames::Data::IS_UNIQUE)->get_bool(&row);
-            info.namespace_id = names_fields->at(sys_tbl::IndexNames::Data::NAMESPACE_ID)->get_uint64(&row);
 
             // Pick the latest unfinished state for the index
             if (unfinished_indexes_map.find(index_id) != unfinished_indexes_map.end()) {
@@ -115,7 +108,12 @@ Service::_get_unfinished_indexes_info(uint64_t db_id)
         }
     }
 
+    // From the above map, reorganize them in the form of
+    // {xid: [indexes]}  =>  proto::IndexesInfo
+    // after fetching full index info (proto::IndexInfo)
     proto::IndexesInfo unfinished_indexes;
+    proto::GetIndexInfoRequest index_info_request;
+    index_info_request.set_db_id(db_id);
 
     for (const auto& [index_id, index_entry]: unfinished_indexes_map) {
         auto& [index_xid, index_basic_info] = *index_entry.begin();
@@ -129,44 +127,11 @@ Service::_get_unfinished_indexes_info(uint64_t db_id)
             index_info_list = &(*unfinished_indexes.mutable_xid_index_map())[index_xid];
         }
 
-        auto* info = index_info_list->add_indexes();
-        auto ns_info = _get_namespace_info(db_id, index_basic_info.namespace_id, index_basic_info.xid_lsn, false);
-        CHECK(ns_info);
-
-        info->set_id(index_basic_info.index_id);
-        info->set_name(index_basic_info.name);
-        info->set_state(index_basic_info.state);
-        info->set_namespace_name(ns_info->name);
-        info->set_table_id(index_basic_info.table_id);
-        info->set_is_unique(index_basic_info.is_unique);
-        auto index_key = sys_tbl::Indexes::Primary::key_tuple(index_basic_info.table_id, index_id, index_xid,
-                                                              index_basic_info.xid_lsn.lsn, 0);
-        for (auto index_i = indexes_t->lower_bound(index_key); index_i != indexes_t->end();
-             ++index_i) {
-            auto& row = *index_i;
-            uint64_t tid = indexes_fields->at(sys_tbl::Indexes::Data::TABLE_ID)->get_uint64(&row);
-            uint64_t idx_id =
-                indexes_fields->at(sys_tbl::Indexes::Data::INDEX_ID)->get_uint64(&row);
-
-            if (tid != index_basic_info.table_id || idx_id != index_id) {
-                LOG_DEBUG(LOG_SCHEMA, "No more indexes for table {} -- {}, {} -- {}",
-                                    index_basic_info.table_id, tid, idx_id, index_id);
-                break;
-            }
-            // index_xid and xid's of index columns must match
-            uint64_t xid = indexes_fields->at(sys_tbl::Indexes::Data::XID)->get_uint64(&row);
-            uint64_t lsn = indexes_fields->at(sys_tbl::Indexes::Data::LSN)->get_uint64(&row);
-            if (index_basic_info.xid_lsn != XidLsn(xid, lsn)) {
-                break;
-            }
-
-            proto::IndexColumn* col = info->add_columns();
-            col->set_position(
-                indexes_fields->at(sys_tbl::Indexes::Data::COLUMN_ID)->get_uint32(&row));
-            col->set_idx_position(
-                indexes_fields->at(sys_tbl::Indexes::Data::POSITION)->get_uint32(&row));
-        }
-
+        index_info_request.set_index_id(index_basic_info.index_id);
+        index_info_request.set_xid(index_basic_info.xid_lsn.xid);
+        index_info_request.set_lsn(index_basic_info.xid_lsn.lsn);
+        index_info_request.set_table_id(index_basic_info.table_id);
+        *index_info_list->add_indexes() = _get_index_info(index_info_request);
     }
 
     return unfinished_indexes;
