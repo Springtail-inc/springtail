@@ -12,6 +12,7 @@
 #include <storage/mutable_btree.hh>
 #include <common/common.hh>
 #include <pg_repl/index_reconcile_request.hh>
+#include <proto/sys_tbl_mgr.pb.h>
 
 namespace springtail::committer {
 
@@ -51,6 +52,12 @@ namespace springtail::committer {
         Indexer& operator=(const Indexer&) = delete;
 
         void process_ddls(uint64_t db_id, uint64_t xid, nlohmann::json const& ddls);
+
+        /**
+         * @brief Recover indexes which were not complete (build or drop) during shutdown/crash
+         * @Param db_id The ID of the database
+         */
+        void recover_indexes(uint64_t db_id);
 
         /**
          * Build a secondary index.
@@ -199,6 +206,9 @@ namespace springtail::committer {
          * @param key Index key to remove.
          */
         void _remove_index_key(uint64_t db_id, uint64_t table_id, const Key& key);
+
+        nlohmann::json _get_create_index_ddl(proto::IndexInfo index_info);
+        nlohmann::json _get_drop_index_ddl(proto::IndexInfo index_info);
 
         /**
          * @brief Map of <db_id, index_reconciliation_queue> for indexer to notify committer to trigger index reconciliation

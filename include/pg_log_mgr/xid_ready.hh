@@ -90,7 +90,8 @@ namespace springtail::committer {
             TABLE_SYNC_START = 'S',
             TABLE_SYNC_SWAP = 'W',
             TABLE_SYNC_COMMIT = 'C',
-            RECONCILE_INDEX = 'R'
+            RECONCILE_INDEX = 'R',
+            INDEX_RECOVERY_TRIGGER = 'I'
         };
 
         /** Constructor for SWAP and COMMIT messages. */
@@ -125,6 +126,13 @@ namespace springtail::committer {
               _timestamp(timestamp),
               _msg(msg)
         { }
+
+        /** Constructor for messages that are INDEX_RECOVERY_TRIGGER */
+        XidReady(uint64_t db_id, const Type &type)
+            : _type(type)
+        {
+            CHECK_EQ(type, Type::INDEX_RECOVERY_TRIGGER);
+        }
 
         /** A getter for the type. */
         Type type() const {

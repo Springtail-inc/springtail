@@ -374,6 +374,21 @@ Client::get_index_info(uint64_t db_id,
     return response;
 }
 
+proto::IndexesInfo
+Client::get_unfinished_indexes_info(uint64_t db_id)
+{
+    proto::GetUnfinishedIndexesInfoRequest request;
+    request.set_db_id(db_id);
+
+    proto::IndexesInfo response;
+    grpc_client::retry_rpc("SysTblMgr", "GetUnfinishedIndexesInfo",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->GetUnfinishedIndexesInfo(context, request, &response);
+                           });
+
+    return response;
+}
+
 std::string
 Client::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
 {

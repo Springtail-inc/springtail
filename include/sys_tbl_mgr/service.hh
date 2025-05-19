@@ -152,6 +152,13 @@ public:
                         const proto::RevertRequest* request,
                         google::protobuf::Empty* response) override;
 
+    /**
+     * Get the list of indexes which are to be built/deleted, which will be
+     * used to complete the index commits while recovery
+     */
+    grpc::Status GetUnfinishedIndexesInfo(grpc::ServerContext* context,
+            const proto::GetUnfinishedIndexesInfoRequest* request,
+            proto::IndexesInfo* response) override;
 
 private:
     Service() = default;
@@ -521,6 +528,16 @@ private:
     /** Performs an get_index_info() assuming that the correct locks are already held.
      */
     proto::IndexInfo _get_index_info(const proto::GetIndexInfoRequest& request);
+
+
+    /**
+     * @brief Get the list of indexes which are to be built/deleted for the db,
+     * assuming correct locks are already held
+     *
+     * @param db_id Database ID
+     * @return IndexesInfo
+     */
+    proto::IndexesInfo _get_unfinished_indexes_info(uint64_t db_id);
 
     /** This doesn't return information about index columns
      */

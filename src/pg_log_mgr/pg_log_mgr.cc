@@ -45,6 +45,9 @@ namespace springtail::pg_log_mgr {
       _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
       _index_reconciliation_queues(index_reconciliation_queues)
     {
+        // Initiate indexes recovery for this database before pg_log_reader messages
+        _committer_queue->push(std::make_shared<committer::XidReady>(db_id, committer::XidReady::Type::INDEX_RECOVERY_TRIGGER));
+
         _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, _committer_queue, archive_logs);
 
         // construct the callback for watching for database state changes

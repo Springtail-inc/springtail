@@ -67,8 +67,6 @@ namespace springtail::committer {
          */
         void _invalidate_systbl_cache(uint64_t db, const nlohmann::json &completed_ddls);
 
-        void _create_indexer();
-
         /**
          * The structure that defines a worker job.
          */
