@@ -143,9 +143,18 @@ get_property(ALL_TESTS GLOBAL PROPERTY SPRINGTAIL_UNIT_TEST_TARGETS)
 add_custom_target(build_tests
   DEPENDS ${ALL_TESTS}
 )
+
+# Add a target to stop Springtail and install triggers
+add_custom_target(setup_springtail
+    COMMAND python3 ${PROJECT_SOURCE_DIR}/python/testing/springtail.py --kill -f ${PROJECT_SOURCE_DIR}/system.json.test -b ${CMAKE_BINARY_DIR}
+    COMMAND python3 ${PROJECT_SOURCE_DIR}/python/testing/springtail.py --install-triggers -f ${PROJECT_SOURCE_DIR}/system.json.test -b ${CMAKE_BINARY_DIR}
+    COMMENT "Setting up Springtail environment..."
+)
+
+# Update the check target to depend on setup_springtail
 add_custom_target(check
     COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target test
-    DEPENDS build_tests
+    DEPENDS build_tests setup_springtail
     COMMENT "Running tests..."
 )
 
