@@ -118,7 +118,7 @@ namespace {
             TableMgr::get_instance()->update_roots(_db_id, table_id, data_xid, metadata);
         }
 
-        void _create_index(uint64_t table_id, uint64_t index_id, uint64_t index_xid, std::string index_name) {
+        void _create_index(uint64_t table_id, uint64_t index_id, uint64_t index_xid, std::string index_name, bool process_ddls_in_indexer=true) {
             // Create index at an XID
             nlohmann::json idx_ddls;
             auto create_idx_ddl = create_index(_db_id, table_id, index_xid, index_id, index_name,
@@ -130,11 +130,17 @@ namespace {
             ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(index_info.state()), sys_tbl::IndexNames::State::NOT_READY);
 
             // Process Index DDLs
-            _indexer->process_ddls(_db_id, index_xid, idx_ddls);
+
+            if (process_ddls_in_indexer) {
+                _indexer->process_ddls(_db_id, index_xid, idx_ddls);
+            }
             sys_tbl_mgr::Client::get_instance()->finalize(_db_id, index_xid);
         }
 
         void _process_index_and_validate(uint64_t index_id, uint64_t index_xid, uint64_t reconcile_xid) {
+            // Hack: Wait for index build to be completed before triggering reconciliation
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+
             // Trigger index reconcilation at reconcile_xid
             _indexer->process_index_reconciliation(_db_id, index_xid, reconcile_xid);
             auto index_info = sys_tbl_mgr::Client::get_instance()->get_index_info(_db_id, index_id, {reconcile_xid, constant::MAX_LSN});
@@ -261,4 +267,39 @@ namespace {
         ASSERT_TRUE(it != meta->indexes.end());
         ASSERT_EQ(it->state, 1);
     }
+
+    TEST_F(Indexer_Test, Test_IndexRecovery)
+    {
+        uint64_t table_id = _tid++;
+        uint64_t index_id1 = _secondary_index_id + 6;
+        uint64_t table_xid = access_xid++;
+        uint64_t index_xid1 = access_xid++;
+        uint64_t reconcile_xid1 = access_xid++;
+        uint64_t data_xid1 = access_xid++;
+
+        // Create table
+        create_table(_db_id, table_id, table_xid, "test_indexer_table5", _columns);
+
+        // Create index
+        _create_index(table_id, index_id1, index_xid1, "idx_test_indexer_5", false);
+
+        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(_db_id, table_id, XidLsn{data_xid1});
+        auto it = std::ranges::find_if(meta->indexes,
+                [&](auto const& v) { return index_id1 == v.id; });
+        ASSERT_TRUE(it != meta->indexes.end());
+        ASSERT_EQ(it->state, 0);
+
+        // Recover indexes
+        _indexer->recover_indexes(_db_id);
+
+        // Trigger index reconcilation at reconcile_xid
+        _process_index_and_validate(index_id1, index_xid1, reconcile_xid1);
+
+        meta = sys_tbl_mgr::Client::get_instance()->get_schema(_db_id, table_id, XidLsn{data_xid1});
+        it = std::ranges::find_if(meta->indexes,
+                [&](auto const& v) { return index_id1 == v.id; });
+        ASSERT_TRUE(it != meta->indexes.end());
+        ASSERT_EQ(it->state, 1);
+    }
+
 } // namespace
