@@ -820,11 +820,11 @@ namespace springtail::pg_log_mgr {
     {
         std::string coordinator_id = fmt::format(PgLogMgr::MSG_WORKER_ID, _db_id);
         auto coordinator = Coordinator::get_instance();
-        coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+        auto& keep_alive = coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
 
         while (!_msg_queue.is_shutdown()) {
             // mark alive with coordinator
-            coordinator->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+            Coordinator::mark_alive(keep_alive);
 
             // get message from queue
             PgMsgPtr msg = _msg_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);

@@ -24,11 +24,11 @@ namespace springtail::pg_log_mgr {
     {
         std::string coordinator_id = fmt::format(PgLogMgr::FSYNC_WORKER_ID, _db_id);
         auto coordinator = Coordinator::get_instance();
-        coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+        auto& keep_alive = coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
 
         while (!_shutdown) {
             // mark alive with coordinator
-            coordinator->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+            Coordinator::mark_alive(keep_alive);
 
             // sleep for at least PG_LOG_MIN_FSYNC_MS
             std::this_thread::sleep_for(std::chrono::milliseconds(PG_LOG_MIN_FSYNC_MS));
