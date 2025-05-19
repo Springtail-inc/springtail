@@ -11,17 +11,46 @@
 
 namespace springtail {
 
-    Coordinator::Coordinator() : _should_stop(false)
+    Coordinator::Coordinator()
     {
         _db_instance_id = Properties::get_db_instance_id();
-        _background_thread = std::thread(&Coordinator::_background_update_thread, this);
+        start_thread();
     }
 
     Coordinator::~Coordinator()
     {
-        _should_stop = true;
-        if (_background_thread.joinable()) {
-            _background_thread.join();
+        stop_thread();
+    }
+
+    void
+    Coordinator::_internal_shutdown()
+    {
+        // Clean up any resources if needed
+    }
+
+    void
+    Coordinator::_internal_run()
+    {
+        while (!_is_shutting_down()) {
+            RedisClientPtr redis = RedisMgr::get_instance()->get_client();
+            std::string key = fmt::format(redis::HASH_LIVENESS, _db_instance_id);
+
+            // Collect all timestamps under the mutex
+            std::map<std::string, std::string> updates;
+            {
+                std::unique_lock lock(_threads_mutex);
+                for (const auto& [hkey, timestamp] : _thread_timestamps) {
+                    updates[hkey] = fmt::format("{}", timestamp.load());
+                }
+            }
+
+            // Update Redis in a single round-trip
+            if (!updates.empty()) {
+                redis->hmset(key, updates.begin(), updates.end());
+            }
+
+            // Sleep for 1 second
+            std::this_thread::sleep_for(BACKGROUND_THREAD_SLEEP_DURATION);
         }
     }
 
@@ -32,7 +61,7 @@ namespace springtail {
         auto epoch_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
 
-        std::lock_guard<std::mutex> lock(_threads_mutex);
+        std::unique_lock lock(_threads_mutex);
         auto [it, inserted] = _thread_timestamps.try_emplace(hkey, epoch_ms);
         return it->second;
     }
@@ -42,7 +71,7 @@ namespace springtail {
     {
         std::string hkey = fmt::format("{}:{}", enum_to_integral(type), thread_id);
 
-        std::lock_guard<std::mutex> lock(_threads_mutex);
+        std::unique_lock lock(_threads_mutex);
         _thread_timestamps.erase(hkey);
 
         // Also remove from Redis
@@ -59,7 +88,7 @@ namespace springtail {
             return;
         }
 
-        std::lock_guard<std::mutex> lock(_threads_mutex);
+        std::unique_lock lock(_threads_mutex);
         for (const auto& thread_id : threads) {
             std::string hkey = fmt::format("{}:{}", enum_to_integral(type), thread_id);
             _thread_timestamps.erase(hkey);
@@ -77,7 +106,7 @@ namespace springtail {
         std::vector<std::string> keys;
         std::string prefix = fmt::format("{}:", enum_to_integral(type));
 
-        std::lock_guard<std::mutex> lock(_threads_mutex);
+        std::unique_lock lock(_threads_mutex);
         for (const auto& [hkey, _] : _thread_timestamps) {
             if (hkey.starts_with(prefix)) {
                 // remove the daemon type prefix
@@ -93,7 +122,7 @@ namespace springtail {
     {
         std::string hkey = fmt::format("{}:{}", enum_to_integral(type), thread_id);
 
-        std::lock_guard<std::mutex> lock(_threads_mutex);
+        std::unique_lock lock(_threads_mutex);
         if (auto it = _thread_timestamps.find(hkey); it != _thread_timestamps.end()) {
             it->second.store(0);
         }
@@ -104,31 +133,5 @@ namespace springtail {
 
         // notify the coordinator immediately
         Properties::publish_liveness_notification(hkey);
-    }
-
-    void
-    Coordinator::_background_update_thread()
-    {
-        while (!_should_stop) {
-            RedisClientPtr redis = RedisMgr::get_instance()->get_client();
-            std::string key = fmt::format(redis::HASH_LIVENESS, _db_instance_id);
-
-            // Collect all timestamps under the mutex
-            std::map<std::string, std::string> updates;
-            {
-                std::lock_guard<std::mutex> lock(_threads_mutex);
-                for (const auto& [hkey, timestamp] : _thread_timestamps) {
-                    updates[hkey] = fmt::format("{}", timestamp.load());
-                }
-            }
-
-            // Update Redis in a single round-trip
-            if (!updates.empty()) {
-                redis->hmset(key, updates.begin(), updates.end());
-            }
-
-            // Sleep for 1 second
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-        }
     }
 }

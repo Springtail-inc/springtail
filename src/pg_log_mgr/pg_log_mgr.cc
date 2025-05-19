@@ -279,9 +279,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_copy_thread()
     {
-        std::string coordinator_id = fmt::format(COPY_WORKER_ID, _db_id);
-        auto coordinator = Coordinator::get_instance();
-        auto& keep_alive = coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+        // SPR-766 we should register this thread with the coordinator
 
         // check initial state on thread startup
         // if in startup_sync state then switch to syncing
@@ -298,9 +296,6 @@ namespace springtail::pg_log_mgr {
         }
 
         while (!_shutdown) {
-            // mark alive with coordinator
-            Coordinator::mark_alive(keep_alive);
-
             std::set<uint32_t> table_ids;
 
             // block on redis table sync queue w/timeout for shutdown
@@ -335,9 +330,6 @@ namespace springtail::pg_log_mgr {
             LOG_DEBUG(LOG_PG_LOG_MGR, "Committing table sync queue");
             _redis_sync_queue.commit(REDIS_WORKER_ID);
         }
-
-        // unregister thread before exiting
-        coordinator->unregister_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
     }
 
     void
@@ -470,11 +462,10 @@ namespace springtail::pg_log_mgr {
 
     bool
     PgLogMgr::_writer_read_data(
-        const std::string &coordinator_id,
         PgCopyData &data,
         PgLogWriterPtr &logger,
         uint64_t &start_offset,
-        std::function<void (uint64_t, const std::filesystem::path &)> queue_append_func)
+        std::function<void(uint64_t, const std::filesystem::path &)> queue_append_func)
     {
         // read data from pg replication connection (blocks)
         try {
@@ -549,7 +540,7 @@ namespace springtail::pg_log_mgr {
                 Coordinator::mark_alive(keep_alive);
 
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Recevied data in recovery mode");
-                if (!_writer_read_data(coordinator_id, data, logger, start_offset,
+                if (!_writer_read_data(data, logger, start_offset,
                     [&post_recovery_queue, &start_offset](uint64_t end_offset, const std::filesystem::path &file_path) {
                         if (!post_recovery_queue.empty()) {
                             PgLogQueueEntry &entry = post_recovery_queue.back();
@@ -581,7 +572,7 @@ namespace springtail::pg_log_mgr {
                 Coordinator::mark_alive(keep_alive);
 
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Recevied data in normal mode");
-                if (!_writer_read_data(coordinator_id, data, logger, start_offset,
+                if (!_writer_read_data(data, logger, start_offset,
                     [this, &start_offset](uint64_t end_offset, const std::filesystem::path &file_path) {
                         _logger_queue.push(start_offset, end_offset, file_path);
                     }

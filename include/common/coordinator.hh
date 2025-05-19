@@ -13,8 +13,8 @@ namespace springtail {
      * for daemons to register provide liveness information
      * that is stored in redis and used by the coordinator
      */
-    class Coordinator : public Singleton<Coordinator> {
-        friend class Singleton<Coordinator>;
+    class Coordinator : public SingletonWithThread<Coordinator> {
+        friend class SingletonWithThread<Coordinator>;
     public:
         /**
          * Daemon type
@@ -78,23 +78,29 @@ namespace springtail {
          */
         void kill_daemon(DaemonType type, const std::string &thread_id="0");
 
-    private:
+    protected:
         /** Private constructor */
         Coordinator();
         /** Private destructor */
         ~Coordinator();
 
+        /**
+         * @brief Internal shutdown function
+         */
+        void _internal_shutdown() override;
+
+        /**
+         * @brief Internal run function for the thread
+         */
+        void _internal_run() override;
+
+    private:
+        static constexpr std::chrono::seconds BACKGROUND_THREAD_SLEEP_DURATION{1};  // Sleep duration for background thread
+
         uint64_t _db_instance_id;             // db instance id
-        std::thread _background_thread;       // background thread for Redis updates
-        std::atomic<bool> _should_stop;       // flag to stop background thread
         std::mutex _threads_mutex;            // mutex for thread map access
 
         // Map of (type,thread_id) -> atomic timestamp
         std::unordered_map<std::string, std::atomic<uint64_t>> _thread_timestamps;
-
-        /**
-         * @brief Background thread function that periodically updates Redis
-         */
-        void _background_update_thread();
     };
 }
