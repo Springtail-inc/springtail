@@ -103,6 +103,9 @@ namespace springtail
 
         bool _started_streaming = false;
 
+        /** mutex to protect access to the _stream_connection */
+        std::mutex _write_mutex;
+
         /** replication (copy data) streaming connection */
         std::unique_ptr<LibPqConnection> _stream_connection;
 
@@ -376,7 +379,7 @@ namespace springtail
         /**
          * @brief Reconnect to the server; typically after an IO or connection error
          */
-        void reconnect();
+        void reconnect(LSN_t lsn = INVALID_LSN);
 
         /**
          * @brief Set shutdown flag; expected to be called asynchronously

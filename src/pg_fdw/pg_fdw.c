@@ -485,6 +485,7 @@ static void
 springtail_ExplainForeignScan(ForeignScanState *node, ExplainState *es)
 {
 
+    fdw_explain_scan(node, es);
 }
 
 static bool

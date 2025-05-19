@@ -143,7 +143,7 @@ ShmCache::size() const
 }
 
 std::vector<TableId> 
-ShmCache::get_db_tables(DbId db)
+ShmCache::get_db_tables(DbId db, bool exclude_dropped)
 {
     std::vector<TableId> r;
 
@@ -156,20 +156,37 @@ ShmCache::get_db_tables(DbId db)
     auto& seq_idx = _lru->get<0>();
     for (auto const& v: seq_idx) {
         if (v.db == db && std::ranges::find(r, v.tid) == r.end()) {
-            r.push_back(v.tid);
+            if (exclude_dropped) {
+                // check if the table was dropped
+                const auto& it = _cache->find({db, v.tid});
+                CHECK(it != _cache->end());
+                CHECK(!it->second.empty());
+                auto msg_it = it->second.end();
+                --msg_it;
+                if (!msg_it->dropped) {
+                    r.push_back(v.tid);
+                } else {
+                    CHECK(msg_it->msg.empty());
+                }
+            } else {
+                r.push_back(v.tid);
+            }
         }
     }
+    // least used tables are at the front of the list
+    std::ranges::reverse(r);
 
     return r;
 }
 
 bool 
-ShmCache::insert(DbId db, TableId tid, Xid xid, const std::string& msg)
+ShmCache::insert(DbId db, TableId tid, Xid xid, const std::string& msg, bool drop_table)
 {
     Key k{db, tid};
 
     Message item(_string_alloc);
     item.xid = xid;
+    item.dropped = drop_table;
 
     auto cmp = [](const auto& a, const auto& b) {return a.xid < b.xid;};
 
@@ -185,6 +202,17 @@ ShmCache::insert(DbId db, TableId tid, Xid xid, const std::string& msg)
     }
 
     bool key_exists = it != _cache->end();
+
+    // get the last cached message for the table
+    // and make sure that it wasn't dropped
+    if (!drop_table && key_exists && !it->second.empty()) {
+        auto msg_it = it->second.end();
+        --msg_it;
+        if (msg_it->xid < xid) {
+            // we don't resurrect tables
+            DCHECK(!msg_it->dropped);
+        }
+    }
 
     check_free_space_locked();
 

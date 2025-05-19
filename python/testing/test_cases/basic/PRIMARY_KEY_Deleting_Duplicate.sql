@@ -14,7 +14,7 @@ INSERT INTO test_delete_duplicates (value) VALUES ('duplicate');
 DELETE FROM test_delete_duplicates WHERE id = 1;
 
 ## verify
-SELECT * FROM test_delete_duplicates;
+SELECT * FROM test_delete_duplicates ORDER BY id;
 
 ## cleanup
 -- Cleanup

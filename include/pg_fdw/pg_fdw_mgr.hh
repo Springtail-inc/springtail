@@ -85,6 +85,7 @@ namespace springtail::pg_fdw {
             int field_idx; ///< field idx in the fields array of PgFdwState
             int32_t sp_pg_type; ///< Springtail column pg type
             PgAttr pg_attr; ///< PG attribute info
+            std::string name; ///< column name to be used in EXPLAIN
 
             struct Filter {
                 QualOpName op;
@@ -217,6 +218,33 @@ namespace springtail::pg_fdw {
          */
         void fdw_commit_rollback(uint64_t pg_xid, bool commit);
 
+        /** Explain scan
+         * @param state PgFdwState
+         * @return Vector of name:description pairs that should be added by PG to its output
+         */
+        std::vector<std::pair<std::string, std::string>> fdw_explain_scan(const PgFdwState *state);
+
+
+        // public for testing...
+        /**
+         * @brief Convert a qual of one schema type to another; changes qual oid and value
+         * @param qual qual to convert
+         * @param from schema type of springtail column
+         * @param to schema type of pg qual value
+         * @return true if conversion was successful
+         * @return false if conversion failed
+         */
+        static bool convert_qual(ConstQualPtr qual, SchemaType from, SchemaType to);
+
+        /**
+         * @brief Check if a qual is compatible with a schema column
+         * @param column schema column
+         * @param qual qual to check
+         * @return true if the qual is compatible with the column
+         * @return false if the qual is not compatible with the column
+         */
+        static bool check_type_compatibility(const SchemaColumn &column, ConstQualPtr qual);
+
     private:
         /** Delete constructor */
         PgFdwMgr() : _user_type_cache(MAX_USER_TYPE_CACHE) {};
@@ -267,6 +295,9 @@ namespace springtail::pg_fdw {
                                     int32_t springtail_oid,
                                     Oid pg_oid,
                                     int32_t atttypmod);
+
+        /** Helper to convert a numeric datum to binary */
+        std::vector<char> _numeric_datum_to_vector(Datum value);
 
         /** Helper to setup quals and scan iterator in state, called from begin_scan */
         void _init_quals(PgFdwState *state, List *qual_list);

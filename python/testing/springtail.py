@@ -312,7 +312,7 @@ def start_replication(props : Properties, build_dir : str) -> None:
     conn = connect_db_instance(props, db_name)
 
     # Create the publication
-    execute_sql(conn, f"CREATE PUBLICATION {quote_ident(pub_name, conn)} FOR ALL TABLES;")
+    execute_sql(conn, f"CREATE PUBLICATION {quote_ident(pub_name, conn)} FOR ALL TABLES WITH (publish_via_partition_root);")
 
     # Create the replication slot;
     # NOTE: it the slot name needs to be globally unique
