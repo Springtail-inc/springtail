@@ -151,49 +151,50 @@ def cleanup_db_instance(props : Properties) -> None:
     """Cleanup the database instance.
        Drop and recreate the db and execute cleanup SQL statements.
     """
-    # connect to the db instance
-    db_config = props.get_db_configs()[0]
-    db_name = db_config['name']
-    slot_name = db_config['replication_slot']
-    pub_name = db_config['publication_name']
+    for db_config in props.get_db_configs():
+        # connect to the db instance
+        db_name = db_config['name']
+        slot_name = db_config['replication_slot']
+        pub_name = db_config['publication_name']
 
-    if not check_postgres_running():
-        start_postgres()
+        if not check_postgres_running():
+            start_postgres()
 
-    # see if the replication slot exists and drop it on the target database
-    # if we don't do this and the slot exists, we can't drop the database
-    try:
-        # Connect to the database, may fail if it doesn't exist
+        # see if the replication slot exists and drop it on the target database
+        # if we don't do this and the slot exists, we can't drop the database
+        try:
+            # Connect to the database, may fail if it doesn't exist
+            conn = connect_db_instance(props, db_name)
+            slot_exists = execute_sql_select(conn, "SELECT 1 FROM pg_replication_slots WHERE slot_name = %s;", slot_name)
+            if slot_exists:
+                execute_sql(conn, "SELECT pg_drop_replication_slot(%s);", slot_name)
+        except Exception as e:
+            pass
+
+        # Connect to the database ("postgres" database)
+        conn = connect_db_instance(props)
+
+        # Drop and recreate the database
+        execute_sql(conn, f"DROP DATABASE IF EXISTS {quote_ident(db_name, conn)} WITH (FORCE);")
+        execute_sql(conn, f"CREATE DATABASE {quote_ident(db_name, conn)};")
+
+        conn.close()
+
+        # Connect to the database
         conn = connect_db_instance(props, db_name)
+
+        # Cleanup trigger functions
+        execute_sql(conn, "DROP SCHEMA IF EXISTS __pg_springtail_triggers CASCADE;")
+
         slot_exists = execute_sql_select(conn, "SELECT 1 FROM pg_replication_slots WHERE slot_name = %s;", slot_name)
         if slot_exists:
             execute_sql(conn, "SELECT pg_drop_replication_slot(%s);", slot_name)
-    except Exception as e:
-        pass
 
-    # Connect to the database ("postgres" database)
-    conn = connect_db_instance(props)
+        execute_sql(conn, f"DROP PUBLICATION IF EXISTS {quote_ident(pub_name, conn)};")
 
-    # Drop and recreate the database
-    execute_sql(conn, f"DROP DATABASE IF EXISTS {quote_ident(db_name, conn)} WITH (FORCE);")
-    execute_sql(conn, f"CREATE DATABASE {quote_ident(db_name, conn)};")
+        # Close the database connection
+        conn.close()
 
-    conn.close()
-
-    # Connect to the database
-    conn = connect_db_instance(props, db_name)
-
-    # Cleanup trigger functions
-    execute_sql(conn, "DROP SCHEMA IF EXISTS __pg_springtail_triggers CASCADE;")
-
-    slot_exists = execute_sql_select(conn, "SELECT 1 FROM pg_replication_slots WHERE slot_name = %s;", slot_name)
-    if slot_exists:
-        execute_sql(conn, "SELECT pg_drop_replication_slot(%s);", slot_name)
-
-    execute_sql(conn, f"DROP PUBLICATION IF EXISTS {quote_ident(pub_name, conn)};")
-
-    # Close the database connection
-    conn.close()
 
 def update_postgres_config(test_params: dict = {}):
     # cleanup the config to ensure during restarts/crashes we always use the proper config
@@ -309,41 +310,40 @@ def _install_triggers(conn: psycopg2.extensions.connection, build_dir: str) -> N
 
 def install_triggers(props: Properties, build_dir: str) -> None:
     """Install the triggers in the database."""
-    # Get db config
-    db_config = props.get_db_configs()[0]
-    db_name = db_config['name']
+    # Go through the db configs
+    for db_config in props.get_db_configs():
+        db_name = db_config['name']
 
-    # Connect to the primary database
-    conn = connect_db_instance(props, db_name)
-    try:
-        _install_triggers(conn, build_dir)
-    finally:
-        conn.close()
+        # Connect to the primary database
+        conn = connect_db_instance(props, db_name)
+        try:
+            _install_triggers(conn, build_dir)
+        finally:
+            conn.close()
 
 
 def start_replication(props : Properties, build_dir : str) -> None:
     """Start the replication process."""
-    # Get db config
-    db_config = props.get_db_configs()[0]
-    db_name = db_config['name']
-    slot_name = db_config['replication_slot']
-    pub_name = db_config['publication_name']
+    for db_config in props.get_db_configs():
+        db_name = db_config['name']
+        slot_name = db_config['replication_slot']
+        pub_name = db_config['publication_name']
 
-    # Connect to the primary database
-    conn = connect_db_instance(props, db_name)
+        # Connect to the primary database
+        conn = connect_db_instance(props, db_name)
 
-    # Create the publication
-    execute_sql(conn, f"CREATE PUBLICATION {quote_ident(pub_name, conn)} FOR ALL TABLES WITH (publish_via_partition_root);")
+        # Create the publication
+        execute_sql(conn, f"CREATE PUBLICATION {quote_ident(pub_name, conn)} FOR ALL TABLES WITH (publish_via_partition_root);")
 
-    # Create the replication slot;
-    # NOTE: it the slot name needs to be globally unique
-    execute_sql(conn, "SELECT pg_create_logical_replication_slot(%s, 'pgoutput');", slot_name)
+        # Create the replication slot;
+        # NOTE: it the slot name needs to be globally unique
+        execute_sql(conn, "SELECT pg_create_logical_replication_slot(%s, 'pgoutput');", slot_name)
 
-    # Install triggers using existing connection
-    _install_triggers(conn, build_dir)
+        # Install triggers using existing connection
+        _install_triggers(conn, build_dir)
 
-    # Close the connection
-    conn.close()
+        # Close the connection
+        conn.close()
 
 
 def start_fdw_daemons(props : Properties,
@@ -351,7 +351,6 @@ def start_fdw_daemons(props : Properties,
                       config_file : str = None) -> None:
     """Import the foreign data wrapper schemas."""
     fdw_config = props.get_fdw_config()
-    db_configs = props.get_db_configs()
     mount_path = props.get_mount_path()
 
     if config_file is not None:
@@ -402,36 +401,36 @@ def start_proxy(props : Properties, build_dir : str, restart: bool = False) -> N
 def wait_for_running(props : Properties) -> None:
     """Wait for the system to be in a running state."""
     # Wait for the system to be in a running state
-    db_config = props.get_db_configs()[0]
-    id = db_config['id']
-    props.wait_for_state('running', id, 'failed')
+    for db_config in props.get_db_configs():
+        id = db_config['id']
+        props.wait_for_state('running', id, 'failed')
 
 
 def execute_startup_sql(props : Properties, sql_file : str) -> None:
     """Execute the startup SQL file."""
     # Connect to the primary database
-    db_name = props.get_db_configs()[0]['name']
-    conn = connect_db_instance(props, db_name)
+    for db_config in props.get_db_configs():
+        db_name = db_config['name']
+        conn = connect_db_instance(props, db_name)
 
-    # Execute the startup SQL file
-    execute_sql_script(conn, sql_file)
+        # Execute the startup SQL file
+        execute_sql_script(conn, sql_file)
 
-    # Close the connection
-    conn.close()
+        # Close the connection
+        conn.close()
 
 
 def print_sys_props(props : Properties, config_file : str) -> None:
     """Print the system properties."""
-    db_config = props.get_db_configs()[0]
-
-    print("\nSystem properties:")
-    print(f"  Config file    : {config_file}")
-    print(f"  Mount path     : {props.get_mount_path()}")
-    print(f"  Pid path       : {props.get_pid_path()}")
-    print(f"  DB instance ID : {props.get_db_instance_id()}")
-    print(f"  Primary DB name: {db_config['name']}")
-    print(f"  Primary DB ID  : {db_config['id']}")
-    print(f"  FDW ID         : {props.get_fdw_id()}")
+    for db_config in props.get_db_configs():
+        print("\nSystem properties:")
+        print(f"  Config file    : {config_file}")
+        print(f"  Mount path     : {props.get_mount_path()}")
+        print(f"  Pid path       : {props.get_pid_path()}")
+        print(f"  DB instance ID : {props.get_db_instance_id()}")
+        print(f"  Primary DB name: {db_config['name']}")
+        print(f"  Primary DB ID  : {db_config['id']}")
+        print(f"  FDW ID         : {props.get_fdw_id()}")
 
 
 def check_config(props : Properties) -> None:
