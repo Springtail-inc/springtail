@@ -63,24 +63,26 @@ def print_table_columns_to_csv(file: str) -> None:
     """
     max_columns = 0
     max_indexes = 0
-    for table_name in table_columns:
-        max_columns = max(max_columns, len(table_columns[table_name]['columns']))
-        max_indexes = max(max_indexes, len(table_columns[table_name]['indexes']))
+    for schema_name in table_columns:
+        for table_name in table_columns[schema_name]:
+            max_columns = max(max_columns, len(table_columns[schema_name][table_name]['columns']))
+            max_indexes = max(max_indexes, len(table_columns[schema_name][table_name]['indexes']))
 
     with open(file, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
-        header = ['table_name']
+        header = ['schema_name', 'table_name']
         header.extend(['column_{:03d}'.format(i) for i in range(1, max_columns+1)])
         header.extend(['index_{:03d}'.format(i) for i in range(1, max_indexes+1)])
         writer.writerow(header)
 
-        for table_name in table_columns:
-            columns = [table_name]
-            columns.extend([column[0] for column in table_columns[table_name]['columns'][:max_columns]])
-            columns.extend([''] * (max_columns - len(table_columns[table_name]['columns'])))
-            columns.extend([column for column in table_columns[table_name]['indexes'][:max_indexes]])
-            columns.extend([''] * (max_indexes - len(table_columns[table_name]['indexes'])))
-            writer.writerow(columns)
+        for schema_name in table_columns:
+            for table_name in table_columns[schema_name]:
+                columns = [schema_name, table_name]
+                columns.extend([column[0] for column in table_columns[schema_name][table_name]['columns'][:max_columns]])
+                columns.extend([''] * (max_columns - len(table_columns[schema_name][table_name]['columns'])))
+                columns.extend([column for column in table_columns[schema_name][table_name]['indexes'][:max_indexes]])
+                columns.extend([''] * (max_indexes - len(table_columns[schema_name][table_name]['indexes'])))
+                writer.writerow(columns)
 
 def connect_db_instance(props: Properties, db_name: str = 'postgres') -> psycopg2.extensions.connection:
     """
@@ -188,10 +190,10 @@ def write_sql_to_txt(query: str, params: list = None):
                 formatted_query = formatted_query.replace('%s', 'NULL', 1)
             else:
                 formatted_query = formatted_query.replace('%s', str(param), 1)
-        with open(run_config['sql_file'], mode='a', newline='') as file:
+        with open(run_config['file_configuration']['meta_files']['load_sql'], mode='a', newline='') as file:
             file.write(formatted_query + "\n")
     else:
-        with open(run_config['sql_file'], mode='a', newline='') as file:
+        with open(run_config['file_configuration']['meta_files']['load_sql'], mode='a', newline='') as file:
             file.write(query + "\n")
 
 def write_metrics_to_csv(_type: str, duration_ms: float, txid: int, pg_ts: str, rows: int, full_table_name: str = None) -> None:
@@ -210,7 +212,7 @@ def write_metrics_to_csv(_type: str, duration_ms: float, txid: int, pg_ts: str, 
         - Appends to existing file
         - Creates file if it doesn't exist
     """
-    with open(run_config['output_file'], mode='a', newline='') as file:
+    with open(run_config['file_configuration']['output_files']['query_info'], mode='a', newline='') as file:
         writer = csv.writer(file)
         writer.writerow([_type, txid, duration_ms, pg_ts, rows, full_table_name])
 
@@ -725,7 +727,7 @@ def load_data(run_config: dict) -> None:
     props = Properties(config_file)
     print_sys_props(props, config_file)
 
-    with open(run_config['output_file'], mode='w', newline='') as file:
+    with open(run_config['file_configuration']['output_files']['query_info'], mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow(["query_type", "pg_xid", "duration_ms", "pg_timestamp", "rows_affected", "table_name"])
 
@@ -733,16 +735,16 @@ def load_data(run_config: dict) -> None:
     start_time = time.time()
 
     # Clean the previous SQL file
-    with open(run_config['sql_file'], mode='w', newline='') as file:
+    with open(run_config['file_configuration']['meta_files']['load_sql'], mode='w', newline='') as file:
         file.write("")
 
     global table_columns
     if run_config['use_existing_config']:
-        if os.path.exists(run_config['table_columns_file']):
-            with open(run_config['table_columns_file'], 'r') as table_columns_file:
+        if os.path.exists(run_config['file_configuration']['meta_files']['table_columns']):
+            with open(run_config['file_configuration']['meta_files']['table_columns'], 'r') as table_columns_file:
                 table_columns = json.load(table_columns_file)
         else:
-            print(f"[!] Warning: {run_config['table_columns_file']} does not exist. Using empty table_columns.")
+            print(f"[!] Warning: {run_config['file_configuration']['meta_files']['table_columns']} does not exist. Using empty table_columns.")
             table_columns = {}
             run_config['use_existing_config'] = False
 
@@ -757,11 +759,13 @@ def load_data(run_config: dict) -> None:
         create_schema_and_tables(conn, schema_name)
 
     # Dumping table columns into JSON file
-    with open(run_config['table_columns_file'], 'w') as file:
+    with open(run_config['file_configuration']['meta_files']['table_columns'], 'w') as file:
         json.dump(table_columns, file, indent=4)
 
     # Dumping run config to CSV file
-    print_run_config_to_csv(run_config['run_config_file'])
+    print_run_config_to_csv(run_config['file_configuration']['meta_files']['run_config'])
+    # Dumping table columns to CSV file
+    print_table_columns_to_csv(run_config['file_configuration']['meta_files']['table_columns_csv'])
     conn.close()
 
 def parse_arguments() -> argparse.Namespace:
@@ -772,7 +776,7 @@ def parse_arguments() -> argparse.Namespace:
         argparse.Namespace: Parsed arguments
     """
     parser = argparse.ArgumentParser(description="Run ingestion metrics logger")
-    parser.add_argument('-c', '--load-config-file', type=str, required=True, help='Path to the load configuration file')
+    parser.add_argument('-c', '--load-config-file', type=str, default="load_config.yaml", help='Path to the load configuration file')
 
     return parser.parse_args()
 
