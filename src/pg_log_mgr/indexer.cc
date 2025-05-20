@@ -55,6 +55,9 @@ namespace springtail::committer {
                         == sys_tbl::IndexNames::State::BEING_DELETED) {
                     auto&& index_ddl = _get_drop_index_ddl(index_info);
                     index_ddls.push_back(index_ddl);
+                } else {
+                    // We shouldnt hit this point as we picked only the unfinished indexes
+                    CHECK(false);
                 }
             }
 
