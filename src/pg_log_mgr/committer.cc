@@ -32,7 +32,7 @@ namespace springtail::committer {
         cleanup();
         
         // use the same worker count for Indexer
-        _indexer = std::make_unique<Indexer>(_worker_count, _index_reconciliation_queues);
+        _indexer = std::make_unique<Indexer>(_worker_count, _index_reconciliation_queue_mgr);
 
         auto coordinator = Coordinator::get_instance();
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
