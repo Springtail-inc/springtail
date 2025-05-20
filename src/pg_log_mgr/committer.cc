@@ -38,7 +38,7 @@ namespace springtail::committer {
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
 
         // register the thread on startup
-        coordinator->register_thread(daemon_type, _worker_id);
+        auto &keep_alive = coordinator->register_thread(daemon_type, "committer");
 
         // initiate the worker threads
         for (int i = 0; i < _worker_count; i++) {
@@ -53,7 +53,7 @@ namespace springtail::committer {
         // enter a loop polling for data from the write cache
         while (!_shutdown) {
             // update the coordinator
-            coordinator->mark_alive(daemon_type, _worker_id);
+            Coordinator::mark_alive(keep_alive);
 
             // figure out if there's an XID to process
             // note: this is a blocking call that will timeout after keep_alive secs
@@ -276,7 +276,7 @@ namespace springtail::committer {
         }
 
         // unregister the thread on shutdown
-        coordinator->unregister_thread(daemon_type, _worker_id);
+        coordinator->unregister_thread(daemon_type, "committer");
 
         _indexer.reset();
         LOG_DEBUG(LOG_COMMITTER, "Committer shutdown");
@@ -358,12 +358,12 @@ namespace springtail::committer {
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
 
         // register the thread on startup
-        coordinator->register_thread(daemon_type, worker_id);
+        auto& keep_alive = coordinator->register_thread(daemon_type, worker_id);
 
         // note: also wait on an empty queue to ensure it is drained before shutdown
         while (!_shutdown || !_worker_queue.empty()) {
             // update the coordinator
-            coordinator->mark_alive(daemon_type, worker_id);
+            Coordinator::mark_alive(keep_alive);
 
             // wait for work on the queue
             auto entry = _worker_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
@@ -526,4 +526,5 @@ namespace springtail::committer {
             }
         }
     }
+
 }  // namespace springtail::gc

@@ -9,6 +9,7 @@
 
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/committer.hh>
+#include <pg_log_mgr/index_reconciliation_queue_manager.hh>
 #include <pg_repl/index_reconcile_request.hh>
 
 namespace springtail::pg_log_mgr {
@@ -44,9 +45,9 @@ namespace springtail::pg_log_mgr {
         std::shared_ptr<ConcurrentQueue<committer::XidReady>> _committer_queue;
 
         /*
-         * @brief map <db_id, index_reconcile_queue> for indexer to notify committer to trigger index reconciliation
+         * @brief Index reconciliation manager to access the index reconciliation queues
          **/
-        std::shared_ptr<std::unordered_map<uint64_t, IndexReconcileQueuePtr>> _index_reconciliation_queues;
+        IndexReconciliationQueueManager _index_reconciliation_queue_mgr;
 
         /**
          * @brief Function for performing shutdown that is called by Singleton

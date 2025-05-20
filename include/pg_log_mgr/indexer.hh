@@ -13,10 +13,9 @@
 #include <common/common.hh>
 #include <pg_repl/index_reconcile_request.hh>
 #include <proto/sys_tbl_mgr.pb.h>
+#include <pg_log_mgr/index_reconciliation_queue_manager.hh>
 
 namespace springtail::committer {
-
-    using IndexReconcileQueuePtr = std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>>;
 
     /**
      * Indexer is responsible for building table secondary indexes.
@@ -45,8 +44,7 @@ namespace springtail::committer {
             }
         };
 
-        using ReconciliationQueuesPtr = std::shared_ptr<std::unordered_map<uint64_t, IndexReconcileQueuePtr>>;
-        Indexer(uint32_t worker_count, const ReconciliationQueuesPtr& index_reconciliation_queues);
+        Indexer(uint32_t worker_count, pg_log_mgr::IndexReconciliationQueueManager& index_reconciliation_queue_mgr);
 
         Indexer(const Indexer&) = delete;
         Indexer& operator=(const Indexer&) = delete;
@@ -211,8 +209,8 @@ namespace springtail::committer {
         nlohmann::json _get_drop_index_ddl(proto::IndexInfo index_info);
 
         /**
-         * @brief Map of <db_id, index_reconciliation_queue> for indexer to notify committer to trigger index reconciliation
+         * @brief Reference to the index reconciliation manager to access the index reconciliation queues
          */
-        ReconciliationQueuesPtr _index_reconciliation_queues;
+        pg_log_mgr::IndexReconciliationQueueManager& _index_reconciliation_queue_mgr;
     };
 }

@@ -24,6 +24,7 @@
 #include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
 #include <pg_log_mgr/xid_ready.hh>
+#include <pg_log_mgr/index_reconciliation_queue_manager.hh>
 
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <pg_log_mgr/committer.hh>
@@ -31,8 +32,6 @@
 #include <redis/db_state_change.hh>
 
 namespace springtail::pg_log_mgr {
-
-    using IndexReconcileQueuePtr = std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>>;
 
     /**
      * @brief Postgres log manager
@@ -62,6 +61,10 @@ namespace springtail::pg_log_mgr {
         /** coordinator thread worker ids arg=db_id */
         static constexpr char const * const WRITER_WORKER_ID = "writer_{}";
         static constexpr char const * const READER_WORKER_ID = "reader_{}";
+        static constexpr char const * const COPY_WORKER_ID = "copy_{}";
+        static constexpr char const * const RECONCILIATION_WORKER_ID = "reconciliation_{}";
+        static constexpr char const * const MSG_WORKER_ID = "msg_{}";
+        static constexpr char const * const FSYNC_WORKER_ID = "fsync_{}";
         static constexpr char const * const XACT_WORKER_ID = "xact_{}";
 
         static constexpr int QUEUE_SIZE = 256;
@@ -94,7 +97,7 @@ namespace springtail::pg_log_mgr {
                  int port,
                  bool archive_logs,
                  std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
-                 const std::shared_ptr<std::unordered_map<uint64_t, IndexReconcileQueuePtr>>& index_reconciliation_queues);
+                 IndexReconciliationQueueManager& index_reconciliation_queue_mgr);
 
         /**
          * @brief Construct a new Pg Log Mgr object (for testing only)
@@ -109,7 +112,8 @@ namespace springtail::pg_log_mgr {
           _committer_queue(std::make_shared<ConcurrentQueue<committer::XidReady>>()),
           _xact_log_path(xact_log_path),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
-          _index_reconciliation_queues(std::make_shared<std::unordered_map<uint64_t, IndexReconcileQueuePtr>>())
+          _test_index_reconciliation_queue_mgr(),
+          _index_reconciliation_queue_mgr(_test_index_reconciliation_queue_mgr)
         {
             _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, _committer_queue, false);
         }
@@ -238,9 +242,15 @@ namespace springtail::pg_log_mgr {
         // Index reconciliation
 
         /**
-         * Map of <db_id, index_reconciliation_queue> where index reconciliation requests are received
+         * @brief Test instance of index reconciliation manager
+         *        for testing pg_log_mgr
          */
-        std::shared_ptr<std::unordered_map<uint64_t, IndexReconcileQueuePtr>> _index_reconciliation_queues;
+        IndexReconciliationQueueManager _test_index_reconciliation_queue_mgr;
+
+        /**
+         * @brief Reference to the index reconciliation manager to access the index reconciliation queues
+         */
+        IndexReconciliationQueueManager &_index_reconciliation_queue_mgr;
         std::thread _reconciliation_thread;            ///< Index reconciliation thread
         /*
          * Index reconciliation thread; waits on index reconciliation requests
@@ -248,7 +258,7 @@ namespace springtail::pg_log_mgr {
         void _index_reconciliation_thread();
 
         /** Function for writer thread to read data from connection and store it */
-        bool _writer_read_data(const std::string &coordinator_id, PgCopyData &data, PgLogWriterPtr &logger, uint64_t &start_offset, std::function<void (uint64_t, const std::filesystem::path &)> queue_append_func);
+        bool _writer_read_data(PgCopyData &data, PgLogWriterPtr &logger, uint64_t &start_offset, std::function<void (uint64_t, const std::filesystem::path &)> queue_append_func);
     };
     using PgLogMgrPtr = std::shared_ptr<PgLogMgr>;
 

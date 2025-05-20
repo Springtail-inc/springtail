@@ -125,6 +125,7 @@ def parse_arguments():
     parser.add_argument('-c', '--config', type=str, default='config.yaml', help='Path to the test configuration file')
     parser.add_argument('-j', '--junit', type=str, help='Output test results to the specified JUnit XML file')
     parser.add_argument('-o', '--overlay', type=str, help='Run using a specific overlay config')
+    parser.add_argument('--skip-downloads', action='store_true', help='Skip downloading the test files from S3')
     parser.add_argument('test_set', type=str, nargs='?', help='Limit to a specific test set')
     parser.add_argument('test_case', type=str, nargs='*', help='Limit to a specific test case from the test set')
     return parser.parse_args()
@@ -199,9 +200,10 @@ if __name__ == "__main__":
                                        default_config_file, build_dir, {})
 
     # sync the test data files
-    helper = AwsHelper(config=botocore.config.Config(signature_version=botocore.UNSIGNED),
-                       region="us-east-1")
-    helper.sync_s3_data('test_data', s3_path='test_files')
+    if not args.skip_downloads:
+        helper = AwsHelper(config=botocore.config.Config(signature_version=botocore.UNSIGNED),
+                           region="us-east-1")
+        helper.sync_s3_data('test_data', s3_path='test_files')
 
     # run the tests
     test_failure = False

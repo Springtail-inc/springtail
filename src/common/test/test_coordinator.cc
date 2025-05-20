@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <chrono>
 #include <optional>
+#include <thread>
 
 #include <fmt/core.h>
 
@@ -81,8 +82,13 @@ protected:
      * @param thread_id thread id
      * @param alive true if the daemon is alive
      */
-    void check_redis(Coordinator::DaemonType type, const std::string &thread_id, bool alive)
+    void check_redis(Coordinator::DaemonType type, const std::string &thread_id, bool alive, bool delay = false)
     {
+        // Add a delay to allow background thread to sync
+        if (delay) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+        }
+
         RedisClientPtr redis = RedisMgr::get_instance()->get_client();
         std::string key = fmt::format(redis::HASH_LIVENESS, _instance_id);
         std::string hkey = fmt::format("{}:{}", enum_to_integral(type), thread_id);
@@ -124,7 +130,7 @@ TEST_F(CoordinatorTest, RegisterUnregisterThreadTest) {
     std::string thread_id = "1";
 
     _coordinator->register_thread(Coordinator::LOG_MGR, thread_id);
-    check_redis(Coordinator::LOG_MGR, thread_id, true);
+    check_redis(Coordinator::LOG_MGR, thread_id, true, true);
 
     _coordinator->unregister_thread(Coordinator::LOG_MGR, thread_id);
     check_redis_empty();
@@ -133,10 +139,10 @@ TEST_F(CoordinatorTest, RegisterUnregisterThreadTest) {
 TEST_F(CoordinatorTest, SetLivenessTest) {
     std::string thread_id = "1";
 
-    _coordinator->register_thread(Coordinator::WRITE_CACHE, thread_id);
-    _coordinator->mark_alive(Coordinator::WRITE_CACHE, thread_id);
+    auto& timestamp = _coordinator->register_thread(Coordinator::WRITE_CACHE, thread_id);
+    Coordinator::mark_alive(timestamp);
 
-    check_redis(Coordinator::WRITE_CACHE, thread_id, true);
+    check_redis(Coordinator::WRITE_CACHE, thread_id, true, true);
 }
 
 TEST_F(CoordinatorTest, KillDaemonTest) {
@@ -152,13 +158,13 @@ TEST_F(CoordinatorTest, MultipleThreadsTest) {
     std::string thread_id1 = "1";
     std::string thread_id2 = "2";
 
-    _coordinator->register_thread(Coordinator::DDL_MGR, thread_id1);
-    _coordinator->register_thread(Coordinator::GC_MGR, thread_id2);
+    auto &keep_alive1 = _coordinator->register_thread(Coordinator::DDL_MGR, thread_id1);
+    auto &keep_alive2 = _coordinator->register_thread(Coordinator::GC_MGR, thread_id2);
 
-    _coordinator->mark_alive(Coordinator::DDL_MGR, thread_id1);
-    _coordinator->mark_alive(Coordinator::GC_MGR, thread_id2);
+    Coordinator::mark_alive(keep_alive1);
+    Coordinator::mark_alive(keep_alive2);
 
-    check_redis(Coordinator::DDL_MGR, thread_id1, true);
+    check_redis(Coordinator::DDL_MGR, thread_id1, true, true);
     check_redis(Coordinator::GC_MGR, thread_id2, true);
 
     _coordinator->kill_daemon(Coordinator::DDL_MGR, thread_id1);

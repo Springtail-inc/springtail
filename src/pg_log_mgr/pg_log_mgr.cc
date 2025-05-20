@@ -33,7 +33,7 @@ namespace springtail::pg_log_mgr {
                        int port,
                        bool archive_logs,
                        std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
-                       const std::shared_ptr<std::unordered_map<uint64_t, IndexReconcileQueuePtr>>& index_reconciliation_queues)
+                       IndexReconciliationQueueManager& index_reconciliation_queue_mgr)
     : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
       _host(host), _db_name(db_name), _user_name(user_name),
       _password(password), _pub_name(pub_name), _slot_name(slot_name),
@@ -43,7 +43,7 @@ namespace springtail::pg_log_mgr {
       _committer_queue(committer_queue),
       _xact_log_path(xact_log_path),
       _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
-      _index_reconciliation_queues(index_reconciliation_queues)
+      _index_reconciliation_queue_mgr(index_reconciliation_queue_mgr)
     {
         // Initiate indexes recovery for this database before pg_log_reader messages
         _committer_queue->push(std::make_shared<committer::XidReady>(db_id, committer::XidReady::Type::INDEX_RECOVERY_TRIGGER));
@@ -253,25 +253,37 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_index_reconciliation_thread()
     {
+        std::string coordinator_id = fmt::format(RECONCILIATION_WORKER_ID, _db_id);
+        auto coordinator = Coordinator::get_instance();
+        auto& keep_alive = coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
         PgMsgReconcileIndex reconcile_index_msg;
         while (!_shutdown) {
+            // mark alive with coordinator
+            Coordinator::mark_alive(keep_alive);
+
             // block on index reconciliation queue w/timeout for shutdown
             LOG_DEBUG(LOG_PG_LOG_MGR, "Waiting for index reconciliation request");
-            if (auto request = _index_reconciliation_queues->at(_db_id)->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT); request) {
+            if (auto request = _index_reconciliation_queue_mgr.pop(_db_id, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT); request && *request) {
                 //Pass it to log reader to notify committer
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Request received for index reconciliation for XID: {} @ {}", request->db_id(), request->reconcile_xid());
-                reconcile_index_msg.db_id = request->db_id();
-                reconcile_index_msg.reconcile_xid = request->reconcile_xid();
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Request received for index reconciliation for XID: {} @ {}", (*request)->db_id(), (*request)->reconcile_xid());
+                reconcile_index_msg.db_id = (*request)->db_id();
+                reconcile_index_msg.reconcile_xid = (*request)->reconcile_xid();
                 auto msg = std::make_shared<PgMsg>(PgMsgEnum::RECONCILE_INDEX);
                 msg->msg.emplace<PgMsgReconcileIndex>(reconcile_index_msg);
                 _pg_log_reader->enqueue_msg(std::move(msg));
             }
         }
+
+        // unregister thread before exiting
+        coordinator->unregister_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
     }
 
     void
     PgLogMgr::_copy_thread()
     {
+        // SPR-766 we should register this thread with the coordinator
+
         // check initial state on thread startup
         // if in startup_sync state then switch to syncing
         if (_internal_state.is(STATE_STARTUP_SYNC)) {
@@ -453,15 +465,11 @@ namespace springtail::pg_log_mgr {
 
     bool
     PgLogMgr::_writer_read_data(
-        const std::string &coordinator_id,
         PgCopyData &data,
         PgLogWriterPtr &logger,
         uint64_t &start_offset,
-        std::function<void (uint64_t, const std::filesystem::path &)> queue_append_func)
+        std::function<void(uint64_t, const std::filesystem::path &)> queue_append_func)
     {
-        // mark alive with coordinator
-        Coordinator::get_instance()->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
-
         // read data from pg replication connection (blocks)
         try {
             // wait for data from pg; true if data is available
@@ -525,15 +533,17 @@ namespace springtail::pg_log_mgr {
         uint64_t start_offset = logger->offset();
 
         std::string coordinator_id = fmt::format(WRITER_WORKER_ID, _db_id);
-
-        Coordinator::get_instance()->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+        auto coordinator = Coordinator::get_instance();
+        auto& keep_alive = coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
 
         bool done = false;
         // while we are in recovery mode, append all entries to the vector
         if (_wal_buffer_flag) {
             while (!_shutdown && _wal_buffer_flag) {
+                Coordinator::mark_alive(keep_alive);
+
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Recevied data in recovery mode");
-                if (!_writer_read_data(coordinator_id, data, logger, start_offset,
+                if (!_writer_read_data(data, logger, start_offset,
                     [&post_recovery_queue, &start_offset](uint64_t end_offset, const std::filesystem::path &file_path) {
                         if (!post_recovery_queue.empty()) {
                             PgLogQueueEntry &entry = post_recovery_queue.back();
@@ -562,8 +572,10 @@ namespace springtail::pg_log_mgr {
         if (!done) {
             // in normal mode, append entries to the _logger_queue
             while (!_shutdown) {
+                Coordinator::mark_alive(keep_alive);
+
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Recevied data in normal mode");
-                if (!_writer_read_data(coordinator_id, data, logger, start_offset,
+                if (!_writer_read_data(data, logger, start_offset,
                     [this, &start_offset](uint64_t end_offset, const std::filesystem::path &file_path) {
                         _logger_queue.push(start_offset, end_offset, file_path);
                     }
@@ -581,6 +593,9 @@ namespace springtail::pg_log_mgr {
 
         // shutdown the pg connection
         _pg_conn.close();
+
+        // unregister thread before exiting
+        coordinator->unregister_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
     }
 
     /** Thread for reading log data that is written from writer */
@@ -588,13 +603,12 @@ namespace springtail::pg_log_mgr {
     PgLogMgr::_log_reader_thread()
     {
         std::string coordinator_id = fmt::format(READER_WORKER_ID, _db_id);
-
-        auto coordinator = Coordinator::get_instance()->get_instance();
-        coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+        auto coordinator = Coordinator::get_instance();
+        auto& keep_alive = coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
 
         while (!_shutdown) {
             // mark alive with coordinator
-            coordinator->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+            Coordinator::mark_alive(keep_alive);
 
             // get log entry from queue
             PgLogQueueEntryPtr log_entry = this->_logger_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
@@ -627,13 +641,16 @@ namespace springtail::pg_log_mgr {
                                         log_entry->start_offset, log_entry->num_messages);
         }
         LOG_DEBUG(LOG_PG_LOG_MGR, "Exiting log reader thread");
+
+        // unregister thread before exiting
+        coordinator->unregister_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
     }
 
     PgLogWriterPtr
     PgLogMgr::_create_repl_logger()
     {
         std::filesystem::path file = fs::create_log_file(_repl_log_path, LOG_PREFIX_REPL, LOG_SUFFIX);
-        return std::make_shared<PgLogWriter>(file,
+        return std::make_shared<PgLogWriter>(_db_id, file,
             [this](LSN_t lsn) { _pg_conn.set_last_flushed_LSN(lsn); });
     }
 

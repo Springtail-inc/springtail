@@ -71,9 +71,6 @@ namespace springtail::pg_log_mgr {
         // initialize committer queue
         _committer_queue = std::make_shared<ConcurrentQueue<committer::XidReady>>();
 
-        // initialize index reconciliation queue
-        _index_reconciliation_queues = std::make_shared<std::unordered_map<uint64_t, IndexReconcileQueuePtr>>();
-
         // read log mgr config
         nlohmann::json log_mgr_config = Properties::get(Properties::LOG_MGR_CONFIG);
         auto optional_repl_log = Json::get<std::string>(log_mgr_config, "replication_log_path");
@@ -89,7 +86,7 @@ namespace springtail::pg_log_mgr {
         }
 
         // Start the committer thread
-        _committer = std::make_shared<springtail::committer::Committer>(1, _committer_queue, _index_reconciliation_queues);
+        _committer = std::make_shared<springtail::committer::Committer>(1, _committer_queue, _index_reconciliation_queue_mgr);
         _committer_thread = std::thread(&springtail::committer::Committer::run, _committer);
 
         // get instance id
@@ -127,14 +124,12 @@ namespace springtail::pg_log_mgr {
         std::unique_lock lock(_mutex);
 
         // Add index reconciliation queue
-        auto it = _index_reconciliation_queues->find(db_id);
-        DCHECK(it == _index_reconciliation_queues->end());
-        _index_reconciliation_queues->try_emplace(db_id, std::make_shared<ConcurrentQueue<IndexReconcileRequest>>());
+        _index_reconciliation_queue_mgr.add_queue(db_id);
 
         // create log mgr
         auto log_mgr = std::make_shared<PgLogMgr>(db_id, repl_log_path, xact_log_path, _host, db_name, _user_name,
                                                          _password, pub_name, slot_name, _log_size_rollover_threshold,
-                                                         _port, _archive_logs, _committer_queue, _index_reconciliation_queues);
+                                                         _port, _archive_logs, _committer_queue, _index_reconciliation_queue_mgr);
         _log_mgrs[db_id] = log_mgr;
 
         lock.unlock();
@@ -161,6 +156,6 @@ namespace springtail::pg_log_mgr {
         log_mgr->join();
 
         // Remove index reconciliation queue for the db
-        _index_reconciliation_queues->erase(db_id);
+        _index_reconciliation_queue_mgr.remove_queue(db_id);
     }
 }
