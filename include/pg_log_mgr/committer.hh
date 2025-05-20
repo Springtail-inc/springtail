@@ -43,9 +43,7 @@ namespace springtail::committer {
             : _worker_count(worker_count),
               _committer_queue(committer_queue),
               _index_reconciliation_queues(index_reconciliation_queues)
-        {
-            _worker_id = fmt::format("{}_{}_0", THREAD_TYPE, THREAD_MAIN);
-        }
+        { }
 
         /** Initiate the committer loop. */
         void run();
@@ -113,7 +111,6 @@ namespace springtail::committer {
     private:
         RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         bool _has_ddl_precommit = false; ///< Flag indiciating if the redis DDL is holding precommit entries
-        std::string _worker_id; ///< Unique worker ID for the Committer.
 
         uint32_t _worker_count;
         ConcurrentQueue<WorkerEntry> _worker_queue; ///< The queue of work for the worker threads.

@@ -29,11 +29,13 @@ namespace springtail::pg_log_mgr {
 
         /**
          * @brief Construct a new Pg Log Writer object
+         * @param db_id database id
          * @param file file to be writing
          * @param lsn_callback_fn callback when LSN has been fsynced
          */
-        PgLogWriter(const std::filesystem::path &file,
-                    std::function<void (LSN_t)> lsn_callback_fn);
+        PgLogWriter(uint64_t db_id,
+                    const std::filesystem::path &file,
+                    std::function<void (uint64_t)> lsn_callback_fn);
 
         /**
          * @brief Add data to log; start of message starts with header.
@@ -77,6 +79,9 @@ namespace springtail::pg_log_mgr {
             LsnOffset(uint64_t offset, LSN_t lsn) : offset(offset), lsn(lsn) {}
         };
         using LsnOffsetPtr = std::shared_ptr<LsnOffset>;
+
+        /** database id */
+        uint64_t _db_id;
 
         /** message stream writer */
         PgMsgStreamWriter _writer;

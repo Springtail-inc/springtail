@@ -29,7 +29,7 @@ INSERT INTO table_with_geom_types_insert (
 );
 
 ## verify
-SELECT * FROM table_with_geom_types_insert;
+SELECT * FROM table_with_geom_types_insert ORDER BY id;
 
 ## cleanup
 DROP TABLE IF EXISTS table_with_geom_types_insert;

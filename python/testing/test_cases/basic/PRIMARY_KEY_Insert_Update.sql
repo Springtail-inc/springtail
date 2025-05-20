@@ -12,7 +12,7 @@ INSERT INTO test_no_pkey (value) VALUES ('duplicate');
 UPDATE test_no_pkey SET value = 'updated' WHERE id = 1;
 
 ## verify
-SELECT * FROM test_no_pkey;
+SELECT * FROM test_no_pkey ORDER BY id;
 
 ## cleanup
 -- Cleanup

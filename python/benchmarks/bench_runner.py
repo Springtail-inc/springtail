@@ -5,13 +5,15 @@ import sys
 import yaml
 import time
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../testing")))
-
-import springtail
-import common
+# Get the parent directory of the current script (i.e., the project root directory)
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(project_root, 'shared')) # Add the /shared directory to the Python path
+sys.path.append(os.path.join(project_root, 'testing')) # Add the /testing directory to the Python path
 
 from bench_case import BenchCase
 
+import springtail
+import common
 
 def wait_for_springtail_ready(props: springtail.Properties) -> None:
     """Wait for Springtail to be ready by checking sentinel value"""

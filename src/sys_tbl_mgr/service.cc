@@ -510,6 +510,9 @@ Service::AlterTable(grpc::ServerContext* context,
 
     LOG_INFO("got AlterTable()");
 
+    // acquire a shared lock to ensure no one is doing a finalize
+    boost::shared_lock lock(_write_mutex);
+
     // retrieve the id of the namespace
     // this function is called by drop table, so we don't check if
     // the namespace exists
@@ -523,8 +526,6 @@ Service::AlterTable(grpc::ServerContext* context,
     ddl["lsn"] = request->lsn();
     ddl["schema"] = request->table().namespace_name();
     ddl["table"] = request->table().name();
-
-    boost::shared_lock lock(_write_mutex);
 
     // retrieve the name of the table at the point of alteration
     XidLsn xid(request->xid(), request->lsn());
@@ -1877,9 +1878,21 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
                          names_fields->at(sys_tbl::IndexNames::Data::LSN)->get_uint64(&row));
 
         if (access_xid < index_xid) {
+            const XidLsn end_xid(schema_info->access_xid_end(), schema_info->access_lsn_end());
             LOG_DEBUG(LOG_SCHEMA, "No more data for table indexes {}@{}:{}", tid,
                                 index_xid.xid, index_xid.lsn);
+            if (index_xid < end_xid) {
+                schema_info->set_access_xid_end(index_xid.xid);
+                schema_info->set_access_lsn_end(index_xid.lsn);
+            }
             continue;
+        }
+
+        // note: this means the index is valid from the found xid/lsn
+        const XidLsn start_xid(schema_info->access_xid_start(), schema_info->access_lsn_start());
+        if (start_xid < index_xid) {
+            schema_info->set_access_xid_start(index_xid.xid);
+            schema_info->set_access_lsn_start(index_xid.lsn);
         }
 
         proto::IndexInfo info;
@@ -2236,12 +2249,29 @@ Service::_apply_index_cache_history(SchemaInfoPtr schema_info,
         auto iit =
             std::ranges::upper_bound(cache, IndexCacheItem{xid, {}},
                                      [](auto const& a, auto const& b) { return a.xid < b.xid; });
+        // check if we need to update the end of the XID range
+        if (iit != cache.end()) {
+            const XidLsn end_xid(schema_info->access_xid_end(),
+                                 schema_info->access_lsn_end());
+            if (iit->xid < end_xid) {
+                schema_info->set_access_xid_end(iit->xid.xid);
+                schema_info->set_access_lsn_end(iit->xid.lsn);
+            }
+        }
 
         if (iit == cache.begin()) {
             continue;
         }
 
         --iit;
+
+        // check if we need to update the start of the XID range
+        const XidLsn start_xid(schema_info->access_xid_start(),
+                               schema_info->access_lsn_start());
+        if (start_xid < iit->xid) {
+            schema_info->set_access_xid_start(iit->xid.xid);
+            schema_info->set_access_lsn_start(iit->xid.lsn);
+        }
 
         // replace the existing info with the cached one
         auto it = std::ranges::find_if(*schema_info->mutable_indexes(),

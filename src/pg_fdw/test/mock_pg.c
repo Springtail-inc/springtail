@@ -1,6 +1,8 @@
+#include <assert.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <postgres.h>
+#include <utils/numeric.h>
 #include <varatt.h>
 #include <utils/builtins.h>
 #include <access/htup_details.h>
@@ -8,6 +10,7 @@
 #include <nodes/value.h>
 #include <nodes/primnodes.h>
 #include <storage/pmsignal.h>
+
 
 static inline Node *
 newNode_mock(size_t size, NodeTag tag)
@@ -249,3 +252,38 @@ void appendBinaryStringInfoNT(StringInfo str,
     str->len += datalen;
     str->data[str->len] = '\0';
 }
+
+void getTypeBinaryOutputInfo(Oid type_id, Oid *out_func, bool *is_varlena)
+{
+    // Dummy implementation, just set the output function to 0 and is_varlena to false
+    *out_func = 0;
+    *is_varlena = false;
+}
+
+void pfree(void *ptr)
+{
+    free(ptr);
+}
+
+bytea *OidSendFunctionCall(Oid functionId, Datum arg1)
+{
+    bytea *result = (bytea *) palloc(sizeof(bytea));
+    // Dummy implementation, just return a dummy bytea
+    memset(result, 0, sizeof(bytea));
+    return result;
+}
+
+// used by FDW only
+char *numeric_normalize(Numeric num)
+{
+    assert(false);
+    return "";
+}
+
+// used by FDW only
+extern struct varlena *pg_detoast_datum(struct varlena *datum)
+{
+    assert(false);
+    return 0;
+}
+
