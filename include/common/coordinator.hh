@@ -87,7 +87,7 @@ protected:
     /** Private constructor */
     Coordinator();
     /** Private destructor */
-    ~Coordinator() { }
+    ~Coordinator() = default;
 
     /**
      * @brief Internal shutdown function
