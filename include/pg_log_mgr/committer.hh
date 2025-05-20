@@ -18,6 +18,8 @@
 
 #include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/indexer.hh>
+#include <pg_log_mgr/index_reconciliation_queue_manager.hh>
+
 #include <pg_repl/index_reconcile_request.hh>
 
 #include <sys_tbl_mgr/table.hh>
@@ -39,10 +41,10 @@ namespace springtail::committer {
     class Committer {
     public:
         Committer(uint32_t worker_count, const std::shared_ptr<ConcurrentQueue<committer::XidReady>> &committer_queue,
-                const std::shared_ptr<std::unordered_map<uint64_t, IndexReconcileQueuePtr>> &index_reconciliation_queues)
+                pg_log_mgr::IndexReconciliationQueueManager &index_reconciliation_queue_mgr)
             : _worker_count(worker_count),
               _committer_queue(committer_queue),
-              _index_reconciliation_queues(index_reconciliation_queues)
+              _index_reconciliation_queue_mgr(index_reconciliation_queue_mgr)
         { }
 
         /** Initiate the committer loop. */
@@ -117,9 +119,9 @@ namespace springtail::committer {
         std::shared_ptr<ConcurrentQueue<XidReady>> _committer_queue;
 
         /**
-         * @brief Map of <db_id, index_reconciliation_queue> where respective index reconciliation requests are received
+         * @brief Reference to the index reconciliation manager to access the index reconciliation queues
          */
-        std::shared_ptr<std::unordered_map<uint64_t, IndexReconcileQueuePtr>> _index_reconciliation_queues;
+        pg_log_mgr::IndexReconciliationQueueManager& _index_reconciliation_queue_mgr;
 
         std::vector<std::thread> _worker_threads; ///< The worker threads.
 

@@ -5,6 +5,7 @@
 #include <common/json.hh>
 #include <common/properties.hh>
 
+#include <pg_log_mgr/index_reconciliation_queue_manager.hh>
 #include <pg_log_mgr/indexer.hh>
 #include <sys_tbl_mgr/table.hh>
 #include <sys_tbl_mgr/client.hh>
@@ -59,14 +60,12 @@ namespace {
                 {"col5", static_cast<uint8_t>(SchemaType::INT32), INT4OID, std::nullopt, 5, 0, false, false, false},
             };
 
-            _index_reconciliation_queues = std::make_shared<std::unordered_map<uint64_t, IndexReconcileQueuePtr>>();
-            _index_reconciliation_queues->try_emplace(_db_id, std::make_shared<ConcurrentQueue<IndexReconcileRequest>>());
-
-            _indexer = std::make_unique<Indexer>(1, _index_reconciliation_queues);
+            _index_reconciliation_queue_mgr.add_queue(_db_id);
+            _indexer = std::make_unique<Indexer>(1, _index_reconciliation_queue_mgr);
         }
 
         static void TearDownTestSuite() {
-            _index_reconciliation_queues->erase(_db_id);
+            _index_reconciliation_queue_mgr.remove_queue(_db_id);
             _indexer.reset();
             springtail_shutdown();
         }
@@ -89,8 +88,7 @@ namespace {
 
         inline static std::unique_ptr<Indexer> _indexer;
 
-        using IndexReconcileQueuePtr = std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>>;
-        inline static std::shared_ptr<std::unordered_map<uint64_t, IndexReconcileQueuePtr>> _index_reconciliation_queues;
+        inline static springtail::pg_log_mgr::IndexReconciliationQueueManager _index_reconciliation_queue_mgr;
 
         void _populate_table_with_data(uint64_t table_id, uint64_t table_xid,
                 uint64_t data_xid, int num_rows, int num_cols, int start_value = 0) {

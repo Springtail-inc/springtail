@@ -354,7 +354,7 @@ namespace springtail::committer {
     Committer::_create_indexer()
     {
         // use the same worker count for Indexer
-        _indexer = std::make_unique<Indexer>(_worker_count, _index_reconciliation_queues);
+        _indexer = std::make_unique<Indexer>(_worker_count, _index_reconciliation_queue_mgr);
 
         // cleanup
         auto &&precommit = _redis_ddl.get_precommit_index_ddl();
