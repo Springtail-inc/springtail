@@ -8,6 +8,7 @@ import csv
 from load_generator import LoadGenerator
 from generate_xid_traces import generate_xid_traces
 from generate_final_report import generate_final_report
+from utils import get_file_path
 
 def read_csv_to_dict(file_path):
     with open(file_path, 'r') as file:
@@ -35,17 +36,45 @@ def compare_csv_values(prev_run_file, current_run_file, threshold_percent=5.0):
         else:
             print(f"[↓] {key}: Decreased from {prev_run_value} to {current_run_value} (-{rel_change * 100:.2f}%)")
 
+def print_run_details(run_config: dict):
+    final_aggregates_file = get_file_path(run_config, "final_aggregates")
+    csv_reader = csv.DictReader(open(final_aggregates_file))
+    for row in csv_reader:
+        print(f"[=] {row['Label']} is {row['Value']}")
+
 def compare_report_with_previous_run(run_config: dict):
-    prev_aggregates_file = '/tmp/PREV_PERF_final_aggregates.csv'
-    final_aggregates_file = '/tmp/PERF_final_aggregates.csv'
+    if not os.path.exists(run_config['file_configuration']['prev_run_folder']):
+        print("[-] No previous run found. Skipping comparison.")
+        print_run_details(run_config)
+        return
 
-    compare_csv_values(prev_aggregates_file, final_aggregates_file)
+    prev_aggregates_file = get_file_path(run_config, "final_aggregates", run_config['file_configuration']['prev_run_folder'])
+    final_aggregates_file = get_file_path(run_config, "final_aggregates")
 
-def backup_prev_run_files():
-    # Move all PERF_ files to a different folder
-    for file in os.listdir("/tmp"):
-        if file.startswith("PERF_"):
-            os.rename(f"/tmp/{file}", f"/tmp/PREV_{file}")
+    compare_csv_values(prev_aggregates_file, final_aggregates_file, run_config['comparison_threshold'])
+
+def backup_files(run_config: dict):
+    if not os.path.exists(run_config['file_configuration']['output_files']['dir']):
+        # No run information present. Skip the backup
+        return
+
+    prev_run_path = run_config['file_configuration']['prev_run_folder']
+    prev_run_folder = os.path.join(os.path.dirname(prev_run_path), prev_run_path)
+    os.makedirs(prev_run_folder, exist_ok=True)
+
+    # Move the output_files, meta_files to the prev_run folder
+    for file_name in run_config['file_configuration']['output_files']:
+        file_path = get_file_path(run_config, file_name)
+        if os.path.exists(file_path):
+            os.makedirs(os.path.dirname(os.path.join(prev_run_folder, file_path)), exist_ok=True)
+            os.rename(file_path, os.path.join(prev_run_folder, file_path))
+    for file_name in run_config['file_configuration']['meta_files']:
+        file_path = get_file_path(run_config, file_name)
+        if os.path.exists(file_path):
+            os.makedirs(os.path.dirname(os.path.join(prev_run_folder, file_path)), exist_ok=True)
+            os.rename(file_path, os.path.join(prev_run_folder, file_path))
+
+    print(f"[+] Files backed up to {prev_run_folder}")
 
 def parse_arguments() -> argparse.Namespace:
     """
@@ -65,7 +94,7 @@ def run_performance_benchmark(config_file: str):
 
     try:
         print("[*] Backing up previous run files...")
-        backup_prev_run_files()
+        backup_files(run_config)
 
         print("[*] Loading data...")
         LoadGenerator(run_config).load_data()
@@ -86,5 +115,7 @@ def run_performance_benchmark(config_file: str):
 if __name__ == "__main__":
     print("[*] Running performance benchmark...")
     args = parse_arguments()
+
+    # Run the performance benchmark
     run_performance_benchmark(args.load_config_file)
     print("[*] Performance benchmark completed successfully!")

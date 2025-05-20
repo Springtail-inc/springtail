@@ -8,6 +8,8 @@ import yaml
 import os
 import argparse
 
+from utils import get_file_path
+
 def parse_xid_traces(logfile):
     """Parse XID traces from the log file."""
     with open(logfile, 'r') as f:
@@ -163,12 +165,12 @@ def generate_xid_traces(config_file: str = "load_config.yaml", log_file: str = "
     with open(config_file) as f:
         run_config = yaml.safe_load(f)
 
-    query_info_file = run_config['file_configuration']['output_files']['query_info']
-    xid_traces_csv = run_config['file_configuration']['temporary_files']['xid_traces']
-    pgxid_traces_csv = run_config['file_configuration']['temporary_files']['pgxid_traces']
-    xid_pgxid_mapping_csv = run_config['file_configuration']['temporary_files']['xid_pgxid_mapping']
-    merged_traces_csv = run_config['file_configuration']['temporary_files']['merged_traces']
-    final_traces_csv = run_config['file_configuration']['output_files']['final_traces']
+    query_info_file = get_file_path(run_config, "query_info")
+    xid_traces_csv = get_file_path(run_config, "xid_traces")
+    pgxid_traces_csv = get_file_path(run_config, "pgxid_traces")
+    xid_pgxid_mapping_csv = get_file_path(run_config, "xid_pgxid_mapping")
+    merged_traces_csv = get_file_path(run_config, "merged_traces")
+    final_traces_csv = get_file_path(run_config, "final_traces")
 
     # Wait for the log file to stop streaming and dump the traces
     dump_traces(log_file)

@@ -4,6 +4,8 @@ import pandas as pd
 import yaml
 import argparse
 
+from utils import get_file_path
+
 def generate_pg_xid_summary_file(final_traces_file: str, xid_summary_file: str):
     # Load your data
     df = pd.read_csv(final_traces_file)
@@ -122,11 +124,11 @@ def generate_final_report(config_file: str = "load_config.yaml"):
     with open(config_file) as f:
         run_config = yaml.safe_load(f)
 
-    final_traces_file = run_config['file_configuration']['output_files']['final_traces']
-    pg_xid_summary_file = run_config['file_configuration']['temporary_files']['pg_xid_summary']
-    run_config_file = run_config['file_configuration']['meta_files']['run_config']
-    table_columns_file = run_config['file_configuration']['meta_files']['table_columns_csv']
-    final_aggregates_file = run_config['file_configuration']['output_files']['final_aggregates']
+    final_traces_file = get_file_path(run_config, "final_traces")
+    pg_xid_summary_file = get_file_path(run_config, "pg_xid_summary")
+    run_config_file = get_file_path(run_config, "run_config")
+    table_columns_file = get_file_path(run_config, "table_columns_csv")
+    final_aggregates_file = get_file_path(run_config, "final_aggregates")
 
     generate_pg_xid_summary_file(final_traces_file, pg_xid_summary_file)
 

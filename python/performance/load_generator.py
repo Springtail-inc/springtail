@@ -22,6 +22,8 @@ import psycopg2
 import json
 from datetime import datetime
 
+from utils import get_file_path
+
 # Get the parent directory of the current script (i.e., the project root directory)
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -42,11 +44,11 @@ class LoadGenerator:
     def __init__(self, run_config: dict):
         self.run_config = run_config
         self.table_columns = {}
-        self.query_info_file = run_config['file_configuration']['output_files']['query_info']
-        self.load_sql_file = run_config['file_configuration']['meta_files']['load_sql']
-        self.table_columns_json = run_config['file_configuration']['meta_files']['table_columns']
-        self.table_columns_csv = run_config['file_configuration']['meta_files']['table_columns_csv']
-        self.run_config_csv = run_config['file_configuration']['meta_files']['run_config']
+        self.query_info_file = get_file_path(run_config, "query_info")
+        self.load_sql_file = get_file_path(run_config, "load_sql")
+        self.table_columns_json = get_file_path(run_config, "table_columns")
+        self.table_columns_csv = get_file_path(run_config, "table_columns_csv")
+        self.run_config_csv = get_file_path(run_config, "run_config")
 
     def print_table_columns_to_csv(self) -> None:
         """
@@ -724,12 +726,6 @@ class LoadGenerator:
         config_file = os.path.abspath(self.run_config['system_json_path'])
         self.props = Properties(config_file)
         self.print_sys_props(config_file)
-
-        self.query_info_file = self.run_config['file_configuration']['output_files']['query_info']
-        self.load_sql_file = self.run_config['file_configuration']['meta_files']['load_sql']
-        self.table_columns_json = self.run_config['file_configuration']['meta_files']['table_columns']
-        self.table_columns_csv = self.run_config['file_configuration']['meta_files']['table_columns_csv']
-        self.run_config_csv = self.run_config['file_configuration']['meta_files']['run_config']
 
         with open(self.query_info_file, mode='w', newline='') as file:
             writer = csv.writer(file)
