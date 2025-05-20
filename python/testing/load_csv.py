@@ -1,16 +1,16 @@
+import argparse
+import botocore
 import glob
+import logging
 import os
+import psycopg2
+from psycopg2.extensions import quote_ident
 import sys
 import shutil
-import glob
-import argparse
 import traceback
 import tempfile
 import time
-import logging
 from typing import Dict, List, Optional
-import psycopg2
-from psycopg2.extensions import quote_ident
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -18,6 +18,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(project_root, 'shared'))
 sys.path.append(os.path.join(project_root, 'grpc'))
 
+from aws import AwsHelper
 from properties import Properties
 
 from common import (
@@ -126,6 +127,11 @@ if __name__ == "__main__":
 
         # Check the configuration
         check_config(props)
+
+        # sync the benchmark data files
+        helper = AwsHelper(config=botocore.config.Config(signature_version=botocore.UNSIGNED),
+                           region="us-east-1")
+        helper.sync_s3_data('test_data', s3_path='test_files')
 
         # Connect to the primary database
         db_name = props.get_db_configs()[0]['name']
