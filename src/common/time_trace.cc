@@ -54,9 +54,12 @@ FlatTraceSet::format()
 
     for (auto const& [name, item] : traces) {
         s << std::endl
-          << "  " << name << "[total=" << item.timer.elapsed_ms()
-          << ", counter=" << item.start_count
-          << ", average=" << (item.timer.elapsed_ms() / item.start_count) << "]";
+          << "[TRACE] [" << name
+          << ",totalmicros=" << item.timer.elapsed_micros()
+          << ",totalms=" << item.timer.elapsed_ms()
+          << ",counter=" << item.start_count
+          << ",averagemicros=" << (item.timer.elapsed_micros() / item.start_count)
+          << ",averagems=" << (item.timer.elapsed_ms() / item.start_count) << "]";
     }
 
     return s.str();
