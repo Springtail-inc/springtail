@@ -19,7 +19,7 @@ namespace springtail::pg_log_mgr {
              * @param db_id The identifier for the new queue.
              */
             void add_queue(uint64_t db_id) {
-                std::unique_lock lock(map_mutex);
+                std::lock_guard<std::mutex> lock(map_mutex);
                 index_reconciliation_queues.emplace(db_id, std::make_shared<IRQueue>());
             }
 
@@ -32,15 +32,20 @@ namespace springtail::pg_log_mgr {
              * @return IndexReconcileRequestPtr
              */
             std::optional<IndexReconcileRequestPtr> pop(uint64_t db_id, uint32_t seconds = 0) {
-                std::unique_lock lock(map_mutex);
-                auto it = index_reconciliation_queues.find(db_id);
+                std::shared_ptr<IRQueue> _queue;
+                {
+                    std::lock_guard<std::mutex> lock(map_mutex);
+                    auto it = index_reconciliation_queues.find(db_id);
+                    if (it == index_reconciliation_queues.end()) {
+                        return std::nullopt;
+                    } else {
+                        _queue = it->second;
+
+                    }
+                }
                 // Allow indexer to continue pushing to the queue
                 // as the ConcurrentQueue has timeout if queue is empty
-                lock.unlock();
-                if (it != index_reconciliation_queues.end()) {
-                    return it->second->pop(seconds);
-                }
-                return std::nullopt;
+                return _queue->pop(seconds);
             }
 
             /**
@@ -50,7 +55,7 @@ namespace springtail::pg_log_mgr {
              * @return bool true if push is successful, false otherwise.
              */
             bool push(uint64_t db_id, IndexReconcileRequestPtr value) {
-                std::unique_lock lock(map_mutex);
+                std::lock_guard<std::mutex> lock(map_mutex);
                 auto it = index_reconciliation_queues.find(db_id);
                 if (it != index_reconciliation_queues.end()) {
                     it->second->push(value);
@@ -65,12 +70,12 @@ namespace springtail::pg_log_mgr {
              * @param db_id The database/queue identifier to remove.
              */
             void remove_queue(uint64_t db_id) {
-                std::unique_lock lock(map_mutex);
+                std::lock_guard<std::mutex> lock(map_mutex);
                 index_reconciliation_queues.erase(db_id);
             }
 
         private:
             std::unordered_map<uint64_t, std::shared_ptr<IRQueue>> index_reconciliation_queues;
-            std::shared_mutex map_mutex;  ///< Protects access to the queue map.
+            std::mutex map_mutex;  ///< Protects access to the queue map.
     };
 }
