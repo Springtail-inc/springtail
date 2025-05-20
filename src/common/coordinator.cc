@@ -14,12 +14,6 @@ namespace springtail {
     Coordinator::Coordinator()
     {
         _db_instance_id = Properties::get_db_instance_id();
-        start_thread();
-    }
-
-    Coordinator::~Coordinator()
-    {
-        stop_thread();
     }
 
     void
