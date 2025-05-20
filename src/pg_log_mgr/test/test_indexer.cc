@@ -204,4 +204,54 @@ namespace {
         uint64_t reconcile_xid = access_xid++;
         _process_index_and_validate(index_id, index_xid, reconcile_xid);
     }
+
+    TEST_F(Indexer_Test, Test_IndexInSchema)
+    {
+        uint64_t table_id = _tid++;
+        uint64_t index_id1 = _secondary_index_id + 4;
+        uint64_t index_id2 = _secondary_index_id + 5;
+        uint64_t table_xid = access_xid++;
+        uint64_t index_xid1 = access_xid++;
+        uint64_t index_xid2 = access_xid++;
+        uint64_t reconcile_xid1 = access_xid++;
+        uint64_t data_xid1 = access_xid++;
+        uint64_t reconcile_xid2 = access_xid++;
+
+        // Create table
+        create_table(_db_id, table_id, table_xid, "test_indexer_table4", _columns);
+
+        // Create index
+        _create_index(table_id, index_id1, index_xid1, "idx_test_indexer_4");
+
+        // Trigger index reconcilation at reconcile_xid
+        _process_index_and_validate(index_id1, index_xid1, reconcile_xid1);
+
+        // Create index with older xid
+        _create_index(table_id, index_id2, index_xid2, "idx_test_indexer_5");
+
+        // Check if are still seeing the first index in the schema
+        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(_db_id, table_id, XidLsn{data_xid1});
+        auto it = std::ranges::find_if(meta->indexes,
+                [&](auto const& v) { return index_id1 == v.id; });
+        ASSERT_TRUE(it != meta->indexes.end());
+        ASSERT_EQ(it->state, 1);
+
+        int num_rows = 20;
+        // Populate table with newer xid
+        _populate_table_with_data(table_id, table_xid, data_xid1, num_rows, 5);
+
+        // Trigger index reconcilation at reconcile_xid
+        _process_index_and_validate(index_id2, index_xid2, reconcile_xid2);
+
+        meta = sys_tbl_mgr::Client::get_instance()->get_schema(_db_id, table_id, XidLsn{reconcile_xid2});
+        it = std::ranges::find_if(meta->indexes,
+                [&](auto const& v) { return index_id1 == v.id; });
+        ASSERT_TRUE(it != meta->indexes.end());
+        ASSERT_EQ(it->state, 1);
+
+        it = std::ranges::find_if(meta->indexes,
+                [&](auto const& v) { return index_id2 == v.id; });
+        ASSERT_TRUE(it != meta->indexes.end());
+        ASSERT_EQ(it->state, 1);
+    }
 } // namespace

@@ -1,3 +1,8 @@
+## metadata
+### sync_timeout 3600
+### query_timeout 300
+### poll_interval 1
+
 ## test
 -- Create a table with a large dataset.
 CREATE TABLE IF NOT EXISTS truncate_test (

@@ -1,6 +1,7 @@
 #include <common/filesystem.hh>
 #include <common/logging.hh>
 #include <common/open_telemetry.hh>
+#include <common/coordinator.hh>
 
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
@@ -836,16 +837,25 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::_msg_worker()
     {
+        std::string coordinator_id = fmt::format(PgLogMgr::MSG_WORKER_ID, _db_id);
+        auto coordinator = Coordinator::get_instance();
+        auto& keep_alive = coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
         while (!_msg_queue.is_shutdown()) {
-            // Try to get next message from queue, wait up to 1 second
-            auto msg = _msg_queue.pop(1);
+            // mark alive with coordinator
+            Coordinator::mark_alive(keep_alive);
+
+            // get message from queue
+            PgMsgPtr msg = _msg_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (msg == nullptr) {
-                continue;
+                continue; // timeout, check for shutdown
             }
 
-            // Process the message
             _process_msg(msg);
         }
+
+        // unregister thread before exiting
+        coordinator->unregister_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
     }
 
     void
