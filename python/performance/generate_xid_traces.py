@@ -134,26 +134,36 @@ def merge_traces(xid_pgxid_mapping_csv, xid_traces_csv, pgxid_traces_csv, merged
             }
             writer.writerow(row_with_pg_and_query)
 
-def dump_traces(log_file):
-    with open(log_file, 'r') as f:
-        # Check if the log file has stopped streaming
+def log_watcher_thread(log_file: str, pattern: str = "", watch_count: int = 10, max_count: int = 50):
+    last_log_line = ""
+    count = 0
+    print(f"Waiting for log file {log_file} to stop streaming...")
+    with open(log_file) as f:
+        f.seek(0, 2)  # Seek to end
         while True:
+            if count > max_count:
+                return
             line = f.readline()
-            if not line:
-                time.sleep(1)
-            if not line.strip():
-                break
+            if pattern != "" and pattern not in line:
+                return
+            if line != last_log_line:
+                last_log_line = line
+                count = 0
+            else:
+                count += 1
+                if count > watch_count:
+                    return
+                time.sleep(0.1)
 
+def dump_traces(log_file):
+    print("Waiting for log quiescence...")
+    log_watcher_thread(log_file)
+    print("Log stopped streaming. Dumping traces...")
     with open("/tmp/output_trace.txt", 'w') as f:
-        print("Waiting for traces to be dumped")
-        with open(log_file, 'r') as f:
-            # Check if the log file has stopped streaming
-            while True:
-                line = f.readline()
-                if not line:
-                    time.sleep(1)
-                if not line.strip():
-                    break
+        f.write("Dump logs")
+    log_watcher_thread(log_file, "TRACE_DUMP_COMPLETE")
+    print("Trace dump complete.")
+    time.sleep(5)
 
 def generate_xid_traces(config_file: str = "load_config.yaml", log_file: str = "/opt/springtail/logs/pg_log_mgr.log"):
     # Create temporary files
