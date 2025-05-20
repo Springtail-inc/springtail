@@ -4,6 +4,7 @@ import argparse
 import traceback
 import os
 import csv
+import json
 
 from load_generator import LoadGenerator
 from generate_xid_traces import generate_xid_traces
@@ -22,6 +23,7 @@ def compare_csv_values(prev_run_file, current_run_file, threshold_percent=5.0):
     all_keys = set(prev_run_data) | set(current_run_data)
     threshold_fraction = threshold_percent / 100.0
 
+    results = []
     for key in sorted(all_keys):
         prev_run_value = float(prev_run_data.get(key))
         current_run_value = float(current_run_data.get(key))
@@ -30,11 +32,22 @@ def compare_csv_values(prev_run_file, current_run_file, threshold_percent=5.0):
         rel_change = abs(diff) / abs(prev_run_value)
 
         if rel_change <= threshold_fraction:
-            print(f"[~] {key}: No significant change (from {prev_run_value} to {current_run_value})")
+            description = f"[~] {key}: No significant change (from {prev_run_value} to {current_run_value})"
+            success = True
         elif diff > 0:
-            print(f"[↑] {key}: Increased from {prev_run_value} to {current_run_value} (+{rel_change * 100:.2f}%)")
+            description = f"[↑] {key}: Increased from {prev_run_value} to {current_run_value} (+{rel_change * 100:.2f}%)"
+            success = False
         else:
-            print(f"[↓] {key}: Decreased from {prev_run_value} to {current_run_value} (-{rel_change * 100:.2f}%)")
+            description = f"[↓] {key}: Decreased from {prev_run_value} to {current_run_value} (-{rel_change * 100:.2f}%)"
+            success = True
+
+        results.append({
+            "key": key,
+            "success": success,
+            "description": description
+        })
+    json_output = json.dumps(results, indent=2)
+    print(json_output)
 
 def print_run_details(run_config: dict):
     final_aggregates_file = get_file_path(run_config, "final_aggregates")
