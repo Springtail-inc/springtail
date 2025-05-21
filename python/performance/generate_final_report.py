@@ -144,14 +144,17 @@ def write_aggregates_to_worksheet(worksheet, final_aggregates_file: str, final_t
     for c, width in enumerate(col_widths):
         worksheet.set_column(c, c, width)
 
-def create_workbook():
+def create_workbook(output_file: str):
     """
     Create a workbook.
+
+    Args:
+        output_file (str): Output file path
 
     Returns:
         tuple: Tuple of workbook, normal format, and bold format
     """
-    workbook = xlsxwriter.Workbook('final_report.xlsx', {'constant_memory': True})
+    workbook = xlsxwriter.Workbook(output_file, {'constant_memory': True})
     normal_fmt = workbook.add_format({'font_name': 'Trebuchet MS', 'font_size': 10})
     bold_fmt = workbook.add_format({'bold': True, 'font_name': 'Trebuchet MS', 'font_size': 10})
     return workbook, normal_fmt, bold_fmt
@@ -177,10 +180,11 @@ def generate_final_report(run_config: dict):
     run_config_file = get_file_path(run_config, "run_config")
     table_columns_file = get_file_path(run_config, "table_columns_csv")
     final_aggregates_file = get_file_path(run_config, "final_aggregates")
+    final_report_file = get_file_path(run_config, "final_report")
 
     generate_pg_xid_summary_file(final_traces_file, pg_xid_summary_file)
 
-    workbook, normal_fmt, bold_fmt = create_workbook()
+    workbook, normal_fmt, bold_fmt = create_workbook(final_report_file)
 
     write_csv_to_worksheet(workbook.add_worksheet('Run Configuration'), run_config_file, normal_fmt, bold_fmt)
     write_csv_to_worksheet(workbook.add_worksheet('Table Columns'), table_columns_file, normal_fmt, bold_fmt)
