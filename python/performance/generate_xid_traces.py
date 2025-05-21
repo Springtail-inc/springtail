@@ -160,11 +160,7 @@ def dump_traces(log_file):
         f.write("Dump logs")
     log_watcher_thread(log_file)
 
-def generate_xid_traces(config_file: str = "load_config.yaml", log_file: str = "/opt/springtail/logs/pg_log_mgr.log"):
-    # Create temporary files
-    with open(config_file) as f:
-        run_config = yaml.safe_load(f)
-
+def generate_xid_traces(run_config: dict, log_file: str = "/opt/springtail/logs/pg_log_mgr.log"):
     query_info_file = get_file_path(run_config, "query_info")
     xid_traces_csv = get_file_path(run_config, "xid_traces")
     pgxid_traces_csv = get_file_path(run_config, "pgxid_traces")
@@ -216,5 +212,8 @@ if __name__ == "__main__":
     config_file = args.config_file
     log_file = args.log_file
 
+    with open(config_file) as f:
+        run_config = yaml.safe_load(f)
+
     # Run the main function
-    generate_xid_traces(config_file, log_file)
+    generate_xid_traces(run_config, log_file)
