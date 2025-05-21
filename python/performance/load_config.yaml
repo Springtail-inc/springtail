@@ -46,8 +46,9 @@ use_existing_config: false
 comparison_threshold: 5.0
 
 file_configuration:
+  base_dir: 'performance_test_output'
   # Directory for previous run files
-  prev_run_folder: 'prev_run'
+  prev_run_dir: 'performance_test_output_prev_run'
   # Directory for output files
   output_files:
     dir: 'output_files'

@@ -119,11 +119,8 @@ def create_workbook():
     bold_fmt = workbook.add_format({'bold': True, 'font_name': 'Trebuchet MS', 'font_size': 10})
     return workbook, normal_fmt, bold_fmt
 
-def generate_final_report(config_file: str = "load_config.yaml"):
+def generate_final_report(run_config: dict):
     # Generate the final report
-    with open(config_file) as f:
-        run_config = yaml.safe_load(f)
-
     final_traces_file = get_file_path(run_config, "final_traces")
     pg_xid_summary_file = get_file_path(run_config, "pg_xid_summary")
     run_config_file = get_file_path(run_config, "run_config")
@@ -162,5 +159,8 @@ if __name__ == "__main__":
     # Extract arguments
     config_file = args.config_file
 
+    with open(config_file) as f:
+        run_config = yaml.safe_load(f)
+
     # Run the main function
-    generate_final_report(config_file)
+    generate_final_report(run_config)

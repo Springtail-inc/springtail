@@ -9,7 +9,19 @@ import json
 from load_generator import LoadGenerator
 from generate_xid_traces import generate_xid_traces
 from generate_final_report import generate_final_report
-from utils import get_file_path
+from utils import get_file_path, create_tar_gz, extract_tar_gz
+
+# Get the parent directory of the current script (i.e., the project root directory)
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Add the /shared directory to the Python path
+sys.path.append(os.path.join(project_root, 'shared'))
+# Add the /testing directory to the Python path
+sys.path.append(os.path.join(project_root, 'testing'))
+
+from aws import AwsHelper
+
+PERFORMANCE_TEST_BUCKET = "performance-test-output"
 
 def read_csv_to_dict(file_path):
     with open(file_path, 'r') as file:
@@ -49,45 +61,60 @@ def compare_csv_values(prev_run_file, current_run_file, threshold_percent=5.0):
     json_output = json.dumps(results, indent=2)
     print(json_output)
 
-def print_run_details(run_config: dict):
+def write_performance_data_to_s3(run_config: dict):
+    base_dir = run_config['file_configuration']['base_dir']
+    zip_path = os.path.join('/tmp', "final_aggregates.tar.gz")
+    create_tar_gz(base_dir, zip_path)
+    print(f"[*] Zipped contents from {base_dir} to {zip_path}")
+
+    AwsHelper().s3_upload(PERFORMANCE_TEST_BUCKET, base_dir, zip_path, "final_aggregates.tar.gz")
+    print(f"[*] Uploaded performance data to S3")
+
+def get_current_run_details(run_config: dict):
+    print("[*] Writing performance data to S3")
     final_aggregates_file = get_file_path(run_config, "final_aggregates")
     csv_reader = csv.DictReader(open(final_aggregates_file))
+    results = []
     for row in csv_reader:
-        print(f"[=] {row['Label']} is {row['Value']}")
+        results.append({
+            "key": row['Label'],
+            "value": row['Value'],
+            "success": True
+        })
+    json_output = json.dumps(results, indent=2)
+    print(json_output)
+
+    write_performance_data_to_s3(run_config)
+
+def download_performance_data_from_s3(base_dir: str, prev_run_dir: str):
+    download_path = os.path.join('/tmp/', base_dir)
+    os.makedirs(download_path, exist_ok=True)
+    extract_path = os.path.join(prev_run_dir)
+    os.makedirs(extract_path, exist_ok=True)
+
+    # Download file to /tmp
+    filename = AwsHelper().s3_download(PERFORMANCE_TEST_BUCKET, base_dir, download_path, 'final_aggregates.tar.gz')
+    if filename and os.path.exists(filename):
+        return extract_tar_gz(filename, extract_path)
+    else:
+        print("[*] No previous run found")
+        return False
 
 def compare_report_with_previous_run(run_config: dict):
-    if not os.path.exists(run_config['file_configuration']['prev_run_folder']):
+    # Download previous run from S3
+    base_dir = run_config['file_configuration']['base_dir']
+    prev_run_dir = run_config['file_configuration']['prev_run_dir']
+
+    # Try and download the prev run details from S3
+    if not download_performance_data_from_s3(base_dir, prev_run_dir):
         print("[-] No previous run found. Skipping comparison.")
-        print_run_details(run_config)
+        get_current_run_details(run_config)
         return
-
-    prev_aggregates_file = get_file_path(run_config, "final_aggregates", run_config['file_configuration']['prev_run_folder'])
-    final_aggregates_file = get_file_path(run_config, "final_aggregates")
-
-    compare_csv_values(prev_aggregates_file, final_aggregates_file, run_config['comparison_threshold'])
-
-def backup_files(run_config: dict):
-    if not os.path.exists(run_config['file_configuration']['output_files']['dir']):
-        # No run information present. Skip the backup
-        return
-
-    prev_run_path = run_config['file_configuration']['prev_run_folder']
-    prev_run_folder = os.path.join(os.path.dirname(prev_run_path), prev_run_path)
-    os.makedirs(prev_run_folder, exist_ok=True)
-
-    # Move the output_files, meta_files to the prev_run folder
-    for file_name in run_config['file_configuration']['output_files']:
-        file_path = get_file_path(run_config, file_name)
-        if os.path.exists(file_path):
-            os.makedirs(os.path.dirname(os.path.join(prev_run_folder, file_path)), exist_ok=True)
-            os.rename(file_path, os.path.join(prev_run_folder, file_path))
-    for file_name in run_config['file_configuration']['meta_files']:
-        file_path = get_file_path(run_config, file_name)
-        if os.path.exists(file_path):
-            os.makedirs(os.path.dirname(os.path.join(prev_run_folder, file_path)), exist_ok=True)
-            os.rename(file_path, os.path.join(prev_run_folder, file_path))
-
-    print(f"[+] Files backed up to {prev_run_folder}")
+    else:
+        print("[+] Previous run found. Comparing...")
+        prev_aggregates_file = get_file_path(run_config, "final_aggregates", use_dir="prev_run_dir")
+        final_aggregates_file = get_file_path(run_config, "final_aggregates")
+        compare_csv_values(prev_aggregates_file, final_aggregates_file, run_config['comparison_threshold'])
 
 def parse_arguments() -> argparse.Namespace:
     """
@@ -101,22 +128,16 @@ def parse_arguments() -> argparse.Namespace:
 
     return parser.parse_args()
 
-def run_performance_benchmark(config_file: str):
-    with open(config_file) as f:
-        run_config = yaml.safe_load(f)
-
+def run_performance_benchmark(run_config: dict):
     try:
-        print("[*] Backing up previous run files...")
-        backup_files(run_config)
-
         print("[*] Loading data...")
         LoadGenerator(run_config).load_data()
 
         print("[*] Generating XID traces...")
-        generate_xid_traces()
+        generate_xid_traces(run_config)
 
         print("[*] Generating final report...")
-        generate_final_report()
+        generate_final_report(run_config)
 
         print("[*] Comparing final report with previous run...")
         compare_report_with_previous_run(run_config)
@@ -129,6 +150,10 @@ if __name__ == "__main__":
     print("[*] Running performance benchmark...")
     args = parse_arguments()
 
+    with open(args.load_config_file) as f:
+        run_config = yaml.safe_load(f)
+
     # Run the performance benchmark
-    run_performance_benchmark(args.load_config_file)
+    run_performance_benchmark(run_config)
+
     print("[*] Performance benchmark completed successfully!")
