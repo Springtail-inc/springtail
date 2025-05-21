@@ -28,6 +28,33 @@ class AwsHelper:
         instance_id = run_command('curl', ['-s', 'http://169.254.169.254/latest/meta-data/instance-id', '-H', f'X-aws-ec2-metadata-token: {token}'])
         return instance_id
 
+    def s3_upload(
+        self,
+        bucket: str,
+        folder: str,
+        local_path: str,
+        prefix: str = 'springtail'
+    ) -> None:
+        """
+        Upload a file to S3.
+
+        Args:
+            bucket: S3 bucket name
+            folder: Folder prefix in bucket (no leading/trailing slash needed)
+            local_path: Local path to the file to upload
+            prefix: Prefix to add to the file name (default: 'springtail_')
+        """
+        try:
+            # List objects with the given prefix
+            prefix = f"{folder}/{prefix}" if folder else "{prefix}"
+            self.s3.upload_file(local_path, bucket, prefix)
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            self.logger.error(f"Failed to upload file to S3: {error_code}")
+            return False
+        except Exception as e:
+            self.logger.error(f"Failed to upload file to S3: {str(e)}")
+            return False
 
     def s3_download(
         self,
@@ -91,7 +118,7 @@ class AwsHelper:
             return None
         except Exception as e:
             self.logger.error(f"Failed to get latest springtail file: {str(e)}")
-            print(f"Failed todd get latest springtail file: {str(e)}")
+            print(f"Failed to get latest springtail file: {str(e)}")
             return None
 
 
