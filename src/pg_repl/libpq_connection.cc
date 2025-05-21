@@ -705,9 +705,12 @@ namespace springtail {
 
             // incr offset
             if (r > 0) {
+                // return what data we have read, even if not async
                 off += r;
-                continue;
+                return off;
             }
+
+            DCHECK(off == 0);
 
             if (r == 0) {
                 // when using ssl, pqsecure_read will return 0 on SSL_ERROR_WANT_READ
@@ -741,7 +744,7 @@ namespace springtail {
             if (r < 0) {
                 // if async, or error and error is not a would block or again, then return error
                 if (async || (!(errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR))) {
-                    return r;
+                    return (off == 0) ? r : off;
                 }
             }
 
@@ -770,7 +773,7 @@ namespace springtail {
             ssize_t r = _secure_write(_connection, buf + off, count - off);
             // if async, or error and error is not a would block or again, then return error
             if (async || r < 0 || (!(errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR))) {
-                return r;
+                return (off == 0) ? r : off;
             }
 
             // incr offset
@@ -782,7 +785,7 @@ namespace springtail {
             // block until socket is writable
             r = wait_until_writable();
             if (r < 0) {
-                return r;
+                return (off == 0) ? r : off;
             }
         }
         return off;
