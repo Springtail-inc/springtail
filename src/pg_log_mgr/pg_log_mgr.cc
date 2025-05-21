@@ -469,10 +469,12 @@ namespace springtail::pg_log_mgr {
         auto file_path = "/tmp/output_trace.txt";
         auto clear_traces = "/tmp/clear_trace.txt";
         while (!_shutdown) {
+            // if the file exists, log the traces and remove the file
             if (fs::exists(file_path)) {
                 TIME_TRACESET_LOG(time_trace::traces);
                 fs::remove(file_path);
             }
+            // if the clear traces file exists, clear the traces and remove the file
             if (fs::exists(clear_traces)) {
                 TIME_TRACESET_LOG(time_trace::traces);
                 time_trace::traces.reset();
