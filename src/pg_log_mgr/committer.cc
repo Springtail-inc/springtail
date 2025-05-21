@@ -566,7 +566,7 @@ namespace springtail::committer {
                 }
             }
             TIME_TRACE_STOP(process_row_trace);
-            TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("process_row-xid_{}", xid), process_row_trace);
+            TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("process_row-xid_{}", xid.xid), process_row_trace);
         }
     }
 

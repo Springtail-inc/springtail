@@ -240,7 +240,8 @@ jobs:
 
       - name: Run nightly performance test
         run: |
-          cmake -B debug -S . -D'CMAKE_BUILD_TYPE=Debug' -DVCPKG_INSTALL_OPTIONS="--allow-unsupported" -D'SPRINGTAIL_INCLUDE_TIME_TRACES=1'
+          export SPRINGTAIL_INCLUDE_TIME_TRACES=1
+          cmake -B debug -S . -D'CMAKE_BUILD_TYPE=Debug' -DVCPKG_INSTALL_OPTIONS="--allow-unsupported"
 
           cd debug
           make -j${NUM_PROCS}

@@ -178,7 +178,7 @@ def merge_traces(xid_pgxid_mapping_csv, xid_traces_csv, pgxid_traces_csv, merged
             }
             writer.writerow(row_with_pg_and_query)
 
-def log_watcher_thread(log_file: str, watch_count: int = 10, max_count: int = 50):
+def log_watcher_thread(log_file: str, watch_count: int = 5, max_count: int = 5000):
     """
     Watch the log file for a period of time to ensure it has stopped streaming.
 
