@@ -43,7 +43,7 @@ namespace springtail::committer {
             }
         };
 
-        Indexer(uint32_t worker_count, pg_log_mgr::IndexReconciliationQueueManager& index_reconciliation_queue_mgr);
+        Indexer(uint32_t worker_count, std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> index_reconciliation_queue_mgr);
 
         Indexer(const Indexer&) = delete;
         Indexer& operator=(const Indexer&) = delete;
@@ -199,8 +199,8 @@ namespace springtail::committer {
         void _remove_index_key(uint64_t db_id, uint64_t table_id, const Key& key);
 
         /**
-         * @brief Reference to the index reconciliation manager to access the index reconciliation queues
+         * @brief shared_ptr to the index reconciliation manager to access the index reconciliation queues
          */
-        pg_log_mgr::IndexReconciliationQueueManager& _index_reconciliation_queue_mgr;
+        std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> _index_reconciliation_queue_mgr;
     };
 }

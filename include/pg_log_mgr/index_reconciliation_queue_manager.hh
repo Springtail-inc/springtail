@@ -32,20 +32,20 @@ namespace springtail::pg_log_mgr {
              * @return IndexReconcileRequestPtr
              */
             std::optional<IndexReconcileRequestPtr> pop(uint64_t db_id, uint32_t seconds = 0) {
-                std::shared_ptr<IRQueue> _queue;
+                std::shared_ptr<IRQueue> picked_queue;
                 {
                     std::lock_guard<std::mutex> lock(map_mutex);
                     auto it = index_reconciliation_queues.find(db_id);
                     if (it == index_reconciliation_queues.end()) {
                         return std::nullopt;
                     } else {
-                        _queue = it->second;
+                        picked_queue = it->second;
 
                     }
                 }
                 // Allow indexer to continue pushing to the queue
                 // as the ConcurrentQueue has timeout if queue is empty
-                return _queue->pop(seconds);
+                return picked_queue->pop(seconds);
             }
 
             /**
