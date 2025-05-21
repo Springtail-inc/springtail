@@ -238,6 +238,28 @@ jobs:
             fi
           done
 
+      - name: Run nightly performance test
+        run: |
+          cmake -B debug -S . -D'CMAKE_BUILD_TYPE=Debug' -DVCPKG_INSTALL_OPTIONS="--allow-unsupported" -D'SPRINGTAIL_INCLUDE_TIME_TRACES=1'
+
+          cd debug
+          make -j${NUM_PROCS}
+
+          cd python/performance
+
+          # Run performance tests
+          python3 performance_runner.py 2>&1 | tee tmplog
+
+          # Upload performance test logs
+          _TIMESTAMP=$(date +%s)
+          log_file="performance-test-${GITHUB_SHORT_SHA}-${_TIMESTAMP}.log" 
+          log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${log_file}"
+          aws s3 cp tmplog $log_s3_key
+          echo "*** Performance Test Log S3 Key: $log_s3_key"
+          rm -f tmplog
+
+          echo "*** Finished running performance tests"
+
       - name: Run nightly build (if above tests pass)
         if: success()
         run: |
@@ -374,4 +396,3 @@ jobs:
                 }
               ]
             }
-
