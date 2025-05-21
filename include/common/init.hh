@@ -4,6 +4,7 @@
 #include <common/open_telemetry.hh>
 #include <common/properties.hh>
 #include <common/service_register.hh>
+#include <common/coordinator.hh>
 
 namespace springtail {
 
