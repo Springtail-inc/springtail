@@ -1204,7 +1204,6 @@ Service::DropUserType(grpc::ServerContext* context,
         ddl["action"] = "no_change";
     } else {
         // update the user defined types table
-        DCHECK(user_type_info->namespace_id == request->namespace_id());
         ddl = _mutate_usertype(request->db_id(), request->type_id(), request->name(),
             request->namespace_id(), request->type(), request->value_json(), xid, false);
 
