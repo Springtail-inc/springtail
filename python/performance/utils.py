@@ -53,6 +53,13 @@ def get_file_path(run_config: dict, file_name: str, dir_name: str = None, use_di
     return complete_file_path
 
 def zip_folder(source_dir, zip_path):
+    """
+    Zip a folder.
+
+    Args:
+        source_dir (str): The source directory
+        zip_path (str): The path to the zip file
+    """
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
         for root, dirs, files in os.walk(source_dir):
             for file in files:
@@ -64,6 +71,10 @@ def unzip_file(zip_path, extract_to = None):
     """
     Extracts a zip file to the given directory.
     Creates the directory if it does not exist.
+
+    Args:
+        zip_path (str): The path to the zip file
+        extract_to (str): The directory to extract to (optional)
     """
     if extract_to is None:
         extract_to = os.path.dirname(zip_path)
@@ -76,6 +87,14 @@ def unzip_file(zip_path, extract_to = None):
     return True
 
 def print_banner(message, pad=1, border='*'):
+    """
+    Print a banner with the given message.
+
+    Args:
+        message (str): The message to print
+        pad (int): The padding to use (optional)
+        border (str): The border character to use (optional)
+    """
     lines = message.splitlines()
     max_line_len = max(len(line) for line in lines)
     width = max_line_len + (pad * 2)

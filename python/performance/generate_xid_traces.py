@@ -11,7 +11,15 @@ import argparse
 from utils import get_file_path
 
 def parse_xid_traces(logfile):
-    """Parse XID traces from the log file."""
+    """
+    Parse XID traces from the log file.
+
+    Args:
+        logfile (str): Log file path
+
+    Returns:
+        list: List of parsed traces
+    """
     with open(logfile, 'r') as f:
         traces = []
         for line in f:
@@ -24,7 +32,15 @@ def parse_xid_traces(logfile):
     return traces
 
 def parse_pgxid_traces(logfile):
-    """Parse PG-XID traces from the log file."""
+    """
+    Parse PG-XID traces from the log file.
+
+    Args:
+        logfile (str): Log file path
+
+    Returns:
+        list: List of parsed traces
+    """
     with open(logfile, 'r') as f:
         traces = []
         for line in f:
@@ -37,7 +53,15 @@ def parse_pgxid_traces(logfile):
     return traces
 
 def parse_xid_mapping(logfile):
-    """Parse XID to PG-XID mapping from the log file."""
+    """
+    Parse XID to PG-XID mapping from the log file.
+
+    Args:
+        logfile (str): Log file path
+
+    Returns:
+        list: List of parsed mappings
+    """
     with open(logfile, 'r') as f:
         mappings = []
         for line in f:
@@ -48,7 +72,14 @@ def parse_xid_mapping(logfile):
     return mappings
 
 def write_traces_to_csv(traces, filename, prefix):
-    """Write parsed traces to CSV file."""
+    """
+    Write parsed traces to CSV file.
+
+    Args:
+        traces (list): List of traces
+        filename (str): Output file name
+        prefix (str): Prefix for XID
+    """
     with open(filename, 'w', newline='') as f:
         writer = csv.writer(f)
         header = ['function', f'{prefix}xid', 'totalms', 'totalmicros', 'counter',
@@ -69,6 +100,17 @@ def write_traces_to_csv(traces, filename, prefix):
             ])
 
 def merge_traces(xid_pgxid_mapping_csv, xid_traces_csv, pgxid_traces_csv, merged_traces_csv, final_traces_csv, query_info_file):
+    """
+    Merge XID and PG-XID traces.
+
+    Args:
+        xid_pgxid_mapping_csv (str): XID to PG-XID mapping CSV file
+        xid_traces_csv (str): XID traces CSV file
+        pgxid_traces_csv (str): PG-XID traces CSV file
+        merged_traces_csv (str): Merged traces CSV file
+        final_traces_csv (str): Final traces CSV file
+        query_info_file (str): Query info file
+    """
     # Load xid to pg_xid mapping
     xid_to_pg_xid_mapping = {}
     pg_xid_to_xid_mapping = {}
@@ -137,6 +179,14 @@ def merge_traces(xid_pgxid_mapping_csv, xid_traces_csv, pgxid_traces_csv, merged
             writer.writerow(row_with_pg_and_query)
 
 def log_watcher_thread(log_file: str, watch_count: int = 10, max_count: int = 50):
+    """
+    Watch the log file for a period of time to ensure it has stopped streaming.
+
+    Args:
+        log_file (str): Log file path
+        watch_count (int): Number of times to check for a change
+        max_count (int): Maximum number of times to check for a change
+    """
     last_log_line = ""
     count = 0
     with open(log_file) as f:
@@ -155,12 +205,25 @@ def log_watcher_thread(log_file: str, watch_count: int = 10, max_count: int = 50
                 time.sleep(0.1)
 
 def dump_traces(log_file):
+    """
+    Wait for the log file to stop streaming and dump the traces.
+
+    Args:
+        log_file (str): Log file path
+    """
     log_watcher_thread(log_file)
     with open("/tmp/output_trace.txt", 'w') as f:
         f.write("Dump logs")
     log_watcher_thread(log_file)
 
 def generate_xid_traces(run_config: dict, log_file: str = "/opt/springtail/logs/pg_log_mgr.log"):
+    """
+    Generate XID traces from the log file.
+
+    Args:
+        run_config (dict): Run configuration
+        log_file (str): Log file path
+    """
     query_info_file = get_file_path(run_config, "query_info")
     xid_traces_csv = get_file_path(run_config, "xid_traces")
     pgxid_traces_csv = get_file_path(run_config, "pgxid_traces")

@@ -7,6 +7,13 @@ import argparse
 from utils import get_file_path
 
 def generate_pg_xid_summary_file(final_traces_file: str, xid_summary_file: str):
+    """
+    Generate PG-XID summary file.
+
+    Args:
+        final_traces_file (str): Final traces file
+        xid_summary_file (str): XID summary file
+    """
     # Load your data
     df = pd.read_csv(final_traces_file)
 
@@ -34,6 +41,15 @@ def generate_pg_xid_summary_file(final_traces_file: str, xid_summary_file: str):
     final_df.to_csv(xid_summary_file, index=False)
 
 def write_csv_to_worksheet(worksheet, csv_file, normal_fmt, bold_fmt):
+    """
+    Write CSV to worksheet.
+
+    Args:
+        worksheet (xlsxwriter.worksheet.Worksheet): Worksheet to write to
+        csv_file (str): CSV file path
+        normal_fmt (xlsxwriter.format.Format): Normal format
+        bold_fmt (xlsxwriter.format.Format): Bold format
+    """
     col_widths = []
     with open(csv_file, 'r') as f:
         reader = csv.reader(f)
@@ -56,6 +72,17 @@ def write_csv_to_worksheet(worksheet, csv_file, normal_fmt, bold_fmt):
         worksheet.set_column(c, c, width)
 
 def write_aggregates_to_worksheet(worksheet, final_aggregates_file: str, final_traces_file: str, pg_xid_summary_file: str, normal_fmt, bold_fmt):
+    """
+    Write aggregates to worksheet.
+
+    Args:
+        worksheet (xlsxwriter.worksheet.Worksheet): Worksheet to write to
+        final_aggregates_file (str): Final aggregates file
+        final_traces_file (str): Final traces file
+        pg_xid_summary_file (str): PG-XID summary file
+        normal_fmt (xlsxwriter.format.Format): Normal format
+        bold_fmt (xlsxwriter.format.Format): Bold format
+    """
     # Sum the total_ms and duration_ms columns in the final traces sheet
     total_ms = 0
     duration_ms = 0
@@ -118,12 +145,32 @@ def write_aggregates_to_worksheet(worksheet, final_aggregates_file: str, final_t
         worksheet.set_column(c, c, width)
 
 def create_workbook():
+    """
+    Create a workbook.
+
+    Returns:
+        tuple: Tuple of workbook, normal format, and bold format
+    """
     workbook = xlsxwriter.Workbook('final_report.xlsx', {'constant_memory': True})
     normal_fmt = workbook.add_format({'font_name': 'Trebuchet MS', 'font_size': 10})
     bold_fmt = workbook.add_format({'bold': True, 'font_name': 'Trebuchet MS', 'font_size': 10})
     return workbook, normal_fmt, bold_fmt
 
 def generate_final_report(run_config: dict):
+    """
+    Generate the final report.
+
+    Writes 5 sheets
+
+    1. Run Configuration - Contains the run configuration
+    2. Table Columns - Contains the table columns in the load generation
+    3. Trace Data - Contains the trace data
+    4. Transaction Aggregates - Contains the transaction aggregates
+    5. Final Aggregates - Contains the final aggregates
+
+    Args:
+        run_config (dict): Run configuration
+    """
     # Generate the final report
     final_traces_file = get_file_path(run_config, "final_traces")
     pg_xid_summary_file = get_file_path(run_config, "pg_xid_summary")

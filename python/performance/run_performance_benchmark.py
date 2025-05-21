@@ -24,6 +24,15 @@ from aws import AwsHelper
 PERFORMANCE_TEST_BUCKET = "performance-test-output"
 
 def read_csv_to_dict(file_path):
+    """
+    Read a CSV file and return a dictionary of key-value pairs.
+
+    Args:
+        file_path (str): The path to the CSV file
+
+    Returns:
+        dict: A dictionary of key-value pairs
+    """
     with open(file_path, 'r') as file:
         reader = csv.DictReader(file)
         return {row['Label']: row['Value'] for row in reader}
