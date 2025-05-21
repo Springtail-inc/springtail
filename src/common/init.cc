@@ -76,6 +76,7 @@ springtail_init(const std::optional<std::vector<std::unique_ptr<ServiceRunner>>>
     service_runners.emplace_back(std::make_unique<OpenTelemetryRunner>(log_filename));
     service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesCacheRunner>());
+    service_runners.emplace_back(std::make_unique<CoordinatorRunner>());
 
     if (runners.has_value()) {
         std::vector<std::unique_ptr<ServiceRunner>> *non_const_runners = const_cast<std::vector<std::unique_ptr<ServiceRunner>> *>(&runners.value());
@@ -103,6 +104,7 @@ void springtail_init_daemon(const std::optional<std::vector<std::unique_ptr<Serv
     service_runners.emplace_back(std::make_unique<OpenTelemetryRunner>(log_filename));
     service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesCacheRunner>());
+    service_runners.emplace_back(std::make_unique<CoordinatorRunner>());
 
     if (runners.has_value()) {
         std::vector<std::unique_ptr<ServiceRunner>> *non_const_runners = const_cast<std::vector<std::unique_ptr<ServiceRunner>> *>(&runners.value());
