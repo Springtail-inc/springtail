@@ -203,8 +203,6 @@ namespace springtail::committer {
         root->truncate();
         root->finalize();
 
-        meta->roots.erase(it);
-        client->update_roots(db_id, info.table_id(), end_xid, *meta);
         client->set_index_state(db_id, xid, info.table_id(), index_id, sys_tbl::IndexNames::State::DELETED);
 
         // Cleanup table-index map
@@ -331,6 +329,7 @@ namespace springtail::committer {
             auto extent_id = root->finalize();
             if (work_item.is_status(IndexStatus::BUILDING)) {
                 auto meta = client->get_roots(db_id, tid, end_xid);
+                meta->roots.clear();
                 meta->roots.emplace_back(key.second, extent_id);
                 client->update_roots(db_id, tid, end_xid, *meta);
                 client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::READY);

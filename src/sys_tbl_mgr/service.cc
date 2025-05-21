@@ -1640,113 +1640,156 @@ Service::_clear_namespace_info(uint64_t db_id)
 Service::RootsCacheRecordPtr
 Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
 {
-    // first check the cache
-    boost::shared_lock lock(_mutex);
-    auto roots_i = _roots_cache[db_id].find(table_id);
-    if (roots_i != _roots_cache[db_id].end()) {
-        auto info_i = roots_i->second.lower_bound(xid);
-        if (info_i != roots_i->second.end()) {
-            return info_i->second;
+    // possibly cached stats
+    uint64_t row_count = 0;
+    uint64_t end_offset = 0;
+    bool stats_found = false;
+
+    // get cached roots
+    std::optional<XidLsnToRootsInfoMap> cached_roots;
+    {
+        boost::shared_lock lock(_mutex);
+
+        const auto it = _roots_cache.find(db_id);
+        if (it != _roots_cache.end()) {
+            const auto roots_i = it->second.find(table_id);
+            if (roots_i != it->second.end()) {
+                cached_roots = roots_i->second;
+            }
         }
     }
-    lock.unlock();
 
-    auto roots_info = std::make_shared<proto::GetRootsResponse>();
+    // this is just a  helper function to find cached roots by index
+    auto find_cached_root = [&](uint64_t index_id) -> std::optional<uint64_t> {
+        for (const auto& xid_roots: *cached_roots) {
+            // the XidLsnToRootsInfoMap is ordered by XID is revese order (latest first)
+            // so we just need to find the first match 
+            if (xid_roots.first > xid) {
+                continue;
+            }
+            // we found a cached entry, update the stats
+            row_count = xid_roots.second->stats().row_count();
+            end_offset = xid_roots.second->stats().end_offset();
+            stats_found = true;
+            auto it = std::ranges::find_if(xid_roots.second->roots(), [index_id](const auto& v) {
+                        return index_id == v.index_id();
+                    }
+            );
+            if (it != xid_roots.second->roots().end()) {
+                return it->extent_id();
+            }
+        }
+        return {};
+    };
 
-    // read from the tables
+    auto info = std::make_shared<proto::GetSchemaResponse>();
+    info->set_access_xid_start(0);
+    info->set_access_lsn_start(0);
+    info->set_access_xid_end(constant::LATEST_XID);
+    info->set_access_lsn_end(constant::MAX_LSN);
+
+    // get the index states
+    _read_schema_indexes(info, db_id, table_id, xid);
+
+    // go over each index and get the roots
     auto roots_t = _get_system_table(db_id, sys_tbl::TableRoots::ID);
-    auto roots_key_fields = roots_t->extent_schema()->get_sort_fields();
-
-    auto search_key = sys_tbl::TableRoots::Primary::key_tuple(table_id, constant::INDEX_PRIMARY, 0);
-
     auto table_id_f = roots_t->extent_schema()->get_field("table_id");
+
     auto index_id_f = roots_t->extent_schema()->get_field("index_id");
-    auto eid_f = roots_t->extent_schema()->get_field("extent_id");
-    auto xid_f = roots_t->extent_schema()->get_field("xid");
+
+    uint64_t snapshot_xid = 0;
+
     const std::string& sxid =
         sys_tbl::TableRoots::Data::SCHEMA[sys_tbl::TableRoots::Data::SNAPSHOT_XID].name;
     auto sxid_f = roots_t->extent_schema()->get_field(sxid);
 
-    uint64_t snapshot_xid = 0;
-    auto rrow_i = roots_t->lower_bound(search_key);
+    auto eid_f = roots_t->extent_schema()->get_field("extent_id");
+    auto xid_f = roots_t->extent_schema()->get_field("xid");
 
-    proto::GetIndexInfoRequest index_info_request;
-    index_info_request.set_db_id(db_id);
-    index_info_request.set_xid(xid.xid);
-    index_info_request.set_lsn(xid.lsn);
-    index_info_request.set_table_id(table_id);
+    auto roots_info = std::make_shared<proto::GetRootsResponse>();
 
-    for (; rrow_i != roots_t->end(); ++rrow_i) {
-        auto &&row = *rrow_i;
-        if (table_id_f->get_uint64(&row) > table_id) {
-            break;
-        }
-        if (table_id_f->get_uint64(&row) != table_id) {
-            continue;
-        }
-        auto record_xid = xid_f->get_uint64(&row);
-        if (xid.xid < record_xid) {
+    for (const auto& idx: info->indexes()) {
+        if (static_cast<sys_tbl::IndexNames::State>(idx.state()) != sys_tbl::IndexNames::State::READY &&
+                static_cast<sys_tbl::IndexNames::State>(idx.state()) != sys_tbl::IndexNames::State::BEING_DELETED) {
+            LOG_DEBUG(LOG_SCHEMA, "Index deleted or not-ready, so skipping the root {} -- {}",
+                      table_id, idx.id());
             continue;
         }
 
-        // Allow roots to be picked up even for non-primary key tables
-        if (index_id_f->get_uint64(&row) != constant::INDEX_PRIMARY) {
-            index_info_request.set_index_id(index_id_f->get_uint64(&row));
-            auto index_info = _get_index_info(index_info_request);
-
-            if (static_cast<sys_tbl::IndexNames::State>(index_info.state()) != sys_tbl::IndexNames::State::READY &&
-                    static_cast<sys_tbl::IndexNames::State>(index_info.state()) != sys_tbl::IndexNames::State::BEING_DELETED) {
-                LOG_DEBUG(LOG_SCHEMA, "Index deleted or not-ready, so skipping the root {} -- {}",
-                          table_id, index_id_f->get_uint64(&row));
-                continue;
+        // check the cache first
+        if (cached_roots){
+            auto extent_id = find_cached_root(idx.id());
+            if (extent_id.has_value()) {
+                proto::RootInfo ri;
+                ri.set_index_id(idx.id());
+                ri.set_extent_id(*extent_id);
+                *roots_info->add_roots() = ri;
+                continue; // use cached data and go to the next index
             }
         }
 
+        // not found in cached roots, go to the table
+        auto search_key = sys_tbl::TableRoots::Primary::key_tuple(table_id, idx.id(), xid.xid);
+        auto row_i = roots_t->inverse_lower_bound(search_key);
+
+        if (row_i == roots_t->end()) {
+            continue;
+        }
+
+        auto &&row = *row_i;
+        if (table_id_f->get_uint64(&row) != table_id) {
+            continue;
+        }
+        if (index_id_f->get_uint64(&row) != idx.id()) {
+            continue;
+        }
+
+        auto record_xid = xid_f->get_uint64(&row);
+        if (record_xid > xid.xid) {
+            continue;
+        }
+
         proto::RootInfo ri;
-        ri.set_index_id(index_id_f->get_uint64(&row));
+        ri.set_index_id(idx.id());
         ri.set_extent_id(eid_f->get_uint64(&row));
+        *roots_info->add_roots() = ri;
+
         // use snapshot_xid of the last row
         snapshot_xid = sxid_f->get_uint64(&row);
-        auto it = std::ranges::find_if(*roots_info->mutable_roots(), [&ri](auto const& v) {
-            return v.index_id() == ri.index_id();
-        });
-        if (it != roots_info->mutable_roots()->end()) {
-            // rrrow_i is ordered by xid, so the last record will be used
-            it->set_extent_id(ri.extent_id());
-        } else {
-            *roots_info->add_roots() = ri;
-        }
     }
 
     if (roots_info->roots().empty()) {
-        LOG_WARN("Couldn't find table_roots entry for {}@{}:{} -- {}", table_id, xid.xid,
-                    xid.lsn, search_key->to_string());
-        assert(0);
+        LOG_WARN("Couldn't find table_roots entry for {}@{}:{}", table_id, xid.xid,
+                    xid.lsn);
     }
-
-    roots_info->set_snapshot_xid(snapshot_xid);
 
     // access the stats table
-    auto stats_t = _get_system_table(db_id, sys_tbl::TableStats::ID);
-    auto stats_key_fields = stats_t->extent_schema()->get_sort_fields();
+    if (!stats_found) {
+        auto stats_t = _get_system_table(db_id, sys_tbl::TableStats::ID);
+        auto stats_key_fields = stats_t->extent_schema()->get_sort_fields();
 
-    search_key = sys_tbl::TableStats::Primary::key_tuple(table_id, xid.xid);
-    auto srow_i = stats_t->inverse_lower_bound(search_key);
-    auto &&row = *srow_i;
+        auto search_key = sys_tbl::TableStats::Primary::key_tuple(table_id, xid.xid);
+        auto srow_i = stats_t->inverse_lower_bound(search_key);
+        auto &&row = *srow_i;
 
-    // need to confirm that the table ID matches, but the XID may not match
-    table_id_f = stats_t->extent_schema()->get_field("table_id");
-    if (srow_i == stats_t->end() || table_id_f->get_uint64(&row) != table_id) {
-        // no stats for this table?  seems like a potential error
-        LOG_WARN("Couldn't find table_stats entry for {}@{}:{}", table_id, xid.xid, xid.lsn);
-        return roots_info;
+        // need to confirm that the table ID matches, but the XID may not match
+        table_id_f = stats_t->extent_schema()->get_field("table_id");
+        if (srow_i != stats_t->end() && table_id_f->get_uint64(&row) == table_id) {
+            // retrieve the stats from the row
+            auto row_count_f = stats_t->extent_schema()->get_field("row_count");
+            auto end_offset_f = stats_t->extent_schema()->get_field("end_offset");
+            row_count = row_count_f->get_uint64(&row);
+            end_offset = end_offset_f->get_uint64(&row);
+        } else {
+            // no stats for this table?  seems like a potential error
+            LOG_WARN("Couldn't find table_stats entry for {}@{}:{}", table_id, xid.xid, xid.lsn);
+        }
+
     }
 
-    // retrieve the stats from the row
-    auto row_count_f = stats_t->extent_schema()->get_field("row_count");
-    auto end_offset_f = stats_t->extent_schema()->get_field("end_offset");
-    roots_info->mutable_stats()->set_row_count(row_count_f->get_uint64(&row));
-    roots_info->mutable_stats()->set_end_offset(end_offset_f->get_uint64(&row));
+    roots_info->mutable_stats()->set_row_count(row_count);
+    roots_info->mutable_stats()->set_end_offset(end_offset);
+    roots_info->set_snapshot_xid(snapshot_xid);
 
     return roots_info;
 }
@@ -1773,6 +1816,7 @@ Service::_set_roots_info(uint64_t db_id,
                             r.index_id(), r.extent_id());
     }
 
+    // TODO: make table stats updates optional or move to a separate API
     // update the table_stats
     auto table_stats_t = _get_mutable_system_table(db_id, sys_tbl::TableStats::ID);
     auto tuple =
