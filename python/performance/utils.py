@@ -67,19 +67,23 @@ def unzip_file(zip_path, extract_to = None):
     """
     if extract_to is None:
         extract_to = os.path.dirname(zip_path)
-    print(f'Extracting {zip_path} to {extract_to}')
+    print(f'[>] Extracting {zip_path} to {extract_to}')
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         if not zip_ref.infolist():
-            print(f"[*] Zip file {zip_path} is empty")
+            print(f"[!] Zip file {zip_path} is empty")
             return False
         zip_ref.extractall(extract_to)
     return True
 
-def print_banner(message, pad=2, border='*'):
+def print_banner(message, pad=1, border='*'):
     lines = message.splitlines()
-    width = max(len(line) for line in lines) + pad * 2
+    max_line_len = max(len(line) for line in lines)
+    width = max_line_len + (pad * 2)
     horizontal_border = border * (width + 2)
+
     print(horizontal_border)
     for line in lines:
-        print(f"{border} {line.center(width)} {border}")
+        # Center the line within the padded area
+        padded_line = line.center(width)
+        print(f"{border}{padded_line}{border}")
     print(horizontal_border)

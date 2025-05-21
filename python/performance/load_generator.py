@@ -739,6 +739,8 @@ class LoadGenerator:
             file.write("")
 
         if self.run_config['use_existing_config']:
+            print("[*] Using existing configuration")
+            self.table_columns_json = get_file_path(self.run_config, "table_columns", use_dir="prev_run_dir")
             if os.path.exists(self.table_columns_json):
                 with open(self.table_columns_json, 'r') as table_columns_file:
                     self.table_columns = json.load(table_columns_file)

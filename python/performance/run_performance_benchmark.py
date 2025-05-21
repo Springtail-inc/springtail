@@ -29,18 +29,28 @@ def read_csv_to_dict(file_path):
         return {row['Label']: row['Value'] for row in reader}
 
 def get_comparision_details(key, prev_run_value, current_run_value, threshold_fraction, results):
+    """
+    Get the comparison details
+
+    Args:
+        key (str): Key to compare
+        prev_run_value (float): Previous run value
+        current_run_value (float): Current run value
+        threshold_fraction (float): Threshold fraction
+        results (list): List of results
+    """
     diff = current_run_value - prev_run_value
     base = prev_run_value if prev_run_value != 0 else 1e-9
     rel_change = abs(diff) / abs(base)
 
     if rel_change <= threshold_fraction:
-        description = f"{key}: No significant change (from {prev_run_value} to {current_run_value})"
+        description = f"No significant change (from {prev_run_value} to {current_run_value})"
         improvement = None
     elif diff > 0:
-        description = f"{key}: Increased from {prev_run_value} to {current_run_value} (+{rel_change * 100:.2f}%)"
+        description = f"Increased from {prev_run_value} to {current_run_value} (+{rel_change * 100:.2f}%)"
         improvement = False
     else:
-        description = f"{key}: Decreased from {prev_run_value} to {current_run_value} (-{rel_change * 100:.2f}%)"
+        description = f"Decreased from {prev_run_value} to {current_run_value} (-{rel_change * 100:.2f}%)"
         improvement = True
 
     results.append({
@@ -50,6 +60,14 @@ def get_comparision_details(key, prev_run_value, current_run_value, threshold_fr
     })
 
 def compare_csv_values(run_config: dict, prev_run_file, current_run_file):
+    """
+    Compare the previous run with the current run
+
+    Args:
+        run_config (dict): Run configuration
+        prev_run_file (str): Previous run file
+        current_run_file (str): Current run file
+    """
     prev_run_data = read_csv_to_dict(prev_run_file)
     current_run_data = read_csv_to_dict(current_run_file)
 
@@ -77,6 +95,12 @@ def compare_csv_values(run_config: dict, prev_run_file, current_run_file):
         write_performance_data_to_s3(run_config)
 
 def write_performance_data_to_s3(run_config: dict):
+    """
+    Upload the final aggregates to S3
+
+    Args:
+        run_config (dict): Run configuration
+    """
     base_dir = run_config['file_configuration']['base_dir']
     zip_path = os.path.join('/tmp', "final_aggregates.zip")
     zip_folder(base_dir, zip_path)
@@ -86,6 +110,12 @@ def write_performance_data_to_s3(run_config: dict):
     print(f"[*] Uploaded performance data to S3")
 
 def get_current_run_details(run_config: dict):
+    """
+    Get the current run details and compare with previous run
+
+    Args:
+        run_config (dict): Run configuration
+    """
     print("[*] Writing performance data to S3")
     final_aggregates_file = get_file_path(run_config, "final_aggregates")
     csv_reader = csv.DictReader(open(final_aggregates_file))
@@ -97,7 +127,19 @@ def get_current_run_details(run_config: dict):
 
     write_performance_data_to_s3(run_config)
 
-def download_performance_data_from_s3(base_dir: str, prev_run_dir: str):
+def download_performance_data_from_s3(run_config: dict):
+    """
+    Download the final aggregates from S3
+
+    Args:
+        run_config (dict): Run configuration
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    base_dir = run_config['file_configuration']['base_dir']
+    prev_run_dir = run_config['file_configuration']['prev_run_dir']
+
     download_path = os.path.join('/tmp/', base_dir)
     os.makedirs(download_path, exist_ok=True)
     extract_path = os.path.join(prev_run_dir)
@@ -112,12 +154,14 @@ def download_performance_data_from_s3(base_dir: str, prev_run_dir: str):
         return False
 
 def compare_report_with_previous_run(run_config: dict):
-    # Download previous run from S3
-    base_dir = run_config['file_configuration']['base_dir']
-    prev_run_dir = run_config['file_configuration']['prev_run_dir']
+    """
+    Compare the current run with the previous run
 
+    Args:
+        run_config (dict): Run configuration
+    """
     # Try and download the prev run details from S3
-    if not download_performance_data_from_s3(base_dir, prev_run_dir):
+    if not download_performance_data_from_s3(run_config):
         print("[-] No previous run found. Skipping comparison.")
         get_current_run_details(run_config)
         return
@@ -140,8 +184,17 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 def run_performance_benchmark(run_config: dict):
+    """
+    Run the performance benchmark
+
+    Args:
+        run_config (dict): Run configuration
+    """
     try:
-        print("[*] Loading data...")
+        print("[*] Downloading previous run data...")
+        download_performance_data_from_s3(run_config)
+
+        print("[*] Generating data...")
         LoadGenerator(run_config).load_data()
 
         print("[*] Generating XID traces...")

@@ -40,7 +40,7 @@ batched_inserts: false
 operations: ['create_table', 'create_index', 'insert_data', 'update_data', 'delete_data']
 
 # Whether to use the previous configuration to load tables
-use_existing_config: false
+use_existing_config: true
 
 # Comparison threshold for the final aggregates, increase of the percentage will result in failure
 comparison_threshold: 5.0
