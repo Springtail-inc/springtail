@@ -97,7 +97,7 @@ namespace springtail::pg_log_mgr {
                  int port,
                  bool archive_logs,
                  std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
-                 IndexReconciliationQueueManager& index_reconciliation_queue_mgr);
+                 std::shared_ptr<IndexReconciliationQueueManager> index_reconciliation_queue_mgr);
 
         /**
          * @brief Construct a new Pg Log Mgr object (for testing only)
@@ -112,8 +112,7 @@ namespace springtail::pg_log_mgr {
           _committer_queue(std::make_shared<ConcurrentQueue<committer::XidReady>>()),
           _xact_log_path(xact_log_path),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
-          _test_index_reconciliation_queue_mgr(),
-          _index_reconciliation_queue_mgr(_test_index_reconciliation_queue_mgr)
+          _index_reconciliation_queue_mgr(std::make_shared<IndexReconciliationQueueManager>())
         {
             _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, _committer_queue, false);
         }
@@ -242,15 +241,10 @@ namespace springtail::pg_log_mgr {
         // Index reconciliation
 
         /**
-         * @brief Test instance of index reconciliation manager
-         *        for testing pg_log_mgr
+         * @brief shared_ptr to the index reconciliation manager to access the index reconciliation queues
          */
-        IndexReconciliationQueueManager _test_index_reconciliation_queue_mgr;
+        std::shared_ptr<IndexReconciliationQueueManager> _index_reconciliation_queue_mgr;
 
-        /**
-         * @brief Reference to the index reconciliation manager to access the index reconciliation queues
-         */
-        IndexReconciliationQueueManager &_index_reconciliation_queue_mgr;
         std::thread _reconciliation_thread;            ///< Index reconciliation thread
         /*
          * Index reconciliation thread; waits on index reconciliation requests

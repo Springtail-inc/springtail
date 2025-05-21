@@ -41,7 +41,7 @@ namespace springtail::committer {
     class Committer {
     public:
         Committer(uint32_t worker_count, const std::shared_ptr<ConcurrentQueue<committer::XidReady>> &committer_queue,
-                pg_log_mgr::IndexReconciliationQueueManager &index_reconciliation_queue_mgr)
+                std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> index_reconciliation_queue_mgr)
             : _worker_count(worker_count),
               _committer_queue(committer_queue),
               _index_reconciliation_queue_mgr(index_reconciliation_queue_mgr)
@@ -117,9 +117,9 @@ namespace springtail::committer {
         std::shared_ptr<ConcurrentQueue<XidReady>> _committer_queue;
 
         /**
-         * @brief Reference to the index reconciliation manager to access the index reconciliation queues
+         * @brief shared_ptr to the index reconciliation manager to access the index reconciliation queues
          */
-        pg_log_mgr::IndexReconciliationQueueManager& _index_reconciliation_queue_mgr;
+        std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> _index_reconciliation_queue_mgr;
 
         std::vector<std::thread> _worker_threads; ///< The worker threads.
 

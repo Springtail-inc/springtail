@@ -47,7 +47,7 @@ namespace springtail::pg_log_mgr {
         /*
          * @brief Index reconciliation manager to access the index reconciliation queues
          **/
-        IndexReconciliationQueueManager _index_reconciliation_queue_mgr;
+        std::shared_ptr<IndexReconciliationQueueManager> _index_reconciliation_queue_mgr;
 
         /**
          * @brief Function for performing shutdown that is called by Singleton

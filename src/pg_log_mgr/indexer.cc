@@ -9,7 +9,8 @@
 
 namespace springtail::committer {
 
-    Indexer::Indexer(uint32_t worker_count, pg_log_mgr::IndexReconciliationQueueManager& index_reconciliation_queue_mgr)
+    Indexer::Indexer(uint32_t worker_count,
+            std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> index_reconciliation_queue_mgr)
         : _index_reconciliation_queue_mgr(index_reconciliation_queue_mgr)
     {
         CHECK_GT(worker_count, 0);
@@ -437,7 +438,7 @@ namespace springtail::committer {
         // only after all the DDLs of XID are processed
         if (--_xid_ddl_counter_map[idx_state._idx._xid] == 0) {
             _xid_ddl_counter_map.erase(idx_state._idx._xid);
-            auto push_success = _index_reconciliation_queue_mgr.push(db_id,
+            auto push_success = _index_reconciliation_queue_mgr->push(db_id,
                     std::make_shared<IndexReconcileRequest>(db_id, idx_state._idx._xid));
             if (!push_success) {
                 // Queue not available as respective pg_log_mgr is shutdown

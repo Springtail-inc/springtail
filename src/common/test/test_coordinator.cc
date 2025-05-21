@@ -17,7 +17,10 @@ using namespace springtail;
 class CoordinatorTest : public ::testing::Test {
 protected:
     static void SetUpTestSuite() {
-        springtail_init_test();
+        std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
+        runners.emplace();
+        runners->emplace_back(std::make_unique<CoordinatorRunner>());
+        springtail_init_test(runners);
     }
 
     static void TearDownTestSuite() {
@@ -143,6 +146,8 @@ TEST_F(CoordinatorTest, SetLivenessTest) {
     Coordinator::mark_alive(timestamp);
 
     check_redis(Coordinator::WRITE_CACHE, thread_id, true, true);
+
+    _coordinator->unregister_thread(Coordinator::WRITE_CACHE, thread_id);
 }
 
 TEST_F(CoordinatorTest, KillDaemonTest) {
@@ -152,6 +157,8 @@ TEST_F(CoordinatorTest, KillDaemonTest) {
     _coordinator->kill_daemon(Coordinator::XID_MGR, thread_id);
 
     check_redis(Coordinator::XID_MGR, thread_id, false);
+
+    _coordinator->unregister_thread(Coordinator::XID_MGR, thread_id);
 }
 
 TEST_F(CoordinatorTest, MultipleThreadsTest) {
