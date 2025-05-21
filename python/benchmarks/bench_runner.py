@@ -5,18 +5,15 @@ import sys
 import yaml
 import time
 
-from bench_case import BenchCase
-
 # Get the parent directory of the current script (i.e., the project root directory)
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(project_root, 'shared')) # Add the /shared directory to the Python path
 sys.path.append(os.path.join(project_root, 'testing')) # Add the /testing directory to the Python path
 
+from bench_case import BenchCase
+
 import springtail
 import common
-
-from aws import sync_s3_data
-
 
 def wait_for_springtail_ready(props: springtail.Properties) -> None:
     """Wait for Springtail to be ready by checking sentinel value"""
@@ -193,12 +190,6 @@ if __name__ == "__main__":
 
     if not build_dir or not system_config:
         raise ValueError("Missing required config: build_dir or system_json_path")
-
-    # sync the benchmark data files
-    # XXX will add this in with my next PR
-    # helper = AwsHelper(config=botocore.config.Config(signature_version=botocore.UNSIGNED),
-    #                    region="us-east-1")
-    # helper.sync_s3_data('test_data', s3_path='test_files')
 
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"

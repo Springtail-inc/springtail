@@ -32,7 +32,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
     static constexpr char const * const XID_SUBSCRIBER_WORKER_ID = "xid_subscriber";
 
     auto coordinator = Coordinator::get_instance();
-    coordinator->register_thread(Coordinator::DaemonType::XID_SUBSCRIBER, XID_SUBSCRIBER_WORKER_ID);
+    auto& keep_alive = coordinator->register_thread(Coordinator::DaemonType::XID_SUBSCRIBER, XID_SUBSCRIBER_WORKER_ID);
 
     // remove old cache if any and create a new one
     sys_tbl_mgr::ShmCache::remove(sys_tbl_mgr::SHM_CACHE_ROOTS);
@@ -79,7 +79,7 @@ PgXidSubscriberMgr::task(std::stop_token st)
     while(!st.stop_requested()) {
 
         // mark alive with coordinator
-        coordinator->mark_alive(Coordinator::DaemonType::XID_SUBSCRIBER, XID_SUBSCRIBER_WORKER_ID);
+        Coordinator::mark_alive(keep_alive);
 
         if (connected == false) {
             if (subscriber) {
