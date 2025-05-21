@@ -25,7 +25,6 @@ namespace springtail
             case TIMESTAMPOID:
             case TIMESTAMPTZOID:
             case TIMEOID:
-            case TIMETZOID:
             case MONEYOID:
                 return SchemaType::INT64;
 
