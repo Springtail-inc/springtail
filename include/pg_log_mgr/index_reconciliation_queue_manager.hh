@@ -31,13 +31,13 @@ namespace springtail::pg_log_mgr {
              * @param seconds timeout in seconds
              * @return IndexReconcileRequestPtr
              */
-            std::optional<IndexReconcileRequestPtr> pop(uint64_t db_id, uint32_t seconds = 0) {
+            IndexReconcileRequestPtr pop(uint64_t db_id, uint32_t seconds = 0) {
                 std::shared_ptr<IRQueue> picked_queue;
                 {
                     std::lock_guard<std::mutex> lock(map_mutex);
                     auto it = index_reconciliation_queues.find(db_id);
                     if (it == index_reconciliation_queues.end()) {
-                        return std::nullopt;
+                        return nullptr;
                     } else {
                         picked_queue = it->second;
 
