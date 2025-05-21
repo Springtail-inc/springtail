@@ -15,6 +15,12 @@ class AwsHelper:
     def __init__(self,
                  config : Optional[botocore.config.Config] = None,
                  region : str = 'us-east-1'):
+
+        logging.getLogger('boto3').setLevel(logging.INFO)
+        logging.getLogger('botocore').setLevel(logging.INFO) # botocore is a dependency of boto3
+        logging.getLogger('urllib3').setLevel(logging.INFO) # urllib3 is used by boto3 for HTTP requests
+        logging.getLogger('s3transfer').setLevel(logging.INFO) # For S3 specific transfers
+
         self.logger = logging.getLogger('springtail')
         self.s3 = boto3.client('s3', config=config, region_name=region)
         self.sns = boto3.client('sns', region_name=region)
