@@ -74,6 +74,10 @@ def write_aggregates_to_worksheet(worksheet, final_aggregates_file: str, final_t
         ('Primary total time', duration_ms)
     ]
 
+    # Calculate the difference between primary and ingest
+    ingest_faster_count = (duration_ms - total_ms)
+    aggregates += [('Difference between primary and ingest', ingest_faster_count)]
+
     # Analyze pg_xid summary
     gt0 = 0
     lt0 = 0
