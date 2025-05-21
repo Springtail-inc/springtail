@@ -9,7 +9,7 @@ import json
 from load_generator import LoadGenerator
 from generate_xid_traces import generate_xid_traces
 from generate_final_report import generate_final_report
-from utils import get_file_path, create_tar_gz, extract_tar_gz
+from utils import get_file_path, zip_folder, unzip_file
 
 # Get the parent directory of the current script (i.e., the project root directory)
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -20,7 +20,6 @@ sys.path.append(os.path.join(project_root, 'shared'))
 sys.path.append(os.path.join(project_root, 'testing'))
 
 from aws import AwsHelper
-
 PERFORMANCE_TEST_BUCKET = "performance-test-output"
 
 def read_csv_to_dict(file_path):
@@ -63,11 +62,11 @@ def compare_csv_values(prev_run_file, current_run_file, threshold_percent=5.0):
 
 def write_performance_data_to_s3(run_config: dict):
     base_dir = run_config['file_configuration']['base_dir']
-    zip_path = os.path.join('/tmp', "final_aggregates.tar.gz")
-    create_tar_gz(base_dir, zip_path)
+    zip_path = os.path.join('/tmp', "final_aggregates.zip")
+    zip_folder(base_dir, zip_path)
     print(f"[*] Zipped contents from {base_dir} to {zip_path}")
 
-    AwsHelper().s3_upload(PERFORMANCE_TEST_BUCKET, base_dir, zip_path, "final_aggregates.tar.gz")
+    AwsHelper().s3_upload(PERFORMANCE_TEST_BUCKET, base_dir, zip_path, "final_aggregates.zip")
     print(f"[*] Uploaded performance data to S3")
 
 def get_current_run_details(run_config: dict):
@@ -93,9 +92,9 @@ def download_performance_data_from_s3(base_dir: str, prev_run_dir: str):
     os.makedirs(extract_path, exist_ok=True)
 
     # Download file to /tmp
-    filename = AwsHelper().s3_download(PERFORMANCE_TEST_BUCKET, base_dir, download_path, 'final_aggregates.tar.gz')
+    filename = AwsHelper().s3_download(PERFORMANCE_TEST_BUCKET, base_dir, download_path, 'final_aggregates.zip')
     if filename and os.path.exists(filename):
-        return extract_tar_gz(filename, extract_path)
+        return unzip_file(filename, extract_path)
     else:
         print("[*] No previous run found")
         return False

@@ -1,5 +1,5 @@
 import os
-import tarfile
+import zipfile
 
 def get_dir_and_param(run_config: dict, param: str):
     """
@@ -52,34 +52,27 @@ def get_file_path(run_config: dict, file_name: str, dir_name: str = None, use_di
 
     return complete_file_path
 
-def create_tar_gz(source_dir, output_path):
-    """
-    Compresses a folder into a .tar.gz file.
-    """
-    with tarfile.open(output_path, "w:gz") as tar:
-        tar.add(source_dir, arcname=os.path.basename(source_dir))
-    print(f"Created archive: {output_path}")
+def zip_folder(source_dir, zip_path):
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for root, dirs, files in os.walk(source_dir):
+            for file in files:
+                full_path = os.path.join(root, file)
+                rel_path = os.path.relpath(full_path, start=source_dir)
+                zf.write(full_path, arcname=rel_path)
 
-def is_tar_gz_empty(tar_path):
+def unzip_file(zip_path, extract_to = None):
     """
-    Checks if the .tar.gz archive contains any files.
-    Ignores directories.
+    Extracts a zip file to the given directory.
+    Creates the directory if it does not exist.
     """
-    with tarfile.open(tar_path, "r:gz") as tar:
-        files = [member for member in tar.getmembers() if member.isfile()]
-        return len(files) == 0
-
-def extract_tar_gz(tar_path, extract_to):
-    """
-    Extracts a .tar.gz file to a target directory.
-    """
-    os.makedirs(extract_to, exist_ok=True)
-    with tarfile.open(tar_path, "r:gz") as tar:
-        if is_tar_gz_empty(tar_path):
-            print(f"[*] Tar file {tar_path} is empty")
+    if extract_to is None:
+        extract_to = os.path.dirname(zip_path)
+    print(f'Extracting {zip_path} to {extract_to}')
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        if not zip_ref.infolist():
+            print(f"[*] Zip file {zip_path} is empty")
             return False
-        tar.extractall(path=extract_to)
-    print(f"Extracted {tar_path} to {extract_to}")
+        zip_ref.extractall(extract_to)
     return True
 
 def print_banner(message, pad=2, border='*'):
