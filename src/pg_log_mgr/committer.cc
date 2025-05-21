@@ -431,6 +431,8 @@ namespace springtail::committer {
         // retrieve extents and apply the mutations to them
         uint64_t extent_cursor = 0;
         std::optional<PostgresTimestamp> min_commit_ts;
+        time_trace::Trace process_extents_trace;
+        TIME_TRACE_START(process_extents_trace);
         while (true) {
             // XXX would be better if we could perform an async prefetch to reduce IO latency
             PostgresTimestamp commit_ts;
@@ -449,9 +451,15 @@ namespace springtail::committer {
                 _process_extent(db_id, tid, table, wc_extent);
             }
         }
+        TIME_TRACE_STOP(process_extents_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("process_extents-xid_{}", xid), process_extents_trace);
 
+        time_trace::Trace finalize_trace;
+        TIME_TRACE_START(finalize_trace);
         // finalize the table
         auto &&metadata = table->finalize();
+        TIME_TRACE_STOP(finalize_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("finalize-xid_{}", xid), finalize_trace);
 
         if (min_commit_ts) {
             // log how long it took to process this table
@@ -490,6 +498,9 @@ namespace springtail::committer {
 
         auto wc_schema = schema->create_schema(columns, new_columns, sort_keys);
 
+        time_trace::Trace process_extent_trace;
+        TIME_TRACE_START(process_extent_trace);
+
         // Get the extent from the write cache index
         Extent extent(*wc_extent->data);
         LOG_DEBUG(LOG_COMMITTER, "xid={} rows={}", xid.xid, extent.row_count());
@@ -499,12 +510,17 @@ namespace springtail::committer {
         auto wc_fields = wc_schema->get_fields(columns);
         auto wc_key_fields = wc_schema->get_fields(schema->get_sort_keys());
 
+        TIME_TRACE_STOP(process_extent_trace);
+        TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("committer_write_extent-xid_{}", xid.xid), process_extent_trace);
+
         // XXX We know that these operations are sorted in key + LSN order, so we should be
         //     able to perform a more efficient merge using hints.  For a large extent we
         //     could parallelize the mutations.  The one exception is a table truncation,
         //     which must always appear first in a batch (although not necessarily first in
         //     the transaction).
         for (auto &row : extent) {
+            time_trace::Trace process_row_trace;
+            TIME_TRACE_START(process_row_trace);
             uint8_t op = op_f->get_uint8(&row);
             switch (op) {
             case INSERT:
@@ -549,6 +565,8 @@ namespace springtail::committer {
                     CHECK(false);
                 }
             }
+            TIME_TRACE_STOP(process_row_trace);
+            TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("process_row-xid_{}", xid), process_row_trace);
         }
     }
 
