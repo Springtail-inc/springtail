@@ -22,7 +22,7 @@ def get_dir_and_param(run_config: dict, param: str):
                 return result
     return None, None
 
-def get_file_path(run_config: dict, file_name: str, dir_name: str = None, use_dir: str = "base_dir") -> str:
+def get_file_path(run_config: dict, file_name: str, dir_name: str = None, use_dir: str = "base_dir", create_dir: bool = True) -> str:
     """
     Get the absolute path to a file based on the run configuration.
 
@@ -30,6 +30,7 @@ def get_file_path(run_config: dict, file_name: str, dir_name: str = None, use_di
         run_config (dict): The run configuration
         file_name (str): The name of the file
         dir_name (str): The name of the directory (optional)
+        use_dir (str): The name of the directory to use (optional)
 
     Returns:
         str: The absolute path to the file
@@ -45,10 +46,11 @@ def get_file_path(run_config: dict, file_name: str, dir_name: str = None, use_di
         dir_path = os.path.join(base_dir, dir_name, dir_path)
     else:
         dir_path = os.path.join(base_dir, dir_path)
+
     complete_file_path = os.path.join(dir_path, file_path)
 
-    # Create the directory if it doesn't exist
-    os.makedirs(os.path.dirname(complete_file_path), exist_ok=True)
+    if create_dir:
+        os.makedirs(os.path.dirname(complete_file_path), exist_ok=True)
 
     return complete_file_path
 
@@ -106,3 +108,28 @@ def print_banner(message, pad=1, border='*'):
         padded_line = line.center(width)
         print(f"{border}{padded_line}{border}")
     print(horizontal_border)
+
+def print_results(results: list):
+    """
+    Print the results in a table format.
+
+    Args:
+        results (list): List of dictionaries containing the results
+    """
+    print("|" + "-" * 10 + "+" + "-" * 42 + "+" + "-" * 12 + "+" + "-" * 60 + "|")
+    print(f"| {'STATUS':^8} | {'METRIC':^40} | {'PERCENTAGE':^10} | {'DESCRIPTION':^60} |")
+    print("|" + "-" * 10 + "+" + "-" * 42 + "+" + "-" * 12 + "+" + "-" * 60 + "|")
+
+    for res in results:
+        status = {
+            True: "GOOD",
+            False: "BAD",
+            None: "NORMAL"
+        }[res["improvement"]]
+
+        key = res.get("key", "")
+        percentage = res.get("percentage", "")
+        desc = res["description"]
+        print(f"| {status:<8} | {key:<40} | {percentage:<10.2f} | {desc:<60} |")
+
+    print("|" + "-" * 10 + "+" + "-" * 42 + "+" + "-" * 12 + "+" + "-" * 60 + "|")

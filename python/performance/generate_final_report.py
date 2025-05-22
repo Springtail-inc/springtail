@@ -98,28 +98,27 @@ def write_aggregates_to_worksheet(worksheet, final_aggregates_file: str, final_t
     # Row/column values
     aggregates = [
         ('Ingest total time', total_ms),
-        ('Primary total time', duration_ms)
+        ('Primary total time', duration_ms),
     ]
 
-    # Calculate the difference between primary and ingest
-    ingest_faster_count = (duration_ms - total_ms)
-    aggregates += [('Difference between primary and ingest', ingest_faster_count)]
-
     # Analyze pg_xid summary
-    gt0 = 0
-    lt0 = 0
+    ingest_slower_count = 0
+    ingest_faster_count = 0
+    total_count = 0
     with open(pg_xid_summary_file, 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
             val = float(row['ingest_time_minus_primary_time'])
+            total_count += 1
             if val > 0:
-                gt0 += 1
+                ingest_slower_count += 1
             elif val < 0:
-                lt0 += 1
+                ingest_faster_count += 1
 
     aggregates += [
-        ('Number of times ingest is slower', gt0),
-        ('Number of times ingest is faster', lt0)
+        ('Ingest outperform primary percentage', ingest_faster_count / total_count),
+        ('Ingest outperform primary count', ingest_faster_count),
+        ('Primary outperform ingest count', ingest_slower_count),
     ]
 
     # Write aggregates to csv first

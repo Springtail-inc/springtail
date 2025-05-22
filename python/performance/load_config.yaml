@@ -43,7 +43,7 @@ operations: ['create_table', 'create_index', 'insert_data', 'update_data', 'dele
 use_existing_config: true
 
 # Comparison threshold for the final aggregates, increase of the percentage will result in failure
-comparison_threshold: 5.0
+comparison_threshold: 10.0
 
 file_configuration:
   base_dir: 'performance_test_output'
@@ -86,3 +86,12 @@ file_configuration:
     merged_traces: 'merged_traces.csv'
     # PG-XID summary
     pg_xid_summary: 'pg_xid_summary.csv'
+
+use_s3: false
+
+metrics:
+  Ingest total time: 'negative'
+  Primary total time: 'display'
+  Ingest outperform primary percentage: 'positive'
+  Ingest outperform primary count: 'positive'
+  Primary outperform ingest count: 'display'

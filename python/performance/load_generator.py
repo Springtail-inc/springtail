@@ -740,7 +740,7 @@ class LoadGenerator:
 
         if self.run_config['use_existing_config']:
             print("[*] Using existing configuration")
-            self.table_columns_json = get_file_path(self.run_config, "table_columns", use_dir="prev_run_dir")
+            self.table_columns_json = get_file_path(self.run_config, "table_columns", use_dir="prev_run_dir", create_dir=False)
             if os.path.exists(self.table_columns_json):
                 with open(self.table_columns_json, 'r') as table_columns_file:
                     self.table_columns = json.load(table_columns_file)
@@ -758,6 +758,9 @@ class LoadGenerator:
 
         for schema_name in schema_names:
             self.create_schema_and_tables(conn, schema_name)
+
+        # Reset the table column path
+        self.table_columns_json = get_file_path(self.run_config, "table_columns")
 
         # Dumping table columns into JSON file
         with open(self.table_columns_json, 'w') as file:
