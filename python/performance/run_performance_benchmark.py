@@ -36,7 +36,7 @@ def read_csv_to_dict(file_path):
     """
     with open(file_path, 'r') as file:
         reader = csv.DictReader(file)
-        return {row['Label']: row['Value'] for row in reader}
+        return {row['Key']: row['Value'] for row in reader}
 
 def get_comparison_details(label, prev_run_value, current_run_value, threshold_fraction, results, metric_type):
     """
@@ -54,27 +54,31 @@ def get_comparison_details(label, prev_run_value, current_run_value, threshold_f
         description = "Missing values for comparison"
         improvement = None
     else:
-        diff = current_run_value - prev_run_value if prev_run_value == 0 else 0
+        diff = (current_run_value - prev_run_value)
+        if prev_run_value == 0:
+            # For initial runs, nothing to compare
+            diff = 0
         base = prev_run_value if prev_run_value != 0 else 1e-9
         rel_change = abs(diff) / abs(base)
         percentage = rel_change * 100
 
         if metric_type == 'display':
-            description = f"Value changed from {prev_run_value:.2f} to {current_run_value:.2f}"
+            description = f"changed from {prev_run_value:.2f} to {current_run_value:.2f}"
             improvement = None
         else:
             within_threshold = False
             if rel_change <= threshold_fraction:
                 within_threshold = True
-                description = f"Change within threshold: {prev_run_value:.2f} - {current_run_value:.2f}"
+                description = f"Within threshold: {prev_run_value:.2f} - {current_run_value:.2f}"
                 improvement = None
 
-            direction = "increased" if diff > 0 else "decreased"
-
+            direction = ""
             if metric_type == 'positive':
                 improvement = diff > 0
+                direction = "Increased" if improvement else "Decreased"
             elif metric_type == 'negative':
                 improvement = diff < 0
+                direction = "Decreased" if improvement else "Increased"
             else:
                 improvement = None
 
@@ -84,7 +88,7 @@ def get_comparison_details(label, prev_run_value, current_run_value, threshold_f
             if within_threshold and improvement == False:
                 improvement = None
 
-            description = f"Value {direction} from {prev_run_value:.2f} to {current_run_value:.2f}"
+            description = f"{direction} from {prev_run_value:.2f} to {current_run_value:.2f}"
 
     results.append({
         "label": label,
@@ -114,8 +118,7 @@ def compare_csv_values(run_config: dict, prev_run_file, current_run_file):
     for key in metrics:
         prev_run_value = float(prev_run_data.get(key)) if prev_run_data.get(key) else 0
         current_run_value = float(current_run_data.get(key)) if current_run_data.get(key) else 0
-        metric_type = metrics[key]['type']
-        get_comparison_details(metrics[key]['label'], prev_run_value, current_run_value, threshold_fraction, results, metric_type)
+        get_comparison_details(metrics[key]['label'], prev_run_value, current_run_value, threshold_fraction, results, metrics[key]['type'])
 
     # Print the results in table format
     print_results(results)
