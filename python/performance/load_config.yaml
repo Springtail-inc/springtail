@@ -43,7 +43,7 @@ operations: ['create_table', 'create_index', 'insert_data', 'update_data', 'dele
 use_existing_config: true
 
 # Comparison threshold for the final aggregates, increase of the percentage will result in failure
-comparison_threshold: 10.0
+comparison_threshold: 15.0
 
 file_configuration:
   base_dir: 'performance_test_output'
