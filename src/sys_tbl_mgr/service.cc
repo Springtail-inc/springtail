@@ -1224,7 +1224,7 @@ Service::GetUserType(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "GetUserType");
 
-    LOG_DEBUG("got GetUserType() -- db {} type_id {} xid {} lsn {}", request->db_id(),
+    LOG_DEBUG(LOG_SCHEMA, "got GetUserType() -- db {} type_id {} xid {} lsn {}", request->db_id(),
               request->type_id(), request->xid(), request->lsn());
 
     boost::shared_lock lock(_read_mutex);
