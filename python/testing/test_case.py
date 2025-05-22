@@ -505,17 +505,16 @@ class TestCase:
 
     def _wait_for_index_reconciliation(self, cursor, wait_for: int) -> bool:
         query = """
-        SELECT a - b
-        FROM
-          (SELECT COUNT(DISTINCT index_id) AS a
-             FROM "__pg_springtail_catalog"."index_names"
-            WHERE state = 0 AND index_id <> 0) AS t1
-        JOIN
-          (SELECT COUNT(DISTINCT index_id) AS b
-             FROM "__pg_springtail_catalog"."index_names"
-            WHERE state IN (1, 2) AND index_id <> 0) AS t2
-        ON (1=1);
-        """
+            SELECT count(DISTINCT index_id)                                                  
+            FROM __pg_springtail_catalog.index_names
+            WHERE index_id <> 0 AND (
+                (index_id IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state = 0)
+                AND index_id NOT IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state IN (1, 2)))
+                OR
+                (index_id IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state = 3)
+                AND index_id NOT IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state = 2))
+            );
+            """
 
         try:
             common.wait_for_replica_condition(self._fdw, query, (0, ), timeout=wait_for)
