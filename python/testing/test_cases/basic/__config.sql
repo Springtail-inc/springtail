@@ -112,53 +112,53 @@ SELECT
     (i || ' hours')::interval
 FROM generate_series(0, 10) AS i;
 
--- -- table with user defined enum, uuid, and bit strings
--- CREATE TYPE data_type_test.mood AS ENUM (
---     'happy',
---     'sad',
---     'neutral',
---     'angry',
---     'excited',
---     'tired',
---     'anxious',
---     'confused',
---     'bored',
---     'calm',
---     'frustrated',
---     'hopeful',
---     'nervous',
---     'relaxed',
---     'sleepy',
---     'surprised',
---     'content'
--- );
--- 
--- CREATE TABLE data_type_test.special_types_table (
---     id SERIAL PRIMARY KEY,
---     
---     mood_col data_type_test.mood,
---     uuid_col UUID,
---     bit_col BIT(8),
---     varbit_col BIT VARYING
--- );
--- 
--- INSERT INTO data_type_test.special_types_table (mood_col, uuid_col, bit_col, varbit_col)
--- VALUES 
---     ('happy', gen_random_uuid(), B'10101010', B'1101'),
---     ('sad', gen_random_uuid(), B'11110000', B'101010101010'),
---     ('neutral', gen_random_uuid(), B'00001111', B'1110001'),
---     ('angry', gen_random_uuid(), B'01010101', B'10101'),
---     ('excited', gen_random_uuid(), B'11111111', B'10011001'),
---     ('bored', gen_random_uuid(), B'00110011', B'101001'),
---     ('anxious', gen_random_uuid(), B'11001100', B'11110000'),
---     ('content', gen_random_uuid(), B'10011001', B'1100110'),
---     ('confused', gen_random_uuid(), B'01100110', B'1001'),
---     ('relaxed', gen_random_uuid(), B'11100011', B'1111111'),
---     ('frustrated', gen_random_uuid(), B'00011100', B'01010101'),
---     ('surprised', gen_random_uuid(), B'10110110', B'1010'),
---     ('nervous', gen_random_uuid(), B'11000011', B'1110'),
---     ('confused', gen_random_uuid(), B'10010110', B'1000001'),
---     ('sleepy', gen_random_uuid(), B'01010101', B'0001110');
+-- table with user defined enum, uuid, and bit strings
+CREATE TYPE data_type_test.mood AS ENUM (
+    'happy',
+    'sad',
+    'neutral',
+    'angry',
+    'excited',
+    'tired',
+    'anxious',
+    'confused',
+    'bored',
+    'calm',
+    'frustrated',
+    'hopeful',
+    'nervous',
+    'relaxed',
+    'sleepy',
+    'surprised',
+    'content'
+);
+
+CREATE TABLE data_type_test.special_types_table (
+    id SERIAL PRIMARY KEY,
+    
+    mood_col data_type_test.mood,
+    uuid_col UUID,
+    bit_col BIT(8),
+    varbit_col BIT VARYING
+);
+
+INSERT INTO data_type_test.special_types_table (mood_col, uuid_col, bit_col, varbit_col)
+VALUES 
+    ('happy', gen_random_uuid(), B'10101010', B'1101'),
+    ('sad', gen_random_uuid(), B'11110000', B'101010101010'),
+    ('neutral', gen_random_uuid(), B'00001111', B'1110001'),
+    ('angry', gen_random_uuid(), B'01010101', B'10101'),
+    ('excited', gen_random_uuid(), B'11111111', B'10011001'),
+    ('bored', gen_random_uuid(), B'00110011', B'101001'),
+    ('anxious', gen_random_uuid(), B'11001100', B'11110000'),
+    ('content', gen_random_uuid(), B'10011001', B'1100110'),
+    ('confused', gen_random_uuid(), B'01100110', B'1001'),
+    ('relaxed', gen_random_uuid(), B'11100011', B'1111111'),
+    ('frustrated', gen_random_uuid(), B'00011100', B'01010101'),
+    ('surprised', gen_random_uuid(), B'10110110', B'1010'),
+    ('nervous', gen_random_uuid(), B'11000011', B'1110'),
+    ('confused', gen_random_uuid(), B'10010110', B'1000001'),
+    ('sleepy', gen_random_uuid(), B'01010101', B'0001110');
 
 -- geometric types
 
@@ -419,7 +419,7 @@ CREATE TABLE keys_test.table1 (
     PRIMARY KEY (id)
 );
 
--- CREATE UNIQUE INDEX uniq_table1_col1 ON keys_test.table1 (col1);
+CREATE UNIQUE INDEX uniq_table1_col1 ON keys_test.table1 (col1);
 
 -- table1: primary key (id), unique index on (col1)
 INSERT INTO keys_test.table1 (id, col1, col2) VALUES
@@ -434,7 +434,6 @@ INSERT INTO keys_test.table1 (id, col1, col2) VALUES
     (9, 'uniqueI', 'foo9'),
     (10, 'uniqueJ', 'foo10');
 
-
 -- two columnis PK and UK
 CREATE TABLE keys_test.table2 (
     id1 INT,
@@ -445,7 +444,7 @@ CREATE TABLE keys_test.table2 (
     PRIMARY KEY (id1, id2)
 );
 
--- CREATE UNIQUE INDEX uniq_table2_col1_col2 ON keys_test.table2 (col1, col2);
+CREATE UNIQUE INDEX uniq_table2_col1_col2 ON keys_test.table2 (col1, col2);
 
 -- table2: primary key (id1, id2), unique index on (col1, col2)
 INSERT INTO keys_test.table2 (id1, id2, col1, col2, col3) VALUES
@@ -460,7 +459,6 @@ INSERT INTO keys_test.table2 (id1, id2, col1, col2, col3) VALUES
     (5, 1, 'rho', 'sigma', 'val9'),
     (5, 2, 'tau', 'upsilon', 'val10');
 
-
 -- three columnis PK and UK
 CREATE TABLE keys_test.table3 (
     id1 INT,
@@ -473,7 +471,7 @@ CREATE TABLE keys_test.table3 (
     PRIMARY KEY (id1, id2, id3)
 );
 
--- CREATE UNIQUE INDEX uniq_table3_col1_col2_col3 ON keys_test.table3 (col1, col2, col3);
+CREATE UNIQUE INDEX uniq_table3_col1_col2_col3 ON keys_test.table3 (col1, col2, col3);
 
 -- table3: primary key (id1, id2, id3), unique index on (col1, col2, col3)
 INSERT INTO keys_test.table3 (id1, id2, id3, col1, col2, col3, col4) VALUES
@@ -488,223 +486,260 @@ INSERT INTO keys_test.table3 (id1, id2, id3, col1, col2, col3, col4) VALUES
     (3, 1, 1, 'peach', 'plum', 'cherry', 'extra9'),
     (3, 1, 2, 'mint', 'cream', 'mustard', 'extra10');
 
--- -- unique index: 1 column, not nulla
--- CREATE TABLE keys_test.explicit_unique_1_index_test (
---     id SERIAL PRIMARY KEY,
---     username TEXT NOT NULL,
---     email TEXT NOT NULL
--- );
--- 
--- CREATE UNIQUE INDEX explicit_unique_1_index_test_idx
---     ON keys_test.explicit_unique_1_index_test (username);
--- 
--- INSERT INTO keys_test.explicit_unique_1_index_test (username, email) VALUES
---     ('Alice', 'alice@example.com'),
---     ('Bob', 'bob@example.com'),
---     ('Charlie', 'charlie@example.net'),
---     ('Diana', 'diana@sample.org'),
---     ('Eve', 'eve@example.com'),
---     ('Frank', 'frank@domain.com'),
---     ('Grace', 'grace@demo.net'),
---     ('Heidi', 'heidi@sample.com'),
---     ('Ivan', 'ivan@another.com'),
---     ('Judy', 'judy@example.org'),
---     ('Mallory', 'mallory@example.com'),
---     ('Niaj', 'niaj@domain.org'),
---     ('Oscar', 'oscar@sample.net'),
---     ('Peggy', 'peggy@demo.org'),
---     ('Trent', 'trent@service.com');
+-- unique index: 1 column, not null
+CREATE TABLE keys_test.explicit_unique_1_index_test (
+    id SERIAL PRIMARY KEY,
+    username TEXT NOT NULL,
+    email TEXT NOT NULL
+);
 
--- -- unique index: 2 columns, not null
--- CREATE TABLE keys_test.explicit_unique_2_index_test (
---     id SERIAL PRIMARY KEY,
---     username TEXT NOT NULL,
---     email TEXT NOT NULL
--- );
--- 
--- CREATE UNIQUE INDEX explicit_unique_2_index_test_idx
---     ON keys_test.explicit_unique_2_index_test (username, email);
--- 
--- INSERT INTO keys_test.explicit_unique_2_index_test (username, email) VALUES
---     ('Alice', 'alice@example.com'),
---     ('Bob', 'bob@example.com'),
---     ('Charlie', 'charlie@example.net'),
---     ('Diana', 'diana@sample.org'),
---     ('Eve', 'eve@example.com'),
---     ('Frank', 'frank@domain.com'),
---     ('Grace', 'grace@demo.net'),
---     ('Heidi', 'heidi@sample.com'),
---     ('Ivan', 'ivan@another.com'),
---     ('Judy', 'judy@example.org'),
---     ('Mallory', 'mallory@example.com'),
---     ('Niaj', 'niaj@domain.org'),
---     ('Oscar', 'oscar@sample.net'),
---     ('Peggy', 'peggy@demo.org'),
---     ('Trent', 'trent@service.com');
+CREATE UNIQUE INDEX explicit_unique_1_index_test_idx
+    ON keys_test.explicit_unique_1_index_test (username);
 
--- -- unique index: 1 column, with null
--- CREATE TABLE keys_test.explicit_unique_1_null_index_test (
---     id SERIAL PRIMARY KEY,
---     username TEXT,
---     email TEXT
--- );
--- 
--- CREATE UNIQUE INDEX explicit_unique_1_null_index_test_idx
---     ON keys_test.explicit_unique_1_null_index_test (username);
--- 
--- INSERT INTO keys_test.explicit_unique_1_null_index_test (username, email) VALUES
---     ('Alice',    'alice@example.com'),
---     ('Bob',      'bob@example.com'),
---     (NULL,       'ghost1@example.com'),
---     ('Charlie',  NULL),
---     (NULL,       NULL),
---     ('Diana',    'diana@example.org'),
---     ('Eve',      'eve@example.net'),
---     ('Frank',    'frank@example.net'),
---     ('Grace',    NULL),
---     ('Heidi',    'heidi@example.org'),
---     (NULL,       'ghost2@example.com'),
---     ('Ivan',     'ivan@example.org'),
---     ('Judy',     NULL),
---     ('Mallory',  'mallory@foo.com'),
---     ('Niaj',     'niaj@bar.com');
+INSERT INTO keys_test.explicit_unique_1_index_test (username, email) VALUES
+    ('Alice', 'alice@example.com'),
+    ('Bob', 'bob@example.com'),
+    ('Charlie', 'charlie@example.net'),
+    ('Diana', 'diana@sample.org'),
+    ('Eve', 'eve@example.com'),
+    ('Frank', 'frank@domain.com'),
+    ('Grace', 'grace@demo.net'),
+    ('Heidi', 'heidi@sample.com'),
+    ('Ivan', 'ivan@another.com'),
+    ('Judy', 'judy@example.org'),
+    ('Mallory', 'mallory@example.com'),
+    ('Niaj', 'niaj@domain.org'),
+    ('Oscar', 'oscar@sample.net'),
+    ('Peggy', 'peggy@demo.org'),
+    ('Trent', 'trent@service.com');
 
--- -- unique index: 2 columns, with null
--- CREATE TABLE keys_test.explicit_unique_2_null_index_test (
---     id SERIAL PRIMARY KEY,
---     username TEXT,
---     email TEXT
--- );
--- 
--- CREATE UNIQUE INDEX explicit_unique_2_null_index_test_idx
---     ON keys_test.explicit_unique_2_null_index_test (username, email);
--- 
--- INSERT INTO keys_test.explicit_unique_2_null_index_test (username, email) VALUES
---     ('Alice',    'alice@example.com'),
---     ('Bob',      'bob@example.com'),
---     (NULL,       'ghost1@example.com'),
---     ('Charlie',  NULL),
---     (NULL,       NULL),
---     ('Diana',    'diana@example.org'),
---     ('Eve',      'eve@example.net'),
---     ('Frank',    'frank@example.net'),
---     ('Grace',    NULL),
---     ('Heidi',    'heidi@example.org'),
---     (NULL,       'ghost2@example.com'),
---     ('Ivan',     'ivan@example.org'),
---     ('Judy',     NULL),
---     ('Mallory',  'mallory@foo.com'),
---     ('Niaj',     'niaj@bar.com');
+-- unique index: 2 columns, not null
+CREATE TABLE keys_test.explicit_unique_2_index_test (
+    id SERIAL PRIMARY KEY,
+    username TEXT NOT NULL,
+    email TEXT NOT NULL
+);
 
--- -- unique index: 1 column, partial
--- CREATE TABLE keys_test.explicit_unique_1_partial_index_test (
---     id SERIAL PRIMARY KEY,
---     username TEXT,
---     email TEXT
--- );
--- 
--- CREATE UNIQUE INDEX explicit_unique_1_partial_index_test_idx
---     ON keys_test.explicit_unique_1_partial_index_test (username)
---     WHERE username IS NOT NULL;
--- 
--- INSERT INTO keys_test.explicit_unique_1_partial_index_test (username, email) VALUES
---     ('Alice',    'alice@example.com'),
---     ('Bob',      'bob@example.com'),
---     (NULL,       'ghost1@example.com'),
---     ('Charlie',  NULL),
---     (NULL,       NULL),
---     ('Diana',    'diana@example.org'),
---     ('Eve',      'eve@example.net'),
---     ('Frank',    'frank@example.net'),
---     ('Grace',    NULL),
---     ('Heidi',    'heidi@example.org'),
---     (NULL,       'ghost2@example.com'),
---     ('Ivan',     'ivan@example.org'),
---     ('Judy',     NULL),
---     ('Mallory',  'mallory@foo.com'),
---     ('Niaj',     'niaj@bar.com');
+CREATE UNIQUE INDEX explicit_unique_2_index_test_idx
+    ON keys_test.explicit_unique_2_index_test (username, email);
 
--- -- unique index: 2 columns, partial
--- CREATE TABLE keys_test.explicit_unique_2_partial_index_test (
---     id SERIAL PRIMARY KEY,
---     username TEXT,
---     email TEXT
--- );
--- 
--- CREATE UNIQUE INDEX explicit_unique_2_partial_index_test_idx
---     ON keys_test.explicit_unique_2_partial_index_test (username, email)
---     WHERE username IS NOT NULL AND email IS NOT NULL;
--- 
--- INSERT INTO keys_test.explicit_unique_2_partial_index_test (username, email) VALUES
---     ('Alice',    'alice@example.com'),
---     ('Bob',      'bob@example.com'),
---     (NULL,       'ghost1@example.com'),
---     ('Charlie',  NULL),
---     (NULL,       NULL),
---     ('Diana',    'diana@example.org'),
---     ('Eve',      'eve@example.net'),
---     ('Frank',    'frank@example.net'),
---     ('Grace',    NULL),
---     ('Heidi',    'heidi@example.org'),
---     (NULL,       'ghost2@example.com'),
---     ('Ivan',     'ivan@example.org'),
---     ('Judy',     NULL),
---     ('Mallory',  'mallory@foo.com'),
---     ('Niaj',     'niaj@bar.com');
+INSERT INTO keys_test.explicit_unique_2_index_test (username, email) VALUES
+    ('Alice', 'alice@example.com'),
+    ('Bob', 'bob@example.com'),
+    ('Charlie', 'charlie@example.net'),
+    ('Diana', 'diana@sample.org'),
+    ('Eve', 'eve@example.com'),
+    ('Frank', 'frank@domain.com'),
+    ('Grace', 'grace@demo.net'),
+    ('Heidi', 'heidi@sample.com'),
+    ('Ivan', 'ivan@another.com'),
+    ('Judy', 'judy@example.org'),
+    ('Mallory', 'mallory@example.com'),
+    ('Niaj', 'niaj@domain.org'),
+    ('Oscar', 'oscar@sample.net'),
+    ('Peggy', 'peggy@demo.org'),
+    ('Trent', 'trent@service.com');
 
--- -- unique index: 1 column, functional
--- CREATE TABLE keys_test.explicit_unique_1_func_index_test (
---     id SERIAL PRIMARY KEY,
---     username TEXT NOT NULL,
---     email TEXT NOT NULL
--- );
--- 
--- CREATE UNIQUE INDEX explicit_unique_1_func_index_test_idx
---     ON keys_test.explicit_unique_1_func_index_test (UPPER(username));
--- 
--- INSERT INTO keys_test.explicit_unique_1_func_index_test (username, email) VALUES
---     ('Alice', 'alice@example.com'),
---     ('Bob', 'bob@example.com'),
---     ('Charlie', 'charlie@example.net'),
---     ('Diana', 'diana@sample.org'),
---     ('Eve', 'eve@example.com'),
---     ('Frank', 'frank@domain.com'),
---     ('Grace', 'grace@demo.net'),
---     ('Heidi', 'heidi@sample.com'),
---     ('Ivan', 'ivan@another.com'),
---     ('Judy', 'judy@example.org'),
---     ('Mallory', 'mallory@example.com'),
---     ('Niaj', 'niaj@domain.org'),
---     ('Oscar', 'oscar@sample.net'),
---     ('Peggy', 'peggy@demo.org'),
---     ('Trent', 'trent@service.com');
+-- unique index: 1 column, with null
+CREATE TABLE keys_test.explicit_unique_1_null_index_test (
+    id SERIAL PRIMARY KEY,
+    username TEXT,
+    email TEXT
+);
 
--- -- unique index: 2 columns, functional
--- CREATE TABLE keys_test.explicit_unique_2_func_index_test (
---     id SERIAL PRIMARY KEY,
---     username TEXT NOT NULL,
---     email TEXT NOT NULL
--- );
--- 
--- CREATE UNIQUE INDEX explicit_unique_2_func_index_test_idx
---     ON keys_test.explicit_unique_2_func_index_test (UPPER(username), UPPER(email));
--- 
--- INSERT INTO keys_test.explicit_unique_2_func_index_test (username, email) VALUES
---     ('Alice', 'alice@example.com'),
---     ('Bob', 'bob@example.com'),
---     ('Charlie', 'charlie@example.net'),
---     ('Diana', 'diana@sample.org'),
---     ('Eve', 'eve@example.com'),
---     ('Frank', 'frank@domain.com'),
---     ('Grace', 'grace@demo.net'),
---     ('Heidi', 'heidi@sample.com'),
---     ('Ivan', 'ivan@another.com'),
---     ('Judy', 'judy@example.org'),
---     ('Mallory', 'mallory@example.com'),
---     ('Niaj', 'niaj@domain.org'),
---     ('Oscar', 'oscar@sample.net'),
---     ('Peggy', 'peggy@demo.org'),
---     ('Trent', 'trent@service.com');
+CREATE UNIQUE INDEX explicit_unique_1_null_index_test_idx
+    ON keys_test.explicit_unique_1_null_index_test (username);
+
+INSERT INTO keys_test.explicit_unique_1_null_index_test (username, email) VALUES
+    ('Alice',    'alice@example.com'),
+    ('Bob',      'bob@example.com'),
+    (NULL,       'ghost1@example.com'),
+    ('Charlie',  NULL),
+    (NULL,       NULL),
+    ('Diana',    'diana@example.org'),
+    ('Eve',      'eve@example.net'),
+    ('Frank',    'frank@example.net'),
+    ('Grace',    NULL),
+    ('Heidi',    'heidi@example.org'),
+    (NULL,       'ghost2@example.com'),
+    ('Ivan',     'ivan@example.org'),
+    ('Judy',     NULL),
+    ('Mallory',  'mallory@foo.com'),
+    ('Niaj',     'niaj@bar.com');
+
+-- unique index: 2 columns, with null
+CREATE TABLE keys_test.explicit_unique_2_null_index_test (
+    id SERIAL PRIMARY KEY,
+    username TEXT,
+    email TEXT
+);
+
+CREATE UNIQUE INDEX explicit_unique_2_null_index_test_idx
+    ON keys_test.explicit_unique_2_null_index_test (username, email);
+
+INSERT INTO keys_test.explicit_unique_2_null_index_test (username, email) VALUES
+    ('Alice',    'alice@example.com'),
+    ('Bob',      'bob@example.com'),
+    (NULL,       'ghost1@example.com'),
+    ('Charlie',  NULL),
+    (NULL,       NULL),
+    ('Diana',    'diana@example.org'),
+    ('Eve',      'eve@example.net'),
+    ('Frank',    'frank@example.net'),
+    ('Grace',    NULL),
+    ('Heidi',    'heidi@example.org'),
+    (NULL,       'ghost2@example.com'),
+    ('Ivan',     'ivan@example.org'),
+    ('Judy',     NULL),
+    ('Mallory',  'mallory@foo.com'),
+    ('Niaj',     'niaj@bar.com');
+
+-- unique index: 1 column, partial
+CREATE TABLE keys_test.explicit_unique_1_partial_index_test (
+    id SERIAL PRIMARY KEY,
+    username TEXT,
+    email TEXT
+);
+
+CREATE UNIQUE INDEX explicit_unique_1_partial_index_test_idx
+    ON keys_test.explicit_unique_1_partial_index_test (username)
+    WHERE username IS NOT NULL;
+
+INSERT INTO keys_test.explicit_unique_1_partial_index_test (username, email) VALUES
+    ('Alice',    'alice@example.com'),
+    ('Bob',      'bob@example.com'),
+    (NULL,       'ghost1@example.com'),
+    ('Charlie',  NULL),
+    (NULL,       NULL),
+    ('Diana',    'diana@example.org'),
+    ('Eve',      'eve@example.net'),
+    ('Frank',    'frank@example.net'),
+    ('Grace',    NULL),
+    ('Heidi',    'heidi@example.org'),
+    (NULL,       'ghost2@example.com'),
+    ('Ivan',     'ivan@example.org'),
+    ('Judy',     NULL),
+    ('Mallory',  'mallory@foo.com'),
+    ('Niaj',     'niaj@bar.com');
+
+-- unique index: 2 columns, partial
+CREATE TABLE keys_test.explicit_unique_2_partial_index_test (
+    id SERIAL PRIMARY KEY,
+    username TEXT,
+    email TEXT
+);
+
+CREATE UNIQUE INDEX explicit_unique_2_partial_index_test_idx
+    ON keys_test.explicit_unique_2_partial_index_test (username, email)
+    WHERE username IS NOT NULL AND email IS NOT NULL;
+
+INSERT INTO keys_test.explicit_unique_2_partial_index_test (username, email) VALUES
+    ('Alice',    'alice@example.com'),
+    ('Bob',      'bob@example.com'),
+    (NULL,       'ghost1@example.com'),
+    ('Charlie',  NULL),
+    (NULL,       NULL),
+    ('Diana',    'diana@example.org'),
+    ('Eve',      'eve@example.net'),
+    ('Frank',    'frank@example.net'),
+    ('Grace',    NULL),
+    ('Heidi',    'heidi@example.org'),
+    (NULL,       'ghost2@example.com'),
+    ('Ivan',     'ivan@example.org'),
+    ('Judy',     NULL),
+    ('Mallory',  'mallory@foo.com'),
+    ('Niaj',     'niaj@bar.com');
+
+-- unique index: 1 column, functional
+CREATE TABLE keys_test.explicit_unique_1_func_index_test (
+    id SERIAL PRIMARY KEY,
+    username TEXT NOT NULL,
+    email TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX explicit_unique_1_func_index_test_idx
+    ON keys_test.explicit_unique_1_func_index_test (UPPER(username));
+
+INSERT INTO keys_test.explicit_unique_1_func_index_test (username, email) VALUES
+    ('Alice', 'alice@example.com'),
+    ('Bob', 'bob@example.com'),
+    ('Charlie', 'charlie@example.net'),
+    ('Diana', 'diana@sample.org'),
+    ('Eve', 'eve@example.com'),
+    ('Frank', 'frank@domain.com'),
+    ('Grace', 'grace@demo.net'),
+    ('Heidi', 'heidi@sample.com'),
+    ('Ivan', 'ivan@another.com'),
+    ('Judy', 'judy@example.org'),
+    ('Mallory', 'mallory@example.com'),
+    ('Niaj', 'niaj@domain.org'),
+    ('Oscar', 'oscar@sample.net'),
+    ('Peggy', 'peggy@demo.org'),
+    ('Trent', 'trent@service.com');
+
+-- unique index: 2 columns, functional
+CREATE TABLE keys_test.explicit_unique_2_func_index_test (
+    id SERIAL PRIMARY KEY,
+    username TEXT NOT NULL,
+    email TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX explicit_unique_2_func_index_test_idx
+    ON keys_test.explicit_unique_2_func_index_test (UPPER(username), UPPER(email));
+
+INSERT INTO keys_test.explicit_unique_2_func_index_test (username, email) VALUES
+    ('Alice', 'alice@example.com'),
+    ('Bob', 'bob@example.com'),
+    ('Charlie', 'charlie@example.net'),
+    ('Diana', 'diana@sample.org'),
+    ('Eve', 'eve@example.com'),
+    ('Frank', 'frank@domain.com'),
+    ('Grace', 'grace@demo.net'),
+    ('Heidi', 'heidi@sample.com'),
+    ('Ivan', 'ivan@another.com'),
+    ('Judy', 'judy@example.org'),
+    ('Mallory', 'mallory@example.com'),
+    ('Niaj', 'niaj@domain.org'),
+    ('Oscar', 'oscar@sample.net'),
+    ('Peggy', 'peggy@demo.org'),
+    ('Trent', 'trent@service.com');
+
+
+-- multiple unique indices
+CREATE TABLE keys_test.employees (
+    employee_id SERIAL PRIMARY KEY,
+    email TEXT NOT NULL,
+    phone_number TEXT NOT NULL,
+    national_id TEXT NOT NULL,
+    department TEXT NOT NULL,
+    location TEXT NOT NULL,
+    hire_date DATE NOT NULL
+);
+
+-- Unique index on email
+CREATE UNIQUE INDEX uniq_employees_email ON keys_test.employees(email);
+
+-- Unique index on phone_number
+CREATE UNIQUE INDEX uniq_employees_phone ON keys_test.employees(phone_number);
+
+-- Unique index on national_id
+CREATE UNIQUE INDEX uniq_employees_national_id ON keys_test.employees(national_id);
+
+-- Composite unique index on (department, location)
+CREATE UNIQUE INDEX uniq_employees_dept_location ON keys_test.employees(department, location);
+
+INSERT INTO keys_test.employees (email, phone_number, national_id, department, location, hire_date) VALUES
+    ('alice.smith@example.com',     '555-0101', 'ID1001', 'Engineering',  'New York',     '2020-03-15'),
+    ('bob.jones@example.org',       '555-0102', 'ID1002', 'HR',           'Chicago',      '2019-06-01'),
+    ('carol.wilson@example.net',    '555-0103', 'ID1003', 'Finance',      'San Francisco','2021-07-22'),
+    ('dave.brown@example.com',      '555-0104', 'ID1004', 'Engineering',  'Austin',       '2018-11-10'),
+    ('eve.davis@example.org',       '555-0105', 'ID1005', 'Sales',        'Boston',       '2022-01-03'),
+    ('frank.miller@example.net',    '555-0106', 'ID1006', 'Support',      'Seattle',      '2020-09-17'),
+    ('grace.lee@example.com',       '555-0107', 'ID1007', 'Marketing',    'Denver',       '2017-05-25'),
+    ('henry.adams@example.org',     '555-0108', 'ID1008', 'HR',           'Los Angeles',  '2016-12-30'),
+    ('irene.clark@example.net',     '555-0109', 'ID1009', 'Finance',      'Miami',        '2023-04-05'),
+    ('jack.taylor@example.com',     '555-0110', 'ID1010', 'Engineering',  'Chicago',      '2021-10-14');
+
 
 ## cleanup
 
