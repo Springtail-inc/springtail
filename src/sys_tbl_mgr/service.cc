@@ -1224,8 +1224,8 @@ Service::GetUserType(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "GetUserType");
 
-    LOG_INFO("got GetUserType() -- db {} type_id {} xid {} lsn {}", request->db_id(),
-                request->type_id(), request->xid(), request->lsn());
+    LOG_DEBUG("got GetUserType() -- db {} type_id {} xid {} lsn {}", request->db_id(),
+              request->type_id(), request->xid(), request->lsn());
 
     boost::shared_lock lock(_read_mutex);
 
@@ -1294,8 +1294,6 @@ Service::_get_usertype_info(uint64_t db_id, uint64_t type_id, const XidLsn& xid)
     // check the cache of un-finalized records
     {
         boost::unique_lock lock(_mutex);
-        LOG_INFO("In get_usertype_info() -- db {} type_id {} xid {} lsn {}", db_id, type_id,
-                    xid.xid, xid.lsn);
         auto user_type_i = _usertype_id_cache[db_id].find(type_id);
         if (user_type_i != _usertype_id_cache[db_id].end()) {
             // note: we keep XID/LSN in reverse order to allow use of lower_bound() for lookup
