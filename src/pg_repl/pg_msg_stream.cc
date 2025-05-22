@@ -18,6 +18,11 @@
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/exception.hh>
 
+extern "C" {
+    #include <postgres.h>
+    #include <catalog/pg_type.h>  // for BITOID, VARBITOID
+}
+
 namespace springtail {
 
     PgMsgStreamReader::PgMsgStreamReader(const std::filesystem::path &start_file,
@@ -852,6 +857,11 @@ namespace springtail {
             json["is_generated"].get_to(column.is_generated);
             json["type_name"].get_to(column.type_name);
             json["type_namespace"].get_to(column.type_namespace);
+
+            // SPR-774
+            if (column.pg_type == BITOID) {
+                column.pg_type = VARBITOID;
+            }
 
             if (!json["collation"].is_null()) {
                 column.collation = json["collation"].get<std::string>();
