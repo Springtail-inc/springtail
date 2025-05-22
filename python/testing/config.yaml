@@ -8,7 +8,7 @@ system_json_path: '../../system.json.test'
 build_dir: '../../debug'
 
 # the default test sets to run
-default_test_sets: ['basic', 'framework', 'recovery']
+default_test_sets: ['basic', 'framework', 'recovery', 'preload', 'enum_bits']
 
 # the configuration overlays to apply
 overlays:
