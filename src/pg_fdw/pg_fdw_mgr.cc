@@ -48,6 +48,7 @@ extern "C" {
     #include <varatt.h>
     #include <lib/stringinfo.h>
     #include <libpq-fe.h>
+    #include <libpq/pqformat.h>
     #include <miscadmin.h>
     #include <postmaster/interrupt.h>
     #include <postmaster/bgworker.h>
@@ -1159,7 +1160,7 @@ namespace springtail::pg_fdw {
     }
 
     std::vector<std::pair<std::string, std::string>>
-    PgFdwMgr::fdw_explain_scan(const PgFdwState *state) 
+    PgFdwMgr::fdw_explain_scan(const PgFdwState *state)
     {
         std::vector<std::pair<std::string, std::string>> r;
         r.emplace_back("FDW name", "springtail");
@@ -1266,6 +1267,7 @@ namespace springtail::pg_fdw {
                               float sort_order)
     {
         UserTypePtr utp = _enum_cache_lookup(state->db_id, springtail_oid, state->xid);
+        CHECK_NE(utp, nullptr);
 
         // lookup the index and get the string label
         auto &&it = utp->enum_index_map.find(sort_order);
@@ -1291,6 +1293,9 @@ namespace springtail::pg_fdw {
         ReleaseSysCache(tup);
 
         // create a datum from the enum's entry oid
+        LOG_DEBUG(LOG_FDW, "Enum datum: springtail_oid: {}, pg_oid: {}, enum_oid: {}",
+                            springtail_oid, pg_oid, enum_oid);
+
         return ObjectIdGetDatum(enum_oid);
     }
 
@@ -1338,41 +1343,47 @@ namespace springtail::pg_fdw {
             return PointerGetDatum(cstring_to_text_with_len(value.data(), value.size()));
         }
         case SchemaType::BINARY: {
-            // retrieve the type's entry from the pg_type table
-            HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_oid));
-            if (!HeapTupleIsValid(tuple)) {
-                elog(ERROR, "FDW: cache lookup failed for type %u", pg_oid);
-            }
-
-            // get the receive function
-            regproc typeinput = ((Form_pg_type) GETSTRUCT(tuple))->typreceive;
-
-            // handle array types by retrieving the subscript element type
-            Oid typelem = ((Form_pg_type) GETSTRUCT(tuple))->typelem;
-            if (typelem != 0) {
-                pg_oid = typelem;
-            }
-
-            ReleaseSysCache(tuple);
-
             auto &&value = field->get_binary(&row);
-
-            // note: we need to store the data into a StringInfo so that the receive function can
-            // unpack it for us
-            StringInfoData string;
-            initStringInfo(&string);
-            appendBinaryStringInfoNT(&string, value.data(), value.size());
-            Datum datum = PointerGetDatum(&string);
-
-            // call the recieve function
-            Datum value_datum = OidFunctionCall3(typeinput, datum, ObjectIdGetDatum(pg_oid), Int32GetDatum(atttypmod));
-
-            return value_datum;
+            return _binary_to_datum(value, pg_oid, atttypmod);
         }
-
         default:
             return 0;
         }
+    }
+
+    Datum
+    PgFdwMgr::_binary_to_datum(const std::span<const char> &value,
+                               Oid pg_oid,
+                               int32_t atttypmod)
+    {
+        // retrieve the type's entry from the pg_type table
+        HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_oid));
+        if (!HeapTupleIsValid(tuple)) {
+            elog(ERROR, "FDW: cache lookup failed for type %u", pg_oid);
+        }
+
+        // get the receive function
+        regproc typeinput = ((Form_pg_type) GETSTRUCT(tuple))->typreceive;
+
+        // handle array types by retrieving the subscript element type
+        Form_pg_type typeform = (Form_pg_type) GETSTRUCT(tuple);
+        Oid typelem = typeform->typelem;
+        if (typelem != 0) {
+            pg_oid = typelem;
+        }
+
+        ReleaseSysCache(tuple);
+
+        // note: we need to store the data into a StringInfo so that the receive function can
+        // unpack it for us
+        StringInfoData string;
+        initStringInfo(&string);
+
+        appendBinaryStringInfoNT(&string, value.data(), value.size());
+        Datum datum = PointerGetDatum(&string);
+
+        // call the recieve function
+        return OidFunctionCall3(typeinput, datum, ObjectIdGetDatum(pg_oid), Int32GetDatum(atttypmod));
     }
 
     std::string

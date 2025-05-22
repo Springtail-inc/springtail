@@ -353,6 +353,11 @@ namespace springtail::pg_fdw {
             uint64_t namespace_id,
             uint64_t schema_xid);
 
+        /** Helper to convert binary field to datum */
+        static Datum _binary_to_datum(const std::span<const char> &value,
+                                      Oid pg_oid,
+                                      int32_t atttypmod);
+
         /** Helper to get the index quals for a given index */
         friend std::vector<ConstQualPtr>
         _get_index_quals(const PgFdwState *state, Index const& idx, List const* qual_list);
