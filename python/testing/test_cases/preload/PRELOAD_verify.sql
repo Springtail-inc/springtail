@@ -11,6 +11,7 @@
 ### schema_check data_type_test geometric_types_table
 ### schema_check data_type_test network_types_table
 ### schema_check data_type_test text_search_json
+### table_exists data_type_test composite_data false
 ### schema_check data_type_test special_data
 ### schema_check data_type_test range_multirange_test
 

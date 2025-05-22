@@ -258,11 +258,32 @@ INSERT INTO data_type_test.text_search_json (tsv_col, tsq_col, json_col, jsonb_c
 
 -- table with composite type, range types, and monetary type
 
--- CREATE TYPE data_type_test.person_info AS (
---     first_name text,
---     last_name text,
---     age int
--- );
+CREATE TYPE data_type_test.person_info AS (
+    first_name text,
+    last_name text,
+    age int
+);
+
+CREATE TABLE data_type_test.composite_data (
+    id serial PRIMARY KEY,
+    info data_type_test.person_info,
+    price money,
+    int_range int4range,
+    ts_range tsrange,
+    num_range numrange
+);
+
+INSERT INTO data_type_test.composite_data (info, price, int_range, ts_range, num_range) VALUES
+    (ROW('Eve', 'Adams', 29), '$75.00', '[1,5)', '[2025-05-01 09:00, 2025-05-01 11:00)', '[0.1,1.0)'),
+    (ROW('Frank', 'Baker', 52), '$250.25', '[100,200)', '[2025-06-15 13:00, 2025-06-15 15:30)', '[3.3,7.7)'),
+    (ROW('Grace', 'Clark', 40), '$600.00', '[0,50)', '[2025-07-20 08:30, 2025-07-20 12:00)', '[10.5,20.5)'),
+    (ROW('Hank', 'Davis', 33), '$1234.56', '[25,35]', '[2025-08-10 14:00, 2025-08-10 16:00)', '[7,14)'),
+    (ROW('Ivy', 'Evans', 22), '$89.99', '[15,45)', '[2025-09-05 07:00, 2025-09-05 09:00)', '[2,5)'),
+    (ROW('Jack', 'Foster', 60), '$1500.00', '[40,60)', '[2025-10-10 10:00, 2025-10-10 12:00)', '[0,3.14)'),
+    (ROW('Karen', 'Green', 38), '$432.10', '[10,20)', '[2025-11-11 18:00, 2025-11-11 20:00)', '[1,2)'),
+    (ROW('Leo', 'Hall', 44), '$777.77', '[5,15)', '[2025-12-12 08:00, 2025-12-12 10:30)', '[4,8)'),
+    (ROW('Mia', 'Irwin', 27), '$99.99', '[20,30]', '[2026-01-01 00:00, 2026-01-01 02:00)', '[0,1)'),
+    (ROW('Ned', 'Jones', 50), '$111.11', '[30,40)', '[2026-02-02 14:00, 2026-02-02 16:00)', '[5,9)');
 
 CREATE TABLE data_type_test.special_data (
     id serial PRIMARY KEY,
@@ -273,17 +294,6 @@ CREATE TABLE data_type_test.special_data (
     num_range numrange
 );
 
--- INSERT INTO data_type_test.special_data (info, price, int_range, ts_range, num_range) VALUES
---     (ROW('Eve', 'Adams', 29), '$75.00', '[1,5)', '[2025-05-01 09:00, 2025-05-01 11:00)', '[0.1,1.0)'),
---     (ROW('Frank', 'Baker', 52), '$250.25', '[100,200)', '[2025-06-15 13:00, 2025-06-15 15:30)', '[3.3,7.7)'),
---     (ROW('Grace', 'Clark', 40), '$600.00', '[0,50)', '[2025-07-20 08:30, 2025-07-20 12:00)', '[10.5,20.5)'),
---     (ROW('Hank', 'Davis', 33), '$1234.56', '[25,35]', '[2025-08-10 14:00, 2025-08-10 16:00)', '[7,14)'),
---     (ROW('Ivy', 'Evans', 22), '$89.99', '[15,45)', '[2025-09-05 07:00, 2025-09-05 09:00)', '[2,5)'),
---     (ROW('Jack', 'Foster', 60), '$1500.00', '[40,60)', '[2025-10-10 10:00, 2025-10-10 12:00)', '[0,3.14)'),
---     (ROW('Karen', 'Green', 38), '$432.10', '[10,20)', '[2025-11-11 18:00, 2025-11-11 20:00)', '[1,2)'),
---     (ROW('Leo', 'Hall', 44), '$777.77', '[5,15)', '[2025-12-12 08:00, 2025-12-12 10:30)', '[4,8)'),
---     (ROW('Mia', 'Irwin', 27), '$99.99', '[20,30]', '[2026-01-01 00:00, 2026-01-01 02:00)', '[0,1)'),
---     (ROW('Ned', 'Jones', 50), '$111.11', '[30,40)', '[2026-02-02 14:00, 2026-02-02 16:00)', '[5,9)');
 INSERT INTO data_type_test.special_data (price, int_range, ts_range, num_range) VALUES
     ('$75.00', '[1,5)', '[2025-05-01 09:00, 2025-05-01 11:00)', '[0.1,1.0)'),
     ('$250.25', '[100,200)', '[2025-06-15 13:00, 2025-06-15 15:30)', '[3.3,7.7)'),
