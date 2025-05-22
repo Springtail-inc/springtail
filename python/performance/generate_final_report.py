@@ -71,18 +71,21 @@ def write_csv_to_worksheet(worksheet, csv_file, normal_fmt, bold_fmt):
     for c, width in enumerate(col_widths):
         worksheet.set_column(c, c, width)
 
-def write_aggregates_to_worksheet(worksheet, final_aggregates_file: str, final_traces_file: str, pg_xid_summary_file: str, normal_fmt, bold_fmt):
+def write_aggregates_to_worksheet(worksheet, run_config: dict, normal_fmt, bold_fmt):
     """
     Write aggregates to worksheet.
 
     Args:
         worksheet (xlsxwriter.worksheet.Worksheet): Worksheet to write to
-        final_aggregates_file (str): Final aggregates file
-        final_traces_file (str): Final traces file
-        pg_xid_summary_file (str): PG-XID summary file
+        run_config (dict): Run configuration
         normal_fmt (xlsxwriter.format.Format): Normal format
         bold_fmt (xlsxwriter.format.Format): Bold format
     """
+    # Get the files to calculate the aggregates
+    final_aggregates_file = get_file_path(run_config, "final_aggregates")
+    final_traces_file = get_file_path(run_config, "final_traces")
+    pg_xid_summary_file = get_file_path(run_config, "pg_xid_summary")
+
     # Sum the total_ms and duration_ms columns in the final traces sheet
     total_ms = 0
     duration_ms = 0
@@ -93,13 +96,13 @@ def write_aggregates_to_worksheet(worksheet, final_aggregates_file: str, final_t
             duration_ms += float(row['duration_ms'])
 
     # Track max width for each column
-    col_widths = [0, 0]  # two columns: label and value
+    col_widths = [0, 0, 0]  # three columns: key, label, and value
 
-    # Row/column values
-    aggregates = [
-        ('Ingest total time', total_ms),
-        ('Primary total time', duration_ms),
-    ]
+    metrics = run_config['metrics']
+
+    aggregates = {}
+    aggregates["ingest_total_time"] = total_ms
+    aggregates["primary_total_time"] = duration_ms
 
     # Analyze pg_xid summary
     ingest_slower_count = 0
@@ -115,29 +118,29 @@ def write_aggregates_to_worksheet(worksheet, final_aggregates_file: str, final_t
             elif val < 0:
                 ingest_faster_count += 1
 
-    aggregates += [
-        ('Ingest outperform primary percentage', ingest_faster_count / total_count),
-        ('Ingest outperform primary count', ingest_faster_count),
-        ('Primary outperform ingest count', ingest_slower_count),
-    ]
+    aggregates["ingest_outperform_primary_percentage"] = ingest_faster_count / total_count
+    aggregates["ingest_outperform_primary_count"] = ingest_faster_count
+    aggregates["primary_outperform_ingest_count"] = ingest_slower_count
 
     # Write aggregates to csv first
     with open(final_aggregates_file, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['Label', 'Value'])
-        for label, value in aggregates:
-            writer.writerow([label, value])
+        writer.writerow(['Key', 'Label', 'Value'])
+        for key in metrics:
+            writer.writerow([key, metrics[key]['label'], aggregates[key]])
 
     # Write to worksheet and track max widths
-    for r, (label, value) in enumerate(aggregates):
-        label_str = str(label)
-        value_str = str(value)
+    for idx, key in enumerate(metrics):
+        label_str = str(metrics[key]['label'])
+        value_str = str(aggregates[key])
 
-        worksheet.write(r, 0, label_str, bold_fmt)
-        worksheet.write(r, 1, value, normal_fmt)
+        worksheet.write(idx, 0, key, bold_fmt)
+        worksheet.write(idx, 1, label_str, bold_fmt)
+        worksheet.write(idx, 2, value_str, normal_fmt)
 
-        col_widths[0] = max(col_widths[0], len(label_str))
-        col_widths[1] = max(col_widths[1], len(value_str))
+        col_widths[0] = max(col_widths[0], len(key))
+        col_widths[1] = max(col_widths[1], len(label_str))
+        col_widths[2] = max(col_widths[2], len(value_str))
 
     # Apply column widths with padding
     for c, width in enumerate(col_widths):
@@ -190,7 +193,7 @@ def generate_final_report(run_config: dict):
     write_csv_to_worksheet(workbook.add_worksheet('Trace Data'), final_traces_file, normal_fmt, bold_fmt)
     write_csv_to_worksheet(workbook.add_worksheet('Transaction Aggregates'), pg_xid_summary_file, normal_fmt, bold_fmt)
 
-    write_aggregates_to_worksheet(workbook.add_worksheet('Final Aggregates'), final_aggregates_file, final_traces_file, pg_xid_summary_file, normal_fmt, bold_fmt)
+    write_aggregates_to_worksheet(workbook.add_worksheet('Final Aggregates'), run_config, normal_fmt, bold_fmt)
 
     workbook.close()
 

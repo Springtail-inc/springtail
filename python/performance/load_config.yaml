@@ -90,8 +90,18 @@ file_configuration:
 use_s3: false
 
 metrics:
-  Ingest total time: 'negative'
-  Primary total time: 'display'
-  Ingest outperform primary percentage: 'positive'
-  Ingest outperform primary count: 'positive'
-  Primary outperform ingest count: 'display'
+  ingest_total_time:
+    label: 'Ingest total time (ms)'
+    type: 'negative'
+  primary_total_time:
+    label: 'Primary total time (ms)'
+    type: 'display'
+  ingest_outperform_primary_percentage:
+    label: 'Percentage where the ingest is faster than the primary'
+    type: 'positive'
+  ingest_outperform_primary_count:
+    label: 'Number of times the ingest is faster than the primary'
+    type: 'positive'
+  primary_outperform_ingest_count:
+    label: 'Number of times the primary is faster than the ingest'
+    type: 'display'

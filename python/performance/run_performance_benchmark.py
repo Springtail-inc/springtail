@@ -38,12 +38,12 @@ def read_csv_to_dict(file_path):
         reader = csv.DictReader(file)
         return {row['Label']: row['Value'] for row in reader}
 
-def get_comparison_details(key, prev_run_value, current_run_value, threshold_fraction, results, metric_type):
+def get_comparison_details(label, prev_run_value, current_run_value, threshold_fraction, results, metric_type):
     """
     Get the comparison details
 
     Args:
-        key (str): Key to compare
+        label (str): Label to compare
         prev_run_value (float): Previous run value
         current_run_value (float): Current run value
         threshold_fraction (float): Threshold fraction (e.g., 0.05 for 5%)
@@ -54,7 +54,7 @@ def get_comparison_details(key, prev_run_value, current_run_value, threshold_fra
         description = "Missing values for comparison"
         improvement = None
     else:
-        diff = current_run_value - prev_run_value
+        diff = current_run_value - prev_run_value if prev_run_value == 0 else 0
         base = prev_run_value if prev_run_value != 0 else 1e-9
         rel_change = abs(diff) / abs(base)
         percentage = rel_change * 100
@@ -87,7 +87,7 @@ def get_comparison_details(key, prev_run_value, current_run_value, threshold_fra
             description = f"Value {direction} from {prev_run_value:.2f} to {current_run_value:.2f}"
 
     results.append({
-        "key": key,
+        "label": label,
         "improvement": improvement,
         "description": description,
         "percentage": percentage,
@@ -114,8 +114,8 @@ def compare_csv_values(run_config: dict, prev_run_file, current_run_file):
     for key in metrics:
         prev_run_value = float(prev_run_data.get(key)) if prev_run_data.get(key) else 0
         current_run_value = float(current_run_data.get(key)) if current_run_data.get(key) else 0
-        metric_type = metrics[key]
-        get_comparison_details(key, prev_run_value, current_run_value, threshold_fraction, results, metric_type)
+        metric_type = metrics[key]['type']
+        get_comparison_details(metrics[key]['label'], prev_run_value, current_run_value, threshold_fraction, results, metric_type)
 
     # Print the results in table format
     print_results(results)
@@ -163,10 +163,12 @@ def get_current_run_details(run_config: dict):
     csv_reader = csv.DictReader(open(final_aggregates_file))
     results = []
     for row in csv_reader:
+        key = row['Key']
+        label, value, metric_type = row['Label'], float(row['Value']), metrics[key]['type']
         # Only capture the configured metrics
-        if row['Label'] not in metrics:
+        if key not in metrics:
             continue
-        get_comparison_details(row['Label'], 0, float(row['Value']), run_config['comparison_threshold'] / 100.0, results)
+        get_comparison_details(label, 0, value, run_config['comparison_threshold'] / 100.0, results, metric_type)
 
     # Print the results in table format
     print_results(results)

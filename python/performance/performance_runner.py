@@ -28,10 +28,18 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run performance benchmark")
     parser.add_argument('-s', '--suite', type=str, default="basic", help='Specific performance suite to run')
     parser.add_argument('-c', '--config-file', type=str, default="performance_config.yaml", help='Path to the performance configuration file')
+    parser.add_argument('-d', '--do-cleanup', action='store_true', help='Clean up previous run data')
 
     return parser.parse_args()
 
-def run_performance_suite(config_file: str):
+def run_performance_suite(config_file: str, do_cleanup: bool = False):
+    """
+    Run the performance suite.
+
+    Args:
+        config_file (str): Path to the performance configuration file
+        do_cleanup (bool): Whether to clean up previous run data
+    """
     config = yaml.safe_load(open(config_file))
     sys_config_file = config['system_json_path']
     base_config_file = config['base_config_path']
@@ -60,7 +68,7 @@ def run_performance_suite(config_file: str):
         springtail.start(sys_config_file, build_dir, do_cleanup=False, do_init=True, postgres_only=False, do_fdw_install=False)
 
         # Run the performance suite
-        run_performance_benchmark(merged_config)
+        run_performance_benchmark(merged_config, do_cleanup)
 
         # stop Springtail
         print('Stopping the Springtail instance')
@@ -68,4 +76,4 @@ def run_performance_suite(config_file: str):
 
 if __name__ == "__main__":
     args = parse_arguments()
-    run_performance_suite(args.config_file)
+    run_performance_suite(args.config_file, args.do_cleanup)

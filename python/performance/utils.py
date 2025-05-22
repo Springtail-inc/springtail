@@ -109,27 +109,38 @@ def print_banner(message, pad=1, border='*'):
         print(f"{border}{padded_line}{border}")
     print(horizontal_border)
 
-def print_results(results: list):
+def print_results(results):
     """
-    Print the results in a table format.
+    Print the results in table format.
+    Auto pads the header and content rows to the same width.
 
     Args:
-        results (list): List of dictionaries containing the results
+        results (list): List of results
     """
-    print("|" + "-" * 10 + "+" + "-" * 42 + "+" + "-" * 12 + "+" + "-" * 60 + "|")
-    print(f"| {'STATUS':^8} | {'METRIC':^40} | {'PERCENTAGE':^10} | {'DESCRIPTION':^60} |")
-    print("|" + "-" * 10 + "+" + "-" * 42 + "+" + "-" * 12 + "+" + "-" * 60 + "|")
+    # Dynamically determine column widths based on content
+    status_title = "STATUS"
+    metric_title = "METRIC"
+    percentage_title = "PERCENTAGE"
+    description_title = "DESCRIPTION"
 
+    status_width = max(len(status_title), max(len("GOOD"), len("BAD"), len("NORMAL")))
+    metric_width = max(len(metric_title), max(len(res["label"]) for res in results))
+    percent_width = max(len(percentage_title), len("100.00 %"))
+    desc_width = max(len(description_title), max(len(res["description"]) for res in results))
+
+    # Print header
+    print("|" + "-" * (status_width + 4) + "+" + "-" * (metric_width + 4) + "+" + "-" * (percent_width + 4) + "+" + "-" * (desc_width + 4) + "|")
+    print(f"| {status_title:^{status_width + 2}} | {metric_title:^{metric_width + 2}} | {percentage_title:^{percent_width + 2}} | {description_title:^{desc_width + 2}} |")
+    print("|" + "-" * (status_width + 4) + "+" + "-" * (metric_width + 4) + "+" + "-" * (percent_width + 4) + "+" + "-" * (desc_width + 4) + "|")
+
+    # Print rows
     for res in results:
-        status = {
-            True: "GOOD",
-            False: "BAD",
-            None: "NORMAL"
-        }[res["improvement"]]
-
-        key = res.get("key", "")
-        percentage = res.get("percentage", "")
+        status = "GOOD" if res["improvement"] else "BAD" if res["improvement"] is False else "NORMAL"
         desc = res["description"]
-        print(f"| {status:<8} | {key:<40} | {percentage:<10.2f} | {desc:<60} |")
+        metric = res["label"]
+        percentage = f"{res['percentage']:.2f}"
 
-    print("|" + "-" * 10 + "+" + "-" * 42 + "+" + "-" * 12 + "+" + "-" * 60 + "|")
+        print(f"| {status:<{status_width + 2}} | {metric:<{metric_width + 2}} | {percentage:>{percent_width + 2}} | {desc:<{desc_width + 2}} |")
+
+    # Footer
+    print("|" + "-" * (status_width + 4) + "+" + "-" * (metric_width + 4) + "+" + "-" * (percent_width + 4) + "+" + "-" * (desc_width + 4) + "|")
