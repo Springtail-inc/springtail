@@ -1659,6 +1659,8 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
         }
     }
 
+    uint64_t snapshot_xid = 0;
+
     // this is just a  helper function to find cached roots by index
     auto find_cached_root = [&](uint64_t index_id) -> std::optional<uint64_t> {
         for (const auto& xid_roots: *cached_roots) {
@@ -1676,6 +1678,7 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
                     }
             );
             if (it != xid_roots.second->roots().end()) {
+                snapshot_xid = xid_roots.second->snapshot_xid();
                 return it->extent_id();
             }
         }
@@ -1696,8 +1699,6 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     auto table_id_f = roots_t->extent_schema()->get_field("table_id");
 
     auto index_id_f = roots_t->extent_schema()->get_field("index_id");
-
-    uint64_t snapshot_xid = 0;
 
     const std::string& sxid =
         sys_tbl::TableRoots::Data::SCHEMA[sys_tbl::TableRoots::Data::SNAPSHOT_XID].name;
@@ -2558,6 +2559,7 @@ Service::_set_primary_index(uint64_t db_id,
     index.set_is_unique(true);
     index.set_namespace_name(namespace_name);
     index.set_table_id(table_id);
+    index.set_state(static_cast<uint8_t>(sys_tbl::IndexNames::State::READY));
 
     for (auto const& c : info->columns()) {
         if (!c.has_pk_position()) {
@@ -2570,9 +2572,6 @@ Service::_set_primary_index(uint64_t db_id,
         primary_keys[c.pk_position()] = c.position();
     }
 
-    index.set_state(index.columns().empty()
-                        ? static_cast<uint8_t>(sys_tbl::IndexNames::State::DELETED)
-                        : static_cast<uint8_t>(sys_tbl::IndexNames::State::READY));
 
     auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);
 
