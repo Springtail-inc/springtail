@@ -24,6 +24,7 @@
 #include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
 #include <pg_log_mgr/xid_ready.hh>
+#include <pg_log_mgr/index_reconciliation_queue_manager.hh>
 
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <pg_log_mgr/committer.hh>
@@ -31,6 +32,7 @@
 #include <redis/db_state_change.hh>
 
 namespace springtail::pg_log_mgr {
+
     /**
      * @brief Postgres log manager
      * Manages pipeline of postgres replication messages.
@@ -95,7 +97,7 @@ namespace springtail::pg_log_mgr {
                  int port,
                  bool archive_logs,
                  std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
-                 std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>> index_reconciliation_queue);
+                 std::shared_ptr<IndexReconciliationQueueManager> index_reconciliation_queue_mgr);
 
         /**
          * @brief Construct a new Pg Log Mgr object (for testing only)
@@ -110,7 +112,7 @@ namespace springtail::pg_log_mgr {
           _committer_queue(std::make_shared<ConcurrentQueue<committer::XidReady>>()),
           _xact_log_path(xact_log_path),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
-          _index_reconciliation_queue(std::make_shared<ConcurrentQueue<IndexReconcileRequest>>())
+          _index_reconciliation_queue_mgr(std::make_shared<IndexReconciliationQueueManager>())
         {
             _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, _committer_queue, false);
         }
@@ -238,7 +240,11 @@ namespace springtail::pg_log_mgr {
 
         // Index reconciliation
 
-        std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>> _index_reconciliation_queue; ///< Queue where index reconciliation requests are received
+        /**
+         * @brief shared_ptr to the index reconciliation manager to access the index reconciliation queues
+         */
+        std::shared_ptr<IndexReconciliationQueueManager> _index_reconciliation_queue_mgr;
+
         std::thread _reconciliation_thread;            ///< Index reconciliation thread
         /*
          * Index reconciliation thread; waits on index reconciliation requests

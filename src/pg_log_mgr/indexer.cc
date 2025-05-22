@@ -9,8 +9,9 @@
 
 namespace springtail::committer {
 
-    Indexer::Indexer(uint32_t worker_count, const ReconciliationQueuePtr& index_reconciliation_queue)
-        : _index_reconciliation_queue(index_reconciliation_queue)
+    Indexer::Indexer(uint32_t worker_count,
+            std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> index_reconciliation_queue_mgr)
+        : _index_reconciliation_queue_mgr(index_reconciliation_queue_mgr)
     {
         CHECK_GT(worker_count, 0);
         for (auto i = 0; i != worker_count; ++i) {
@@ -365,7 +366,13 @@ namespace springtail::committer {
         // only after all the DDLs of XID are processed
         if (--_xid_ddl_counter_map[idx_state._idx._xid] == 0) {
             _xid_ddl_counter_map.erase(idx_state._idx._xid);
-            _index_reconciliation_queue->push(std::make_shared<IndexReconcileRequest>(db_id, idx_state._idx._xid));
+            auto push_success = _index_reconciliation_queue_mgr->push(db_id,
+                    std::make_shared<IndexReconcileRequest>(db_id, idx_state._idx._xid));
+            if (!push_success) {
+                // Queue not available as respective pg_log_mgr is shutdown
+                // Abort reconciliation as the same will be redone as part of recovery
+                _pending_idx_reconciliation_map[db_id].erase(idx_state._idx._xid);
+            }
         }
     }
 

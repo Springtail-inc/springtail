@@ -1224,13 +1224,14 @@ Service::GetUserType(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "GetUserType");
 
-    LOG_INFO("got GetUserType() -- db {} type_id {} xid {} lsn {}", request->db_id(),
-                request->type_id(), request->xid(), request->lsn());
+    LOG_DEBUG(LOG_SCHEMA, "got GetUserType() -- db {} type_id {} xid {} lsn {}", request->db_id(),
+              request->type_id(), request->xid(), request->lsn());
 
     boost::shared_lock lock(_read_mutex);
 
     XidLsn xid(request->xid(), constant::MAX_LSN);
     auto info = _get_usertype_info(request->db_id(), request->type_id(), xid);
+    LOG_DEBUG(LOG_SCHEMA, "info is null? {}", info == nullptr);
 
     if (info != nullptr) {
         response->set_type_id(info->id);
@@ -1240,7 +1241,6 @@ Service::GetUserType(grpc::ServerContext* context,
         response->set_value_json(info->value_json);
         response->set_exists(info->exists);
     } else {
-        response->set_type_id(info->id);
         response->set_exists(false);
     }
 
@@ -1299,6 +1299,7 @@ Service::_get_usertype_info(uint64_t db_id, uint64_t type_id, const XidLsn& xid)
             // note: we keep XID/LSN in reverse order to allow use of lower_bound() for lookup
             auto info_i = user_type_i->second.lower_bound(xid);
             if (info_i != user_type_i->second.end()) {
+                LOG_DEBUG(LOG_SCHEMA, "Found user type {} in cache at exists {}", type_id, info_i->second->exists);
                 return info_i->second;
             }
         }
@@ -1310,13 +1311,20 @@ Service::_get_usertype_info(uint64_t db_id, uint64_t type_id, const XidLsn& xid)
     auto fields = schema->get_fields();
 
     auto search_key = sys_tbl::UserTypes::Primary::key_tuple(type_id, xid.xid, xid.lsn);
+    LOG_DEBUG(LOG_SCHEMA, "Searching for user type {} at {}:{}", type_id, xid.xid, xid.lsn);
 
     // find the row that matches the type_id at the given XID/LSN
     auto row_i = table->inverse_lower_bound(search_key);
     auto &&row = *row_i;
 
     // make sure type ID exists at this XID/LSN
-    auto id_field = fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID);
+    auto id_field = fields->at(sys_tbl::UserTypes::Data::TYPE_ID);
+    if (row_i == table->end()) {
+        LOG_WARN("No user rows for search key type {} at xid {}:{}", type_id, xid.xid, xid.lsn);
+        return nullptr;
+    }
+
+    LOG_DEBUG(LOG_SCHEMA, "Found user type id: {}", id_field->get_uint64(&row));
     if (row_i == table->end() || id_field->get_uint64(&row) != type_id) {
         LOG_WARN("No user type info at xid {}:{}", xid.xid, xid.lsn);
         return nullptr;
@@ -1334,7 +1342,7 @@ Service::_get_usertype_info(uint64_t db_id, uint64_t type_id, const XidLsn& xid)
         type_id,
         fields->at(sys_tbl::UserTypes::Data::NAME)->get_text(&row),
         fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID)->get_uint64(&row),
-        fields->at(sys_tbl::UserTypes::Data::TYPE)->get_int8(&row),
+        fields->at(sys_tbl::UserTypes::Data::TYPE)->get_uint8(&row),
         fields->at(sys_tbl::UserTypes::Data::VALUE)->get_text(&row),
         fields->at(sys_tbl::UserTypes::Data::EXISTS)->get_bool(&row));
 }
