@@ -272,6 +272,24 @@ class TestCase:
                             'replica_exists': directive[3] == 'true'
                         }, section, is_threaded, cur_txn, line_num)
 
+                    # Usage - index_exists <schema> <table> <index> <replica_exists>
+                    # Ex: ### index_exists public test_init test_init_index true
+                    # Determines if a specific index is present in the replica, used in scenarios where we do not replicate an index
+                    # and want to verify that
+                    elif directive[0] == 'index_exists':
+                        if section != 'verify':
+                            self._raise_error(f'{line_num}: "index_exists" must be part of the "verify" section')
+                        if len(directive) < 5:
+                            self._raise_error(f'{line_num}: "index_exists" must specify a schema, table, index, and replica exists value')
+
+                        self._append_command({
+                            'type': 'index_exists',
+                            'schema': directive[1],
+                            'table': directive[2],
+                            'index': directive[3],
+                            'replica_exists': directive[4] == 'true'
+                        }, section, is_threaded, cur_txn, line_num)
+
                     elif directive[0] == 'autocommit':
                         if section != 'metadata':
                             self._raise_error(f'{line_num}: "autocommit" must be specified in the "metadata" section')
@@ -454,7 +472,7 @@ class TestCase:
 
                 return []
 
-            if command['type'] == 'table_exists':
+            if command['type'] == 'table_exists' or command['type'] == 'index_exists':
                 results = {}
 
                 results['exists'] = command['replica_exists']
@@ -572,7 +590,30 @@ class TestCase:
                 results['exists'] = replica_result
 
                 return results
+            elif command['type'] == 'index_exists':
+                results = {}
+                replica_result = True
 
+                with_sql = f"""SELECT EXISTS (SELECT "index_names"."name"
+                                FROM "__pg_springtail_catalog"."index_names"
+                                JOIN "__pg_springtail_catalog"."table_names"
+                                ON "table_names"."table_id" = "index_names"."table_id"
+                                JOIN "__pg_springtail_catalog"."namespace_names"
+                                ON "namespace_names"."namespace_id" = "table_names"."namespace_id"
+                                    AND "namespace_names"."namespace_id" = "index_names"."namespace_id"
+                                WHERE "namespace_names"."name" = '{command["schema"]}'
+                                AND "table_names"."name" = '{command["table"]}'
+                                AND "index_names"."name" = '{command["schema"]}.{command["index"]}') AS index_exists
+                            """
+                sql = f"""WITH latest_table AS ({with_sql})
+                          SELECT index_exists FROM latest_table LIMIT 1"""
+
+                sql_result = self._execute_sql(cursor, sql, True)
+
+                replica_result = False if not sql_result else sql_result[0][0]
+                results['exists'] = replica_result
+
+                return results
             elif command['type'] == 'schema_check':
                 results = {}
 
