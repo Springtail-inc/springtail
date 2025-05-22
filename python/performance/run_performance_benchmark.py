@@ -63,7 +63,7 @@ def get_comparison_details(label, prev_run_value, current_run_value, threshold_f
         percentage = rel_change * 100
 
         if metric_type == 'display':
-            description = f"changed from {prev_run_value:.2f} to {current_run_value:.2f}"
+            description = f"Changed from {prev_run_value:.2f} to {current_run_value:.2f}"
             improvement = None
         else:
             within_threshold = False
@@ -95,6 +95,7 @@ def get_comparison_details(label, prev_run_value, current_run_value, threshold_f
         "improvement": improvement,
         "description": description,
         "percentage": percentage,
+        "metric_type": metric_type
     })
 
 def compare_csv_values(run_config: dict, prev_run_file, current_run_file):

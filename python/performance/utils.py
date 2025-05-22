@@ -120,27 +120,30 @@ def print_results(results):
     # Dynamically determine column widths based on content
     status_title = "STATUS"
     metric_title = "METRIC"
+    metric_type_title = "METRIC TYPE"
     percentage_title = "PERCENTAGE"
     description_title = "DESCRIPTION"
 
     status_width = max(len(status_title), max(len("GOOD"), len("BAD"), len("NORMAL")))
     metric_width = max(len(metric_title), max(len(res["label"]) for res in results))
+    metric_type_width = max(len(metric_type_title), max(len(res["metric_type"]) for res in results))
     percent_width = max(len(percentage_title), len("100.00 %"))
     desc_width = max(len(description_title), max(len(res["description"]) for res in results))
 
     # Print header
-    print("|" + "-" * (status_width + 4) + "+" + "-" * (metric_width + 4) + "+" + "-" * (percent_width + 4) + "+" + "-" * (desc_width + 4) + "|")
-    print(f"| {status_title:^{status_width + 2}} | {metric_title:^{metric_width + 2}} | {percentage_title:^{percent_width + 2}} | {description_title:^{desc_width + 2}} |")
-    print("|" + "-" * (status_width + 4) + "+" + "-" * (metric_width + 4) + "+" + "-" * (percent_width + 4) + "+" + "-" * (desc_width + 4) + "|")
+    print("|" + "-" * (status_width + 4) + "+" + "-" * (metric_width + 4) + "+" + "-" * (metric_type_width + 4) + "+" + "-" * (percent_width + 4) + "+" + "-" * (desc_width + 4) + "|")
+    print(f"| {status_title:^{status_width + 2}} | {metric_title:^{metric_width + 2}} | {metric_type_title:^{metric_type_width + 2}} | {percentage_title:^{percent_width + 2}} | {description_title:^{desc_width + 2}} |")
+    print("|" + "-" * (status_width + 4) + "+" + "-" * (metric_width + 4) + "+" + "-" * (metric_type_width + 4) + "+" + "-" * (percent_width + 4) + "+" + "-" * (desc_width + 4) + "|")
 
     # Print rows
     for res in results:
         status = "GOOD" if res["improvement"] else "BAD" if res["improvement"] is False else "NORMAL"
         desc = res["description"]
         metric = res["label"]
+        metric_type = res["metric_type"]
         percentage = f"{res['percentage']:.2f}"
 
-        print(f"| {status:<{status_width + 2}} | {metric:<{metric_width + 2}} | {percentage:>{percent_width + 2}} | {desc:<{desc_width + 2}} |")
+        print(f"| {status:<{status_width + 2}} | {metric:<{metric_width + 2}} | {metric_type:<{metric_type_width + 2}} | {percentage:>{percent_width + 2}} | {desc:<{desc_width + 2}} |")
 
     # Footer
-    print("|" + "-" * (status_width + 4) + "+" + "-" * (metric_width + 4) + "+" + "-" * (percent_width + 4) + "+" + "-" * (desc_width + 4) + "|")
+    print("|" + "-" * (status_width + 4) + "+" + "-" * (metric_width + 4) + "+" + "-" * (metric_type_width + 4) + "+" + "-" * (percent_width + 4) + "+" + "-" * (desc_width + 4) + "|")
