@@ -465,7 +465,10 @@ class TestCase:
                 results = {}
 
                 sql = f""" SELECT a.attname AS name,
-                                  t.oid AS pg_type,
+                                    CASE
+                                        WHEN t.oid = 1560 THEN 1562
+                                        ELSE t.oid
+                                    END AS pg_type,
                                   NOT a.attnotnull AS nullable,
                                   a.attnum AS position
                            FROM pg_catalog.pg_attribute a
