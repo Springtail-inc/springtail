@@ -20,8 +20,6 @@ find_package(nlohmann_json REQUIRED)
 # destination library
 add_library(springtail_pg ${PG_LIB_SOURCES})
 
-add_executable(test_reader test/test_reader.cc)
-
 # executables
 add_executable(pg_wal_dump test/pg_wal_dump.cc)
 add_dsymutil_command(pg_wal_dump)
