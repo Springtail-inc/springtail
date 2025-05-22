@@ -348,6 +348,10 @@ namespace springtail
 
                 // atttypid oid
                 column.pg_type = _connection.get_int32(i, 4);
+                // SPR-774
+                if (column.pg_type == BITOID) {
+                    column.pg_type = VARBITOID;
+                }
 
                 // is primary key
                 column.is_generated = _connection.get_boolean(i, 5);
