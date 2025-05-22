@@ -169,6 +169,12 @@ namespace springtail
         PgTableSchema _schema;
 
         /**
+         * @brief Reset all internal data relevant to processing the next request.
+         *
+         */
+        void _reset_schema();
+
+        /**
          * @brief Extract schema from table and store in internal _schema object
          * @details Uses atttypid from pg_attribute table for identifier of the type.
          *          Saves the column name, ordinal position, default value (as string), column type
@@ -280,10 +286,10 @@ namespace springtail
          * @param copy_queue queue of copy requests
          * @param result copy result (output)
          */
-        void _worker(uint64_t db_id,
-                     uint64_t target_xid,
-                     CopyQueuePtr copy_queue,
-                     PgCopyResultPtr result);
+        static void _worker(uint64_t db_id,
+                            uint64_t target_xid,
+                            CopyQueuePtr copy_queue,
+                            PgCopyResultPtr result);
 
         /** Get where clause condition for inclusion of schemas */
        static std::string _get_schema_condition(LibPqConnection &connection, uint64_t db_id);
