@@ -192,12 +192,14 @@ def download_performance_data_from_s3(run_config: dict):
     base_dir = run_config['file_configuration']['base_dir']
     prev_run_dir = run_config['file_configuration']['prev_run_dir']
 
+    # Clean up the previous run data
+    if os.path.exists(prev_run_dir):
+        shutil.rmtree(prev_run_dir)
+
     if not run_config['use_s3']:
         # Assume that the previous run is just the run that was done before this
         # If its not present, then previous run data will not be used
         if os.path.exists(base_dir):
-            if os.path.exists(prev_run_dir):
-                shutil.rmtree(prev_run_dir)
             shutil.move(base_dir, prev_run_dir)
             return True
         print(f"[*] No previous run found")
@@ -205,12 +207,12 @@ def download_performance_data_from_s3(run_config: dict):
 
     download_path = os.path.join('/tmp/', base_dir)
     os.makedirs(download_path, exist_ok=True)
-    extract_path = os.path.join(prev_run_dir)
-    os.makedirs(extract_path, exist_ok=True)
 
     # Download file to /tmp
     filename = AwsHelper().s3_download(PERFORMANCE_TEST_BUCKET, base_dir, download_path, 'final_aggregates.zip')
     if filename and os.path.exists(filename):
+        extract_path = os.path.join(prev_run_dir)
+        os.makedirs(extract_path, exist_ok=True)
         return unzip_file(filename, extract_path)
     else:
         print("[*] No previous run found")

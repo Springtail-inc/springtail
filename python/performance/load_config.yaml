@@ -87,7 +87,7 @@ file_configuration:
     # PG-XID summary
     pg_xid_summary: 'pg_xid_summary.csv'
 
-use_s3: false
+use_s3: true
 
 metrics:
   ingest_total_time:
