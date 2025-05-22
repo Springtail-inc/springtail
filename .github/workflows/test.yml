@@ -171,7 +171,7 @@ jobs:
           service postgresql stop
 
       - name: Run Integration Tests
-        if: success() || failure()      # run this step even if previous step failed
+        if: success()
         run: |
           cd python/testing
           service postgresql start

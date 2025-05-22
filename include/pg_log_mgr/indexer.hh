@@ -12,6 +12,7 @@
 #include <storage/mutable_btree.hh>
 #include <common/common.hh>
 #include <pg_repl/index_reconcile_request.hh>
+#include <pg_log_mgr/index_reconciliation_queue_manager.hh>
 
 namespace springtail::committer {
 
@@ -42,9 +43,7 @@ namespace springtail::committer {
             }
         };
 
-        using ReconciliationQueuePtr = std::shared_ptr<ConcurrentQueue<IndexReconcileRequest>>;
-
-        Indexer(uint32_t worker_count, const ReconciliationQueuePtr& index_reconciliation_queue);
+        Indexer(uint32_t worker_count, std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> index_reconciliation_queue_mgr);
 
         Indexer(const Indexer&) = delete;
         Indexer& operator=(const Indexer&) = delete;
@@ -199,9 +198,9 @@ namespace springtail::committer {
          */
         void _remove_index_key(uint64_t db_id, uint64_t table_id, const Key& key);
 
-        /*
-         * @brief A queue for indexer to notify committer to trigger index reconciliation
+        /**
+         * @brief shared_ptr to the index reconciliation manager to access the index reconciliation queues
          */
-        ReconciliationQueuePtr _index_reconciliation_queue;
+        std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> _index_reconciliation_queue_mgr;
     };
 }
