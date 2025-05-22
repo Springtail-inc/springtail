@@ -22,7 +22,7 @@ sys.path.append(os.path.join(project_root, 'shared'))
 sys.path.append(os.path.join(project_root, 'testing'))
 
 from aws import AwsHelper
-PERFORMANCE_TEST_BUCKET = "performance-test-output"
+PERFORMANCE_TEST_BUCKET = "devsupport.springtail.internal"
 
 def read_csv_to_dict(file_path):
     """
