@@ -978,6 +978,7 @@ namespace springtail
 
                 // add the table oid to the result
                 result->add_table(info);
+                copy_table._reset_schema();
 
             } catch (PgTableNotFoundError &e) {
                 LOG_ERROR("Table not found: {}.{}", request->schema_name, request->table_name);
@@ -1235,12 +1236,13 @@ namespace springtail
             PgCopyResultPtr copy_result = std::make_shared<PgCopyResult>(target_xid);
             table_results.push_back(copy_result);
             workers.push_back(std::thread(&PgCopyTable::_worker,
-                              &copy_table, db_id, target_xid, copy_queue, copy_result));
+                              db_id, target_xid, copy_queue, copy_result));
         }
 
         // iterate through the tables and copy them
         for (const auto &table_md : table_oids) {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Dumping table {}", table_md.table_name);
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Dumping table {}, namespace: {}, table_oid: {}",
+                table_md.table_name, table_md.namespace_name, table_md.table_oid);
 
             // add the table to the copy queue
             copy_queue->push(std::make_shared<CopyRequest>(table_md.table_name,
@@ -1261,4 +1263,14 @@ namespace springtail
         // create result object
         return table_results;
     }
+
+    void
+    PgCopyTable::_reset_schema()
+    {
+        _schema_name = std::string();
+        _table_name = std::string();
+        _oid_flag = false;
+        _schema = {};
+    }
+
 } // namespace springtail
