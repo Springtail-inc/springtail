@@ -134,6 +134,9 @@ jobs:
           echo "*** Performance Test Log S3 Key: $log_s3_key"
           rm -f tmplog
 
+          # Go back to the testing folder to use the springtail.py
+          cd ../testing
+
           # Springtail service logs
           springtail_log_file="springtail-performance-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.tar.gz"
           output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../debug)
