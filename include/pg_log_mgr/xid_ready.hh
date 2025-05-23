@@ -129,7 +129,8 @@ namespace springtail::committer {
 
         /** Constructor for messages that are INDEX_RECOVERY_TRIGGER */
         XidReady(uint64_t db_id, const Type &type)
-            : _type(type)
+            : _type(type),
+              _db_id(db_id)
         {
             CHECK_EQ(type, Type::INDEX_RECOVERY_TRIGGER);
         }

@@ -39,7 +39,30 @@ namespace springtail::committer {
         }
     }
 
+    void Indexer::_cleanup_for_db(uint64_t db_id) {
+        std::scoped_lock lock(_m, _pending_reconciliation_map_mtx, _table_idx_map_mtx);
+
+        // Clear _work_set entries for the db, to start fresh recovery
+        auto it = _work_set.begin();
+        while (it != _work_set.end()) {
+            if (it->second._db_id == db_id) {
+                it = _work_set.erase(it);  // erase returns the next valid iterator
+            } else {
+                ++it;
+            }
+        }
+
+        // Cleanup pending reconciliation map for the db
+        _pending_idx_reconciliation_map.erase(db_id);
+
+        // Cleanup table_idx_map for the db
+        _table_idx_map.erase(db_id);
+    }
+
     void Indexer::recover_indexes(uint64_t db_id) {
+        // Cleanup for db from the previous run
+        _cleanup_for_db(db_id);
+
         // Get indexes which were not completed during last shutdown/crash
         auto unfinished_indexes_info = sys_tbl_mgr::Client::get_instance()->get_unfinished_indexes_info(db_id);
 

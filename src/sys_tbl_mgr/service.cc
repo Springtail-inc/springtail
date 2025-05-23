@@ -131,7 +131,9 @@ Service::_get_unfinished_indexes_info(uint64_t db_id)
         index_info_request.set_xid(index_basic_info.xid_lsn.xid);
         index_info_request.set_lsn(index_basic_info.xid_lsn.lsn);
         index_info_request.set_table_id(index_basic_info.table_id);
-        *index_info_list->add_indexes() = _get_index_info(index_info_request);
+        auto index_info = _get_index_info(index_info_request);
+        _populate_index_columns(db_id, index_info, index_basic_info.xid_lsn);
+        *index_info_list->add_indexes() = std::move(index_info);
     }
 
     return unfinished_indexes;
@@ -1972,10 +1974,6 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
     auto names_schema = names_t->extent_schema();
     auto names_fields = names_schema->get_fields();
 
-    auto indexes_t = _get_system_table(db_id, sys_tbl::Indexes::ID);
-    auto indexes_schema = indexes_t->extent_schema();
-    auto indexes_fields = indexes_schema->get_fields();
-
     auto search_key = sys_tbl::IndexNames::Primary::key_tuple(table_id, 0, 0, 0);
 
     for (auto names_i = names_t->lower_bound(search_key); names_i != names_t->end(); ++names_i) {
@@ -2042,33 +2040,8 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
         info.set_table_id(tid);
         info.set_is_unique(names_fields->at(sys_tbl::IndexNames::Data::IS_UNIQUE)->get_bool(&row));
 
-        auto index_key = sys_tbl::Indexes::Primary::key_tuple(table_id, info.id(), index_xid.xid,
-                                                              index_xid.lsn, 0);
-        for (auto index_i = indexes_t->lower_bound(index_key); index_i != indexes_t->end();
-             ++index_i) {
-            auto& row = *index_i;
-            uint64_t tid = indexes_fields->at(sys_tbl::Indexes::Data::TABLE_ID)->get_uint64(&row);
-            uint64_t index_id =
-                indexes_fields->at(sys_tbl::Indexes::Data::INDEX_ID)->get_uint64(&row);
-
-            if (tid != table_id || index_id != info.id()) {
-                LOG_DEBUG(LOG_SCHEMA, "No more indexes for table {} -- {}, {} -- {}",
-                                    table_id, tid, index_id, info.id());
-                break;
-            }
-            // index_xid and xid's of index columns must match
-            uint64_t xid = indexes_fields->at(sys_tbl::Indexes::Data::XID)->get_uint64(&row);
-            uint64_t lsn = indexes_fields->at(sys_tbl::Indexes::Data::LSN)->get_uint64(&row);
-            if (index_xid != XidLsn(xid, lsn)) {
-                break;
-            }
-
-            proto::IndexColumn* col = info.add_columns();
-            col->set_position(
-                indexes_fields->at(sys_tbl::Indexes::Data::COLUMN_ID)->get_uint32(&row));
-            col->set_idx_position(
-                indexes_fields->at(sys_tbl::Indexes::Data::POSITION)->get_uint32(&row));
-        }
+        // populate Index columns for the given XidLsn
+        _populate_index_columns(db_id, info, index_xid);
 
         // erase any of the previous info, we'll keep the last one only
         auto it = std::ranges::find_if(schema_info->indexes(),
@@ -2081,6 +2054,41 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
 
     // apply cached changes
     _apply_index_cache_history(schema_info, db_id, table_id, access_xid);
+}
+
+void
+Service::_populate_index_columns(uint64_t db_id, proto::IndexInfo& info, XidLsn index_xid) {
+    auto indexes_t = _get_system_table(db_id, sys_tbl::Indexes::ID);
+    auto indexes_schema = indexes_t->extent_schema();
+    auto indexes_fields = indexes_schema->get_fields();
+
+    auto index_key = sys_tbl::Indexes::Primary::key_tuple(info.table_id(), info.id(), index_xid.xid,
+            index_xid.lsn, 0);
+    for (auto index_i = indexes_t->lower_bound(index_key); index_i != indexes_t->end();
+            ++index_i) {
+        auto& row = *index_i;
+        uint64_t tid = indexes_fields->at(sys_tbl::Indexes::Data::TABLE_ID)->get_uint64(&row);
+        uint64_t index_id =
+            indexes_fields->at(sys_tbl::Indexes::Data::INDEX_ID)->get_uint64(&row);
+
+        if (tid != info.table_id() || index_id != info.id()) {
+            LOG_DEBUG(LOG_SCHEMA, "No more indexes for table {} -- {}, {} -- {}",
+                    info.table_id(), tid, index_id, info.id());
+            break;
+        }
+        // index_xid and xid's of index columns must match
+        uint64_t xid = indexes_fields->at(sys_tbl::Indexes::Data::XID)->get_uint64(&row);
+        uint64_t lsn = indexes_fields->at(sys_tbl::Indexes::Data::LSN)->get_uint64(&row);
+        if (index_xid != XidLsn(xid, lsn)) {
+            break;
+        }
+
+        proto::IndexColumn* col = info.add_columns();
+        col->set_position(
+                indexes_fields->at(sys_tbl::Indexes::Data::COLUMN_ID)->get_uint32(&row));
+        col->set_idx_position(
+                indexes_fields->at(sys_tbl::Indexes::Data::POSITION)->get_uint32(&row));
+    }
 }
 
 void

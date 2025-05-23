@@ -301,6 +301,14 @@ private:
     void _clear_schema_info(uint64_t db_id);
 
     /**
+     * @brief Helper function to populate index columns for a given index (proto::IndexInfo)
+     * @param db_id Database ID
+     * @param info proto::IndexInfo - Index info from IndexNames table
+     * @param index_xid XidLsn to fetch columns for index
+     */
+    void _populate_index_columns(uint64_t db_id, proto::IndexInfo& info, XidLsn index_xid);
+
+    /**
      * Helper function to read the full set of columns for a table from the on-disk system tables.
      * @param table_id The table for which we are constructing a schema.
      * @param access_xid The XID/LSN at which we are querying the schema.

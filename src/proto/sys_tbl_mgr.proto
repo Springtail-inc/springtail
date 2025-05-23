@@ -97,7 +97,7 @@ message IndexInfoList {
 }
 
 message IndexesInfo {
-    map<int64, IndexInfoList> xid_index_map = 1;
+    map<uint64, IndexInfoList> xid_index_map = 1;
 }
 
 message IndexRequest {

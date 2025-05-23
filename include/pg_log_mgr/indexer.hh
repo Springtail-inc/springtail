@@ -205,6 +205,13 @@ namespace springtail::committer {
          */
         void _remove_index_key(uint64_t db_id, uint64_t table_id, const Key& key);
 
+        /**
+         * @brief Cleanup all records related to the db before initiating recovery
+         *        as it will populate from the scratch
+         * @param db_id Database ID.
+         */
+        void _cleanup_for_db(uint64_t db_id);
+
         nlohmann::json _get_create_index_ddl(proto::IndexInfo index_info);
         nlohmann::json _get_drop_index_ddl(proto::IndexInfo index_info);
 
