@@ -64,6 +64,16 @@ namespace springtail::committer {
 
             // perform rotation if needed
             uint64_t db_id = result->db();
+
+            // Process index recovery first as this message doesnt require xid
+            // or timestamp processing for xact_log
+            if (result->type() == XidReady::Type::INDEX_RECOVERY_TRIGGER) {
+                LOG_DEBUG(LOG_COMMITTER, "Initiate indexes recovery: {}", db_id);
+                _indexer->recover_indexes(db_id);
+                LOG_DEBUG(LOG_COMMITTER, "Indexes recovery initiated: {}", db_id);
+                continue;
+            }
+
             uint64_t timestamp = result->timestamp();
             uint64_t stored_timestamp = 0;
             auto emplace_result = _db_to_timestamp.try_emplace(db_id, timestamp);
@@ -84,13 +94,6 @@ namespace springtail::committer {
                 // stop performing commits on this db until the table syncs are complete and aligned
                 _block_commit.insert(db_id);
 
-                continue;
-            }
-
-            if (result->type() == XidReady::Type::INDEX_RECOVERY_TRIGGER) {
-                LOG_DEBUG(LOG_COMMITTER, "Initiate indexes recovery: {}", db_id);
-                _indexer->recover_indexes(db_id);
-                LOG_DEBUG(LOG_COMMITTER, "Indexes recovery initiated: {}", db_id);
                 continue;
             }
 
