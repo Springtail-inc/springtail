@@ -526,14 +526,11 @@ class TestCase:
 
     def _wait_for_index_reconciliation(self, cursor, wait_for: int) -> bool:
         query = """
-            SELECT count(DISTINCT index_id)                                                  
+            SELECT count(DISTINCT index_id)
             FROM __pg_springtail_catalog.index_names
-            WHERE index_id <> 0 AND (
+            WHERE index_id <> 0 AND
                 (index_id IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state = 0)
-                AND index_id NOT IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state IN (1, 2)))
-                OR
-                (index_id IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state = 3)
-                AND index_id NOT IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state = 2))
+                AND index_id NOT IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state IN (1, 2))
             );
             """
 
