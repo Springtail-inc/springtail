@@ -160,6 +160,7 @@ namespace springtail::pg_fdw {
             DCHECK(fields->at(sys_tbl::UserTypes::Data::TYPE)->get_uint8(&row) == constant::USER_TYPE_ENUM);
 
             // insert into map by namespace_id
+            LOG_DEBUG(LOG_FDW, "Adding user type: {}.{} = {}:{}", namespace_id, type_id, type_name, value_json);
             usertype_map[namespace_id][type_id] = std::make_pair(type_name, value_json);
         }
 
@@ -811,6 +812,7 @@ namespace springtail::pg_fdw {
                     const std::string &type_name = entry.second.first;
                     const std::string &value_json_str = entry.second.second;
                     std::string escaped_type = conn->escape_identifier(type_name);
+                    LOG_DEBUG(LOG_FDW, "Creating user type: {}.{} = {}", escaped_schema, escaped_type, value_json_str);
                     std::string create_type_query = _get_create_type_query(escaped_schema, escaped_type, value_json_str, conn);
                     conn->exec(create_type_query);
                     conn->clear();

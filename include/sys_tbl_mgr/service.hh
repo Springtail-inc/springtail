@@ -431,11 +431,11 @@ private:
         uint64_t namespace_id;
         std::string name;
         std::string value_json;
-        int8_t type;
+        uint8_t type;
         bool exists;
 
         UserTypeCacheRecord(uint64_t id, std::string_view name, uint64_t ns_id,
-                            int8_t type, std::string_view value_json, bool exists)
+                            uint8_t type, std::string_view value_json, bool exists)
             : id(id), namespace_id(ns_id), name(name), value_json(value_json), type(type), exists(exists)
         {
         }

@@ -233,7 +233,6 @@ namespace springtail {
                                            secondary_keys, tbl_meta, schema);
         }
         case (sys_tbl::UserTypes::ID): {
-            secondary_keys = _get_secondary_keys<sys_tbl::UserTypes>();
             return std::make_shared<Table>(db_id, table_id, xid, _table_base,
                                            sys_tbl::UserTypes::Primary::KEY,
                                            secondary_keys, tbl_meta, schema);
@@ -310,7 +309,6 @@ namespace springtail {
                                                   tbl_meta, schema);
         }
         case (sys_tbl::UserTypes::ID): {
-            secondary_keys = _get_secondary_keys<sys_tbl::UserTypes>();
             return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                   sys_tbl::UserTypes::Primary::KEY, secondary_keys,
                                                   tbl_meta, schema);

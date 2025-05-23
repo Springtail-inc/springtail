@@ -507,26 +507,6 @@ public:
             return std::make_shared<FieldTuple>(key_fields, nullptr);
         }
     };
-
-    struct Secondary {
-        static constexpr uint32_t NAME = 0;
-        static constexpr uint32_t XID = 1;
-        static constexpr uint32_t LSN = 2;
-        static constexpr uint32_t EXTENT_ID = 3;
-        static constexpr uint32_t ROW_ID = 4;
-
-        static const std::vector<SchemaColumn> SCHEMA;
-        static const std::vector<std::string> KEY;
-
-        static TuplePtr key_tuple(const std::string &name, uint64_t xid, uint64_t lsn)
-        {
-            auto key_fields = std::make_shared<FieldArray>(3);
-            key_fields->at(NAME) = std::make_shared<ConstTypeField<std::string>>(name);
-            key_fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
-            key_fields->at(LSN) = std::make_shared<ConstTypeField<uint64_t>>(lsn);
-            return std::make_shared<FieldTuple>(key_fields, nullptr);
-        }
-    };
 };
 
 
