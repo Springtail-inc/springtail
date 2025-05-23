@@ -508,19 +508,20 @@ namespace springtail {
         }
 
         // check if the page is valid through the requested xid
-        if (!page_i->second->check_xid_valid(xid)) {
+        auto page = page_i->second;
+        if (!page->check_xid_valid(xid)) {
             return nullptr;
         }
 
         // if the page is on the LRU list, remove it
-        if (page_i->second->_use_count == 0) {
-            _lru.erase(page_i->second->_lru_pos);
+        if (page->_use_count == 0) {
+            _lru.erase(page->_lru_pos);
         }
 
         // increment it's use count
-        ++(page_i->second->_use_count);
+        ++(page->_use_count);
 
-        return page_i->second;
+        return page;
     }
 
     StorageCache::Page::Page(const std::filesystem::path &file,
