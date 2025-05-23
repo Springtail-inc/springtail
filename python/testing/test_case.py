@@ -272,6 +272,24 @@ class TestCase:
                             'replica_exists': directive[3] == 'true'
                         }, section, is_threaded, cur_txn, line_num)
 
+                    # Usage - index_exists <schema> <table> <index> <replica_exists>
+                    # Ex: ### index_exists public test_init test_init_index true
+                    # Determines if a specific index is present in the replica, used in scenarios where we do not replicate an index
+                    # and want to verify that
+                    elif directive[0] == 'index_exists':
+                        if section != 'verify':
+                            self._raise_error(f'{line_num}: "index_exists" must be part of the "verify" section')
+                        if len(directive) < 5:
+                            self._raise_error(f'{line_num}: "index_exists" must specify a schema, table, index, and replica exists value')
+
+                        self._append_command({
+                            'type': 'index_exists',
+                            'schema': directive[1],
+                            'table': directive[2],
+                            'index': directive[3],
+                            'replica_exists': directive[4] == 'true'
+                        }, section, is_threaded, cur_txn, line_num)
+
                     elif directive[0] == 'autocommit':
                         if section != 'metadata':
                             self._raise_error(f'{line_num}: "autocommit" must be specified in the "metadata" section')
@@ -454,7 +472,7 @@ class TestCase:
 
                 return []
 
-            if command['type'] == 'table_exists':
+            if command['type'] == 'table_exists' or command['type'] == 'index_exists':
                 results = {}
 
                 results['exists'] = command['replica_exists']
@@ -465,7 +483,10 @@ class TestCase:
                 results = {}
 
                 sql = f""" SELECT a.attname AS name,
-                                  t.oid AS pg_type,
+                                    CASE
+                                        WHEN t.oid = 1560 THEN 1562
+                                        ELSE t.oid
+                                    END AS pg_type,
                                   NOT a.attnotnull AS nullable,
                                   a.attnum AS position
                            FROM pg_catalog.pg_attribute a
@@ -505,17 +526,13 @@ class TestCase:
 
     def _wait_for_index_reconciliation(self, cursor, wait_for: int) -> bool:
         query = """
-        SELECT a - b
-        FROM
-          (SELECT COUNT(DISTINCT index_id) AS a
-             FROM "__pg_springtail_catalog"."index_names"
-            WHERE state = 0 AND index_id <> 0) AS t1
-        JOIN
-          (SELECT COUNT(DISTINCT index_id) AS b
-             FROM "__pg_springtail_catalog"."index_names"
-            WHERE state IN (1, 2) AND index_id <> 0) AS t2
-        ON (1=1);
-        """
+            SELECT count(DISTINCT index_id)
+            FROM __pg_springtail_catalog.index_names
+            WHERE index_id <> 0 AND
+                (index_id IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state = 0)
+                AND index_id NOT IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state IN (1, 2))
+            );
+            """
 
         try:
             common.wait_for_replica_condition(self._fdw, query, (0, ), timeout=wait_for)
@@ -570,7 +587,30 @@ class TestCase:
                 results['exists'] = replica_result
 
                 return results
+            elif command['type'] == 'index_exists':
+                results = {}
+                replica_result = True
 
+                with_sql = f"""SELECT EXISTS (SELECT "index_names"."name"
+                                FROM "__pg_springtail_catalog"."index_names"
+                                JOIN "__pg_springtail_catalog"."table_names"
+                                ON "table_names"."table_id" = "index_names"."table_id"
+                                JOIN "__pg_springtail_catalog"."namespace_names"
+                                ON "namespace_names"."namespace_id" = "table_names"."namespace_id"
+                                    AND "namespace_names"."namespace_id" = "index_names"."namespace_id"
+                                WHERE "namespace_names"."name" = '{command["schema"]}'
+                                AND "table_names"."name" = '{command["table"]}'
+                                AND "index_names"."name" = '{command["schema"]}.{command["index"]}') AS index_exists
+                            """
+                sql = f"""WITH latest_table AS ({with_sql})
+                          SELECT index_exists FROM latest_table LIMIT 1"""
+
+                sql_result = self._execute_sql(cursor, sql, True)
+
+                replica_result = False if not sql_result else sql_result[0][0]
+                results['exists'] = replica_result
+
+                return results
             elif command['type'] == 'schema_check':
                 results = {}
 
