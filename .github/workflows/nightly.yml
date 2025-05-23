@@ -134,6 +134,15 @@ jobs:
           echo "*** Performance Test Log S3 Key: $log_s3_key"
           rm -f tmplog
 
+          # Springtail service logs
+          springtail_log_file="springtail-performance-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.tar.gz"
+          output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../debug)
+          fname=$(echo $output | cut -f2 -d':' | xargs | head -1)
+          springtail_log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${springtail_log_file}"
+          aws s3 cp $fname $springtail_log_s3_key
+          echo "*** Springtail Log S3 Key: $springtail_log_s3_key"
+          rm -f $fname
+
           if [ "$_LOG_FLAG" = "failed" ]; then
             echo "*** Performance test failed"
             exit 1
