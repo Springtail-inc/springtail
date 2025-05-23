@@ -46,35 +46,57 @@ def run_performance_suite(config_file: str, do_cleanup: bool = False):
     build_dir = config['build_dir']
     cases = config['cases']
 
-    for case in cases:
-        config_file = os.path.join('cases', case, 'load_config.yaml')
+    print(f"Running performance with config_file: {config_file}")
+    print(f"Using system_json_path: {sys_config_file}")
+    print(f"Using build_dir: {build_dir}")
 
-        with open(base_config_file, 'r') as f:
-            default_config = yaml.safe_load(f)
+    # Override the log rotation enabled to false
+    log_rotation_enabled_orig = True
+    with open(sys_config_file, 'r') as f:
+        system_config = json.load(f)
+        log_rotation_enabled_orig = system_config['logging']['log_rotation_enabled']
+        system_config['logging']['log_rotation_enabled'] = False
 
-        with open(config_file, 'r') as f:
-            case_config = yaml.safe_load(f)
+    with open(sys_config_file, 'w') as f:
+        json.dump(system_config, f, indent=2)
 
-        merged_config = merge_json(default_config, case_config)
+    try:
+        for case in cases:
+            config_file = os.path.join('cases', case, 'load_config.yaml')
 
-        print(f"Running performance with config_file: {config_file}")
-        print(f"Using system_json_path: {sys_config_file}")
-        print(f"Using build_dir: {build_dir}")
+            with open(base_config_file, 'r') as f:
+                default_config = yaml.safe_load(f)
 
-        # make sure Springtail is stopped
-        print('Stopping any existing Springtail instance')
-        springtail.stop(sys_config_file, do_cleanup=True)
+            with open(config_file, 'r') as f:
+                case_config = yaml.safe_load(f)
 
-        # start Springtail
-        print('Starting the Springtail instance')
-        springtail.start(sys_config_file, build_dir, do_cleanup=False, do_init=True, postgres_only=False, do_fdw_install=True)
+            merged_config = merge_json(default_config, case_config)
 
-        # Run the performance suite
-        run_performance_benchmark(merged_config, do_cleanup)
+            # make sure Springtail is stopped
+            print('Stopping any existing Springtail instance')
+            springtail.stop(sys_config_file, do_cleanup=True)
 
-        # stop Springtail
-        print('Stopping the Springtail instance')
-        springtail.stop(sys_config_file)
+            # start Springtail
+            print('Starting the Springtail instance')
+            springtail.start(sys_config_file, build_dir, do_cleanup=False, do_init=True, postgres_only=False, do_fdw_install=True)
+
+            # Run the performance suite
+            run_performance_benchmark(merged_config, do_cleanup)
+
+            # stop Springtail
+            print('Stopping the Springtail instance')
+            springtail.stop(sys_config_file)
+    except Exception as e:
+        print(f"Error running performance suite: {e}")
+        raise
+    finally:
+        # Restore the log rotation enabled
+        with open(sys_config_file, 'r') as f:
+            system_config = json.load(f)
+            system_config['logging']['log_rotation_enabled'] = log_rotation_enabled_orig
+
+        with open(sys_config_file, 'w') as f:
+            json.dump(system_config, f, indent=2)
 
 if __name__ == "__main__":
     args = parse_arguments()
