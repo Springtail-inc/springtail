@@ -340,11 +340,7 @@ namespace springtail {
 
             SafeExtent(const std::filesystem::path &file,
                        const ExtentRef &ref,
-                       bool mark_dirty)
-            {
-                _extent = StorageCache::get_instance()->_data_cache->get(file, ref, mark_dirty);
-                assert(_extent);
-            }
+                       bool mark_dirty);
 
         private:
             CacheExtentPtr _extent;
