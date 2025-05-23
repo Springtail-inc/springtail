@@ -89,6 +89,8 @@ jobs:
           ln -s /home/dev/debug debug
           ln -s /home/dev/install install
           
+          # Build with traces enabled
+          export SPRINGTAIL_INCLUDE_TIME_TRACES=1
           cmake -B debug -S . -D'CMAKE_BUILD_TYPE=Debug' -DVCPKG_INSTALL_OPTIONS="--allow-unsupported"
 
           cd debug
@@ -104,18 +106,14 @@ jobs:
           echo "TEST_LOG_S3_FULL_PREFIX=s3://${DEVSUPPORT_BUCKET_NAME}/${TEST_LOGS_S3_PREFIX}/${CURRENT_DATE}" >> $GITHUB_ENV
 
       - name: Run nightly performance test
+        if: success()
         run: |
-          # Build with traces enabled
-          export SPRINGTAIL_INCLUDE_TIME_TRACES=1
-          cmake -B debug -S . -D'CMAKE_BUILD_TYPE=Debug' -DVCPKG_INSTALL_OPTIONS="--allow-unsupported"
-
-          cd debug
-          make -j${NUM_PROCS}
-
-          cd /home/dev/springtail/python/performance
+          pwd
+          ls -l
+          cd python/performance
 
           # Install dependencies
-          pip3 install -r requirements.txt
+          pip3 install --break-system-packages -r requirements.txt
 
           # Run performance tests
           python3 performance_runner.py 2>&1 | tee tmplog
@@ -219,7 +217,7 @@ jobs:
 
       - name: Run nightly tests
         run: |
-          cd /home/dev/springtail/python/testing
+          cd python/testing
           service postgresql start
           ./startup.sh -s data_init.sql
           
