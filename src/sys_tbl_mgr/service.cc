@@ -57,10 +57,6 @@ Service::_get_unfinished_indexes_info(uint64_t db_id)
     auto names_schema = names_t->extent_schema();
     auto names_fields = names_schema->get_fields();
 
-    auto indexes_t = _get_system_table(db_id, sys_tbl::Indexes::ID);
-    auto indexes_schema = indexes_t->extent_schema();
-    auto indexes_fields = indexes_schema->get_fields();
-
     auto search_key = sys_tbl::IndexNames::Primary::key_tuple(0, 0, 0, 0);
     struct IndexBasicInfo {
         uint64_t index_id;
