@@ -248,9 +248,6 @@ jobs:
 
           cd ../performance
 
-          # Install dependencies
-          pip3 install --break-system-packages -r requirements.txt
-
           _LOG_FLAG="failed"
           # Run performance tests
           python3 performance_runner.py -c performance_config.yaml 2>&1 | tee tmplog
