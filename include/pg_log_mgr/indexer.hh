@@ -212,7 +212,18 @@ namespace springtail::committer {
          */
         void _cleanup_for_db(uint64_t db_id);
 
+        /**
+         * @brief Helper method to get index ddl for create action
+         * @param index_info proto::IndexInfo - Index to be created
+         * @return ddl json containing index create action details
+         */
         nlohmann::json _get_create_index_ddl(proto::IndexInfo index_info);
+
+        /**
+         * @brief Helper method to get index ddl for drop action
+         * @param index_info proto::IndexInfo - Index to be dropped
+         * @return ddl json containing index drop action details
+         */
         nlohmann::json _get_drop_index_ddl(proto::IndexInfo index_info);
 
         /**
