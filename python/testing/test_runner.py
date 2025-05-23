@@ -62,6 +62,7 @@ def gen_all_tests(test_folder: str,
         if not os.path.isfile(os.path.join(test_folder, test_set, '__config.sql')):
             print(f'Skipping test set {test_set} -- missing __config.sql')
             continue
+        print(f'Processing test set {test_set}')
         test_sets.append(TestSet(os.path.join(test_folder, test_set), config_file, build_dir, test_params))
 
     return test_sets
@@ -122,6 +123,7 @@ def try_generate_junit(junit_file: str, test_sets: list[TestSet]) -> None:
 def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Run Springtail tests")
+    parser.add_argument('-a', '--run-all', action='store_true', help='Run all test sets regardless of the default_test_sets')
     parser.add_argument('-c', '--config', type=str, default='config.yaml', help='Path to the test configuration file')
     parser.add_argument('-j', '--junit', type=str, help='Output test results to the specified JUnit XML file')
     parser.add_argument('-o', '--overlay', type=str, help='Run using a specific overlay config')
@@ -151,6 +153,8 @@ if __name__ == "__main__":
         raise ValueError('"build_dir" is missing in the YAML configuration')
 
     default_test_sets = yaml_config.get('default_test_sets')
+    if args.run_all:
+        default_test_sets = None
 
     # set the log level and format
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
