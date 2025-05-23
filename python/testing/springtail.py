@@ -648,8 +648,7 @@ def start(config_file: str,
         # start replication on db instance
         print("\nStarting replication on database instance...")
         check_log_writable(props)
-        if do_cleanup:
-            start_replication(props, build_dir)
+        start_replication(props, build_dir)
 
         # start daemons with XID if specified
         print("\nStarting daemons...")
