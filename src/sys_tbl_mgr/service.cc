@@ -210,6 +210,7 @@ Service::_create_index(const proto::IndexRequest& request)
     }
 
     // update index names
+    // Create a copy to add namespace ID, before caching the index_info
     auto mutable_index_request = request;
     {
         // lookup the namespace info
@@ -223,6 +224,8 @@ Service::_create_index(const proto::IndexRequest& request)
             request.index().is_unique());
 
         index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
+
+        // Set namespace ID for the requested index
         mutable_index_request.mutable_index()->set_namespace_id(ns_info->id);
     }
 
