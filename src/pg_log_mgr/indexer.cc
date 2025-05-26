@@ -175,8 +175,14 @@ namespace springtail::committer {
         auto exists = TableMgr::get_instance()->exists(db_id, info.table_id(), xid.xid, xid.lsn);
         if (!exists) {
             // when dropping a table, PG generates DROP TABLE first
-            // following by DROP INDEX. We ignore DROP INDEX after DROP TABLE.
+            // following by DROP INDEX, We will mark the index as DELETED in this case.
+            // Need to do check before setting DELETED, because,
+            // DELETED would have got marked directly as part of table resync due to
+            // column being dropped, thats part of the index.
             LOG_INFO("Table doesn't exists: {}, {}", info.table_id(), index_id);
+            if (static_cast<sys_tbl::IndexNames::State>(info.state()) != sys_tbl::IndexNames::State::DELETED) {
+                client->set_index_state(db_id, xid, info.table_id(), index_id, sys_tbl::IndexNames::State::DELETED);
+            }
             return;
         }
 

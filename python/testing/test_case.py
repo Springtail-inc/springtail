@@ -528,11 +528,18 @@ class TestCase:
         query = """
             SELECT count(DISTINCT index_id)
             FROM __pg_springtail_catalog.index_names
-            WHERE index_id <> 0 AND
+            WHERE index_id <> 0 AND (
+                -- Rule 1 violation: index_id in state 0 but not in 1 or 2
                 (index_id IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state = 0)
-                AND index_id NOT IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state IN (1, 2))
+                 AND index_id NOT IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state IN (1, 2)))
+
+                OR
+
+                -- Rule 2 violation: index_id in state 3 but not in 2
+                (index_id IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state = 3)
+                 AND index_id NOT IN (SELECT index_id FROM __pg_springtail_catalog.index_names WHERE state = 2))
             );
-            """
+        """
 
         try:
             common.wait_for_replica_condition(self._fdw, query, (0, ), timeout=wait_for)

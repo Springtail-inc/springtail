@@ -90,6 +90,7 @@ message IndexInfo {
   string table_name = 6;
   int32 state = 7;
   repeated IndexColumn columns = 8;
+  int64 namespace_id = 9;
 }
 
 message IndexRequest {

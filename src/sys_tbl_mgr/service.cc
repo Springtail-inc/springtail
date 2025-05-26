@@ -105,18 +105,9 @@ Service::_set_index_state(const proto::SetIndexStateRequest& request)
     CHECK(index_info.table_id() == request.table_id() && index_info.id() == request.index_id());
     index_info.set_state(request.state());
 
-    // lookup the namespace ID
-    // XXX it seems like we shouldn't need to look up the namespace info at this point -- we
-    //     just retrieved all of the index info above in _read_schema_indexes() so it's a
-    //     duplication of effort to perform the lookup again here.  Further, the code itself is
-    //     somewhat ugly / hard to follow.  We should revist this whole flow to improve
-    //     performance and readability.
-    auto ns_info = _get_namespace_info(request.db_id(), index_info.namespace_name(), xid);
-    CHECK(ns_info);
-
     auto index_names_t = _get_mutable_system_table(request.db_id(), sys_tbl::IndexNames::ID);
     auto tuple = sys_tbl::IndexNames::Data::tuple(
-        ns_info->id, index_info.name(), index_info.table_id(), request.index_id(), xid.xid, xid.lsn,
+        index_info.namespace_id(), index_info.name(), index_info.table_id(), request.index_id(), xid.xid, xid.lsn,
         static_cast<sys_tbl::IndexNames::State>(index_info.state()), index_info.is_unique());
 
     // update the index state
@@ -219,6 +210,7 @@ Service::_create_index(const proto::IndexRequest& request)
     }
 
     // update index names
+    auto mutable_index_request = request;
     {
         // lookup the namespace info
         auto ns_info = _get_namespace_info(request.db_id(), request.index().namespace_name(), xid);
@@ -231,6 +223,7 @@ Service::_create_index(const proto::IndexRequest& request)
             request.index().is_unique());
 
         index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
+        mutable_index_request.mutable_index()->set_namespace_id(ns_info->id);
     }
 
     _write_index(xid, request.db_id(), request.index().table_id(), request.index().id(), keys);
@@ -238,7 +231,7 @@ Service::_create_index(const proto::IndexRequest& request)
     {
         boost::unique_lock lock(_mutex);
         _index_cache[request.db_id()][request.index().table_id()][request.index().id()]
-            .emplace_back(xid, request.index());
+            .emplace_back(xid, mutable_index_request.index());
     }
 
     return ddl;
@@ -351,6 +344,7 @@ Service::_find_index(uint64_t db_id,
     auto ns_info = _get_namespace_info(db_id, namespace_id, access_xid, false);
     CHECK(ns_info);
     info.set_namespace_name(ns_info->name);
+    info.set_namespace_id(ns_info->id);
 
     return {{info, namespace_id, index_xid}};
 }
@@ -1932,6 +1926,7 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
         auto ns_info = _get_namespace_info(db_id, namespace_id, access_xid, false);
         CHECK(ns_info);
         info.set_namespace_name(ns_info->name);
+        info.set_namespace_id(ns_info->id);
 
         info.set_name(names_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(&row));
         info.set_table_id(tid);
@@ -2521,6 +2516,7 @@ Service::_set_primary_index(uint64_t db_id,
     index.set_name(table_name + ".primary_key");
     index.set_is_unique(true);
     index.set_namespace_name(namespace_name);
+    index.set_namespace_id(namespace_id);
     index.set_table_id(table_id);
 
     for (auto const& c : info->columns()) {
