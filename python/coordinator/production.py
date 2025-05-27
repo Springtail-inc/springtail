@@ -267,6 +267,9 @@ class Production:
         elif type == 'db_state_change':
             subject = f"Database state change: {srn}, {service_name} @{timestamp}"
             msg = f"\nState change: {attrs['old_state']} -> {attrs['new_state']}"
+        elif type == 'max_retries_failed':
+            subject = f"Component tried restarting, but couldn't restart after maximum retries: {srn}, {service_name} @{timestamp}"
+            attributes['component'] = component
         else:
             self.logger.error(f"Unknown SNS message type: {type}")
             return
