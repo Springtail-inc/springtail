@@ -59,7 +59,7 @@ LIVENESS_DAEMON_TO_SERVICE = {
 }
 
 # Number of failures before a component is considered failed
-MAX_FAILURES = 3
+MAX_FAILURES = 5
 
 # Time between consecutive failures before considering a component failed
 FAILURE_WINDOW_THRESHOLD = 5 # seconds
