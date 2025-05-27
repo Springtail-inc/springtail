@@ -172,17 +172,15 @@ namespace springtail::committer {
             return;
         }
 
+        // Index should be at BEING_DELETED to be dropped
+        DCHECK(static_cast<sys_tbl::IndexNames::State>(info.state()) == sys_tbl::IndexNames::State::BEING_DELETED);
+
         auto exists = TableMgr::get_instance()->exists(db_id, info.table_id(), xid.xid, xid.lsn);
         if (!exists) {
             // when dropping a table, PG generates DROP TABLE first
             // following by DROP INDEX, We will mark the index as DELETED in this case.
-            // Need to do check before setting DELETED, because,
-            // DELETED would have got marked directly as part of table resync due to
-            // column being dropped, thats part of the index.
             LOG_INFO("Table doesn't exists: {}, {}", info.table_id(), index_id);
-            if (static_cast<sys_tbl::IndexNames::State>(info.state()) != sys_tbl::IndexNames::State::DELETED) {
-                client->set_index_state(db_id, xid, info.table_id(), index_id, sys_tbl::IndexNames::State::DELETED);
-            }
+            client->set_index_state(db_id, xid, info.table_id(), index_id, sys_tbl::IndexNames::State::DELETED);
             return;
         }
 
@@ -316,7 +314,10 @@ namespace springtail::committer {
         _work_set.erase(key);
         auto client = sys_tbl_mgr::Client::get_instance();
         proto::IndexInfo index_info = client->get_index_info(db_id, index_id, xid);
-        auto index_deleted = static_cast<sys_tbl::IndexNames::State>(index_info.state()) == sys_tbl::IndexNames::State::DELETED;
+
+        // Index should be at NOT_READY / BEING_DELETED to be processed
+        DCHECK(static_cast<sys_tbl::IndexNames::State>(index_info.state()) == sys_tbl::IndexNames::State::BEING_DELETED ||
+                static_cast<sys_tbl::IndexNames::State>(index_info.state()) == sys_tbl::IndexNames::State::NOT_READY);
 
         if (!root) {
             // if IndexStatus is BUILDING - stop could have got requested, so the index
@@ -325,13 +326,7 @@ namespace springtail::committer {
             //                              mark the state as DELETED
 
             if (work_item.is_status(IndexStatus::ABORTING)) {
-                auto table_exists = TableMgr::get_instance()->exists(db_id, tid, xid.xid, xid.lsn);
-                if (table_exists && !index_deleted) {
-                    // when dropping a table, PG generates DROP TABLE first
-                    // following by DROP INDEX. We ignore DROP INDEX after DROP TABLE, because
-                    // indexes will be set as DELETED directly as part of sys_tbl_mgr DROP TABLE
-                    client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
-                }
+                client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
             }
         } else {
             // Index building was attempted, finalize and process build/abort
@@ -347,9 +342,7 @@ namespace springtail::committer {
                 // may have got finalized while we were building.
                 root->truncate();
                 root->finalize();
-                if (!index_deleted) {
-                    client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
-                }
+                client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
             }
         }
 

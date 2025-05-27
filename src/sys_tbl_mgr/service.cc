@@ -653,7 +653,12 @@ Service::_drop_table(const proto::DropTableRequest& request)
     _read_schema_indexes(index_info, request.db_id(), request.table_id(), xid);
 
     for (auto const& idx : index_info->indexes()) {
-        _drop_index(xid, request.db_id(), idx.id(), request.table_id());
+        // For secondary indexes, indexer will take care of marking them DELETED
+        if (idx.id() == constant::INDEX_PRIMARY) {
+            _drop_index(xid, request.db_id(), idx.id(), request.table_id(), sys_tbl::IndexNames::State::DELETED);
+        } else {
+            _drop_index(xid, request.db_id(), idx.id(), request.table_id(), sys_tbl::IndexNames::State::BEING_DELETED);
+        }
     }
 
     // mark the table as dropped in the table_names
