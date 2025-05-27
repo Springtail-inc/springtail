@@ -636,6 +636,3 @@ BEGIN
     END LOOP;
 END;
 $$ LANGUAGE plpgsql;
-
--- execute the function to set REPLICA IDENTIFY FULL on tables with no primary key
-SELECT __pg_springtail_triggers.set_identity_on_tables_without_pk();

@@ -73,6 +73,17 @@ class TestSet:
                 pass # this test was recorded as an error and we continue
 
 
+    def _apply_replica_full(self) -> None:
+        sql = "SELECT __pg_springtail_triggers.set_identity_on_tables_without_pk();"
+        for db_config in self._props.get_db_configs():
+            primary_name = db_config['name']
+            connection = springtail.connect_db_instance(self._props, primary_name)
+            with connection.cursor() as cursor:
+                cursor.execute(sql)
+            connection.commit()
+            connection.close()
+
+
     def run(self,
             shutdown_on_fail: bool = False) -> bool:
         """Runs one or more of the test cases in the test set in the
@@ -89,6 +100,12 @@ class TestSet:
         # perform the primary db setup
         logging.debug('Perform the global setup()')
         self._config.setup()
+
+        # install the event triggers for DDL statements
+        springtail.install_triggers(self._props, self._build_dir)
+
+        # apply the REPLICA IDENTITY FULL to any tables without primary keys
+        self._apply_replica_full()
 
         # update postgres config to apply props for the test
         springtail.update_postgres_config(self._test_params)
