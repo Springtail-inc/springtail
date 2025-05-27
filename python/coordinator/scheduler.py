@@ -59,7 +59,7 @@ LIVENESS_DAEMON_TO_SERVICE = {
 }
 
 # Number of failures before a component is considered failed
-MAX_FAILURES = 3 # seconds
+MAX_FAILURES = 3
 
 # Time between consecutive failures before considering a component failed
 FAILURE_WINDOW_THRESHOLD = 5 # seconds
@@ -96,7 +96,7 @@ class Scheduler:
         self.timeouts = {}
         self.allowed_timeout = allowed_timeout_secs * 1000
         self.db_states = {}
-        # Map of service_name and the last time it failed
+        # Map of component_name to {count, time} where count is the number of failures and time is the last time it failed
         self.last_fail_time = {}
 
         # Setup pubsub for liveness notifications
@@ -196,6 +196,11 @@ class Scheduler:
         if name not in self.last_fail_time:
             # Initialize failure tracking
             self.last_fail_time[name] = {'count': 1, 'time': time.time()}
+        else:
+            # If the last fail time is not within the failure window threshold, reset the failure count
+            if time.time() - self.last_fail_time[name]['time'] > FAILURE_WINDOW_THRESHOLD:
+                self.last_fail_time[name]['count'] = 1
+                self.last_fail_time[name]['time'] = time.time()
 
         if self.last_fail_time[name]['count'] < MAX_FAILURES:
             # Increment failure count
