@@ -12,6 +12,7 @@
 #include <storage/mutable_btree.hh>
 #include <common/common.hh>
 #include <pg_repl/index_reconcile_request.hh>
+#include <proto/sys_tbl_mgr.pb.h>
 #include <pg_log_mgr/index_reconciliation_queue_manager.hh>
 
 namespace springtail::committer {
@@ -49,6 +50,12 @@ namespace springtail::committer {
         Indexer& operator=(const Indexer&) = delete;
 
         void process_ddls(uint64_t db_id, uint64_t xid, nlohmann::json const& ddls);
+
+        /**
+         * @brief Recover indexes which were not complete (build or drop) during shutdown/crash
+         * @Param db_id The ID of the database
+         */
+        void recover_indexes(uint64_t db_id);
 
         /**
          * Build a secondary index.
@@ -197,6 +204,27 @@ namespace springtail::committer {
          * @param key Index key to remove.
          */
         void _remove_index_key(uint64_t db_id, uint64_t table_id, const Key& key);
+
+        /**
+         * @brief Cleanup all records related to the db before initiating recovery
+         *        as it will populate from the scratch
+         * @param db_id Database ID.
+         */
+        void _cleanup_for_db(uint64_t db_id);
+
+        /**
+         * @brief Helper method to get index ddl for create action
+         * @param index_info proto::IndexInfo - Index to be created
+         * @return ddl json containing index create action details
+         */
+        nlohmann::json _get_create_index_ddl(proto::IndexInfo index_info);
+
+        /**
+         * @brief Helper method to get index ddl for drop action
+         * @param index_info proto::IndexInfo - Index to be dropped
+         * @return ddl json containing index drop action details
+         */
+        nlohmann::json _get_drop_index_ddl(proto::IndexInfo index_info);
 
         /**
          * @brief shared_ptr to the index reconciliation manager to access the index reconciliation queues

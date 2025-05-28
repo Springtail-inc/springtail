@@ -178,6 +178,10 @@ namespace springtail::pg_log_mgr {
             // note: we wait to perform these actions until the log reader has been started
             // perform the any required log recovery here
             recovery.replay_logs();
+
+            // Initiate indexes recovery for this database before pg_log_reader messages
+            _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::Type::INDEX_RECOVERY_TRIGGER));
+
             _wal_buffer_flag = false;
             LOG_DEBUG(LOG_PG_LOG_MGR, "Done with recovery");
         }

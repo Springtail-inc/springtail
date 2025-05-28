@@ -39,6 +39,100 @@ namespace springtail::committer {
         }
     }
 
+    void Indexer::_cleanup_for_db(uint64_t db_id) {
+        std::scoped_lock lock(_m, _pending_reconciliation_map_mtx, _table_idx_map_mtx);
+
+        // Clear _work_set entries for the db, to start fresh recovery
+        auto it = _work_set.begin();
+        while (it != _work_set.end()) {
+            if (it->second._db_id == db_id) {
+                it = _work_set.erase(it);  // erase returns the next valid iterator
+            } else {
+                ++it;
+            }
+        }
+
+        // Cleanup pending reconciliation map for the db
+        _pending_idx_reconciliation_map.erase(db_id);
+
+        // Cleanup table_idx_map for the db
+        _table_idx_map.erase(db_id);
+    }
+
+    void Indexer::recover_indexes(uint64_t db_id) {
+        // Cleanup for db from the previous run
+        _cleanup_for_db(db_id);
+
+        // Get indexes which were not completed during last shutdown/crash
+        auto unfinished_indexes_info = sys_tbl_mgr::Client::get_instance()->get_unfinished_indexes_info(db_id);
+
+        // Get each such XIDs and their indexes
+        for (const auto& [index_xid, idx_list]: unfinished_indexes_info.xid_index_map()) {
+            auto index_ddls = nlohmann::json::array();
+            for (const auto& index_info: idx_list.indexes()) {
+                // Build indexer-known ddl out of the indexes - to be created/dropped
+                if (static_cast<sys_tbl::IndexNames::State>(index_info.state())
+                        == sys_tbl::IndexNames::State::NOT_READY) {
+                    auto&& index_ddl = _get_create_index_ddl(index_info);
+                    index_ddls.push_back(index_ddl);
+                } else if (static_cast<sys_tbl::IndexNames::State>(index_info.state())
+                        == sys_tbl::IndexNames::State::BEING_DELETED) {
+                    auto&& index_ddl = _get_drop_index_ddl(index_info);
+                    index_ddls.push_back(index_ddl);
+                } else {
+                    // We shouldnt hit this point as we picked only the unfinished indexes
+                    CHECK(false);
+                }
+            }
+
+            // Schedule the index processing at its XID
+            process_ddls(db_id, index_xid, std::move(index_ddls));
+        }
+    }
+
+    nlohmann::json Indexer::_get_drop_index_ddl(proto::IndexInfo index_info) {
+        nlohmann::json ddl;
+        ddl["action"] = "drop_index";
+        ddl["name"] = index_info.name();
+        ddl["schema"] = index_info.namespace_name();
+        ddl["id"] = index_info.id();
+        return ddl;
+    }
+
+    nlohmann::json Indexer::_get_create_index_ddl(proto::IndexInfo index_info) {
+        nlohmann::json ddl;
+        ddl["action"] = "create_index";
+        ddl["index"] = index_info.name();
+        ddl["schema"] = index_info.namespace_name();
+        ddl["id"] = index_info.id();
+        ddl["is_unique"] = index_info.is_unique();
+        ddl["table_id"] = index_info.table_id();
+        ddl["columns"] = nlohmann::json::array();
+
+        // construct index columns at their positions
+        std::map<uint32_t, uint32_t> keys;
+        for (const auto& column : index_info.columns()) {
+            CHECK(keys.find(column.idx_position()) == keys.end());
+            keys[column.idx_position()] = column.position();
+
+            // store the column data into the json
+            nlohmann::json column_json;
+            column_json["idx_position"] = column.idx_position();
+            column_json["position"] = column.position();
+            column_json["name"] = column.name();
+
+            // Insert columns in the order specified by idx_position.
+            // This ensures the index columns are arranged correctly,
+            // as their order may differ from the table column order.
+            if (ddl["columns"].size() <= column.idx_position()) {
+                ddl["columns"].get_ref<nlohmann::json::array_t&>().resize(column.idx_position() + 1);
+            }
+            ddl["columns"][column.idx_position()] = column_json;
+        }
+
+        return ddl;
+    }
+
     void Indexer::abort_indexes(uint64_t db_id, uint64_t table_id, uint64_t xid)
     {
         std::scoped_lock g(_m, _table_idx_map_mtx);
