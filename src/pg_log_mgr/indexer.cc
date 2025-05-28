@@ -278,32 +278,35 @@ namespace springtail::committer {
             return;
         }
 
-        // index column positions
-        std::vector<uint32_t> idx_cols;
-        for (auto const& col : info.columns()) {
-            idx_cols.push_back(col.position());
-        }
-
         auto meta = client->get_roots(db_id, info.table_id(), end_xid);
         auto it = std::ranges::find_if(meta->roots,
                 [&](auto const& v) { return index_id == v.index_id; });
-        CHECK(it != meta->roots.end());
+        // Erase roots if present, roots wont be there if index drop came in before processing build,
+        // and in that case, proceed for making index DELETED
+        if (it != meta->roots.end()) {
+            // XXX: Optimize roundtrips:
+            // https://linear.app/springtail/issue/SPR-679/optimize-indexer-to-reduce-roundtrips-to-systblmgr
 
-        // XXX: Optimize roundtrips:
-        // https://linear.app/springtail/issue/SPR-679/optimize-indexer-to-reduce-roundtrips-to-systblmgr
-        auto table =
-            TableMgr::get_instance()->get_mutable_table(db_id, info.table_id(), end_xid, end_xid);
-        auto root = table->create_index_root(index_id, idx_cols);
-        if (it->extent_id != constant::UNKNOWN_EXTENT) {
-            root->init(it->extent_id);
-        } else {
-            root->init_empty();
+            // index column positions
+            std::vector<uint32_t> idx_cols;
+            for (auto const& col : info.columns()) {
+                idx_cols.push_back(col.position());
+            }
+
+            auto table =
+                TableMgr::get_instance()->get_mutable_table(db_id, info.table_id(), end_xid, end_xid);
+            auto root = table->create_index_root(index_id, idx_cols);
+            if (it->extent_id != constant::UNKNOWN_EXTENT) {
+                root->init(it->extent_id);
+            } else {
+                root->init_empty();
+            }
+            root->truncate();
+            root->finalize();
+
+            meta->roots.erase(it);
+            client->update_roots(db_id, info.table_id(), end_xid, *meta);
         }
-        root->truncate();
-        root->finalize();
-
-        meta->roots.erase(it);
-        client->update_roots(db_id, info.table_id(), end_xid, *meta);
         client->set_index_state(db_id, xid, info.table_id(), index_id, sys_tbl::IndexNames::State::DELETED);
 
         // Cleanup table-index map
