@@ -169,13 +169,20 @@ private:
         uint64_t namespace_id;  ///< The ID of the schema/namespace of the table.
         std::string name;       ///< The name of the table.
         bool exists;            ///< A flag indicating if the table exists at this point.
+        uint64_t parent_table_id;  ///< The parent table ID for partitioned tables (INVALID_TABLE if not set)
+        std::string partition_key;  ///< The partition key expression for partitioned tables.
+        std::string partition_bound;  ///< The partition bound expression for partitioned tables.
         TableCacheRecord(uint64_t id,
                          uint64_t xid,
                          uint64_t lsn,
                          uint64_t namespace_id,
                          const std::string& name,
-                         bool exists)
-            : id(id), xid(xid), lsn(lsn), namespace_id(namespace_id), name(name), exists(exists)
+                         bool exists,
+                         uint64_t parent_table_id,
+                         const std::string& partition_key,
+                         const std::string& partition_bound)
+            : id(id), xid(xid), lsn(lsn), namespace_id(namespace_id), name(name), exists(exists),
+              parent_table_id(parent_table_id), partition_key(partition_key), partition_bound(partition_bound)
         {
         }
         TableCacheRecord() = default;
@@ -373,11 +380,14 @@ private:
      * @param old_schema The schema before the alteration.
      * @param new_schema The schema after the alteration.
      * @param xid The XID/LSN at which the alteration occurred.
+     * @param partition_root A flag indicating if this is a partition root table (holds no data)
+     * @param ddl The JSON object to which the DDL statement will be added.
      */
     proto::ColumnHistory _generate_update(
         const google::protobuf::RepeatedPtrField<proto::TableColumn>& old_schema,
         const google::protobuf::RepeatedPtrField<proto::TableColumn>& new_schema,
         const XidLsn& xid,
+        bool partition_root,
         nlohmann::json& ddl);
 
     // CACHE FOR NAMESPACES

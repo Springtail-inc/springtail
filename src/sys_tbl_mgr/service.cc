@@ -453,10 +453,40 @@ Service::_create_table(const proto::TableRequest& request)
     ddl["lsn"] = request.lsn();
     ddl["columns"] = nlohmann::json::array();
 
+    // partition info
+    uint64_t parent_id = INVALID_TABLE;
+    if (request.table().has_parent_table_id()) {
+        parent_id = request.table().parent_table_id();
+        ddl["parent_table_id"] = parent_id;
+        // TODO: add parent table name
+        auto parent_table_info = _get_table_info(request.db_id(), parent_id, xid);
+        if (!parent_table_info || !parent_table_info->exists) {
+            LOG_ERROR("Parent table {} not found for table {} in namespace {}",
+                      parent_id, request.table().name(), request.table().namespace_name());
+            throw SysTblMgrError("Parent table not found");
+        }
+        ddl["parent_table_name"] = parent_table_info->name;
+    }
+
+    // partition key -- this is a parent table; either root or intermediate
+    std::string partition_key;
+    if (request.table().has_partition_key()) {
+        partition_key = request.table().partition_key();
+        ddl["partition_key"] = partition_key;
+    }
+
+    // this is a partitioned table, it is a leaf if partition_key is empty
+    std::string partition_bound;
+    if (request.table().has_partition_bound()) {
+        partition_bound = request.table().partition_bound();
+        ddl["partition_bound"] = partition_bound;
+    }
+
     // add table name
     auto table_info =
         std::make_shared<TableCacheRecord>(request.table().id(), request.xid(), request.lsn(),
-                                           ns_info->id, request.table().name(), true);
+                                           ns_info->id, request.table().name(), true,
+                                           parent_id, partition_key, partition_bound);
     _set_table_info(request.db_id(), table_info);
 
     // add roots and stats entry -- may get overwritten later if data is added to the table
@@ -534,12 +564,28 @@ Service::AlterTable(grpc::ServerContext* context,
     // note: table should always exist when calling alter_table()
     assert(table_info != nullptr);
 
+    // check if the table is a partitioned table
+    uint64_t parent_id = INVALID_TABLE;
+    std::string partition_key;
+    std::string partition_bound;
+    if (request->table().has_parent_table_id()) {
+        parent_id = request->table().parent_table_id();
+    }
+    if (request->table().has_partition_key()) {
+        partition_key = request->table().partition_key();
+    }
+    if (request->table().has_partition_bound()) {
+        partition_bound = request->table().partition_bound();
+    }
+
     if (table_info->namespace_id != ns_info->id) {
         // if the schema/namespace changed then update the table_names table
         // insert the new name for this oid
         auto new_info = std::make_shared<TableCacheRecord>(request->table().id(), request->xid(),
                                                            request->lsn(), ns_info->id,
-                                                           request->table().name(), true);
+                                                           request->table().name(), true,
+                                                           parent_id, partition_key,
+                                                           partition_bound);
         _set_table_info(request->db_id(), new_info);
 
         // set the DDL statement
@@ -555,7 +601,9 @@ Service::AlterTable(grpc::ServerContext* context,
         // insert the new name for this oid
         auto new_info = std::make_shared<TableCacheRecord>(request->table().id(), request->xid(),
                                                            request->lsn(), ns_info->id,
-                                                           request->table().name(), true);
+                                                           request->table().name(), true,
+                                                           parent_id, partition_key,
+                                                           partition_bound);
         _set_table_info(request->db_id(), new_info);
 
         // set the DDL statement
@@ -573,6 +621,25 @@ Service::AlterTable(grpc::ServerContext* context,
 
         _set_primary_index(request->db_id(), ns_info->id, request->table().id(), table_info->name,
                            ns_info->name, xid);
+    } else if (table_info->parent_table_id != parent_id) {
+        auto new_info = std::make_shared<TableCacheRecord>(request->table().id(), request->xid(),
+                                                           request->lsn(), ns_info->id,
+                                                           request->table().name(), true,
+                                                           parent_id, partition_key,
+                                                           partition_bound);
+        _set_table_info(request->db_id(), new_info);
+
+        if (table_info->parent_table_id == INVALID_TABLE) {
+            CHECK_NE(parent_id, INVALID_TABLE);
+            // moving table to a partitioned table
+            ddl["action"] = "alter_parent_set";
+            // TODO: get parent table name
+            // ddl["parent_table_name"] = parent_table_name;
+            // ddl["parent_table_schema"] = parent_table_schema;
+        } else if (parent_id == INVALID_TABLE) {
+            // promote back to full table
+            ddl["action"] = "alter_parent_clear";
+        }
     } else {
         XidLsn xid(request->xid(), request->lsn());
 
@@ -581,7 +648,10 @@ Service::AlterTable(grpc::ServerContext* context,
 
         // generate a tuple for the change
         // note: _generate_update() sets the necessary elements of the ddl
-        auto history = _generate_update(info->columns(), request->table().columns(), xid, ddl);
+        // use partition_key to determine if this is a root of a partitioned table, in which case
+        // it will not hold any data, so no need to resync the data
+        auto history = _generate_update(info->columns(), request->table().columns(),
+                                        xid, (!partition_key.empty()), ddl);
 
         // we won't apply any changes to the system tables in these cases
         if (history.update_type() != static_cast<int8_t>(SchemaUpdateType::NO_CHANGE) &&
@@ -1625,7 +1695,9 @@ Service::_set_table_info(uint64_t db_id, TableCacheRecordPtr table_info)
     auto table_names_t = _get_mutable_system_table(db_id, sys_tbl::TableNames::ID);
     auto tuple =
         sys_tbl::TableNames::Data::tuple(table_info->namespace_id, table_info->name, table_info->id,
-                                         table_info->xid, table_info->lsn, table_info->exists);
+                                         table_info->xid, table_info->lsn, table_info->exists,
+                                         table_info->parent_table_id, table_info->partition_key,
+                                         table_info->partition_bound);
     table_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 }
 
@@ -2640,6 +2712,7 @@ proto::ColumnHistory
 Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableColumn>& old_schema,
                           const google::protobuf::RepeatedPtrField<proto::TableColumn>& new_schema,
                           const XidLsn& xid,
+                          bool partition_root,
                           nlohmann::json& ddl)
 {
     proto::ColumnHistory update;
@@ -2660,6 +2733,17 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
     // Check for removals: any column in oldMap that's missing in newMap
     for (const auto& [pos, old_col] : oldMap) {
         if (newMap.find(pos) == newMap.end()) {
+
+            if (partition_root) {
+                // Column has been removed
+                *update.mutable_column() = *old_col;
+                update.set_update_type(static_cast<int8_t>(SchemaUpdateType::REMOVE_COLUMN));
+                update.set_exists(false);
+                ddl["action"] = "col_drop";
+                ddl["column"] = old_col->name();
+                return update;
+            }
+
 #if ENABLE_SCHEMA_MUTATES
             // Column has been removed
             *update.mutable_column() = *old_col;
@@ -2679,6 +2763,21 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
     for (const auto& [pos, new_col] : newMap) {
         if (oldMap.find(pos) == oldMap.end()) {
             // A new column has been added
+            if (partition_root) {
+                // If this is a partition root, we can add the column
+                *update.mutable_column() = *new_col;
+                update.set_update_type(static_cast<int8_t>(SchemaUpdateType::NEW_COLUMN));
+                update.set_exists(true);
+                ddl["action"] = "col_add";
+                ddl["column"]["name"] = new_col->name();
+                ddl["column"]["type"] = new_col->pg_type();
+                ddl["column"]["nullable"] = new_col->is_nullable();
+                if (new_col->has_default_value()) {
+                    ddl["column"]["default"] = new_col->default_value();
+                }
+                return update;
+            }
+
 #if ENABLE_SCHEMA_MUTATES
             if (new_col->has_default_value()) {
                 ddl["action"] = "resync";
@@ -2700,6 +2799,7 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
             ddl["action"] = "resync";
             update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
 #endif
+
             return update;
         }
     }
@@ -2724,6 +2824,16 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
             // A column going from nullable to not-nullable results in NULL values being
             // populated with a default, which aren't sent via the log.
             if (!old_col->is_nullable() && new_col->is_nullable()) {
+                if (partition_root) {
+                    // Column has been made nullable
+                    *update.mutable_column() = *new_col;
+                    update.set_update_type(static_cast<int8_t>(SchemaUpdateType::NULLABLE_CHANGE));
+                    update.set_exists(true);
+                    ddl["action"] = "col_nullable";
+                    ddl["column"]["name"] = new_col->name();
+                    ddl["column"]["nullable"] = new_col->is_nullable();
+                    return update;
+                }
 #if ENABLE_SCHEMA_MUTATES
                 *update.mutable_column() = *new_col;
                 update.set_update_type(static_cast<int8_t>(SchemaUpdateType::NULLABLE_CHANGE));
@@ -2740,6 +2850,18 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
 
             // Changing from nullable to not-nullable requires a resync
             if (old_col->is_nullable() && !new_col->is_nullable()) {
+
+                if (partition_root) {
+                    // Column has been made not-nullable
+                    *update.mutable_column() = *new_col;
+                    update.set_update_type(static_cast<int8_t>(SchemaUpdateType::NULLABLE_CHANGE));
+                    update.set_exists(true);
+                    ddl["action"] = "col_not_nullable";
+                    ddl["column"]["name"] = new_col->name();
+                    ddl["column"]["nullable"] = new_col->is_nullable();
+                    return update;
+                }
+
                 ddl["action"] = "resync";
                 update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
                 return update;
@@ -2747,6 +2869,17 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
 
             // Check for a change in the data type
             if (old_col->pg_type() != new_col->pg_type()) {
+                if (partition_root) {
+                    // Column has changed type
+                    *update.mutable_column() = *new_col;
+                    update.set_update_type(static_cast<int8_t>(SchemaUpdateType::TYPE_CHANGE));
+                    update.set_exists(true);
+                    ddl["action"] = "col_type_change";
+                    ddl["column"]["name"] = new_col->name();
+                    ddl["column"]["type"] = new_col->pg_type();
+                    return update;
+                }
+
                 ddl["action"] = "resync";
                 update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
                 return update;
@@ -2754,6 +2887,7 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
 
             // Check for a primary key position change
             if (old_col->pk_position() != new_col->pk_position()) {
+                CHECK_EQ(partition_root, false);
                 ddl["action"] = "resync";
                 update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
                 return update;

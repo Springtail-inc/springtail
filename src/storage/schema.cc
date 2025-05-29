@@ -343,6 +343,10 @@ namespace springtail {
                 assert(update.nullable);
                 break;
 
+            case (SchemaUpdateType::TYPE_CHANGE):
+
+                break;
+
             default:
                 // note: we shouldn't see any other update types in the schema history
                 assert(0);

@@ -484,7 +484,7 @@ class TestCase:
 
                 sql = f""" SELECT a.attname AS name,
                                     CASE
-                                        WHEN t.oid = 1560 THEN 1562
+                                        WHEN t.oid = 1560 THEN 1562 --remap bitoid to varbitoid
                                         ELSE t.oid
                                     END AS pg_type,
                                   NOT a.attnotnull AS nullable,

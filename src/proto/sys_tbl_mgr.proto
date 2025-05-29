@@ -26,6 +26,9 @@ message TableInfo {
   string namespace_name = 2;
   string name = 3;
   repeated TableColumn columns = 4;
+  optional int32 parent_id = 5;
+  optional string partition_key = 6;
+  optional string partition_bound = 7;
 }
 
 message TableRequest {
