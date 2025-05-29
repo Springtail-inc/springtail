@@ -152,48 +152,51 @@ def cleanup_db_instance(props : Properties) -> None:
        Drop and recreate the db and execute cleanup SQL statements.
     """
     for db_config in props.get_db_configs():
-        # connect to the db instance
-        db_name = db_config['name']
-        slot_name = db_config['replication_slot']
-        pub_name = db_config['publication_name']
+        add_database(props, db_config)
 
-        if not check_postgres_running():
-            start_postgres()
+def add_database(props : Properties, db_config: Dict) -> None:
+    # connect to the db instance
+    db_name = db_config['name']
+    slot_name = db_config['replication_slot']
+    pub_name = db_config['publication_name']
 
-        # see if the replication slot exists and drop it on the target database
-        # if we don't do this and the slot exists, we can't drop the database
-        try:
-            # Connect to the database, may fail if it doesn't exist
-            conn = connect_db_instance(props, db_name)
-            slot_exists = execute_sql_select(conn, "SELECT 1 FROM pg_replication_slots WHERE slot_name = %s;", slot_name)
-            if slot_exists:
-                execute_sql(conn, "SELECT pg_drop_replication_slot(%s);", slot_name)
-        except Exception as e:
-            pass
+    if not check_postgres_running():
+        start_postgres()
 
-        # Connect to the database ("postgres" database)
-        conn = connect_db_instance(props)
-
-        # Drop and recreate the database
-        execute_sql(conn, f"DROP DATABASE IF EXISTS {quote_ident(db_name, conn)} WITH (FORCE);")
-        execute_sql(conn, f"CREATE DATABASE {quote_ident(db_name, conn)};")
-
-        conn.close()
-
-        # Connect to the database
+    # see if the replication slot exists and drop it on the target database
+    # if we don't do this and the slot exists, we can't drop the database
+    try:
+        # Connect to the database, may fail if it doesn't exist
         conn = connect_db_instance(props, db_name)
-
-        # Cleanup trigger functions
-        execute_sql(conn, "DROP SCHEMA IF EXISTS __pg_springtail_triggers CASCADE;")
-
         slot_exists = execute_sql_select(conn, "SELECT 1 FROM pg_replication_slots WHERE slot_name = %s;", slot_name)
         if slot_exists:
             execute_sql(conn, "SELECT pg_drop_replication_slot(%s);", slot_name)
+    except Exception as e:
+        pass
 
-        execute_sql(conn, f"DROP PUBLICATION IF EXISTS {quote_ident(pub_name, conn)};")
+    # Connect to the database ("postgres" database)
+    conn = connect_db_instance(props)
 
-        # Close the database connection
-        conn.close()
+    # Drop and recreate the database
+    execute_sql(conn, f"DROP DATABASE IF EXISTS {quote_ident(db_name, conn)} WITH (FORCE);")
+    execute_sql(conn, f"CREATE DATABASE {quote_ident(db_name, conn)};")
+
+    conn.close()
+
+    # Connect to the database
+    conn = connect_db_instance(props, db_name)
+
+    # Cleanup trigger functions
+    execute_sql(conn, "DROP SCHEMA IF EXISTS __pg_springtail_triggers CASCADE;")
+
+    slot_exists = execute_sql_select(conn, "SELECT 1 FROM pg_replication_slots WHERE slot_name = %s;", slot_name)
+    if slot_exists:
+        execute_sql(conn, "SELECT pg_drop_replication_slot(%s);", slot_name)
+
+    execute_sql(conn, f"DROP PUBLICATION IF EXISTS {quote_ident(pub_name, conn)};")
+
+    # Close the database connection
+    conn.close()
 
 
 def update_postgres_config(test_params: dict = {}):
