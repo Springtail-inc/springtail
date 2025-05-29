@@ -60,6 +60,8 @@ namespace springtail {
                       bool do_rollforward,
                       SafePagePtr::FlushCb flush_cb )
     {
+        //TODO: SPR-796
+        //auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(target_xid)}});
         LOG_DEBUG(LOG_CACHE, "GET file {} eid {} xid {} txid {}",
                             file, extent_id, access_xid, target_xid);
 
@@ -69,6 +71,7 @@ namespace springtail {
             target_xid = access_xid;
         }
 
+        //TODO: SPR-796
         //open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_GET_CALLS);
 
         // if the extent ID is UNKNOWN, then we will get an empty page for the file
@@ -144,6 +147,9 @@ namespace springtail {
     {
         DCHECK(extent_id != constant::UNKNOWN_EXTENT);
 
+        //TODO: SPR-796
+        //auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(target_xid)}});
+
         LOG_DEBUG(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, access_xid, target_xid);
 
         boost::unique_lock lock(_mutex);
@@ -151,9 +157,14 @@ namespace springtail {
         // check if the page already exists in the cache for the given target XID
         PagePtr page = _try_get(file, extent_id, target_xid);
         if (page != nullptr) {
+            //TODO: SPR-796
+            //open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_GET_CALLS);
             LOG_DEBUG(LOG_CACHE, "Found in cache");
             return page;
         }
+
+        //TODO: SPR-796
+        //open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_GET_CACHE_MISSES);
 
         // XXX eventually use the access_xid and extent_id to get the proper set of extents to start
         //     from; for now we assume that the single extent_id *is* the full list of extents for
@@ -1637,7 +1648,7 @@ namespace springtail {
             bool mark_dirty)
     {
         _extent = StorageCache::get_instance()->_data_cache->get(file, ref, mark_dirty);
-        assert(_extent);
+        DCHECK(_extent);
     }
 
 }
