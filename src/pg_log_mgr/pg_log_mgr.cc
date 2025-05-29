@@ -573,7 +573,7 @@ namespace springtail::pg_log_mgr {
             while (!_shutdown) {
                 Coordinator::mark_alive(keep_alive);
 
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Recevied data in normal mode");
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Received data in normal mode");
                 if (!_writer_read_data(data, logger, start_offset,
                     [this, &start_offset](uint64_t end_offset, const std::filesystem::path &file_path) {
                         _logger_queue.push(start_offset, end_offset, file_path);
