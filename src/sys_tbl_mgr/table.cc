@@ -1232,8 +1232,6 @@ namespace indexer_helpers {
 
     void Table::Iterator::Primary::next()
     {
-        TIME_TRACE_SCOPED(time_trace::traces, primary_index_iterator_next);
-
         if (!_end) {
             _end = _page->end();
         }
@@ -1286,8 +1284,6 @@ namespace indexer_helpers {
 
     void Table::Iterator::Secondary::next()
     {
-        TIME_TRACE_SCOPED(time_trace::traces, secondary_index_iterator_next);
-
         ++_btree_i;
         if (_btree_i == _btree->end()) {
             _page = {};
@@ -1303,13 +1299,14 @@ namespace indexer_helpers {
 
     void Table::Iterator::Secondary::update_page()
     {
-        CHECK(_btree_i != _btree->end());
+        DCHECK(_btree_i != _btree->end());
         auto &&row = *_btree_i;
         uint64_t eid = _extent_id_f->get_uint64(&row);
         if (_page.empty() || _extent_id != eid) {
             _extent_id = eid;
             _page = _table->_read_page(_extent_id);
         }
+
         uint64_t row_id = _row_id_f->get_uint32(&row);
         _page_i = _page->at(row_id);
     }
