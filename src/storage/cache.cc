@@ -76,12 +76,14 @@ namespace springtail {
 
         // if the extent ID is UNKNOWN, then we will get an empty page for the file
         if (extent_id == constant::UNKNOWN_EXTENT) {
-            return {_page_cache.get(), _page_cache->get_empty(file, target_xid), flush_cb};
+            TIME_TRACE_SCOPED(time_trace::traces, _storage_cache_get_1);
+            return {_page_cache.get(), _page_cache->get_empty(file, target_xid), std::move(flush_cb)};
         }
 
         // if target is the same as access, get the page and return it
         if (target_xid == access_xid) {
-            return {_page_cache.get(), _page_cache->get(file, extent_id, access_xid, target_xid), flush_cb};
+            TIME_TRACE_SCOPED(time_trace::traces, _storage_cache_get_2);
+            return {_page_cache.get(), _page_cache->get(file, extent_id, access_xid, target_xid), std::move(flush_cb)};
         }
 
         // if the target is ahead of the access, but there is roll-forward request, then it means
@@ -90,7 +92,7 @@ namespace springtail {
             // note: we know that the provided extent_id is valid at the access_xid, so we get the
             //       page at the target_xid using that original extent_id so that the caller can
             //       modify it from that point forward
-            return {_page_cache.get(), _page_cache->get(file, extent_id, access_xid, target_xid), flush_cb};
+            return {_page_cache.get(), _page_cache->get(file, extent_id, access_xid, target_xid), std::move(flush_cb)};
         }
 
         // note: from here forward, we know we are dealing with a roll-forward table data page
@@ -189,12 +191,14 @@ namespace springtail {
     StorageCache::PageCache::put(PagePtr page,
                                  std::function<bool(std::shared_ptr<Page>)> flush_callback)
     {
-        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(page->_end_xid)}});
+        //TODO: SPR-796
+        //auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(page->_end_xid)}});
 
         LOG_DEBUG(LOG_CACHE, "PUT file {} eid {} s_xid {} e_xid {}",
                             page->_file, page->_extent_id, page->_start_xid, page->_end_xid);
 
-        open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_PUT_CALLS);
+        //TODO: SPR-796
+        //open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_PUT_CALLS);
 
         boost::unique_lock lock(_mutex);
 
@@ -208,7 +212,7 @@ namespace springtail {
 
         if (page->_extent_id == constant::UNKNOWN_EXTENT) {
             // note: we cannot release a dirty page with no original extent ID back to the cache unless it has a flush callback
-            CHECK(!page->_is_dirty || page->_flush_callback);
+            DCHECK(!page->_is_dirty || page->_flush_callback);
 
             // release the space back to the cache
             --_size;
