@@ -18,7 +18,8 @@ MemoryContext::MemoryContext(MemoryContext* parent,
       _parent(parent)
 {
     // Create the initial block
-    _blocks.push_back(std::make_unique<MemoryBlock>(init_size));
+    auto block = std::make_unique<MemoryBlock>(init_size);
+    _blocks[block->remaining()] = std::move(block);
 }
 
 void*
@@ -27,8 +28,9 @@ MemoryContext::_alloc_large(size_t size)
     auto block = std::make_unique<MemoryBlock>(size);
     block->pos = size; // Mark as fully used
     
-    _large_allocs.push_back(std::move(block));
-    return _large_allocs.back()->memory;
+    char* memory = block->memory;
+    _large_allocs[memory] = std::move(block);
+    return memory;
 }
 
 void*
@@ -44,33 +46,39 @@ MemoryContext::alloc(size_t size)
     // Pad size to be a multiple of sizeof(size_t) for proper alignment
     size_t aligned_size = (size + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1);
 
-    // Try to find space in existing blocks
-    for (auto it = _blocks.begin(); it != _blocks.end();) {
-        auto& block = *it;
-        if (block->size - block->pos >= aligned_size) {
-            ptr = block->memory + block->pos;
-            block->pos += aligned_size;
-            
-            // If block is now full, move it to _full_blocks
-            if (block->pos >= block->size) {
-                _full_blocks.splice(_full_blocks.end(), _blocks, it++);
-            }
-            return ptr;
+    // Try to find a block with enough space
+    auto it = _blocks.lower_bound(aligned_size);
+    if (it != _blocks.end()) {
+        auto& block = it->second;
+        ptr = block->memory + block->pos;
+        block->pos += aligned_size;
+        CHECK(block->pos <= block->size);
+
+        // If block is now full, move it to _full_blocks
+        if (block->pos == block->size) {
+            _full_blocks.push_back(std::move(block));
+            _blocks.erase(it);
+        } else {
+            // Update the block's position in the map using node handle
+            auto node = _blocks.extract(it);
+            node.key() = block->remaining();
+            _blocks.insert(std::move(node));
         }
-        ++it;
+        return ptr;
     }
 
     // Allocate a new block
     size_t new_size = std::max(_init_size, aligned_size);
-    _blocks.push_back(std::make_unique<MemoryBlock>(new_size));
-    
-    auto& block = _blocks.back();
+    auto block = std::make_unique<MemoryBlock>(new_size);
     block->pos = aligned_size;
     ptr = block->memory;
+    CHECK(block->pos <= block->size);
 
     // If the new block is immediately full, move it to _full_blocks
-    if (block->pos >= block->size) {
-        _full_blocks.splice(_full_blocks.end(), _blocks, --_blocks.end());
+    if (block->pos == block->size) {
+        _full_blocks.push_back(std::move(block));
+    } else {
+        _blocks[block->remaining()] = std::move(block);
     }
 
     return ptr;
@@ -113,6 +121,21 @@ MemoryContext::remove_child(MemoryContext* child)
             return;
         }
     }
+}
+
+bool
+MemoryContext::free(void* ptr)
+{
+    if (ptr == nullptr) {
+        return false;
+    }
+
+    auto it = _large_allocs.find(static_cast<char*>(ptr));
+    if (it != _large_allocs.end()) {
+        _large_allocs.erase(it);
+        return true;
+    }
+    return false;
 }
 
 } // namespace pgext
@@ -173,3 +196,36 @@ MemoryContextDelete(void *context)
     // Remove from parent
     parent->remove_child(ctx);
 }
+
+void*
+palloc(size_t size)
+{
+    auto ctx = static_cast<pgext::MemoryContext*>(CurrentMemoryContext);
+    CHECK(ctx != nullptr);
+    return ctx->alloc(size);
+}
+
+void*
+palloc0(size_t size)
+{
+    auto ptr = palloc(size);
+    if (ptr != nullptr) {
+        std::memset(ptr, 0, size);
+    }
+    return ptr;
+}
+
+void
+pfree(void *ptr)
+{
+    if (ptr == nullptr) {
+        return;
+    }
+
+    auto ctx = static_cast<pgext::MemoryContext*>(CurrentMemoryContext);
+    CHECK(ctx != nullptr);
+
+    // Try to free the pointer, if not found do nothing
+    ctx->free(ptr);
+}
+

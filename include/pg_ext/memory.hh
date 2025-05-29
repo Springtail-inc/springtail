@@ -3,6 +3,8 @@
 #include <list>
 #include <string_view>
 #include <memory>
+#include <map>
+#include <absl/container/flat_hash_map.h>
 
 #include <pg_ext/export.hh>
 
@@ -29,6 +31,9 @@ public:
     void remove_child(MemoryContext* child);
 
     MemoryContext* parent() const { return _parent; }
+
+    // Memory management
+    bool free(void* ptr);
 
 private:
     /** Definition of a memory block. */
@@ -79,12 +84,17 @@ private:
         char *memory; ///< The actual memory of this block
         size_t size; ///< The size of this block
         size_t pos; ///< The position up to which we have allocated memory from this block
+
+        size_t remaining() const { return size - pos; }
     };
 
     using BlockList = std::list<std::unique_ptr<MemoryBlock>>;
-    BlockList _blocks; ///< A list of blocks that still have free space
+    using BlockMap = std::map<size_t, std::unique_ptr<MemoryBlock>>;
+    using LargeAllocMap = absl::flat_hash_map<char*, std::unique_ptr<MemoryBlock>>;
+
+    BlockMap _blocks; ///< A map of remaining space to blocks that still have free space
     BlockList _full_blocks; ///< A list of blocks that are completely allocated
-    BlockList _large_allocs; ///< Holds large memory allocations (larger than _max_size)
+    LargeAllocMap _large_allocs; ///< Holds large memory allocations (larger than _max_size)
 
     std::string _name; ///< The name of the block; used for debugging
     size_t _init_size; ///< The default size of a block and the initial size of the first block
