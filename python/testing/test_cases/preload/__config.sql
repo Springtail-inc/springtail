@@ -4,6 +4,9 @@
 ### add_db data_types
 ### add_db indices
 
+### add_db parallel_db1
+### add_db parallel_db2
+
 ### switch_db toast
 -- create table with toast data
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
