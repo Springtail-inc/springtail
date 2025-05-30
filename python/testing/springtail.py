@@ -198,6 +198,47 @@ def add_database(props : Properties, db_config: Dict) -> None:
     # Close the database connection
     conn.close()
 
+def drop_database(props : Properties, db_config: Dict) -> None:
+    # connect to the db instance
+    db_name = db_config['name']
+    slot_name = db_config['replication_slot']
+    pub_name = db_config['publication_name']
+
+    # see if the replication slot exists and drop it on the target database
+    # if we don't do this and the slot exists, we can't drop the database
+    try:
+        # Connect to the database, may fail if it doesn't exist
+        conn = connect_db_instance(props, db_name)
+        slot_exists = execute_sql_select(conn, "SELECT 1 FROM pg_replication_slots WHERE slot_name = %s;", slot_name)
+        if slot_exists:
+            execute_sql(conn, "SELECT pg_drop_replication_slot(%s);", slot_name)
+        conn.close()
+    except Exception as e:
+        pass
+
+    # Connect to the database
+    conn = connect_db_instance(props, db_name)
+
+    # Cleanup trigger functions
+    execute_sql(conn, "DROP SCHEMA IF EXISTS __pg_springtail_triggers CASCADE;")
+
+    slot_exists = execute_sql_select(conn, "SELECT 1 FROM pg_replication_slots WHERE slot_name = %s;", slot_name)
+    if slot_exists:
+        execute_sql(conn, "SELECT pg_drop_replication_slot(%s);", slot_name)
+
+    execute_sql(conn, f"DROP PUBLICATION IF EXISTS {quote_ident(pub_name, conn)};")
+
+    # Close the database connection
+    conn.close()
+
+    # Connect to the database ("postgres" database)
+    conn = connect_db_instance(props)
+
+    # Drop and recreate the database
+    execute_sql(conn, f"DROP DATABASE IF EXISTS {quote_ident(db_name, conn)} WITH (FORCE);")
+    conn.close()
+
+
 
 def update_postgres_config(test_params: dict = {}):
     # cleanup the config to ensure during restarts/crashes we always use the proper config
@@ -700,6 +741,9 @@ def stop(config_file: str, do_cleanup: bool = False) -> None:
     # Load the system properties from the system.json file
     props = Properties(config_file, False)
 
+    stop_with_properties(props, do_cleanup)
+
+def stop_with_properties(props: Properties, do_cleanup: bool = False) -> None:
     # Stop the daemons
     print("\nStopping daemons...")
     stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)

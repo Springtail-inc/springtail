@@ -18,7 +18,6 @@ class TestCase:
     """
     def __init__(self,
                  filename: str,
-                 props: springtail.Properties,
                  build_dir: str,
                  test_params: dict = {},
                  valid_sections: list = ['test', 'verify', 'cleanup']) -> None:
@@ -26,7 +25,6 @@ class TestCase:
         self._filename = os.path.abspath(filename)
         self._name = os.path.basename(self._filename)
         self._directory = os.path.dirname(self._filename)
-        self._props = props
         self._build_dir = build_dir
         self._test_params = test_params
         self._status = 'INIT'
@@ -45,14 +43,7 @@ class TestCase:
             'poll_interval': 0.001
         }
 
-        fdw_config = props.get_fdw_config()
-        db_configs = props.get_db_configs()
-        self._primary_name = db_configs[0]['name']
-        self._db_prefix = ""
-        if 'db_prefix' in fdw_config:
-            self._db_prefix = fdw_config['db_prefix']
-
-        self._replica_name = self._db_prefix + self._primary_name
+        self._added_databases = []
 
         # Each section is composed of an array of sub-sections which
         # are either "sequential" or "parallel".  Sequential
@@ -70,6 +61,19 @@ class TestCase:
         self._sync_step = 0 # incrementing ID used for replica synchronization
         self._recovery_points = { } # map from recovery point name to XID
 
+
+    def set_props(self, props: springtail.Properties) -> None:
+        self._props = props
+        fdw_config = props.get_fdw_config()
+        db_configs = props.get_db_configs()
+        self._primary_name = db_configs[0]['name']
+        self._db_prefix = ""
+        if 'db_prefix' in fdw_config:
+            self._db_prefix = fdw_config['db_prefix']
+        self._replica_name = self._db_prefix + self._primary_name
+
+    def get_added_databases(self) -> list:
+        return self._added_databases
 
     def _setup_default_fdw(self) -> None:
         if self._fdw is None:
@@ -342,10 +346,12 @@ class TestCase:
                             self._raise_error(f'{line_num}: "add_db" must be specified in the "{_GLOBAL_CONFIG_FILE}" file')
                         if len(directive) < 2:
                             self._raise_error(f'{line_num}: "add_db" must specify a database_name value')
+                        db_name = directive[1]
                         self._append_command({
                             'type': 'add_db',
-                            'database_name': directive[1]
+                            'database_name': db_name
                         }, section, is_threaded, cur_txn, line_num)
+                        self._added_databases.append(db_name)
 
                     elif directive[0] == 'switch_db':
                         if section != 'test' and section != 'setup' and section != 'verify' and section != 'cleanup':
@@ -564,17 +570,6 @@ class TestCase:
                 return results
 
         if command['type'] == "add_db":
-            db_name = command["database_name"]
-            self._props.add_database(db_name)
-            db_config = None
-            for dbc in self._props.get_db_configs():
-                if dbc['name'] == db_name:
-                    db_config = dbc
-                    break
-            springtail.add_database(self._props, db_config)
-            for txn in self._txns:
-                self._connections[txn]['connections'][db_name] = springtail.connect_db_instance(self._props, db_name)
-
             return None
 
         elif command['type'] == "switch_db":
@@ -632,7 +627,6 @@ class TestCase:
             if command['type'] == 'sql':
                 return self._execute_sql("replica", cursor, command['sql'], True)
 
-        # with self._fdw[self._replica_name] as cursor:
             elif command['type'] == 'table_exists':
                 results = {}
                 replica_result = True
@@ -748,7 +742,7 @@ class TestCase:
 
     def _open_db_connections_for_txn(self, txn: str, use_proxy: bool) -> None:
         self._connections[txn] = {
-            'current_db': None,
+            'current_db': self._primary_name,
             'connections': {}
         }
         for db_config in self._props.get_db_configs():
@@ -796,14 +790,8 @@ class TestCase:
             self._txns.add(self._metadata['default_txn'])
 
         for txn in self._txns:
-            logging.debug(f'Connecting to database for txn "{txn}"')
-            self._connections[txn] = {
-                "current_db": self._primary_name,
-                "connections": {
-                    self._primary_name: springtail.connect_db_instance(self._props, self._primary_name)
-                }
-            }
-            self._connections[txn]['connections'][self._primary_name].autocommit = self._metadata['autocommit']
+            logging.debug(f'Connecting to databases for txn "{txn}"')
+            self._open_db_connections_for_txn(txn, False)
 
         # execute all of the setup commands
         if len(self._sections['setup']) > 0:
@@ -850,7 +838,6 @@ class TestCase:
         # construct a connection for each transaction in the test
         for txn in self._txns:
             self._open_db_connections_for_txn(txn, use_proxy_for_test)
-            self._connections[txn]['current_db'] = self._primary_name
 
         # connect to the replica database -- used to perform any 'sync' directives
         self._setup_default_fdw()
@@ -925,7 +912,6 @@ class TestCase:
         use_proxy_for_verify = self._test_params.get('use_proxy_for_verify', False)
         txn = next(iter(self._txns))
         self._open_db_connections_for_txn(txn, use_proxy_for_verify)
-        self._connections[txn]['current_db'] = self._primary_name
         self._open_db_connections_for_fdw()
 
         # execute the verification commands against both databases, compare the results
