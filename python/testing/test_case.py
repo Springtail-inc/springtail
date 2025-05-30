@@ -402,7 +402,7 @@ class TestCase:
             cursor.copy_from(f, table, sep=',', null='')
 
 
-    def _execute_sql(self, txn: str, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool, quiet: bool = False) -> list:
+    def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool, txn: str = 'replica', quiet: bool = False) -> list:
         """Execute the provided SQL using the provided cursor."""
         if not quiet:
             logging.debug(f'Execute transaction {txn} SQL: {sql}')
@@ -479,12 +479,12 @@ class TestCase:
                 if is_enabling:
                     logging.debug(f'Enabling streaming')
                     # set to lower value to enable streaming
-                    self._execute_sql(txn, cursor, f"ALTER SYSTEM SET logical_decoding_work_mem = '64kB'", False)
-                    self._execute_sql(txn, cursor, f"SELECT pg_reload_conf()", False)
+                    self._execute_sql(cursor, f"ALTER SYSTEM SET logical_decoding_work_mem = '64kB'", False, txn)
+                    self._execute_sql(cursor, f"SELECT pg_reload_conf()", False, txn)
                 else:
                     # reset to default value
-                    self._execute_sql(txn, cursor, f"ALTER SYSTEM SET logical_decoding_work_mem = '64MB'", False)
-                    self._execute_sql(txn, cursor, f"SELECT pg_reload_conf()", False)
+                    self._execute_sql(cursor, f"ALTER SYSTEM SET logical_decoding_work_mem = '64MB'", False, txn)
+                    self._execute_sql(cursor, f"SELECT pg_reload_conf()", False, txn)
 
             elif command['type'] == 'load_csv':
                 # call the helper to read the CSV file and populate the table
@@ -493,14 +493,14 @@ class TestCase:
 
             elif command['type'] == 'sql':
                 # execute a SQL command
-                return self._execute_sql(txn, cursor, command['sql'], do_fetch)
+                return self._execute_sql(cursor, command['sql'], do_fetch, txn)
 
         connection = self._connections[txn]["connections"][self._primary_name]
         with connection.cursor() as cursor:
             if command['type'] == 'sync':
                 # insert a row to the sync_control table
                 self._sync_step += 1
-                self._execute_sql(txn, cursor, f"BEGIN; SET statement_timeout = 5000; INSERT INTO sync_control (sync, test) VALUES ({self._sync_step}, '{self._name}'); COMMIT;", False)
+                self._execute_sql(cursor, f"BEGIN; SET statement_timeout = 5000; INSERT INTO sync_control (sync, test) VALUES ({self._sync_step}, '{self._name}'); COMMIT;", False, txn)
 
                 # Wait for sync row to appear in replica
                 try:
@@ -544,7 +544,7 @@ class TestCase:
                                     AND a.attnum > 0
                                     AND NOT a.attisdropped
                             ORDER BY a.attnum ASC;"""
-                results['columns'] = self._execute_sql(txn, cursor, sql, True)
+                results['columns'] = self._execute_sql(cursor, sql, True, txn)
 
                 # retrieve the primary index information for the table
                 sql = f"""SELECT unnest(conkey) AS column_id,
@@ -553,7 +553,7 @@ class TestCase:
                             JOIN pg_catalog.pg_class t ON (t.oid = c.conrelid)
                             JOIN pg_catalog.pg_namespace n ON (t.relnamespace = n.oid)
                             WHERE n.nspname = '{command["schema"]}' AND t.relname = '{command["table"]}' AND c.contype = 'p';"""
-                results['primary'] = self._execute_sql(txn, cursor, sql, True)
+                results['primary'] = self._execute_sql(cursor, sql, True, txn)
 
                 sql = f"""SELECT c.oid as table_id,
                                     i.indexrelid as index_id,
@@ -565,7 +565,7 @@ class TestCase:
                     AND i.indisprimary IS FALSE
                     ORDER BY column_id ASC;
                 """
-                results['secondary'] = self._execute_sql(txn, cursor, sql, True)
+                results['secondary'] = self._execute_sql(cursor, sql, True, txn)
 
                 return results
 
@@ -625,7 +625,7 @@ class TestCase:
 
         with connection.cursor() as cursor:
             if command['type'] == 'sql':
-                return self._execute_sql("replica", cursor, command['sql'], True)
+                return self._execute_sql(cursor, command['sql'], True, 'replica')
 
             elif command['type'] == 'table_exists':
                 results = {}
@@ -640,7 +640,7 @@ class TestCase:
                 sql = f"""WITH latest_table AS ({with_sql})
                           SELECT exists FROM latest_table LIMIT 1"""
 
-                sql_result = self._execute_sql("replica", cursor, sql, True)
+                sql_result = self._execute_sql(cursor, sql, True, 'replica')
 
                 replica_result = False if not sql_result else sql_result[0][0]
 
@@ -665,7 +665,7 @@ class TestCase:
                 sql = f"""WITH latest_table AS ({with_sql})
                           SELECT index_exists FROM latest_table LIMIT 1"""
 
-                sql_result = self._execute_sql("replica", cursor, sql, True)
+                sql_result = self._execute_sql(cursor, sql, True, 'replica')
 
                 replica_result = False if not sql_result else sql_result[0][0]
                 results['exists'] = replica_result
@@ -688,7 +688,7 @@ class TestCase:
                 sql = f"""WITH latest_table AS ({with_sql}), ranked_columns AS ({ranking_sql})
                           SELECT name, pg_type, nullable, position FROM ranked_columns WHERE rn = 1 AND exists IS TRUE ORDER BY position ASC;"""
 
-                results['columns'] = self._execute_sql("replica", cursor, sql, True)
+                results['columns'] = self._execute_sql(cursor, sql, True, 'replica')
 
                 # retrieve the primary key data
                 with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists"
@@ -701,7 +701,7 @@ class TestCase:
                 ranking_sql = self._get_ranking_sql()
                 sql = f"""WITH latest_table AS ({with_sql}), ranked_columns AS ({ranking_sql})
                           SELECT column_id, position FROM ranked_columns ORDER BY position ASC;"""
-                results['primary'] = self._execute_sql("replica", cursor, sql, True)
+                results['primary'] = self._execute_sql(cursor, sql, True, 'replica')
 
                 # Wait for index reconciliation
                 self._wait_for_index_reconciliation(command["wait_for"])
@@ -709,7 +709,7 @@ class TestCase:
                 index_sql = self._get_ranking_sql(is_index_query=True)
                 sql = f"""WITH latest_table AS ({with_sql}), ranked_indexes AS ({index_sql})
                          SELECT table_id, index_id, column_id FROM ranked_indexes ORDER BY column_id ASC;"""
-                results['secondary'] = self._execute_sql("replica", cursor, sql, True)
+                results['secondary'] = self._execute_sql(cursor, sql, True, 'replica')
 
                 return results
 
@@ -729,13 +729,13 @@ class TestCase:
     def _run_background(self, frequency: float):
         connection = springtail.connect_db_instance(self._props, self._primary_name)
         with connection.cursor() as cursor:
-            self._execute_sql("background", cursor, f'BEGIN; DROP TABLE IF EXISTS background_control; CREATE TABLE background_control (value INT); COMMIT;', False)
+            self._execute_sql(cursor, f'BEGIN; DROP TABLE IF EXISTS background_control; CREATE TABLE background_control (value INT); COMMIT;', False, 'background')
 
         # run periodically
         while not self._stop_thread.wait(frequency):
             self._value += 1
             with connection.cursor() as cursor:
-                self._execute_sql("background", cursor, f"BEGIN; INSERT INTO background_control (value) VALUES ({self._value}); COMMIT;", False, True)
+                self._execute_sql(cursor, f"BEGIN; INSERT INTO background_control (value) VALUES ({self._value}); COMMIT;", False, 'background', True)
 
             pass
         connection.close()
@@ -800,7 +800,7 @@ class TestCase:
         # create the sync control table
         any_txn = next(iter(self._txns))
         with self._connections[any_txn]["connections"][self._primary_name].cursor() as cursor:
-            self._execute_sql(any_txn, cursor, 'BEGIN; DROP TABLE IF EXISTS sync_control; CREATE TABLE sync_control (sync INT, test TEXT); COMMIT;', False)
+            self._execute_sql(cursor, 'BEGIN; DROP TABLE IF EXISTS sync_control; CREATE TABLE sync_control (sync INT, test TEXT); COMMIT;', False, any_txn)
 
         self._status = 'SETUP_END'
 
@@ -842,7 +842,7 @@ class TestCase:
         # connect to the replica database -- used to perform any 'sync' directives
         self._setup_default_fdw()
         with self._fdw[self._replica_name].cursor() as c:
-            self._execute_sql("replica", c, f'BEGIN; SET statement_timeout = {self._metadata["query_timeout"] * 1000}; COMMIT;', False)
+            self._execute_sql(c, f'BEGIN; SET statement_timeout = {self._metadata["query_timeout"] * 1000}; COMMIT;', False, 'replica')
 
         # XXX need a way to determine when the database is up and running... poll Redis?
 
