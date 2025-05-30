@@ -188,17 +188,13 @@ namespace springtail
 
     static constexpr char TABLE_PARTITION_QUERY[] =
         "SELECT "
-        "    -- Parent table OID for child tables "
         "    CASE WHEN c.relispartition THEN "
         "        (SELECT inhparent FROM pg_inherits WHERE inhrelid = c.oid) "
         "    END as parent_oid, "
-        "    -- Partition bound expression for children "
         "    pg_get_expr(c.relpartbound, c.oid, TRUE) as partition_bound, "
-        "   -- Partition key expression for parent "
         "    pg_get_partkeydef(c.oid) as partition_key "
         "FROM pg_class c "
-        "WHERE c.relkind = 'p' OR c.relispartition "
-        "  AND c.oid = {};";
+        "WHERE c.oid = {}";
 
     /**
      * @brief Connect to database
@@ -328,10 +324,11 @@ namespace springtail
         // get any table partition info
         _connection.exec(fmt::format(TABLE_PARTITION_QUERY, table_oid));
         if (_connection.ntuples() > 0) {
-            DCHECK(_connection.nfields() == 3);
-            _schema.parent_oid = _connection.get_int32_optional(0, 0);
-            _schema.partition_bound = _connection.get_string(0, 1);
-            _schema.partition_key = _connection.get_string(0, 2);
+            if ( _connection.nfields() == 3 ) {
+                _schema.parent_oid = _connection.get_int32_optional(0, 0);
+                _schema.partition_bound = _connection.get_string_optional(0, 1);
+                _schema.partition_key = _connection.get_string_optional(0, 2);
+            }
         }
         _connection.clear();
 
@@ -558,16 +555,15 @@ namespace springtail
 
         // partition info
         if (_schema.parent_oid.has_value()) {
-            table_info->set_table_id(_schema.table_oid);
-            table_info->set_parent_id(_schema.parent_oid);
+            table_info->set_parent_table_id(static_cast<int32_t>(_schema.parent_oid.value()));
         }
 
-        if (!_schema.partition_key.empty()) {
-            table_info->set_partition_key(_schema.partition_key);
+        if (_schema.partition_key.has_value()) {
+            table_info->set_partition_key(_schema.partition_key.value());
         }
 
-        if (!_schema.partition_bound.empty()) {
-            table_info->set_partition_bound(_schema.partition_bound);
+        if (_schema.partition_bound.has_value()) {
+            table_info->set_partition_bound(_schema.partition_bound.value());
         }
 
         for (const auto &col : _schema.columns) {
@@ -620,7 +616,7 @@ namespace springtail
 
         // only do the COPY if there are no partition keys
         // if there are partition keys, then this is not a leaf table
-        if (_schema.part_key_expr.empty()) {
+        if (!_schema.partition_key.has_value()) {
             // start the COPY
             _prepare_copy();
 

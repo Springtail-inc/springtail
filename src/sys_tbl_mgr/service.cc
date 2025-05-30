@@ -454,39 +454,40 @@ Service::_create_table(const proto::TableRequest& request)
     ddl["columns"] = nlohmann::json::array();
 
     // partition info
-    uint64_t parent_id = INVALID_TABLE;
+    std::optional<uint64_t> parent_table_id;
     if (request.table().has_parent_table_id()) {
-        parent_id = request.table().parent_table_id();
-        ddl["parent_table_id"] = parent_id;
+        parent_table_id = request.table().parent_table_id();
+        ddl["parent_table_id"] = parent_table_id.value();
         // TODO: add parent table name
-        auto parent_table_info = _get_table_info(request.db_id(), parent_id, xid);
-        if (!parent_table_info || !parent_table_info->exists) {
-            LOG_ERROR("Parent table {} not found for table {} in namespace {}",
-                      parent_id, request.table().name(), request.table().namespace_name());
-            throw SysTblMgrError("Parent table not found");
-        }
-        ddl["parent_table_name"] = parent_table_info->name;
+        // auto parent_table_info = _get_table_info(request.db_id(), parent_table_id, xid);
+        // if (parent_table_info == nullptr) {
+        //     LOG_INFO("[DEBUG] Parent table not found {}", parent_table_id);
+        //     LOG_ERROR("Parent table {} not found for table {} in namespace {}",
+        //               parent_table_id, request.table().name(), request.table().namespace_name());
+        //     throw SysTblMgrError("Parent table not found");
+        // }
+        // ddl["parent_table_name"] = parent_table_info->name;
     }
 
     // partition key -- this is a parent table; either root or intermediate
-    std::string partition_key;
+    std::optional<std::string> partition_key;
     if (request.table().has_partition_key()) {
         partition_key = request.table().partition_key();
-        ddl["partition_key"] = partition_key;
+        ddl["partition_key"] = partition_key.value();
     }
 
     // this is a partitioned table, it is a leaf if partition_key is empty
-    std::string partition_bound;
+    std::optional<std::string> partition_bound;
     if (request.table().has_partition_bound()) {
         partition_bound = request.table().partition_bound();
-        ddl["partition_bound"] = partition_bound;
+        ddl["partition_bound"] = partition_bound.value();
     }
 
     // add table name
     auto table_info =
         std::make_shared<TableCacheRecord>(request.table().id(), request.xid(), request.lsn(),
                                            ns_info->id, request.table().name(), true,
-                                           parent_id, partition_key, partition_bound);
+                                           parent_table_id, partition_key, partition_bound);
     _set_table_info(request.db_id(), table_info);
 
     // add roots and stats entry -- may get overwritten later if data is added to the table
@@ -565,7 +566,7 @@ Service::AlterTable(grpc::ServerContext* context,
     assert(table_info != nullptr);
 
     // check if the table is a partitioned table
-    uint64_t parent_id = INVALID_TABLE;
+    uint64_t parent_id = constant::INVALID_TABLE;
     std::string partition_key;
     std::string partition_bound;
     if (request->table().has_parent_table_id()) {
@@ -629,14 +630,14 @@ Service::AlterTable(grpc::ServerContext* context,
                                                            partition_bound);
         _set_table_info(request->db_id(), new_info);
 
-        if (table_info->parent_table_id == INVALID_TABLE) {
-            CHECK_NE(parent_id, INVALID_TABLE);
+        if (table_info->parent_table_id == constant::INVALID_TABLE) {
+            CHECK_NE(parent_id, constant::INVALID_TABLE);
             // moving table to a partitioned table
             ddl["action"] = "alter_parent_set";
             // TODO: get parent table name
             // ddl["parent_table_name"] = parent_table_name;
             // ddl["parent_table_schema"] = parent_table_schema;
-        } else if (parent_id == INVALID_TABLE) {
+        } else if (parent_id == constant::INVALID_TABLE) {
             // promote back to full table
             ddl["action"] = "alter_parent_clear";
         }
@@ -1569,6 +1570,9 @@ Service::_get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     info->namespace_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
     info->name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row);
     info->exists = exists;
+    info->parent_table_id = fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->get_uint64(&row);
+    info->partition_key = fields->at(sys_tbl::TableNames::Data::PARTITION_KEY)->get_text(&row);
+    info->partition_bound = fields->at(sys_tbl::TableNames::Data::PARTITION_BOUND)->get_text(&row);
 
     // note: we currently only keep un-finalized mutations in the cache, so don't cache here
     return info;

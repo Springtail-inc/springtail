@@ -169,20 +169,29 @@ private:
         uint64_t namespace_id;  ///< The ID of the schema/namespace of the table.
         std::string name;       ///< The name of the table.
         bool exists;            ///< A flag indicating if the table exists at this point.
-        uint64_t parent_table_id;  ///< The parent table ID for partitioned tables (INVALID_TABLE if not set)
-        std::string partition_key;  ///< The partition key expression for partitioned tables.
-        std::string partition_bound;  ///< The partition bound expression for partitioned tables.
+        std::optional<uint64_t> parent_table_id;  ///< The parent table ID for partitioned tables (INVALID_TABLE if not set)
+        std::optional<std::string> partition_key;  ///< The partition key expression for partitioned tables.
+        std::optional<std::string> partition_bound;  ///< The partition bound expression for partitioned tables.
         TableCacheRecord(uint64_t id,
                          uint64_t xid,
                          uint64_t lsn,
                          uint64_t namespace_id,
                          const std::string& name,
                          bool exists,
-                         uint64_t parent_table_id,
-                         const std::string& partition_key,
-                         const std::string& partition_bound)
+                         std::optional<uint64_t> parent_table_id,
+                         std::optional<std::string> partition_key,
+                         std::optional<std::string> partition_bound)
             : id(id), xid(xid), lsn(lsn), namespace_id(namespace_id), name(name), exists(exists),
               parent_table_id(parent_table_id), partition_key(partition_key), partition_bound(partition_bound)
+        {
+        }
+        TableCacheRecord(uint64_t id,
+            uint64_t xid,
+            uint64_t lsn,
+            uint64_t namespace_id,
+            const std::string& name,
+            bool exists)
+            : id(id), xid(xid), lsn(lsn), namespace_id(namespace_id), name(name), exists(exists)
         {
         }
         TableCacheRecord() = default;

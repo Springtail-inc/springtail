@@ -48,7 +48,7 @@ public:
                               const std::optional<std::string> &partition_key,
                               const std::optional<std::string> &partition_bound)
         {
-            auto fields = std::make_shared<FieldArray>(6);
+            auto fields = std::make_shared<FieldArray>(9);
             fields->at(NAMESPACE_ID) = std::make_shared<ConstTypeField<uint64_t>>(namespace_id);
             fields->at(NAME) = std::make_shared<ConstTypeField<std::string>>(name);
             fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
