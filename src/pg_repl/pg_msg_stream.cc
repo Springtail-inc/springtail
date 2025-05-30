@@ -1336,6 +1336,9 @@ namespace springtail {
             }
         }
 
+        // close before it is potentially truncated
+        stream.close();
+
         // handle error if we reached here
         if (truncate) {
             _truncate_file(file, hdr_offset);
@@ -1350,12 +1353,12 @@ namespace springtail {
     {
         int fd = ::open(file.c_str(), O_WRONLY);
         if (fd == -1) {
-            LOG_ERROR("Failed to open file {} for truncation: {}", file.string(), strerror(errno));
+            LOG_ERROR("Failed to open file {} for truncation: {}", file, errno);
             throw PgIOError();
         }
 
         if (::ftruncate(fd, offset) == -1) {
-            LOG_ERROR("Failed to truncate file {} to offset {}: {}", file.string(), offset, strerror(errno));
+            LOG_ERROR("Failed to truncate file {} to offset {}: {}", file, offset, errno);
             ::close(fd);
             throw PgIOError();
         }
