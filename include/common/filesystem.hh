@@ -269,9 +269,13 @@ namespace springtail {
                                uint64_t timestamp_limit,
                                bool archive = false)
         {
-            if (archive && !std::filesystem::exists(dir / "archive")) {
-                // create archive directory
-                std::filesystem::create_directories(dir / "archive");
+            std::filesystem::path create_path = dir;
+            if (archive) {
+                create_path = dir / "archive";
+            }
+            if (!std::filesystem::exists(create_path)) {
+                // create directory path
+                std::filesystem::create_directories(create_path);
             }
             for (const auto& entry : std::filesystem::directory_iterator(dir)) {
                 auto path = entry.path();
