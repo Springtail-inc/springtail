@@ -118,12 +118,12 @@ class TestSet:
         self._props = springtail.Properties(self._config_file, True)
         self._config.set_props(self._props)
 
-        # add databases
-        self._add_databases()
-
         # make sure Springtail is stopped
         logging.debug('Stopping any existing Springtail instance')
         springtail.stop_with_properties(self._props, do_cleanup=True)
+
+        # add databases
+        self._add_databases()
 
         # set database state appropriately
         self._props.reset_all_db_states('initialize')
