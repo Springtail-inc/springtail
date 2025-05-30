@@ -60,17 +60,19 @@ namespace springtail {
                       bool do_rollforward,
                       SafePagePtr::FlushCb flush_cb )
     {
-        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(target_xid)}});
+        //TODO: SPR-796
+        //auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(target_xid)}});
         LOG_DEBUG(LOG_CACHE, "GET file {} eid {} xid {} txid {}",
                             file, extent_id, access_xid, target_xid);
 
         // note: target_xid must be at or beyond the access_xid
-        CHECK_GE(target_xid, access_xid);
+        DCHECK_GE(target_xid, access_xid);
         if (target_xid == constant::LATEST_XID) {
             target_xid = access_xid;
         }
 
-        open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_GET_CALLS);
+        //TODO: SPR-796
+        //open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_GET_CALLS);
 
         // if the extent ID is UNKNOWN, then we will get an empty page for the file
         if (extent_id == constant::UNKNOWN_EXTENT) {
@@ -143,9 +145,10 @@ namespace springtail {
                                  uint64_t access_xid,
                                  uint64_t target_xid)
     {
-        CHECK(extent_id != constant::UNKNOWN_EXTENT);
+        DCHECK(extent_id != constant::UNKNOWN_EXTENT);
 
-        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(target_xid)}});
+        //TODO: SPR-796
+        //auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(target_xid)}});
 
         LOG_DEBUG(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, access_xid, target_xid);
 
@@ -154,16 +157,19 @@ namespace springtail {
         // check if the page already exists in the cache for the given target XID
         PagePtr page = _try_get(file, extent_id, target_xid);
         if (page != nullptr) {
-            open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_GET_CALLS);
+            //TODO: SPR-796
+            //open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_GET_CALLS);
             LOG_DEBUG(LOG_CACHE, "Found in cache");
             return page;
         }
+
+        //TODO: SPR-796
+        //open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_GET_CACHE_MISSES);
 
         // XXX eventually use the access_xid and extent_id to get the proper set of extents to start
         //     from; for now we assume that the single extent_id *is* the full list of extents for
         //     the access XID and that the query nodes won't perform any roll-forward on their own.
 
-        open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_GET_CACHE_MISSES);
         // note: not in the cache, need to create a new Page
         return _create(file, extent_id, target_xid, { extent_id });
     }
@@ -1148,7 +1154,7 @@ namespace springtail {
         if (dirty_i == _dirty_cache.end()) {
             // not in memory, so need to retrieve from disk
             auto key_i = _cache_id_map.find(cache_id);
-            CHECK(key_i != _cache_id_map.end());
+            DCHECK(key_i != _cache_id_map.end());
 
             // note: no one should know about the cache ID except for the owning page, so this
             //       should never return nullptr since there should never be two concurrent readers
@@ -1386,11 +1392,12 @@ namespace springtail {
             // extent not cached, so read from disk
             // note: may return nullptr, indicating someone else just read the extent from disk and
             //       that we should check the cache again
+            //
             extent = _read_extent(key, [this, key](CacheExtentPtr extent) {
-                // insert the extent into the cache
-                // note: we don't place into the LRU list since the extent will be in-use
-                _clean_cache.insert({ key, extent });
-            });
+                    // insert the extent into the cache
+                    // note: we don't place into the LRU list since the extent will be in-use
+                    _clean_cache.insert({ key, extent });
+                    });
         }
 
         return extent;
@@ -1635,4 +1642,13 @@ namespace springtail {
         // extract the extent from the clean cache into the dirty cache
         return _extract(extent);
     }
+    
+    StorageCache::SafeExtent::SafeExtent(const std::filesystem::path &file,
+            const ExtentRef &ref,
+            bool mark_dirty)
+    {
+        _extent = StorageCache::get_instance()->_data_cache->get(file, ref, mark_dirty);
+        DCHECK(_extent);
+    }
+
 }

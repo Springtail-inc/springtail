@@ -1,0 +1,4 @@
+system_json_path: '../../system.json.test'
+base_config_path: 'load_config.yaml'
+build_dir: '../../debug'
+cases: ['basic', 'complex', 'reindex']

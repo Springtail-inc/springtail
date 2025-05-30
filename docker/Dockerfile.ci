@@ -88,7 +88,9 @@ RUN ./vcpkg.sh && \
     ln -s /home/dev/install install && \
     cmake -B debug -S . -D'CMAKE_BUILD_TYPE=Debug' -DVCPKG_INSTALL_OPTIONS="--allow-unsupported" && \
     cd debug && \
-    make -j$(nproc) && \
+    make -j6 && \
+    cd .. && \
+    pip3 install --break-system-packages -r python/performance/requirements.txt && \
     rm -rf /__w/springtail/springtail /home/dev/debug/src /home/dev/external/vcpkg/buildtrees /home/dev/external/vcpkg/packages /home/dev/external/vcpkg/downloads 
 
 # Pull back the libpg_query
