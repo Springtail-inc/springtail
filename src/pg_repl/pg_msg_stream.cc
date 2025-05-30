@@ -1285,33 +1285,40 @@ namespace springtail {
             throw PgIOError();
         }
 
-        uint64_t end_lsn=0;
+        uint64_t end_lsn = 0;
+        uint64_t hdr_offset = 0;
+        uint64_t end_offset = stream.seekg(0, std::ios::end).tellg(); // get end of file offset
+        stream.seekg(0, std::ios::beg); // reset to start of file
 
         while(true) {
-            uint64_t hdr_offset = stream.tellg();
-
             char buffer[PgMsgStreamHeader::SIZE];
-            stream.read(buffer, PgMsgStreamHeader::SIZE);
-            if (stream.gcount() == 0 && stream.eof()) {
-                // we've hit the end of the file and are done
+
+            hdr_offset = stream.tellg();
+            DCHECK(stream.good());
+
+            if (hdr_offset == end_offset) {
+                // we've reached the end of the file
                 return end_lsn;
             }
 
-            if (stream.gcount() != PgMsgStreamHeader::SIZE || stream.eof()) {
-                // we've read some of the header but failed to read it all
-                LOG_WARN("Failed to read header from file: {}", file);
-                if (truncate) {
-                    _truncate_file(file, hdr_offset);
-                } else {
-                    throw PgIOError();
-                }
-                return end_lsn;
+            if (hdr_offset + PgMsgStreamHeader::SIZE > end_offset) {
+                LOG_WARN("New header offset is beyond end of file {}", hdr_offset + PgMsgStreamHeader::SIZE);
+                break;
             }
+
+            stream.read(buffer, PgMsgStreamHeader::SIZE);
+            CHECK(stream.gcount() <= PgMsgStreamHeader::SIZE);
 
             PgMsgStreamHeader header(buffer);
             if (header.magic != PgMsgStreamHeader::PG_LOG_MAGIC) {
                 LOG_WARN("Invalid stream header magic number: {}", header.magic);
                 throw PgIOError();
+            }
+
+            if (hdr_offset + PgMsgStreamHeader::SIZE + header.msg_length > end_offset) {
+                LOG_WARN("Header offset {} + msg size {} is beyond end of file {}",
+                         hdr_offset, header.msg_length, end_offset);
+                break;
             }
 
             [[maybe_unused]] char c = stream.get(); // read the message type
@@ -1320,14 +1327,7 @@ namespace springtail {
                                 header.start_lsn, header.end_lsn, header.msg_length, c);
 
             stream.seekg(header.msg_length-1, std::ios::cur);
-            if (stream.eof()) {
-                LOG_WARN("Failed to seek to end of message");
-                if (truncate) {
-                    _truncate_file(file, hdr_offset);
-                } else {
-                    throw PgIOError();
-                }
-            }
+            CHECK(stream.good());
 
             // update ending lsn if we have a valid one
             // tt seems relation messages 'R' set lsn = 0
@@ -1335,6 +1335,17 @@ namespace springtail {
                 end_lsn = header.end_lsn;
             }
         }
+
+        // close before it is potentially truncated
+        stream.close();
+
+        // handle error if we reached here
+        if (truncate) {
+            _truncate_file(file, hdr_offset);
+            return end_lsn;
+        }
+
+        throw PgIOError();
     }
 
     void
@@ -1342,10 +1353,12 @@ namespace springtail {
     {
         int fd = ::open(file.c_str(), O_WRONLY);
         if (fd == -1) {
+            LOG_ERROR("Failed to open file {} for truncation: {}", file, errno);
             throw PgIOError();
         }
 
         if (::ftruncate(fd, offset) == -1) {
+            LOG_ERROR("Failed to truncate file {} to offset {}: {}", file, offset, errno);
             ::close(fd);
             throw PgIOError();
         }
