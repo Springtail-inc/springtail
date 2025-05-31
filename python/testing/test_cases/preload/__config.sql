@@ -1,5 +1,15 @@
 ## setup
 
+### add_db toast
+### add_db data_types
+### add_db indices
+### add_db partitions
+
+### add_db parallel_db1
+### add_db parallel_db2
+
+### switch_db toast
+
 -- create table with toast data
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
@@ -750,6 +760,87 @@ INSERT INTO keys_test.employees (email, phone_number, national_id, department, l
     ('irene.clark@example.net',     '555-0109', 'ID1009', 'Finance',      'Miami',        '2023-04-05'),
     ('jack.taylor@example.com',     '555-0110', 'ID1010', 'Engineering',  'Chicago',      '2021-10-14');
 
+### switch_db partitions
+CREATE TABLE IF NOT EXISTS preload_sales_hash (
+    id SERIAL PRIMARY KEY,
+    sale_date DATE NOT NULL,
+    amount NUMERIC NOT NULL
+) PARTITION BY HASH (id);
+
+CREATE TABLE IF NOT EXISTS preload_sales_hash_p0 PARTITION OF preload_sales_hash
+    FOR VALUES WITH (MODULUS 4, REMAINDER 0);
+
+CREATE TABLE IF NOT EXISTS preload_sales_hash_p1 PARTITION OF preload_sales_hash
+    FOR VALUES WITH (MODULUS 4, REMAINDER 1);
+
+CREATE TABLE IF NOT EXISTS preload_sales_hash_p2 PARTITION OF preload_sales_hash
+    FOR VALUES WITH (MODULUS 4, REMAINDER 2);
+
+CREATE TABLE IF NOT EXISTS preload_sales_hash_p3 PARTITION OF preload_sales_hash
+    FOR VALUES WITH (MODULUS 4, REMAINDER 3);
+
+INSERT INTO preload_sales_hash (sale_date, amount) VALUES
+  ('2023-01-05', 220.00),
+  ('2023-01-06', 130.00),
+  ('2023-01-07', 310.00),
+  ('2023-01-08', 90.00),
+  ('2023-01-09', 470.00),
+  ('2023-01-10', 250.00),
+  ('2023-01-11', 145.00),
+  ('2023-01-12', 190.00),
+  ('2023-01-13', 300.00),
+  ('2023-01-14', 280.00),
+  ('2023-01-15', 160.00),
+  ('2023-01-16', 210.00),
+  ('2023-01-17', 330.00),
+  ('2023-01-18', 295.00),
+  ('2023-01-19', 175.00),
+  ('2023-01-20', 400.00),
+  ('2023-01-21', 385.00),
+  ('2023-01-22', 215.00),
+  ('2023-01-23', 270.00),
+  ('2023-01-24', 180.00);
+
+-- Multi-level partitions
+
+CREATE TABLE country_sales (
+    id SERIAL,
+    country TEXT NOT NULL,
+    year INT NOT NULL,
+    amount NUMERIC,
+    PRIMARY KEY (country, year, id)
+) PARTITION BY LIST (country);
+
+CREATE TABLE country_sales_us PARTITION OF country_sales
+    FOR VALUES IN ('US')
+    PARTITION BY RANGE (year);
+
+CREATE TABLE country_sales_us_2023 PARTITION OF country_sales_us
+    FOR VALUES FROM (2023) TO (2024);
+
+CREATE TABLE country_sales_us_2024 PARTITION OF country_sales_us
+    FOR VALUES FROM (2024) TO (2025);
+
+CREATE TABLE country_sales_ca PARTITION OF country_sales
+    FOR VALUES IN ('CA')
+    PARTITION BY RANGE (year);
+
+CREATE TABLE country_sales_ca_2023 PARTITION OF country_sales_ca
+    FOR VALUES FROM (2023) TO (2024);
+
+CREATE TABLE country_sales_ca_2024 PARTITION OF country_sales_ca
+    FOR VALUES FROM (2024) TO (2025);
+
+INSERT INTO country_sales (country, year, amount)
+SELECT
+    country,
+    year,
+    ROUND((random() * 1000 + 100)::NUMERIC, 2)
+FROM (
+    SELECT unnest(ARRAY['US', 'CA']) AS country,
+           unnest(ARRAY[2023, 2024]) AS year
+) AS combos,
+generate_series(1, 25);
 
 ## cleanup
 
@@ -760,4 +851,6 @@ DROP TABLE IF EXISTS preload_random_text_test CASCADE;
 DROP SCHEMA IF EXISTS data_type_test CASCADE;
 DROP SCHEMA IF EXISTS keys_test CASCADE;
 
-
+-- ### switch_db partitions
+DROP TABLE IF EXISTS preload_sales_hash CASCADE;
+DROP TABLE IF EXISTS country_sales CASCADE;
