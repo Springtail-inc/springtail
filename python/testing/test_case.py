@@ -57,7 +57,7 @@ class TestCase:
 
         self._txns = set({}) # the set of transaction names referenced in this test
         self._connections = {} # connections to the primary for each transaction
-        self._fdw = None # connection to Springtail
+        self._fdw = {} # connection to Springtail
         self._sync_step = 0 # incrementing ID used for replica synchronization
         self._recovery_points = { } # map from recovery point name to XID
 
@@ -76,18 +76,17 @@ class TestCase:
         return self._added_databases
 
     def _setup_default_fdw(self) -> None:
-        if self._fdw is None:
+        if len(self._fdw) == 0:
             # connect to the replica database -- used to perform any 'sync' directives
-            self._fdw = {}
             self._fdw[self._replica_name] = springtail.connect_fdw_instance(self._props, self._replica_name)
             self._fdw[self._replica_name].autocommit = True
 
     def _cleanup_fdw_connections(self) -> None:
-        if self._fdw is None:
+        if len(self._fdw) == 0:
             return
         for db_name in self._fdw:
             self._fdw[db_name].close()
-        self._fdw = None
+        self._fdw = {}
 
     def _append_command(self,
                         command: dict,
@@ -452,9 +451,11 @@ class TestCase:
             springtail.restart(self._props, self._build_dir,
                                start_xid=target_xid, unarchive_logs=True)
 
+            time.sleep(5)
+
             # reconnect to the replica database
             self._cleanup_fdw_connections()
-            self._setup_default_fdw()
+            self._open_db_connections_for_fdw()
 
             return None
 
@@ -463,9 +464,11 @@ class TestCase:
             springtail.restart(self._props, self._build_dir,
                                start_xid=None, unarchive_logs=True)
 
+            time.sleep(5)
+
             # reconnect to the replica database
             self._cleanup_fdw_connections()
-            self._setup_default_fdw()
+            self._open_db_connections_for_fdw()
 
             return None
 
@@ -495,17 +498,18 @@ class TestCase:
                 # execute a SQL command
                 return self._execute_sql(cursor, command['sql'], do_fetch, txn)
 
-        connection = self._connections[txn]["connections"][self._primary_name]
-        with connection.cursor() as cursor:
-            if command['type'] == 'sync':
-                # insert a row to the sync_control table
-                self._sync_step += 1
-                self._execute_sql(cursor, f"BEGIN; SET statement_timeout = 5000; INSERT INTO sync_control (sync, test) VALUES ({self._sync_step}, '{self._name}'); COMMIT;", False, txn)
+        if command['type'] == 'sync':
+            # insert a row to the sync_control table
+            self._sync_step += 1
+            for db_name, connection in self._connections[txn]["connections"].items():
+                with connection.cursor() as cursor:
+                    self._execute_sql(cursor, f"BEGIN; SET statement_timeout = 5000; INSERT INTO sync_control (sync, test) VALUES ({self._sync_step}, '{self._name}'); COMMIT;", False, txn)
 
                 # Wait for sync row to appear in replica
                 try:
+                    replica_name = self._db_prefix + db_name
                     sync_time = common.wait_for_replica_condition(
-                        self._fdw[self._replica_name],
+                        self._fdw[replica_name],
                         f"SELECT MAX(sync) FROM sync_control WHERE test = '{self._name}'",
                         (self._sync_step,),
                         timeout=self._metadata['sync_timeout'],
@@ -514,7 +518,7 @@ class TestCase:
                 except Exception as e:
                     self._raise_failure(f'Sync control error: {e}')
 
-                return []
+            return []
 
         if command['type'] == 'table_exists' or command['type'] == 'index_exists':
             results = {}
@@ -786,7 +790,7 @@ class TestCase:
         logging.info(f'{self._name} -- Running setup()')
 
         # construct a connection for each transaction in the test
-        if len(self._txns) == 0:
+        if self._metadata['default_txn'] not in self._txns:
             self._txns.add(self._metadata['default_txn'])
 
         for txn in self._txns:
@@ -798,9 +802,10 @@ class TestCase:
             self._execute_commands(self._sections['setup'][0]['sequential'])
 
         # create the sync control table
-        any_txn = next(iter(self._txns))
-        with self._connections[any_txn]["connections"][self._primary_name].cursor() as cursor:
-            self._execute_sql(cursor, 'BEGIN; DROP TABLE IF EXISTS sync_control; CREATE TABLE sync_control (sync INT, test TEXT); COMMIT;', False, any_txn)
+        txn = self._metadata['default_txn']
+        for db_name, connection in self._connections[txn]["connections"].items():
+            with connection.cursor() as cursor:
+                self._execute_sql(cursor, 'BEGIN; DROP TABLE IF EXISTS sync_control; CREATE TABLE sync_control (sync INT, test TEXT); COMMIT;', False, txn)
 
         self._status = 'SETUP_END'
 
@@ -840,7 +845,7 @@ class TestCase:
             self._open_db_connections_for_txn(txn, use_proxy_for_test)
 
         # connect to the replica database -- used to perform any 'sync' directives
-        self._setup_default_fdw()
+        self._open_db_connections_for_fdw()
         with self._fdw[self._replica_name].cursor() as c:
             self._execute_sql(c, f'BEGIN; SET statement_timeout = {self._metadata["query_timeout"] * 1000}; COMMIT;', False, 'replica')
 
@@ -879,7 +884,7 @@ class TestCase:
                 self._connections[txn]["connections"][db_name].commit()
 
         # pick a connection from any transaction on the primary database to run the sync against
-        txn = next(iter(self._txns))
+        txn = self._metadata['default_txn']
         self._connections[txn]['current_db'] = self._primary_name
 
         # wait for the primary and replica to come into sync
@@ -910,7 +915,7 @@ class TestCase:
 
         # Determine what config to use for verify phase
         use_proxy_for_verify = self._test_params.get('use_proxy_for_verify', False)
-        txn = next(iter(self._txns))
+        txn = self._metadata['default_txn']
         self._open_db_connections_for_txn(txn, use_proxy_for_verify)
         self._open_db_connections_for_fdw()
 

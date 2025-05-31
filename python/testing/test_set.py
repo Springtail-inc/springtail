@@ -2,6 +2,7 @@ import logging
 from lxml import etree
 import os
 import springtail
+import time
 
 from test_case import TestCase
 
@@ -151,6 +152,9 @@ class TestSet:
         # start Springtail
         logging.debug('Starting the Springtail instance')
         springtail.start(self._config_file, self._build_dir, do_cleanup=False, do_init=False, postgres_only=False, do_fdw_install=False)
+
+        # allow time to preload databases
+        time.sleep(5)
 
         # stop the background mutations and verify correctness
         success = self._config.stop_background()
