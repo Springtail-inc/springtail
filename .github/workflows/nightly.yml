@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 180
     container:
       image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
+      options: --entrypoint "/tini"    
       credentials:
         username: AWS
         password: ${{ secrets.DEV_SUPPORT_ECR_PW }}

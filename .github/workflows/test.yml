@@ -27,6 +27,7 @@ jobs:
     timeout-minutes: 60
     container:
       image: ${{ inputs.builder_image_version_tag }}
+      options: --entrypoint "/tini"    
       credentials:
         username: AWS
         password: ${{ secrets.aws_ecr_docker_password }}
