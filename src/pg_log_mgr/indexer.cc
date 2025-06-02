@@ -91,6 +91,7 @@ namespace springtail::committer {
     }
 
     nlohmann::json Indexer::_get_drop_index_ddl(proto::IndexInfo index_info) {
+        // XXX: Refactor this code: https://linear.app/springtail/issue/SPR-778/remove-index-ddl-tracking-from-redis-ddls
         nlohmann::json ddl;
         ddl["action"] = "drop_index";
         ddl["name"] = index_info.name();
@@ -100,6 +101,7 @@ namespace springtail::committer {
     }
 
     nlohmann::json Indexer::_get_create_index_ddl(proto::IndexInfo index_info) {
+        // XXX: Refactor this code: https://linear.app/springtail/issue/SPR-778/remove-index-ddl-tracking-from-redis-ddls
         nlohmann::json ddl;
         ddl["action"] = "create_index";
         ddl["index"] = index_info.name();
