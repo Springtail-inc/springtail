@@ -15,8 +15,8 @@ permissions:
 jobs:
   nightly_job:
     name: Nightly Job
-    runs-on: warp-ubuntu-latest-arm64-4x
-    timeout-minutes: 180
+    runs-on: self-hosted
+    timeout-minutes: 380
     container:
       image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
       credentials:
@@ -197,7 +197,7 @@ jobs:
           cd python/testing
           service postgresql start
           ./startup.sh -s data_init.sql
-          
+          sleep infinity
           # Run integration tests
           set +e
           for i in $(seq 1 ${INTEGRATION_TEST_ITERATIONS}) ; 
