@@ -12,6 +12,7 @@ import datetime
 from typing import Dict, List, Optional
 import psycopg2
 from psycopg2.extensions import quote_ident
+import re
 
 # Get the parent directory of the current script (i.e., the project root directory)
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -151,51 +152,18 @@ def cleanup_db_instance(props : Properties) -> None:
     """Cleanup the database instance.
        Drop and recreate the db and execute cleanup SQL statements.
     """
-    for db_config in props.get_db_configs():
-        add_database(props, db_config)
-
-def add_database(props : Properties, db_config: Dict) -> None:
-    # connect to the db instance
-    db_name = db_config['name']
-    slot_name = db_config['replication_slot']
-    pub_name = db_config['publication_name']
-
     if not check_postgres_running():
         start_postgres()
+    for db_config in props.get_db_configs():
+        cleanup_database(props, db_config)
 
-    # see if the replication slot exists and drop it on the target database
-    # if we don't do this and the slot exists, we can't drop the database
-    try:
-        # Connect to the database, may fail if it doesn't exist
-        conn = connect_db_instance(props, db_name)
-        slot_exists = execute_sql_select(conn, "SELECT 1 FROM pg_replication_slots WHERE slot_name = %s;", slot_name)
-        if slot_exists:
-            execute_sql(conn, "SELECT pg_drop_replication_slot(%s);", slot_name)
-    except Exception as e:
-        pass
 
+def cleanup_database(props : Properties, db_config: Dict) -> None:
+    drop_database(props, db_config)
     # Connect to the database ("postgres" database)
+    db_name = db_config['name']
     conn = connect_db_instance(props)
-
-    # Drop and recreate the database
-    execute_sql(conn, f"DROP DATABASE IF EXISTS {quote_ident(db_name, conn)} WITH (FORCE);")
     execute_sql(conn, f"CREATE DATABASE {quote_ident(db_name, conn)};")
-
-    conn.close()
-
-    # Connect to the database
-    conn = connect_db_instance(props, db_name)
-
-    # Cleanup trigger functions
-    execute_sql(conn, "DROP SCHEMA IF EXISTS __pg_springtail_triggers CASCADE;")
-
-    slot_exists = execute_sql_select(conn, "SELECT 1 FROM pg_replication_slots WHERE slot_name = %s;", slot_name)
-    if slot_exists:
-        execute_sql(conn, "SELECT pg_drop_replication_slot(%s);", slot_name)
-
-    execute_sql(conn, f"DROP PUBLICATION IF EXISTS {quote_ident(pub_name, conn)};")
-
-    # Close the database connection
     conn.close()
 
 def drop_database(props : Properties, db_config: Dict) -> None:
@@ -206,38 +174,47 @@ def drop_database(props : Properties, db_config: Dict) -> None:
 
     # see if the replication slot exists and drop it on the target database
     # if we don't do this and the slot exists, we can't drop the database
+    conn = None
     try:
         # Connect to the database, may fail if it doesn't exist
         conn = connect_db_instance(props, db_name)
+
+        # Cleanup trigger functions
+        execute_sql(conn, "DROP SCHEMA IF EXISTS __pg_springtail_triggers CASCADE;")
+
         slot_exists = execute_sql_select(conn, "SELECT 1 FROM pg_replication_slots WHERE slot_name = %s;", slot_name)
         if slot_exists:
-            execute_sql(conn, "SELECT pg_drop_replication_slot(%s);", slot_name)
-        conn.close()
+            try:
+                execute_sql(conn, "SELECT pg_drop_replication_slot(%s);", slot_name)
+            except Exception as e:
+                logging.error(f"Failed to drop replication slot {slot_name} on database {db_name}: {e}")
+                message = str(e)
+                match = re.search(r'PID\s+(\d+)', message)
+                if match:
+                    pid = int(match.group(1))
+                    # stop the process using the slot
+                    logging.info(f"Terminating backend process with PID {pid} so that we can try to drop replication slot {slot_name} on database {db_name} again.")
+                    execute_sql_select(conn, "SELECT pg_terminate_backend(%s);", (pid,))
+                    # try to drop the slot again
+                    execute_sql(conn, "SELECT pg_drop_replication_slot(%s);", slot_name)
+                else:
+                    raise e
+        execute_sql(conn, f"DROP PUBLICATION IF EXISTS {quote_ident(pub_name, conn)};")
     except Exception as e:
+        message = str(e)
+        logging.error(f"Exception occurred on one of the queries to the database {db_name}: {message}")
         pass
-
-    # Connect to the database
-    conn = connect_db_instance(props, db_name)
-
-    # Cleanup trigger functions
-    execute_sql(conn, "DROP SCHEMA IF EXISTS __pg_springtail_triggers CASCADE;")
-
-    slot_exists = execute_sql_select(conn, "SELECT 1 FROM pg_replication_slots WHERE slot_name = %s;", slot_name)
-    if slot_exists:
-        execute_sql(conn, "SELECT pg_drop_replication_slot(%s);", slot_name)
-
-    execute_sql(conn, f"DROP PUBLICATION IF EXISTS {quote_ident(pub_name, conn)};")
-
-    # Close the database connection
-    conn.close()
+    finally:
+        if conn is not None:
+            conn.close()
 
     # Connect to the database ("postgres" database)
     conn = connect_db_instance(props)
 
     # Drop and recreate the database
     execute_sql(conn, f"DROP DATABASE IF EXISTS {quote_ident(db_name, conn)} WITH (FORCE);")
-    conn.close()
 
+    conn.close()
 
 
 def update_postgres_config(test_params: dict = {}):

@@ -94,7 +94,7 @@ class TestSet:
         for db_config in self._props.get_db_configs():
             db_name = db_config['name']
             if db_name in added_databases:
-                springtail.add_database(self._props, db_config)
+                springtail.cleanup_database(self._props, db_config)
 
     def _remove_databases(self) -> None:
         added_databases = self._config.get_added_databases()
@@ -127,7 +127,7 @@ class TestSet:
         self._add_databases()
 
         # set database state appropriately
-        self._props.reset_all_db_states('initialize')
+        self._props.set_all_db_states('initialize')
 
         # perform the primary db setup
         logging.debug('Perform the global setup()')

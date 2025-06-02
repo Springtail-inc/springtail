@@ -316,7 +316,7 @@ class Properties:
             self.redis.hset(fdw_key, fdw_id, fdw_json_str)
             self.redis.sadd(fdw_key + '_ids', fdw_id)
 
-    def reset_all_db_states(self, state: str):
+    def set_all_db_states(self, state: str):
         self.db_instance_id
         for dbc in self.get_db_configs():
             db_id = dbc['id']

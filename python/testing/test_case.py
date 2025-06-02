@@ -752,19 +752,23 @@ class TestCase:
         for db_config in self._props.get_db_configs():
             # connect to the db instance
             db_name = db_config['name']
+            if db_name in self._connections[txn]['connections']:
+                self._connections[txn]['connections'][db_name].close()
 
             if use_proxy:
                 logging.debug(f'Connecting to proxy for txn "{txn}" database "{db_name}"')
                 self._connections[txn]['connections'][db_name] = springtail.connect_proxy(self._props, db_name)
             else:
                 logging.debug(f'Connecting to primary for txn "{txn}" database "{db_name}"')
-                self._connections[txn]["connections"][db_name] = springtail.connect_db_instance(self._props, db_name)
-            self._connections[txn]["connections"][db_name].autocommit = self._metadata['autocommit']
+                self._connections[txn]['connections'][db_name] = springtail.connect_db_instance(self._props, db_name)
+            self._connections[txn]['connections'][db_name].autocommit = self._metadata['autocommit']
 
     def _open_db_connections_for_fdw(self) -> None:
         for db_config in self._props.get_db_configs():
             # connect to the db instance
             db_name = self._db_prefix + db_config['name']
+            if db_name in self._fdw:
+                self._fdw[db_name].close()
             self._fdw[db_name] = springtail.connect_db_instance(self._props, db_name)
             self._fdw[db_name].autocommit = True
 
@@ -978,8 +982,13 @@ class TestCase:
         if len(self._sections['cleanup']) > 0:
             self._execute_commands(self._sections['cleanup'][0]['sequential'])
 
-        # close the database connections
-        for db_name, connection in self._connections[txn]['connections'].items():
+        # close all database connections
+        for txn in self._connections:
+            for db_name, connection in self._connections[txn]['connections'].items():
+                connection.close()
+
+        # close the connections to the foreign data wrappers
+        for connection in self._fdw.values():
             connection.close()
 
 
