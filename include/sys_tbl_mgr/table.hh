@@ -219,6 +219,11 @@ namespace indexer_helpers {
                 };
                 std::unordered_map<uint64_t, PageMapItem> _page_map;
                 uint64_t _cache_size;
+                // This it to keep a list of extent ids that are in 
+                // _page_map. The list is used for evicting items from the
+                // page map. We assume that secondary indexes jump
+                // around extent ids somewhat randomly. There is no need to
+                // pay for something like maintaining LRU.
                 CircularBuffer<uint64_t> _eid_buffer;
 
                 uint64_t _extent_id = 0;

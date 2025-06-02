@@ -4,44 +4,56 @@
 
 namespace springtail {
 
-template< typename T >
-struct CircularBuffer {
-	typedef T value_type;
+    /**
+     * @brief Circular buffer of elements of type T. 
+     * It has a FIFO queue semantic.
+     */
+    template< typename T >
+    struct CircularBuffer {
+        typedef T value_type;
 
-	CircularBuffer(size_t max_size) {
-        _b.resize(max_size);
-	}
+        CircularBuffer(size_t max_size) {
+            _b.resize(max_size);
+        }
 
-	bool full() const {
-		return _cnt == _b.size();
-	}
-	bool empty() const {
-		return _cnt == 0;
-	}
+        /** Returns true if the buffer is empty.  */
+        bool empty() const {
+            return _cnt == 0;
+        }
 
-	void put( T v ) {
-		DCHECK(_cnt <= _b.size());
-		DCHECK(_read_pnt < _b.size());
-		// next index
-		auto i = ( _read_pnt + _cnt ) % _b.size();
-		_b[i] = v;
-		++_cnt;
-	}
+        /** Returns the number of elements in the buffer.  */
+        size_t size() const {
+            return _cnt;
+        }
 
-	T next() {
-		DCHECK(!empty());
-		--_cnt;
-		auto i = _read_pnt++;
-		if (_read_pnt == _b.size())
-			_read_pnt = 0;
-		return _b[i];
-	}
+        /** Add an element into the buffer. The buffer must have
+         *  space available or the behavior is undefined. 
+         */
+        void put( T v ) {
+            DCHECK(_cnt <= _b.size());
+            DCHECK(_read_pnt < _b.size());
+            auto i = ( _read_pnt + _cnt ) % _b.size();
+            _b[i] = v;
+            ++_cnt;
+        }
 
-private:
-	std::vector<value_type> _b;
-	size_t _cnt = 0; // number of element in the buffer
-	size_t _read_pnt = 0;
+        /** Get the next element. The buffer must not be empty
+         *  or the behavior is undefined. 
+         */
+        T next() {
+            DCHECK(!empty());
+            --_cnt;
+            auto i = _read_pnt++;
+            if (_read_pnt == _b.size())
+                _read_pnt = 0;
+            return _b[i];
+        }
 
-};
+    private:
+        std::vector<value_type> _b;
+        size_t _cnt = 0; // number of elements in the buffer
+        size_t _read_pnt = 0;
+
+    };
 
 }

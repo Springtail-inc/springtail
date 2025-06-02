@@ -1319,6 +1319,8 @@ namespace indexer_helpers {
     void Table::Iterator::Secondary::update_page()
     {
         DCHECK(_btree_i != _btree->end());
+        DCHECK(_page_map.size() <= _cache_size);
+        DCHECK(_eid_buffer.size() <= _cache_size);
         auto &&row = *_btree_i;
         uint64_t eid = _extent_id_f->get_uint64(&row);
 
@@ -1326,7 +1328,9 @@ namespace indexer_helpers {
             _extent_id = eid;
             auto it = _page_map.find(eid);
             if (it == _page_map.end()) {
-                // check if need to free space
+                TIME_TRACE_SCOPED(time_trace::traces, table_iterator_read_page);
+
+                // check if need to free space in the page map
                 if (_page_map.size() == _cache_size) {
                     DCHECK(!_eid_buffer.empty());
                     auto cached_eid = _eid_buffer.next();
@@ -1335,14 +1339,15 @@ namespace indexer_helpers {
                     _page_map.erase(it);
                 }
 
-                TIME_TRACE_SCOPED(time_trace::traces, table_iterator_read_page);
                 auto page = _table->_read_page(_extent_id);
+                //TODO: is this correct?
                 DCHECK(page->extent_count() == 1);
+
                 auto begin_it = page->begin();
                 PageMapItem pi{std::move(page), std::move(begin_it)};
-                auto inserted = _page_map.insert({eid, std::move(pi)});
-                _page_i_begin = inserted.first->second.it_begin;
+                auto inserted = _page_map.insert({_extent_id, std::move(pi)});
                 _eid_buffer.put(_extent_id);
+                _page_i_begin = inserted.first->second.it_begin;
             } else {
                 _page_i_begin = it->second.it_begin;
             }

@@ -28,7 +28,7 @@
 #include <sys_tbl_mgr/shm_cache.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 
-#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
+//#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
 #include <common/time_trace.hh>
 
 extern "C" {
