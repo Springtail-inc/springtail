@@ -5,6 +5,8 @@
 #include <sys_tbl_mgr/table.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_client.hh>
+#include <common/json.hh>
+#include <common/properties.hh>
 
 //#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
 #include <common/time_trace.hh>
@@ -1282,11 +1284,28 @@ namespace indexer_helpers {
         --_page_i;
     }
 
+    Table::Iterator::Secondary::Secondary(const Table *table,
+            BTreePtr btree, const BTree::Iterator &btree_i,
+            ExtentSchemaPtr schema )
+        : 
+            Tracker{table, btree, btree_i},
+            _cache_size{Json::get_or<uint64_t>(Properties::get(Properties::STORAGE_CONFIG), "page_cache_size", 16384)},
+            _eid_buffer{_cache_size}
+    {
+        CHECK(_cache_size);
+
+        _extent_id_f = schema->get_field(constant::INDEX_EID_FIELD);
+        _row_id_f = schema->get_field(constant::INDEX_RID_FIELD);
+        if (_btree_i != btree->end()) {
+            update_page();
+        }
+    }
+
     void Table::Iterator::Secondary::next()
     {
         ++_btree_i;
         if (_btree_i == _btree->end()) {
-            _page = {};
+            _page_map.clear();
             return;
         }
         update_page();
@@ -1302,13 +1321,38 @@ namespace indexer_helpers {
         DCHECK(_btree_i != _btree->end());
         auto &&row = *_btree_i;
         uint64_t eid = _extent_id_f->get_uint64(&row);
-        if (_page.empty() || _extent_id != eid) {
+
+        if (_page_map.empty() || _extent_id != eid) {
             _extent_id = eid;
-            _page = _table->_read_page(_extent_id);
+            auto it = _page_map.find(eid);
+            if (it == _page_map.end()) {
+                // check if need to free space
+                if (_page_map.size() == _cache_size) {
+                    DCHECK(!_eid_buffer.empty());
+                    auto cached_eid = _eid_buffer.next();
+                    auto it = _page_map.find(cached_eid);
+                    DCHECK(it != _page_map.end());
+                    _page_map.erase(it);
+                }
+
+                TIME_TRACE_SCOPED(time_trace::traces, table_iterator_read_page);
+                auto page = _table->_read_page(_extent_id);
+                DCHECK(page->extent_count() == 1);
+                auto begin_it = page->begin();
+                PageMapItem pi{std::move(page), std::move(begin_it)};
+                auto inserted = _page_map.insert({eid, std::move(pi)});
+                _page_i_begin = inserted.first->second.it_begin;
+                _eid_buffer.put(_extent_id);
+            } else {
+                _page_i_begin = it->second.it_begin;
+            }
         }
 
-        uint64_t row_id = _row_id_f->get_uint32(&row);
-        _page_i = _page->at(row_id);
+        {
+            auto row_id = _row_id_f->get_uint32(&row);
+            _page_i = _page_i_begin;
+            _page_i += row_id;
+        }
     }
 
     const Extent::Row& Table::Iterator::Secondary::row() const

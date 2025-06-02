@@ -28,7 +28,7 @@
 #include <sys_tbl_mgr/shm_cache.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 
-//#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
+#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
 #include <common/time_trace.hh>
 
 extern "C" {
@@ -887,7 +887,7 @@ namespace springtail::pg_fdw {
         }
 
         // get current row
-        Extent::Row row{state->scan_asc? *(*state->iter_start) : *(*state->iter_end)};
+        const Extent::Row& row{state->scan_asc? *(*state->iter_start) : *(*state->iter_end)};
         state->rows_fetched++;
 
         memset(nulls, true, num_attrs * sizeof(bool));

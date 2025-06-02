@@ -1,6 +1,7 @@
 #pragma once
 
-#include "common/constants.hh"
+#include <common/constants.hh>
+#include <common/circular_buffer.hh>
 #include <memory>
 #include <stdexcept>
 #include <storage/btree.hh>
@@ -194,15 +195,7 @@ namespace indexer_helpers {
             {
                 Secondary(const Table *table,
                         BTreePtr btree, const BTree::Iterator &btree_i,
-                        ExtentSchemaPtr schema )
-                    : Tracker{table, btree, btree_i}
-                {
-                    _extent_id_f = schema->get_field(constant::INDEX_EID_FIELD);
-                    _row_id_f = schema->get_field(constant::INDEX_RID_FIELD);
-                    if (_btree_i != btree->end()) {
-                        update_page();
-                    }
-                }
+                        ExtentSchemaPtr schema );
 
                 Secondary(Secondary&&) = default;
                 virtual ~Secondary() = default;
@@ -220,8 +213,16 @@ namespace indexer_helpers {
                 FieldPtr _extent_id_f;
                 FieldPtr _row_id_f;
 
+                struct PageMapItem {
+                    StorageCache::SafePagePtr page;
+                    StorageCache::Page::Iterator it_begin;
+                };
+                std::unordered_map<uint64_t, PageMapItem> _page_map;
+                uint64_t _cache_size;
+                CircularBuffer<uint64_t> _eid_buffer;
+
                 uint64_t _extent_id = 0;
-                StorageCache::SafePagePtr _page;
+                StorageCache::Page::Iterator _page_i_begin;
                 StorageCache::Page::Iterator _page_i;
 
                 void update_page();

@@ -59,7 +59,7 @@ namespace springtail {
         class PageCache;
 
         /** Key for cache entries. */
-        using CacheKey = std::pair<std::filesystem::path, uint64_t>;
+        using CacheKey = std::pair<uint64_t, std::string>;
 
         /**
          * A wrapper around an extent to hold additional information needed by the cache.
@@ -129,7 +129,7 @@ namespace springtail {
              * Returns they cache key of this extent.
              */
             CacheKey key() const {
-                return CacheKey(_file, _extent_id);
+                return CacheKey(_extent_id, _file.native());
             }
 
             /**
@@ -603,7 +603,7 @@ namespace springtail {
              * Returns the cache key of this page.
              */
             CacheKey key() const {
-                return CacheKey(_file, _extent_id);
+                return CacheKey(_extent_id, _file.native());
             }
 
             /**
@@ -683,6 +683,11 @@ namespace springtail {
                     // start at the first row
                     _row = (*_extent)->begin();
 
+                    return *this;
+                }
+
+                Iterator &operator+=(difference_type n) { 
+                    _row += n;
                     return *this;
                 }
 
