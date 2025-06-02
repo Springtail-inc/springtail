@@ -769,7 +769,7 @@ namespace indexer_helpers {
     void
     MutableTable::_invalidate_indexes(StorageCache::PagePtr page)
     {
-        uint64_t old_eid = page->key().second;
+        uint64_t old_eid = page->key().first;
 
         // if there was no previous page, nothing to invalidate
         if (old_eid == constant::UNKNOWN_EXTENT) {
@@ -784,7 +784,7 @@ namespace indexer_helpers {
         if (_primary_key.empty()) {
             // no primary key, so use the old extent ID as the primary key
             auto pkey_fields = std::make_shared<FieldArray>(1);
-            pkey_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(orig_page->key().second);
+            pkey_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(orig_page->key().first);
             pkey = std::make_shared<FieldTuple>(pkey_fields, nullptr);
         } else {
             // has a primary key, get the last row of the original page for the primary index
@@ -799,14 +799,14 @@ namespace indexer_helpers {
         // INVALIDATE SECONDARY INDEXES
 
         for (auto const& [index_id, idx]: _secondary_indexes) {
-            indexer_helpers::invalidate_index_for_page(orig_page->key().second, orig_page, idx.first, idx.second, _schema);
+            indexer_helpers::invalidate_index_for_page(orig_page->key().first, orig_page, idx.first, idx.second, _schema);
         }
     }
 
     void
     MutableTable::_flush_and_populate_indexes(StorageCache::PagePtr::element_type* page)
     {
-        uint64_t old_eid = page->key().second;
+        uint64_t old_eid = page->key().first;
 
         // if the page is now empty, do nothing since the indexes will be flushed as empty
         if (page->empty()) {
@@ -1292,7 +1292,7 @@ namespace indexer_helpers {
             _cache_size{Json::get_or<uint64_t>(Properties::get(Properties::STORAGE_CONFIG), "page_cache_size", 16384)},
             _eid_buffer{_cache_size}
     {
-        CHECK(_cache_size);
+        DCHECK(_cache_size);
 
         _extent_id_f = schema->get_field(constant::INDEX_EID_FIELD);
         _row_id_f = schema->get_field(constant::INDEX_RID_FIELD);
@@ -1348,11 +1348,9 @@ namespace indexer_helpers {
             }
         }
 
-        {
-            auto row_id = _row_id_f->get_uint32(&row);
-            _page_i = _page_i_begin;
-            _page_i += row_id;
-        }
+        auto row_id = _row_id_f->get_uint32(&row);
+        _page_i = _page_i_begin;
+        _page_i += row_id;
     }
 
     const Extent::Row& Table::Iterator::Secondary::row() const

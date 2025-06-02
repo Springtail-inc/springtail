@@ -485,7 +485,7 @@ namespace springtail {
              * Helper to retrieve an extent from the clean cache.  If the provided key is not
              * cached, this function will retrieve the extent from disk.
              */
-            CacheExtentPtr _get_clean(const CacheKey &key);
+            CacheExtentPtr _get_clean(const std::filesystem::path& file, uint64_t extent_id);
 
             /**
              * Internal helper to make space for a new extent within the cache by evicting another extent.
@@ -512,7 +512,8 @@ namespace springtail {
              * Helper to read a CLEAN extent into memory.  A callback is provided to be run after
              * the IO to read the extent is complete.
              */
-            CacheExtentPtr _read_extent(const CacheKey &key, std::function<void(CacheExtentPtr)> callback);
+            CacheExtentPtr _read_extent(const std::filesystem::path& file, 
+                    uint64_t extent_id, std::function<void(CacheExtentPtr)> callback);
 
             /**
              * Helper to create a new unique cache ID and associate it with the provided extent.
@@ -540,7 +541,7 @@ namespace springtail {
             std::map<CacheKey, std::shared_ptr<IoCv>> _io_map;
 
             /** Map from cache ID to the most recent on-disk location of the extent. */
-            std::map<uint64_t, CacheKey> _cache_id_map;
+            std::unordered_map<uint64_t, CacheKey> _cache_id_map;
 
             uint64_t _size; ///< The current size of the cache.
             uint64_t _max_size; ///< The maximum allowed size of the cache.
@@ -738,7 +739,7 @@ namespace springtail {
                 Iterator(Page *page,
                          std::vector<ExtentRef>::iterator extent_i)
                     : _page(page),
-                      _extent_i(extent_i)
+                      _extent_i(std::move(extent_i))
                 {
                     // if at the end, do nothing
                     if (_extent_i == _page->_extents.end()) {
@@ -757,7 +758,7 @@ namespace springtail {
                          SafeExtent &&extent,
                          Extent::Iterator row_i)
                     : _page(page),
-                      _extent_i(extent_i),
+                      _extent_i(std::move(extent_i)),
                       _extent(std::move(extent)),
                       _row(row_i)
                 { }
@@ -1081,7 +1082,9 @@ namespace springtail {
             PageCache(uint64_t max_size)
                 : _max_size(max_size),
                   _size(0)
-            { }
+            {
+                _cache.reserve(max_size);
+            }
 
             /**
              * Retrieve a Page object from the cache.
