@@ -11,7 +11,7 @@
     "pid_path": "/opt/springtail/pids",
     "log_rotation_enabled": true
   },
-  "io_pool": {
+  "iopool": {
     "threads": 10,
     "filehandles": 30
   },
@@ -20,7 +20,8 @@
     "pool": {
       "connections": 10,
       "max_idle_secs": 300,
-      "max_connection_lifetime_secs": 0
+      "max_connection_lifetime_secs": 0,
+      "ssl": true,
     }
   },
   "write_cache": {
