@@ -14,6 +14,7 @@
 #include <common/filesystem.hh>
 #include <common/properties.hh>
 #include <common/state_synchronizer.hh>
+#include <common/time_trace.hh>
 
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_copy_table.hh>
@@ -135,6 +136,8 @@ namespace springtail::pg_log_mgr {
             LOG_DEBUG(LOG_PG_LOG_MGR, "copy thread joined");
             _reconciliation_thread.join();
             LOG_DEBUG(LOG_PG_LOG_MGR, "Index reconciliation thread joined");
+            _tracer_thread.join();
+            LOG_DEBUG(LOG_PG_LOG_MGR, "tracer thread joined");
         }
 
         /** Set shutdown flag */
@@ -246,10 +249,17 @@ namespace springtail::pg_log_mgr {
         std::shared_ptr<IndexReconciliationQueueManager> _index_reconciliation_queue_mgr;
 
         std::thread _reconciliation_thread;            ///< Index reconciliation thread
+        std::thread _tracer_thread;                    ///< Thread for dumping traces for the performance test
         /*
          * Index reconciliation thread; waits on index reconciliation requests
          */
         void _index_reconciliation_thread();
+
+        /**
+         * @brief Thread for monitoring and log the traces to the log file
+         *        Used for the performance test
+         */
+        void _trace_thread();
 
         /** Function for writer thread to read data from connection and store it */
         bool _writer_read_data(PgCopyData &data, PgLogWriterPtr &logger, uint64_t &start_offset, std::function<void (uint64_t, const std::filesystem::path &)> queue_append_func);

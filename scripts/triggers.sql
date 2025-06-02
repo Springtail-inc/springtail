@@ -598,3 +598,41 @@ BEGIN
     END IF;
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION __pg_springtail_triggers.set_identity_on_tables_without_pk()
+RETURNS void AS $$
+DECLARE
+    tbl RECORD;
+    has_pk BOOLEAN;
+BEGIN
+    FOR tbl IN
+        -- find all regular tables that aren't part of the metadata schemas
+        SELECT relname::text AS tablename,
+               nspname::text AS schemaname,
+               pg_class.oid::integer AS oid
+        FROM pg_catalog.pg_class
+        JOIN pg_catalog.pg_namespace
+        ON relnamespace=pg_namespace.oid
+        WHERE relkind = 'r'
+        AND nspname NOT LIKE 'pg_%'
+        AND nspname != 'information_schema'
+        ORDER BY pg_class.oid
+    LOOP
+        -- check if table has a primary key
+        SELECT EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conrelid = tbl.oid
+              AND contype = 'p'
+        ) INTO has_pk;
+
+        IF NOT has_pk THEN
+            EXECUTE format(
+                'ALTER TABLE %I.%I REPLICA IDENTITY FULL;',
+                tbl.schemaname, tbl.tablename
+            );
+            RAISE NOTICE 'Set REPLICA IDENTITY FULL on %.%', tbl.schemaname, tbl.tablename;
+        END IF;
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql;
