@@ -17,11 +17,11 @@
   },
   "redis": {
     "keep_alive_secs": 30,
+    "ssl": true,
     "pool": {
       "connections": 10,
       "max_idle_secs": 300,
-      "max_connection_lifetime_secs": 0,
-      "ssl": true
+      "max_connection_lifetime_secs": 0
     }
   },
   "write_cache": {
