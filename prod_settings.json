@@ -96,9 +96,11 @@
   },
   "otel": {
     "enabled": true,
-    "host": "localhost",
+    "remote": true,
+    "host": "127.0.0.1",
     "port": 4318,
-    "metrics_host": "localhost",
-    "metrics_port": 4318
+    "metrics_export_interval_millis": 60000,
+    "metrics_export_timeout_millis": 30000,
+    "remote_log_level": "info"
   }
 }
