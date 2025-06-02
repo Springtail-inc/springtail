@@ -137,8 +137,21 @@ namespace {
         }
 
         void _process_index_and_validate(uint64_t index_id, uint64_t index_xid, uint64_t reconcile_xid) {
-            // Hack: Wait for index build to be completed before triggering reconciliation
-            std::this_thread::sleep_for(std::chrono::seconds(2));
+            // Wait for index build to be completed before triggering reconciliation
+            auto max_tries = 5;
+            auto try_count = 0;
+            auto index_ready_for_reconcile = false;
+            while (try_count < max_tries) {
+                if (auto request = _index_reconciliation_queue_mgr->pop(_db_id, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT)) {
+                    if (request != nullptr) {
+                        index_ready_for_reconcile = true;
+                        break;
+                    }
+                }
+                try_count++;
+            }
+
+            ASSERT_TRUE(index_ready_for_reconcile);
 
             // Trigger index reconcilation at reconcile_xid
             _indexer->process_index_reconciliation(_db_id, index_xid, reconcile_xid);

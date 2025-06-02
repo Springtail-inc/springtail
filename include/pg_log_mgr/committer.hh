@@ -42,8 +42,9 @@ namespace springtail::committer {
     class Committer {
     public:
         Committer(uint32_t worker_count, const std::shared_ptr<ConcurrentQueue<committer::XidReady>> &committer_queue,
-                std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> index_reconciliation_queue_mgr)
+                std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> index_reconciliation_queue_mgr, uint32_t indexer_worker_count)
             : _worker_count(worker_count),
+              _indexer_worker_count(indexer_worker_count),
               _committer_queue(committer_queue),
               _index_reconciliation_queue_mgr(index_reconciliation_queue_mgr)
         { }
@@ -113,7 +114,15 @@ namespace springtail::committer {
         RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         bool _has_ddl_precommit = false; ///< Flag indiciating if the redis DDL is holding precommit entries
 
+        /**
+         * Table worker threads in the committer
+         */
         uint32_t _worker_count;
+
+        /**
+         * Indexer worker threads to process indexes
+         */
+        uint32_t _indexer_worker_count;
         ConcurrentQueue<WorkerEntry> _worker_queue; ///< The queue of work for the worker threads.
         std::shared_ptr<ConcurrentQueue<XidReady>> _committer_queue;
 
