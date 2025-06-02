@@ -139,7 +139,10 @@ namespace springtail::pg_log_mgr {
             _wal_buffer_flag = true;
 
             // start streaming immediately so that we can't miss any mutations to copied tables
-            _start_streaming(lsn, true);
+            if (!_start_streaming(lsn, true)) {
+                LOG_ERROR("Failed to start streaming");
+                return;
+            }
 
             // initiate table copy thread; this will perform the initial copy of all tables
             _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
@@ -160,7 +163,10 @@ namespace springtail::pg_log_mgr {
             lsn = recovery.repair_logs();
 
             // once we have the target LSN the system is ready to start streaming
-            _start_streaming(lsn, false);
+            if (!_start_streaming(lsn, false)) {
+                LOG_ERROR("Failed to start streaming");
+                return;
+            }
 
             // set the system into the running state
             _startup_running();
@@ -415,7 +421,7 @@ namespace springtail::pg_log_mgr {
         LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; state=replaying");
     }
 
-    void
+    bool
     PgLogMgr::_start_streaming(uint64_t lsn, bool do_init)
     {
         try {
@@ -433,7 +439,7 @@ namespace springtail::pg_log_mgr {
                     LOG_ERROR("Replication slot does not exist: db_id={}, slot={}", _db_id, _slot_name);
                     // shutdown
                     Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
-                    return;
+                    return false;
                 }
             }
 
@@ -449,19 +455,21 @@ namespace springtail::pg_log_mgr {
                          _db_id, e.what());
             // shutdown
             Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
-            return;
+            return false;
         } catch (const PgUnrecoverableError &e) {
             LOG_ERROR("Unrecoverable Error starting streaming in db_id={}: {}, setting state to failed",
                          _db_id, e.what());
             // shutdown
             Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
-            return;
+            return false;
         }
 
         // create the worker threads
         _writer_thread = std::thread(&PgLogMgr::_log_writer_thread, this);
         // create the tracer thread
         _tracer_thread = std::thread(&PgLogMgr::_trace_thread, this);
+
+        return true;
     }
 
     void
