@@ -1,4 +1,6 @@
 ## metadata
+### sync_timeout 3600
+### query_timeout 300
 ### autocommit false
 
 ## test
