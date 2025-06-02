@@ -1,0 +1,9 @@
+# Refer to load_config.yaml for more details
+
+# Operations to perform
+operations: ['create_table', 'create_index', 'insert_data']
+
+file_configuration:
+  # Base directory for all files
+  base_dir: 'performance_test_output/basic'
+  prev_run_dir: 'performance_test_output_prev_run/basic'

@@ -19,3 +19,5 @@ system.json.test
 **/core
 python/**/__pycache__
 .aws
+shared-lib
+python/performance/performance_test_output*

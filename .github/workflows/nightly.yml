@@ -89,6 +89,8 @@ jobs:
           ln -s /home/dev/debug debug
           ln -s /home/dev/install install
           
+          # Build with traces enabled
+          export SPRINGTAIL_INCLUDE_TIME_TRACES=1
           cmake -B debug -S . -D'CMAKE_BUILD_TYPE=Debug' -DVCPKG_INSTALL_OPTIONS="--allow-unsupported"
 
           cd debug
@@ -238,6 +240,50 @@ jobs:
             fi
           done
 
+      - name: Run nightly performance test
+        if: success()
+        run: |
+          cd python/testing
+          python3 springtail.py -f ../../system.json.test --load-redis --build-dir ../../debug
+
+          cd ../performance
+
+          _LOG_FLAG="failed"
+          # Run performance tests
+          python3 performance_runner.py -c performance_config.yaml 2>&1 | tee tmplog
+
+          # Grab the success/failure status of the performance tests
+          if [ $? -eq 0 ] 
+          then 
+            _LOG_FLAG="succeeded"
+          fi
+
+          # Upload performance test logs
+          _TIMESTAMP=$(date +%s)
+          log_file="performance-test-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log" 
+          log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${log_file}"
+          aws s3 cp tmplog $log_s3_key
+          echo "*** Performance Test Log S3 Key: $log_s3_key"
+          rm -f tmplog
+
+          # Go back to the testing folder to use the springtail.py to dump the logs
+          cd ../testing
+
+          # Springtail service logs
+          springtail_log_file="springtail-performance-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.tar.gz"
+          output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../debug)
+          log_dump_file_name=$(echo $output | cut -f2 -d':' | xargs | head -1)
+          springtail_log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${springtail_log_file}"
+          aws s3 cp $log_dump_file_name $springtail_log_s3_key
+          echo "*** Springtail Log S3 Key: $springtail_log_s3_key"
+          rm -f $log_dump_file_name
+
+          if [ "$_LOG_FLAG" = "failed" ]; then
+            echo "*** Performance test failed"
+            exit 1
+          fi
+          echo "*** Finished running performance tests"
+
       - name: Run nightly build (if above tests pass)
         if: success()
         run: |
@@ -374,4 +420,3 @@ jobs:
                 }
               ]
             }
-

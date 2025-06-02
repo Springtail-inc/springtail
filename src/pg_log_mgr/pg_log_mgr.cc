@@ -460,6 +460,31 @@ namespace springtail::pg_log_mgr {
 
         // create the worker threads
         _writer_thread = std::thread(&PgLogMgr::_log_writer_thread, this);
+        // create the tracer thread
+        _tracer_thread = std::thread(&PgLogMgr::_trace_thread, this);
+    }
+
+    void
+    PgLogMgr::_trace_thread()
+    {
+        namespace fs = std::filesystem;
+        auto file_path = "/tmp/output_trace.txt";
+        auto clear_traces = "/tmp/clear_trace.txt";
+        while (!_shutdown) {
+            // if the file exists, log the traces and remove the file
+            if (fs::exists(file_path)) {
+                TIME_TRACESET_LOG(time_trace::traces);
+                fs::remove(file_path);
+            }
+            // if the clear traces file exists, clear the traces and remove the file
+            if (fs::exists(clear_traces)) {
+                TIME_TRACESET_LOG(time_trace::traces);
+                time_trace::traces.reset();
+                fs::remove(clear_traces);
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        }
     }
 
     bool
@@ -573,7 +598,7 @@ namespace springtail::pg_log_mgr {
             while (!_shutdown) {
                 Coordinator::mark_alive(keep_alive);
 
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Recevied data in normal mode");
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Received data in normal mode");
                 if (!_writer_read_data(data, logger, start_offset,
                     [this, &start_offset](uint64_t end_offset, const std::filesystem::path &file_path) {
                         _logger_queue.push(start_offset, end_offset, file_path);

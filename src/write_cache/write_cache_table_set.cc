@@ -188,7 +188,7 @@ namespace springtail
     void
     WriteCacheTableSet::commit(uint64_t pg_xid, uint64_t xid, PostgresTimestamp commit_ts)
     {
-        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "Committing PG XID: {} -> XID: {}", pg_xid, xid);
+        LOG_INFO("Committing PG XID: {} -> XID: {}", pg_xid, xid);
 
         // insert xid into xid map
         // XXX should we check if there is an existing pg_xid with data and skip if not?
@@ -204,7 +204,7 @@ namespace springtail
         // XXX should we check if there is an existing pg_xid with data and skip if not?
         std::unique_lock<std::shared_mutex> lock(_xid_map_mutex);
         for (auto &pg_xid: pg_xids) {
-            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "Committing PG XID: {} -> XID: {}", pg_xid, xid);
+            LOG_INFO("Committing PG XID: {} -> XID: {}", pg_xid, xid);
             _xid_map.insert({xid, pg_xid});
         }
         _xid_ts_map.insert({xid, commit_ts});
