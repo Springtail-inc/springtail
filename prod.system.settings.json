@@ -21,7 +21,7 @@
       "connections": 10,
       "max_idle_secs": 300,
       "max_connection_lifetime_secs": 0,
-      "ssl": true,
+      "ssl": true
     }
   },
   "write_cache": {
