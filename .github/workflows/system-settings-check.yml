@@ -1,6 +1,6 @@
 name: Check System Settings
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       canonical_copy:
         description: 'The canonical copy of the system.json.settings file, against which to check the file.'
