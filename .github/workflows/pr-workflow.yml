@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   system-settings-check:
-    uses: ./.github/workflows/system_settings_check.yml
+    uses: ./.github/workflows/system-settings-check.yml
     with:
       canonical_copy: 'system.json.settings'
       target_files: 'prod.system.settings.json'
