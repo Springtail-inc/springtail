@@ -21,7 +21,7 @@ jobs:
     runs-on: warp-ubuntu-latest-arm64-4x-spot
     timeout-minutes: 35
     container:
-      image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
+      image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ inputs.build_type == 'release'  && vars.RELEASE_BUILDER_IMAGE_VERSION  || vars.BUILDER_IMAGE_VERSION }}
       credentials:
         username: AWS
         password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
