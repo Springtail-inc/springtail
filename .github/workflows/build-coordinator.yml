@@ -2,14 +2,6 @@ name: Build Coordinator
 
 on:
   workflow_dispatch:
-    inputs:
-      build_type:
-        description: 'The type of build to perform. This determines the S3 bucket we upload to. For release build, we upload to the "release-builds.springtail.internal" bucket (in production account), for debug builds we upload to the "debug-builds.springtail.internal" bucket (in development account).'
-        type: string
-        default: "release"
-        options:
-          - release
-          - debug
 
 permissions:
   id-token: write
@@ -26,7 +18,7 @@ jobs:
         username: AWS
         password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
     env:
-      PACKAGE_BUCKET_NAME: ${{ inputs.build_type == 'release' && 'prod-data-share.springtail.internal' || 'data-share.springtail.internal' }}
+      DATA_SHARE_BUCKET_NAME: data-share.springtail.internal
       COORDINATOR_S3_PREFIX: stc
     steps:
       - name: Checkout code
@@ -69,7 +61,7 @@ jobs:
           name="stc-${TIMESTAMP}.tar.gz"
           # Add this name to an current file
           echo $name > current
-          aws s3 cp stc.tar.gz s3://${PACKAGE_BUCKET_NAME}/${COORDINATOR_S3_PREFIX}/${name}
-          aws s3 cp current s3://${PACKAGE_BUCKET_NAME}/${COORDINATOR_S3_PREFIX}/current
+          aws s3 cp stc.tar.gz s3://${DATA_SHARE_BUCKET_NAME}/${COORDINATOR_S3_PREFIX}/${name}
+          aws s3 cp current s3://${DATA_SHARE_BUCKET_NAME}/${COORDINATOR_S3_PREFIX}/current
           rm stc.tar.gz
           rm current

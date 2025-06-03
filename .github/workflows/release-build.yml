@@ -7,10 +7,7 @@ on:
         description: 'The number of processes to use for the build.'
         type: string
         required: true
-      build_type:
-        description: 'The type of build to perform. This also determines the S3 bucket we upload to. For release build, we upload to the "release-builds.springtail.internal" bucket (in production account), for debug builds we upload to the "debug-builds.springtail.internal" bucket (in development account).'
-        type: string
-      package_bucket_name:
+      data_share_bucket_name:
         description: 'The name of the S3 bucket to store the build artifacts.'
         type: string
         required: true
@@ -43,12 +40,11 @@ jobs:
     env:
       VCPKG_FORCE_SYSTEM_BINARIES: 1
       ZIC: true
-      PACKAGE_BUCKET_NAME: ${{ inputs.package_bucket_name }}
+      DATA_SHARE_BUCKET_NAME: ${{ inputs.data_share_bucket_name }}
       PACKAGES_S3_PREFIX: packages
       NUM_PROCS: ${{ inputs.num_procs }}
       SLACK_WEBHOOK_URL: ${{ inputs.slack_webhook_url }}
       SLACK_CHANNEL: '#release'
-      BUILD_TYPE: ${{ inputs.build_type }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -72,28 +68,25 @@ jobs:
       - name: Build Springtail Service
         run: |
           git config --global --add safe.directory /__w/springtail/springtail
-          if [ $BUILD_TYPE = "release" ]; then
-            ./release.sh
-          else
-            ./debug.sh
-          fi
+          # Todo: change this to release in the future
+          ./debug.sh -j 3
 
       - name: Install the packages
         if: success()
         run: |
           # Todo: later change to release/ location
-          cd "$BUILD_TYPE"
+          cd debug
           make install
 
       - name: Package and Upload Build artifacts to S3
         if: success()
         run: |
           sudo ./package.sh
-          echo "RELEASE_INFO=$(cat install/INFO.txt)" >> $GITHUB_ENV
           cd releases
           PKG_NAME="$(ls -t *.tgz | head -n1)"
-          aws s3 cp $PKG_NAME s3://${PACKAGE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/
-          echo "PACKAGE_PATH=s3://${PACKAGE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/${PKG_NAME}" >> $GITHUB_ENV
+          aws s3 cp $PKG_NAME s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/
+          echo "PACKAGE_PATH=s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/${PKG_NAME}" >> $GITHUB_ENV
+          echo "RELEASE_INFO=$(cat install/INFO.txt)" >> $GITHUB_ENV
 
       - name: Notify Slack Success
         if: success()
