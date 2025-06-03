@@ -49,7 +49,11 @@ jobs:
       - name: Build
         run: |
           git config --global --add safe.directory /__w/springtail/springtail
-          ./debug.sh -j 4
+          if [ "${{ inputs.build_type }}" = "release" ]; then
+            ./release.sh
+          else
+            ./debug.sh
+          fi
 
       - name: Pack Coordinator
         run: |
