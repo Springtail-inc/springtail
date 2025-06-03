@@ -90,7 +90,7 @@ jobs:
           git config --global --add safe.directory /__w/springtail/springtail
           sudo ./package.sh
           {
-            echo 'RELEASE_INFO=<<EOF'
+            echo 'RELEASE_INFO<<EOF'
             cat install/INFO.txt
             echo 'EOF'
           } >> $GITHUB_ENV
