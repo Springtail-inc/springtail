@@ -81,15 +81,19 @@ jobs:
       - name: Install the packages
         if: success()
         run: |
-          # Todo: later change to release/ location
           cd "$BUILD_TYPE"
           make install
 
       - name: Package and Upload Build artifacts to S3
         if: success()
         run: |
+          git config --global --add safe.directory /__w/springtail/springtail
           sudo ./package.sh
-          echo "RELEASE_INFO=$(cat install/INFO.txt)" >> $GITHUB_ENV
+          {
+            echo 'RELEASE_INFO=<<EOF'
+            cat install/INFO.txt
+            echo 'EOF'
+          } >> $GITHUB_ENV
           cd releases
           PKG_NAME="$(ls -t *.tgz | head -n1)"
           aws s3 cp $PKG_NAME s3://${PACKAGE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/
