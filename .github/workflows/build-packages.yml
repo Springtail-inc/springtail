@@ -11,7 +11,14 @@ on:
       num_procs:
         description: 'The number of processes to use for the build.'
         type: string
-        default: "3"
+        default: "4"
+      build_type:
+        description: 'The type of build to perform. For release build, we upload to the "prod-data-share.springtail.internal" bucket (in production account), for debug builds we upload to the "data-share.springtail.internal" bucket (in development account).'
+        type: string
+        default: "release"
+        options:
+          - release
+          - debug
 
 permissions:
   id-token: write
@@ -22,10 +29,11 @@ jobs:
   release-build:
     uses: ./.github/workflows/release-build.yml
     with:
-      num_procs: ${{ inputs.num_procs || 3 }}
-      data_share_bucket_name: data-share.springtail.internal
+      num_procs: ${{ inputs.num_procs || 4 }}
+      package_bucket_name: ${{ inputs.build_type == 'release' && 'prod-data-share.springtail.internal' || 'data-share.springtail.internal' }}
       image_version_tag: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
       slack_webhook_url: "${{ vars.GENERIC_SLACK_WEBHOOK_URL }}"
+      build_type: ${{ inputs.build_type || 'release' }}
     secrets:
       aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
       aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
