@@ -1421,7 +1421,7 @@ namespace springtail::pg_fdw {
                                  const std::string &schema,
                                  const std::string &table,
                                  uint64_t tid,
-                                 std::vector<std::tuple<std::string, std::string, bool>> &columns)
+                                 const std::vector<std::tuple<std::string, std::string, bool>> &columns)
     {
         // no schema name needed
         std::string create = fmt::format("CREATE FOREIGN TABLE {}.{} (\n",
@@ -1612,6 +1612,7 @@ namespace springtail::pg_fdw {
 
         // map from table name -> <table id, xid>
         std::map<std::string, std::pair<uint64_t,uint64_t>> table_map;
+        std::map<uint64_t, PartitionInfo> table_partition_map;
 
         // iterate over the table names table and populate the table map
         for (auto row : (*table)) {
@@ -1659,6 +1660,28 @@ namespace springtail::pg_fdw {
 
             // lookup table in map, if found the xid if it is newer
             auto entry = table_map.insert({table_name, {tid, xid}});
+
+            // Insert the partition details in the partition map
+            uint64_t parent_table_id = 0;
+            if (!fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->is_null(&row)) {
+                parent_table_id = fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->get_uint64(&row);
+            }
+            std::string partition_key = "";
+            if (!fields->at(sys_tbl::TableNames::Data::PARTITION_KEY)->is_null(&row)) {
+                partition_key = fields->at(sys_tbl::TableNames::Data::PARTITION_KEY)->get_text(&row);
+            }
+            std::string partition_bound = "";
+            if (!fields->at(sys_tbl::TableNames::Data::PARTITION_BOUND)->is_null(&row)) {
+                partition_bound = fields->at(sys_tbl::TableNames::Data::PARTITION_BOUND)->get_text(&row);
+            }
+
+            LOG_DEBUG(LOG_FDW, "[DEBUG] <{}> Found parent table id: {}, partition key: {}, partition bound: {}", table_name, parent_table_id, partition_key, partition_bound);
+
+            table_partition_map.try_emplace(
+                tid,
+                PartitionInfo(parent_table_id, partition_key, partition_bound)
+            );
+
             if (entry.second == false) {
                 LOG_DEBUG(LOG_FDW, "Table {} already exists in schema {}", table_name, namespace_name);
                 // update if xid is newer
@@ -1702,9 +1725,7 @@ namespace springtail::pg_fdw {
             if (tid != current_tid) {
 
                 if (!current_table.empty()) {
-                    // dump this table
-                    std::string sql = _gen_fdw_table_sql(server, namespace_name, current_table,
-                                                         current_tid, columns);
+                    std::string sql = _process_table(server, namespace_name, current_table, current_tid, columns, table_partition_map);
                     commands = lappend(commands, pstrdup(sql.c_str()));
                 }
 
@@ -1747,12 +1768,46 @@ namespace springtail::pg_fdw {
 
         // process last table
         if (columns.size() > 0) {
-            // dump this table
-            std::string sql = _gen_fdw_table_sql(server, namespace_name, current_table, current_tid, columns);
+            std::string sql = _process_table(server, namespace_name, current_table, current_tid, columns, table_partition_map);
             commands = lappend(commands, pstrdup(sql.c_str()));
         }
 
         return commands;
+    }
+
+    std::string
+    PgFdwMgr::_process_table(const std::string &server,
+                             const std::string &namespace_name,
+                             const std::string &current_table,
+                             const uint64_t &current_tid,
+                             const std::vector<std::tuple<std::string, std::string, bool>> &columns,
+                             const std::map<uint64_t, PartitionInfo> &table_partition_map)
+    {
+        const PartitionInfo &partition_info = table_partition_map.at(current_tid);
+        uint64_t parent_table_id = partition_info.parent_table_id;
+        std::string partition_key = partition_info.partition_key;
+        std::string partition_bound = partition_info.partition_bound;
+
+        LOG_INFO("[DEBUG] Processing table: {} parent_table_id: {} partition_key: {} partition_bound: {}",
+                                    current_table, parent_table_id, partition_key, partition_bound);
+        if ( parent_table_id == 0 ) {
+            if (partition_key.empty()) {
+                // If its a parent table and partition key is empty, create it
+                std::string sql = _gen_fdw_table_sql(server, namespace_name, current_table, current_tid, columns);
+                return sql;
+            } else {
+                LOG_INFO("Parent partitioned table, not creating: {}", current_table);
+            }
+        } else if (!partition_bound.empty() && partition_key.empty()) {
+            // If its a partitioned table and partition key is empty, create it. This is most
+            // likely a leaf partitioned table
+            std::string sql = _gen_fdw_table_sql(server, namespace_name, current_table, current_tid, columns);
+            return sql;
+        } else {
+            LOG_INFO("Partitioned table, not creating: {}", current_table);
+        }
+
+        return "";
     }
 
     bool

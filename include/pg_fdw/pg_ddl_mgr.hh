@@ -21,6 +21,13 @@
 
 namespace springtail::pg_fdw {
 
+    /** Partition info */
+    struct PartitionInfo {
+        uint64_t parent_table_id;
+        std::string parent_table_name;
+        std::string partition_key;
+        std::string partition_bound;
+    };
     /**
      * @brief DDL Mgr, applies changes from Redis queue
      * to the FDW tables
@@ -167,6 +174,69 @@ namespace springtail::pg_fdw {
          */
         std::map<uint64_t, std::map<uint64_t, std::pair<std::string, std::string>>>
         _get_usertypes(uint64_t db_id, uint64_t xid);
+
+        /**
+         * @brief Helper to process table
+         * @param conn connection
+         * @param namespace_name namespace name
+         * @param table_name table name
+         * @param tid table id
+         * @param columns vector of columns
+         * @param table_partition_map map of table id to partition info
+         */
+        void
+        _process_table(LibPqConnectionPtr conn,
+                       const std::string &namespace_name,
+                       const std::string &current_table,
+                       const uint64_t &current_tid,
+                       const std::vector<std::tuple<std::string, std::string, bool>> &columns,
+                       const std::map<uint64_t, PartitionInfo> &table_partition_map);
+
+        /**
+         * @brief Helper to create partition tables in the FDW
+         * @param db_id db id
+         * @param schema_xid schema xid
+         * @param namespace_name namespace name
+         * @param user_types map of namespace_id to map of type_id to pair <type_name, value_json>
+         * @param conn connection
+         */
+        void
+        _create_partition_tables(uint64_t db_id,
+                                 uint64_t schema_xid,
+                                 std::string namespace_name,
+                                 std::map<uint64_t, std::map<uint64_t,
+                                 std::pair<std::string, std::string>>> user_types,
+                                 LibPqConnectionPtr conn);
+
+        /**
+        * @brief Helper to get type name from type oid
+        * @param pg_type type oid
+        * @param user_types map of namespace_id to map of type_id to pair <type_name, value_json>
+        * @return type name
+        */
+        std::string _get_type_name(int32_t pg_type,
+                const std::map<uint64_t, std::map<uint64_t,
+                std::pair<std::string, std::string>>> &user_types);
+
+        /**
+         * @brief Helper to generate create partitioned table query
+         * @param schema schema name
+         * @param table_name table name
+         * @param conn connection
+         * @param columns vector of columns
+         * @param parent_table_name parent table name
+         * @param partition_key partition key
+         * @param partition_bound partition bound
+         * @return std::string create partitioned table query
+         */
+        std::string
+        _get_create_partitioned_table_query(std::string schema,
+                                            std::string table_name,
+                                            LibPqConnectionPtr conn,
+                                            const std::vector<std::tuple<std::string, std::string, bool>> &columns,
+                                            std::string parent_table_name,
+                                            std::string partition_key,
+                                            std::string partition_bound);
 
         /**
          * @brief Helper to generate sql statement from json.  Decodes the ddl json.

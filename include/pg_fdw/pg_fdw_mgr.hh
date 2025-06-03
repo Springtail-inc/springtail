@@ -51,6 +51,12 @@ namespace springtail::pg_fdw {
     };
     using PgFdwSortGroupPtr = std::shared_ptr<PgFdwSortGroup>;
 
+    /** Partition info */
+    struct PartitionInfo {
+        uint64_t parent_table_id;
+        std::string partition_key;
+        std::string partition_bound;
+    };
 
     /** Internal state used to track table scan */
     struct PgFdwState {
@@ -276,6 +282,24 @@ namespace springtail::pg_fdw {
                                        int32_t oid,
                                        uint64_t xid);
 
+        /**
+         * @brief Process a table
+         * @param server server name
+         * @param namespace_name namespace name
+         * @param current_table table name
+         * @param current_tid table id
+         * @param columns vector of column names, types, and nullability
+         * @param table_partition_map map of table partitions
+         * @return sql string to create the table
+         */
+        std::string
+        _process_table(const std::string &server,
+                       const std::string &namespace_name,
+                       const std::string &current_table,
+                       const uint64_t &current_tid,
+                       const std::vector<std::tuple<std::string, std::string, bool>> &columns,
+                       const std::map<uint64_t, PartitionInfo> &table_partition_map);
+
         /** Helper to convert a springtail enum user type to a datum */
         Datum _get_enum_datum(const PgFdwState *state,
                               int32_t springtail_oid,
@@ -316,7 +340,7 @@ namespace springtail::pg_fdw {
                                               const std::string &schema,
                                               const std::string &table,
                                               uint64_t tid,
-                                              std::vector<std::tuple<std::string, std::string, bool>> &columns);
+                                              const std::vector<std::tuple<std::string, std::string, bool>> &columns);
 
         /** Helper to generate a system table create foreign table sql */
         static std::string _gen_fdw_system_table(const std::string &server,
