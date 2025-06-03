@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       build_type:
-        description: 'The type of build to perform. This determines the S3 bucket we upload to. For release build, we upload to the "release-builds.springtail.internal" bucket (in production account), for debug builds we upload to the "debug-builds.springtail.internal" bucket (in development account).'
+        description: 'The type of build to perform. For release build, we upload to the "prod-data-share.springtail.internal" bucket (in production account), for debug builds we upload to the "data-share.springtail.internal" bucket (in development account).'
         type: string
         default: "release"
         options:
