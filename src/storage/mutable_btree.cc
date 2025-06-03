@@ -150,11 +150,14 @@ namespace springtail {
         bool is_empty = node->page->empty();
         page_lock.unlock();
 
+        if (is_empty && node->parent == nullptr) {
+            // if the root page is empty, we can remove immediately
+            return;
+        }
+
+        // check for empty non-root page
         if (is_empty) {
-            // check if this is a non-root page
-            if (node->parent != nullptr) {
-                _lock_and_remove_page(node);
-            }
+            _lock_and_remove_page(node);
         }
 
         boost::unique_lock cache_lock(_cache->mutex);
@@ -182,15 +185,8 @@ namespace springtail {
         // acquire an exclusive lock on the tree here
         boost::unique_lock lock(_mutex);
 
-        // evict all pages without flushing to disk
-        _root = nullptr;
-        {
-            boost::unique_lock cache_lock(_cache->mutex);
-            _cache_clear();
-        }
-
-        // set up an empty tree
-        init_empty();
+        // clear the root
+        _remove_root();
     }
 
     uint64_t
@@ -1201,6 +1197,22 @@ MutableBTree::lower_bound(TuplePtr search_key,
         // evict the page from the cache
         boost::unique_lock cache_lock(_cache->mutex);
         _cache_evict(page->extent_id);
+    }
+
+    void
+    MutableBTree::_remove_root()
+    {
+        // note: the tree must be locked to perform this operation
+        _root = nullptr;
+
+        // evict all pages without flushing to disk
+        {
+            boost::unique_lock cache_lock(_cache->mutex);
+            _cache_clear();
+        }
+
+        // set up an empty tree
+        init_empty();
     }
 
     void

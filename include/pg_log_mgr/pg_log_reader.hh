@@ -178,7 +178,7 @@ namespace springtail::pg_log_mgr {
             /**
              * Records a truncation of a given set of tables into the batch.
              */
-            void truncate(uint64_t current_xid, const PgMsgTruncate &msg);
+            void truncate(uint64_t current_xid, int32_t pg_xid, const PgMsgTruncate &msg);
 
             /**
              * Records a schema change into the batch.

@@ -679,6 +679,12 @@ namespace springtail {
         void _remove_page(PagePtr page, PagePtr parent);
 
         /**
+         * Removes the root page of the tree, clears the cache and re-initializes the tree into an
+         * empty state.
+         */
+        void _remove_root();
+
+        /**
          * Removes an empty page from it's parent.  Both the parent and the page must *not* be
          * locked before calling this function.
          *

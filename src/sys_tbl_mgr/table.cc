@@ -599,12 +599,25 @@ namespace indexer_helpers {
         auto it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_PRIMARY; });
         assert(it != roots.end());
 
-        if (it->extent_id != constant::UNKNOWN_EXTENT) {
-            _began_empty = false;
-            _primary_index->init(it->extent_id);
+        // check if we need to use an empty page
+        if (_id > constant::MAX_SYSTEM_TABLE_ID) {
+            // for non-system tables
+            _use_empty = (_stats.row_count == 0);
+            if (!_use_empty && it->extent_id != constant::UNKNOWN_EXTENT) {
+                _primary_index->init(it->extent_id);
+            } else {
+                _use_empty = true;
+                _primary_index->init_empty();
+            }
         } else {
-            _began_empty = true;
-            _primary_index->init_empty();
+            // check how we need to initialize the primary index for system tables
+            if (it->extent_id != constant::UNKNOWN_EXTENT) {
+                _use_empty = false;
+                _primary_index->init(it->extent_id);
+            } else {
+                _use_empty = true;
+                _primary_index->init_empty();
+            }
         }
 
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
@@ -701,6 +714,12 @@ namespace indexer_helpers {
         // update the stats
         if (_id > constant::MAX_SYSTEM_TABLE_ID) {
             --_stats.row_count;
+            if (_stats.row_count == 0) {
+                // we've emptied the table, need to switch to using the _empty_page
+                // note: this is because the pages no longer have on-disk locations that can be
+                //       stored into the primary index
+                _use_empty = true;
+            }
         }
     }
 
@@ -968,14 +987,15 @@ namespace indexer_helpers {
     {
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_began_empty) {
+        if (_use_empty) {
             _append_empty(value);
             return;
         }
 
         // note: in this case there is no explicit primary key, so we need to append the row to the
         //       end of the file
-        auto &&row = *(_primary_index->last());
+        auto leaf_i = _primary_index->last();
+        auto row = *leaf_i;
         uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
 
         // get the page from the cache
@@ -997,7 +1017,7 @@ namespace indexer_helpers {
 
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_began_empty) {
+        if (_use_empty) {
             _insert_empty(value);
             return;
         }
@@ -1050,7 +1070,7 @@ namespace indexer_helpers {
 
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_began_empty) {
+        if (_use_empty) {
             return _upsert_empty(value);
         }
 
@@ -1084,14 +1104,11 @@ namespace indexer_helpers {
     void
     MutableTable::_remove_empty(TuplePtr value)
     {
-        // get the page from the cache if we don't have one
-        if (!_empty_page) {
-            _empty_page = std::make_unique< StorageCache::SafePagePtr>(
-                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid));
-        }
+        // note: if we are performing a remove, there must be a page already
+        CHECK(_empty_page != nullptr);
 
         // add the row to the page
-       (*_empty_page)->remove(value, _schema);
+        (*_empty_page)->remove(value, _schema);
     }
 
     void
@@ -1099,7 +1116,7 @@ namespace indexer_helpers {
     {
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_began_empty) {
+        if (_use_empty) {
             _remove_empty(key);
             return;
         }
@@ -1124,7 +1141,17 @@ namespace indexer_helpers {
         // note: it would be much more performant to perform all of the scan-based removals in
         //       an XID at once as a batch, since the table is likely to be much larger than the
         //       set of removals
-        auto fields = _schema->get_fields();
+
+        // if the primary_lookup tree is empty, we will maintain a single page of data that we will
+        // keep against the table and use for all operations.
+        if (_use_empty) {
+            // note: if we are performing a remove, there must be a page already
+            CHECK(_empty_page != nullptr);
+
+            // add the row to the page
+            (*_empty_page)->try_remove_by_scan(value, _schema);
+            return;
+        }
 
         // scan the index
         bool found = false;
@@ -1140,16 +1167,8 @@ namespace indexer_helpers {
             // check if we need to convert the page contents to a new schema
             _check_convert_page(page);
 
-            auto &&j = page->begin();
-            while (!found && j != page->end()) {
-                auto &&vrow = *j;
-                if (value->equal_strict(FieldTuple(fields, &vrow))) {
-                    page->remove(j);
-                    found = true;
-                } else {
-                    ++j;
-                }
-            }
+            // pass the value tuple and the schema down to the page
+            found = page->try_remove_by_scan(value, _schema);
 
             if (!found) {
                 ++i;
@@ -1193,7 +1212,7 @@ namespace indexer_helpers {
 
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_began_empty) {
+        if (_use_empty) {
             _update_empty(value);
             return;
         }
