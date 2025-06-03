@@ -26,8 +26,14 @@ permissions:
   checks: write
 
 jobs:
+  system-settings-check:
+    uses: ./.github/workflows/system_settings_check.yml
+    with:
+      canonical_copy: 'system.json.settings'
+      target_files: 'prod.system.settings.json'
   release-build:
     uses: ./.github/workflows/release-build.yml
+    needs: [ system-settings-check ]
     with:
       num_procs: ${{ inputs.num_procs || 4 }}
       package_bucket_name: ${{ inputs.build_type == 'release' && 'prod-data-share.springtail.internal' || 'data-share.springtail.internal' }}
