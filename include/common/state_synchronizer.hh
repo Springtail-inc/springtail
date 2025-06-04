@@ -28,17 +28,25 @@ namespace springtail::common {
         }
 
         /** Wait for a specific state */
-        void wait_for_state(std::set<StateEnum> desired_states)
+        bool wait_for_state(std::set<StateEnum> desired_states, int timeout_secs = -1)
         {
             std::unique_lock<std::shared_mutex> lock(_mutex);
             if (desired_states.contains(_current_state)) {
-                return;
+                return true;
             }
 
             // wait for desired state
-            _cv.wait(lock, [this, desired_states]() {
-                return desired_states.contains(_current_state);
-            });
+            if (timeout_secs >= 0) {
+                auto timeout = std::chrono::seconds(timeout_secs);
+                _cv.wait_for(lock, timeout, [this, desired_states]() {
+                    return desired_states.contains(_current_state);
+                });
+            } else {
+                _cv.wait(lock, [this, desired_states]() {
+                    return desired_states.contains(_current_state);
+                });
+            }
+            return desired_states.contains(_current_state);
         }
 
         /** Wait for a specific state */

@@ -466,8 +466,7 @@ namespace springtail::committer {
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - min_commit_ts->to_system_time());
             open_telemetry::OpenTelemetry::record_histogram(PG_LOG_MGR_BTREE_LATENCIES, duration.count());
-            LOG_DEBUG(LOG_COMMITTER, "Processed table {} in {} milliseconds", tid, duration.count());
-            LOG_ERROR("Processed table {} in {} milliseconds", tid, duration.count());
+            LOG_INFO("Processed table {} in {} milliseconds", tid, duration.count());
         }
         // update the system table roots
         TableMgr::get_instance()->update_roots(table->db(), table->id(), xid, metadata);
