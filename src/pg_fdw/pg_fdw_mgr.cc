@@ -1675,8 +1675,6 @@ namespace springtail::pg_fdw {
                 partition_bound = fields->at(sys_tbl::TableNames::Data::PARTITION_BOUND)->get_text(&row);
             }
 
-            LOG_DEBUG(LOG_FDW, "[DEBUG] <{}> Found parent table id: {}, partition key: {}, partition bound: {}", table_name, parent_table_id, partition_key, partition_bound);
-
             table_partition_map.try_emplace(
                 tid,
                 PartitionInfo(parent_table_id, partition_key, partition_bound)
@@ -1788,8 +1786,6 @@ namespace springtail::pg_fdw {
         std::string partition_key = partition_info.partition_key;
         std::string partition_bound = partition_info.partition_bound;
 
-        LOG_INFO("[DEBUG] Processing table: {} parent_table_id: {} partition_key: {} partition_bound: {}",
-                                    current_table, parent_table_id, partition_key, partition_bound);
         if ( parent_table_id == 0 ) {
             if (partition_key.empty()) {
                 // If its a parent table and partition key is empty, create it

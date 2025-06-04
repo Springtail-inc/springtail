@@ -461,7 +461,6 @@ Service::_create_table(const proto::TableRequest& request)
         // TODO: add parent table name
         // auto parent_table_info = _get_table_info(request.db_id(), parent_table_id, xid);
         // if (parent_table_info == nullptr) {
-        //     LOG_INFO("[DEBUG] Parent table not found {}", parent_table_id);
         //     LOG_ERROR("Parent table {} not found for table {} in namespace {}",
         //               parent_table_id, request.table().name(), request.table().namespace_name());
         //     throw SysTblMgrError("Parent table not found");
@@ -1749,7 +1748,7 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     auto find_cached_root = [&](uint64_t index_id) -> std::optional<uint64_t> {
         for (const auto& xid_roots: *cached_roots) {
             // the XidLsnToRootsInfoMap is ordered by XID is revese order (latest first)
-            // so we just need to find the first match 
+            // so we just need to find the first match
             if (xid_roots.first > xid) {
                 continue;
             }

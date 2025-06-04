@@ -41,6 +41,11 @@ namespace springtail::pg_fdw {
     static constexpr char VERIFY_DB_EXISTS[] =
         "SELECT 1 FROM  pg_database WHERE datname = '{}'";
 
+    static constexpr char SYSTEM_TYPES[] =
+        "SELECT oid, typname, typcategory "
+        "FROM pg_type "
+        "WHERE typisdefined = true";
+
     PgDDLMgr::PgDDLMgr() : _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE)
     {
         _cache_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
@@ -182,8 +187,12 @@ namespace springtail::pg_fdw {
             }
         }
 
-        // XXX Fix this
-        return "TEXT";
+        auto it = _type_cache.find(pg_type);
+        if (it != _type_cache.end()) {
+            return std::get<0>(it->second);
+        }
+
+        return "UNKNOWN";
     }
 
     std::string
@@ -231,7 +240,7 @@ namespace springtail::pg_fdw {
 
         create += ";";
 
-        LOG_DEBUG(LOG_FDW, "[DEBUG] Partitioned table SQL: {}", create);
+        LOG_DEBUG(LOG_FDW, "Partitioned table SQL: {}", create);
 
         return create;
     }
@@ -250,8 +259,6 @@ namespace springtail::pg_fdw {
         std::string partition_key = partition_info.partition_key;
         std::string partition_bound = partition_info.partition_bound;
         std::string parent_table_name = partition_info.parent_table_name;
-
-        LOG_DEBUG(LOG_FDW, "[DEBUG] Processing table {} with parent table name: {}, parent table id: {}, partition key: {}, partition bound: {}", current_table, parent_table_name, parent_table_id, partition_key, partition_bound);
 
         if ( parent_table_id == 0 && !partition_key.empty()) {
             std::string sql = _get_create_partitioned_table_query(namespace_name, current_table, conn, columns, parent_table_name, partition_key, partition_bound);
@@ -335,7 +342,6 @@ namespace springtail::pg_fdw {
 
             std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row));
 
-            LOG_DEBUG(LOG_FDW, "[DEBUG] Found table {}.{} in table_names table", namespace_name, table_name);
             // handle limit and exclude
             // if (exclude && table_set.contains(table_name)) {
             //     LOG_DEBUG(LOG_FDW, "Excluding table {}.{}", namespace_name, table_name);
@@ -350,8 +356,6 @@ namespace springtail::pg_fdw {
 
             uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
             uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
-
-            LOG_DEBUG(LOG_FDW, "[DEBUG] Processing table {}.{} tid={}, xid={}", namespace_name, table_name, tid, xid);
 
             bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
             if (!exists) {
@@ -386,8 +390,6 @@ namespace springtail::pg_fdw {
             if (!fields->at(sys_tbl::TableNames::Data::PARTITION_BOUND)->is_null(&row)) {
                 partition_bound = fields->at(sys_tbl::TableNames::Data::PARTITION_BOUND)->get_text(&row);
             }
-
-            LOG_DEBUG(LOG_FDW, "[DEBUG] <{}> Found parent table id: {}, partition key: {}, partition bound: {}", table_name, parent_table_id, partition_key, partition_bound);
 
             table_partition_map.try_emplace(
                 tid,
@@ -571,6 +573,16 @@ namespace springtail::pg_fdw {
             conn->clear();
             conn->exec(fmt::format(CREATE_FDW_USER, username, password));
             conn->clear();
+        }
+
+        // Populate system defined types
+        conn->exec(SYSTEM_TYPES);
+        int rows = conn->ntuples();
+        for (int i = 0; i < rows; i++) {
+            uint64_t oid = conn->get_int32(i, 0);
+            std::string name = conn->get_string(i, 1);
+            std::string category = conn->get_string(i, 2);
+            _type_cache[oid] = std::make_tuple(name, category);
         }
 
         // go through each db and drop/create the database on the fdw

@@ -97,6 +97,8 @@ namespace springtail::pg_fdw {
         std::map<uint32_t, std::string> _type_map;  ///< map of PG type OIDs to type names
         std::atomic<bool> _is_shutting_down{false}; ///< shutting down flag
 
+        std::unordered_map<uint32_t, std::tuple<std::string, std::string>> _type_cache;
+
         /** Private constructor */
         PgDDLMgr();
         /** Private destructor */
