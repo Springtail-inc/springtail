@@ -91,16 +91,8 @@ namespace springtail::pg_log_mgr {
             Properties::set_db_state(_db_id, state);
         }
 
-        // reset state if we were stuck in syncing or copy tables
-        if (state == redis::db_state_change::REDIS_STATE_SYNCING) {
-            // reset state to running; GC will move us back to syncing
-            state = redis::db_state_change::REDIS_STATE_RUNNING;
-            Properties::set_db_state(_db_id, state);
-        } else if (state == redis::db_state_change::REDIS_STATE_COPY_TABLES) {
-            // we were in copy tables state, reset to initialize to restart copy tables
-            state = redis::db_state_change::REDIS_STATE_INITIALIZE;
-            Properties::set_db_state(_db_id, state);
-        } else if (state == redis::db_state_change::REDIS_STATE_FAILED) {
+        // if the system failed, must be manually restarted in a valid state
+        if (state == redis::db_state_change::REDIS_STATE_FAILED) {
             LOG_ERROR("Database in failed state, cannot start up, db_id={}", _db_id);
             return;
         }
@@ -215,9 +207,6 @@ namespace springtail::pg_log_mgr {
         // create directories if they don't exist
         std::filesystem::create_directories(_repl_log_path);
         std::filesystem::create_directories(_xact_log_path);
-
-        // set state to copy tables
-        Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_COPY_TABLES);
 
         // set internal state to copy tables
         _internal_state.set(STATE_STARTUP_SYNC);
@@ -351,12 +340,8 @@ namespace springtail::pg_log_mgr {
         // notify xact handler to rollover log
         _notify_xact_start_sync();
 
-        // set db state to syncing
-        Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_SYNCING);
-
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Copying tables for db {}; state={}", _db_id, state);
-
         // copy tables
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Copying tables for db {}; state=synchronizing", _db_id);
         std::vector<PgCopyResultPtr> res;
         auto xid = _pg_log_reader->get_next_xid();
 
