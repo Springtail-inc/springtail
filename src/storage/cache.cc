@@ -971,23 +971,49 @@ namespace springtail {
         }
     }
 
-    void
-    StorageCache::Page::remove(const Iterator &pos)
+    bool
+    StorageCache::Page::try_remove_by_scan(TuplePtr value,
+                                           ExtentSchemaPtr schema)
     {
+        bool found = false;
+
         boost::unique_lock lock(_mutex);
+        auto fields = schema->get_fields();
+
+        auto extent_i = _extents.begin();
+        uint32_t row_pos;
+        while (!found && extent_i != _extents.end()) {
+            auto extent = extent_i->make_safe_extent(_file);
+            for (row_pos = 0; row_pos < (*extent)->row_count(); ++row_pos) {
+                auto row = *((*extent)->at(row_pos));
+                if (value->equal_strict(FieldTuple(fields, &row))) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                ++extent_i;
+            }
+        }
+
+        if (!found) {
+            return false;
+        }
+
         _is_dirty = true;
 
-        // make sure that we've got a mutable version of the extent
-        auto extent = pos._extent_i->make_dirty_safe_extent(_file);
-
-        // remove the row
-        (*extent)->remove(pos._row);
+        // mark the extent as dirty and remove the row from it
+        auto extent = extent_i->make_dirty_safe_extent(_file);
+        auto it = (*extent)->at(row_pos);
+        (*extent)->remove(it);
 
         // if the extent has become empty, remove it from the page
         if ((*extent)->empty()) {
             StorageCache::get_instance()->_data_cache->drop_dirty(*extent);
-            _extents.erase(pos._extent_i);
+            _extents.erase(extent_i);
         }
+
+        return true;
     }
 
     void

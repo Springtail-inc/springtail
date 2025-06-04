@@ -426,7 +426,8 @@ namespace springtail
         }
 
         if (static_cast<std::size_t>(_connection.nfields()) != _schema.columns.size()) {
-            LOG_ERROR("Mismatch in copy fields");
+            LOG_ERROR("Mismatch in copy fields: {} != {}",
+                      _connection.nfields(), _schema.columns.size());
             _connection.clear();
             throw PgQueryError();
         }
