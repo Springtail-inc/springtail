@@ -783,12 +783,12 @@ namespace indexer_helpers {
 
         std::vector<std::string> _primary_key; ///< The key columns of the primary index.
 
-        /** A lookup version of the primary index.  Pinned to the most recent XID. */
-        bool _began_empty; ///< True if the table was empty at the access XID.
+        bool _use_empty; ///< True if the table started or became empty, requiring use of the _empty_page.
         FieldPtr _primary_extent_id_f; ///< A field accessor for the extent ID within the primary index extents.
 
         /** The primary index of the table. */
         MutableBTreePtr _primary_index; ///< The mutable primary index btree.
+
         /** A map of secondary indexes
          * first is the index id
          * second.first is btree

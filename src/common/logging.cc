@@ -25,6 +25,7 @@ namespace springtail::logging {
         {"schema", LOG_SCHEMA},
         {"committer", LOG_COMMITTER},
         {"sys_tbl_mgr", LOG_SYS_TBL_MGR},
+        {"log_mgr_data", LOG_PG_LOG_MGR_DATA},
         {"none", LOG_NONE},
         {"all", LOG_ALL}
     };

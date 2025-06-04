@@ -876,9 +876,10 @@ namespace springtail {
             void remove(TuplePtr key, ExtentSchemaPtr schema);
 
             /**
-             * Removes the row at the provided position in the Page.
+             * Tries to remove a row by scanning the Page for the given value.
+             * @return true if the row was found and removed, false otherwise.
              */
-            void remove(const Iterator &pos);
+            bool try_remove_by_scan(TuplePtr value, ExtentSchemaPtr schema);
 
             /**
              * Converts the page to the provided target_schema.  It reads rows from the existing
