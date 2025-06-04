@@ -356,7 +356,6 @@ OpenTelemetry::flush()
             opentelemetry::trace::Provider::GetTracerProvider();
         dynamic_cast<opentelemetry::sdk::trace::TracerProvider *>(trace_provider.get())->ForceFlush();
         auto logger_provider = opentelemetry::logs::Provider::GetLoggerProvider();
-        std::cout << "log provider pointer: " << logger_provider.get() << std::endl;
         dynamic_cast<opentelemetry::sdk::logs::LoggerProvider *>(logger_provider.get())->ForceFlush();
     }
 }
