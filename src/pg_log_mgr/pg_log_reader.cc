@@ -307,12 +307,13 @@ namespace springtail::pg_log_mgr {
 
     void
     PgLogReader::Batch::truncate(uint64_t current_xid,
+                                 int32_t pg_xid,
                                  const PgMsgTruncate &msg)
     {
         auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
 
         // get the current txn
-        auto txn = _get_txn(msg.xid);
+        auto txn = _get_txn(pg_xid);
 
         // note: there may be multiple truncates due to CASCADE
         for (auto tid : msg.rel_ids) {
@@ -338,7 +339,7 @@ namespace springtail::pg_log_mgr {
             }
 
             // if we sent any batches to the WriteCache, evict them
-            WriteCacheFuncImpl::drop_table(_db, tid, _cur_pg_xid);
+            WriteCacheFuncImpl::drop_table(_db, tid, pg_xid);
 
             // XXX if this is a subtxn, then once it's committed, we could also drop any earlier
             //     mutations to the table in it's parent pg xid, but it's not strictly necessary
@@ -1006,15 +1007,17 @@ namespace springtail::pg_log_mgr {
 
         case PgMsgEnum::TRUNCATE:
             {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "TRUNCATE pg_xid={}", this->get_current_xid());
                 if (_current_batch == nullptr) {
                     LOG_DEBUG(LOG_PG_LOG_MGR, "Skip TRUNCATE because no batch");
                     break;
                 }
 
-                // note: the current XID is only used to determine table existence
-                _current_batch->truncate(this->get_current_xid(),
-                                         std::get<PgMsgTruncate>(msg->msg));
+                auto truncate = std::get<PgMsgTruncate>(msg->msg);
+                int32_t pg_xid = (msg->is_streaming) ? truncate.xid : _current_xact->xid;
+                LOG_DEBUG(LOG_PG_LOG_MGR, "TRUNCATE pg_xid={} xid={}", pg_xid, this->get_current_xid());
+
+                // note: the current XID can only be used to determine table existence
+                _current_batch->truncate(this->get_current_xid(), pg_xid, truncate);
                 break;
             }
         case PgMsgEnum::CREATE_TABLE:
