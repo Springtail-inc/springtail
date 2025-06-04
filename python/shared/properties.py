@@ -402,6 +402,10 @@ class Properties:
         key = self.db_instance_id + ':instance_config'
         return self.redis.hget(key, f'hostname:{type}')
 
+    def get_config_gitsha(self) -> str:
+        key = self.db_instance_id + ':instance_config'
+        return self.redis.hget(key, 'system_settings_gitsha')
+
     def get_db_states(self) -> dict:
         """Return a dictionary of database states."""
         key = self.db_instance_id + ':instance_state'

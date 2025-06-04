@@ -367,7 +367,8 @@ class Scheduler:
                 self.logger.info("Shutting down services complete, installing binaries")
 
                 if self.production:
-                    self.production.install_binaries()
+                    config_gitsha = self.props.get_config_gitsha()
+                    self.production.install_binaries(config_gitsha)
                     if self.service_name == 'fdw':
                         self.logger.info("Installing postgres_fdw")
                         self.production.install_pgfdw()

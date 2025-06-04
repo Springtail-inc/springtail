@@ -242,9 +242,9 @@ namespace {
     }
 
     TEST_F(DatabaseMgr_Test, TestChangeReplicatedDatabaseState) {
-        _change_database_state(1, redis::db_state_change::DB_STATE_STARTUP);
+        _change_database_state(1, redis::db_state_change::DB_STATE_INITIALIZE);
         _change_database_state(1, redis::db_state_change::DB_STATE_RUNNING);
-        _change_database_state(1, redis::db_state_change::DB_STATE_SYNCING);
+        _change_database_state(1, redis::db_state_change::DB_STATE_STOPPED);
         _change_database_state(1, redis::db_state_change::DB_STATE_RUNNING);
     }
 }
