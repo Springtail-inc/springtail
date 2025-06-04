@@ -2,6 +2,7 @@ find_package(absl CONFIG REQUIRED)
 
 # Add source files
 set(LIB_PGEXT_SOURCES
+    error.cc
     memory.cc
     guc.cc
 )
