@@ -88,12 +88,12 @@ jobs:
         uses: Warpbuilds/action-debugger@v1.3
         with:
           limit-access-to-actor: true
-          
+
       - name: Package and Upload Build artifacts to S3
         if: success()
         run: |
           git config --global --add safe.directory /__w/springtail/springtail
-          sudo ./package.sh
+          ./package.sh
           {
             echo 'RELEASE_INFO<<EOF'
             cat install/INFO.txt
