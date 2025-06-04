@@ -191,27 +191,44 @@ Service::_set_index_state(const proto::SetIndexStateRequest& request)
     CHECK(index_info.table_id() == request.table_id() && index_info.id() == request.index_id());
     index_info.set_state(request.state());
 
-    auto index_names_t = _get_mutable_system_table(request.db_id(), sys_tbl::IndexNames::ID);
-    auto tuple = sys_tbl::IndexNames::Data::tuple(
-        index_info.namespace_id(), index_info.name(), index_info.table_id(), request.index_id(), xid.xid, xid.lsn,
-        static_cast<sys_tbl::IndexNames::State>(index_info.state()), index_info.is_unique());
-
-    // update the index state
-    index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
-
     std::map<uint32_t, uint32_t> keys;
     for (const auto& column : index_info.columns()) {
         assert(keys.find(column.idx_position()) == keys.end());
         keys[column.idx_position()] = column.position();
     }
 
+    return _upsert_index_name(request.db_id(), request.index_id(), index_info, xid, keys);
+}
+
+bool
+Service::_upsert_index_name(uint64_t db_id,
+                   uint64_t index_id,
+                   const proto::IndexInfo& index_info,
+                   const XidLsn& xid,
+                   const std::map<uint32_t, uint32_t>& keys,
+                   bool is_primary_index)
+{
+    auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);
+    auto tuple = sys_tbl::IndexNames::Data::tuple(
+        index_info.namespace_id(), index_info.name(), index_info.table_id(), index_id, xid.xid, xid.lsn,
+        static_cast<sys_tbl::IndexNames::State>(index_info.state()), index_info.is_unique());
+
+    // update the index state
+    index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
+
     // update columns with the state XID
-    _write_index(xid, request.db_id(), index_info.table_id(), index_info.id(), keys);
+    if (is_primary_index) {
+        if(!keys.empty()) {
+            _write_index(xid, db_id, index_info.table_id(), constant::INDEX_PRIMARY, keys);
+        }
+    } else {
+        _write_index(xid, db_id, index_info.table_id(), index_info.id(), keys);
+    }
 
     // add to index cache
     {
         boost::unique_lock lock(_mutex);
-        _index_cache[request.db_id()][index_info.table_id()][index_info.id()].emplace_back(
+        _index_cache[db_id][index_info.table_id()][index_info.id()].emplace_back(
             xid, index_info);
     }
 
