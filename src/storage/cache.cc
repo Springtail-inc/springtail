@@ -1431,10 +1431,10 @@ namespace springtail {
             // note: may return nullptr, indicating someone else just read the extent from disk and
             //       that we should check the cache again
             //
-            extent = _read_extent(file, extent_id, [this, extent_id, file](CacheExtentPtr ext) {
+            extent = _read_extent(file, extent_id, [this, extent_id, &file](CacheExtentPtr ext) {
                     // insert the extent into the cache
                     // note: we don't place into the LRU list since the extent will be in-use
-                    _clean_cache.insert({ {extent_id, file.string()}, ext });
+                    _clean_cache.insert({ {extent_id, file.native()}, ext });
                     });
         }
 
