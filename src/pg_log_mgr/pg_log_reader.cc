@@ -1224,6 +1224,7 @@ namespace springtail::pg_log_mgr {
             _xid_ts_tracker->remove_pg_xid(_current_xact->xid);
         } else {
             // update the write cache and system tables as needed
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Commit db_id: {}, xid={}, pg_xid={}", _db_id, xid, _current_xact->xid);
             _current_batch->commit(xid, postgres_timestamp);
             _xid_ts_tracker->add_xid(_current_xact->xid, xid);
         }

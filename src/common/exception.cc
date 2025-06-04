@@ -19,7 +19,7 @@ namespace {
         auto trace = cpptrace::generate_trace();
 
         std::stringstream ss;
-        trace.print(ss);
+        trace.print(ss, false); // no color
 
         LOG_ERROR("Backtrace from signal {}:\n{}", signo, ss.str());
         signal(signo, SIG_DFL);
