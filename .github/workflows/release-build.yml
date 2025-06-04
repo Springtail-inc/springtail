@@ -84,11 +84,6 @@ jobs:
           cd "$BUILD_TYPE"
           make install
 
-      - name: Setup interactive ssh session
-        uses: Warpbuilds/action-debugger@v1.3
-        with:
-          limit-access-to-actor: true
-
       - name: Package and Upload Build artifacts to S3
         if: success()
         run: |
