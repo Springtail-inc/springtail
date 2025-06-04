@@ -451,8 +451,6 @@ class TestCase:
             springtail.restart(self._props, self._build_dir,
                                start_xid=target_xid, unarchive_logs=True)
 
-            time.sleep(5)
-
             # reconnect to the replica database
             self._cleanup_fdw_connections()
             self._open_db_connections_for_fdw()
@@ -463,8 +461,6 @@ class TestCase:
             # restart Springtail at the target XID
             springtail.restart(self._props, self._build_dir,
                                start_xid=None, unarchive_logs=True)
-
-            time.sleep(5)
 
             # reconnect to the replica database
             self._cleanup_fdw_connections()
@@ -505,6 +501,7 @@ class TestCase:
                 with connection.cursor() as cursor:
                     self._execute_sql(cursor, f"BEGIN; SET statement_timeout = 5000; INSERT INTO sync_control (sync, test) VALUES ({self._sync_step}, '{self._name}'); COMMIT;", False, txn)
 
+            for db_name in self._connections[txn]["connections"].keys():
                 # Wait for sync row to appear in replica
                 try:
                     replica_name = self._db_prefix + db_name
