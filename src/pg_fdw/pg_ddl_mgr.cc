@@ -937,15 +937,13 @@ namespace springtail::pg_fdw {
 
             LOG_DEBUG(LOG_FDW, "i={}, j={}", i, j);
 
-            float from_val = from[i].begin().value();
-            float to_val = to[j].begin().value();
-
             LOG_DEBUG(LOG_FDW, "got from vals");
 
             std::string from_key = from[i].begin().key();
             std::string to_key = to[j].begin().key();
 
-            LOG_DEBUG(LOG_FDW, "From key: {}, From val: {}, To key: {}, To val: {}", from_key, from_val, to_key, to_val);
+            LOG_DEBUG(LOG_FDW, "From key: {}, From val: {}, To key: {}, To val: {}", from_key,
+                    (float)from[i].begin().value(), to_key, (float)to[j].begin().value());
 
             if (from_key == to_key) {
                 ++i;
