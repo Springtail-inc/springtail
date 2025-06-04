@@ -316,6 +316,13 @@ class Properties:
             self.redis.hset(fdw_key, fdw_id, fdw_json_str)
             self.redis.sadd(fdw_key + '_ids', fdw_id)
 
+    def set_all_db_states(self, state: str):
+        self.db_instance_id
+        for dbc in self.get_db_configs():
+            db_id = dbc['id']
+            db_state_key = str(self.db_instance_id) + ':instance_state'
+            self.redis.hset(db_state_key, db_id, state)
+
     def wait_for_state(self, state : str, id : int, error_state : str = "", timeout : int = 600) -> None:
         """Wait for the database state to reach the desired state.
         :param state: the state to wait for
@@ -394,6 +401,10 @@ class Properties:
         """Return the hostname for the given type."""
         key = self.db_instance_id + ':instance_config'
         return self.redis.hget(key, f'hostname:{type}')
+
+    def get_config_gitsha(self) -> str:
+        key = self.db_instance_id + ':instance_config'
+        return self.redis.hget(key, 'system_settings_gitsha')
 
     def get_db_states(self) -> dict:
         """Return a dictionary of database states."""

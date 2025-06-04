@@ -1,0 +1,53 @@
+name: Check System Settings
+on:
+  workflow_call:
+    inputs:
+      canonical_copy:
+        description: 'The canonical copy of the system.json.settings file, against which to check the file.'
+        type: string
+        required: true
+      target_files:
+        description: 'The target file(s) to check against the canonical copy; separate multiple files with a ":".'
+        type: string
+        required: true
+env:
+  OPTIONAL_PATHS: '.fdws;.databases;.redis.password;.redis.db;.redis.config_db;.redis.user;.org;.fs;.db_instances;.redis.host;.proxy.NOTE;.redis.port;'
+  SCRIPT_PATH: '.github/workflows/scripts/json_shape_check.py'
+
+jobs:
+  check-system-settings:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          clean: true
+
+      - name: Check system.json.settings
+        run: |
+          canonical_copy="${{ inputs.canonical_copy }}"
+          # Split the target_files input into an array (:)
+          IFS=':' read -r -a target_files <<< "${{ inputs.target_files }}"
+          
+          # Iterate over each target file and check against the canonical copy
+          for target_file in "${target_files[@]}"; do
+            if [ -z "$target_file" ]; then
+              echo "Error: target_file is empty. Please provide a valid target file."
+              exit 1
+            fi
+          
+            # Check if the target file exists
+            if [ ! -f "$target_file" ]; then
+              echo "Error: The target file ${target_file} does not exist."
+              exit 1
+            fi
+          
+            # Run the Python script to check the JSON shape
+            if ! python3 ${{ env.SCRIPT_PATH }} "$canonical_copy" "$target_file" "${{ env.OPTIONAL_PATHS }}" ; then
+              echo "Error: the ${target_file} file does not match the canonical copy: ${canonical_copy}."
+              exit 1
+            else
+              echo "The ${target_file} file matches the canonical copy: ${canonical_copy}."
+            fi
+          done

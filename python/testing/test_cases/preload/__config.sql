@@ -9,7 +9,6 @@
 ### add_db parallel_db2
 
 ### switch_db toast
-
 -- create table with toast data
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
@@ -36,6 +35,7 @@ FROM generate_series(1, 10) AS gs1(id)
 JOIN generate_series(1, 100000) AS gs2(id2) ON TRUE
 GROUP BY gs1.id;
 
+### switch_db data_types
 -- data types schema
 CREATE SCHEMA data_type_test;
 
@@ -428,6 +428,7 @@ INSERT INTO data_type_test.range_multirange_test (
     '{[2033-11-20, 2033-11-22), [2033-11-23, 2033-11-25)}'
 );
 
+### switch_db indices
 -- keys schema
 CREATE SCHEMA keys_test;
 
@@ -845,10 +846,13 @@ generate_series(1, 25);
 ## cleanup
 
 -- cleanup toast tables
+### switch_db toast
 DROP TABLE IF EXISTS preload_random_binary_test CASCADE;
 DROP TABLE IF EXISTS preload_random_text_test CASCADE;
 
+### switch_db data_types
 DROP SCHEMA IF EXISTS data_type_test CASCADE;
+### switch_db indices
 DROP SCHEMA IF EXISTS keys_test CASCADE;
 
 -- ### switch_db partitions

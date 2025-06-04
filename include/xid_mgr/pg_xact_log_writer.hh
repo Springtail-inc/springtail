@@ -10,7 +10,7 @@ namespace springtail::xid_mgr {
  */
 class PgXactLogWriter {
 public:
-    /** Page size to load at a time */
+    /** Page size to load at a time, must be divisible by XidElement size */
     static constexpr size_t PG_XLOG_PAGE_SIZE = 4096;
 
     /** Xact log prefix and suffix */
@@ -19,7 +19,7 @@ public:
 
     /**
      * @brief Storage structure
-     *
+     * NOTE: this structure needs to be a multiple of 8 BYTES
      */
     struct XidElement {
         uint32_t pg_xid;    ///< Postgress transaction id

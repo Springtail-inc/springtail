@@ -2,6 +2,7 @@
 
 #include <absl/log/log.h>
 #include <absl/log/check.h>
+#include <functional>
 
 #include <common/json.hh>
 #include <common/open_telemetry.hh>
@@ -76,12 +77,12 @@ namespace springtail {
 
         // if the extent ID is UNKNOWN, then we will get an empty page for the file
         if (extent_id == constant::UNKNOWN_EXTENT) {
-            return {_page_cache.get(), _page_cache->get_empty(file, target_xid), flush_cb};
+            return {_page_cache.get(), _page_cache->get_empty(file, target_xid), std::move(flush_cb)};
         }
 
         // if target is the same as access, get the page and return it
         if (target_xid == access_xid) {
-            return {_page_cache.get(), _page_cache->get(file, extent_id, access_xid, target_xid), flush_cb};
+            return {_page_cache.get(), _page_cache->get(file, extent_id, access_xid, target_xid), std::move(flush_cb)};
         }
 
         // if the target is ahead of the access, but there is roll-forward request, then it means
@@ -90,7 +91,7 @@ namespace springtail {
             // note: we know that the provided extent_id is valid at the access_xid, so we get the
             //       page at the target_xid using that original extent_id so that the caller can
             //       modify it from that point forward
-            return {_page_cache.get(), _page_cache->get(file, extent_id, access_xid, target_xid), flush_cb};
+            return {_page_cache.get(), _page_cache->get(file, extent_id, access_xid, target_xid), std::move(flush_cb)};
         }
 
         // note: from here forward, we know we are dealing with a roll-forward table data page
@@ -189,12 +190,14 @@ namespace springtail {
     StorageCache::PageCache::put(PagePtr page,
                                  std::function<bool(std::shared_ptr<Page>)> flush_callback)
     {
-        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(page->_end_xid)}});
+        //TODO: SPR-796
+        //auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(page->_end_xid)}});
 
         LOG_DEBUG(LOG_CACHE, "PUT file {} eid {} s_xid {} e_xid {}",
                             page->_file, page->_extent_id, page->_start_xid, page->_end_xid);
 
-        open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_PUT_CALLS);
+        //TODO: SPR-796
+        //open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_PUT_CALLS);
 
         boost::unique_lock lock(_mutex);
 
@@ -208,7 +211,7 @@ namespace springtail {
 
         if (page->_extent_id == constant::UNKNOWN_EXTENT) {
             // note: we cannot release a dirty page with no original extent ID back to the cache unless it has a flush callback
-            CHECK(!page->_is_dirty || page->_flush_callback);
+            DCHECK(!page->_is_dirty || page->_flush_callback);
 
             // release the space back to the cache
             --_size;
@@ -504,9 +507,10 @@ namespace springtail {
                                       uint64_t extent_id,
                                       uint64_t xid)
     {
-        CacheKey key(file, extent_id);
+        TIME_TRACE_SCOPED(time_trace::traces, cache__try_get_total);
 
         // check for the key in the hash map
+        std::pair<uint64_t, const std::string&> key{extent_id, file.native()};
         auto write_i = _cache.find(key);
         if (write_i == _cache.end()) {
             return nullptr;
@@ -519,20 +523,20 @@ namespace springtail {
         }
 
         // check if the page is valid through the requested xid
-        auto page = page_i->second;
-        if (!page->check_xid_valid(xid)) {
+        if (!page_i->second->check_xid_valid(xid)) {
             return nullptr;
         }
 
         // if the page is on the LRU list, remove it
-        if (page->_use_count == 0) {
-            _lru.erase(page->_lru_pos);
+        if (page_i->second->_use_count == 0) {
+            TIME_TRACE_SCOPED(time_trace::traces, cache__try_get__lru_erase);
+            _lru.erase(page_i->second->_lru_pos);
         }
 
         // increment it's use count
-        ++(page->_use_count);
+        ++(page_i->second->_use_count);
 
-        return page;
+        return page_i->second;
     }
 
     StorageCache::Page::Page(const std::filesystem::path &file,
@@ -714,7 +718,7 @@ namespace springtail {
             uint32_t row_count = (*extent)->row_count();
             if (index < row_count) {
                 // construct the iterator to the requested position and return it
-                return Iterator(this, extent_i, std::move(extent), (*extent)->at(index));
+                return Iterator(this, std::move(extent_i), std::move(extent), (*extent)->at(index));
             }
 
             index -= row_count;
@@ -971,23 +975,49 @@ namespace springtail {
         }
     }
 
-    void
-    StorageCache::Page::remove(const Iterator &pos)
+    bool
+    StorageCache::Page::try_remove_by_scan(TuplePtr value,
+                                           ExtentSchemaPtr schema)
     {
+        bool found = false;
+
         boost::unique_lock lock(_mutex);
+        auto fields = schema->get_fields();
+
+        auto extent_i = _extents.begin();
+        uint32_t row_pos;
+        while (!found && extent_i != _extents.end()) {
+            auto extent = extent_i->make_safe_extent(_file);
+            for (row_pos = 0; row_pos < (*extent)->row_count(); ++row_pos) {
+                auto row = *((*extent)->at(row_pos));
+                if (value->equal_strict(FieldTuple(fields, &row))) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                ++extent_i;
+            }
+        }
+
+        if (!found) {
+            return false;
+        }
+
         _is_dirty = true;
 
-        // make sure that we've got a mutable version of the extent
-        auto extent = pos._extent_i->make_dirty_safe_extent(_file);
-
-        // remove the row
-        (*extent)->remove(pos._row);
+        // mark the extent as dirty and remove the row from it
+        auto extent = extent_i->make_dirty_safe_extent(_file);
+        auto it = (*extent)->at(row_pos);
+        (*extent)->remove(it);
 
         // if the extent has become empty, remove it from the page
         if ((*extent)->empty()) {
             StorageCache::get_instance()->_data_cache->drop_dirty(*extent);
-            _extents.erase(pos._extent_i);
+            _extents.erase(extent_i);
         }
+
+        return true;
     }
 
     void
@@ -1132,8 +1162,7 @@ namespace springtail {
         }
 
         // if the ref is of a CLEAN page
-        CacheKey key(file, ref.id());
-        auto extent = _get_clean(key);
+        auto extent = _get_clean(file, ref.id());
 
         if (mark_dirty) {
             // we create a DIRTY copy of it by calling extract()
@@ -1155,10 +1184,11 @@ namespace springtail {
             // not in memory, so need to retrieve from disk
             auto key_i = _cache_id_map.find(cache_id);
             DCHECK(key_i != _cache_id_map.end());
+            const auto& [_, value] = *key_i;
 
             // note: no one should know about the cache ID except for the owning page, so this
             //       should never return nullptr since there should never be two concurrent readers
-            extent = _read_extent(key_i->second, [this, cache_id](CacheExtentPtr extent) {
+            extent = _read_extent(value.second, value.first, [this, cache_id](CacheExtentPtr extent) {
                 // mark it as mutable
                 extent->_state = CacheExtent::State::MUTABLE;
                 extent->_cache_id = cache_id;
@@ -1367,19 +1397,27 @@ namespace springtail {
     }
 
     StorageCache::CacheExtentPtr
-    StorageCache::DataCache::_get_clean(const CacheKey &key)
+    StorageCache::DataCache::_get_clean(const std::filesystem::path& file, uint64_t extent_id)
     {
+
+        std::pair<uint64_t, const std::string&> key{extent_id, file.native()};
         CacheExtentPtr extent = nullptr;
+
         while (extent == nullptr) {
+
+
             // search for the requested extent
-            auto cache_i = _clean_cache.find(key);
+            const auto cache_i = _clean_cache.find(key);
             if (cache_i != _clean_cache.end()) {
                 extent = cache_i->second;
 
                 // remove the entry from the LRU list
                 if (extent->_use_count == 0) {
-                    _clean_lru.erase(extent->_pos);
-                    extent->_pos = _clean_lru.end();
+                    {
+                        TIME_TRACE_SCOPED(time_trace::traces, cache_get_clean_lru_erase);
+                        _clean_lru.erase(extent->_pos);
+                    }
+                    extent->_pos = {};
                 }
 
                 // update the use count
@@ -1393,10 +1431,10 @@ namespace springtail {
             // note: may return nullptr, indicating someone else just read the extent from disk and
             //       that we should check the cache again
             //
-            extent = _read_extent(key, [this, key](CacheExtentPtr extent) {
+            extent = _read_extent(file, extent_id, [this, extent_id, &file](CacheExtentPtr ext) {
                     // insert the extent into the cache
                     // note: we don't place into the LRU list since the extent will be in-use
-                    _clean_cache.insert({ key, extent });
+                    _clean_cache.insert({ {extent_id, file.native()}, ext });
                     });
         }
 
@@ -1501,7 +1539,7 @@ namespace springtail {
             return;
         }
 
-        CHECK(extent->_use_count);
+        DCHECK(extent->_use_count);
 
         // reduce the use count
         --(extent->_use_count);
@@ -1512,7 +1550,7 @@ namespace springtail {
         }
 
         // note: shouldn't be possible to call _release() when FLUSHING
-        CHECK(extent->_state != CacheExtent::State::FLUSHING);
+        DCHECK(extent->_state != CacheExtent::State::FLUSHING);
 
         // if the use count is zero, place into the appropriate LRU list
         if (extent->_state == CacheExtent::State::DIRTY) {
@@ -1523,10 +1561,10 @@ namespace springtail {
     }
 
     StorageCache::CacheExtentPtr
-    StorageCache::DataCache::_read_extent(const CacheKey &key,
+    StorageCache::DataCache::_read_extent(const std::filesystem::path& file, uint64_t extent_id,
                                           std::function<void(CacheExtentPtr)> callback)
     {
-        TIME_TRACE_SCOPED(time_trace::traces, _read_extent);
+        std::pair<uint64_t, const std::string&> key{extent_id, file.native()};
 
         // extent not cached, check if someone is reading it from disk
         auto io_i = _io_map.find(key);
@@ -1560,9 +1598,9 @@ namespace springtail {
         lock.unlock();
 
         // read the extent
-        auto handle = IOMgr::get_instance()->open(key.first, IOMgr::READ, true);
-        auto response = handle->read(key.second);
-        auto extent = std::make_shared<CacheExtent>(response->data, key.first, key.second);
+        auto handle = IOMgr::get_instance()->open(file, IOMgr::READ, true);
+        auto response = handle->read(extent_id);
+        auto extent = std::make_shared<CacheExtent>(response->data, file, extent_id);
 
         // reacquire the lock once IO complete
         lock.lock();
