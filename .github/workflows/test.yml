@@ -23,7 +23,7 @@ on:
 jobs:
   test:
     name: test
-    runs-on: warp-ubuntu-latest-arm64-4x
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     timeout-minutes: 60
     container:
       image: ${{ inputs.builder_image_version_tag }}

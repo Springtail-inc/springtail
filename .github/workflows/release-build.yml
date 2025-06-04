@@ -33,7 +33,7 @@ on:
 jobs:
   build:
     name: Build Springtail Packages
-    runs-on: warp-ubuntu-latest-arm64-4x-spot
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     timeout-minutes: 30
     container:
       image: ${{ inputs.image_version_tag }}

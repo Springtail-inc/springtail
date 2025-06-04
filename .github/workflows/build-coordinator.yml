@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: warp-ubuntu-latest-arm64-4x-spot
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     timeout-minutes: 35
     container:
       image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ inputs.build_type == 'release'  && vars.RELEASE_BUILDER_IMAGE_VERSION  || vars.BUILDER_IMAGE_VERSION }}

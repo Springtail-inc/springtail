@@ -15,7 +15,7 @@ permissions:
 jobs:
   nightly_job:
     name: Nightly Job
-    runs-on: warp-ubuntu-latest-arm64-4x
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     timeout-minutes: 180
     container:
       image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
