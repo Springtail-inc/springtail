@@ -350,16 +350,14 @@ OpenTelemetry::init(std::string_view component_name)
 void
 OpenTelemetry::flush()
 {
-    if (_inited_flag && !_shutdown_flag && get_instance()->_otel_enabled) {
+    if (_inited_flag && !_shutdown_flag && get_instance()->_otel_enabled && get_instance()->_otel_remote) {
         get_instance()->_meter_provider->ForceFlush();
         opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider> trace_provider =
             opentelemetry::trace::Provider::GetTracerProvider();
         dynamic_cast<opentelemetry::sdk::trace::TracerProvider *>(trace_provider.get())->ForceFlush();
         auto logger_provider = opentelemetry::logs::Provider::GetLoggerProvider();
         std::cout << "log provider pointer: " << logger_provider.get() << std::endl;
-        if (get_instance()->_otel_remote) {
-            dynamic_cast<opentelemetry::sdk::logs::LoggerProvider *>(logger_provider.get())->ForceFlush();
-        }
+        dynamic_cast<opentelemetry::sdk::logs::LoggerProvider *>(logger_provider.get())->ForceFlush();
     }
 }
 
