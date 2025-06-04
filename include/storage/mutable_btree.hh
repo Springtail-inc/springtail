@@ -140,6 +140,13 @@ namespace springtail {
             return std::make_shared<FieldArray>(_leaf_keys->begin(), _leaf_keys->end());
         }
 
+        /**
+         * Helper function to determine if the btree is empty by checking if the root is empty.
+         */
+        bool empty() {
+            return _root->empty();
+        }
+
     private:
         /** The default maximum number of extents in an in-memory page before we automatically flush it to disk. */
         static const uint32_t MAX_EXTENT_COUNT = 16;

@@ -959,11 +959,12 @@ namespace springtail::pg_fdw {
             else if ((j + 1 < to.size()) && (to[j + 1].begin().key() == from_key)) {
                 // to[i] was added
                 return fmt::format("ALTER TYPE {}.{} ADD VALUE '{}' BEFORE '{}';",
-                    schema, type_name, conn->escape_string(to_key), conn->escape_string(from_key));
+                                   schema, type_name, conn->escape_string(to_key), conn->escape_string(from_key));
             }
-            else if (i + 1 < from.size() &&
-                     j + 1 < to.size() &&
-                     from[i + 1].begin().key() == to[j + 1].begin().key()) {
+            else if ((i + 1 < from.size() &&
+                      j + 1 < to.size() &&
+                      from[i + 1].begin().key() == to[j + 1].begin().key()) ||
+                     (i + 1 == from.size() && j + 1 == to.size())) {
                 // assume we renamed the current key
                 return fmt::format("ALTER TYPE {}.{} RENAME VALUE '{}' TO '{}';", schema, type_name,
                                    conn->escape_string(from_key), conn->escape_string(to_key));

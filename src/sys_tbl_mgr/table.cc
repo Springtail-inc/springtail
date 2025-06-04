@@ -595,31 +595,17 @@ namespace indexer_helpers {
 
 
 
-        // find primary index
+        // find primary index root
         auto it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_PRIMARY; });
         assert(it != roots.end());
 
-        // check if we need to use an empty page
-        if (_id > constant::MAX_SYSTEM_TABLE_ID) {
-            // for non-system tables
-            _use_empty = (_stats.row_count == 0);
-            if (!_use_empty && it->extent_id != constant::UNKNOWN_EXTENT) {
-                _primary_index->init(it->extent_id);
-            } else {
-                _use_empty = true;
-                _primary_index->init_empty();
-            }
+        // initialize the primary index
+        if (it->extent_id != constant::UNKNOWN_EXTENT) {
+            _primary_index->init(it->extent_id);
         } else {
-            // check how we need to initialize the primary index for system tables
-            if (it->extent_id != constant::UNKNOWN_EXTENT) {
-                _use_empty = false;
-                _primary_index->init(it->extent_id);
-            } else {
-                _use_empty = true;
-                _primary_index->init_empty();
-            }
+            _primary_index->init_empty();
         }
-
+        _use_empty = _primary_index->empty();
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
 
         // deal with secondary indexes
