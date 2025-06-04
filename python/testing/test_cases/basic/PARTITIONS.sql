@@ -176,8 +176,8 @@ generate_series(1, 25);
 
 ## verify
 -- verify
-SELECT * FROM employees;
-SELECT * FROM sales;
+SELECT * FROM employees ORDER BY id;
+SELECT * FROM sales ORDER BY id;
 SELECT * FROM sales_hash ORDER BY id;
 
 SELECT * FROM country_sales ORDER BY id;
