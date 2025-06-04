@@ -678,6 +678,9 @@ namespace springtail::pg_fdw {
                                           nlohmann::json::parse(value_json_str),
                                           conn);
             }
+
+            // nothing to actually change in the FDW
+            return {};
         }
 
         // can't currently support other kinds of DDL mutations
@@ -944,27 +947,28 @@ namespace springtail::pg_fdw {
 
             LOG_DEBUG(LOG_FDW, "From key: {}, From val: {}, To key: {}, To val: {}", from_key, from_val, to_key, to_val);
 
-            if (from_val == to_val) {
-                if (from_key == to_key) {
-                    ++i;
-                    ++j;
-                    continue;
-                } else {
-                    // key changed
-                    return fmt::format("ALTER TYPE {}.{} RENAME VALUE '{}' TO '{}';",
-                        schema, type_name, conn->escape_string(from_key), conn->escape_string(to_key));
-                }
+            if (from_key == to_key) {
+                ++i;
+                ++j;
+                continue;
             }
-            else if ((i + 1 < from.size()) && (from[i + 1].begin().value() == to_val)) {
+            else if ((i + 1 < from.size()) && (from[i + 1].begin().key() == to_key)) {
                 // from[i] was removed
                 CHECK(false);  // removal is not supported
             }
-            else if ((j + 1 < to.size()) && (to[j + 1].begin().value() == from_val)) {
-                // to[j] was added before from[i]
+            else if ((j + 1 < to.size()) && (to[j + 1].begin().key() == from_key)) {
+                // to[i] was added
                 return fmt::format("ALTER TYPE {}.{} ADD VALUE '{}' BEFORE '{}';",
-                    schema, type_name, conn->escape_string(to_key), conn->escape_string(from_key));
+                                   schema, type_name, conn->escape_string(to_key), conn->escape_string(from_key));
             }
-            else {
+            else if ((i + 1 < from.size() &&
+                      j + 1 < to.size() &&
+                      from[i + 1].begin().key() == to[j + 1].begin().key()) ||
+                     (i + 1 == from.size() && j + 1 == to.size())) {
+                // assume we renamed the current key
+                return fmt::format("ALTER TYPE {}.{} RENAME VALUE '{}' TO '{}';", schema, type_name,
+                                   conn->escape_string(from_key), conn->escape_string(to_key));
+            } else {
                 // Otherwise treat as added after previous
                 if (i > 0) {
                     return fmt::format("ALTER TYPE {}.{} ADD VALUE '{}' AFTER '{}';",
