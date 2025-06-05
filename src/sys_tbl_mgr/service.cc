@@ -197,16 +197,15 @@ Service::_set_index_state(const proto::SetIndexStateRequest& request)
         keys[column.idx_position()] = column.position();
     }
 
-    return _upsert_index_name(request.db_id(), request.index_id(), index_info, xid, keys);
+    return _upsert_index_name(request.db_id(), index_info, xid, keys);
 }
 
 bool
 Service::_upsert_index_name(uint64_t db_id,
-                   uint64_t index_id,
-                   const proto::IndexInfo& index_info,
-                   const XidLsn& xid,
-                   const std::map<uint32_t, uint32_t>& keys,
-                   bool is_primary_index)
+                            const proto::IndexInfo& index_info,
+                            const XidLsn& xid,
+                            const std::map<uint32_t, uint32_t>& keys,
+                            bool is_primary_index)
 {
     auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);
 
@@ -216,7 +215,7 @@ Service::_upsert_index_name(uint64_t db_id,
     }
 
     auto tuple = sys_tbl::IndexNames::Data::tuple(
-        index_info.namespace_id(), index_info.name(), index_info.table_id(), index_id, xid.xid, xid.lsn,
+        index_info.namespace_id(), index_info.name(), index_info.table_id(), index_info.id(), xid.xid, xid.lsn,
         static_cast<sys_tbl::IndexNames::State>(index_info.state()), is_unique);
 
     // update the index state
@@ -346,7 +345,7 @@ Service::_create_index(const proto::IndexRequest& request)
     // Set namespace ID for the requested index
     mutable_index_request.mutable_index()->set_namespace_id(ns_info->id);
 
-    _upsert_index_name(request.db_id(), request.index().id(), mutable_index_request.index(), xid, keys);
+    _upsert_index_name(request.db_id(), mutable_index_request.index(), xid, keys);
 
     return ddl;
 }
@@ -504,7 +503,7 @@ Service::_drop_index(const XidLsn& xid,
     }
 
     index_info.set_state(static_cast<int32_t>(index_state));
-    _upsert_index_name(db_id, index_id, index_info, xid, keys);
+    _upsert_index_name(db_id, index_info, xid, keys);
 }
 
 grpc::Status
@@ -2689,7 +2688,7 @@ Service::_set_primary_index(uint64_t db_id,
         primary_keys[c.pk_position()] = c.position();
     }
 
-    _upsert_index_name(db_id, index.id(), index, xid, primary_keys, true);
+    _upsert_index_name(db_id, index, xid, primary_keys, true);
 }
 
 void
