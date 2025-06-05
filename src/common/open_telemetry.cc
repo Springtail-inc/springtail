@@ -350,7 +350,7 @@ OpenTelemetry::init(std::string_view component_name)
 void
 OpenTelemetry::flush()
 {
-    if (_inited_flag && !_shutdown_flag && get_instance()->_otel_enabled) {
+    if (_inited_flag && !_shutdown_flag && get_instance()->_otel_enabled && get_instance()->_otel_remote) {
         get_instance()->_meter_provider->ForceFlush();
         opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider> trace_provider =
             opentelemetry::trace::Provider::GetTracerProvider();

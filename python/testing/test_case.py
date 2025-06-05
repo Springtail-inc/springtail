@@ -1,5 +1,4 @@
 import concurrent.futures
-import csv
 import io
 import logging
 from lxml import etree
@@ -19,7 +18,6 @@ class TestCase:
     """
     def __init__(self,
                  filename: str,
-                 props: springtail.Properties,
                  build_dir: str,
                  test_params: dict = {},
                  valid_sections: list = ['test', 'verify', 'cleanup']) -> None:
@@ -27,7 +25,6 @@ class TestCase:
         self._filename = os.path.abspath(filename)
         self._name = os.path.basename(self._filename)
         self._directory = os.path.dirname(self._filename)
-        self._props = props
         self._build_dir = build_dir
         self._test_params = test_params
         self._status = 'INIT'
@@ -46,13 +43,7 @@ class TestCase:
             'poll_interval': 0.001
         }
 
-        fdw_config = props.get_fdw_config()
-        db_configs = props.get_db_configs()
-        self._primary_name = db_configs[0]['name']
-        if 'db_prefix' in fdw_config:
-            self._replica_name = fdw_config['db_prefix'] + self._primary_name
-        else:
-            self._replica_name = self._primary_name
+        self._added_databases = []
 
         # Each section is composed of an array of sub-sections which
         # are either "sequential" or "parallel".  Sequential
@@ -66,10 +57,36 @@ class TestCase:
 
         self._txns = set({}) # the set of transaction names referenced in this test
         self._connections = {} # connections to the primary for each transaction
-        self._fdw = None # connection to Springtail
+        self._fdw = {} # connection to Springtail
         self._sync_step = 0 # incrementing ID used for replica synchronization
         self._recovery_points = { } # map from recovery point name to XID
 
+
+    def set_props(self, props: springtail.Properties) -> None:
+        self._props = props
+        fdw_config = props.get_fdw_config()
+        db_configs = props.get_db_configs()
+        self._primary_name = db_configs[0]['name']
+        self._db_prefix = ""
+        if 'db_prefix' in fdw_config:
+            self._db_prefix = fdw_config['db_prefix']
+        self._replica_name = self._db_prefix + self._primary_name
+
+    def get_added_databases(self) -> list:
+        return self._added_databases
+
+    def _setup_default_fdw(self) -> None:
+        if len(self._fdw) == 0:
+            # connect to the replica database -- used to perform any 'sync' directives
+            self._fdw[self._replica_name] = springtail.connect_fdw_instance(self._props, self._replica_name)
+            self._fdw[self._replica_name].autocommit = True
+
+    def _cleanup_fdw_connections(self) -> None:
+        if len(self._fdw) == 0:
+            return
+        for db_name in self._fdw:
+            self._fdw[db_name].close()
+        self._fdw = {}
 
     def _append_command(self,
                         command: dict,
@@ -115,7 +132,6 @@ class TestCase:
         """Parse the test file."""
         is_threaded = False
         sql = []
-        txns = { }
         cur_txn = self._metadata['default_txn']
         line_num = 0
 
@@ -322,6 +338,30 @@ class TestCase:
                             self._raise_error(f'{line_num}: "live_startup" must be specified in the "{_GLOBAL_CONFIG_FILE}" file')
                         self._metadata['live_startup'] = float(directive[1])
 
+                    elif directive[0] == 'add_db':
+                        if section != 'setup':
+                            self._raise_error(f'{line_num}: "add_db" must be specified in the "metadata" section')
+                        if not self._filename.endswith(_GLOBAL_CONFIG_FILE):
+                            self._raise_error(f'{line_num}: "add_db" must be specified in the "{_GLOBAL_CONFIG_FILE}" file')
+                        if len(directive) < 2:
+                            self._raise_error(f'{line_num}: "add_db" must specify a database_name value')
+                        db_name = directive[1]
+                        self._append_command({
+                            'type': 'add_db',
+                            'database_name': db_name
+                        }, section, is_threaded, cur_txn, line_num)
+                        self._added_databases.append(db_name)
+
+                    elif directive[0] == 'switch_db':
+                        if section != 'test' and section != 'setup' and section != 'verify' and section != 'cleanup':
+                            self._raise_error(f'{line_num}: "switch_db" must be in either the "setup", "test", "verify", or "cleanup" sections')
+                        if len(directive) < 2:
+                            self._raise_error(f'{line_num}: "switch_db" must specify a database_name value')
+                        self._append_command({
+                            'type': 'switch_db',
+                            'database_name': directive[1]
+                        }, section, is_threaded, cur_txn, line_num)
+
                     else:
                         self._raise_error(f'{line_num}: unknown directive "{directive[0]}"')
 
@@ -361,10 +401,10 @@ class TestCase:
             cursor.copy_from(f, table, sep=',', null='')
 
 
-    def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool, quiet: bool = False) -> list:
+    def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool, txn: str = 'replica', quiet: bool = False) -> list:
         """Execute the provided SQL using the provided cursor."""
         if not quiet:
-            logging.debug(f'Execute SQL: {sql}')
+            logging.debug(f'Execute transaction {txn} SQL: {sql}')
         try:
             cursor.execute(sql)
 
@@ -374,6 +414,7 @@ class TestCase:
         except psycopg2.OperationalError as e:
             self._raise_failure(f'Query timed out: {e}')
         except Exception as e:
+            logging.error(f"Error executing SQL:\n{sql},\n\ttxn: {txn},\n\tError:{str(e)}")
             self._raise_failure(f'Unknown error: {e}')
 
 
@@ -411,9 +452,8 @@ class TestCase:
                                start_xid=target_xid, unarchive_logs=True)
 
             # reconnect to the replica database
-            if self._fdw:
-                self._fdw.close()
-                self._fdw = springtail.connect_fdw_instance(self._props, self._replica_name)
+            self._cleanup_fdw_connections()
+            self._open_db_connections_for_fdw()
 
             return None
 
@@ -423,45 +463,50 @@ class TestCase:
                                start_xid=None, unarchive_logs=True)
 
             # reconnect to the replica database
-            if self._fdw:
-                self._fdw.close()
-                self._fdw = springtail.connect_fdw_instance(self._props, self._replica_name)
+            self._cleanup_fdw_connections()
+            self._open_db_connections_for_fdw()
 
             return None
 
-        if command['type'] == 'streaming':
-            is_enabling = command['enable']
-            with self._connections[command['txn']].cursor() as cursor:
+        # handle SQL statements
+        txn = command['txn']
+        current_db = self._connections[txn]['current_db']
+        connection = self._connections[txn]['connections'][current_db]
+        with connection.cursor() as cursor:
+            if command['type'] == 'streaming':
+                is_enabling = command['enable']
                 if is_enabling:
                     logging.debug(f'Enabling streaming')
                     # set to lower value to enable streaming
-                    self._execute_sql(cursor, f"ALTER SYSTEM SET logical_decoding_work_mem = '64kB'", False)
-                    self._execute_sql(cursor, f"SELECT pg_reload_conf()", False)
+                    self._execute_sql(cursor, f"ALTER SYSTEM SET logical_decoding_work_mem = '64kB'", False, txn)
+                    self._execute_sql(cursor, f"SELECT pg_reload_conf()", False, txn)
                 else:
                     # reset to default value
-                    self._execute_sql(cursor, f"ALTER SYSTEM SET logical_decoding_work_mem = '64MB'", False)
-                    self._execute_sql(cursor, f"SELECT pg_reload_conf()", False)
+                    self._execute_sql(cursor, f"ALTER SYSTEM SET logical_decoding_work_mem = '64MB'", False, txn)
+                    self._execute_sql(cursor, f"SELECT pg_reload_conf()", False, txn)
 
-        # handle SQL statements
-        with self._connections[command['txn']].cursor() as cursor:
-            if command['type'] == 'load_csv':
+            elif command['type'] == 'load_csv':
                 # call the helper to read the CSV file and populate the table
                 self._load_csv(cursor, command['file'], command['table'])
                 return None
 
             elif command['type'] == 'sql':
                 # execute a SQL command
-                return self._execute_sql(cursor, command['sql'], do_fetch)
+                return self._execute_sql(cursor, command['sql'], do_fetch, txn)
 
-            elif command['type'] == 'sync':
-                # insert a row to the sync_control table
-                self._sync_step += 1
-                self._execute_sql(cursor, f"BEGIN; SET statement_timeout = 5000; INSERT INTO sync_control (sync, test) VALUES ({self._sync_step}, '{self._name}'); COMMIT;", False)
+        if command['type'] == 'sync':
+            # insert a row to the sync_control table
+            self._sync_step += 1
+            for db_name, connection in self._connections[txn]["connections"].items():
+                with connection.cursor() as cursor:
+                    self._execute_sql(cursor, f"BEGIN; SET statement_timeout = 5000; INSERT INTO sync_control (sync, test) VALUES ({self._sync_step}, '{self._name}'); COMMIT;", False, txn)
 
+            for db_name in self._connections[txn]["connections"].keys():
                 # Wait for sync row to appear in replica
                 try:
+                    replica_name = self._db_prefix + db_name
                     sync_time = common.wait_for_replica_condition(
-                        self._fdw,
+                        self._fdw[replica_name],
                         f"SELECT MAX(sync) FROM sync_control WHERE test = '{self._name}'",
                         (self._sync_step,),
                         timeout=self._metadata['sync_timeout'],
@@ -470,16 +515,18 @@ class TestCase:
                 except Exception as e:
                     self._raise_failure(f'Sync control error: {e}')
 
-                return []
+            return []
 
-            if command['type'] == 'table_exists' or command['type'] == 'index_exists':
-                results = {}
+        if command['type'] == 'table_exists' or command['type'] == 'index_exists':
+            results = {}
 
-                results['exists'] = command['replica_exists']
+            results['exists'] = command['replica_exists']
 
-                return results
+            return results
 
-            elif command['type'] == 'schema_check':
+        connection = self._connections[txn]['connections'][current_db]
+        with connection.cursor() as cursor:
+            if command['type'] == 'schema_check':
                 results = {}
 
                 sql = f""" SELECT a.attname AS name,
@@ -487,31 +534,31 @@ class TestCase:
                                         WHEN t.oid = 1560 THEN 1562
                                         ELSE t.oid
                                     END AS pg_type,
-                                  NOT a.attnotnull AS nullable,
-                                  a.attnum AS position
-                           FROM pg_catalog.pg_attribute a
-                           JOIN pg_class c ON a.attrelid = c.oid
-                           JOIN pg_type t ON a.atttypid = t.oid
-                           JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
-                           WHERE n.nspname = '{command["schema"]}' AND c.relname = '{command["table"]}'
-                                 AND c.relkind = 'r'
-                                 AND a.attnum > 0
-                                 AND NOT a.attisdropped
-                           ORDER BY a.attnum ASC;"""
-                results['columns'] = self._execute_sql(cursor, sql, True)
+                                    NOT a.attnotnull AS nullable,
+                                    a.attnum AS position
+                            FROM pg_catalog.pg_attribute a
+                            JOIN pg_class c ON a.attrelid = c.oid
+                            JOIN pg_type t ON a.atttypid = t.oid
+                            JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
+                            WHERE n.nspname = '{command["schema"]}' AND c.relname = '{command["table"]}'
+                                    AND c.relkind = 'r'
+                                    AND a.attnum > 0
+                                    AND NOT a.attisdropped
+                            ORDER BY a.attnum ASC;"""
+                results['columns'] = self._execute_sql(cursor, sql, True, txn)
 
                 # retrieve the primary index information for the table
                 sql = f"""SELECT unnest(conkey) AS column_id,
-                                 generate_subscripts(conkey, 1) - 1 AS position
+                                    generate_subscripts(conkey, 1) - 1 AS position
                             FROM pg_catalog.pg_constraint c
                             JOIN pg_catalog.pg_class t ON (t.oid = c.conrelid)
                             JOIN pg_catalog.pg_namespace n ON (t.relnamespace = n.oid)
-                           WHERE n.nspname = '{command["schema"]}' AND t.relname = '{command["table"]}' AND c.contype = 'p';"""
-                results['primary'] = self._execute_sql(cursor, sql, True)
+                            WHERE n.nspname = '{command["schema"]}' AND t.relname = '{command["table"]}' AND c.contype = 'p';"""
+                results['primary'] = self._execute_sql(cursor, sql, True, txn)
 
                 sql = f"""SELECT c.oid as table_id,
-                                 i.indexrelid as index_id,
-                                 unnest(string_to_array(i.indkey::text, ' '))::int as column_id
+                                    i.indexrelid as index_id,
+                                    unnest(string_to_array(i.indkey::text, ' '))::int as column_id
                     FROM pg_index i
                     JOIN pg_class c ON c.oid = i.indrelid
                     JOIN pg_namespace ns ON ns.oid = c.relnamespace
@@ -519,12 +566,19 @@ class TestCase:
                     AND i.indisprimary IS FALSE
                     ORDER BY column_id ASC;
                 """
-                results['secondary'] = self._execute_sql(cursor, sql, True)
+                results['secondary'] = self._execute_sql(cursor, sql, True, txn)
 
                 return results
 
+        if command['type'] == "add_db":
+            return None
 
-    def _wait_for_index_reconciliation(self, cursor, wait_for: int) -> bool:
+        elif command['type'] == "switch_db":
+            self._connections[txn]['current_db'] = command['database_name']
+            return None
+
+
+    def _wait_for_index_reconciliation(self, wait_for: int) -> bool:
         query = """
             SELECT count(DISTINCT index_id)
             FROM __pg_springtail_catalog.index_names
@@ -542,7 +596,7 @@ class TestCase:
         """
 
         try:
-            common.wait_for_replica_condition(self._fdw, query, (0, ), timeout=wait_for)
+            common.wait_for_replica_condition(self._fdw[self._replica_name], query, (0, ), timeout=wait_for)
         except Exception as e:
             self._raise_failure(f'Secondary indexes not in sync within {wait_for}s.')
 
@@ -570,9 +624,16 @@ class TestCase:
         database.
 
         """
-        with self._fdw.cursor() as cursor:
+        if command['type'] == 'switch_db':
+            return None
+
+        txn = command['txn']
+        db_name = self._connections[txn]['current_db']
+        connection = self._fdw[self._db_prefix + db_name]
+
+        with connection.cursor() as cursor:
             if command['type'] == 'sql':
-                return self._execute_sql(cursor, command['sql'], True)
+                return self._execute_sql(cursor, command['sql'], True, 'replica')
 
             elif command['type'] == 'table_exists':
                 results = {}
@@ -587,7 +648,7 @@ class TestCase:
                 sql = f"""WITH latest_table AS ({with_sql})
                           SELECT exists FROM latest_table LIMIT 1"""
 
-                sql_result = self._execute_sql(cursor, sql, True)
+                sql_result = self._execute_sql(cursor, sql, True, 'replica')
 
                 replica_result = False if not sql_result else sql_result[0][0]
 
@@ -612,7 +673,7 @@ class TestCase:
                 sql = f"""WITH latest_table AS ({with_sql})
                           SELECT index_exists FROM latest_table LIMIT 1"""
 
-                sql_result = self._execute_sql(cursor, sql, True)
+                sql_result = self._execute_sql(cursor, sql, True, 'replica')
 
                 replica_result = False if not sql_result else sql_result[0][0]
                 results['exists'] = replica_result
@@ -635,7 +696,7 @@ class TestCase:
                 sql = f"""WITH latest_table AS ({with_sql}), ranked_columns AS ({ranking_sql})
                           SELECT name, pg_type, nullable, position FROM ranked_columns WHERE rn = 1 AND exists IS TRUE ORDER BY position ASC;"""
 
-                results['columns'] = self._execute_sql(cursor, sql, True)
+                results['columns'] = self._execute_sql(cursor, sql, True, 'replica')
 
                 # retrieve the primary key data
                 with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists"
@@ -648,15 +709,15 @@ class TestCase:
                 ranking_sql = self._get_ranking_sql()
                 sql = f"""WITH latest_table AS ({with_sql}), ranked_columns AS ({ranking_sql})
                           SELECT column_id, position FROM ranked_columns ORDER BY position ASC;"""
-                results['primary'] = self._execute_sql(cursor, sql, True)
+                results['primary'] = self._execute_sql(cursor, sql, True, 'replica')
 
                 # Wait for index reconciliation
-                self._wait_for_index_reconciliation(cursor, command["wait_for"])
+                self._wait_for_index_reconciliation(command["wait_for"])
 
                 index_sql = self._get_ranking_sql(is_index_query=True)
                 sql = f"""WITH latest_table AS ({with_sql}), ranked_indexes AS ({index_sql})
                          SELECT table_id, index_id, column_id FROM ranked_indexes ORDER BY column_id ASC;"""
-                results['secondary'] = self._execute_sql(cursor, sql, True)
+                results['secondary'] = self._execute_sql(cursor, sql, True, 'replica')
 
                 return results
 
@@ -676,17 +737,44 @@ class TestCase:
     def _run_background(self, frequency: float):
         connection = springtail.connect_db_instance(self._props, self._primary_name)
         with connection.cursor() as cursor:
-            self._execute_sql(cursor, f'BEGIN; DROP TABLE IF EXISTS background_control; CREATE TABLE background_control (value INT); COMMIT;', False)
+            self._execute_sql(cursor, f'BEGIN; DROP TABLE IF EXISTS background_control; CREATE TABLE background_control (value INT); COMMIT;', False, 'background')
 
         # run periodically
         while not self._stop_thread.wait(frequency):
             self._value += 1
             with connection.cursor() as cursor:
-                self._execute_sql(cursor, f"BEGIN; INSERT INTO background_control (value) VALUES ({self._value}); COMMIT;", False, True)
+                self._execute_sql(cursor, f"BEGIN; INSERT INTO background_control (value) VALUES ({self._value}); COMMIT;", False, 'background', True)
 
             pass
         connection.close()
 
+    def _open_db_connections_for_txn(self, txn: str, use_proxy: bool) -> None:
+        self._connections[txn] = {
+            'current_db': self._primary_name,
+            'connections': {}
+        }
+        for db_config in self._props.get_db_configs():
+            # connect to the db instance
+            db_name = db_config['name']
+            if db_name in self._connections[txn]['connections']:
+                self._connections[txn]['connections'][db_name].close()
+
+            if use_proxy:
+                logging.debug(f'Connecting to proxy for txn "{txn}" database "{db_name}"')
+                self._connections[txn]['connections'][db_name] = springtail.connect_proxy(self._props, db_name)
+            else:
+                logging.debug(f'Connecting to primary for txn "{txn}" database "{db_name}"')
+                self._connections[txn]['connections'][db_name] = springtail.connect_db_instance(self._props, db_name)
+            self._connections[txn]['connections'][db_name].autocommit = self._metadata['autocommit']
+
+    def _open_db_connections_for_fdw(self) -> None:
+        for db_config in self._props.get_db_configs():
+            # connect to the db instance
+            db_name = self._db_prefix + db_config['name']
+            if db_name in self._fdw:
+                self._fdw[db_name].close()
+            self._fdw[db_name] = springtail.connect_db_instance(self._props, db_name)
+            self._fdw[db_name].autocommit = True
 
     def start_background(self) -> None:
         if self._metadata['live_startup'] is not None:
@@ -710,21 +798,22 @@ class TestCase:
         logging.info(f'{self._name} -- Running setup()')
 
         # construct a connection for each transaction in the test
-        if len(self._txns) == 0:
+        if self._metadata['default_txn'] not in self._txns:
             self._txns.add(self._metadata['default_txn'])
 
         for txn in self._txns:
-            logging.debug(f'Connecting to database for txn "{txn}"')
-            self._connections[txn] = springtail.connect_db_instance(self._props, self._primary_name)
-            self._connections[txn].autocommit = self._metadata['autocommit']
+            logging.debug(f'Connecting to databases for txn "{txn}"')
+            self._open_db_connections_for_txn(txn, False)
 
         # execute all of the setup commands
         if len(self._sections['setup']) > 0:
             self._execute_commands(self._sections['setup'][0]['sequential'])
 
         # create the sync control table
-        with self._connections[next(iter(self._txns))].cursor() as cursor:
-            self._execute_sql(cursor, 'BEGIN; DROP TABLE IF EXISTS sync_control; CREATE TABLE sync_control (sync INT, test TEXT); COMMIT;', False)
+        txn = self._metadata['default_txn']
+        for db_name, connection in self._connections[txn]["connections"].items():
+            with connection.cursor() as cursor:
+                self._execute_sql(cursor, 'BEGIN; DROP TABLE IF EXISTS sync_control; CREATE TABLE sync_control (sync INT, test TEXT); COMMIT;', False, txn)
 
         self._status = 'SETUP_END'
 
@@ -756,23 +845,17 @@ class TestCase:
 
         logging.info(f'{self._name} -- Running test()')
 
+        # Determine what config to use for the test phase
+        use_proxy_for_test = self._test_params.get('use_proxy_for_test', False)
+
         # construct a connection for each transaction in the test
         for txn in self._txns:
-            # Determine what config to use for the test phase
-            use_proxy_for_test = self._test_params.get('use_proxy_for_test', False)
-            if use_proxy_for_test:
-                logging.debug(f'Connecting to proxy for txn "{txn}"')
-                self._connections[txn] = springtail.connect_proxy(self._props, self._primary_name)
-            else:
-                logging.debug(f'Connecting to primary for txn "{txn}"')
-                self._connections[txn] = springtail.connect_db_instance(self._props, self._primary_name)
-            self._connections[txn].autocommit = self._metadata['autocommit']
+            self._open_db_connections_for_txn(txn, use_proxy_for_test)
 
         # connect to the replica database -- used to perform any 'sync' directives
-        self._fdw = springtail.connect_fdw_instance(self._props, self._replica_name)
-        self._fdw.autocommit = True
-        with self._fdw.cursor() as c:
-            self._execute_sql(c, f'BEGIN; SET statement_timeout = {self._metadata["query_timeout"] * 1000}; COMMIT;', False)
+        self._open_db_connections_for_fdw()
+        with self._fdw[self._replica_name].cursor() as c:
+            self._execute_sql(c, f'BEGIN; SET statement_timeout = {self._metadata["query_timeout"] * 1000}; COMMIT;', False, 'replica')
 
         # XXX need a way to determine when the database is up and running... poll Redis?
 
@@ -804,10 +887,13 @@ class TestCase:
 
         # force a commit on all connections at the end of the test section
         for txn in self._connections:
-            self._connections[txn].commit()
+            for db_config in self._props.get_db_configs():
+                db_name = db_config['name']
+                self._connections[txn]["connections"][db_name].commit()
 
-        # pick a connection to run the sync against, any will do
-        txn = next(iter(self._txns))
+        # pick a connection from any transaction on the primary database to run the sync against
+        txn = self._metadata['default_txn']
+        self._connections[txn]['current_db'] = self._primary_name
 
         # wait for the primary and replica to come into sync
         self._execute_command({
@@ -835,17 +921,14 @@ class TestCase:
 
         logging.info(f'{self._name} -- Running verify()')
 
+        # Determine what config to use for verify phase
+        use_proxy_for_verify = self._test_params.get('use_proxy_for_verify', False)
+        txn = self._metadata['default_txn']
+        self._open_db_connections_for_txn(txn, use_proxy_for_verify)
+        self._open_db_connections_for_fdw()
+
         # execute the verification commands against both databases, compare the results
         for command in self._sections['verify'][0]['sequential']:
-            # Determine what config to use for verify phase
-            use_proxy_for_verify = self._test_params.get('use_proxy_for_verify', False)
-            if use_proxy_for_verify:
-                logging.info(f'Using proxy to verify')
-                self._connections[command['txn']] = springtail.connect_proxy(self._props, self._primary_name)
-            else:
-                logging.info(f'Using primary to verify')
-                self._connections[command['txn']] = springtail.connect_db_instance(self._props, self._primary_name)
-
             primary_result = self._execute_command(command, True)
             replica_result = self._replica_command(command)
 
@@ -870,11 +953,10 @@ class TestCase:
 
         # wait for the background job to complete -- if it never does then we fail
         try:
-            if self._fdw is None:
-                self._fdw = springtail.connect_fdw_instance(self._props, self._replica_name)
+            self._setup_default_fdw()
 
             common.wait_for_replica_condition(
-                self._fdw,
+                self._fdw[self._replica_name],
                 "SELECT COUNT(value), MAX(value) FROM background_control;",
                 (self._value, self._value),
                 timeout=self._metadata['sync_timeout']
@@ -893,19 +975,25 @@ class TestCase:
         logging.info(f'{self._name} -- Running cleanup()')
 
         # re-connect to the database in case there was an error on the connection
-        if self._fdw:
-            self._fdw.close()
-        for connection in self._connections:
-            self._connections[connection].close()
-            self._connections[connection] = springtail.connect_db_instance(self._props, self._primary_name)
+        self._cleanup_fdw_connections()
+        txn = self._metadata['default_txn']
+        for db_name, connection in self._connections[txn]['connections'].items():
+            connection.close()
+            self._connections[txn]['connections'][db_name] = springtail.connect_db_instance(self._props, db_name)
+        self._connections[txn]['current_db'] = self._primary_name
 
         # run the cleanup commands
         if len(self._sections['cleanup']) > 0:
             self._execute_commands(self._sections['cleanup'][0]['sequential'])
 
-        # close the database connections
-        for connection in self._connections:
-            self._connections[connection].close()
+        # close all database connections
+        for txn in self._connections:
+            for db_name, connection in self._connections[txn]['connections'].items():
+                connection.close()
+
+        # close the connections to the foreign data wrappers
+        for connection in self._fdw.values():
+            connection.close()
 
 
     def skip(self) -> None:
