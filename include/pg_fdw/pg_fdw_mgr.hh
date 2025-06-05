@@ -78,6 +78,8 @@ namespace springtail::pg_fdw {
             uint32_t atttypid;
             uint32_t atttypmod;
             uint32_t attnum;
+
+            bool operator==(const PgAttr&) const = default;
         };
         std::vector<PgAttr> _attrs; ///< Scan tuple attributes
 
@@ -160,8 +162,7 @@ namespace springtail::pg_fdw {
                             int num_attrs,
                             const Form_pg_attribute* attrs,
                             List *target_list,
-                            List *qual_list,
-                            List *sortgroup);
+                            List *qual_list);
 
         /** Iterate scan -- get next row
          * @param state PgFdwState
@@ -179,7 +180,7 @@ namespace springtail::pg_fdw {
         void fdw_end_scan(PgFdwState *state);
 
         /** Reset scan -- set iterator to beginning */
-        void fdw_reset_scan(PgFdwState *state);
+        void fdw_reset_scan(PgFdwState *state, List *qual_list);
 
         /** Import foreign schema -- scan through system table generating sql for create foreign table */
         List *fdw_import_foreign_schema(const std::string &server,
