@@ -22,6 +22,8 @@
 
 #include <xid_mgr/xid_mgr_client.hh>
 
+#include <pg_fdw/pg_fdw_ddl_common.hh>
+
 extern "C" {
     #include <postgres.h>
     #include <nodes/pg_list.h>
@@ -50,13 +52,6 @@ namespace springtail::pg_fdw {
         {}
     };
     using PgFdwSortGroupPtr = std::shared_ptr<PgFdwSortGroup>;
-
-    /** Partition info */
-    struct PartitionInfo {
-        uint64_t parent_table_id;
-        std::string partition_key;
-        std::string partition_bound;
-    };
 
     /** Internal state used to track table scan */
     struct PgFdwState {
@@ -281,24 +276,6 @@ namespace springtail::pg_fdw {
         UserTypePtr _enum_cache_lookup(uint64_t db_id,
                                        int32_t oid,
                                        uint64_t xid);
-
-        /**
-         * @brief Process a table
-         * @param server server name
-         * @param namespace_name namespace name
-         * @param current_table table name
-         * @param current_tid table id
-         * @param columns vector of column names, types, and nullability
-         * @param table_partition_map map of table partitions
-         * @return sql string to create the table
-         */
-        std::string
-        _process_table(const std::string &server,
-                       const std::string &namespace_name,
-                       const std::string &current_table,
-                       const uint64_t &current_tid,
-                       const std::vector<std::tuple<std::string, std::string, bool>> &columns,
-                       const std::map<uint64_t, PartitionInfo> &table_partition_map);
 
         /** Helper to convert a springtail enum user type to a datum */
         Datum _get_enum_datum(const PgFdwState *state,
