@@ -34,12 +34,12 @@ public:
     /** Creates an index within the system tables. */
     grpc::Status CreateIndex(grpc::ServerContext* context,
                              const proto::IndexRequest* request,
-                             proto::DDLStatement* response) override;
+                             proto::IndexActionResponse* response) override;
 
     /** Drops an index within the system tables. */
     grpc::Status DropIndex(grpc::ServerContext* context,
                            const proto::DropIndexRequest* request,
-                           proto::DDLStatement* response) override;
+                           proto::IndexActionResponse* response) override;
 
     /** Set the state of the index within the system tables. */
     grpc::Status SetIndexState(grpc::ServerContext* context,
@@ -492,7 +492,7 @@ private:
     /**
      * Performs a create_index() assuming that the correct locks are already held.
      */
-    nlohmann::json _create_index(const proto::IndexRequest& request);
+    proto::IndexInfo _create_index(const proto::IndexRequest& request);
 
     /**
      * Performs a drop_index() assuming that the correct locks are already held.
@@ -508,11 +508,11 @@ private:
      * to all primary indexes and so tid is required for PRIMARY_INDEX.
      * @param index_state Accepts BEING_DELETED or DELETED
      */
-    void _drop_index(const XidLsn& xid,
-                     uint64_t db_id,
-                     uint64_t index_id,
-                     std::optional<uint64_t> tid = std::nullopt,
-                     sys_tbl::IndexNames::State index_state = sys_tbl::IndexNames::State::DELETED);
+    proto::IndexInfo _drop_index(const XidLsn& xid,
+                                 uint64_t db_id,
+                                 uint64_t index_id,
+                                 std::optional<uint64_t> tid = std::nullopt,
+                                 sys_tbl::IndexNames::State index_state = sys_tbl::IndexNames::State::DELETED);
 
     /**
      * Performs a create_table() assuming that the correct locks are already held.

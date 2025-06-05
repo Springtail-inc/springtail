@@ -34,7 +34,7 @@ public:
     std::string alter_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
     std::string drop_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
 
-    std::string create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, sys_tbl::IndexNames::State state);
+    proto::IndexActionResponse create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, sys_tbl::IndexNames::State state);
 
     /**
      * Update state of the index on the SysTblMgr. The index must exist with the same xid.
@@ -57,7 +57,7 @@ public:
      * @return Map of <xid, vector<IndexInfo>>
      **/
     proto::IndexesInfo get_unfinished_indexes_info(uint64_t db_id);
-    std::string drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg);
+    proto::IndexActionResponse drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg);
 
     void update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const TableMetadata &metadata);
     void finalize(uint64_t db_id, uint64_t xid);

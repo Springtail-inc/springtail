@@ -33,7 +33,8 @@ namespace springtail::pg_log_mgr {
                        int port,
                        bool archive_logs,
                        std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
-                       std::shared_ptr<IndexReconciliationQueueManager> index_reconciliation_queue_mgr)
+                       std::shared_ptr<IndexReconciliationQueueManager> index_reconciliation_queue_mgr,
+                       std::shared_ptr<IndexRequestsManager> index_requests_mgr)
     : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
       _host(host), _db_name(db_name), _user_name(user_name),
       _password(password), _pub_name(pub_name), _slot_name(slot_name),
@@ -43,9 +44,10 @@ namespace springtail::pg_log_mgr {
       _committer_queue(committer_queue),
       _xact_log_path(xact_log_path),
       _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
-      _index_reconciliation_queue_mgr(index_reconciliation_queue_mgr)
+      _index_reconciliation_queue_mgr(index_reconciliation_queue_mgr),
+      _index_requests_mgr(index_requests_mgr)
     {
-        _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, _committer_queue, archive_logs);
+        _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, _committer_queue, archive_logs, _index_requests_mgr);
 
         // construct the callback for watching for database state changes
         _cache_watcher_db_states = std::make_shared<RedisCache::RedisChangeWatcher>(

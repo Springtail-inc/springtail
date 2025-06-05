@@ -26,6 +26,7 @@
 #include <pg_log_mgr/pg_log_reader.hh>
 #include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/index_reconciliation_queue_manager.hh>
+#include <pg_log_mgr/index_requests_manager.hh>
 
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <pg_log_mgr/committer.hh>
@@ -98,7 +99,8 @@ namespace springtail::pg_log_mgr {
                  int port,
                  bool archive_logs,
                  std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
-                 std::shared_ptr<IndexReconciliationQueueManager> index_reconciliation_queue_mgr);
+                 std::shared_ptr<IndexReconciliationQueueManager> index_reconciliation_queue_mgr,
+                 std::shared_ptr<IndexRequestsManager> index_requests_mgr);
 
         /**
          * @brief Construct a new Pg Log Mgr object (for testing only)
@@ -113,9 +115,10 @@ namespace springtail::pg_log_mgr {
           _committer_queue(std::make_shared<ConcurrentQueue<committer::XidReady>>()),
           _xact_log_path(xact_log_path),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
-          _index_reconciliation_queue_mgr(std::make_shared<IndexReconciliationQueueManager>())
+          _index_reconciliation_queue_mgr(std::make_shared<IndexReconciliationQueueManager>()),
+          _index_requests_mgr(std::make_shared<IndexRequestsManager>())
         {
-            _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, _committer_queue, false);
+            _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, _committer_queue, false, _index_requests_mgr);
         }
 
         /** Start the pipeline; setup the log reader/writer log files etc. */
@@ -247,6 +250,8 @@ namespace springtail::pg_log_mgr {
          * @brief shared_ptr to the index reconciliation manager to access the index reconciliation queues
          */
         std::shared_ptr<IndexReconciliationQueueManager> _index_reconciliation_queue_mgr;
+
+        std::shared_ptr<IndexRequestsManager> _index_requests_mgr;
 
         std::thread _reconciliation_thread;            ///< Index reconciliation thread
         std::thread _tracer_thread;                    ///< Thread for dumping traces for the performance test

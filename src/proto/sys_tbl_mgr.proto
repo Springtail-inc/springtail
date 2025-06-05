@@ -126,6 +126,11 @@ message DropIndexRequest {
   string name = 6;
 }
 
+message IndexActionResponse {
+  string action = 1;
+  IndexInfo index = 2;
+}
+
 message GetUnfinishedIndexesInfoRequest {
   int64 db_id = 1;
 }
@@ -244,10 +249,10 @@ service SysTblMgr {
   rpc Ping(google.protobuf.Empty) returns (google.protobuf.Empty) {}
 
   // Create a new index
-  rpc CreateIndex(IndexRequest) returns (DDLStatement) {}
+  rpc CreateIndex(IndexRequest) returns (IndexActionResponse) {}
 
   // Drop an existing index
-  rpc DropIndex(DropIndexRequest) returns (DDLStatement) {}
+  rpc DropIndex(DropIndexRequest) returns (IndexActionResponse) {}
 
   // Set index state
   rpc SetIndexState(SetIndexStateRequest) returns (google.protobuf.Empty) {}

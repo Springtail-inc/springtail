@@ -10,6 +10,7 @@
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/committer.hh>
 #include <pg_log_mgr/index_reconciliation_queue_manager.hh>
+#include <pg_log_mgr/index_requests_manager.hh>
 #include <pg_repl/index_reconcile_request.hh>
 
 namespace springtail::pg_log_mgr {
@@ -49,6 +50,7 @@ namespace springtail::pg_log_mgr {
          **/
         std::shared_ptr<IndexReconciliationQueueManager> _index_reconciliation_queue_mgr;
 
+        std::shared_ptr<IndexRequestsManager> _index_requests_mgr;
         /**
          * @brief Function for performing shutdown that is called by Singleton
          *

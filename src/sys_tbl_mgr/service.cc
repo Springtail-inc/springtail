@@ -24,7 +24,7 @@ Service::Ping(grpc::ServerContext* context,
 grpc::Status
 Service::CreateIndex(grpc::ServerContext* context,
                      const proto::IndexRequest* request,
-                     proto::DDLStatement* response)
+                     proto::IndexActionResponse* response)
 {
     ServerSpan span(context, "SysTblMgrService", "CreateIndex");
 
@@ -36,10 +36,10 @@ Service::CreateIndex(grpc::ServerContext* context,
 
     try {
         // perform the CREATE INDEX
-        auto ddl = _create_index(*request);
+        const auto &index_info = _create_index(*request);
+        response->set_action("create_index");
+        *response->mutable_index() = index_info;
 
-        // serialize the JSON and return
-        response->set_statement(nlohmann::to_string(ddl));
         span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
         return grpc::Status::OK;
     } catch (const std::exception& e) {
@@ -296,42 +296,15 @@ Service::GetUnfinishedIndexesInfo(grpc::ServerContext* context,
     return grpc::Status::OK;
 }
 
-nlohmann::json
+proto::IndexInfo
 Service::_create_index(const proto::IndexRequest& request)
 {
     XidLsn xid(request.xid(), request.lsn());
-
-    nlohmann::json ddl;
-    ddl["action"] = "create_index";
-    ddl["index"] = request.index().name();
-    ddl["schema"] = request.index().namespace_name();
-    ddl["id"] = request.index().id();
-    ddl["is_unique"] = request.index().is_unique();
-    ddl["table_id"] = request.index().table_id();
-    ddl["columns"] = nlohmann::json::array();
-
-    if (request.index().columns().empty()) {
-        return ddl;
-    }
 
     std::map<uint32_t, uint32_t> keys;
     for (const auto& column : request.index().columns()) {
         assert(keys.find(column.idx_position()) == keys.end());
         keys[column.idx_position()] = column.position();
-
-        // store the column data into the json
-        nlohmann::json column_json;
-        column_json["idx_position"] = column.idx_position();
-        column_json["position"] = column.position();
-        column_json["name"] = column.name();
-
-        // Insert columns in the order specified by idx_position.
-        // This ensures the index columns are arranged correctly,
-        // as their order may differ from the table column order.
-        if (ddl["columns"].size() <= column.idx_position()) {
-            ddl["columns"].get_ref<nlohmann::json::array_t&>().resize(column.idx_position() + 1);
-        }
-        ddl["columns"][column.idx_position()] = column_json;
     }
 
     // update index names
@@ -347,13 +320,13 @@ Service::_create_index(const proto::IndexRequest& request)
 
     _upsert_index_name(request.db_id(), mutable_index_request.index(), xid, keys);
 
-    return ddl;
+    return mutable_index_request.index();
 }
 
 grpc::Status
 Service::DropIndex(grpc::ServerContext* context,
                    const proto::DropIndexRequest* request,
-                   proto::DDLStatement* response)
+                   proto::IndexActionResponse* response)
 {
     LOG_INFO("got DropIndex(): db {}, index {}, xid {}:{}", request->db_id(),
                 request->index_id(), request->xid(), request->lsn());
@@ -361,19 +334,14 @@ Service::DropIndex(grpc::ServerContext* context,
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
-    nlohmann::json ddl;
-    ddl["action"] = "drop_index";
-    ddl["id"] = request->index_id();
-    ddl["name"] = request->name();
-    ddl["schema"] = request->namespace_name();
-
     XidLsn xid(request->xid(), request->lsn());
 
     // perform the DROP INDEX
-    _drop_index(xid, request->db_id(), request->index_id(), std::nullopt, sys_tbl::IndexNames::State::BEING_DELETED);
+    const auto& index_info = _drop_index(xid, request->db_id(), request->index_id(), std::nullopt, sys_tbl::IndexNames::State::BEING_DELETED);
 
-    // serialize the JSON and return
-    response->set_statement(nlohmann::to_string(ddl));
+    response->set_action("drop_index");
+    *response->mutable_index() = index_info;
+
     return grpc::Status::OK;
 }
 
@@ -462,7 +430,7 @@ Service::_find_index(uint64_t db_id,
     return {{info, namespace_id, index_xid}};
 }
 
-void
+proto::IndexInfo
 Service::_drop_index(const XidLsn& xid,
                      uint64_t db_id,
                      uint64_t index_id,
@@ -480,7 +448,7 @@ Service::_drop_index(const XidLsn& xid,
     if (!info) {
         LOG_DEBUG(LOG_SCHEMA, "Drop index not found: {}@{} - {}", db_id, xid.xid,
                             index_id);
-        return;
+        return proto::IndexInfo();
     }
     auto& index_info = std::get<0>(*info);
 
@@ -488,7 +456,7 @@ Service::_drop_index(const XidLsn& xid,
     if (state == sys_tbl::IndexNames::State::DELETED ||
         state == sys_tbl::IndexNames::State::BEING_DELETED) {
         LOG_DEBUG(LOG_SCHEMA, "Index already deleted: {}@{} - {}", db_id, xid.xid, index_id);
-        return;
+        return proto::IndexInfo();
     }
 
     // note: this might not be true during recovery
@@ -504,6 +472,8 @@ Service::_drop_index(const XidLsn& xid,
 
     index_info.set_state(static_cast<int32_t>(index_state));
     _upsert_index_name(db_id, index_info, xid, keys);
+
+    return index_info;
 }
 
 grpc::Status

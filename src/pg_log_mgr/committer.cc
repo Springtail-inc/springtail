@@ -223,19 +223,15 @@ namespace springtail::committer {
             LOG_DEBUG(LOG_COMMITTER, "All table processing complete for XID {}", xid);
 
             nlohmann::json index_ddls = _redis_ddl.get_index_ddls_xid(db_id, xid);
+            auto index_requests = _index_requests_mgr->get_index_requests(db_id, xid);
 
             // Trigger index reconciliation for the earliest pending XID
             if (result->type() == XidReady::Type::RECONCILE_INDEX) {
                 _indexer->process_index_reconciliation(db_id, result->reconcile().reconcile_xid(), xid);
             }
 
-            if (!index_ddls.is_null()) {
-                _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
-
-                // process the indexes - create/drop, allowing them to happen in the background
-                _indexer->process_ddls(db_id, xid, index_ddls);
-
-                _redis_ddl.commit_index_ddl(db_id, xid);
+            if (!index_requests.empty()) {
+                _indexer->process_requests(db_id, xid, index_requests);
             }
 
             if (!completed_ddls.is_null()) {
