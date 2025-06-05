@@ -289,7 +289,7 @@ namespace {
             }
 
             // begin the scan
-            mgr->fdw_begin_scan(state, _columns.size(), _attrs, _target_list, qual_list, nullptr);
+            mgr->fdw_begin_scan(state, _columns.size(), _attrs, _target_list, qual_list);
 
             if (index_id == std::numeric_limits<uint32_t>::max()) {
                 // a full scan is expected
