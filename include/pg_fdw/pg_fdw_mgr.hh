@@ -162,8 +162,7 @@ namespace springtail::pg_fdw {
                             int num_attrs,
                             const Form_pg_attribute* attrs,
                             List *target_list,
-                            List *qual_list,
-                            List *sortgroup);
+                            List *qual_list);
 
         /** Iterate scan -- get next row
          * @param state PgFdwState

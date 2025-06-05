@@ -31,10 +31,10 @@ extern "C" {
 
     /** Begin scan wrapper */
     void
-    fdw_begin_scan(void *state, int num_attrs, Form_pg_attribute* attrs, List *target_list, List *qual_list, List *sortgroup)
+    fdw_begin_scan(void *state, int num_attrs, Form_pg_attribute* attrs, List *target_list, List *qual_list)
     {
         if (state) {
-            return get_fdw_mgr()->fdw_begin_scan(static_cast<PgFdwState*>(state), num_attrs, attrs, target_list, qual_list, sortgroup);
+            return get_fdw_mgr()->fdw_begin_scan(static_cast<PgFdwState*>(state), num_attrs, attrs, target_list, qual_list);
         }
     }
 

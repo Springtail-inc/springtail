@@ -554,7 +554,7 @@ namespace springtail::pg_fdw {
 
     void
     PgFdwMgr::fdw_begin_scan(PgFdwState *state, int num_attrs, const Form_pg_attribute* attrs,
-            List *target_list, List *qual_list, List *)
+            List *target_list, List *qual_list)
     {
         LOG_DEBUG(LOG_FDW, "fdw_begin_scan: tid: {}, {}", state->tid, num_attrs);
         for (size_t i = 0; i != num_attrs; ++i) {
