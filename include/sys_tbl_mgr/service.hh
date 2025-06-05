@@ -152,6 +152,13 @@ public:
                         const proto::RevertRequest* request,
                         google::protobuf::Empty* response) override;
 
+    /**
+     * Get the list of indexes which are to be built/deleted, which will be
+     * used to complete the index commits while recovery
+     */
+    grpc::Status GetUnfinishedIndexesInfo(grpc::ServerContext* context,
+            const proto::GetUnfinishedIndexesInfoRequest* request,
+            proto::IndexesInfo* response) override;
 
 private:
     Service() = default;
@@ -292,6 +299,14 @@ private:
      * all committed to disk.
      */
     void _clear_schema_info(uint64_t db_id);
+
+    /**
+     * @brief Helper function to populate index columns for a given index (proto::IndexInfo)
+     * @param db_id Database ID
+     * @param info proto::IndexInfo - Index info from IndexNames table
+     * @param index_xid XidLsn to fetch columns for index
+     */
+    void _populate_index_columns(uint64_t db_id, proto::IndexInfo& info, XidLsn index_xid);
 
     /**
      * Helper function to read the full set of columns for a table from the on-disk system tables.
@@ -521,6 +536,16 @@ private:
     /** Performs an get_index_info() assuming that the correct locks are already held.
      */
     proto::IndexInfo _get_index_info(const proto::GetIndexInfoRequest& request);
+
+
+    /**
+     * @brief Get the list of indexes which are to be built/deleted for the db,
+     * assuming correct locks are already held
+     *
+     * @param db_id Database ID
+     * @return IndexesInfo
+     */
+    proto::IndexesInfo _get_unfinished_indexes_info(uint64_t db_id);
 
     /** This doesn't return information about index columns
      */

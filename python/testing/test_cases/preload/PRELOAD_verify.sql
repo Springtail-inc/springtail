@@ -4,6 +4,7 @@
 
 ## verify
 
+### switch_db data_types
 ### schema_check data_type_test all_numeric_types
 ### schema_check data_type_test all_char_and_binary_types
 ### schema_check data_type_test all_datetime_types
@@ -15,6 +16,7 @@
 ### schema_check data_type_test special_data
 ### schema_check data_type_test range_multirange_test
 
+### switch_db indices
 ### schema_check keys_test table1
 ### schema_check keys_test table2
 ### schema_check keys_test table3
@@ -28,9 +30,12 @@
 ### index_exists keys_test explicit_unique_2_partial_index_test explicit_unique_2_partial_index_test_idx true
 ### index_exists keys_test explicit_unique_1_func_index_test explicit_unique_1_func_index_test_idx false
 ### index_exists keys_test explicit_unique_2_func_index_test explicit_unique_2_func_index_test_idx false
+### table_exists keys_test explicit_unique_1_func_index_test true
+### table_exists keys_test explicit_unique_2_func_index_test true
 ### schema_check keys_test employees
 
 -- verify data types
+### switch_db data_types
 SELECT * FROM data_type_test.all_numeric_types ORDER BY serial_col;
 SELECT * FROM data_type_test.all_char_and_binary_types ORDER BY id;
 SELECT * FROM data_type_test.all_datetime_types ORDER BY id;
@@ -42,6 +47,7 @@ SELECT * FROM data_type_test.special_data ORDER BY id;
 SELECT * FROM data_type_test.range_multirange_test ORDER BY id;
 
 -- verify indices
+### switch_db indices
 SELECT * FROM keys_test.table1 ORDER BY id;
 SELECT * FROM keys_test.table1 ORDER BY col1;
 
