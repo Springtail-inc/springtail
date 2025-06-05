@@ -596,7 +596,15 @@ namespace {
 
         schema_meta = _client->get_schema(_db, tid, {check_xid, constant::MAX_LSN});
         ASSERT_EQ(schema_meta->columns.size(), 0);
-        ASSERT_EQ(schema_meta->indexes.size(), 0);
+        // BEING_DELETED index will be present in the schema
+        ASSERT_EQ(schema_meta->indexes.size(), 1);
+        auto it = std::ranges::find_if(schema_meta->indexes,
+                               [&](const auto& index) { return index.id == index_id; });
+
+        ASSERT_TRUE(it != schema_meta->indexes.end());
+        ASSERT_EQ(it->state, (uint8_t)sys_tbl::IndexNames::State::BEING_DELETED);
+
+
 
         // verify the virtual schema creation at various combinations of access and target XID
         XidLsn access_xid(check_xid - 4);

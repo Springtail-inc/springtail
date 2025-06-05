@@ -39,6 +39,102 @@ namespace springtail::committer {
         }
     }
 
+    void Indexer::_cleanup_for_db(uint64_t db_id) {
+        std::scoped_lock lock(_m, _pending_reconciliation_map_mtx, _table_idx_map_mtx);
+
+        // Clear _work_set entries for the db, to start fresh recovery
+        auto it = _work_set.begin();
+        while (it != _work_set.end()) {
+            if (it->second._db_id == db_id) {
+                it = _work_set.erase(it);  // erase returns the next valid iterator
+            } else {
+                ++it;
+            }
+        }
+
+        // Cleanup pending reconciliation map for the db
+        _pending_idx_reconciliation_map.erase(db_id);
+
+        // Cleanup table_idx_map for the db
+        _table_idx_map.erase(db_id);
+    }
+
+    void Indexer::recover_indexes(uint64_t db_id) {
+        // Cleanup for db from the previous run
+        _cleanup_for_db(db_id);
+
+        // Get indexes which were not completed during last shutdown/crash
+        auto unfinished_indexes_info = sys_tbl_mgr::Client::get_instance()->get_unfinished_indexes_info(db_id);
+
+        // Get each such XIDs and their indexes
+        for (const auto& [index_xid, idx_list]: unfinished_indexes_info.xid_index_map()) {
+            auto index_ddls = nlohmann::json::array();
+            for (const auto& index_info: idx_list.indexes()) {
+                // Build indexer-known ddl out of the indexes - to be created/dropped
+                if (static_cast<sys_tbl::IndexNames::State>(index_info.state())
+                        == sys_tbl::IndexNames::State::NOT_READY) {
+                    auto&& index_ddl = _get_create_index_ddl(index_info);
+                    index_ddls.push_back(index_ddl);
+                } else if (static_cast<sys_tbl::IndexNames::State>(index_info.state())
+                        == sys_tbl::IndexNames::State::BEING_DELETED) {
+                    auto&& index_ddl = _get_drop_index_ddl(index_info);
+                    index_ddls.push_back(index_ddl);
+                } else {
+                    // We shouldnt hit this point as we picked only the unfinished indexes
+                    CHECK(false);
+                }
+            }
+
+            // Schedule the index processing at its XID
+            process_ddls(db_id, index_xid, std::move(index_ddls));
+        }
+    }
+
+    nlohmann::json Indexer::_get_drop_index_ddl(proto::IndexInfo index_info) {
+        // XXX: Refactor this code: https://linear.app/springtail/issue/SPR-778/remove-index-ddl-tracking-from-redis-ddls
+        nlohmann::json ddl;
+        ddl["action"] = "drop_index";
+        ddl["name"] = index_info.name();
+        ddl["schema"] = index_info.namespace_name();
+        ddl["id"] = index_info.id();
+        return ddl;
+    }
+
+    nlohmann::json Indexer::_get_create_index_ddl(proto::IndexInfo index_info) {
+        // XXX: Refactor this code: https://linear.app/springtail/issue/SPR-778/remove-index-ddl-tracking-from-redis-ddls
+        nlohmann::json ddl;
+        ddl["action"] = "create_index";
+        ddl["index"] = index_info.name();
+        ddl["schema"] = index_info.namespace_name();
+        ddl["id"] = index_info.id();
+        ddl["is_unique"] = index_info.is_unique();
+        ddl["table_id"] = index_info.table_id();
+        ddl["columns"] = nlohmann::json::array();
+
+        // construct index columns at their positions
+        std::map<uint32_t, uint32_t> keys;
+        for (const auto& column : index_info.columns()) {
+            CHECK(keys.find(column.idx_position()) == keys.end());
+            keys[column.idx_position()] = column.position();
+
+            // store the column data into the json
+            nlohmann::json column_json;
+            column_json["idx_position"] = column.idx_position();
+            column_json["position"] = column.position();
+            column_json["name"] = column.name();
+
+            // Insert columns in the order specified by idx_position.
+            // This ensures the index columns are arranged correctly,
+            // as their order may differ from the table column order.
+            if (ddl["columns"].size() <= column.idx_position()) {
+                ddl["columns"].get_ref<nlohmann::json::array_t&>().resize(column.idx_position() + 1);
+            }
+            ddl["columns"][column.idx_position()] = column_json;
+        }
+
+        return ddl;
+    }
+
     void Indexer::abort_indexes(uint64_t db_id, uint64_t table_id, uint64_t xid)
     {
         std::scoped_lock g(_m, _table_idx_map_mtx);
@@ -172,38 +268,44 @@ namespace springtail::committer {
             return;
         }
 
+        // Index should be at BEING_DELETED to be dropped
+        DCHECK(static_cast<sys_tbl::IndexNames::State>(info.state()) == sys_tbl::IndexNames::State::BEING_DELETED);
+
         auto exists = TableMgr::get_instance()->exists(db_id, info.table_id(), xid.xid, xid.lsn);
         if (!exists) {
             // when dropping a table, PG generates DROP TABLE first
-            // following by DROP INDEX. We ignore DROP INDEX after DROP TABLE.
+            // following by DROP INDEX, We will mark the index as DELETED in this case.
             LOG_INFO("Table doesn't exists: {}, {}", info.table_id(), index_id);
+            client->set_index_state(db_id, xid, info.table_id(), index_id, sys_tbl::IndexNames::State::DELETED);
             return;
-        }
-
-        // index column positions
-        std::vector<uint32_t> idx_cols;
-        for (auto const& col : info.columns()) {
-            idx_cols.push_back(col.position());
         }
 
         auto meta = client->get_roots(db_id, info.table_id(), end_xid);
         auto it = std::ranges::find_if(meta->roots,
                 [&](auto const& v) { return index_id == v.index_id; });
-        CHECK(it != meta->roots.end());
+        // Erase roots if present, roots wont be there if index drop came in before processing build,
+        // and in that case, proceed for making index DELETED
+        if (it != meta->roots.end()) {
+            // XXX: Optimize roundtrips:
+            // https://linear.app/springtail/issue/SPR-679/optimize-indexer-to-reduce-roundtrips-to-systblmgr
 
-        // XXX: Optimize roundtrips:
-        // https://linear.app/springtail/issue/SPR-679/optimize-indexer-to-reduce-roundtrips-to-systblmgr
-        auto table =
-            TableMgr::get_instance()->get_mutable_table(db_id, info.table_id(), end_xid, end_xid);
-        auto root = table->create_index_root(index_id, idx_cols);
-        if (it->extent_id != constant::UNKNOWN_EXTENT) {
-            root->init(it->extent_id);
-        } else {
-            root->init_empty();
+            // index column positions
+            std::vector<uint32_t> idx_cols;
+            for (auto const& col : info.columns()) {
+                idx_cols.push_back(col.position());
+            }
+
+            auto table =
+                TableMgr::get_instance()->get_mutable_table(db_id, info.table_id(), end_xid, end_xid);
+            auto root = table->create_index_root(index_id, idx_cols);
+            if (it->extent_id != constant::UNKNOWN_EXTENT) {
+                root->init(it->extent_id);
+            } else {
+                root->init_empty();
+            }
+            root->truncate();
+            root->finalize();
         }
-        root->truncate();
-        root->finalize();
-
         client->set_index_state(db_id, xid, info.table_id(), index_id, sys_tbl::IndexNames::State::DELETED);
 
         // Cleanup table-index map
@@ -308,7 +410,10 @@ namespace springtail::committer {
         _work_set.erase(key);
         auto client = sys_tbl_mgr::Client::get_instance();
         proto::IndexInfo index_info = client->get_index_info(db_id, index_id, xid);
-        auto index_deleted = static_cast<sys_tbl::IndexNames::State>(index_info.state()) == sys_tbl::IndexNames::State::DELETED;
+
+        // Index should be at NOT_READY / BEING_DELETED to be processed
+        DCHECK(static_cast<sys_tbl::IndexNames::State>(index_info.state()) == sys_tbl::IndexNames::State::BEING_DELETED ||
+                static_cast<sys_tbl::IndexNames::State>(index_info.state()) == sys_tbl::IndexNames::State::NOT_READY);
 
         if (!root) {
             // if IndexStatus is BUILDING - stop could have got requested, so the index
@@ -317,13 +422,7 @@ namespace springtail::committer {
             //                              mark the state as DELETED
 
             if (work_item.is_status(IndexStatus::ABORTING)) {
-                auto table_exists = TableMgr::get_instance()->exists(db_id, tid, xid.xid, xid.lsn);
-                if (table_exists && !index_deleted) {
-                    // when dropping a table, PG generates DROP TABLE first
-                    // following by DROP INDEX. We ignore DROP INDEX after DROP TABLE, because
-                    // indexes will be set as DELETED directly as part of sys_tbl_mgr DROP TABLE
-                    client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
-                }
+                client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
             }
         } else {
             // Index building was attempted, finalize and process build/abort
@@ -340,9 +439,7 @@ namespace springtail::committer {
                 // may have got finalized while we were building.
                 root->truncate();
                 root->finalize();
-                if (!index_deleted) {
-                    client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
-                }
+                client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
             }
         }
 

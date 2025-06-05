@@ -30,7 +30,9 @@ namespace springtail::committer {
     {
         // perform cleanup for any Committer threads in a previous run
         cleanup();
-        _create_indexer();
+        
+        // use the same worker count for Indexer
+        _indexer = std::make_unique<Indexer>(_indexer_worker_count, _index_reconciliation_queue_mgr);
 
         auto coordinator = Coordinator::get_instance();
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
@@ -62,6 +64,16 @@ namespace springtail::committer {
 
             // perform rotation if needed
             uint64_t db_id = result->db();
+
+            // Process index recovery first as this message doesnt require xid
+            // or timestamp processing for xact_log
+            if (result->type() == XidReady::Type::INDEX_RECOVERY_TRIGGER) {
+                LOG_DEBUG(LOG_COMMITTER, "Initiate indexes recovery: {}", db_id);
+                _indexer->recover_indexes(db_id);
+                LOG_DEBUG(LOG_COMMITTER, "Indexes recovery initiated: {}", db_id);
+                continue;
+            }
+
             uint64_t timestamp = result->timestamp();
             uint64_t stored_timestamp = 0;
             auto emplace_result = _db_to_timestamp.try_emplace(db_id, timestamp);
@@ -223,14 +235,7 @@ namespace springtail::committer {
                 // process the indexes - create/drop, allowing them to happen in the background
                 _indexer->process_ddls(db_id, xid, index_ddls);
 
-                // Abort index_ddls if they have only abort_index
-                bool only_abort_index_ddls = std::ranges::all_of(index_ddls, [](const auto& ddl) {
-                        return ddl["action"] == "abort_index";
-                        });
-
-                if (only_abort_index_ddls) {
-                    _redis_ddl.abort_index_ddl(db_id, xid);
-                }
+                _redis_ddl.commit_index_ddl(db_id, xid);
             }
 
             if (!completed_ddls.is_null()) {
@@ -261,10 +266,7 @@ namespace springtail::committer {
             }
             _completed_xids[db_id] = xid;
 
-            if (result->type() == XidReady::Type::RECONCILE_INDEX) {
-                // Commit index XID as they complete reconciliation
-                _redis_ddl.commit_index_ddl(db_id, result->reconcile().reconcile_xid());
-            } else if (result->type() == XidReady::Type::XACT_MSG) {
+            if (result->type() != XidReady::Type::RECONCILE_INDEX) {
                 result->notify_tracker(xid);
             }
 
@@ -347,30 +349,6 @@ namespace springtail::committer {
             uint64_t tid = ddl["tid"].get<uint64_t>();
             XidLsn ddl_xid(ddl["xid"].get<uint64_t>(), ddl["lsn"].get<uint64_t>());
             client->invalidate_table(db, tid, ddl_xid);
-        }
-    }
-
-    void
-    Committer::_create_indexer()
-    {
-        // use the same worker count for Indexer
-        _indexer = std::make_unique<Indexer>(_worker_count, _index_reconciliation_queue_mgr);
-
-        // cleanup
-        auto &&precommit = _redis_ddl.get_precommit_index_ddl();
-
-        //make sure it is sorted
-        std::ranges::sort(precommit, [](auto const& a, auto const& b) {
-                    auto const& [db_id1, xid1, v1] = a;
-                    auto const& [db_id2, xid2, v2] = b;
-                    if (db_id1 == db_id2) {
-                        return xid1 < xid2;
-                    }
-                    return db_id1 < db_id2;
-                });
-
-        for (auto [db_id, xid, ddls] : precommit) {
-            _indexer->process_ddls(db_id, xid, ddls["ddls"]);
         }
     }
 
