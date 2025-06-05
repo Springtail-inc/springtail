@@ -126,7 +126,6 @@ PgXactLogWriter::cleanup(uint64_t min_timestamp, bool archive_logs)
 void
 PgXactLogWriter::_extract_last_xid()
 {
-    int ret;
     char read_buffer[PG_XLOG_PAGE_SIZE];
     size_t total_offset = 0;
     size_t current_offset = 0;
@@ -135,14 +134,23 @@ PgXactLogWriter::_extract_last_xid()
 
     // iterate through the file and extract the last committed xid
     // this also sets the fd offset to the end of the file
-    while (!done && (ret = ::read(_fd, read_buffer, PG_XLOG_PAGE_SIZE)) != 0)
+    while (!done)
     {
+        auto ret = ::read(_fd, read_buffer, PG_XLOG_PAGE_SIZE);
+        if (ret == 0) {
+            // end of file reached
+            break;
+        }
+
         if (ret == -1) {
             throw Error(fmt::format("Error reading from file {}; error {}: {}", _file.string(), errno, strerror(errno)));
         }
 
         current_offset = 0;
         while (current_offset + sizeof(XidElement) <= ret) {
+            DCHECK_EQ((reinterpret_cast<uintptr_t>(&read_buffer[current_offset]) % alignof(XidElement)), 0)
+                << "XidElement must be aligned to its size";
+
             current_xid = reinterpret_cast<XidElement *>(&read_buffer[current_offset]);
             if (current_xid->xid == 0) {
                 // this is legacy, we shouldn't see 0 xids
@@ -187,7 +195,9 @@ PgXactLogWriter::flush()
 
 // TODO: need unit tests for this function
 void
-PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir, uint64_t last_xid, bool archive)
+PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir,
+                                         uint64_t last_xid,
+                                         bool archive)
 {
     char read_buffer[PG_XLOG_PAGE_SIZE];
     std::filesystem::path last_committed_xid_file;
@@ -210,10 +220,15 @@ PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir, uint64_
 
         // loop over pages in the file; read the file in chunks of PG_XLOG_PAGE_SIZE
         uint32_t page_count = 0;
-        int ret;
-        while (!done && (ret = ::read(fd, read_buffer, PG_XLOG_PAGE_SIZE)) != 0)
+        while (!done && !xid_found)
         {
-            if (ret == -1) {
+            auto ret = ::read(fd, read_buffer, PG_XLOG_PAGE_SIZE);
+            if (ret == 0) {
+                // end of file reached
+                break;
+            }
+
+             if (ret == -1) {
                 throw Error(fmt::format("Error reading from file {}; error {}: {}", current_file.value().string(), errno, strerror(errno)));
             }
             ++page_count;
