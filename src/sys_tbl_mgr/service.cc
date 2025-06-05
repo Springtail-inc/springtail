@@ -49,6 +49,92 @@ Service::CreateIndex(grpc::ServerContext* context,
     }
 }
 
+proto::IndexesInfo
+Service::_get_unfinished_indexes_info(uint64_t db_id)
+{
+    proto::IndexesInfo indexes;
+    auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
+    auto names_schema = names_t->extent_schema();
+    auto names_fields = names_schema->get_fields();
+
+    auto search_key = sys_tbl::IndexNames::Primary::key_tuple(0, 0, 0, 0);
+    struct IndexBasicInfo {
+        uint64_t index_id;
+        XidLsn xid_lsn;
+        uint64_t table_id;
+    };
+
+    // Build a map <index_id, <xid, IndexBasicInfo>>
+    // containing map of unfinished indexes
+    std::unordered_map<uint64_t, std::unordered_map<uint64_t, IndexBasicInfo>> unfinished_indexes_map;
+
+    for (auto names_i = names_t->lower_bound(search_key); names_i != names_t->end(); ++names_i) {
+        auto& row = *names_i;
+        auto index_id = names_fields->at(sys_tbl::IndexNames::Data::INDEX_ID)->get_uint64(&row);
+
+        if (index_id == 0) {
+            // we dont have to pick primary indexes
+            continue;
+        }
+
+        auto state = names_fields->at(sys_tbl::IndexNames::Data::STATE)->get_uint8(&row);
+        auto index_xid = names_fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(&row);
+        if ((static_cast<sys_tbl::IndexNames::State>(state) ==
+                    sys_tbl::IndexNames::State::BEING_DELETED) ||
+                (static_cast<sys_tbl::IndexNames::State>(state) ==
+                 sys_tbl::IndexNames::State::NOT_READY)) {
+            IndexBasicInfo info;
+            info.index_id = index_id;
+            XidLsn index_xid_lsn(names_fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(&row),
+                    names_fields->at(sys_tbl::IndexNames::Data::LSN)->get_uint64(&row));
+            info.xid_lsn = index_xid_lsn;
+            info.table_id = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(&row);
+
+            // Pick the latest unfinished state for the index
+            if (unfinished_indexes_map.find(index_id) != unfinished_indexes_map.end()) {
+                unfinished_indexes_map.erase(index_id);
+            }
+            unfinished_indexes_map.try_emplace(index_id)
+                .first->second
+                .try_emplace(index_xid, std::move(info));
+        } else {
+            if (unfinished_indexes_map.find(index_id) != unfinished_indexes_map.end()) {
+                unfinished_indexes_map.erase(index_id);
+            }
+        }
+    }
+
+    // From the above map, reorganize them in the form of
+    // {xid: [indexes]}  =>  proto::IndexesInfo
+    // after fetching full index info (proto::IndexInfo)
+    proto::IndexesInfo unfinished_indexes;
+    proto::GetIndexInfoRequest index_info_request;
+    index_info_request.set_db_id(db_id);
+
+    for (const auto& [index_id, index_entry]: unfinished_indexes_map) {
+        auto& [index_xid, index_basic_info] = *index_entry.begin();
+        proto::IndexInfoList* index_info_list = nullptr;
+        auto it = unfinished_indexes.mutable_xid_index_map()->find(index_xid);
+        if (it != unfinished_indexes.mutable_xid_index_map()->end()) {
+            // If the xid exists, get the existing IndexInfoList
+            index_info_list = &it->second;
+        } else {
+            // If the xid does not exist, create a new IndexInfoList
+            index_info_list = &(*unfinished_indexes.mutable_xid_index_map())[index_xid];
+        }
+
+        index_info_request.set_index_id(index_basic_info.index_id);
+        index_info_request.set_xid(index_basic_info.xid_lsn.xid);
+        index_info_request.set_lsn(index_basic_info.xid_lsn.lsn);
+        index_info_request.set_table_id(index_basic_info.table_id);
+        auto index_info = _get_index_info(index_info_request);
+        _populate_index_columns(db_id, index_info, index_basic_info.xid_lsn);
+        *index_info_list->add_indexes() = std::move(index_info);
+    }
+
+    return unfinished_indexes;
+}
+
 proto::IndexInfo
 Service::_get_index_info(const proto::GetIndexInfoRequest& request)
 {
@@ -105,18 +191,9 @@ Service::_set_index_state(const proto::SetIndexStateRequest& request)
     CHECK(index_info.table_id() == request.table_id() && index_info.id() == request.index_id());
     index_info.set_state(request.state());
 
-    // lookup the namespace ID
-    // XXX it seems like we shouldn't need to look up the namespace info at this point -- we
-    //     just retrieved all of the index info above in _read_schema_indexes() so it's a
-    //     duplication of effort to perform the lookup again here.  Further, the code itself is
-    //     somewhat ugly / hard to follow.  We should revist this whole flow to improve
-    //     performance and readability.
-    auto ns_info = _get_namespace_info(request.db_id(), index_info.namespace_name(), xid);
-    CHECK(ns_info);
-
     auto index_names_t = _get_mutable_system_table(request.db_id(), sys_tbl::IndexNames::ID);
     auto tuple = sys_tbl::IndexNames::Data::tuple(
-        ns_info->id, index_info.name(), index_info.table_id(), request.index_id(), xid.xid, xid.lsn,
+        index_info.namespace_id(), index_info.name(), index_info.table_id(), request.index_id(), xid.xid, xid.lsn,
         static_cast<sys_tbl::IndexNames::State>(index_info.state()), index_info.is_unique());
 
     // update the index state
@@ -180,6 +257,23 @@ Service::GetIndexInfo(grpc::ServerContext* context,
     return grpc::Status::OK;
 }
 
+grpc::Status
+Service::GetUnfinishedIndexesInfo(grpc::ServerContext* context,
+        const proto::GetUnfinishedIndexesInfoRequest* request,
+        proto::IndexesInfo* response)
+{
+    ServerSpan span(context, "SysTblMgrService", "GetUnfinishedIndexesInfo");
+
+    LOG_INFO("got GetUnfinishedIndexesInfo");
+
+    // acquire a shared lock to ensure no one is doing a finalize
+    boost::shared_lock lock(_read_mutex);
+
+    *response = _get_unfinished_indexes_info(request->db_id());
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
+    return grpc::Status::OK;
+}
+
 nlohmann::json
 Service::_create_index(const proto::IndexRequest& request)
 {
@@ -219,6 +313,8 @@ Service::_create_index(const proto::IndexRequest& request)
     }
 
     // update index names
+    // Create a copy to add namespace ID, before caching the index_info
+    auto mutable_index_request = request;
     {
         // lookup the namespace info
         auto ns_info = _get_namespace_info(request.db_id(), request.index().namespace_name(), xid);
@@ -231,6 +327,9 @@ Service::_create_index(const proto::IndexRequest& request)
             request.index().is_unique());
 
         index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
+
+        // Set namespace ID for the requested index
+        mutable_index_request.mutable_index()->set_namespace_id(ns_info->id);
     }
 
     _write_index(xid, request.db_id(), request.index().table_id(), request.index().id(), keys);
@@ -238,7 +337,7 @@ Service::_create_index(const proto::IndexRequest& request)
     {
         boost::unique_lock lock(_mutex);
         _index_cache[request.db_id()][request.index().table_id()][request.index().id()]
-            .emplace_back(xid, request.index());
+            .emplace_back(xid, mutable_index_request.index());
     }
 
     return ddl;
@@ -351,6 +450,7 @@ Service::_find_index(uint64_t db_id,
     auto ns_info = _get_namespace_info(db_id, namespace_id, access_xid, false);
     CHECK(ns_info);
     info.set_namespace_name(ns_info->name);
+    info.set_namespace_id(ns_info->id);
 
     return {{info, namespace_id, index_xid}};
 }
@@ -726,7 +826,12 @@ Service::_drop_table(const proto::DropTableRequest& request)
     _read_schema_indexes(index_info, request.db_id(), request.table_id(), xid);
 
     for (auto const& idx : index_info->indexes()) {
-        _drop_index(xid, request.db_id(), idx.id(), request.table_id());
+        // For secondary indexes, indexer will take care of marking them DELETED
+        if (idx.id() == constant::INDEX_PRIMARY) {
+            _drop_index(xid, request.db_id(), idx.id(), request.table_id(), sys_tbl::IndexNames::State::DELETED);
+        } else {
+            _drop_index(xid, request.db_id(), idx.id(), request.table_id(), sys_tbl::IndexNames::State::BEING_DELETED);
+        }
     }
 
     // mark the table as dropped in the table_names
@@ -1987,10 +2092,6 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
     auto names_schema = names_t->extent_schema();
     auto names_fields = names_schema->get_fields();
 
-    auto indexes_t = _get_system_table(db_id, sys_tbl::Indexes::ID);
-    auto indexes_schema = indexes_t->extent_schema();
-    auto indexes_fields = indexes_schema->get_fields();
-
     auto search_key = sys_tbl::IndexNames::Primary::key_tuple(table_id, 0, 0, 0);
 
     for (auto names_i = names_t->lower_bound(search_key); names_i != names_t->end(); ++names_i) {
@@ -2052,38 +2153,14 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
         auto ns_info = _get_namespace_info(db_id, namespace_id, access_xid, false);
         CHECK(ns_info);
         info.set_namespace_name(ns_info->name);
+        info.set_namespace_id(ns_info->id);
 
         info.set_name(names_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(&row));
         info.set_table_id(tid);
         info.set_is_unique(names_fields->at(sys_tbl::IndexNames::Data::IS_UNIQUE)->get_bool(&row));
 
-        auto index_key = sys_tbl::Indexes::Primary::key_tuple(table_id, info.id(), index_xid.xid,
-                                                              index_xid.lsn, 0);
-        for (auto index_i = indexes_t->lower_bound(index_key); index_i != indexes_t->end();
-             ++index_i) {
-            auto& row = *index_i;
-            uint64_t tid = indexes_fields->at(sys_tbl::Indexes::Data::TABLE_ID)->get_uint64(&row);
-            uint64_t index_id =
-                indexes_fields->at(sys_tbl::Indexes::Data::INDEX_ID)->get_uint64(&row);
-
-            if (tid != table_id || index_id != info.id()) {
-                LOG_DEBUG(LOG_SCHEMA, "No more indexes for table {} -- {}, {} -- {}",
-                                    table_id, tid, index_id, info.id());
-                break;
-            }
-            // index_xid and xid's of index columns must match
-            uint64_t xid = indexes_fields->at(sys_tbl::Indexes::Data::XID)->get_uint64(&row);
-            uint64_t lsn = indexes_fields->at(sys_tbl::Indexes::Data::LSN)->get_uint64(&row);
-            if (index_xid != XidLsn(xid, lsn)) {
-                break;
-            }
-
-            proto::IndexColumn* col = info.add_columns();
-            col->set_position(
-                indexes_fields->at(sys_tbl::Indexes::Data::COLUMN_ID)->get_uint32(&row));
-            col->set_idx_position(
-                indexes_fields->at(sys_tbl::Indexes::Data::POSITION)->get_uint32(&row));
-        }
+        // populate Index columns for the given XidLsn
+        _populate_index_columns(db_id, info, index_xid);
 
         // erase any of the previous info, we'll keep the last one only
         auto it = std::ranges::find_if(schema_info->indexes(),
@@ -2096,6 +2173,41 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
 
     // apply cached changes
     _apply_index_cache_history(schema_info, db_id, table_id, access_xid);
+}
+
+void
+Service::_populate_index_columns(uint64_t db_id, proto::IndexInfo& info, XidLsn index_xid) {
+    auto indexes_t = _get_system_table(db_id, sys_tbl::Indexes::ID);
+    auto indexes_schema = indexes_t->extent_schema();
+    auto indexes_fields = indexes_schema->get_fields();
+
+    auto index_key = sys_tbl::Indexes::Primary::key_tuple(info.table_id(), info.id(), index_xid.xid,
+            index_xid.lsn, 0);
+    for (auto index_i = indexes_t->lower_bound(index_key); index_i != indexes_t->end();
+            ++index_i) {
+        auto& row = *index_i;
+        uint64_t tid = indexes_fields->at(sys_tbl::Indexes::Data::TABLE_ID)->get_uint64(&row);
+        uint64_t index_id =
+            indexes_fields->at(sys_tbl::Indexes::Data::INDEX_ID)->get_uint64(&row);
+
+        if (tid != info.table_id() || index_id != info.id()) {
+            LOG_DEBUG(LOG_SCHEMA, "No more indexes for table {} -- {}, {} -- {}",
+                    info.table_id(), tid, index_id, info.id());
+            break;
+        }
+        // index_xid and xid's of index columns must match
+        uint64_t xid = indexes_fields->at(sys_tbl::Indexes::Data::XID)->get_uint64(&row);
+        uint64_t lsn = indexes_fields->at(sys_tbl::Indexes::Data::LSN)->get_uint64(&row);
+        if (index_xid != XidLsn(xid, lsn)) {
+            break;
+        }
+
+        proto::IndexColumn* col = info.add_columns();
+        col->set_position(
+                indexes_fields->at(sys_tbl::Indexes::Data::COLUMN_ID)->get_uint32(&row));
+        col->set_idx_position(
+                indexes_fields->at(sys_tbl::Indexes::Data::POSITION)->get_uint32(&row));
+    }
 }
 
 void
@@ -2641,6 +2753,7 @@ Service::_set_primary_index(uint64_t db_id,
     index.set_name(table_name + ".primary_key");
     index.set_is_unique(true);
     index.set_namespace_name(namespace_name);
+    index.set_namespace_id(namespace_id);
     index.set_table_id(table_id);
     index.set_state(static_cast<uint8_t>(sys_tbl::IndexNames::State::READY));
 

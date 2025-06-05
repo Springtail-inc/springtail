@@ -87,7 +87,7 @@ class Production:
         logging.getLogger('urllib3').setLevel(logging.CRITICAL)
 
 
-    def install_binaries(self) -> None:
+    def install_binaries(self, config_gitsha: str) -> None:
         """
         Install the springtail binaries on the local system.
         Current s3 bucket: s3://data-share.springtail.internal/packages/
@@ -126,6 +126,11 @@ class Production:
             # Make sure shared-lib is readable by all
             run_command('sudo', ['chmod', '-R', '755', os.path.join(self.install_path, SPRINGTAIL_LIB_DIR)])
 
+            package_config_sha = self.get_config_hash(os.path.join(self.install_path, 'IFNO.txt'))
+            if package_config_sha != config_gitsha:
+                self.logger.error(f"Config Git SHA mismatch: expected {config_gitsha}, got {package_config_sha}")
+                raise ValueError("Config Git SHA mismatch")
+
             self.logger.info(f"Springtail binaries installed to {self.install_path}")
             self.send_sns('install_complete', version=os.path.basename(springtail_tgz))
 
@@ -133,6 +138,26 @@ class Production:
             self.logger.error(f"Failed to install springtail binaries: {str(e)}")
             self.send_sns('install_failed', version=os.path.basename(springtail_tgz))
             raise e
+
+    def get_config_hash(file_path: str) -> str:
+        """Read and extract Config Hash value from the version file.
+        
+        Args:
+            file_path: Path to the version file
+            
+        Returns:
+            String containing the config hash value
+        """
+        try:
+            with open(file_path, 'r') as f:
+                for line in f:
+                    if line.startswith('Config Hash:'):
+                        return line.split(':')[1].strip()
+        except Exception as e:
+            logging.error(f"Failed to read config hash: {str(e)}")
+            raise
+
+        raise ValueError("Config Hash not found in version file")
 
     def install_pgfdw(self) -> None:
         """

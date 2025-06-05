@@ -196,7 +196,7 @@ namespace springtail::pg_log_mgr {
         void _startup_running();
 
         /** Setup streaming and startup threads */
-        void _start_streaming(uint64_t lsn = INVALID_LSN, bool do_init = false);
+        bool _start_streaming(uint64_t lsn = INVALID_LSN, bool do_init = false);
 
         ///// Stage 1 of pipeline, writing replication log to disk
         std::thread _writer_thread;           ///< log writer thread

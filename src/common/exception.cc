@@ -8,9 +8,9 @@ namespace {
     backtrace_handler(int signo)
     {
         LOG_ERROR("Crash detected from signal {}", signo);
-        // NOTE: this part is commented out for now as it was causing segmentation fault in the signal handler
+
         // flush open telemetry data
-        // springtail::open_telemetry::OpenTelemetry::flush();
+        springtail::open_telemetry::OpenTelemetry::flush();
 
         // attempt to flush the log before we try to capture the backtrace in case something goes wrong
         spdlog::default_logger()->flush();
@@ -19,7 +19,7 @@ namespace {
         auto trace = cpptrace::generate_trace();
 
         std::stringstream ss;
-        trace.print(ss);
+        trace.print(ss, false); // no color
 
         LOG_ERROR("Backtrace from signal {}:\n{}", signo, ss.str());
         signal(signo, SIG_DFL);

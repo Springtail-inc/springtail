@@ -93,6 +93,15 @@ message IndexInfo {
   string table_name = 6;
   int32 state = 7;
   repeated IndexColumn columns = 8;
+  int64 namespace_id = 9;
+}
+
+message IndexInfoList {
+    repeated IndexInfo indexes = 1;
+}
+
+message IndexesInfo {
+    map<uint64, IndexInfoList> xid_index_map = 1;
 }
 
 message IndexRequest {
@@ -118,6 +127,10 @@ message DropIndexRequest {
   uint64 index_id = 4;
   string namespace_name = 5;
   string name = 6;
+}
+
+message GetUnfinishedIndexesInfoRequest {
+  int64 db_id = 1;
 }
 
 message GetIndexInfoRequest {
@@ -298,4 +311,8 @@ service SysTblMgr {
 
   // Get user defined type
   rpc GetUserType(GetUserTypeRequest) returns (GetUserTypeResponse) {}
+
+  // Get unfinished indexs info to be recovered
+  rpc GetUnfinishedIndexesInfo(GetUnfinishedIndexesInfoRequest) returns (IndexesInfo) {}
+
 }

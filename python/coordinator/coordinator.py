@@ -96,6 +96,7 @@ class Coordinator:
         """
         state = self.props.get_coordinator_state()
         self.logger.info(f"Coordinator state: {state}")
+        config_gitsha = self.props.get_config_gitsha()
 
         if self.production:
             # Send SNS message
@@ -106,7 +107,7 @@ class Coordinator:
                 if state == CoordinatorState.STARTUP:
                     # Install binaries
                     self.logger.debug("Installing binaries")
-                    self.production.install_binaries()
+                    self.production.install_binaries(config_gitsha)
                     self.logger.debug("Re-installing coordinator")
                     loader.startup(self.install_path, project_root)
                     self.props.set_coordinator_state(CoordinatorState.RELOADING)
