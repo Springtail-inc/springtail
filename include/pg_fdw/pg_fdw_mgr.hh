@@ -79,7 +79,7 @@ namespace springtail::pg_fdw {
             uint32_t atttypmod;
             uint32_t attnum;
 
-            auto operator<=>(const PgAttr&) const = default;
+            bool operator==(const PgAttr&) const = default;
         };
         std::vector<PgAttr> _attrs; ///< Scan tuple attributes
 
