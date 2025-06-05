@@ -59,10 +59,10 @@ extern "C" {
 
     /** Reset scan wrapper */
     void
-    fdw_reset_scan(void *state)
+    fdw_reset_scan(void *state, List *qual_list)
     {
         if (state) {
-            get_fdw_mgr()->fdw_reset_scan(static_cast<PgFdwState*>(state));
+            get_fdw_mgr()->fdw_reset_scan(static_cast<PgFdwState*>(state), qual_list);
         }
     }
 

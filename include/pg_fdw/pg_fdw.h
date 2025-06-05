@@ -32,7 +32,7 @@ void fdw_end_scan(void *state);
 bool fdw_iterate_scan(void *state, Datum *values, bool *nulls, bool *eos);
 
 /** Reset scan */
-void fdw_reset_scan(void *state);
+void fdw_reset_scan(void *state, List *qual_list);
 
 /** Import foreign schema */
 List *fdw_import_foreign_schema(const char *server, const char *schema,

@@ -428,7 +428,7 @@ makeQual(AttrNumber varattno, char *opname, Expr *value, bool isarray,
     qual->op = getOpEnum(opname);
     qual->isArray = isarray;
     qual->useOr = useOr;
-    elog(DEBUG3, "makeQual() opname '%s': right_type '%d'", opname, qual->right_type);
+    elog(DEBUG3, "makeQual() opname '%s': right_type '%d', op:'%d'", opname, qual->right_type, qual->op);
     return qual;
 }
 
@@ -1039,7 +1039,6 @@ multicorn_getForeignPlan(PlannerInfo *root,
                             NULL);
 }
 
-
 List *
 multicorn_buildSimpleQualList(ForeignScanState *node)
 {
@@ -1079,6 +1078,7 @@ multicorn_buildSimpleQualList(ForeignScanState *node)
                 newqual->base.right_type = T_Const;
                 newqual->base.varattno = qual->varattno;
                 newqual->base.opname = qual->opname;
+                newqual->base.op = getOpEnum(qual->opname);
                 newqual->base.isArray = qual->isArray;
                 newqual->base.useOr = qual->useOr;
                 newqual->value = ExecEvalExpr(expr_state, econtext, &isNull);

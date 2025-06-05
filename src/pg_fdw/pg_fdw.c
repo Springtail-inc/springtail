@@ -465,7 +465,11 @@ springtail_ReScanForeignScan(ForeignScanState *node)
 {
     // reset state to beginning of table
     void *state = node->fdw_state;
-    fdw_reset_scan(state);
+
+    // build a simple qual list against constants only
+    List* qual_list = multicorn_buildSimpleQualList(node);
+
+    fdw_reset_scan(state, qual_list);
 }
 
 /**
