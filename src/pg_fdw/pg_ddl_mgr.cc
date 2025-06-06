@@ -516,6 +516,48 @@ namespace springtail::pg_fdw {
         conn->end_transaction();
     }
 
+    PartitionInfo
+    _get_partition_info(const nlohmann::json &ddl){
+
+        uint64_t parent_table_id;
+        std::string parent_table_name;
+        std::string partition_key;
+        std::string partition_bound;
+
+        if (ddl.contains("parent_table_id")) {
+            parent_table_id = ddl.at("parent_table_id").get<uint64_t>();
+        } else {
+            parent_table_id = 0;
+        }
+
+        if (ddl.contains("parent_table_name")) {
+            parent_table_name = ddl.at("parent_table_name").get<std::string>();
+        } else {
+            parent_table_name = "";
+        }
+
+        if (ddl.contains("partition_key")) {
+            partition_key = ddl.at("partition_key").get<std::string>();
+        } else {
+            partition_key = "";
+        }
+
+        if (ddl.contains("partition_bound")) {
+            partition_bound = ddl.at("partition_bound").get<std::string>();
+        } else {
+            partition_bound = "";
+        }
+
+        PartitionInfo partition_info(
+            parent_table_id,
+            parent_table_name,
+            partition_key,
+            partition_bound
+        );
+
+        return partition_info;
+    }
+
     std::string
     PgDDLMgr::_gen_sql_from_json(LibPqConnectionPtr conn,
                                  const std::string &server_name,
@@ -526,17 +568,15 @@ namespace springtail::pg_fdw {
 
         LOG_DEBUG(LOG_FDW, "DDL JSON: {}", ddl.dump(4));
 
+        PartitionInfo partition_info = _get_partition_info(ddl);
+
+        bool is_regular_table = partition_info.parent_table_id == 0 && partition_info.partition_key.empty();
+        bool is_leaf_partitioned_table = partition_info.parent_table_id > 0 && !partition_info.partition_bound.empty() && partition_info.partition_key.empty();
+
+        bool is_regular_table_type = is_regular_table || is_leaf_partitioned_table;
+
         auto const &action = ddl.at("action");
         if (action == "create") { // create table
-            PartitionInfo partition_info(
-                ddl.at("parent_table_id").get<uint64_t>(),
-                ddl.at("parent_table_name").get<std::string>(),
-                ddl.at("partition_key").get<std::string>(),
-                ddl.at("partition_bound").get<std::string>()
-            );
-
-            bool is_parent_partitioned_table = partition_info.parent_table_id == 0 && !partition_info.partition_key.empty();
-            bool is_non_leaf_partitioned_table = partition_info.parent_table_id > 0 && !partition_info.partition_bound.empty() && !partition_info.partition_key.empty();
             // generate the CREATE TABLE statement
             std::vector<std::tuple<std::string, std::string, bool>> columns;
 
@@ -546,28 +586,12 @@ namespace springtail::pg_fdw {
                                                     col.at("nullable").get<bool>()));
             }
 
-            if (is_parent_partitioned_table || is_non_leaf_partitioned_table) {
-                return PgFdwCommon::_gen_fdw_table_sql(server_name, ddl.at("schema"), ddl.at("table"), ddl.at("tid"), columns, partition_info, false);
-            }
-
-            return PgFdwCommon::_gen_fdw_table_sql(server_name, ddl.at("schema"), ddl.at("table"), ddl.at("tid"), columns, partition_info, true);
+            return PgFdwCommon::_gen_fdw_table_sql(server_name, ddl.at("schema"), ddl.at("table"), ddl.at("tid"), columns, partition_info, is_regular_table_type);
         }
 
         else if (action == "rename") { // rename table
-            PartitionInfo partition_info(
-                ddl.at("parent_table_id").get<uint64_t>(),
-                "",
-                ddl.at("partition_key").get<std::string>(),
-                ddl.at("partition_bound").get<std::string>()
-            );
-
-            bool is_parent_partitioned_table = partition_info.parent_table_id == 0 && !partition_info.partition_key.empty();
-            bool is_non_leaf_partitioned_table = partition_info.parent_table_id > 0 && !partition_info.partition_bound.empty() && !partition_info.partition_key.empty();
-
-            bool is_regular_table = is_parent_partitioned_table || is_non_leaf_partitioned_table;
-
             std::string rename = fmt::format("ALTER {} TABLE {}.{} RENAME TO {};",
-                                             is_regular_table ? "" : "FOREIGN",
+                                             is_regular_table_type ? "FOREIGN" : "",
                                              conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
                                              conn->escape_identifier(ddl.at("old_table").get<std::string>()),
                                              conn->escape_identifier(ddl.at("table").get<std::string>()));
@@ -575,7 +599,7 @@ namespace springtail::pg_fdw {
             // XXX it's not clear to me that we need to support a schema change here?
             if (ddl.at("schema").get<std::string>() != ddl.at("old_schema").get<std::string>()) {
                 return rename + fmt::format("ALTER {} TABLE {}.{} SET SCHEMA {};",
-                                            is_regular_table ? "" : "FOREIGN",
+                                            is_regular_table_type ? "FOREIGN" : "",
                                             conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
                                             conn->escape_identifier(ddl.at("table").get<std::string>()),
                                             conn->escape_identifier(ddl.at("schema").get<std::string>()));
@@ -585,7 +609,8 @@ namespace springtail::pg_fdw {
         }
 
         else if (action == "drop") {  // drop table
-            return fmt::format("DROP FOREIGN TABLE IF EXISTS {}.{};",
+            return fmt::format("DROP {} TABLE IF EXISTS {}.{};",
+                               is_regular_table_type ? "FOREIGN" : "",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()));
         }
@@ -628,7 +653,8 @@ namespace springtail::pg_fdw {
 #endif /* ENABLE_SCHEMA_MUTATES */
 
         else if (action == "col_rename") {
-            return fmt::format("ALTER FOREIGN TABLE {}.{} RENAME COLUMN {} TO {};",
+            return fmt::format("ALTER {} TABLE {}.{} RENAME COLUMN {} TO {};",
+                               is_regular_table_type ? "FOREIGN" : "",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(ddl.at("old_name").get<std::string>()),
@@ -681,7 +707,8 @@ namespace springtail::pg_fdw {
             const auto table = conn->escape_identifier(ddl.at("table").get<std::string>());
             const auto old_schema = conn->escape_identifier(ddl.at("old_schema").get<std::string>());
 
-            return fmt::format("ALTER FOREIGN TABLE {}.{} SET SCHEMA {};",
+            return fmt::format("ALTER {} TABLE {}.{} SET SCHEMA {};",
+                               is_regular_table_type ? "FOREIGN" : "",
                                old_schema, table, schema);
         }
         else if (action == "ut_create") {

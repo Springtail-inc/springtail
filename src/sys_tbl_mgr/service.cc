@@ -685,6 +685,11 @@ Service::AlterTable(grpc::ServerContext* context,
         partition_bound = request->table().partition_bound();
     }
 
+    // update the partition details
+    ddl["partition_key"] = partition_key;
+    ddl["partition_bound"] = partition_bound;
+    ddl["parent_table_id"] = parent_table_id;
+
     if (table_info->namespace_id != ns_info->id) {
         // if the schema/namespace changed then update the table_names table
         // insert the new name for this oid
@@ -716,11 +721,6 @@ Service::AlterTable(grpc::ServerContext* context,
         // set the DDL statement
         ddl["action"] = "rename";
         ddl["old_table"] = table_info->name;
-
-        // update the partition details
-        ddl["partition_key"] = partition_key;
-        ddl["partition_bound"] = partition_bound;
-        ddl["parent_table_id"] = parent_table_id;
 
         if (table_info->namespace_id != ns_info->id) {
             auto old_ns_info = _get_namespace_info(request->db_id(), table_info->namespace_id,
@@ -765,7 +765,6 @@ Service::AlterTable(grpc::ServerContext* context,
         auto history = _generate_update(info->columns(), request->table().columns(),
                                         xid, (!partition_key.empty()), ddl);
 
-        LOG_INFO("[DEBUG] DDL: {}", ddl.dump(4));
         // we won't apply any changes to the system tables in these cases
         if (history.update_type() != static_cast<int8_t>(SchemaUpdateType::NO_CHANGE) &&
             history.update_type() != static_cast<int8_t>(SchemaUpdateType::RESYNC)) {
@@ -817,6 +816,10 @@ Service::_drop_table(const proto::DropTableRequest& request)
 
     CHECK(ns_info);
 
+    auto old_table_info = _get_table_info(request.db_id(), request.table_id(), XidLsn(request.xid(), request.lsn()));
+
+    CHECK(old_table_info);
+
     // initialize the ddl json
     nlohmann::json ddl;
     ddl["action"] = "drop";
@@ -825,6 +828,22 @@ Service::_drop_table(const proto::DropTableRequest& request)
     ddl["lsn"] = request.lsn();
     ddl["schema"] = request.namespace_name();
     ddl["table"] = request.name();
+
+    if (old_table_info->parent_table_id.has_value()) {
+        ddl["parent_table_id"] = old_table_info->parent_table_id.value();
+    } else {
+        ddl["parent_table_id"] = constant::INVALID_TABLE;
+    }
+    if (old_table_info->partition_key.has_value() && !old_table_info->partition_key.value().empty()) {
+        ddl["partition_key"] = old_table_info->partition_key.value();
+    } else {
+        ddl["partition_key"] = "";
+    }
+    if (old_table_info->partition_bound.has_value() && !old_table_info->partition_bound.value().empty()) {
+        ddl["partition_bound"] = old_table_info->partition_bound.value();
+    } else {
+        ddl["partition_bound"] = "";
+    }
 
     XidLsn xid(request.xid(), request.lsn());
 
@@ -1687,9 +1706,22 @@ Service::_get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     info->namespace_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
     info->name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row);
     info->exists = exists;
-    info->parent_table_id = fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->get_uint64(&row);
-    info->partition_key = fields->at(sys_tbl::TableNames::Data::PARTITION_KEY)->get_text(&row);
-    info->partition_bound = fields->at(sys_tbl::TableNames::Data::PARTITION_BOUND)->get_text(&row);
+
+    uint64_t parent_table_id = 0;
+    if (!fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->is_null(&row)) {
+        parent_table_id = fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->get_uint64(&row);
+    }
+    std::string partition_key = "";
+    if (!fields->at(sys_tbl::TableNames::Data::PARTITION_KEY)->is_null(&row)) {
+        partition_key = fields->at(sys_tbl::TableNames::Data::PARTITION_KEY)->get_text(&row);
+    }
+    std::string partition_bound = "";
+    if (!fields->at(sys_tbl::TableNames::Data::PARTITION_BOUND)->is_null(&row)) {
+        partition_bound = fields->at(sys_tbl::TableNames::Data::PARTITION_BOUND)->get_text(&row);
+    }
+    info->parent_table_id = parent_table_id;
+    info->partition_key = partition_key;
+    info->partition_bound = partition_bound;
 
     // note: we currently only keep un-finalized mutations in the cache, so don't cache here
     return info;
