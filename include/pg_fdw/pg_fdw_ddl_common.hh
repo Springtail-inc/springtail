@@ -32,17 +32,16 @@ namespace springtail::pg_fdw {
          * @param table_oid table OID
          * @param columns table columns
          * @param table_partition_map table partition map
-         * @param query_resolver Function to resolve the query to be executed
          * @param is_fdw Flag to indicate if the output query is needed for FDW or the DDL manager
          * @return std::string
          */
-        template <typename Func>
         static std::string
-        _process_table(const std::string &table_name,
+        _process_table(const std::string &server_name,
+                       const std::string &namespace_name,
+                       const std::string &table_name,
                        const uint64_t &table_oid,
                        const std::vector<std::tuple<std::string, std::string, bool>> &columns,
                        const std::map<uint64_t, PartitionInfo> &table_partition_map,
-                       Func query_resolver,
                        bool is_fdw)
         {
             const PartitionInfo &partition_info = table_partition_map.at(table_oid);
@@ -60,38 +59,108 @@ namespace springtail::pg_fdw {
             // Non-Leaf Partitioned Table   - SKIP      - CREATE
 
             if (is_regular_table || is_leaf_partitioned_table) {
-                return is_fdw ? query_resolver(table_name, table_oid, columns, partition_info) : "";
+                return is_fdw ? _gen_fdw_table_sql(server_name, namespace_name, table_name, table_oid, columns, partition_info, true) : "";
             } else if (is_parent_partitioned_table || is_non_leaf_partitioned_table) {
-                return is_fdw ? "" : query_resolver(table_name, table_oid, columns, partition_info);
+                return is_fdw ? "" : _gen_fdw_table_sql(server_name, namespace_name, table_name, table_oid, columns, partition_info, false);
             }
             return "";
         }
 
         /**
+         * @brief Generate the SQL for a table to be created in the FDW. Depending on the partitioning, either create
+         *        the table as a regular table or a foreign table
+         *
+         * @param server_name server name
+         * @param namespace_name namespace name
+         * @param table table name
+         * @param tid table id
+         * @param columns table columns
+         * @param partition_info partition info
+         * @param is_foreign_table flag to indicate if the table is a foreign table
+         * @return std::string
+         */
+        static std::string
+        _gen_fdw_table_sql(const std::string &server_name,
+                           const std::string &namespace_name,
+                           const std::string &table,
+                           uint64_t tid,
+                           const std::vector<std::tuple<std::string, std::string, bool>> &columns,
+                           const PartitionInfo &partition_info,
+                           bool is_foreign_table)
+        {
+            // no schema name needed
+            std::string create = fmt::format("{} {}.{} \n",
+                is_foreign_table ? "CREATE FOREIGN TABLE" : "CREATE TABLE",
+                namespace_name,
+                table);
+
+            if (partition_info.parent_table_id == 0) {
+                create += " (";
+                // iterate over the columns, adding each to the create statement
+                // name, type, is_nullable, default value
+                for (int i = 0; i < columns.size(); i++) {
+                    const auto &[column_name, type_name, nullable] = columns[i];
+                    std::string column = fmt::format("  {} ", column_name);
+
+                    // XXX Check user defined type
+                    // set the type name
+                    column += type_name;
+
+                    // add nullability and default
+                    if (!nullable) {
+                        column += " NOT NULL";
+                    }
+
+                    if (i < columns.size() - 1) {
+                        column += ",\n";
+                    }
+
+                    create += column;
+                }
+                create += "\n)";
+            } else {
+                create += fmt::format("\nPARTITION OF {}.{}", namespace_name, partition_info.parent_table_name);
+                create += fmt::format("\n{}", partition_info.partition_bound);
+            }
+
+            if (!partition_info.partition_key.empty()) {
+                create += fmt::format("\nPARTITION BY {}", partition_info.partition_key);
+            }
+            if (is_foreign_table) {
+                create += fmt::format("\nSERVER {} OPTIONS (tid '{}');", server_name, tid);
+            } else {
+                create += ";";
+            }
+
+            LOG_DEBUG(LOG_FDW, "Generated SQL: {}", create);
+
+            return create;
+        }
+
+        /**
          * @brief Get the schema ddl object
          *
-         * @tparam Func1 Function to resolve the column type name
-         * @tparam Func2 Function to resolve the query to be executed
+         * @tparam Func Function to resolve the column type name
          * @param db_id database id
          * @param schema_xid schema xid
+         * @param server_name server name
          * @param namespace_name namespace name
          * @param exclude exclude flag
          * @param limit limit flag
          * @param table_set table set
          * @param type_name_resolver Function to resolve the column type name
-         * @param query_resolver Function to resolve the query to be executed
          * @param is_fdw Flag to indicate if the output query is needed for FDW or the DDL manager
          * @return std::vector<std::string>
          */
-        template <typename Func1, typename Func2>
+        template <typename Func>
         static std::vector<std::string>
         get_schema_ddl(uint64_t db_id,
                        uint64_t schema_xid,
+                       const std::string &server_name,
                        const std::string &namespace_name,
                        bool exclude, bool limit,
                        const std::set<std::string> &table_set,
-                       Func1 type_name_resolver,
-                       Func2 query_resolver,
+                       Func type_name_resolver,
                        bool is_fdw)
         {
             std::vector<std::string> commands;
@@ -261,7 +330,7 @@ namespace springtail::pg_fdw {
                 if (tid != current_tid) {
 
                     if (!current_table.empty()) {
-                        std::string sql = _process_table(current_table, current_tid, columns, table_partition_map, query_resolver, is_fdw);
+                        std::string sql = _process_table(server_name, namespace_name, current_table, current_tid, columns, table_partition_map, is_fdw);
                         if (!sql.empty())
                             commands.push_back(sql);
                     }
@@ -305,7 +374,7 @@ namespace springtail::pg_fdw {
 
             // process last table
             if (columns.size() > 0) {
-                std::string sql = _process_table(current_table, current_tid, columns, table_partition_map, query_resolver, is_fdw);
+                std::string sql = _process_table(server_name, namespace_name, current_table, current_tid, columns, table_partition_map, is_fdw);
                 if (!sql.empty())
                     commands.push_back(sql);
             }

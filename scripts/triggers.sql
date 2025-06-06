@@ -66,6 +66,9 @@ DECLARE
     table_persistence "char";
     table_replident "char";
     rel_kind "char";
+    parent_table_id oid;
+    partition_bound text;
+    partition_key text;
     table_relname text;
     table_info RECORD;
     command_tag text;
@@ -83,10 +86,14 @@ BEGIN
 
         -- BEGIN of what should have been a function, if you change it here,
         -- it should also be change in the springtail_event_trigger_for_schema_ddl()
-        SELECT pg_class.relname, pg_class.relreplident, pg_class.relpersistence, pg_class.relkind
+        SELECT pg_class.relname, pg_class.relreplident, pg_class.relpersistence, pg_class.relkind, CASE WHEN pg_class.relispartition THEN
+                (SELECT inhparent FROM pg_inherits WHERE inhrelid = pg_class.oid)
+            END as parent_table_id,
+            pg_get_expr(pg_class.relpartbound, pg_class.oid, TRUE) as partition_bound,
+            pg_get_partkeydef(pg_class.oid) as partition_key
         FROM pg_class
         WHERE oid = obj.objid
-        INTO table_relname, table_replident, table_persistence, rel_kind;
+        INTO table_relname, table_replident, table_persistence, rel_kind, parent_table_id, partition_bound, partition_key;
 
         -- This is a corner case when an index is renamed through "ALTER TABLE" statement
         -- In this case our object is an index, not a table. So, we can't do anything with it here.
@@ -156,7 +163,10 @@ BEGIN
             'obj', obj.object_type,
             'schema', obj.schema_name,
             'table', table_relname,
-            'columns', json_columns);
+            'columns', json_columns,
+            'parent_table_id', parent_table_id::int,
+            'partition_bound', partition_bound,
+            'partition_key', partition_key);
 
         -- command_tag is CREATE TABLE or ALTER TABLE
         PERFORM pg_logical_emit_message(true, 'springtail:' || command_tag, msg::text);

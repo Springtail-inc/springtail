@@ -102,20 +102,6 @@ namespace springtail::pg_fdw {
                                    const std::map<uint64_t, std::map<uint64_t,
                                    std::pair<std::string, std::string>>> &user_types);
 
-        /**
-         * @brief Helper to generate a create partitioned table query
-         *
-         * @param schema schema name
-         * @param table_name table name
-         * @param columns vector of column tuples (name, type, nullable)
-         * @param partition_info partition info
-         * @return std::string create partitioned table query
-         */
-        std::string
-        _get_create_partitioned_table_query(const std::string &schema,
-                                            const std::string &table_name,
-                                            const std::vector<std::tuple<std::string, std::string, bool>> &columns,
-                                            const PartitionInfo &partition_info);
 
         /** Private constructor */
         PgDDLMgr();

@@ -1598,12 +1598,9 @@ namespace springtail::pg_fdw {
             return _import_springtail_catalog(server, table_set, exclude, limit);
         }
 
-        std::vector<std::string> ddl = PgFdwCommon::get_schema_ddl(db_id, schema_xid, namespace_name, exclude, limit, table_set,
+        std::vector<std::string> ddl = PgFdwCommon::get_schema_ddl(db_id, schema_xid, server, namespace_name, exclude, limit, table_set,
                               [&db_id, &namespace_name, &schema_xid](uint32_t pg_type, uint64_t namespace_id) {
                                   return _get_type_name(pg_type, _load_user_types(db_id, namespace_name, namespace_id, schema_xid));
-                              },
-                              [&server, &namespace_name](const std::string &table_name, const uint64_t &table_oid, const std::vector<std::tuple<std::string, std::string, bool>> &columns, const PartitionInfo &partition_info) {
-                                  return _gen_fdw_table_sql(server, namespace_name, table_name, table_oid, columns);
                               }, true);
 
         return vector_to_string_list(ddl);

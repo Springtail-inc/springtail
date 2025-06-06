@@ -576,6 +576,8 @@ Service::_create_table(const proto::TableRequest& request)
     if (request.table().has_partition_key()) {
         partition_key = request.table().partition_key();
         ddl["partition_key"] = partition_key.value();
+    } else {
+        ddl["partition_key"] = "";
     }
 
     // this is a partitioned table, it is a leaf if partition_key is empty
@@ -583,6 +585,8 @@ Service::_create_table(const proto::TableRequest& request)
     if (request.table().has_partition_bound()) {
         partition_bound = request.table().partition_bound();
         ddl["partition_bound"] = partition_bound.value();
+    } else {
+        ddl["partition_bound"] = "";
     }
 
     // add table name

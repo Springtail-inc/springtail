@@ -172,53 +172,6 @@ namespace springtail::pg_fdw {
         return usertype_map;
     }
 
-    std::string
-    PgDDLMgr::_get_create_partitioned_table_query(const std::string &schema,
-                                                  const std::string &table_name,
-                                                  const std::vector<std::tuple<std::string, std::string, bool>> &columns,
-                                                  const PartitionInfo &partition_info)
-    {
-        std::string create = fmt::format("CREATE TABLE {}.{} \n",
-                                         schema,
-                                         table_name);
-
-        if (partition_info.parent_table_id == 0) {
-            // iterate over the columns again, adding each to the create statement
-            create += " (";
-            for (int i = 0; i < columns.size(); i++) {
-                const auto &[column_name, type_name, nullable] = columns[i];
-                std::string column = fmt::format("  {} ", column_name);
-
-                // set the type name
-                column += type_name;
-
-                // add nullability and default
-                if (!nullable) {
-                    column += " NOT NULL";
-                }
-
-                if (i < columns.size() - 1) {
-                    column += ",\n";
-                }
-
-                create += column;
-            }
-            create += "\n)";
-        } else {
-            create += fmt::format("\nPARTITION OF {}.{}", schema, partition_info.parent_table_name);
-            create += fmt::format("\n{}", partition_info.partition_bound);
-        }
-
-        if (!partition_info.partition_key.empty()) {
-            create += fmt::format("\nPARTITION BY {}", partition_info.partition_key);
-        }
-        create += ";";
-
-        LOG_DEBUG(LOG_FDW, "Partitioned table SQL: {}", create);
-
-        return create;
-    }
-
     std::map<uint64_t, std::string>
     PgDDLMgr::_get_schemas(uint64_t db_id, uint64_t xid)
     {
@@ -585,20 +538,19 @@ namespace springtail::pg_fdw {
             bool is_parent_partitioned_table = partition_info.parent_table_id == 0 && !partition_info.partition_key.empty();
             bool is_non_leaf_partitioned_table = partition_info.parent_table_id > 0 && !partition_info.partition_bound.empty() && !partition_info.partition_key.empty();
             // generate the CREATE TABLE statement
-            if (is_parent_partitioned_table || is_non_leaf_partitioned_table) {
-                std::vector<std::tuple<std::string, std::string, bool>> columns;
+            std::vector<std::tuple<std::string, std::string, bool>> columns;
 
-                for (const auto &col : ddl.at("columns")) {
-                    columns.push_back(std::make_tuple(col.at("name").get<std::string>(),
-                                                      col.at("type_name").get<std::string>(),
-                                                      col.at("nullable").get<bool>()));
-                }
-
-                return _get_create_partitioned_table_query(ddl.at("schema"), ddl.at("table"), columns, partition_info);
+            for (const auto &col : ddl.at("columns")) {
+                columns.push_back(std::make_tuple(col.at("name").get<std::string>(),
+                                                    col.at("type_name").get<std::string>(),
+                                                    col.at("nullable").get<bool>()));
             }
 
-            return _gen_fdw_table_sql(conn, server_name, ddl.at("schema"), ddl.at("table"),
-                                      ddl.at("tid"), ddl.at("columns"));
+            if (is_parent_partitioned_table || is_non_leaf_partitioned_table) {
+                return PgFdwCommon::_gen_fdw_table_sql(server_name, ddl.at("schema"), ddl.at("table"), ddl.at("tid"), columns, partition_info, false);
+            }
+
+            return PgFdwCommon::_gen_fdw_table_sql(server_name, ddl.at("schema"), ddl.at("table"), ddl.at("tid"), columns, partition_info, true);
         }
 
         else if (action == "rename") { // rename table
@@ -931,16 +883,10 @@ namespace springtail::pg_fdw {
             }
 
             // Create the parent partition tables
-            std::vector<std::string> ddl = PgFdwCommon::get_schema_ddl(db_id, xid, schema.second,
+            std::vector<std::string> ddl = PgFdwCommon::get_schema_ddl(db_id, xid, SPRINGTAIL_FDW_SERVER_NAME, schema.second,
                                              false, false, {},
                                              [this, &user_types](uint32_t pg_type, uint64_t namespace_id) {
                                                  return _get_type_name(pg_type, user_types);
-                                             },
-                                             [this, &schema](const std::string &table_name,
-                                                             const uint64_t &table_oid,
-                                                             const std::vector<std::tuple<std::string, std::string, bool>> &columns,
-                                                             const PartitionInfo &partition_info) {
-                                                 return _get_create_partitioned_table_query(schema.second, table_name, columns, partition_info);
                                              }, false);
 
             // Create the partition tables
