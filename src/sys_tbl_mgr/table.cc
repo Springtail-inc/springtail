@@ -1295,7 +1295,7 @@ namespace indexer_helpers {
         : 
             Tracker{table, btree, btree_i},
             _cache_size{Json::get_or<uint64_t>(Properties::get(Properties::STORAGE_CONFIG), "page_cache_size", 16384)},
-            _eid_buffer{_cache_size}
+            _eid_buffer{_cache_size/2}
     {
         DCHECK(_cache_size);
 
