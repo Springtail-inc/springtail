@@ -554,14 +554,28 @@ namespace springtail::pg_fdw {
         }
 
         else if (action == "rename") { // rename table
-            std::string rename = fmt::format("ALTER FOREIGN TABLE {}.{} RENAME TO {};",
+            PartitionInfo partition_info(
+                ddl.at("parent_table_id").get<uint64_t>(),
+                "",
+                ddl.at("partition_key").get<std::string>(),
+                ddl.at("partition_bound").get<std::string>()
+            );
+
+            bool is_parent_partitioned_table = partition_info.parent_table_id == 0 && !partition_info.partition_key.empty();
+            bool is_non_leaf_partitioned_table = partition_info.parent_table_id > 0 && !partition_info.partition_bound.empty() && !partition_info.partition_key.empty();
+
+            bool is_regular_table = is_parent_partitioned_table || is_non_leaf_partitioned_table;
+
+            std::string rename = fmt::format("ALTER {} TABLE {}.{} RENAME TO {};",
+                                             is_regular_table ? "" : "FOREIGN",
                                              conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
                                              conn->escape_identifier(ddl.at("old_table").get<std::string>()),
                                              conn->escape_identifier(ddl.at("table").get<std::string>()));
 
             // XXX it's not clear to me that we need to support a schema change here?
             if (ddl.at("schema").get<std::string>() != ddl.at("old_schema").get<std::string>()) {
-                return rename + fmt::format("ALTER FOREIGN TABLE {}.{} SET SCHEMA {};",
+                return rename + fmt::format("ALTER {} TABLE {}.{} SET SCHEMA {};",
+                                            is_regular_table ? "" : "FOREIGN",
                                             conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
                                             conn->escape_identifier(ddl.at("table").get<std::string>()),
                                             conn->escape_identifier(ddl.at("schema").get<std::string>()));

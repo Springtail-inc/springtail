@@ -672,11 +672,11 @@ Service::AlterTable(grpc::ServerContext* context,
     assert(table_info != nullptr);
 
     // check if the table is a partitioned table
-    uint64_t parent_id = constant::INVALID_TABLE;
-    std::string partition_key;
-    std::string partition_bound;
+    uint64_t parent_table_id = constant::INVALID_TABLE;
+    std::string partition_key = "";
+    std::string partition_bound = "";
     if (request->table().has_parent_table_id()) {
-        parent_id = request->table().parent_table_id();
+        parent_table_id = request->table().parent_table_id();
     }
     if (request->table().has_partition_key()) {
         partition_key = request->table().partition_key();
@@ -691,7 +691,7 @@ Service::AlterTable(grpc::ServerContext* context,
         auto new_info = std::make_shared<TableCacheRecord>(request->table().id(), request->xid(),
                                                            request->lsn(), ns_info->id,
                                                            request->table().name(), true,
-                                                           parent_id, partition_key,
+                                                           parent_table_id, partition_key,
                                                            partition_bound);
         _set_table_info(request->db_id(), new_info);
 
@@ -709,13 +709,18 @@ Service::AlterTable(grpc::ServerContext* context,
         auto new_info = std::make_shared<TableCacheRecord>(request->table().id(), request->xid(),
                                                            request->lsn(), ns_info->id,
                                                            request->table().name(), true,
-                                                           parent_id, partition_key,
+                                                           parent_table_id, partition_key,
                                                            partition_bound);
         _set_table_info(request->db_id(), new_info);
 
         // set the DDL statement
         ddl["action"] = "rename";
         ddl["old_table"] = table_info->name;
+
+        // update the partition details
+        ddl["partition_key"] = partition_key;
+        ddl["partition_bound"] = partition_bound;
+        ddl["parent_table_id"] = parent_table_id;
 
         if (table_info->namespace_id != ns_info->id) {
             auto old_ns_info = _get_namespace_info(request->db_id(), table_info->namespace_id,
@@ -728,22 +733,22 @@ Service::AlterTable(grpc::ServerContext* context,
 
         _set_primary_index(request->db_id(), ns_info->id, request->table().id(), table_info->name,
                            ns_info->name, xid);
-    } else if (table_info->parent_table_id != parent_id) {
+    } else if (table_info->parent_table_id != parent_table_id) {
         auto new_info = std::make_shared<TableCacheRecord>(request->table().id(), request->xid(),
                                                            request->lsn(), ns_info->id,
                                                            request->table().name(), true,
-                                                           parent_id, partition_key,
+                                                           parent_table_id, partition_key,
                                                            partition_bound);
         _set_table_info(request->db_id(), new_info);
 
         if (table_info->parent_table_id == constant::INVALID_TABLE) {
-            CHECK_NE(parent_id, constant::INVALID_TABLE);
+            CHECK_NE(parent_table_id, constant::INVALID_TABLE);
             // moving table to a partitioned table
             ddl["action"] = "alter_parent_set";
             // TODO: get parent table name
             // ddl["parent_table_name"] = parent_table_name;
             // ddl["parent_table_schema"] = parent_table_schema;
-        } else if (parent_id == constant::INVALID_TABLE) {
+        } else if (parent_table_id == constant::INVALID_TABLE) {
             // promote back to full table
             ddl["action"] = "alter_parent_clear";
         }
@@ -760,6 +765,7 @@ Service::AlterTable(grpc::ServerContext* context,
         auto history = _generate_update(info->columns(), request->table().columns(),
                                         xid, (!partition_key.empty()), ddl);
 
+        LOG_INFO("[DEBUG] DDL: {}", ddl.dump(4));
         // we won't apply any changes to the system tables in these cases
         if (history.update_type() != static_cast<int8_t>(SchemaUpdateType::NO_CHANGE) &&
             history.update_type() != static_cast<int8_t>(SchemaUpdateType::RESYNC)) {
