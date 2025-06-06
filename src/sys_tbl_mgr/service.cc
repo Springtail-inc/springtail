@@ -338,9 +338,16 @@ Service::DropIndex(grpc::ServerContext* context,
 
     // perform the DROP INDEX
     const auto& index_info = _drop_index(xid, request->db_id(), request->index_id(), std::nullopt, sys_tbl::IndexNames::State::BEING_DELETED);
-
     response->set_action("drop_index");
-    *response->mutable_index() = index_info;
+    if (index_info.id() > 0) {
+        *response->mutable_index() = index_info;
+    } else {
+        proto::IndexInfo non_deleted_index;
+        non_deleted_index.set_id(request->index_id());
+        non_deleted_index.set_name(request->name());
+        non_deleted_index.set_namespace_name(request->namespace_name());
+        *response->mutable_index() = non_deleted_index;
+    }
 
     return grpc::Status::OK;
 }
