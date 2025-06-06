@@ -381,7 +381,6 @@ namespace springtail::pg_fdw {
                 LOG_DEBUG(LOG_FDW, "Checking qual {}:{} against column {} {}:{}, for op {}",
                          qual->base.typeoid, to_string(convert_pg_type(qual->base.typeoid, 'N')),
                          column.name, column.pg_type, to_string(column.type), (int)qual->base.op);
-
                 if (PgFdwMgr::check_type_compatibility(column, qual)) {
                     LOG_DEBUG(LOG_FDW, "Qual match successful");
                     return qual;
@@ -555,10 +554,9 @@ namespace springtail::pg_fdw {
 
     void
     PgFdwMgr::fdw_begin_scan(PgFdwState *state, int num_attrs, const Form_pg_attribute* attrs,
-            List *target_list, List *qual_list, List *sortgroup)
+            List *target_list, List *qual_list)
     {
         LOG_DEBUG(LOG_FDW, "fdw_begin_scan: tid: {}, {}", state->tid, num_attrs);
-
         for (size_t i = 0; i != num_attrs; ++i) {
             state->_attrs.emplace_back(attrs[i]->atttypid, attrs[i]->atttypmod, attrs[i]->attnum);
         }
@@ -588,7 +586,6 @@ namespace springtail::pg_fdw {
             state->target_columns.emplace_back(
                    i++, column.pg_type, state->_attrs[attno-1], column.name, std::move(filter));
         }
-
 
         i = state->target_columns.size();
         foreach(lc, target_list) {
@@ -678,8 +675,8 @@ namespace springtail::pg_fdw {
         // for DESC order, scan from iter_end to iter_end with (iter_end--)
         // make sure to handle the special case for NOT_EQUALS while scanning
         if (!state->index.has_value()) {
-            LOG_DEBUG(LOG_FDW, "Setting up iterators for full table scan: tid={}, ASC={}",
-                    state->tid, state->scan_asc);
+            LOG_DEBUG(LOG_FDW, "Setting up iterators for full table scan: tid={}, ASC={}, quals={}",
+                    state->tid, state->scan_asc, state->filtered_quals.size());
             state->iter_start.emplace(state->table->begin());
             state->iter_end.emplace(state->table->end());
             return;
@@ -811,9 +808,36 @@ namespace springtail::pg_fdw {
     }
 
     void
-    PgFdwMgr::fdw_reset_scan(PgFdwState *state)
+    PgFdwMgr::fdw_reset_scan(PgFdwState *state, List *qual_list)
     {
         LOG_DEBUG(LOG_FDW, "fdw_reset_scan: tid: {}", state->tid);
+
+        state->filtered_quals.clear();
+        
+        // init quals
+        _init_quals(state, qual_list);
+
+        int i = 0;
+        for (int j = 0; j < state->filtered_quals.size(); ++j) {
+            int attno = state->filtered_quals[j]->base.varattno;
+
+            auto it = std::ranges::find_if( state->target_columns,
+                    [attno, state](const PgFdwState::PgAttr& v) {return v == state->_attrs[attno-1];},
+                    [](const auto& c) {return c.pg_attr;} );
+
+            if (it == state->target_columns.end()) {
+                DCHECK(false); //fail in debug to investigate
+                LOG_WARN("fdw_reset_scan unknown qual: {} - {}", state->tid, attno);
+                continue;
+            }
+
+            PgFdwState::TargetColumn::Filter filter{state->filtered_quals[i]->base.op,
+                state->qual_fields->at(j)};
+
+            it->filter = std::move(filter);
+        }
+
+        // set the iterators for the scan taking quals into consideration
         _set_scan_iterators(state);
     }
 
@@ -1060,7 +1084,10 @@ namespace springtail::pg_fdw {
 
             double rows = 1; // number of rows with unique key
             if (!idx.is_unique) {
-                rows = 100; //just some number to indicate different cost
+                rows = pg_state->stats.row_count/10;
+                if (rows < 1) {
+                    rows = 1;
+                }
             }
             item = lappend(item, makeConst(INT4OID,
                         -1, InvalidOid, 4, rows, false, true));

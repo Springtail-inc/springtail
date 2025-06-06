@@ -23,7 +23,7 @@ void fdw_init(const char *config_file);
 void *fdw_create_state(uint64_t db_id, uint64_t tid, uint64_t pg_xid, uint64_t schema_xid);
 
 /** Begin scan */
-void *fdw_begin_scan(void *stat, int num_attrs, Form_pg_attribute* attrs,  List *target_list, List *qual_list, List *sortgroup);
+void *fdw_begin_scan(void *stat, int num_attrs, Form_pg_attribute* attrs,  List *target_list, List *qual_list);
 
 /** End scan -- cleanup state */
 void fdw_end_scan(void *state);
@@ -32,7 +32,7 @@ void fdw_end_scan(void *state);
 bool fdw_iterate_scan(void *state, Datum *values, bool *nulls, bool *eos);
 
 /** Reset scan */
-void fdw_reset_scan(void *state);
+void fdw_reset_scan(void *state, List *qual_list);
 
 /** Import foreign schema */
 List *fdw_import_foreign_schema(const char *server, const char *schema,
