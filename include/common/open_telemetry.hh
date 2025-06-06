@@ -76,6 +76,13 @@ public:
     }
 
     static inline void
+    add_counter(std::string_view name, int delta)
+    {
+        _assert_instance();
+        get_instance()->_add_counter(name, delta);
+    }
+
+    static inline void
     record_histogram(std::string_view name, double value)
     {
         _assert_instance();
@@ -224,6 +231,13 @@ private:
      */
      void _increment_counter(std::string_view name);
 
+    /**
+     * @brief Increment a counter
+     * @param name The name of the counter
+     * @param delta The increment
+     */
+     void _add_counter(std::string_view name, int delta);
+
      /**
       * @brief Record a value in the histogram
       * @param name The name of the histogram
@@ -236,6 +250,88 @@ private:
      * @brief Retrieve the otel Tracer by name.
      */
      opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> _tracer(const std::string_view& name);
-
 };
+
+    /**
+    * @brief This type delegates otel counter updates to a dedicated thread.
+    * First define counter types with static OTel counter name methods:
+    * struct MyCnt1 { static const char* name() { return "otel counter 1"; } };
+    * struct MyCnt2 { static const char* name() { return "otel counter 2"; } };
+    *
+    * Instantiate this type:
+    *
+    * OTelCounters<MyCnt1, MyCnt2> counters;
+    *
+    * Increment the counters:
+    *
+    * counters.increment<MyCnt1>();
+    * counters.increment<MyCnt2>();
+    */
+    template <typename... Names>
+    struct OTelCounters 
+    {
+        using NamesTuple = std::tuple<Names...>;
+
+        OTelCounters(std::unordered_map<std::string, std::string> attrs, int freq_sec)
+            :_attrs{std::move(attrs)},
+            _freq_sec{freq_sec}
+        {
+            _t = std::make_unique<std::jthread>([this](std::stop_token st) { task(st); });
+        }
+        OTelCounters(OTelCounters&&) = delete;
+
+        template<typename  Name>
+        void increment()
+        {
+            ++std::get<get_type_index<NamesTuple, Name>()>(_new);
+        }
+    
+    private:
+        std::unordered_map<std::string, std::string> _attrs;
+        int _freq_sec;
+
+        std::mutex _m;
+        std::condition_variable_any _cv;
+        std::unique_ptr<std::jthread> _t;
+
+        // counter increments
+        std::array<std::atomic<int>, sizeof...(Names)> _new;
+
+        // get index of the specific type in the tuple
+        template <typename Tuple, typename T, size_t I = 0>
+        static constexpr size_t get_type_index() {
+            if constexpr (I == std::tuple_size_v<Tuple>) {
+                static_assert(false);
+            } else if constexpr (std::is_same_v<T, typename std::tuple_element<I, Tuple>::type>) {
+                return I;
+            } else {
+                return get_type_index<I+1>();
+            }
+        }
+
+        template <size_t I>
+        void update_counters() {
+            if constexpr (I < sizeof...(Names)) {
+                auto n = std::get<I>(_new).load();
+                if (n) {
+                    open_telemetry::OpenTelemetry::add_counter(std::tuple_element<I, NamesTuple>::type::name(), n);
+                    std::get<I>(_new) = 0;
+                }
+                update_counters<I+1>();
+            }
+        }
+
+        void task(std::stop_token st) {
+            while(!st.stop_requested()) {
+                std::unique_lock g(_m);
+                if (_cv.wait_for(g, st, std::chrono::seconds(_freq_sec), 
+                            [st]{ return !st.stop_requested(); }) ) {
+                    auto token = open_telemetry::OpenTelemetry::set_context_variables(_attrs);
+                    update_counters<0>();
+                }
+            }
+        }
+    };
+
+
 }  // namespace springtail::open_telemetry
