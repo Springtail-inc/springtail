@@ -978,6 +978,21 @@ namespace springtail {
         json["table"].get_to(table_msg.table);
         json["schema"].get_to(table_msg.namespace_name);
         json["oid"].get_to(table_msg.oid);
+        if (!json["parent_table_id"].is_null()) {
+            json["parent_table_id"].get_to(table_msg.parent_table_id);
+        } else {
+            table_msg.parent_table_id = 0;
+        }
+        if (!json["partition_key"].is_null()) {
+            json["partition_key"].get_to(table_msg.partition_key);
+        } else {
+            table_msg.partition_key = "";
+        }
+        if (!json["partition_bound"].is_null()) {
+            json["partition_bound"].get_to(table_msg.partition_bound);
+        } else {
+            table_msg.partition_bound = "";
+        }
 
         _decode_schema_columns(json["columns"], table_msg.columns);
 

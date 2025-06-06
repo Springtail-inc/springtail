@@ -575,7 +575,28 @@ namespace springtail::pg_fdw {
 
         auto const &action = ddl.at("action");
         if (action == "create") { // create table
+            PartitionInfo partition_info(
+                ddl.at("parent_table_id").get<uint64_t>(),
+                ddl.at("parent_table_name").get<std::string>(),
+                ddl.at("partition_key").get<std::string>(),
+                ddl.at("partition_bound").get<std::string>()
+            );
+
+            bool is_parent_partitioned_table = partition_info.parent_table_id == 0 && !partition_info.partition_key.empty();
+            bool is_non_leaf_partitioned_table = partition_info.parent_table_id > 0 && !partition_info.partition_bound.empty() && !partition_info.partition_key.empty();
             // generate the CREATE TABLE statement
+            if (is_parent_partitioned_table || is_non_leaf_partitioned_table) {
+                std::vector<std::tuple<std::string, std::string, bool>> columns;
+
+                for (const auto &col : ddl.at("columns")) {
+                    columns.push_back(std::make_tuple(col.at("name").get<std::string>(),
+                                                      col.at("type_name").get<std::string>(),
+                                                      col.at("nullable").get<bool>()));
+                }
+
+                return _get_create_partitioned_table_query(ddl.at("schema"), ddl.at("table"), columns, partition_info);
+            }
+
             return _gen_fdw_table_sql(conn, server_name, ddl.at("schema"), ddl.at("table"),
                                       ddl.at("tid"), ddl.at("columns"));
         }

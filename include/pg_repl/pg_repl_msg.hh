@@ -180,6 +180,9 @@ namespace springtail
         std::string namespace_name;
         std::string table;
         std::vector<PgMsgSchemaColumn> columns;
+        uint64_t parent_table_id;
+        std::string partition_bound;
+        std::string partition_key;
     };
 
     /** Drop table message decoded */

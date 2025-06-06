@@ -69,6 +69,9 @@ _gen_table_request(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
     table->set_id(msg.oid);
     table->set_namespace_name(msg.namespace_name);
     table->set_name(msg.table);
+    table->set_parent_table_id(msg.parent_table_id);
+    table->set_partition_key(msg.partition_key);
+    table->set_partition_bound(msg.partition_bound);
 
     for (const auto &col : msg.columns) {
         auto *column = table->add_columns();

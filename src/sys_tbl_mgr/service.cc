@@ -558,14 +558,17 @@ Service::_create_table(const proto::TableRequest& request)
     if (request.table().has_parent_table_id()) {
         parent_table_id = request.table().parent_table_id();
         ddl["parent_table_id"] = parent_table_id.value();
-        // TODO: add parent table name
-        // auto parent_table_info = _get_table_info(request.db_id(), parent_table_id, xid);
-        // if (parent_table_info == nullptr) {
-        //     LOG_ERROR("Parent table {} not found for table {} in namespace {}",
-        //               parent_table_id, request.table().name(), request.table().namespace_name());
-        //     throw SysTblMgrError("Parent table not found");
-        // }
-        // ddl["parent_table_name"] = parent_table_info->name;
+        auto parent_table_info = _get_table_info(request.db_id(), parent_table_id.value(), xid);
+        if (parent_table_info == nullptr) {
+            LOG_ERROR("Parent table {} not found for table {} in namespace {}",
+                      parent_table_id.value(), request.table().name(), request.table().namespace_name());
+            ddl["parent_table_name"] = "";
+        } else {
+            ddl["parent_table_name"] = parent_table_info->name;
+        }
+    } else {
+        ddl["parent_table_id"] = constant::INVALID_TABLE;
+        ddl["parent_table_name"] = "";
     }
 
     // partition key -- this is a parent table; either root or intermediate
