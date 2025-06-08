@@ -2,6 +2,7 @@
 
 #include <common/init.hh>
 #include <storage/field.hh>
+#include "pg_repl/pg_common.hh"
 
 using namespace springtail;
 
@@ -21,6 +22,7 @@ generate_fields(ExtentPtr extent)
 
             case (SchemaType::TEXT):
             case (SchemaType::BINARY):
+            case (SchemaType::NUMERIC):
             case (SchemaType::UINT32):
             case (SchemaType::INT32):
             case (SchemaType::FLOAT32):
@@ -35,6 +37,7 @@ generate_fields(ExtentPtr extent)
             case (SchemaType::UINT8):
             case (SchemaType::INT8):
                 fixed_width += 1;
+                break;
 
             case (SchemaType::BOOLEAN):
                 break;
@@ -68,6 +71,7 @@ generate_fields(ExtentPtr extent)
 
             case (SchemaType::TEXT):
             case (SchemaType::BINARY):
+            case (SchemaType::NUMERIC):
             case (SchemaType::UINT32):
             case (SchemaType::INT32):
             case (SchemaType::FLOAT32):
@@ -167,6 +171,10 @@ get_type_name(FieldPtr field)
 
         case (SchemaType::BOOLEAN):
             name = "bool";
+            break;
+
+        case (SchemaType::NUMERIC):
+            name = "numeric";
             break;
     }
 

@@ -30,6 +30,7 @@
 
 //#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
 #include <common/time_trace.hh>
+#include "storage/field.hh"
 
 extern "C" {
     #include <postgres.h>
@@ -279,7 +280,9 @@ namespace springtail::pg_fdw {
         // the type category doesn't matter for these checks since enum check is done above
         SchemaType pg_schema_type = convert_pg_type(pg_type, 'N');
         if (column.type == pg_schema_type) {
+            /*
             if (pg_schema_type == SchemaType::BINARY) {
+                // TODO: fix this when we have full support for numeric types
                 if (pg_type == NUMERICOID &&
                     (qual->base.op == QualOpName::EQUALS || qual->base.op == QualOpName::NOT_EQUALS)) {
                     // only support equality of NUMERICOID binary types
@@ -289,6 +292,7 @@ namespace springtail::pg_fdw {
                     return false;
                 }
             }
+            */
 
             return true;
         }
@@ -641,7 +645,7 @@ namespace springtail::pg_fdw {
 
 
     FieldTuplePtr
-    PgFdwMgr::_gen_qual_tuple(const std::vector<ConstQual*> &quals, const FieldArrayPtr qual_fields)
+    PgFdwMgr::_gen_qual_tuple(const std::vector<ConstQualPtr> &quals, const FieldArrayPtr qual_fields)
     {
         // create the field tuple used for bounds, it is based on the number of EQUAL quals
         // the tuple always has at least the first qual field from the primary key
@@ -813,7 +817,7 @@ namespace springtail::pg_fdw {
         LOG_DEBUG(LOG_FDW, "fdw_reset_scan: tid: {}", state->tid);
 
         state->filtered_quals.clear();
-        
+
         // init quals
         _init_quals(state, qual_list);
 
@@ -1371,6 +1375,10 @@ namespace springtail::pg_fdw {
             const std::string_view value(field->get_text(&row));
             return PointerGetDatum(cstring_to_text_with_len(value.data(), value.size()));
         }
+        case SchemaType::NUMERIC: {
+            auto &&value = field->get_numeric(&row);
+            return PointerGetDatum(value);
+        }
         case SchemaType::BINARY: {
             auto &&value = field->get_binary(&row);
             return _binary_to_datum(value, pg_oid, atttypmod);
@@ -1805,10 +1813,11 @@ namespace springtail::pg_fdw {
             case BOOLOID:
             case CHAROID:
             case UUIDOID:
+            case NUMERICOID:    // DECIMAL(x,y)
                 return true;
-            case NUMERICOID: // DECIMAL(x,y)
+            // case NUMERICOID: // DECIMAL(x,y)
                 //TODO: https://linear.app/springtail/issue/SPR-556/
-                return (op == EQUALS || op == NOT_EQUALS);
+            //     return (op == EQUALS || op == NOT_EQUALS);
             case VARCHAROID:
             case TEXTOID:
                 // due to different collations/encodings we only support equality for text

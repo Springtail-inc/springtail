@@ -1,4 +1,5 @@
 #include <bit>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <cassert>
@@ -777,6 +778,24 @@ namespace springtail
                 auto num = recvint32(row.data() + pos);
                 float f = std::bit_cast<float>(num);
                 fields->push_back(std::make_shared<ConstTypeField<float>>(f));
+                pos += length;
+                break;
+            }
+
+            case (SchemaType::NUMERIC): {
+                std::string_view tmp(row.data() + pos, length);
+
+                // TODO: convert the binary data into a numeric value
+                // XXX print out the binary data here
+                std::vector<char> data(tmp.begin(), tmp.end());
+                std::stringstream ss;
+                ss << std::hex << std::setfill('0');
+                for (char c : data) {
+                    ss << std::setw(2) << static_cast<uint8_t>(c);
+                }
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Converting type '{}' into NUMERIC, value: {}", pg_type, ss.str());
+                
+                fields->push_back(std::make_shared<ConstTypeField<std::vector<char>>>(data));
                 pos += length;
                 break;
             }
