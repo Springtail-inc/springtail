@@ -222,7 +222,6 @@ namespace springtail::committer {
             }
             LOG_DEBUG(LOG_COMMITTER, "All table processing complete for XID {}", xid);
 
-            nlohmann::json index_ddls = _redis_ddl.get_index_ddls_xid(db_id, xid);
             auto index_requests = _index_requests_mgr->get_index_requests(db_id, xid);
 
             // Trigger index reconciliation for the earliest pending XID
