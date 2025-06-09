@@ -82,25 +82,36 @@ main(int argc, char *argv[])
 
     // asynchronous counters
     {
-        struct CommitCallCnt {
+        struct Cnt1 {
             static auto name() {
-                return XID_MGR_COMMIT_XID_CALLS;
+                static char name[] = "Counter1";
+                return name;
+            }
+        };
+        struct Cnt2 {
+            static auto name() {
+                static char name[] = "Counter2";
+                return name;
             }
         };
 
-        // update counters every 2sec.
-        OTelCounters<CommitCallCnt> cnt({{"async_xid_id", "2"}}, 1);
+        // update counters every second.
+        OTelCounters<Cnt1, Cnt2> cnt({{"async_xid_id", "2"}}, 1);
 
-        assert(cnt.get<CommitCallCnt>() == 0);
-        cnt.increment<CommitCallCnt>();
-        cnt.increment<CommitCallCnt>();
+        assert(cnt.get<Cnt1>() == 0);
+        assert(cnt.get<Cnt2>() == 0);
+        cnt.increment<Cnt1>();
+        cnt.increment<Cnt2>();
+        cnt.increment<Cnt2>();
 
-        assert(cnt.get<CommitCallCnt>() == 2);
+        assert(cnt.get<Cnt1>() == 1);
+        assert(cnt.get<Cnt2>() == 2);
 
         std::this_thread::sleep_for(std::chrono::seconds(2));
 
         // wait for 2sec, the counters must be back to 0
-        assert(cnt.get<CommitCallCnt>() == 0);
+        assert(cnt.get<Cnt1>() == 0);
+        assert(cnt.get<Cnt2>() == 0);
     }
 
 
