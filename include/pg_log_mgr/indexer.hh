@@ -50,7 +50,13 @@ namespace springtail::committer {
         Indexer(const Indexer&) = delete;
         Indexer& operator=(const Indexer&) = delete;
 
-        void process_ddls(uint64_t db_id, uint64_t xid, nlohmann::json const& ddls);
+        /**
+         * @brief Process index requests(create/drop) at an XID
+         * @param db_id          Database ID
+         * @param xid            XID at which index is created/dropped
+         * @param index_requests Index requests (create/drop)
+         *
+         */
         void process_requests(uint64_t db_id, uint64_t xid, const std::list<proto::IndexActionResponse> &index_requests);
 
         /**

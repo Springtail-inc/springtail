@@ -117,7 +117,7 @@ namespace {
             TableMgr::get_instance()->update_roots(_db_id, table_id, data_xid, metadata);
         }
 
-        void _create_index(uint64_t table_id, uint64_t index_id, uint64_t index_xid, std::string index_name, bool process_ddls_in_indexer=true) {
+        void _create_index(uint64_t table_id, uint64_t index_id, uint64_t index_xid, std::string index_name, bool process_requests_in_indexer=true) {
             // Create index at an XID
             std::list<proto::IndexActionResponse> index_requests;
             auto create_idx_request = create_index(_db_id, table_id, index_xid, index_id, index_name,
@@ -128,9 +128,8 @@ namespace {
             auto index_info = sys_tbl_mgr::Client::get_instance()->get_index_info(_db_id, index_id, {index_xid, constant::MAX_LSN});
             ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(index_info.state()), sys_tbl::IndexNames::State::NOT_READY);
 
-            // Process Index DDLs
-
-            if (process_ddls_in_indexer) {
+            // Process Index requests
+            if (process_requests_in_indexer) {
                 _indexer->process_requests(_db_id, index_xid, index_requests);
             }
             sys_tbl_mgr::Client::get_instance()->finalize(_db_id, index_xid);

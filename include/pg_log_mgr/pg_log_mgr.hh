@@ -251,6 +251,10 @@ namespace springtail::pg_log_mgr {
          */
         std::shared_ptr<IndexReconciliationQueueManager> _index_reconciliation_queue_mgr;
 
+        /**
+         * @brief shared_ptr to the index requests manager to get
+         * index requests (create/drop) for an XID per db
+         */
         std::shared_ptr<IndexRequestsManager> _index_requests_mgr;
 
         std::thread _reconciliation_thread;            ///< Index reconciliation thread

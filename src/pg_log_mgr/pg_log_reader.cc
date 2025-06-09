@@ -685,12 +685,6 @@ namespace springtail::pg_log_mgr {
         // Add a message to skip indexes for this table
         // for the currently building indexes and the ones
         // belonging to this transaction
-        //nlohmann::json ddl;
-        //RedisDDL redis_ddl;
-        //ddl["action"] = "abort_index";
-        //ddl["table_id"] = table_oid;
-        //redis_ddl.add_index_ddl(_db, xidlsn.xid, ddl.dump());
-
         proto::IndexActionResponse index_response;
         index_response.set_action("abort_index");
         index_response.mutable_index()->set_table_id(table_oid);
@@ -798,9 +792,8 @@ namespace springtail::pg_log_mgr {
                 auto create_index_response = client->create_index(_db, xidlsn, index_msg,
                                                                   sys_tbl::IndexNames::State::NOT_READY);
 
+                // Store the index process request for the Committer
                 _index_requests_mgr->add_index_request(_db, xidlsn.xid, create_index_response);
-                // Store the DDL statement for the Committer
-                //redis_ddl.add_index_ddl(_db, xidlsn.xid, ddl_stmt);
                 break;
             }
         case PgMsgEnum::DROP_INDEX:
@@ -808,8 +801,7 @@ namespace springtail::pg_log_mgr {
                 auto &index_msg = std::get<PgMsgDropIndex>(change->msg);
                 auto drop_index_response = client->drop_index(_db, xidlsn, index_msg);
 
-                // Store the DDL statement for the Committer
-                //redis_ddl.add_index_ddl(_db, xidlsn.xid, ddl_stmt);
+                // Store the index process request for the Committer
                 _index_requests_mgr->add_index_request(_db, xidlsn.xid, drop_index_response);
                 break;
             }

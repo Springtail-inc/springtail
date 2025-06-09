@@ -161,6 +161,10 @@ namespace springtail::committer {
          */
         std::unique_ptr<Indexer> _indexer;
 
+        /**
+         * @brief shared_ptr to the index requests manager to get
+         * index requests (create/drop) for an XID per db
+         */
         std::shared_ptr<pg_log_mgr::IndexRequestsManager> _index_requests_mgr;
     };
 }

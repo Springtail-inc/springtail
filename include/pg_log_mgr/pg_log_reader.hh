@@ -381,6 +381,10 @@ namespace springtail::pg_log_mgr {
         /** Cache indicating if a table exists at the latest XID seen committed by the log reader. */
         ExistsCachePtr _exists_cache;
 
+        /**
+         * @brief shared_ptr to the index requests manager to get
+         * index requests (create/drop) for an XID per db
+         */
         std::shared_ptr<IndexRequestsManager> _index_requests_mgr;
 
         /** Function for cleaning up old log files. */
