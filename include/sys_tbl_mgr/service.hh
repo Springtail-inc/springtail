@@ -34,12 +34,12 @@ public:
     /** Creates an index within the system tables. */
     grpc::Status CreateIndex(grpc::ServerContext* context,
                              const proto::IndexRequest* request,
-                             proto::IndexActionResponse* response) override;
+                             proto::IndexProcessRequest* response) override;
 
     /** Drops an index within the system tables. */
     grpc::Status DropIndex(grpc::ServerContext* context,
                            const proto::DropIndexRequest* request,
-                           proto::IndexActionResponse* response) override;
+                           proto::IndexProcessRequest* response) override;
 
     /** Set the state of the index within the system tables. */
     grpc::Status SetIndexState(grpc::ServerContext* context,

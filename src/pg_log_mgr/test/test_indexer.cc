@@ -119,7 +119,7 @@ namespace {
 
         void _create_index(uint64_t table_id, uint64_t index_id, uint64_t index_xid, std::string index_name, bool process_requests_in_indexer=true) {
             // Create index at an XID
-            std::list<proto::IndexActionResponse> index_requests;
+            std::list<proto::IndexProcessRequest> index_requests;
             auto create_idx_request = create_index(_db_id, table_id, index_xid, index_id, index_name,
                     std::vector<PgMsgSchemaColumn>(_columns.end() - 2, _columns.end()), sys_tbl::IndexNames::State::NOT_READY);
             index_requests.push_back(std::move(create_idx_request));

@@ -7,16 +7,16 @@ namespace springtail::pg_log_mgr {
     class IndexRequestsManager {
         public:
             /**
-             * @brief Add an IndexActionResponse entry for the given db_id and xid.
+             * @brief Add an IndexProcessRequest entry for the given db_id and xid.
              *
-             * Thread-safe method that inserts the provided IndexActionResponse into the internal map
+             * Thread-safe method that inserts the provided IndexProcessRequest into the internal map
              * under the specified db_id and xid. Automatically creates entries if they don't exist.
              *
              * @param db_id The database ID.
              * @param xid The transaction ID.
-             * @param ia_response The IndexActionResponse object to add.
+             * @param ia_response The IndexProcessRequest object to add.
              */
-            void add_index_request(uint64_t db_id, uint64_t xid, proto::IndexActionResponse ia_response) {
+            void add_index_request(uint64_t db_id, uint64_t xid, proto::IndexProcessRequest ia_response) {
                 std::lock_guard<std::mutex> lock(_idx_req_mutex);
 
                 // Insert the response into the list associated with the given db_id and xid
@@ -25,16 +25,16 @@ namespace springtail::pg_log_mgr {
             }
 
             /**
-             * @brief Retrieve and remove all IndexActionResponse entries for a given db_id and xid.
+             * @brief Retrieve and remove all IndexProcessRequest entries for a given db_id and xid.
              *
-             * Thread-safe method that returns the list of IndexActionResponse objects associated with the given
+             * Thread-safe method that returns the list of IndexProcessRequest objects associated with the given
              * db_id and xid. After retrieval, the entry is removed from the map. Returns an empty list if not found.
              *
              * @param db_id The database ID.
              * @param xid The transaction ID.
-             * @return A list of IndexActionResponse objects, or an empty list if none exist.
+             * @return A list of IndexProcessRequest objects, or an empty list if none exist.
              */
-            std::list<proto::IndexActionResponse> get_index_requests(uint64_t db_id, uint64_t xid) {
+            std::list<proto::IndexProcessRequest> get_index_requests(uint64_t db_id, uint64_t xid) {
                 std::lock_guard<std::mutex> lock(_idx_req_mutex);
 
                 // Attempt to find the db_id in the outer map
@@ -55,7 +55,7 @@ namespace springtail::pg_log_mgr {
                 }
 
                 // Move the list of responses out of the map
-                std::list<proto::IndexActionResponse> result = std::move(xid_it->second);
+                std::list<proto::IndexProcessRequest> result = std::move(xid_it->second);
 
                 // Remove the xid entry from the inner map
                 xid_map.erase(xid_it);
@@ -70,7 +70,7 @@ namespace springtail::pg_log_mgr {
             }
         private:
             std::unordered_map<uint64_t, std::unordered_map<uint64_t,
-                std::list<proto::IndexActionResponse>>> _index_requests_map;
+                std::list<proto::IndexProcessRequest>>> _index_requests_map;
             std::mutex _idx_req_mutex;  ///< Protects access to the index requests map.
     };
 }

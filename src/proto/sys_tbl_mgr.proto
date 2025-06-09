@@ -126,7 +126,7 @@ message DropIndexRequest {
   string name = 6;
 }
 
-message IndexActionResponse {
+message IndexProcessRequest {
   string action = 1;
   IndexInfo index = 2;
 }
@@ -249,10 +249,10 @@ service SysTblMgr {
   rpc Ping(google.protobuf.Empty) returns (google.protobuf.Empty) {}
 
   // Create a new index
-  rpc CreateIndex(IndexRequest) returns (IndexActionResponse) {}
+  rpc CreateIndex(IndexRequest) returns (IndexProcessRequest) {}
 
   // Drop an existing index
-  rpc DropIndex(DropIndexRequest) returns (IndexActionResponse) {}
+  rpc DropIndex(DropIndexRequest) returns (IndexProcessRequest) {}
 
   // Set index state
   rpc SetIndexState(SetIndexStateRequest) returns (google.protobuf.Empty) {}

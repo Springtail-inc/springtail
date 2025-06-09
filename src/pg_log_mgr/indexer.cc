@@ -20,7 +20,7 @@ namespace springtail::committer {
         LOG_INFO("Indexer created: {}", worker_count);
     }
 
-    void Indexer::process_requests(uint64_t db_id, uint64_t xid, const std::list<proto::IndexActionResponse> &index_requests)
+    void Indexer::process_requests(uint64_t db_id, uint64_t xid, const std::list<proto::IndexProcessRequest> &index_requests)
     {
         std::scoped_lock lock(_xid_ddl_counter_map_mtx);
         // Set counter for XID for ddls
@@ -68,18 +68,18 @@ namespace springtail::committer {
 
         // Get each such XIDs and their indexes
         for (const auto& [index_xid, idx_list]: unfinished_indexes_info.xid_index_map()) {
-            std::list<proto::IndexActionResponse> index_requests;
+            std::list<proto::IndexProcessRequest> index_requests;
             for (const auto& index_info: idx_list.indexes()) {
                 // Build indexer-known ddl out of the indexes - to be created/dropped
                 if (static_cast<sys_tbl::IndexNames::State>(index_info.state())
                         == sys_tbl::IndexNames::State::NOT_READY) {
-                    proto::IndexActionResponse create_idx_request;
+                    proto::IndexProcessRequest create_idx_request;
                     create_idx_request.set_action("create_index");
                     *create_idx_request.mutable_index() = std::move(index_info);
                     index_requests.push_back(std::move(create_idx_request));
                 } else if (static_cast<sys_tbl::IndexNames::State>(index_info.state())
                         == sys_tbl::IndexNames::State::BEING_DELETED) {
-                    proto::IndexActionResponse drop_idx_request;
+                    proto::IndexProcessRequest drop_idx_request;
                     drop_idx_request.set_action("drop_index");
                     *drop_idx_request.mutable_index() = std::move(index_info);
                     index_requests.push_back(std::move(drop_idx_request));

@@ -685,7 +685,7 @@ namespace springtail::pg_log_mgr {
         // Add a message to skip indexes for this table
         // for the currently building indexes and the ones
         // belonging to this transaction
-        proto::IndexActionResponse index_response;
+        proto::IndexProcessRequest index_response;
         index_response.set_action("abort_index");
         index_response.mutable_index()->set_table_id(table_oid);
         _index_requests_mgr->add_index_request(_db, xidlsn.xid, index_response);

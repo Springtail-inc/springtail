@@ -24,7 +24,7 @@ Service::Ping(grpc::ServerContext* context,
 grpc::Status
 Service::CreateIndex(grpc::ServerContext* context,
                      const proto::IndexRequest* request,
-                     proto::IndexActionResponse* response)
+                     proto::IndexProcessRequest* response)
 {
     ServerSpan span(context, "SysTblMgrService", "CreateIndex");
 
@@ -326,7 +326,7 @@ Service::_create_index(const proto::IndexRequest& request)
 grpc::Status
 Service::DropIndex(grpc::ServerContext* context,
                    const proto::DropIndexRequest* request,
-                   proto::IndexActionResponse* response)
+                   proto::IndexProcessRequest* response)
 {
     LOG_INFO("got DropIndex(): db {}, index {}, xid {}:{}", request->db_id(),
                 request->index_id(), request->xid(), request->lsn());
