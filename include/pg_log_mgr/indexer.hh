@@ -57,7 +57,7 @@ namespace springtail::committer {
          * @param index_requests Index requests (create/drop)
          *
          */
-        void process_requests(uint64_t db_id, uint64_t xid, const std::list<proto::IndexActionResponse> &index_requests);
+        void process_requests(uint64_t db_id, uint64_t xid, const std::list<proto::IndexProcessRequest> &index_requests);
 
         /**
          * @brief Recover indexes which were not complete (build or drop) during shutdown/crash
