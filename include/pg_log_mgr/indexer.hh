@@ -31,7 +31,7 @@ namespace springtail::committer {
         struct IndexParams {
             uint64_t _db_id;
             uint64_t _xid;
-            proto::IndexInfo _index;
+            proto::IndexProcessRequest _index_request;
             IndexStatus _status = IndexStatus::BUILDING;
 
             /**

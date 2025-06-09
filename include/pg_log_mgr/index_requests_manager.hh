@@ -14,14 +14,14 @@ namespace springtail::pg_log_mgr {
              *
              * @param db_id The database ID.
              * @param xid The transaction ID.
-             * @param ia_response The IndexProcessRequest object to add.
+             * @param index_request The IndexProcessRequest object to add.
              */
-            void add_index_request(uint64_t db_id, uint64_t xid, proto::IndexProcessRequest ia_response) {
+            void add_index_request(uint64_t db_id, uint64_t xid, proto::IndexProcessRequest index_request) {
                 std::lock_guard<std::mutex> lock(_idx_req_mutex);
 
-                // Insert the response into the list associated with the given db_id and xid
+                // Insert the request into the list associated with the given db_id and xid
                 // Creates the inner map or list automatically if missing
-                _index_requests_map[db_id][xid].push_back(ia_response);
+                _index_requests_map[db_id][xid].push_back(index_request);
             }
 
             /**
@@ -54,7 +54,7 @@ namespace springtail::pg_log_mgr {
                     return {};
                 }
 
-                // Move the list of responses out of the map
+                // Move the list of requests out of the map
                 std::list<proto::IndexProcessRequest> result = std::move(xid_it->second);
 
                 // Remove the xid entry from the inner map
@@ -65,7 +65,7 @@ namespace springtail::pg_log_mgr {
                     _index_requests_map.erase(db_it);
                 }
 
-                // Return the list of responses
+                // Return the list of requests
                 return result;
             }
         private:
