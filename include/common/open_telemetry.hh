@@ -283,6 +283,9 @@ private:
         template<typename  Name>
         void increment()
         {
+            // the static assert is just to make sure that the type
+            // index is resolved at compile time. It doesn't do anything useful.
+            static_assert(get_type_index<NamesTuple, Name>() <= 100000);
             ++std::get<get_type_index<NamesTuple, Name>()>(_new);
         }
 
