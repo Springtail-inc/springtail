@@ -255,8 +255,8 @@ private:
     /**
     * @brief This type delegates otel counter updates to a dedicated thread.
     * First define counter types with static OTel counter name methods:
-    * struct MyCnt1 { static const char* name() { return "otel counter 1"; } };
-    * struct MyCnt2 { static const char* name() { return "otel counter 2"; } };
+    * struct MyCnt1 { static auto name() { return "otel counter 1"; } };
+    * struct MyCnt2 { static auto name() { return "otel counter 2"; } };
     *
     * Instantiate this type:
     *
@@ -285,19 +285,24 @@ private:
         {
             ++std::get<get_type_index<NamesTuple, Name>()>(_new);
         }
+
+        template<typename  Name>
+        int get() const {
+            return std::get<get_type_index<NamesTuple, Name>()>(_new).load();
+        }
     
     private:
         std::unordered_map<std::string, std::string> _attrs;
         int _freq_sec;
+        // counter increments
+        std::array<std::atomic<int>, sizeof...(Names)> _new;
 
         std::mutex _m;
         std::condition_variable_any _cv;
         std::unique_ptr<std::jthread> _t;
 
-        // counter increments
-        std::array<std::atomic<int>, sizeof...(Names)> _new;
 
-        // get index of the specific type in the tuple
+        // get index of the specific type in the tupple
         template <typename Tuple, typename T, size_t I = 0>
         static constexpr size_t get_type_index() {
             if constexpr (I == std::tuple_size_v<Tuple>) {
@@ -305,7 +310,7 @@ private:
             } else if constexpr (std::is_same_v<T, typename std::tuple_element<I, Tuple>::type>) {
                 return I;
             } else {
-                return get_type_index<I+1>();
+                return get_type_index<Tuple, T, I+1>();
             }
         }
 
@@ -330,6 +335,9 @@ private:
                     update_counters<0>();
                 }
             }
+            // update before exit
+            auto token = open_telemetry::OpenTelemetry::set_context_variables(_attrs);
+            update_counters<0>();
         }
     };
 

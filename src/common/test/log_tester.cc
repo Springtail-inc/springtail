@@ -1,6 +1,8 @@
 #include <common/init.hh>
 #include <common/logging.hh>
 #include <common/open_telemetry.hh>
+#include <assert.h>
+#include <thread>
 
 using namespace springtail;
 using namespace springtail::logging;
@@ -77,6 +79,30 @@ main(int argc, char *argv[])
         }
         OpenTelemetry::increment_counter(XID_MGR_COMMIT_XID_CALLS);
     }
+
+    // asynchronous counters
+    {
+        struct CommitCallCnt {
+            static auto name() {
+                return XID_MGR_COMMIT_XID_CALLS;
+            }
+        };
+
+        // update counters every 2sec.
+        OTelCounters<CommitCallCnt> cnt({{"async_xid_id", "2"}}, 1);
+
+        assert(cnt.get<CommitCallCnt>() == 0);
+        cnt.increment<CommitCallCnt>();
+        cnt.increment<CommitCallCnt>();
+
+        assert(cnt.get<CommitCallCnt>() == 2);
+
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+
+        // wait for 2sec, the counters must be back to 0
+        assert(cnt.get<CommitCallCnt>() == 0);
+    }
+
 
     // test tracers, spans, and scopes
     {

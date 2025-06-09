@@ -18,7 +18,6 @@ namespace springtail {
      */
     class StorageCache {
     public:
-
         /**
          * @brief get_instance() of singleton StorageCache; create if it doesn't exist.
          * @return instance of StorageCache
@@ -1247,5 +1246,46 @@ namespace springtail {
          * The lookup map for Page objects.
          */
         std::shared_ptr<PageCache> _page_cache;
+
+
+        /**
+         * Storage cache counters.
+         */
+        struct MetricCounter
+        {
+            struct GetCalls {
+                static auto name() {
+                    return STORAGE_CACHE_GET_CALLS;
+                }
+            };
+            struct PutCalls {
+                static auto name() {
+                    return STORAGE_CACHE_PUT_CALLS;
+                }
+            };
+            struct CacheMisses {
+                static auto name() {
+                    return STORAGE_CACHE_GET_CACHE_MISSES;
+                }
+            };
+            struct FlushCalls {
+                static auto name() {
+                    return STORAGE_CACHE_FLUSH_CALLS;
+                }
+            };
+            struct DropCalls {
+                static auto name() {
+                    return STORAGE_CACHE_DROP_CALLS;
+                }
+            };
+        };
+
+        using MetricCounters = open_telemetry::OTelCounters<
+            MetricCounter::GetCalls, MetricCounter::PutCalls,
+            MetricCounter::CacheMisses,
+            MetricCounter::FlushCalls,
+            MetricCounter::DropCalls>;
+
+        std::unique_ptr<MetricCounters> _metric_counters;
     };
 }
