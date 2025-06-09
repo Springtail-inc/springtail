@@ -337,17 +337,15 @@ Service::DropIndex(grpc::ServerContext* context,
     XidLsn xid(request->xid(), request->lsn());
 
     // perform the DROP INDEX
-    const auto& index_info = _drop_index(xid, request->db_id(), request->index_id(), std::nullopt, sys_tbl::IndexNames::State::BEING_DELETED);
+    _drop_index(xid, request->db_id(), request->index_id(), std::nullopt, sys_tbl::IndexNames::State::BEING_DELETED);
+
+    // Create response for the dropped index
+    proto::IndexInfo dropped_index;
+    dropped_index.set_id(request->index_id());
+    dropped_index.set_name(request->name());
+    dropped_index.set_namespace_name(request->namespace_name());
     response->set_action("drop_index");
-    if (index_info.id() > 0) {
-        *response->mutable_index() = index_info;
-    } else {
-        proto::IndexInfo non_deleted_index;
-        non_deleted_index.set_id(request->index_id());
-        non_deleted_index.set_name(request->name());
-        non_deleted_index.set_namespace_name(request->namespace_name());
-        *response->mutable_index() = non_deleted_index;
-    }
+    *response->mutable_index() = dropped_index;
 
     return grpc::Status::OK;
 }
@@ -437,7 +435,7 @@ Service::_find_index(uint64_t db_id,
     return {{info, namespace_id, index_xid}};
 }
 
-proto::IndexInfo
+void
 Service::_drop_index(const XidLsn& xid,
                      uint64_t db_id,
                      uint64_t index_id,
@@ -455,7 +453,7 @@ Service::_drop_index(const XidLsn& xid,
     if (!info) {
         LOG_DEBUG(LOG_SCHEMA, "Drop index not found: {}@{} - {}", db_id, xid.xid,
                             index_id);
-        return proto::IndexInfo();
+        return;
     }
     auto& index_info = std::get<0>(*info);
 
@@ -463,7 +461,7 @@ Service::_drop_index(const XidLsn& xid,
     if (state == sys_tbl::IndexNames::State::DELETED ||
         state == sys_tbl::IndexNames::State::BEING_DELETED) {
         LOG_DEBUG(LOG_SCHEMA, "Index already deleted: {}@{} - {}", db_id, xid.xid, index_id);
-        return proto::IndexInfo();
+        return;
     }
 
     // note: this might not be true during recovery
@@ -479,8 +477,6 @@ Service::_drop_index(const XidLsn& xid,
 
     index_info.set_state(static_cast<int32_t>(index_state));
     _upsert_index_name(db_id, index_info, xid, keys);
-
-    return index_info;
 }
 
 grpc::Status

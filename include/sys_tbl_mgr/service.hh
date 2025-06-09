@@ -508,11 +508,11 @@ private:
      * to all primary indexes and so tid is required for PRIMARY_INDEX.
      * @param index_state Accepts BEING_DELETED or DELETED
      */
-    proto::IndexInfo _drop_index(const XidLsn& xid,
-                                 uint64_t db_id,
-                                 uint64_t index_id,
-                                 std::optional<uint64_t> tid = std::nullopt,
-                                 sys_tbl::IndexNames::State index_state = sys_tbl::IndexNames::State::DELETED);
+    void _drop_index(const XidLsn& xid,
+                     uint64_t db_id,
+                     uint64_t index_id,
+                     std::optional<uint64_t> tid = std::nullopt,
+                     sys_tbl::IndexNames::State index_state = sys_tbl::IndexNames::State::DELETED);
 
     /**
      * Performs a create_table() assuming that the correct locks are already held.
