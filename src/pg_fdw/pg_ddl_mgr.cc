@@ -584,12 +584,16 @@ namespace springtail::pg_fdw {
                 auto fully_qualified_type_name = fmt::format("{}.{}",
                                         conn->escape_identifier(col.at("type_namespace").get<std::string>()),
                                         conn->escape_identifier(col.at("type_name").get<std::string>()));
-                columns.push_back(std::make_tuple(col.at("name").get<std::string>(),
+                columns.push_back(std::make_tuple(col.at("name"),
                                                     fully_qualified_type_name,
-                                                    col.at("nullable").get<bool>()));
+                                                    col.at("nullable")));
             }
 
-            return PgFdwCommon::_gen_fdw_table_sql(server_name, ddl.at("schema"), ddl.at("table"), ddl.at("tid"), columns, partition_info, is_regular_table_type);
+            return PgFdwCommon::_gen_fdw_table_sql(server_name, ddl.at("schema"), ddl.at("table"), ddl.at("tid"), columns,
+                                                   partition_info, is_regular_table_type,
+                                                   [conn](const std::string &name) {
+                                                        return conn->escape_identifier(name.c_str());
+                                                   });
         }
 
         else if (action == "rename") { // rename table
@@ -767,56 +771,6 @@ namespace springtail::pg_fdw {
         CHECK(false);
     }
 
-    std::string
-    PgDDLMgr::_gen_fdw_table_sql(LibPqConnectionPtr conn,
-                                 const std::string &server_name,
-                                 const std::string &schema,
-                                 const std::string &table,
-                                 uint64_t tid,
-                                 const nlohmann::json &columns)
-    {
-        std::string escaped_schema = conn->escape_identifier(schema);
-
-        // no schema name needed
-        std::string create = fmt::format("CREATE FOREIGN TABLE {}.{} (\n",
-                                         escaped_schema,
-                                         conn->escape_identifier(table));
-
-        // iterate over the columns, adding each to the create statement
-        // name, type, is_nullable, default value
-        int i = 0, num_cols = columns.size();
-
-        // iterate over the columns again, adding each to the create statement
-        for (const auto &col : columns) {
-            // check for userdefined type
-            uint32_t type_oid = col.at("type").get<uint32_t>();
-            std::string type_name = col.at("type_name").get<std::string>();
-            std::string type_namespace = col.at("type_namespace").get<std::string>();
-
-            CHECK(!type_name.empty());
-
-            // the constant FirstNormalObjectId is defined in postgres include/access/transam.h
-            if (type_oid >= constant::FIRST_USER_DEFINED_PG_OID) {
-                // this is a user defined type, fully qualify it
-                type_name = fmt::format("{}.{}", conn->escape_identifier(type_namespace),
-                                                 conn->escape_identifier(type_name));
-            }
-
-            std::string column = fmt::format("{} {} {} {}", conn->escape_identifier(col.at("name")),
-                                             type_name, col.at("nullable").get<bool>() ? "" : "NOT NULL",
-                                             (i == num_cols - 1) ? "" : ",");
-
-            i++;
-            create += column;
-        }
-
-        create += fmt::format("\n) SERVER {} OPTIONS (tid '{}');", server_name, tid);
-
-        LOG_DEBUG(LOG_FDW, "Generated SQL: {}", create);
-
-        return create;
-    }
-
     void
     PgDDLMgr::_create_database(LibPqConnectionPtr conn,
                      const uint64_t db_id,
@@ -933,6 +887,9 @@ namespace springtail::pg_fdw {
                                              false, false, {},
                                              [this, escaped_schema, &user_types](uint32_t pg_type, uint64_t namespace_id) {
                                                  return _get_type_name(pg_type, escaped_schema, user_types);
+                                             },
+                                             [conn](const std::string &name) {
+                                                 return conn->escape_identifier(name.c_str());
                                              }, false);
 
             // Create the partition tables

@@ -814,7 +814,7 @@ namespace springtail::pg_fdw {
         LOG_DEBUG(LOG_FDW, "fdw_reset_scan: tid: {}", state->tid);
 
         state->filtered_quals.clear();
-        
+
         // init quals
         _init_quals(state, qual_list);
 
@@ -1628,6 +1628,9 @@ namespace springtail::pg_fdw {
         std::vector<std::string> ddl = PgFdwCommon::get_schema_ddl(db_id, schema_xid, server, namespace_name, exclude, limit, table_set,
                               [&db_id, &namespace_name, &schema_xid](uint32_t pg_type, uint64_t namespace_id) {
                                   return _get_type_name(pg_type, _load_user_types(db_id, namespace_name, namespace_id, schema_xid));
+                              },
+                              [](const std::string &name) {
+                                  return quote_identifier(name.c_str());
                               }, true);
 
         return vector_to_string_list(ddl);
