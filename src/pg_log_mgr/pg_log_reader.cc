@@ -876,15 +876,9 @@ namespace springtail::pg_log_mgr {
         // consume messages from log; num_messages of -1 means go until eos
         bool eos = false; // end of stream
         while (num_messages != 0 && !eos) {
-            bool eob=false; // end of block
-
-            // while not at end of message block (or stream) process
-            while (!eob && !eos) {
-                // read next message
-                PgMsgPtr msg = _reader.read_message(filter, eos, eob);
-                if (msg == nullptr) {
-                    continue;
-                }
+            // read next message
+            PgMsgPtr msg = _reader.read_message(filter, eos);
+            if (msg != nullptr) {
                 msg->pg_log_timestamp = timestamp;
 
                 // process the message
@@ -892,7 +886,7 @@ namespace springtail::pg_log_mgr {
             }
 
             if (num_messages > 0) {
-                num_messages--;
+                --num_messages;
             }
         }
     }

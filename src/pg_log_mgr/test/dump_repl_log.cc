@@ -53,30 +53,25 @@ int main(int argc, char *argv[])
         // consume messages from log; num_messages of -1 means go until eos
         bool eos = false; // end of stream
         while (!eos) {
-            bool eob=false; // end of block
+            // read next message
+            PgMsgPtr msg = reader.read_message(reader.ALL_MESSAGES, eos);
+            if (msg == nullptr) {
+                continue;
+            }
 
-            // while not at end of message block (or stream) process
-            while (!eob && !eos) {
-                // read next message
-                PgMsgPtr msg = reader.read_message(reader.ALL_MESSAGES, eos, eob);
-                if (msg == nullptr) {
-                    continue;
+            // dump the message
+            std::string msg_str = pg_msg::dump_msg(*msg);
+            std::cout << msg_str;
+            std::cout << "Msg Offset: " << reader.offset() << std::endl;
+
+            if (msg->msg_type == PgMsgEnum::BEGIN) {
+                // extract xid
+                auto begin_msg = std::get<PgMsgBegin>(msg->msg);
+                if (xids.contains(begin_msg.xid)) {
+                    std::cout << "Duplicate xid: " << begin_msg.xid << std::endl;
+                    duplicate_xids.insert(begin_msg.xid);
                 }
-
-                // dump the message
-                std::string msg_str = pg_msg::dump_msg(*msg);
-                std::cout << msg_str;
-                std::cout << "Msg Offset: " << reader.offset() << std::endl;
-
-                if (msg->msg_type == PgMsgEnum::BEGIN) {
-                    // extract xid
-                    auto begin_msg = std::get<PgMsgBegin>(msg->msg);
-                    if (xids.contains(begin_msg.xid)) {
-                        std::cout << "Duplicate xid: " << begin_msg.xid << std::endl;
-                        duplicate_xids.insert(begin_msg.xid);
-                    }
-                    xids.insert(begin_msg.xid);
-                }
+                xids.insert(begin_msg.xid);
             }
         }
 
