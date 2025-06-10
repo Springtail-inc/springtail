@@ -102,7 +102,6 @@ namespace springtail::pg_fdw {
                     const auto &[column_name, type_name, nullable] = columns[i];
                     std::string column = fmt::format("  {} ", column_name);
 
-                    // XXX Check user defined type
                     // set the type name
                     column += type_name;
 

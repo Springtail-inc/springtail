@@ -581,8 +581,11 @@ namespace springtail::pg_fdw {
             std::vector<std::tuple<std::string, std::string, bool>> columns;
 
             for (const auto &col : ddl.at("columns")) {
+                auto fully_qualified_type_name = fmt::format("{}.{}",
+                                        conn->escape_identifier(col.at("type_namespace").get<std::string>()),
+                                        conn->escape_identifier(col.at("type_name").get<std::string>()));
                 columns.push_back(std::make_tuple(col.at("name").get<std::string>(),
-                                                    col.at("type_name").get<std::string>(),
+                                                    fully_qualified_type_name,
                                                     col.at("nullable").get<bool>()));
             }
 
@@ -840,6 +843,7 @@ namespace springtail::pg_fdw {
 
     std::string
     PgDDLMgr::_get_type_name(int32_t pg_type,
+                             const std::string &namespace_name,
                              const std::map<uint64_t, std::map<uint64_t,
                              std::pair<std::string, std::string>>> &user_types)
     {
@@ -849,7 +853,8 @@ namespace springtail::pg_fdw {
             if (it != user_types.end()) {
                 auto it2 = it->second.find(pg_type);
                 if (it2 != it->second.end()) {
-                    return it2->second.first;
+                    const auto fully_qualified_type_name = fmt::format("{}.{}", namespace_name, it2->second.first);
+                    return fully_qualified_type_name;
                 }
             }
         }
@@ -926,8 +931,8 @@ namespace springtail::pg_fdw {
             // Create the parent partition tables
             std::vector<std::string> ddl = PgFdwCommon::get_schema_ddl(db_id, xid, SPRINGTAIL_FDW_SERVER_NAME, schema.second,
                                              false, false, {},
-                                             [this, &user_types](uint32_t pg_type, uint64_t namespace_id) {
-                                                 return _get_type_name(pg_type, user_types);
+                                             [this, escaped_schema, &user_types](uint32_t pg_type, uint64_t namespace_id) {
+                                                 return _get_type_name(pg_type, escaped_schema, user_types);
                                              }, false);
 
             // Create the partition tables
