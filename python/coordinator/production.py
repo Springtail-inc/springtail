@@ -126,7 +126,7 @@ class Production:
             # Make sure shared-lib is readable by all
             run_command('sudo', ['chmod', '-R', '755', os.path.join(self.install_path, SPRINGTAIL_LIB_DIR)])
 
-            package_config_sha = self.get_config_hash(os.path.join(self.install_path, 'IFNO.txt'))
+            package_config_sha = self.get_config_hash(os.path.join(self.install_path, 'INFO.txt'))
             if package_config_sha != config_gitsha:
                 self.logger.error(f"Config Git SHA mismatch: expected {config_gitsha}, got {package_config_sha}")
                 raise ValueError("Config Git SHA mismatch")
@@ -139,7 +139,7 @@ class Production:
             self.send_sns('install_failed', version=os.path.basename(springtail_tgz))
             raise e
 
-    def get_config_hash(file_path: str) -> str:
+    def get_config_hash(self, file_path: str) -> str:
         """Read and extract Config Hash value from the version file.
         
         Args:

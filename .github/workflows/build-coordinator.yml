@@ -5,7 +5,7 @@ on:
     inputs:
       build_type:
         description: 'The type of build to perform. For release build, we upload to the "prod-data-share.springtail.internal" bucket (in production account), for debug builds we upload to the "data-share.springtail.internal" bucket (in development account).'
-        type: string
+        type: choice
         default: "release"
         options:
           - release
