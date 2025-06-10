@@ -215,9 +215,6 @@ namespace springtail {
         /** write tuple data */
         void _write_tuple(uint32_t table_id, const std::vector<int32_t> &types, const std::vector<std::string> &columns);
 
-        /** write header */
-        void _write_header();
-
         /** create _current_xact and populate with start of xact data */
         void _add_start_xact();
 
