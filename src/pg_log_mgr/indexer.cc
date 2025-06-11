@@ -351,7 +351,7 @@ namespace springtail::committer {
         // Step 3: Extract position values into idx_cols
         std::vector<uint32_t> idx_cols;
         idx_cols.reserve(temp.size());
-        for (const auto& [idx_pos, pos] : temp) {
+        for (const auto& [_, pos] : temp) {
             idx_cols.push_back(pos);
         }
         return idx_cols;
