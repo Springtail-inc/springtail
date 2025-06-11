@@ -53,7 +53,6 @@ namespace springtail {
         std::vector<value_type> _b;
         size_t _cnt = 0; // number of elements in the buffer
         size_t _read_pnt = 0;
-
     };
 
 }

@@ -1339,9 +1339,9 @@ namespace indexer_helpers {
                 if (_page_map.size() == _cache_size) {
                     DCHECK(!_eid_buffer.empty());
                     auto cached_eid = _eid_buffer.next();
-                    auto it = _page_map.find(cached_eid);
-                    DCHECK(it != _page_map.end());
-                    _page_map.erase(it);
+                    auto erase_it = _page_map.find(cached_eid);
+                    DCHECK(erase_it != _page_map.end());
+                    _page_map.erase(erase_it);
                 }
 
                 auto page = _table->_read_page(_extent_id);
@@ -1350,9 +1350,9 @@ namespace indexer_helpers {
 
                 auto begin_it = page->begin();
                 PageMapItem pi{std::move(page), std::move(begin_it)};
-                auto inserted = _page_map.insert({_extent_id, std::move(pi)});
+                auto [inserted_it, _] = _page_map.try_emplace(_extent_id, std::move(pi));
                 _eid_buffer.put(_extent_id);
-                _page_i_begin = inserted.first->second.it_begin;
+                _page_i_begin = inserted_it->second.it_begin;
             } else {
                 _page_i_begin = it->second.it_begin;
             }
