@@ -12,7 +12,7 @@ namespace springtail {
     struct CircularBuffer {
         typedef T value_type;
 
-        CircularBuffer(size_t max_size) {
+        explicit CircularBuffer(size_t max_size) {
             _b.resize(max_size);
         }
 
