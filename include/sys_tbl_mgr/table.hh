@@ -195,7 +195,7 @@ namespace indexer_helpers {
             {
                 Secondary(const Table *table,
                         BTreePtr btree, const BTree::Iterator &btree_i,
-                        ExtentSchemaPtr schema );
+                        ExtentSchemaPtr schema, size_t cache_size);
 
                 Secondary(Secondary&&) = default;
                 virtual ~Secondary() = default;
@@ -218,7 +218,7 @@ namespace indexer_helpers {
                     StorageCache::Page::Iterator it_begin;
                 };
                 std::unordered_map<uint64_t, PageMapItem> _page_map;
-                uint64_t _cache_size;
+                size_t _cache_size = 0;
                 // This it to keep a list of extent ids that are in 
                 // _page_map. The list is used for evicting items from the
                 // page map. We assume that secondary indexes jump
@@ -339,7 +339,7 @@ namespace indexer_helpers {
                      BTreePtr btree, const BTree::Iterator &btree_i,
                      ExtentSchemaPtr index_schema)
             { 
-                _tracker.emplace<Secondary>(table, btree, btree_i, index_schema);
+                _tracker.emplace<Secondary>(table, btree, btree_i, index_schema, table->_page_cache_size/2);
             }
         };
 
@@ -515,6 +515,8 @@ namespace indexer_helpers {
         FieldPtr _roots_index_id_f; ///< The field accessor to read the root index ID from each row in the "roots" file.
 
         TableStats _stats; ///< The statistics for this table.
+
+        size_t _page_cache_size; ///< Page cache size from settings
     };
     typedef std::shared_ptr<Table> TablePtr;
 

@@ -151,7 +151,8 @@ namespace indexer_helpers {
           _xid(xid),
           _primary_key(primary_key),
           _schema(schema),
-          _stats(metadata.stats)
+          _stats(metadata.stats),
+          _page_cache_size{Json::get_or<uint64_t>(Properties::get(Properties::STORAGE_CONFIG), "page_cache_size", 16384)}
     {
         // construct the table's data directory
         _table_dir = table_helpers::get_table_dir(table_base, db_id, table_id, metadata.snapshot_xid);
@@ -1291,11 +1292,11 @@ namespace indexer_helpers {
 
     Table::Iterator::Secondary::Secondary(const Table *table,
             BTreePtr btree, const BTree::Iterator &btree_i,
-            ExtentSchemaPtr schema )
+            ExtentSchemaPtr schema, size_t cache_size)
         : 
             Tracker{table, btree, btree_i},
-            _cache_size{Json::get_or<uint64_t>(Properties::get(Properties::STORAGE_CONFIG), "page_cache_size", 16384)},
-            _eid_buffer{_cache_size/2}
+            _cache_size{cache_size},
+            _eid_buffer{cache_size}
     {
         DCHECK(_cache_size);
 
@@ -1378,8 +1379,7 @@ namespace indexer_helpers {
         } else {
             auto const& [btree, cols] = table->_secondary_indexes.at(index_id);
             auto index_schema = _create_index_schema(table->_schema, cols);
-            _tracker.emplace<Secondary>(table, btree, 
-                    btree->end(), index_schema );
+            _tracker.emplace<Secondary>(table, btree, btree->end(), index_schema, table->_page_cache_size/2);
         }
     }
 }
