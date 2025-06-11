@@ -509,6 +509,8 @@ namespace springtail::pg_log_mgr {
 
             case PgMsgEnum::CREATE_INDEX:
             case PgMsgEnum::ALTER_TABLE:
+            case PgMsgEnum::ATTACH_PARTITION:
+            case PgMsgEnum::DETACH_PARTITION:
             case PgMsgEnum::DROP_TABLE: {
                 // check if there's an ongoing sync for this table
                 auto sync_skip = SyncTracker::get_instance()->should_skip(_db, *tid, pg_xid_txn);
@@ -811,6 +813,24 @@ namespace springtail::pg_log_mgr {
                 _mark_table_resync(table_msg.oid, xidlsn, pg_xids);
                 break;
             }
+        case PgMsgEnum::ATTACH_PARTITION:
+            {
+                auto &attach_partition_msg = std::get<PgMsgAttachPartition>(change->msg);
+                std::string &&ddl_stmt = client->attach_partition(_db, xidlsn, attach_partition_msg);
+
+                // Store the DDL statement for the Committer
+                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                break;
+            }
+        case PgMsgEnum::DETACH_PARTITION:
+            {
+                auto &detach_partition_msg = std::get<PgMsgDetachPartition>(change->msg);
+                std::string &&ddl_stmt = client->detach_partition(_db, xidlsn, detach_partition_msg);
+
+                // Store the DDL statement for the Committer
+                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                break;
+            }
 
         default:
             LOG_ERROR("Message type {} not handled", static_cast<uint8_t>(change->msg_type));
@@ -1091,6 +1111,18 @@ namespace springtail::pg_log_mgr {
             {
                 const auto &idx_reconcile_msg = std::get<PgMsgReconcileIndex>(msg->msg);
                 _process_index_reconciliation(idx_reconcile_msg.db_id, idx_reconcile_msg.reconcile_xid);
+                break;
+            }
+        case PgMsgEnum::ATTACH_PARTITION:
+            {
+                const auto &partition_msg = std::get<PgMsgAttachPartition>(msg->msg);
+                _process_ddl(std::nullopt, partition_msg.table_id, partition_msg.xid, msg->is_streaming, msg);
+                break;
+            }
+        case PgMsgEnum::DETACH_PARTITION:
+            {
+                const auto &partition_msg = std::get<PgMsgDetachPartition>(msg->msg);
+                _process_ddl(std::nullopt, partition_msg.table_id, partition_msg.xid, msg->is_streaming, msg);
                 break;
             }
         default:

@@ -69,9 +69,12 @@ DECLARE
     parent_table_id oid;
     partition_bound text;
     partition_key text;
+    partition_name text;
     table_relname text;
     table_info RECORD;
     command_tag text;
+    command_text text;
+    match text[];
 BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() AS cmd
         WHERE cmd.command_tag IN ('ALTER TABLE', 'CREATE TABLE', 'ALTER INDEX')
@@ -94,6 +97,54 @@ BEGIN
         FROM pg_class
         WHERE oid = obj.objid
         INTO table_relname, table_replident, table_persistence, rel_kind, parent_table_id, partition_bound, partition_key;
+
+        command_text := current_query();
+
+        IF obj.command_tag = 'ALTER TABLE' AND position('detach partition' IN lower(command_text)) > 0 THEN
+            -- Use regex to extract partition name
+            match := regexp_matches(
+                command_text,
+                'DETACH\s+PARTITION\s+([^\s;]+)',
+                'i'
+            );
+
+            IF match IS NOT NULL THEN
+                partition_name := match[1];
+            END IF;
+
+            msg := json_build_object('xid', txid_current(),
+                'cmd', 'DETACH PARTITION',
+                'table_id', obj.objid::bigint,
+                'schema', obj.schema_name,
+                'table', table_relname,
+                'partition_name', partition_name);
+
+            PERFORM pg_logical_emit_message(true, 'springtail:' || 'DETACH PARTITION', msg::text);
+        END IF;
+
+        IF obj.command_tag = 'ALTER TABLE' AND position('attach partition' IN lower(command_text)) > 0 THEN
+            -- Use regex to extract partition name and partition bound
+            match := regexp_matches(
+                command_text,
+                'ATTACH PARTITION\s+([^\s]+)\s+FOR\s+VALUES\s+((?:IN\s*\([^)]+\))|(?:FROM\s*\([^)]+\)\s+TO\s*\([^)]+\)))',
+                'i'
+            );
+
+            IF match IS NOT NULL THEN
+                partition_name := match[1];
+                partition_bound := match[2];
+            END IF;
+
+            msg := json_build_object('xid', txid_current(),
+                'cmd', 'ATTACH PARTITION',
+                'table_id', obj.objid::bigint,
+                'schema', obj.schema_name,
+                'table', table_relname,
+                'partition_name', partition_name,
+                'partition_bound', partition_bound);
+
+            PERFORM pg_logical_emit_message(true, 'springtail:' || 'ATTACH PARTITION', msg::text);
+        END IF;
 
         -- This is a corner case when an index is renamed through "ALTER TABLE" statement
         -- In this case our object is an index, not a table. So, we can't do anything with it here.

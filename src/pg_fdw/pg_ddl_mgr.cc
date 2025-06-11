@@ -764,6 +764,31 @@ namespace springtail::pg_fdw {
 
             // nothing to actually change in the FDW
             return {};
+        } else if (action == "attach_partition") {
+            // XXX handle parition schema
+            std::string alter = fmt::format("ALTER TABLE {}.{} ATTACH PARTITION {}.{} FOR VALUES {};",
+                                            conn->escape_identifier(ddl.at("schema")),
+                                            conn->escape_identifier(ddl.at("table")),
+                                            conn->escape_identifier(ddl.at("schema")),
+                                            conn->escape_identifier(ddl.at("partition_name")),
+                                            ddl.at("partition_bound").get<std::string>());
+
+            return alter;
+        } else if (action == "detach_partition") {
+            // XXX handle parition schema
+            std::string alter = fmt::format("ALTER TABLE {}.{} DETACH PARTITION {}.{};",
+                                            conn->escape_identifier(ddl.at("schema")),
+                                            conn->escape_identifier(ddl.at("table")),
+                                            conn->escape_identifier(ddl.at("schema")),
+                                            conn->escape_identifier(ddl.at("partition_name")));
+
+            return alter;
+        } else if (action == "alter_parent_set") {
+            return "";
+            // XXX Handle this
+        } else if (action == "alter_parent_clear") {
+            return "";
+            // XXX Handle this
         }
 
         // can't currently support other kinds of DDL mutations

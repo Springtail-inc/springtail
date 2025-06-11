@@ -307,6 +307,51 @@ Client::drop_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &ms
 }
 
 std::string
+Client::attach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgAttachPartition &msg)
+{
+    proto::AttachPartitionRequest request;
+    _set_request_common(request, db_id, xid);
+    request.set_table_id(msg.table_id);
+    request.set_namespace_name(msg.schema);
+    request.set_table_name(msg.table);
+    request.set_partition_name(msg.partition_name);
+    request.set_partition_bound(msg.partition_bound);
+
+    proto::DDLStatement response;
+    grpc_client::retry_rpc("SysTblMgr", "AttachPartition",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->AttachPartition(context, request, &response);
+                           });
+
+    if (response.statement().empty()) {
+        throw SysTblMgrError("No DDL statement");
+    }
+    return response.statement();
+}
+
+std::string
+Client::detach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgDetachPartition &msg)
+{
+    proto::DetachPartitionRequest request;
+    _set_request_common(request, db_id, xid);
+    request.set_table_id(msg.table_id);
+    request.set_namespace_name(msg.schema);
+    request.set_table_name(msg.table);
+    request.set_partition_name(msg.partition_name);
+
+    proto::DDLStatement response;
+    grpc_client::retry_rpc("SysTblMgr", "DetachPartition",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->DetachPartition(context, request, &response);
+                           });
+
+    if (response.statement().empty()) {
+        throw SysTblMgrError("No DDL statement");
+    }
+    return response.statement();
+}
+
+std::string
 Client::create_index(uint64_t db_id,
                      const XidLsn &xid,
                      const PgMsgIndex &msg,
@@ -773,6 +818,36 @@ Client::get_usertype(uint64_t db_id, uint64_t type_id, const XidLsn &xid)
                                                 response.value_json(),
                                                 response.exists());
     return user_type;
+}
+
+std::string
+Client::attach_partition(const proto::AttachPartitionRequest &request)
+{
+    proto::DDLStatement response;
+    grpc_client::retry_rpc("SysTblMgr", "AttachPartition",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->AttachPartition(context, request, &response);
+                           });
+
+    if (response.statement().empty()) {
+        throw SysTblMgrError("No DDL statement");
+    }
+    return response.statement();
+}
+
+std::string
+Client::detach_partition(const proto::DetachPartitionRequest &request)
+{
+    proto::DDLStatement response;
+    grpc_client::retry_rpc("SysTblMgr", "DetachPartition",
+                           [this, &request, &response](grpc::ClientContext *context) {
+                               return _stub->DetachPartition(context, request, &response);
+                           });
+
+    if (response.statement().empty()) {
+        throw SysTblMgrError("No DDL statement");
+    }
+    return response.statement();
 }
 
 }  // namespace springtail::sys_tbl_mgr

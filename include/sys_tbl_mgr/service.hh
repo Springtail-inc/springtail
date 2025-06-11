@@ -103,6 +103,16 @@ public:
                              const proto::GetUserTypeRequest* request,
                              proto::GetUserTypeResponse* response) override;
 
+    /** Attaches a partition to a table. */
+    grpc::Status AttachPartition(grpc::ServerContext* context,
+                                 const proto::AttachPartitionRequest* request,
+                                 proto::DDLStatement* response) override;
+
+    /** Detaches a partition from a table. */
+    grpc::Status DetachPartition(grpc::ServerContext* context,
+                                 const proto::DetachPartitionRequest* request,
+                                 proto::DDLStatement* response) override;
+
     /** Updates the roots extents of the indexes of the table as well as the table stats. */
     grpc::Status UpdateRoots(grpc::ServerContext* context,
                              const proto::UpdateRootsRequest* request,

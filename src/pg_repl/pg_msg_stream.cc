@@ -1219,6 +1219,47 @@ namespace springtail {
         return msg;
     }
 
+    PgMsgPtr
+    PgMsgStreamReader::_decode_attach_partition(const PgMsgMessage &message, char *buffer, int len)
+    {
+        PgMsgAttachPartition attach_partition_msg;
+        std::string data_str(buffer, len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded attach partition: json: {}", json.dump());
+
+        json["table_id"].get_to(attach_partition_msg.table_id);
+        json["schema"].get_to(attach_partition_msg.schema);
+        json["table"].get_to(attach_partition_msg.table);
+        json["partition_name"].get_to(attach_partition_msg.partition_name);
+        json["partition_bound"].get_to(attach_partition_msg.partition_bound);
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::ATTACH_PARTITION);
+        msg->msg.emplace<PgMsgAttachPartition>(attach_partition_msg);
+
+        return msg;
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_detach_partition(const PgMsgMessage &message, char *buffer, int len)
+    {
+        PgMsgDetachPartition detach_partition_msg;
+        std::string data_str(buffer, len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded detach partition: json: {}", json.dump());
+
+        json["table_id"].get_to(detach_partition_msg.table_id);
+        json["schema"].get_to(detach_partition_msg.schema);
+        json["table"].get_to(detach_partition_msg.table);
+        json["partition_name"].get_to(detach_partition_msg.partition_name);
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DETACH_PARTITION);
+        msg->msg.emplace<PgMsgDetachPartition>(detach_partition_msg);
+
+        return msg;
+    }
+
     void
     PgMsgStreamReader::_skip_message()
     {
@@ -1286,6 +1327,10 @@ namespace springtail {
             return _decode_alter_usertype(msg, buffer.data(), data_len);
         } else if (msg.prefix_str == pg_msg::MSG_PREFIX_DROP_TYPE) {
             return _decode_drop_usertype(msg, buffer.data(), data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_ATTACH_PARTITION) {
+            return _decode_attach_partition(msg, buffer.data(), data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_DETACH_PARTITION) {
+            return _decode_detach_partition(msg, buffer.data(), data_len);
         } else {
             LOG_INFO("Unknown message prefix: {}", msg.prefix_str);
             return nullptr;

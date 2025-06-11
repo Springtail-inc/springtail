@@ -1455,6 +1455,83 @@ Service::GetUserType(grpc::ServerContext* context,
     return grpc::Status::OK;
 }
 
+grpc::Status
+Service::AttachPartition(grpc::ServerContext* context,
+                         const proto::AttachPartitionRequest* request,
+                         proto::DDLStatement* response)
+{
+    ServerSpan span(context, "SysTblMgrService", "AttachPartition");
+
+    LOG_INFO("got AttachPartition() -- db {} table {} xid {} lsn {}", request->db_id(),
+              request->table_id(), request->xid(), request->lsn());
+
+    XidLsn xid(request->xid(), request->lsn());
+
+    auto ns_info = _get_namespace_info(request->db_id(), request->namespace_name(),
+                                       XidLsn(request->xid(), request->lsn()), false);
+
+    nlohmann::json ddl;
+
+    auto current_table_info = _get_table_info(request->db_id(), request->table_id(), XidLsn(request->xid(), request->lsn()));
+
+    CHECK(current_table_info);
+
+    auto table_info =
+        std::make_shared<TableCacheRecord>(request->table_id(), request->xid(), request->lsn(),
+                                           ns_info->id, request->table_name(), true,
+                                           current_table_info->parent_table_id, current_table_info->partition_key,
+                                           request->partition_bound());
+    _set_table_info(request->db_id(), table_info);
+
+    ddl["action"] = "attach_partition";
+    ddl["schema"] = request->namespace_name();
+    ddl["table"] = request->table_name();
+    ddl["partition_name"] = request->partition_name();
+    ddl["partition_bound"] = request->partition_bound();
+
+    // serialize the JSON and return
+    response->set_statement(nlohmann::to_string(ddl));
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
+    return grpc::Status::OK;
+}
+
+grpc::Status
+Service::DetachPartition(grpc::ServerContext* context,
+                         const proto::DetachPartitionRequest* request,
+                         proto::DDLStatement* response)
+{
+    ServerSpan span(context, "SysTblMgrService", "DetachPartition");
+
+    LOG_INFO("got DetachPartition() -- db {} table {} xid {} lsn {}", request->db_id(),
+              request->table_id(), request->xid(), request->lsn());
+
+    // acquire a shared lock to ensure no one is doing a finalize
+    boost::shared_lock lock(_write_mutex);
+
+    XidLsn xid(request->xid(), request->lsn());
+
+    auto ns_info = _get_namespace_info(request->db_id(), request->namespace_name(),
+                                       XidLsn(request->xid(), request->lsn()), false);
+
+    nlohmann::json ddl;
+
+    auto table_info =
+        std::make_shared<TableCacheRecord>(request->table_id(), request->xid(), request->lsn(),
+                                           ns_info->id, request->table_name(), true);
+    _set_table_info(request->db_id(), table_info);
+
+    ddl["action"] = "detach_partition";
+    ddl["schema"] = request->namespace_name();
+    ddl["table"] = request->table_name();
+    ddl["partition_name"] = request->partition_name();
+
+    LOG_DEBUG(LOG_SCHEMA, "Detach partition DDL: {}", ddl.dump());
+    // serialize the JSON and return
+    response->set_statement(nlohmann::to_string(ddl));
+    span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
+    return grpc::Status::OK;
+}
+
 nlohmann::json
 Service::_mutate_usertype(uint64_t db_id,
                           uint64_t type_id,
