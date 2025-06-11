@@ -168,18 +168,18 @@ namespace springtail::pg_log_mgr {
     PgLogReader::Batch::TableEntry::get_pg_fields(Batch *batch,
                                                   const XidLsn &xid,
                                                   const MutableFieldArrayPtr fields,
-                                                  const std::vector<int32_t> &pg_types)
+                                                  const std::vector<std::pair<int32_t, int>> &pg_types)
     {
         auto pg_fields = std::make_shared<FieldArray>();
         for (int i = 0; i < fields->size(); i++) {
             // check if the pg_type is a user type
             auto type = fields->at(i)->get_type();
-            if (pg_types[i] >= constant::FIRST_USER_DEFINED_PG_OID) {
-                auto utp = batch->_usertype_cache_lookup(pg_types[i], xid);
+            if (pg_types[i].first >= constant::FIRST_USER_DEFINED_PG_OID) {
+                auto utp = batch->_usertype_cache_lookup(pg_types[i].first, xid);
                 DCHECK(utp->exists);
-                pg_fields->push_back(std::make_shared<PgEnumField>(type, i, utp));
+                pg_fields->push_back(std::make_shared<PgEnumField>(type, pg_types[i].second, utp));
             } else {
-                pg_fields->push_back(std::make_shared<PgLogField>(type, i));
+                pg_fields->push_back(std::make_shared<PgLogField>(type, pg_types[i].second));
             }
         }
         return pg_fields;
@@ -876,15 +876,9 @@ namespace springtail::pg_log_mgr {
         // consume messages from log; num_messages of -1 means go until eos
         bool eos = false; // end of stream
         while (num_messages != 0 && !eos) {
-            bool eob=false; // end of block
-
-            // while not at end of message block (or stream) process
-            while (!eob && !eos) {
-                // read next message
-                PgMsgPtr msg = _reader.read_message(filter, eos, eob);
-                if (msg == nullptr) {
-                    continue;
-                }
+            // read next message
+            PgMsgPtr msg = _reader.read_message(filter, eos);
+            if (msg != nullptr) {
                 msg->pg_log_timestamp = timestamp;
 
                 // process the message
@@ -892,7 +886,7 @@ namespace springtail::pg_log_mgr {
             }
 
             if (num_messages > 0) {
-                num_messages--;
+                --num_messages;
             }
         }
     }
