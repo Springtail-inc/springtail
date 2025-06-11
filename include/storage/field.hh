@@ -750,7 +750,7 @@ namespace springtail {
         bool _can_null;
         bool _can_undefined;
 
-        uint32_t _offset;
+        uint32_t _offset;         ///< byte offset of the field in the row data
         uint8_t _bool_bitmask;
 
         uint32_t _null_offset;
@@ -1540,7 +1540,7 @@ namespace springtail {
 
     protected:
         SchemaType _type;
-        uint32_t _offset;
+        uint32_t _offset;  ///< Column offset in the tuple data
     };
     using PgLogFieldPtr = std::shared_ptr<PgLogField>;
 
