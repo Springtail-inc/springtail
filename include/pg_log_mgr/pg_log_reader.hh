@@ -137,7 +137,7 @@ namespace springtail::pg_log_mgr {
 
         public:
             Batch(uint64_t db_id, int32_t pg_xid, const CommitterQueuePtr committer_queue,
-                  ExistsCachePtr exists_cache, const std::shared_ptr<IndexRequestsManager> index_requests_mgr)
+                  ExistsCachePtr exists_cache, const std::shared_ptr<IndexRequestsManager>& index_requests_mgr)
                 : _db(db_id), _pg_xid(pg_xid), _committer_queue(committer_queue),
                 _exists_cache(exists_cache), _index_requests_mgr(index_requests_mgr)
             {
