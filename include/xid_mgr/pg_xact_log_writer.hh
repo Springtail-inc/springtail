@@ -82,32 +82,22 @@ public:
 
     /**
      * @brief Flush from memory to file.
-     *
      */
     void flush();
 
 private:
     std::filesystem::path _base_dir;    ///< full path to file storage directory
     std::filesystem::path _file;        ///< file name of the current log file
-    size_t _file_size{0};               ///< file size - multiple of page size
-    size_t _mmap_offset{0};             ///< offset of mmap segment
-    size_t _last_offset{0};             ///< offset inside the mmap segment, points to the next available memory location
+    size_t _offset{0};                  ///< offset inside write buffer for next entry
     uint64_t _last_stored_xid{1};       ///< value of the last xid stored in xact log
     uint64_t _current_log_timestamp{0}; ///< timestamp of the current log file
-    XidElement *_file_mem{nullptr};     ///< pointer to the mmaped memory
+    char _write_buffer[PgXactLogWriter::PG_XLOG_PAGE_SIZE];
     int _fd{-1};                        ///< file descriptor of the open file, when set to -1, it means that no file is open
     bool _first_file{true};             ///< first file flag
-    bool _can_flush{false};             ///< flag that indicates that the data can be flushed
-
-    /**
-     * @brief Add the next page to the file by resizing it and moving mmap to the newly added segment.
-     *
-     */
-    void _resize_and_map();
+    bool _can_flush{false};             ///< dirty flag that indicates that the data can be flushed
 
     /**
      * @brief In the existing file, advance to the position of the last stored xid
-     *
      */
     void _extract_last_xid();
 };

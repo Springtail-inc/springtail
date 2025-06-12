@@ -239,7 +239,7 @@ namespace springtail::pg_log_mgr {
                 FieldArrayPtr get_pg_fields(Batch *batch,
                                             const XidLsn &xid,
                                             const MutableFieldArrayPtr fields,
-                                            const std::vector<int32_t> &pg_types);
+                                            const std::vector<std::pair<int32_t, int>> &pg_types);
             };
             using TableMap = std::map<int32_t, TableEntry>;
 
