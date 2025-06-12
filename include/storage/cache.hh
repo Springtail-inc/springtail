@@ -688,6 +688,17 @@ namespace springtail {
                 }
 
                 Iterator &operator+=(difference_type n) { 
+                    if (_page->extent_count() == 1) {
+                        _row += n;
+                        return *this;
+                    }
+
+                    while ((*_extent)->end() - _row <= n) {
+                        n -= (*_extent)->end() - _row;
+                        ++_extent_i;
+                        _extent = _extent_i->make_safe_extent(_page->_file);
+                        _row = (*_extent)->begin();
+                    }
                     _row += n;
                     return *this;
                 }

@@ -519,7 +519,7 @@ namespace springtail {
 
         template <typename T>
         T get_value(const void* row) const {
-            return *(T*)(((const Extent::Row *)row)->data() + _offset);
+            return *reinterpret_cast<T*>(((const Extent::Row *)row)->data() + _offset);
         }
 
         int8_t get_int8(const void *row) const override {

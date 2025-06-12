@@ -42,6 +42,7 @@ namespace {
             std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
             runners.emplace();
             runners->emplace_back(std::make_unique<IOMgrRunner>());
+
             springtail_init_test(runners, LOG_ALL ^ LOG_STORAGE);
 
             // construct a schema for testing
@@ -92,10 +93,29 @@ namespace {
             page->insert(std::make_shared<KeyValueTuple>(_csv_fields, extra, &r), _schema);
         }
 
+
+        // test operator +=(difference_type)
+        {
+            ASSERT_GT(page->extent_count(), 1);
+            std::string diff_test_txt;
+            int count = 0;
+            for (auto it = page->begin(); it != page->end(); ++it, ++count) {
+                if (count == 4500) {
+                    diff_test_txt = _fields->at(1)->get_text(&*it);
+                    break;
+                }
+            }
+
+            auto it = page->begin();
+            it += 4500;
+            auto txt = _fields->at(1)->get_text(&*it);
+
+            ASSERT_EQ(txt, diff_test_txt);
+        }
+
         ExtentHeader header(ExtentType(), xid++, _schema->row_size(), _schema->field_types(), 0);
         auto &&offsets = page->flush(header);
 
-        // verify the contents
         int count = 0;
         std::string prev = "";
         for (auto offset : offsets) {
