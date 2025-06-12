@@ -472,7 +472,7 @@ namespace springtail::pg_proxy {
 
                             for (auto socket : it->second) {
                                 PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Removing socket {} from waiting sessions for {}", socket, session->name());
-                                CHECK_EQ(_waiting_sessions.erase(socket), 1);
+                                _waiting_sessions.erase(socket);
                             }
                         }
                     } else {

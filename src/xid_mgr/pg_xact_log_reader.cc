@@ -1,5 +1,6 @@
 #include <fcntl.h>
 
+#include <common/logging.hh>
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <xid_mgr/pg_xact_log_reader.hh>
 
@@ -16,17 +17,11 @@ bool
 PgXactLogReader::begin()
 {
     _cleanup();
-    return _open_next_file() && _get_next_xid();
+    return _open_next_file() && next();
 }
 
 bool
 PgXactLogReader::next()
-{
-    return _get_next_xid();
-}
-
-bool
-PgXactLogReader::_get_next_xid()
 {
     if (_fd == -1) {
         return false;
@@ -34,8 +29,7 @@ PgXactLogReader::_get_next_xid()
     _current_xid = nullptr;
     while (_current_xid == nullptr) {
         // If we reached the end of the page
-        if (_current_offset == PgXactLogWriter::PG_XLOG_PAGE_SIZE) {
-            ++_page_count;
+        if (_current_offset + sizeof(PgXactLogWriter::XidElement) > _end_offset) {
             // Try to load the next page from the current file
             if (!_load_next_page() && !_open_next_file()) {
                 return false;
@@ -69,18 +63,19 @@ PgXactLogReader::_open_next_file()
         } else {
             _current_file = fs::get_next_log_file(*_current_file, PgXactLogWriter::LOG_PREFIX_XACT, PgXactLogWriter::LOG_SUFFIX);
         }
+
         if (!_current_file.has_value()) {
             return false;
         }
-        LOG_INFO("Current file: {}", _current_file->string());
 
         // open file
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Opening xact log file: {}", _current_file->string());
         _fd = ::open(_current_file.value().c_str(), O_RDWR, 0660);
         if (_fd == -1) {
             throw Error(fmt::format("Failed to open file {}; error {}: {}", _current_file.value().string(), errno, strerror(errno)));
         }
-        _page_count = 0;
-    } while(!_load_next_page());
+
+    } while(!_load_next_page()); // make sure we can read the first page or go to the next file
 
     return true;
 }
@@ -90,14 +85,12 @@ PgXactLogReader::_load_next_page()
 {
     int ret = ::read(_fd, _read_buffer, PgXactLogWriter::PG_XLOG_PAGE_SIZE);
     if (ret == 0) {
-        return false;
+        return false;          // EOF
     }
     if (ret == -1) {
         throw Error(fmt::format("Error reading from file {}; error {}: {}", _current_file.value().string(), errno, strerror(errno)));
     }
-    if (ret != PgXactLogWriter::PG_XLOG_PAGE_SIZE) {
-        throw Error(fmt::format("Error: read incomplete page from file {}", _current_file.value().string()));
-    }
+    _end_offset = ret;
     _current_offset = 0;
 
     return true;
