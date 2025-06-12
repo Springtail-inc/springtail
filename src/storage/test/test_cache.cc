@@ -93,7 +93,6 @@ namespace {
             page->insert(std::make_shared<KeyValueTuple>(_csv_fields, extra, &r), _schema);
         }
 
-
         // test operator +=(difference_type)
         {
             ASSERT_GT(page->extent_count(), 1);
@@ -116,6 +115,7 @@ namespace {
         ExtentHeader header(ExtentType(), xid++, _schema->row_size(), _schema->field_types(), 0);
         auto &&offsets = page->flush(header);
 
+        // verify the contents
         int count = 0;
         std::string prev = "";
         for (auto offset : offsets) {
