@@ -20,7 +20,8 @@ public:
      * @param base_dir - directory where the log files are located
      * @param last_xid - last allowed transaction id
      */
-    explicit PgXactLogReader(const std::filesystem::path &base_dir) : _base_dir(base_dir) {};
+    explicit PgXactLogReader(const std::filesystem::path &base_dir)
+        : _base_dir(base_dir), _current_xid {0,0,false} {};
 
     /**
      * @brief Destroy the Pg Xact Log Reader Mmap object
@@ -49,8 +50,8 @@ public:
     uint32_t
     get_pg_xid() const
     {
-        CHECK(_current_xid != nullptr);
-        return _current_xid->pg_xid;
+        CHECK(_current_xid.xid != 0);
+        return _current_xid.pg_xid;
     }
 
     /**
@@ -61,8 +62,8 @@ public:
     uint64_t
     get_xid() const
     {
-        CHECK(_current_xid != nullptr);
-        return _current_xid->xid;
+        CHECK(_current_xid.xid != 0);
+        return _current_xid.xid;
     }
 
     /**
@@ -74,26 +75,17 @@ public:
     bool
     get_real_commit() const
     {
-        CHECK(_current_xid != nullptr);
-        return _current_xid->real_commit;
+        return _current_xid.real_commit;
     }
 
 private:
     std::filesystem::path _base_dir;        ///< full path to transaction logs directory
     std::optional<std::filesystem::path> _current_file;     ///< the name of the current file
     char _read_buffer[PgXactLogWriter::PG_XLOG_PAGE_SIZE];  ///< read buffer memory
-    PgXactLogWriter::XidElement *_current_xid{nullptr};     ///< pointer to the next memory location to get the data from
+    PgXactLogWriter::XidElement _current_xid;     ///< pointer to the next memory location to get the data from
     size_t _current_offset{0};          ///< current memory offset inside the current read segment
-    uint32_t _page_count{0};            ///< number of pages in the current file
+    size_t _end_offset{0};              ///< end offset of the current read segment
     int _fd{-1};                        ///< current file descriptor
-
-    /**
-     * @brief Move current xid pointer to the next xid entry
-     *
-     * @return true - success
-     * @return false - failure
-     */
-    bool _get_next_xid();
 
     /**
      * @brief Load the next page from current file
