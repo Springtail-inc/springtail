@@ -15,11 +15,43 @@
 
 namespace springtail::pg_fdw {
     /** Partition info */
-    struct PartitionInfo {
-        uint64_t parent_table_id;
-        std::string parent_table_name;
-        std::string partition_key;
-        std::string partition_bound;
+    class PartitionInfo {
+    public:
+        PartitionInfo(uint64_t parent_table_id,
+                      std::string parent_namespace_name,
+                      std::string parent_table_name,
+                      std::string partition_key,
+                      std::string partition_bound)
+            : _parent_table_id(parent_table_id),
+              _parent_namespace_name(std::move(parent_namespace_name)),
+              _parent_table_name(std::move(parent_table_name)),
+              _partition_key(std::move(partition_key)),
+              _partition_bound(std::move(partition_bound)) {}
+
+        PartitionInfo(uint64_t parent_table_id,
+                      std::string partition_key,
+                      std::string partition_bound)
+            : _parent_table_id(parent_table_id),
+              _partition_key(std::move(partition_key)),
+              _partition_bound(std::move(partition_bound)) {}
+
+        uint64_t parent_table_id() const { return _parent_table_id; }
+        const std::string& parent_namespace_name() const { return _parent_namespace_name; }
+        const std::string& parent_table_name() const { return _parent_table_name; }
+        const std::string& partition_key() const { return _partition_key; }
+        const std::string& partition_bound() const { return _partition_bound; }
+
+        const std::string& set_parent_namespace_name(const std::string& parent_namespace_name) { return _parent_namespace_name = parent_namespace_name; }
+        const std::string& set_parent_table_name(const std::string& parent_table_name) { return _parent_table_name = parent_table_name; }
+        const std::string& set_partition_key(const std::string& partition_key) { return _partition_key = partition_key; }
+        const std::string& set_partition_bound(const std::string& partition_bound) { return _partition_bound = partition_bound; }
+
+    private:
+        uint64_t _parent_table_id;
+        std::string _parent_namespace_name;
+        std::string _parent_table_name;
+        std::string _partition_key;
+        std::string _partition_bound;
     };
 
     class PgFdwCommon {
@@ -48,10 +80,10 @@ namespace springtail::pg_fdw {
         {
             const PartitionInfo &partition_info = table_partition_map.at(table_oid);
 
-            bool is_regular_table = partition_info.parent_table_id == 0 && partition_info.partition_key.empty();
-            bool is_parent_partitioned_table = partition_info.parent_table_id == 0 && !partition_info.partition_key.empty();
-            bool is_leaf_partitioned_table = partition_info.parent_table_id > 0 && !partition_info.partition_bound.empty() && partition_info.partition_key.empty();
-            bool is_non_leaf_partitioned_table = partition_info.parent_table_id > 0 && !partition_info.partition_bound.empty() && !partition_info.partition_key.empty();
+            bool is_regular_table = partition_info.parent_table_id() == 0 && partition_info.partition_key().empty();
+            bool is_parent_partitioned_table = partition_info.parent_table_id() == 0 && !partition_info.partition_key().empty();
+            bool is_leaf_partitioned_table = partition_info.parent_table_id() > 0 && !partition_info.partition_bound().empty() && partition_info.partition_key().empty();
+            bool is_non_leaf_partitioned_table = partition_info.parent_table_id() > 0 && !partition_info.partition_bound().empty() && !partition_info.partition_key().empty();
 
             // Table Type                   - FDW       - DDL
             //
@@ -98,7 +130,7 @@ namespace springtail::pg_fdw {
                 escape_identifier(namespace_name),
                 escape_identifier(table));
 
-            if (partition_info.parent_table_id == 0) {
+            if (partition_info.parent_table_id() == 0) {
                 create += " (";
                 // iterate over the columns, adding each to the create statement
                 // name, type, is_nullable, default value
@@ -122,12 +154,12 @@ namespace springtail::pg_fdw {
                 }
                 create += "\n)";
             } else {
-                create += fmt::format("\nPARTITION OF {}.{}", namespace_name, partition_info.parent_table_name);
-                create += fmt::format("\n{}", partition_info.partition_bound);
+                create += fmt::format("\nPARTITION OF {}.{}", partition_info.parent_namespace_name(), partition_info.parent_table_name());
+                create += fmt::format("\n{}", partition_info.partition_bound());
             }
 
-            if (!partition_info.partition_key.empty()) {
-                create += fmt::format("\nPARTITION BY {}", partition_info.partition_key);
+            if (!partition_info.partition_key().empty()) {
+                create += fmt::format("\nPARTITION BY {}", partition_info.partition_key());
             }
             if (is_foreign_table) {
                 create += fmt::format("\nSERVER {} OPTIONS (tid '{}');", server_name, tid);
@@ -138,6 +170,44 @@ namespace springtail::pg_fdw {
             LOG_DEBUG(LOG_FDW, "Generated SQL: {}", create);
 
             return create;
+        }
+
+        /**
+         * @brief Get the namespace info
+         *
+         * @param db_id database id
+         * @param schema_xid schema xid
+         * @param namespace_id namespace id
+         * @return std::pair<std::string, uint64_t>
+         */
+        static std::string_view
+        _get_namespace_name(uint64_t db_id, uint64_t schema_xid, uint64_t namespace_id)
+        {
+            // lookup the namespace_id for the requested schema
+            auto ns_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, schema_xid);
+            auto ns_key = sys_tbl::NamespaceNames::Primary::key_tuple(namespace_id, schema_xid, constant::MAX_LSN);
+            auto ns_i = ns_table->inverse_lower_bound(ns_key);
+
+            if (ns_i == ns_table->end()) {
+                LOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
+                            namespace_id, schema_xid, constant::MAX_LSN);
+                return "";
+            }
+
+            auto ns_fields = ns_table->extent_schema()->get_fields();
+            auto &&row = *ns_i;
+            if (namespace_id != ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&row)) {
+                LOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
+                            namespace_id, schema_xid, constant::MAX_LSN);
+                return "";
+            }
+            if (!ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row)) {
+                LOG_WARN("Namespace marked as not-exists {} @ {}:{}",
+                            namespace_id, schema_xid, constant::MAX_LSN);
+                return "";
+            }
+
+            return ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&row);
         }
 
         /**
@@ -168,6 +238,8 @@ namespace springtail::pg_fdw {
                        bool is_fdw)
         {
             std::vector<std::string> commands;
+
+            LOG_DEBUG(LOG_FDW, "Getting schema ddl for {} @ {}:{}", namespace_name, schema_xid, constant::MAX_LSN);
 
             // lookup the namespace_id for the requested schema
             auto ns_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, schema_xid);
@@ -203,8 +275,8 @@ namespace springtail::pg_fdw {
             // get field array
             auto fields = table->extent_schema()->get_fields();
 
-            // map from table name -> <table id, xid>
-            std::map<std::string, std::pair<uint64_t,uint64_t>> table_map;
+            // map from table name -> <table id, xid, table_ns_id>
+            std::map<std::string, std::tuple<uint64_t,uint64_t, uint64_t>> table_map;
             std::map<uint64_t, PartitionInfo> table_partition_map;
 
             // iterate over the table names table and populate the table map
@@ -239,7 +311,7 @@ namespace springtail::pg_fdw {
                     // find table and compare xids, remove if this xid is >= to the one in the map
                     auto entry = table_map.find(table_name);
                     if (entry != table_map.end()) {
-                        if (xid >= entry->second.second) {
+                        if (xid >= std::get<1>(entry->second)) {
                             // remove this table entry
                             table_map.erase(entry);
                         }
@@ -252,7 +324,7 @@ namespace springtail::pg_fdw {
                 LOG_DEBUG(LOG_FDW, "Found table {}.{} tid={}, xid={}", namespace_name, table_name, tid, xid);
 
                 // lookup table in map, if found the xid if it is newer
-                auto entry = table_map.insert({table_name, {tid, xid}});
+                auto entry = table_map.insert({table_name, {tid, xid, table_ns_id}});
 
                 // Insert the partition details in the partition map
                 uint64_t parent_table_id = 0;
@@ -270,27 +342,27 @@ namespace springtail::pg_fdw {
 
                 table_partition_map.try_emplace(
                     tid,
-                    PartitionInfo(parent_table_id, "", partition_key, partition_bound)
+                    PartitionInfo(parent_table_id, "", "", partition_key, partition_bound)
                 );
 
                 if (entry.second == false) {
                     LOG_DEBUG(LOG_FDW, "Table {} already exists in schema {}", table_name, namespace_name);
                     // update if xid is newer
-                    if (xid > entry.first->second.second) {
-                        entry.first->second = {tid, xid};
+                    if (xid > std::get<1>(entry.first->second)) {
+                        entry.first->second = {tid, xid, table_ns_id};
                     }
                 }
             }
 
             // reorganize the table_map to be from tid -> {xid, table}
-            std::map<uint64_t, std::tuple<uint64_t, std::string>> tid_map;
+            std::map<uint64_t, std::tuple<uint64_t, std::string, uint64_t>> tid_map;
             for (const auto &[table_name, table_info] : table_map) {
-                tid_map[table_info.first] = {table_info.second, table_name};
+                tid_map[std::get<0>(table_info)] = {std::get<1>(table_info), table_name, std::get<2>(table_info)};
             }
 
             // Populate the parent table names for the partitioned tables
             for (auto &partition_info : table_partition_map) {
-                uint64_t parent_table_id = partition_info.second.parent_table_id;
+                uint64_t parent_table_id = partition_info.second.parent_table_id();
 
                 if (parent_table_id == 0) {
                     // not a partitioned table or its a parent table
@@ -303,7 +375,8 @@ namespace springtail::pg_fdw {
                 }
                 LOG_DEBUG(LOG_FDW, "Found parent table name {} for id: {}", std::get<1>(parent_table->second), parent_table_id);
 
-                partition_info.second.parent_table_name = std::get<1>(parent_table->second);
+                partition_info.second.set_parent_namespace_name(_get_namespace_name(db_id, schema_xid, std::get<2>(parent_table->second)).data());
+                partition_info.second.set_parent_table_name(std::get<1>(parent_table->second));
             }
 
             // Move on to iterating through the schemas table

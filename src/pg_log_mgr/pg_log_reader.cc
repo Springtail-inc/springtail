@@ -495,6 +495,8 @@ namespace springtail::pg_log_mgr {
                         // table ID here
 
             case PgMsgEnum::CREATE_TABLE:
+            case PgMsgEnum::ATTACH_PARTITION:
+            case PgMsgEnum::DETACH_PARTITION:
             case PgMsgEnum::ALTER_RESYNC: {
                 // check if there's an ongoing sync for this table
                 auto sync_skip = SyncTracker::get_instance()->should_skip(_db, *tid, pg_xid_txn);
@@ -509,8 +511,6 @@ namespace springtail::pg_log_mgr {
 
             case PgMsgEnum::CREATE_INDEX:
             case PgMsgEnum::ALTER_TABLE:
-            case PgMsgEnum::ATTACH_PARTITION:
-            case PgMsgEnum::DETACH_PARTITION:
             case PgMsgEnum::DROP_TABLE: {
                 // check if there's an ongoing sync for this table
                 auto sync_skip = SyncTracker::get_instance()->should_skip(_db, *tid, pg_xid_txn);

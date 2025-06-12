@@ -1,0 +1,53 @@
+## test
+CREATE SCHEMA partition_table_schema_alter;
+
+CREATE SCHEMA child_table_schema_alter;
+
+CREATE TABLE partition_table_schema_alter.invoice (
+    id SERIAL,
+    name TEXT NOT NULL,
+    amount NUMERIC NOT NULL,
+    purchase_date DATE NOT NULL,
+    PRIMARY KEY (id, purchase_date)
+) PARTITION BY RANGE (purchase_date);
+
+CREATE TABLE child_table_schema_alter.invoice_2023 (
+    id SERIAL,
+    name TEXT NOT NULL,
+    amount NUMERIC NOT NULL,
+    purchase_date DATE NOT NULL,
+    PRIMARY KEY (id, purchase_date)
+);
+
+CREATE TABLE child_table_schema_alter.invoice_2024 (
+    id SERIAL,
+    name TEXT NOT NULL,
+    amount NUMERIC NOT NULL,
+    purchase_date DATE NOT NULL,
+    PRIMARY KEY (id, purchase_date)
+);
+
+INSERT INTO child_table_schema_alter.invoice_2023 (name, amount, purchase_date) VALUES
+    ('John Doe', 100.00, '2023-01-01'),
+    ('Jane Doe', 200.00, '2023-02-01'),
+    ('Bob Smith', 300.00, '2023-03-01');
+
+INSERT INTO child_table_schema_alter.invoice_2024 (name, amount, purchase_date) VALUES
+    ('John Doe', 100.00, '2024-01-01'),
+    ('Jane Doe', 200.00, '2024-02-01'),
+    ('Bob Smith', 300.00, '2024-03-01');
+
+ALTER TABLE partition_table_schema_alter.invoice
+    ATTACH PARTITION child_table_schema_alter.invoice_2024
+    FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
+
+ALTER TABLE partition_table_schema_alter.invoice
+    ATTACH PARTITION child_table_schema_alter.invoice_2023
+    FOR VALUES FROM ('2023-01-01') TO ('2024-01-01');
+
+## verify
+SELECT * FROM partition_table_schema_alter.invoice;
+
+## cleanup
+DROP SCHEMA child_table_schema_alter CASCADE;
+DROP SCHEMA partition_table_schema_alter CASCADE;

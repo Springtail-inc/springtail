@@ -563,12 +563,20 @@ Service::_create_table(const proto::TableRequest& request)
             LOG_ERROR("Parent table {} not found for table {} in namespace {}",
                       parent_table_id.value(), request.table().name(), request.table().namespace_name());
             ddl["parent_table_name"] = "";
+            ddl["parent_namespace_name"] = "";
         } else {
+            auto namespace_name = _get_namespace_info(request.db_id(), parent_table_info->namespace_id, xid);
+            if (namespace_name == nullptr) {
+                ddl["parent_namespace_name"] = "";
+            } else {
+                ddl["parent_namespace_name"] = namespace_name->name;
+            }
             ddl["parent_table_name"] = parent_table_info->name;
         }
     } else {
         ddl["parent_table_id"] = constant::INVALID_TABLE;
         ddl["parent_table_name"] = "";
+        ddl["parent_namespace_name"] = "";
     }
 
     // partition key -- this is a parent table; either root or intermediate

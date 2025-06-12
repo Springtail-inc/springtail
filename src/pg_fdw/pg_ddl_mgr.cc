@@ -518,8 +518,8 @@ namespace springtail::pg_fdw {
 
     PartitionInfo
     _get_partition_info(const nlohmann::json &ddl){
-
         uint64_t parent_table_id;
+        std::string parent_namespace_name;
         std::string parent_table_name;
         std::string partition_key;
         std::string partition_bound;
@@ -528,6 +528,12 @@ namespace springtail::pg_fdw {
             parent_table_id = ddl.at("parent_table_id").get<uint64_t>();
         } else {
             parent_table_id = 0;
+        }
+
+        if (ddl.contains("parent_namespace_name")) {
+            parent_namespace_name = ddl.at("parent_namespace_name").get<std::string>();
+        } else {
+            parent_namespace_name = "";
         }
 
         if (ddl.contains("parent_table_name")) {
@@ -548,12 +554,11 @@ namespace springtail::pg_fdw {
             partition_bound = "";
         }
 
-        PartitionInfo partition_info(
-            parent_table_id,
-            parent_table_name,
-            partition_key,
-            partition_bound
-        );
+        PartitionInfo partition_info(parent_table_id,
+                                     parent_namespace_name,
+                                     parent_table_name,
+                                     partition_key,
+                                     partition_bound);
 
         return partition_info;
     }
@@ -570,8 +575,8 @@ namespace springtail::pg_fdw {
 
         PartitionInfo partition_info = _get_partition_info(ddl);
 
-        bool is_regular_table = partition_info.parent_table_id == 0 && partition_info.partition_key.empty();
-        bool is_leaf_partitioned_table = partition_info.parent_table_id > 0 && !partition_info.partition_bound.empty() && partition_info.partition_key.empty();
+        bool is_regular_table = partition_info.parent_table_id() == 0 && partition_info.partition_key().empty();
+        bool is_leaf_partitioned_table = partition_info.parent_table_id() > 0 && !partition_info.partition_bound().empty() && partition_info.partition_key().empty();
 
         bool is_regular_table_type = is_regular_table || is_leaf_partitioned_table;
 
@@ -765,30 +770,36 @@ namespace springtail::pg_fdw {
             // nothing to actually change in the FDW
             return {};
         } else if (action == "attach_partition") {
-            // XXX handle parition schema
-            std::string alter = fmt::format("ALTER TABLE {}.{} ATTACH PARTITION {}.{} FOR VALUES {};",
+            std::string partition_name = ddl.at("partition_name");
+            if ( partition_name.find(".") == std::string::npos) {
+                partition_name = fmt::format("{}.{}",
+                    ddl.at("schema").get<std::string>(),
+                    partition_name);
+            }
+            std::string alter = fmt::format("ALTER TABLE {}.{} ATTACH PARTITION {} FOR VALUES {};",
                                             conn->escape_identifier(ddl.at("schema")),
                                             conn->escape_identifier(ddl.at("table")),
-                                            conn->escape_identifier(ddl.at("schema")),
-                                            conn->escape_identifier(ddl.at("partition_name")),
+                                            partition_name,
                                             ddl.at("partition_bound").get<std::string>());
 
             return alter;
         } else if (action == "detach_partition") {
-            // XXX handle parition schema
-            std::string alter = fmt::format("ALTER TABLE {}.{} DETACH PARTITION {}.{};",
+            std::string partition_name = ddl.at("partition_name");
+            if ( partition_name.find(".") == std::string::npos) {
+                partition_name = fmt::format("{}.{}",
+                        ddl.at("schema").get<std::string>(),
+                        partition_name);
+            }
+            std::string alter = fmt::format("ALTER TABLE {}.{} DETACH PARTITION {};",
                                             conn->escape_identifier(ddl.at("schema")),
                                             conn->escape_identifier(ddl.at("table")),
-                                            conn->escape_identifier(ddl.at("schema")),
-                                            conn->escape_identifier(ddl.at("partition_name")));
+                                            partition_name);
 
             return alter;
         } else if (action == "alter_parent_set") {
             return "";
-            // XXX Handle this
         } else if (action == "alter_parent_clear") {
             return "";
-            // XXX Handle this
         }
 
         // can't currently support other kinds of DDL mutations
