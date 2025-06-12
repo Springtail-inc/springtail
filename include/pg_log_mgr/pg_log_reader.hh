@@ -40,7 +40,7 @@ namespace springtail::pg_log_mgr {
                     const std::filesystem::path &repl_log_path,
                     const CommitterQueuePtr committer_queue,
                     const bool archive_logs,
-                    const std::shared_ptr<IndexRequestsManager> index_requests_mgr);
+                    const std::shared_ptr<IndexRequestsManager> &index_requests_mgr);
 
         ~PgLogReader();
         /**

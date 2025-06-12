@@ -34,7 +34,7 @@ namespace springtail::pg_log_mgr {
                        bool archive_logs,
                        std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
                        std::shared_ptr<IndexReconciliationQueueManager> index_reconciliation_queue_mgr,
-                       std::shared_ptr<IndexRequestsManager> index_requests_mgr)
+                       const std::shared_ptr<IndexRequestsManager> &index_requests_mgr)
     : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
       _host(host), _db_name(db_name), _user_name(user_name),
       _password(password), _pub_name(pub_name), _slot_name(slot_name),

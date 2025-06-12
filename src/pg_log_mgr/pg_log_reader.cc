@@ -18,7 +18,7 @@ namespace springtail::pg_log_mgr {
                              const std::filesystem::path &repl_log_path,
                              const CommitterQueuePtr committer_queue,
                              const bool archive_logs,
-                             const std::shared_ptr<IndexRequestsManager> index_requests_mgr)
+                             const std::shared_ptr<IndexRequestsManager> &index_requests_mgr)
         : _db_id(db_id),
           // retrieve the most recently committed XID at startup
          _committed_xid(xid_mgr::XidMgrServer::get_instance()->get_committed_xid(db_id, 0)),

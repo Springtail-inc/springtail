@@ -44,7 +44,7 @@ namespace springtail::committer {
     public:
         Committer(uint32_t worker_count, const std::shared_ptr<ConcurrentQueue<committer::XidReady>> &committer_queue,
                 std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> index_reconciliation_queue_mgr,
-                std::shared_ptr<pg_log_mgr::IndexRequestsManager> index_requests_mgr, uint32_t indexer_worker_count)
+                const std::shared_ptr<pg_log_mgr::IndexRequestsManager> &index_requests_mgr, uint32_t indexer_worker_count)
             : _worker_count(worker_count),
               _indexer_worker_count(indexer_worker_count),
               _committer_queue(committer_queue),

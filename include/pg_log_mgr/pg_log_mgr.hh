@@ -100,7 +100,7 @@ namespace springtail::pg_log_mgr {
                  bool archive_logs,
                  std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
                  std::shared_ptr<IndexReconciliationQueueManager> index_reconciliation_queue_mgr,
-                 std::shared_ptr<IndexRequestsManager> index_requests_mgr);
+                 const std::shared_ptr<IndexRequestsManager> &index_requests_mgr);
 
         /**
          * @brief Construct a new Pg Log Mgr object (for testing only)
