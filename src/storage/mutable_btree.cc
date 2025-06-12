@@ -609,6 +609,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
         // it's possible that the page was evicted due to a flush, in which case it will no
         // longer be in the cache
+        CHECK(i != _cache->lookup.end());
         if (i == _cache->lookup.end()) {
             return;
         }
