@@ -789,7 +789,7 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::CREATE_INDEX:
             {
                 auto &index_msg = std::get<PgMsgIndex>(change->msg);
-                auto create_index_response = client->create_index(_db, xidlsn, index_msg,
+                auto &&create_index_response = client->create_index(_db, xidlsn, index_msg,
                                                                   sys_tbl::IndexNames::State::NOT_READY);
 
                 // Store the index process request for the Committer
@@ -799,7 +799,7 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::DROP_INDEX:
             {
                 auto &index_msg = std::get<PgMsgDropIndex>(change->msg);
-                auto drop_index_response = client->drop_index(_db, xidlsn, index_msg);
+                auto &&drop_index_response = client->drop_index(_db, xidlsn, index_msg);
 
                 // Store the index process request for the Committer
                 _index_requests_mgr->add_index_request(_db, xidlsn.xid, drop_index_response);

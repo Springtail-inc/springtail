@@ -16,7 +16,7 @@ namespace springtail::pg_log_mgr {
              * @param xid The transaction ID.
              * @param index_request The IndexProcessRequest object to add.
              */
-            void add_index_request(uint64_t db_id, uint64_t xid, proto::IndexProcessRequest index_request) {
+            void add_index_request(uint64_t db_id, uint64_t xid, const proto::IndexProcessRequest& index_request) {
                 std::lock_guard<std::mutex> lock(_idx_req_mutex);
 
                 // Insert the request into the list associated with the given db_id and xid
