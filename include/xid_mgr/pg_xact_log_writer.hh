@@ -10,22 +10,54 @@ namespace springtail::xid_mgr {
  */
 class PgXactLogWriter {
 public:
+    /**
+     * @brief Storage structure for xid element read/written to xlog file
+     */
+    class XidElement {
+    public:
+        static constexpr int PACKED_SIZE = 8 + 4 + 1;
+
+        uint64_t xid;       ///< Transaction id associated with this xid
+        uint32_t pg_xid;    ///< Postgress transaction id
+        bool real_commit;
+
+        static int pack(char *buffer, const PgXactLogWriter::XidElement &xid_element)
+        {
+            DCHECK_NE(buffer, nullptr);
+            int offset = 0;
+            std::memcpy(buffer, &xid_element.xid, sizeof(uint64_t));
+            offset += sizeof(uint64_t);
+            std::memcpy(buffer + offset, &xid_element.pg_xid, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
+            std::memcpy(buffer + offset, &xid_element.real_commit, sizeof(bool));
+            offset += sizeof(bool);
+            DCHECK_EQ(offset, XidElement::PACKED_SIZE) << "Unpacked size must match packed size";
+            return offset;
+        }
+
+        static int unpack(const char *buffer, PgXactLogWriter::XidElement &xid_element)
+        {
+            DCHECK_NE(buffer, nullptr);
+            int offset = 0;
+            std::memcpy(&xid_element.xid, buffer, sizeof(uint64_t));
+            offset += sizeof(uint64_t);
+            std::memcpy(&xid_element.pg_xid, buffer + offset, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
+            std::memcpy(&xid_element.real_commit, buffer + offset, sizeof(bool));
+            offset += sizeof(bool);
+            DCHECK_EQ(offset, XidElement::PACKED_SIZE) << "Unpacked size must match packed size";
+            return offset;
+        }
+    };
+
     /** Page size to load at a time, must be divisible by XidElement size */
-    static constexpr size_t PG_XLOG_PAGE_SIZE = 4096;
+    static constexpr size_t PG_XLOG_PAGE_SIZE = XidElement::PACKED_SIZE * 256; // 1 KB page size
 
     /** Xact log prefix and suffix */
     static constexpr char const * const LOG_PREFIX_XACT = "pg_log_xact_";
     static constexpr char const * const LOG_SUFFIX = ".log";
 
-    /**
-     * @brief Storage structure
-     * NOTE: this structure needs to be a multiple of 8 BYTES
-     */
-    struct XidElement {
-        uint32_t pg_xid;    ///< Postgress transaction id
-        bool real_commit;
-        uint64_t xid;       ///< Transaction id associated with this xid
-    };
+
 
     /**
      * @brief Construct a new Pg Xact Log Writer Mmap object
@@ -72,6 +104,11 @@ public:
     uint64_t get_last_xid() { return _last_stored_xid; }
 
     /**
+     * @brief Flush from memory to file.
+     */
+    void flush();
+
+    /**
      * @brief Change existing log file such that existing xid is the last one in storage.
      *
      * @param base_dir - directory where xact log files are stored
@@ -80,10 +117,7 @@ public:
      */
     static void set_last_xid_in_storage(std::filesystem::path base_dir, uint64_t last_xid, bool archive);
 
-    /**
-     * @brief Flush from memory to file.
-     */
-    void flush();
+
 
 private:
     std::filesystem::path _base_dir;    ///< full path to file storage directory
