@@ -285,21 +285,27 @@ namespace springtail {
 
         /**
          * Retrieve the list of column pg types.
-         * @return std::vector<int32_t>
+         * @return std::vector<int32_t, int>
          */
-        std::vector<int32_t> get_pg_types() const {
-            return _pg_types;
+        std::vector<std::pair<int32_t, int>> get_pg_types() const {
+            std::vector<std::pair<int32_t, int>> pg_types;
+            for (size_t i = 0; i < _pg_types.size(); i++) {
+                auto field = _field_map.at(_column_order[i]);
+                pg_types.push_back({_pg_types[i], field.second});
+            }
+            return pg_types;
         }
 
         /**
          * Retrieve sort key pg types.
-         * @return std::vector<int32_t>
+         * @return std::vector<std::pair<int32_t, int>> pair of pg_type and column position (0 based)
          */
-        std::vector<int32_t> get_sort_key_pg_types() const {
-            std::vector<int32_t> sort_key_pg_types;
+        std::vector<std::pair<int32_t, int>> get_sort_key_pg_types() const {
+            std::vector<std::pair<int32_t, int>> sort_key_pg_types;
             for (auto &&key : _sort_keys) {
+                auto field = _field_map.at(key);
                 auto pg_type = get_type(key);
-                sort_key_pg_types.push_back(pg_type);
+                sort_key_pg_types.push_back({pg_type, field.second});
             }
             return sort_key_pg_types;
         }

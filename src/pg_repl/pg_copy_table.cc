@@ -139,6 +139,9 @@ namespace springtail
     /** copy command, output in binary using utf-8 encoding */
     static constexpr char COPY_QUERY[] = "COPY {}.{} TO STDOUT WITH (FORMAT binary, ENCODING 'UTF-8')";
 
+    /** copy command with primary key */
+    static constexpr char COPY_PKEY_QUERY[] = "COPY (SELECT * FROM {}.{} ORDER BY {}) TO STDOUT WITH (FORMAT binary, ENCODING 'UTF-8')";
+
     /** Get table name, schema name, oid for all tables */
     static constexpr char TABLES_QUERY[] =
         "SELECT relname::text, nspname::text, pg_class.oid::integer, pg_namespace.oid "
@@ -353,6 +356,7 @@ namespace springtail
             int rows = _connection.ntuples();
             _schema.columns.resize(rows);
 
+            std::set<std::pair<int, std::string>> pkeys;
             for (int i = 0; i < rows; i++) {
                 // add column to schema
                 // PgColumn column;
@@ -394,6 +398,7 @@ namespace springtail
                 if (pkey_pos) {
                     CHECK(is_pkey);
                     column.pkey_position = (*pkey_pos);
+                    pkeys.insert({*pkey_pos, column.name});
                 }
 
                 // type category of 'E' represents enum
@@ -415,6 +420,12 @@ namespace springtail
 
                 _schema.columns[i] = std::move(column);
             }
+
+            // create the set of pkeys in order
+            for (const auto &pkey : pkeys) {
+                _schema.pkeys.push_back(pkey.second);
+            }
+
         } catch (...) {
             _connection.clear();
 
@@ -434,7 +445,22 @@ namespace springtail
         std::string table_name = _connection.escape_identifier(_schema.table_name);
         std::string schema_name = _connection.escape_identifier(_schema.schema_name);
 
-        _connection.exec(fmt::format(COPY_QUERY, schema_name, table_name));
+        if (_schema.pkeys.size() > 0) {
+            // if we have primary keys, use them to order the copy
+            std::string pkey_order;
+            for (const auto &pkey : _schema.pkeys) {
+                if (!pkey_order.empty()) {
+                    pkey_order += ", ";
+                }
+                pkey_order += fmt::format("{}", _connection.escape_identifier(pkey));
+            }
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Copying table {}.{} with primary keys: {}", schema_name, table_name, pkey_order);
+            _connection.exec(fmt::format(COPY_PKEY_QUERY, schema_name, table_name, pkey_order));
+        } else {
+            // no primary keys, just copy the table in storage order
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Copying table {}.{} without primary keys", schema_name, table_name);
+            _connection.exec(fmt::format(COPY_QUERY, schema_name, table_name));
+        }
 
         if (_connection.status() != PGRES_COPY_OUT) {
             LOG_ERROR("Copy command did not receive PGRES_COPY_OUT");

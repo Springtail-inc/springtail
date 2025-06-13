@@ -562,6 +562,18 @@ private:
      */
     bool _set_index_state(const proto::SetIndexStateRequest& request);
 
+    /**
+     * @brief Upserts index name entry with the give index info
+     * @param db_id            Database ID
+     * @param index_info       proto::IndexInfo containing the index details
+     * @param xid              XidLsn entry at which index is mutated
+     * @param keys             Index keys
+     * @param is_primary_index Indicates if its primary or secondary index
+     * @return bool indicating the upsert is successful or not
+     */
+    bool _upsert_index_name(uint64_t db_id, const proto::IndexInfo& index_info, const XidLsn& xid,
+            const std::map<uint32_t, uint32_t>& keys, bool is_primary_index=false);
+
     /** Performs an get_index_info() assuming that the correct locks are already held.
      */
     proto::IndexInfo _get_index_info(const proto::GetIndexInfoRequest& request);

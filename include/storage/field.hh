@@ -517,100 +517,69 @@ namespace springtail {
             return _get_bit(*e_row, _offset, _bool_bitmask);
         }
 
+        template <typename T>
+        T get_value(const void* row) const {
+            return *reinterpret_cast<T*>(((const Extent::Row *)row)->data() + _offset);
+        }
+
         int8_t get_int8(const void *row) const override {
             // must be int8 type
             DCHECK_EQ(_type, SchemaType::INT8);
-
-            auto e_row = reinterpret_cast<const Extent::Row *>(row);
-            return *reinterpret_cast<const int8_t *>(e_row->data() + _offset);
+            return get_value<int8_t>(row);
         }
 
         uint8_t get_uint8(const void *row) const override {
             // must be uint8 type
             DCHECK_EQ(_type, SchemaType::UINT8);
-
-            auto e_row = reinterpret_cast<const Extent::Row *>(row);
-            return *reinterpret_cast<const uint8_t *>(e_row->data() + _offset);
+            return get_value<uint8_t>(row);
         }
 
         int16_t get_int16(const void *row) const override {
             // must be int16 type
             DCHECK_EQ(_type, SchemaType::INT16);
-            auto e_row = reinterpret_cast<const Extent::Row *>(row);
-
-            int16_t result;
-            std::memcpy(&result, e_row->data() + _offset, sizeof(int16_t));
-            return result;
+            return get_value<int16_t>(row);
         }
 
         uint16_t get_uint16(const void *row) const override {
             // must be uint16 type
             DCHECK_EQ(_type, SchemaType::UINT16);
-            auto e_row = reinterpret_cast<const Extent::Row *>(row);
-
-            uint16_t result;
-            std::memcpy(&result, e_row->data() + _offset, sizeof(uint16_t));
-            return result;
+            return get_value<uint16_t>(row);
         }
 
         int32_t get_int32(const void *row) const override {
             // must be int32 type
             DCHECK_EQ(_type, SchemaType::INT32);
-            auto e_row = reinterpret_cast<const Extent::Row *>(row);
-
-            int32_t result;
-            std::memcpy(&result, e_row->data() + _offset, sizeof(int32_t));
-            return result;
+            return get_value<int32_t>(row);
         }
 
         uint32_t get_uint32(const void *row) const override {
             // must be uint32 type
             DCHECK_EQ(_type, SchemaType::UINT32);
-            auto e_row = reinterpret_cast<const Extent::Row *>(row);
-
-            uint32_t result;
-            std::memcpy(&result, e_row->data() + _offset, sizeof(uint32_t));
-            return result;
+            return get_value<uint32_t>(row);
         }
 
         int64_t get_int64(const void *row) const override {
             // must be int64 type
             DCHECK_EQ(_type, SchemaType::INT64);
-            auto e_row = reinterpret_cast<const Extent::Row *>(row);
-
-            int64_t result;
-            std::memcpy(&result, e_row->data() + _offset, sizeof(int64_t));
-            return result;
+            return get_value<int64_t>(row);
         }
 
         uint64_t get_uint64(const void *row) const override {
             // must be uint64 type
             DCHECK_EQ(_type, SchemaType::UINT64);
-            auto e_row = reinterpret_cast<const Extent::Row *>(row);
-
-            uint64_t result;
-            std::memcpy(&result, e_row->data() + _offset, sizeof(uint64_t));
-            return result;
+            return get_value<uint64_t>(row);
         }
 
         float get_float32(const void *row) const override {
             // must be float32 type
             DCHECK_EQ(_type, SchemaType::FLOAT32);
-            auto e_row = reinterpret_cast<const Extent::Row *>(row);
-
-            float result;
-            std::memcpy(&result, e_row->data() + _offset, sizeof(float));
-            return result;
+            return get_value<float>(row);
         }
 
         double get_float64(const void *row) const override {
             // must be float64 type
             DCHECK_EQ(_type, SchemaType::FLOAT64);
-            auto e_row = reinterpret_cast<const Extent::Row *>(row);
-
-            double result;
-            std::memcpy(&result, e_row->data() + _offset, sizeof(double));
-            return result;
+            return get_value<double>(row);
         }
 
         std::string_view get_text(const void *row) const override {
@@ -724,8 +693,7 @@ namespace springtail {
                  uint32_t offset,
                  uint8_t mask) const
         {
-            const char * const fixed = row.data() + offset;
-            return ((*reinterpret_cast<const uint8_t * const>(fixed) & mask) > 0);
+            return ((*reinterpret_cast<const uint8_t * const>(row.data() + offset) & mask) > 0);
         }
 
         void
@@ -750,7 +718,7 @@ namespace springtail {
         bool _can_null;
         bool _can_undefined;
 
-        uint32_t _offset;
+        uint32_t _offset;         ///< byte offset of the field in the row data
         uint8_t _bool_bitmask;
 
         uint32_t _null_offset;
@@ -1540,7 +1508,7 @@ namespace springtail {
 
     protected:
         SchemaType _type;
-        uint32_t _offset;
+        uint32_t _offset;  ///< Column offset in the tuple data
     };
     using PgLogFieldPtr = std::shared_ptr<PgLogField>;
 

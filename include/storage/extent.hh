@@ -277,7 +277,7 @@ namespace springtail {
             _variable_data = std::make_shared<std::vector<char>>();
         }
 
-        Extent(const std::vector<std::shared_ptr<std::vector<char>>> &data)
+        explicit Extent(const std::vector<std::shared_ptr<std::vector<char>>> &data)
             : _header(data[0]),
               _fixed_data(data[1]),
               _variable_data(data[2])
@@ -285,7 +285,7 @@ namespace springtail {
             _populate_vhash();
         }
 
-        Extent(const ExtentHeader &header)
+        explicit Extent(const ExtentHeader &header)
             : _header(header)
         {
             // empty extent
@@ -308,10 +308,13 @@ namespace springtail {
               _fixed_data(other._fixed_data),
               _variable_data(other._variable_data)
         {
-            // XXX should we invalidate the data in other?
-
+            other._fixed_data.reset();
+            other._variable_data.reset();
             _populate_vhash();
         }
+
+        Extent() = delete;
+        Extent& operator=(const Extent&) = delete;
 
         ExtentHeader &header() {
             return _header;

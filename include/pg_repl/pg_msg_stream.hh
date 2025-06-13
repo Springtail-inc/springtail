@@ -92,7 +92,7 @@ namespace springtail {
          * @param eob output | end of block; true if no more messages in current block
          * @return PgMsgPtr; nullptr if no more messages or message skipped, check has_more() for EOF across all files
          */
-        PgMsgPtr read_message(const std::vector<char> &filter, bool &eos, bool &eob);
+        PgMsgPtr read_message(const std::vector<char> &filter, bool &eos);
 
         /**
          * @brief Read next message from stream
@@ -102,29 +102,16 @@ namespace springtail {
         PgMsgPtr read_message(const std::vector<char> &filter);
 
         /**
-         * @brief Get offset of start of header for current message block
-         * @return uint64_t starting offset of message block header
-         */
-        uint64_t header_offset() const { return _header_offset; }
-
-        /**
-         * @brief Get offset of end of message block
-         * @return uint64_t end of message block offset
-         */
-        uint64_t block_end_offset() const { return _end_offset; }
-
-        /**
          * @brief Get current offset
          * @return uint64_t current offset
          */
         uint64_t offset() const { return _current_offset; }
 
         /**
-         * @brief Are all messages in current message block consumed?
-         * @return true
-         * @return false
+         * @brief Get the offset of the message we just read
+         * @return uint64_t message offset
          */
-        bool end_of_block() const { return _current_offset >= _end_offset; }
+        uint64_t message_offset() const { return _message_offset; }
 
         /**
          * @brief Does the stream contain more data to parse
@@ -227,10 +214,9 @@ namespace springtail {
 
         std::filesystem::path _current_path; ///< current file path
 
-        uint64_t _current_offset;       ///< current file offset
-        uint64_t _end_offset;           ///< ending file offset for this message block
+        uint64_t _message_offset = 0;   ///< offset of the message we just read
+        uint64_t _current_offset;       ///< current file offset for next read
         uint64_t _end_msg_offset;       ///< ending message offset in end file
-        uint64_t _header_offset;        ///< starting offset of message block
         uint64_t _internal_offset;      ///< internal offset within file, not to be altered by user
 
         int _proto_version;             ///< protocol version of message block (from header)
@@ -311,9 +297,6 @@ namespace springtail {
             return true; // no eof
         }
 
-        /** Read header from stream, set _current_offset, _end_offset, _proto_version; return !eof */
-        bool _read_header();
-
         /** Checks if msg type is in filtered set, if it is returns true */
         bool _is_message_filtered(char msg_type, const std::vector<char> &v) const;
 
@@ -358,18 +341,11 @@ namespace springtail {
          */
         uint64_t offset() const { return _current_offset; }
 
-        /**
-         * @brief Get current message end offset
-         * @return uint64_t message end offset
-         */
-        uint64_t msg_end_offset() const { return _msg_end_offset; }
-
     private:
         int _fd=-1;     ///< file descriptor; use C fd for fsync
 
         std::filesystem::path _file;
 
         uint64_t _current_offset = 0;
-        uint64_t _msg_end_offset = 0;
     };
 } // namespace springtail

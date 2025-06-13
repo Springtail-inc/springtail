@@ -2,6 +2,7 @@
 #include <common/init.hh>
 #include <common/logging.hh>
 #include <common/json.hh>
+#include <common/circular_buffer.hh>
 
 using namespace springtail;
 
@@ -97,4 +98,29 @@ TEST(JsonTest, Json)
     ASSERT_EQ(Json::get_or<int>(json, "key5", 0), 45);
     ASSERT_EQ(Json::get_or<std::string>(json, "key5", "0"), "45");
     ASSERT_EQ(Json::get_or<char>(json, "key6", 'a'), 's');
+}
+
+TEST(CommonTest, CircularBuffer) {
+    CircularBuffer<int> cb{3};
+
+    cb.put(2);
+    ASSERT_EQ(cb.size(), 1);
+    ASSERT_EQ(cb.next(), 2);
+    ASSERT_EQ(cb.size(), 0);
+    ASSERT_EQ(cb.empty(), true);
+
+    //this should force the loop around
+    cb.put(2);
+    cb.put(3);
+    cb.put(4);
+    ASSERT_EQ(cb.next(), 2);
+    ASSERT_EQ(cb.next(), 3);
+    ASSERT_EQ(cb.next(), 4);
+    ASSERT_EQ(cb.size(), 0);
+
+    cb.put(10);
+    ASSERT_EQ(cb.size(), 1);
+    ASSERT_EQ(cb.empty(), false);
+    ASSERT_EQ(cb.next(), 10);
+    ASSERT_EQ(cb.size(), 0);
 }
