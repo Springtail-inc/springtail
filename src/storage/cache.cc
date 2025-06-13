@@ -1523,6 +1523,7 @@ namespace springtail {
         _clean_lru.pop_front();
 
         if (extent->_state == CacheExtent::State::CLEAN) {
+            //TODO: consider changing to splice() that should be more efficient
             _clean_cache.erase(extent->key());
         } else {
             CHECK_EQ(extent->_state, CacheExtent::State::MUTABLE);
