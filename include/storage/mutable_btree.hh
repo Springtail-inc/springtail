@@ -735,6 +735,13 @@ namespace springtail {
             using reference         = const Extent::Row &;  // or also value_type&
 
             Iterator() = default;
+            ~Iterator() {
+                auto node = _node;
+                while (node->parent != nullptr) {
+                    _btree->_cache_release(node->page);
+                    node = node->parent;
+                }
+            }
 
             Iterator &operator++() {
                 ++_page_i;

@@ -20,7 +20,7 @@ namespace {
 
     void PrintTo(const CacheSize& cacheSize, std::ostream* os) {
         // Customize the output here as needed
-        if (cacheSize.data_cache_size == 32) {
+        if (cacheSize.data_cache_size < 128) {
             *os << "small_cache";
         } else {
             *os << "large_cache";
@@ -631,5 +631,5 @@ namespace {
     INSTANTIATE_TEST_CASE_P(BTree_Test,
                             BTree_Test,
                             ::testing::Values(CacheSize{ 16384, 16384, 512, 16 },
-                                              CacheSize{ 32, 32, 8, 4 }));
+                                              CacheSize{ 16, 16, 4, 2 }));
 }

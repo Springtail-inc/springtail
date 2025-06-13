@@ -151,7 +151,7 @@ namespace springtail {
         page_lock.unlock();
 
         if (is_empty && node->parent == nullptr) {
-            // if the root page is empty, we can remove immediately
+            // if the root page is empty, we can return immediately
             return;
         }
 
@@ -609,7 +609,6 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
         // it's possible that the page was evicted due to a flush, in which case it will no
         // longer be in the cache
-        CHECK(i != _cache->lookup.end());
         if (i == _cache->lookup.end()) {
             return;
         }
@@ -669,10 +668,8 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
         // evict pages until the size is under the watermark
         while (_cache->size > _cache->max_size) {
-            // if somehow there are no evictable pages, print a warning and return
-            if (_cache->lru.empty()) {
-                assert(0); // XXX we should never hit this case
-            }
+            // there should always be an evictable page
+            CHECK(!_cache->lru.empty());
 
             // get a page
             // note: coming off the LRU we know that no one else is currently using this page
