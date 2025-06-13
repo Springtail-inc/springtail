@@ -210,6 +210,36 @@ namespace springtail::pg_fdw {
             return ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&row);
         }
 
+        static std::pair<std::string_view, uint64_t>
+        _get_parent_table_info(uint64_t db_id, uint64_t schema_xid, uint64_t table_id)
+        {
+            auto table_names_t = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, schema_xid);
+            auto schema = table_names_t->extent_schema();
+            auto fields = schema->get_fields();
+
+            auto search_key = sys_tbl::TableNames::Primary::key_tuple(table_id, schema_xid, constant::MAX_LSN);
+
+            auto row_i = table_names_t->inverse_lower_bound(search_key);
+            auto &&row = *row_i;
+
+            // make sure table ID exists at this XID/LSN
+            if (row_i == table_names_t->end() ||
+                fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row) != table_id) {
+                LOG_WARN("No table info at xid {}:{}", schema_xid, constant::MAX_LSN);
+                return std::make_pair("", 0);
+            }
+
+            // make sure that the table is marked as existing at this XID/LSN
+            bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
+            if (!exists) {
+                LOG_WARN("Table marked non-existant at xid {}:{}", schema_xid, constant::MAX_LSN);
+                return std::make_pair("", 0);
+            }
+
+            return std::make_pair(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row),
+                                   fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row));
+        }
+
         /**
          * @brief Get the schema ddl object
          *
@@ -342,7 +372,7 @@ namespace springtail::pg_fdw {
 
                 table_partition_map.try_emplace(
                     tid,
-                    PartitionInfo(parent_table_id, "", "", partition_key, partition_bound)
+                    PartitionInfo(parent_table_id, partition_key, partition_bound)
                 );
 
                 if (entry.second == false) {
@@ -371,12 +401,18 @@ namespace springtail::pg_fdw {
                 auto parent_table = tid_map.find(parent_table_id);
                 if (parent_table == tid_map.end()) {
                     // parent table not found, skip this partition
-                    continue;
+                    // Try getting the table from the system tables directly.
+                    auto parent_table_info = _get_parent_table_info(db_id, schema_xid, parent_table_id);
+                    if (parent_table_info.second == 0) {
+                        LOG_WARN("Parent table {} not found", parent_table_id);
+                        continue;
+                    }
+                    partition_info.second.set_parent_namespace_name(_get_namespace_name(db_id, schema_xid, parent_table_info.second).data());
+                    partition_info.second.set_parent_table_name(parent_table_info.first.data());
+                } else {
+                    partition_info.second.set_parent_namespace_name(_get_namespace_name(db_id, schema_xid, std::get<2>(parent_table->second)).data());
+                    partition_info.second.set_parent_table_name(std::get<1>(parent_table->second));
                 }
-                LOG_DEBUG(LOG_FDW, "Found parent table name {} for id: {}", std::get<1>(parent_table->second), parent_table_id);
-
-                partition_info.second.set_parent_namespace_name(_get_namespace_name(db_id, schema_xid, std::get<2>(parent_table->second)).data());
-                partition_info.second.set_parent_table_name(std::get<1>(parent_table->second));
             }
 
             // Move on to iterating through the schemas table
