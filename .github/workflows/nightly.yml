@@ -207,7 +207,7 @@ jobs:
           
             _LOG_FLAG="failed"
             echo "*** Starting iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
-            python3 test_runner.py -c config.yaml -j ${GITHUB_WORKSPACE}/integration-test-report.xml 2>&1 | tee tmplog
+            python3 test_runner.py -a -c config.yaml -j ${GITHUB_WORKSPACE}/integration-test-report.xml 2>&1 | tee tmplog
             # Grab the success/failure status of the integration tests
             if [ $? -eq 0 ] && ! grep -qE "Tests failed: [1-9][0-9]*" tmplog
             then
