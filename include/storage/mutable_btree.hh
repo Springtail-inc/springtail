@@ -736,7 +736,12 @@ namespace springtail {
 
             Iterator() = default;
             ~Iterator() {
+                if (_node == nullptr) {
+                    return;
+                }
                 auto node = _node;
+
+                boost::unique_lock cache_lock(_btree->_cache->mutex);
                 while (node->parent != nullptr) {
                     _btree->_cache_release(node->page);
                     node = node->parent;

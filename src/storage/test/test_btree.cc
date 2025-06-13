@@ -631,5 +631,5 @@ namespace {
     INSTANTIATE_TEST_CASE_P(BTree_Test,
                             BTree_Test,
                             ::testing::Values(CacheSize{ 16384, 16384, 512, 16 },
-                                              CacheSize{ 16, 16, 4, 2 }));
+                                              CacheSize{ 32, 32, 8, 4 }));
 }

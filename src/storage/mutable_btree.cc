@@ -242,6 +242,12 @@ MutableBTree::_next_leaf(NodePtr node)
         // move to the next entry
         ++parent_i;
 
+        // release the current page back to the cache
+        {
+            boost::unique_lock cache_lock(_cache->mutex);
+            _cache_release(node->page);
+        }
+
         if (parent_i == node->parent->page->end()) {
             // if that was the last entry, move up the tree further
             node = node->parent;
@@ -250,7 +256,7 @@ MutableBTree::_next_leaf(NodePtr node)
             uint64_t extent_id = _branch_child_f->get_uint64(&*parent_i);
 
             // read the next child page
-            NodePtr child = _read_page(extent_id, node, parent_lock);
+            NodePtr child = _read_page(extent_id, node->parent, parent_lock);
 
             // if the child was flushed while we were reading the page, we need to re-find it in the parent
             if (!child) {
