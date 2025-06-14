@@ -375,6 +375,7 @@ namespace springtail::pg_fdw {
                                 redis_ddl.update_schema_xid(_fdw_id, db_id, schema_xid);
 
                                 std::unique_lock db_lock_unique(_db_mutex);
+                                LOG_DEBUG(LOG_FDW, "Acquired lock for updating schema_xid in _db_xid_map for db_id:xid: {}:{}", db_id, schema_xid);
                                 _db_xid_map[db_id] = schema_xid;
                                 db_lock_unique.unlock();
 
