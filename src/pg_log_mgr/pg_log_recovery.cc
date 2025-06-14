@@ -20,21 +20,17 @@ PgLogRecovery::repair_logs()
 
     _latest_log =
         fs::find_latest_modified_file(_repl_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
-    if (_latest_log) {
-        while (_latest_log && lsn == INVALID_LSN) {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Found latest log file: {}", *_latest_log);
-            lsn = PgMsgStreamReader::scan_log(*_latest_log, true);
+    CHECK(_latest_log);
 
-            if (lsn == INVALID_LSN) {
-                // didn't find a latest completed LSN in the file, so remove this file and keep going back
-                std::filesystem::remove(*_latest_log);
-                _latest_log = fs::find_latest_modified_file(_repl_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
-            }
+    while (_latest_log && lsn == INVALID_LSN) {
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Found latest log file: {}", *_latest_log);
+        lsn = PgMsgStreamReader::scan_log(*_latest_log, true);
+
+        if (lsn == INVALID_LSN) {
+            // didn't find a latest completed LSN in the file, so remove this file and keep going back
+            std::filesystem::remove(*_latest_log);
+            _latest_log = fs::find_latest_modified_file(_repl_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
         }
-    } else {
-        // note: right now we must have a log file in the directory
-        LOG_ERROR("Did not find any files in directory: {}", _repl_path.string());
-        throw Error("Can't recover with no WAL files");
     }
 
     return lsn;
