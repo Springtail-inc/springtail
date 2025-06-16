@@ -19,7 +19,10 @@ const std::vector<SchemaColumn> TableNames::Data::SCHEMA = {
     {"table_id", 3, SchemaType::UINT64, INT8OID, false, 0},
     {"xid", 4, SchemaType::UINT64, INT8OID, false, 1},
     {"lsn", 5, SchemaType::UINT64, INT8OID, false, 2},
-    {"exists", 6, SchemaType::BOOLEAN, BOOLOID, false}};
+    {"exists", 6, SchemaType::BOOLEAN, BOOLOID, false},
+    {"rls_enabled", 7, SchemaType::BOOLEAN, BOOLOID, false},
+    {"rls_forced", 8, SchemaType::BOOLEAN, BOOLOID, false}
+};
 
 const std::vector<SchemaColumn> TableNames::Primary::SCHEMA = {
     {"table_id", 1, SchemaType::UINT64, INT8OID, false},
@@ -157,7 +160,6 @@ const std::vector<SchemaColumn> NamespaceNames::Secondary::SCHEMA = {
     {constant::INDEX_RID_FIELD, 5, SchemaType::UINT64, INT8OID, false}};
 
 const std::vector<std::string> NamespaceNames::Secondary::KEY = {"name", "xid", "lsn"};
-
 
 // User defined types
 const std::vector<SchemaColumn> UserTypes::Data::SCHEMA = {

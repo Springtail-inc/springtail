@@ -135,30 +135,6 @@ namespace springtail
         using CopyQueue = ConcurrentQueue<CopyRequest>;
         using CopyQueuePtr = std::shared_ptr<CopyQueue>;
 
-        /** Struct for holding table metadata */
-        struct TableMetadata {
-            std::string namespace_name;
-            std::string table_name;
-            uint32_t namespace_oid;
-            uint32_t table_oid;
-
-            TableMetadata(std::string_view n_name,
-                          std::string_view t_name,
-                          uint32_t n_pgoid,
-                          uint32_t t_pgoid)
-                : namespace_name(n_name),
-                  table_name(t_name),
-                  namespace_oid(n_pgoid),
-                  table_oid(t_pgoid)
-            { }
-            TableMetadata() = default;
-
-            // Operator to sort the table metadata by table oid
-            bool operator<(const TableMetadata &table_metadata) const{
-                return table_oid < table_metadata.table_oid;
-            }
-        };
-
         LibPqConnection _connection;
         std::string _db_name;
         std::string _schema_name;
@@ -181,10 +157,7 @@ namespace springtail
          *          and is_nullable flag for each table column.  Requires getTableOid() first.
          *
          */
-        void _set_schema(const std::string &table_name,
-                         const std::string &schema_name,
-                         uint64_t table_oid,
-                         uint64_t schema_oid);
+        void _set_schema(uint32_t table_oid);
 
         /**
          * @brief Get transaction ids for current transaction snapshot
@@ -245,7 +218,7 @@ namespace springtail
          * @param db_id database id
          */
         void _get_table_oids(const std::string &query,
-                             std::set<TableMetadata> &table_oids);
+                             std::set<uint32_t> &table_oids);
 
         /**
          * @brief Get table oids based on json specifying schema and table includes
@@ -254,7 +227,7 @@ namespace springtail
          * @param db_id database id
          */
         void _get_table_oids(const nlohmann::json &include_json,
-                             std::set<TableMetadata> &table_oids);
+                             std::set<uint32_t> &table_oids);
 
         /**
          * @brief Copy table from remote system
@@ -262,10 +235,7 @@ namespace springtail
         PgCopyResult::TableInfoPtr _copy_table(uint64_t db_id,
                                                const springtail::XidLsn &xid,
                                                const std::map<int32_t, std::map<std::string, float>> &user_types,
-                                               const std::string &table_name,
-                                               const std::string &schema_name,
-                                               uint64_t table_oid,
-                                               uint64_t schema_oid,
+                                               uint32_t table_oid,
                                                const PgCopyResultPtr &snapshot_details);
 
         /**

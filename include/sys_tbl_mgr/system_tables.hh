@@ -32,6 +32,8 @@ public:
         static constexpr uint32_t XID = 3;
         static constexpr uint32_t LSN = 4;
         static constexpr uint32_t EXISTS = 5;
+        static constexpr uint32_t RLS_ENABLED = 6; // Row Level Security enabled for this table
+        static constexpr uint32_t RLS_FORCED = 7; // Row Level Security force for table owner
 
         static const std::vector<SchemaColumn> SCHEMA;
 
@@ -40,15 +42,19 @@ public:
                               uint64_t table_id,
                               uint64_t xid,
                               uint64_t lsn,
-                              bool exists)
+                              bool exists,
+                              bool rls_enabled,
+                              bool rls_forced)
         {
-            auto fields = std::make_shared<FieldArray>(6);
+            auto fields = std::make_shared<FieldArray>(8);
             fields->at(NAMESPACE_ID) = std::make_shared<ConstTypeField<uint64_t>>(namespace_id);
             fields->at(NAME) = std::make_shared<ConstTypeField<std::string>>(name);
             fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
             fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
             fields->at(LSN) = std::make_shared<ConstTypeField<uint64_t>>(lsn);
             fields->at(EXISTS) = std::make_shared<ConstTypeField<bool>>(exists);
+            fields->at(RLS_ENABLED) = std::make_shared<ConstTypeField<bool>>(rls_enabled);
+            fields->at(RLS_FORCED) = std::make_shared<ConstTypeField<bool>>(rls_forced);
             return std::make_shared<FieldTuple>(fields, nullptr);
         }
     };
@@ -508,7 +514,6 @@ public:
         }
     };
 };
-
 
 static constexpr std::array<uint32_t, 8> TABLE_IDS = {
     TableNames::ID,

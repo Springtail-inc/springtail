@@ -83,10 +83,10 @@ BEGIN
 
         -- BEGIN of what should have been a function, if you change it here,
         -- it should also be change in the springtail_event_trigger_for_schema_ddl()
-        SELECT pg_class.relname, pg_class.relreplident, pg_class.relpersistence, pg_class.relkind
+        SELECT relname, relreplident, relpersistence, relkind, relrowsecurity, relforcerowsecurity
         FROM pg_class
         WHERE oid = obj.objid
-        INTO table_relname, table_replident, table_persistence, rel_kind;
+        INTO table_relname, table_replident, table_persistence, rel_kind, relrowsecurity, relforcerowsecurity;
 
         -- This is a corner case when an index is renamed through "ALTER TABLE" statement
         -- In this case our object is an index, not a table. So, we can't do anything with it here.
@@ -156,7 +156,9 @@ BEGIN
             'obj', obj.object_type,
             'schema', obj.schema_name,
             'table', table_relname,
-            'columns', json_columns);
+            'columns', json_columns,
+            'rls_enabled', relrowsecurity::boolean,
+            'rls_forced', relforcerowsecurity::boolean);
 
         -- command_tag is CREATE TABLE or ALTER TABLE
         PERFORM pg_logical_emit_message(true, 'springtail:' || command_tag, msg::text);
@@ -339,10 +341,10 @@ BEGIN
 
             -- BEGIN of what should have been a function, if you change it here,
             -- it should also be change in the springtail_event_trigger_for_table_ddl()
-            SELECT pg_class.relname, pg_class.relreplident, pg_class.relpersistence, pg_class.relkind
+            SELECT relname, relreplident, relpersistence, relkind, relrowsecurity, relforcerowsecurity
             FROM pg_class
             WHERE oid = obj.objid
-            INTO table_relname, table_replident, table_persistence, rel_kind;
+            INTO table_relname, table_replident, table_persistence, rel_kind, rel_row_security, rel_force_row_security;
 
             -- This is a corner case when an index is renamed through "ALTER TABLE" statement
             -- In this case our object is an index, not a table. So, we can't do anything with it here.
@@ -400,7 +402,9 @@ BEGIN
                 'obj', obj.object_type,
                 'schema', obj.schema_name,
                 'table', table_relname,
-                'columns', json_columns
+                'columns', json_columns,
+                'rls_enabled', rel_row_security::boolean,
+                'rls_forced', rel_force_row_security::boolean
             );
 
         ELSIF obj.command_tag = 'CREATE INDEX' THEN
