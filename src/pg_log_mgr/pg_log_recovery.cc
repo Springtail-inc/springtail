@@ -18,21 +18,19 @@ PgLogRecovery::repair_logs()
     std::filesystem::create_directories(_repl_path);
     std::filesystem::create_directories(_xact_path);
 
-    auto latest_log =
+    _latest_log =
         fs::find_latest_modified_file(_repl_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
-    if (latest_log) {
-        while (latest_log && lsn == INVALID_LSN) {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Found latest log file: {}", *latest_log);
-            lsn = PgMsgStreamReader::scan_log(*latest_log, true);
+    CHECK(_latest_log);
 
-            if (lsn == INVALID_LSN) {
-                // didn't find a latest completed LSN in the file, so remove this file and keep going back
-                std::filesystem::remove(*latest_log);
-                latest_log = fs::find_latest_modified_file(_repl_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
-            }
+    while (_latest_log && lsn == INVALID_LSN) {
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Found latest log file: {}", *_latest_log);
+        lsn = PgMsgStreamReader::scan_log(*_latest_log, true);
+
+        if (lsn == INVALID_LSN) {
+            // didn't find a latest completed LSN in the file, so remove this file and keep going back
+            std::filesystem::remove(*_latest_log);
+            _latest_log = fs::find_latest_modified_file(_repl_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
         }
-    } else {
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Did not find any files in directory: {}", _repl_path.string());
     }
 
     return lsn;
@@ -138,15 +136,10 @@ PgLogRecovery::_skip_committed()
 
         // check if we need to move to the next replication log file
         if (!done && eos) {
-            _repl_log =
-                fs::get_next_log_file(*_repl_log, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
-            if (!_repl_log) {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "No next replication log found, last committed xid is not found");
+            bool found_next = _next_repl_log();
+            if (!found_next) {
                 return false;
             }
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Set streaming for file {}", _repl_log.value().string());
-
-            _repl_reader.set_file(*_repl_log);
         }
     }
 
@@ -337,15 +330,14 @@ PgLogRecovery::_replay_active()
 
         // check if we need to move to the next file
         if (eos) {
-            _repl_log =
-                fs::get_next_log_file(*_repl_log, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
-            if (_repl_log) {
-                _repl_reader.set_file(*_repl_log);
-                timestamp = fs::extract_timestamp_from_file(_repl_log.value(), PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX).value();
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Replaying active from file {}", _repl_log.value().string());
-            } else {
+            bool found_next = _next_repl_log();
+            if (!found_next) {
                 return false;
             }
+            timestamp = fs::extract_timestamp_from_file(_repl_log.value(),
+                                                        PgLogMgr::LOG_PREFIX_REPL,
+                                                        PgLogMgr::LOG_SUFFIX).value();
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Replaying active from file {}", _repl_log.value().string());
         }
     }
 
@@ -377,15 +369,36 @@ PgLogRecovery::_replay_uncommitted()
 
         // check if we need to move to the next file
         if (eos) {
-            _repl_log =
-                fs::get_next_log_file(*_repl_log, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
-            if (_repl_log) {
-                _repl_reader.set_file(*_repl_log);
+            bool found_next = _next_repl_log();
+            if (found_next) {
                 timestamp = fs::extract_timestamp_from_file(_repl_log.value(), PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX).value();
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Replaying uncommitted from file {}", _repl_log.value().string());
             }
         }
     }
 }
+
+bool
+PgLogRecovery::_next_repl_log()
+{
+    if (_repl_log == _latest_log) {
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Processed the final log file: {} == {}",
+                  _repl_log, *_latest_log);
+        _repl_log = std::nullopt;
+        return false;
+    }
+
+    _repl_log =
+        fs::get_next_log_file(*_repl_log, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
+    if (!_repl_log) {
+        LOG_DEBUG(LOG_PG_LOG_MGR, "No next replication log found");
+        return false;
+    }
+
+    _repl_reader.set_file(*_repl_log);
+    LOG_DEBUG(LOG_PG_LOG_MGR, "Found next log file {}", _repl_log.value().string());
+    return true;
+}
+
 
 }  // namespace springtail::pg_log_mgr

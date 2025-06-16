@@ -518,20 +518,26 @@ namespace springtail {
         }
 
         template <typename T>
-        T get_value(const void* row) const {
-            return *reinterpret_cast<T*>(((const Extent::Row *)row)->data() + _offset);
+        inline T get_value(const void* row) const {
+            T result;
+            std::memcpy(&result, 
+                    reinterpret_cast<const Extent::Row *>(row)->data() + _offset,
+                    sizeof(T));
+            return result;
         }
 
         int8_t get_int8(const void *row) const override {
             // must be int8 type
             DCHECK_EQ(_type, SchemaType::INT8);
-            return get_value<int8_t>(row);
+            return *reinterpret_cast<const int8_t *>(
+                    reinterpret_cast<const Extent::Row *>(row)->data() + _offset);
         }
 
         uint8_t get_uint8(const void *row) const override {
             // must be uint8 type
             DCHECK_EQ(_type, SchemaType::UINT8);
-            return get_value<uint8_t>(row);
+            return *reinterpret_cast<const uint8_t *>(
+                    reinterpret_cast<const Extent::Row *>(row)->data() + _offset);
         }
 
         int16_t get_int16(const void *row) const override {
