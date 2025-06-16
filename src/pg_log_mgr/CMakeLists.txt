@@ -78,12 +78,3 @@ install(TARGETS
     dump_repl_log
     RUNTIME DESTINATION bin/utils
 )
-
-# dump_repl_log
-add_executable(reencode_xlog test/reencode_xlog.cc)
-target_include_directories(reencode_xlog
-    PUBLIC ${PROJECT_SOURCE_DIR}/include
-)
-target_link_libraries(reencode_xlog
-    PRIVATE Boost::program_options
-)
