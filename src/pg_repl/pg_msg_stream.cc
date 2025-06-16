@@ -67,6 +67,7 @@ namespace springtail {
 
         _stream.open(file, std::fstream::in | std::fstream::binary);
         if (!_stream.is_open()) {
+            LOG_ERROR("Unable to open file: {}", file);
             throw PgIOError();
         }
 
