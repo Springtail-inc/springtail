@@ -25,7 +25,7 @@ SyncTracker::issue_resync_and_wait(uint64_t db_id,
               db_id, table_id, xid.xid, xid.lsn);
     std::unique_lock lock(_mutex);
 
-    LOG_DEBUG(LOG_PG_LOG_MGR, "Acquired lock to notify copy thread");
+    LOG_DEBUG(LOG_PG_LOG_MGR, "Acquired lock to notify copy thread: table: {}", table_id);
     // notify the copy thread to resync the table
     auto key = fmt::format(redis::QUEUE_SYNC_TABLES,
                            Properties::get_db_instance_id(), db_id);
@@ -33,7 +33,7 @@ SyncTracker::issue_resync_and_wait(uint64_t db_id,
     TableSyncRequest request(table_id, xid);
     table_sync_queue.push(request);
 
-    LOG_DEBUG(LOG_PG_LOG_MGR, "Pushed message to table_sync_queue, wait for resync to begin");
+    LOG_DEBUG(LOG_PG_LOG_MGR, "Pushed message to table_sync_queue, wait for resync to begin for table: {}", table_id);
     // wait for the resync to begin
     auto wait = std::make_shared<Wait>();
     auto wait_i = _wait_map.emplace(db_id, wait).first;
@@ -41,7 +41,7 @@ SyncTracker::issue_resync_and_wait(uint64_t db_id,
         return wait->notified;
     });
 
-    LOG_DEBUG(LOG_PG_LOG_MGR, "Notified by resync");
+    LOG_DEBUG(LOG_PG_LOG_MGR, "Notified by resync for table: {}", table_id);
     // clear the entry
     _wait_map.erase(wait_i);
 }

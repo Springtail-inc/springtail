@@ -1005,6 +1005,7 @@ namespace springtail
 
                 // add the table oid to the result
                 result->add_table(info);
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Copy table done, table: {}", request->table_oid);
                 copy_table._reset_schema();
 
             } catch (PgTableNotFoundError &e) {
