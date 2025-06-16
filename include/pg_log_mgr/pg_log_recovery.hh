@@ -57,6 +57,9 @@ private:
     /** Play back all of the remaining records in the replication log. */
     void _replay_uncommitted();
 
+    /** Helper function to move to the next repl log file. */
+    bool _next_repl_log();
+
 private:
     /** Helper structure to track the starting position of the first block in the replication log
         for a given pgxid. */
@@ -85,6 +88,8 @@ private:
     std::filesystem::path _repl_path;
     std::filesystem::path _xact_path;
     uint64_t _committed_xid;        ///< Holds the last commited xid.
+
+    std::optional<std::filesystem::path> _latest_log; ///< The latest repl log seen during repair
 
     /** Interface for reading the replication log. */
     PgMsgStreamReader _repl_reader;

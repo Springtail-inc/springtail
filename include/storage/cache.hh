@@ -129,7 +129,7 @@ namespace springtail {
              * Returns they cache key of this extent.
              */
             CacheKey key() const {
-                return CacheKey(_extent_id, _file.string());
+                return CacheKey(_extent_id, _file.native());
             }
 
             /**
@@ -604,7 +604,7 @@ namespace springtail {
              * Returns the cache key of this page.
              */
             CacheKey key() const {
-                return CacheKey(_extent_id, _file);
+                return CacheKey(_extent_id, _file.native());
             }
 
             /**
@@ -684,6 +684,22 @@ namespace springtail {
                     // start at the first row
                     _row = (*_extent)->begin();
 
+                    return *this;
+                }
+
+                Iterator &operator+=(difference_type n) { 
+                    if (_page->extent_count() == 1) {
+                        _row += n;
+                        return *this;
+                    }
+
+                    while ((*_extent)->end() - _row <= n) {
+                        n -= (*_extent)->end() - _row;
+                        ++_extent_i;
+                        _extent = _extent_i->make_safe_extent(_page->_file);
+                        _row = (*_extent)->begin();
+                    }
+                    _row += n;
                     return *this;
                 }
 
