@@ -1279,13 +1279,17 @@ namespace springtail
         }
 
         // shutdown the copy queue; blocks until queue is empty
+        LOG_DEBUG(LOG_PG_LOG_MGR, "About to trigger copy_queue->shutdown for db: {}", db_id);
         copy_queue->shutdown(true);
         assert (copy_queue->empty());
 
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Shutdown triggered for copy_queue, lets wait for workers join for db: {}", db_id);
         // join the worker threads
         for (auto &worker : workers) {
             worker.join();
         }
+
+        LOG_DEBUG(LOG_PG_LOG_MGR, "copy_queue Workers joined for db: {}", db_id);
 
         // create result object
         return table_results;
