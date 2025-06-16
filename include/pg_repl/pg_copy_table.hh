@@ -104,8 +104,10 @@ namespace springtail
         std::string schema_name;
         std::string table_name;
         std::string xids;                // pg_current_snapshot(); xmin:xmax:xids
-        uint64_t table_oid;
-        uint64_t schema_oid;
+        uint32_t table_oid;
+        uint32_t schema_oid;
+        bool rls_enabled;
+        bool rls_forced;
         std::vector<SchemaColumn> columns;
         std::vector<std::string> pkeys;  // primary keys as columns
         std::vector<Index> secondary_keys;  // secondary keys as columns
@@ -126,10 +128,7 @@ namespace springtail
 
         /** Request to worker thread to process table */
         struct CopyRequest {
-            std::string table_name;
-            std::string schema_name;
             int32_t table_oid;
-            int32_t schema_oid;
         };
         using CopyRequestPtr = std::shared_ptr<CopyRequest>;
         using CopyQueue = ConcurrentQueue<CopyRequest>;

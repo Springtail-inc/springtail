@@ -42,9 +42,9 @@ public:
                               uint64_t table_id,
                               uint64_t xid,
                               uint64_t lsn,
-                              bool exists,
                               bool rls_enabled,
-                              bool rls_forced)
+                              bool rls_forced,
+                              bool exists)
         {
             auto fields = std::make_shared<FieldArray>(8);
             fields->at(NAMESPACE_ID) = std::make_shared<ConstTypeField<uint64_t>>(namespace_id);

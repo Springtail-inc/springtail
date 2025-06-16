@@ -928,9 +928,12 @@ namespace springtail {
 
         table_msg.xid = message.xid; // only valid in streaming mode
         table_msg.lsn = message.lsn;
+
         json["table"].get_to(table_msg.table);
         json["schema"].get_to(table_msg.namespace_name);
         json["oid"].get_to(table_msg.oid);
+        json["rls_enabled"].get_to(table_msg.rls_enabled);
+        json["rls_forced"].get_to(table_msg.rls_forced);
 
         _decode_schema_columns(json["columns"], table_msg.columns);
 

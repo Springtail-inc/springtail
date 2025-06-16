@@ -69,6 +69,8 @@ _gen_table_request(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
     table->set_id(msg.oid);
     table->set_namespace_name(msg.namespace_name);
     table->set_name(msg.table);
+    table->set_rls_enabled(msg.rls_enabled);
+    table->set_rls_forced(msg.rls_forced);
 
     for (const auto &col : msg.columns) {
         auto *column = table->add_columns();

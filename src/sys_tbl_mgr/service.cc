@@ -546,12 +546,15 @@ Service::_create_table(const proto::TableRequest& request)
     ddl["tid"] = request.table().id();
     ddl["xid"] = request.xid();
     ddl["lsn"] = request.lsn();
+    ddl["rls_enabled"] = request.table().rls_enabled();
+    ddl["rls_forced"] = request.table().rls_forced();
     ddl["columns"] = nlohmann::json::array();
 
     // add table name
     auto table_info =
         std::make_shared<TableCacheRecord>(request.table().id(), request.xid(), request.lsn(),
-                                           ns_info->id, request.table().name(), true);
+                                           ns_info->id, request.table().name(), request.table().rls_enabled(),
+                                           request.table().rls_forced(), true);
     _set_table_info(request.db_id(), table_info);
 
     // add roots and stats entry -- may get overwritten later if data is added to the table
@@ -621,6 +624,8 @@ Service::AlterTable(grpc::ServerContext* context,
     ddl["lsn"] = request->lsn();
     ddl["schema"] = request->table().namespace_name();
     ddl["table"] = request->table().name();
+    ddl["rls_enabled"] = request->table().rls_enabled();
+    ddl["rls_forced"] = request->table().rls_forced();
 
     // retrieve the name of the table at the point of alteration
     XidLsn xid(request->xid(), request->lsn());
@@ -634,7 +639,8 @@ Service::AlterTable(grpc::ServerContext* context,
         // insert the new name for this oid
         auto new_info = std::make_shared<TableCacheRecord>(request->table().id(), request->xid(),
                                                            request->lsn(), ns_info->id,
-                                                           request->table().name(), true);
+                                                           request->table().name(), request->table().rls_enabled(),
+                                                           request->table().rls_forced(), true);
         _set_table_info(request->db_id(), new_info);
 
         // set the DDL statement
@@ -650,7 +656,8 @@ Service::AlterTable(grpc::ServerContext* context,
         // insert the new name for this oid
         auto new_info = std::make_shared<TableCacheRecord>(request->table().id(), request->xid(),
                                                            request->lsn(), ns_info->id,
-                                                           request->table().name(), true);
+                                                           request->table().name(), request->table().rls_enabled(),
+                                                           request->table().rls_forced(), true);
         _set_table_info(request->db_id(), new_info);
 
         // set the DDL statement
@@ -760,8 +767,9 @@ Service::_drop_table(const proto::DropTableRequest& request)
     }
 
     // mark the table as dropped in the table_names
+    // don't have the rls flags, so set them to false, shouldn't matter
     auto table_info = std::make_shared<TableCacheRecord>(
-        request.table_id(), request.xid(), request.lsn(), ns_info->id, request.name(), false);
+        request.table_id(), request.xid(), request.lsn(), ns_info->id, request.name(), false, false, false);
     _set_table_info(request.db_id(), table_info);
 
     // get the schema prior to this change
@@ -1598,6 +1606,8 @@ Service::_get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     info->lsn = fields->at(sys_tbl::TableNames::Data::LSN)->get_uint64(&row);
     info->namespace_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
     info->name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row);
+    info->rls_enabled = fields->at(sys_tbl::TableNames::Data::RLS_ENABLED)->get_bool(&row);
+    info->rls_forced = fields->at(sys_tbl::TableNames::Data::RLS_FORCED)->get_bool(&row);
     info->exists = exists;
 
     // note: we currently only keep un-finalized mutations in the cache, so don't cache here
@@ -1725,7 +1735,8 @@ Service::_set_table_info(uint64_t db_id, TableCacheRecordPtr table_info)
     auto table_names_t = _get_mutable_system_table(db_id, sys_tbl::TableNames::ID);
     auto tuple =
         sys_tbl::TableNames::Data::tuple(table_info->namespace_id, table_info->name, table_info->id,
-                                         table_info->xid, table_info->lsn, table_info->exists);
+                                         table_info->xid, table_info->lsn, table_info->rls_enabled,
+                                         table_info->rls_forced, table_info->exists);
     table_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 }
 
@@ -1773,7 +1784,7 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     auto find_cached_root = [&](uint64_t index_id) -> std::optional<uint64_t> {
         for (const auto& xid_roots: *cached_roots) {
             // the XidLsnToRootsInfoMap is ordered by XID is revese order (latest first)
-            // so we just need to find the first match 
+            // so we just need to find the first match
             if (xid_roots.first > xid) {
                 continue;
             }

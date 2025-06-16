@@ -25,7 +25,9 @@ message TableInfo {
   int64 id = 1;
   string namespace_name = 2;
   string name = 3;
-  repeated TableColumn columns = 4;
+  bool rls_enabled = 4;
+  bool rls_forced = 5;
+  repeated TableColumn columns = 6;
 }
 
 message TableRequest {

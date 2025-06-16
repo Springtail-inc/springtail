@@ -177,6 +177,8 @@ namespace springtail
         LSN_t lsn;
         uint32_t oid;
         int32_t xid;        // proto vers 2+ only if streaming
+        bool rls_enabled;   // is row level security enabled
+        bool rls_forced;    // is row level security forced
         std::string namespace_name;
         std::string table;
         std::vector<PgMsgSchemaColumn> columns;

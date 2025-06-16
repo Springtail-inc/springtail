@@ -308,7 +308,7 @@ namespace springtail
     }
 
 
-    void PgCopyTable::_set_schema(uint64_t table_oid)
+    void PgCopyTable::_set_schema(uint32_t table_oid)
     {
         // refetch schema info as it may have changed
         _connection.exec(fmt::format(TABLE_INFO_QUERY, table_oid));
@@ -328,7 +328,7 @@ namespace springtail
         // get table info
         std::string table_name = _connection.get_string(0, 0);
         std::string schema_name = _connection.get_string(0, 1);
-        uint64_t schema_oid = _connection.get_int64(0, 3);
+        uint32_t schema_oid = _connection.get_int32(0, 3);
         bool relrowsecurity = _connection.get_boolean(0, 4);
         bool relforcerowsecurity = _connection.get_boolean(0, 5);
 
@@ -358,6 +358,8 @@ namespace springtail
             _schema.schema_name = schema_name;
             _schema.table_oid = table_oid;
             _schema.schema_oid = schema_oid;
+            _schema.rls_enabled = relrowsecurity;
+            _schema.rls_forced = relforcerowsecurity;
 
             // get columns
             int rows = _connection.ntuples();
@@ -533,7 +535,7 @@ namespace springtail
     PgCopyTable::_copy_table(uint64_t db_id,
                              const springtail::XidLsn &xid,
                              const std::map<int32_t, std::map<std::string, float>> &user_types,
-                             uint64_t table_oid,
+                             uint32_t table_oid,
                              const PgCopyResultPtr &snapshot_details)
     {
         // set the schema
@@ -583,6 +585,8 @@ namespace springtail
         table_info->set_id(table_oid);
         table_info->set_namespace_name(_schema.schema_name);
         table_info->set_name(_schema.table_name);
+        table_info->set_rls_enabled(_schema.rls_enabled);
+        table_info->set_rls_forced(_schema.rls_forced);
 
         for (const auto &col : _schema.columns) {
             auto* column = table_info->add_columns();
@@ -872,7 +876,7 @@ namespace springtail
 
     void
     PgCopyTable::_get_table_oids(const std::string &query,
-                                 std::set<uint64_t> &table_oids)
+                                 std::set<uint32_t> &table_oids)
     {
         // do the tables query
         _connection.exec(query);
@@ -885,11 +889,7 @@ namespace springtail
         // iterate through the results and get the table oids
         for (int i = 0; i < _connection.ntuples(); i++) {
             // get the table name, schema name, and oid
-            std::string table_name = _connection.get_string(i, 0);
-            std::string schema_name = _connection.get_string(i, 1);
             uint32_t table_oid = _connection.get_int32(i, 2);
-            uint32_t schema_oid = _connection.get_int32(i, 3);
-
             table_oids.insert(table_oid);
         }
 
@@ -898,7 +898,7 @@ namespace springtail
 
     void
     PgCopyTable::_get_table_oids(const nlohmann::json &include_json,
-                                 std::set<uint64_t> &table_oids)
+                                 std::set<uint32_t> &table_oids)
     {
         // get schemas array from json into vector of strings
 
@@ -1025,10 +1025,7 @@ namespace springtail
                 auto info = copy_table._copy_table(db_id,
                                                    xid,
                                                    user_type_map,
-                                                   request->table_name,
-                                                   request->schema_name,
                                                    request->table_oid,
-                                                   request->schema_oid,
                                                    result);
 
                 // add the table oid to the result
@@ -1036,10 +1033,10 @@ namespace springtail
                 copy_table._reset_schema();
 
             } catch (PgTableNotFoundError &e) {
-                LOG_ERROR("Table not found: {}.{}", request->schema_name, request->table_name);
+                LOG_ERROR("Table not found: oid {}", request->table_oid);
             } catch (PgQueryError &e) {
                 e.log_backtrace();
-                LOG_ERROR("Error copying table: {}.{}", request->schema_name, request->table_name);
+                LOG_ERROR("Error copying table: oid {}", request->table_oid);
                 assert(false);
             }
         }
@@ -1297,15 +1294,11 @@ namespace springtail
         }
 
         // iterate through the tables and copy them
-        for (const auto &table_md : table_oids) {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Dumping table {}, namespace: {}, table_oid: {}",
-                table_md.table_name, table_md.namespace_name, table_md.table_oid);
+        for (const auto &table_oid : table_oids) {
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Queueing copy for table_oid: {}", table_oid);
 
             // add the table to the copy queue
-            copy_queue->push(std::make_shared<CopyRequest>(table_md.table_name,
-                                                           table_md.namespace_name,
-                                                           table_md.table_oid,
-                                                           table_md.namespace_oid));
+            copy_queue->push(std::make_shared<CopyRequest>(table_oid));
         }
 
         // shutdown the copy queue; blocks until queue is empty

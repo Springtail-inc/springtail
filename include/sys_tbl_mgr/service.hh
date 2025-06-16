@@ -175,12 +175,16 @@ private:
         uint64_t lsn;           ///< The LSN at which this entry becomes valid.
         uint64_t namespace_id;  ///< The ID of the schema/namespace of the table.
         std::string name;       ///< The name of the table.
+        bool rls_enabled;       ///< A flag indicating if RLS is enabled for this table.
+        bool rls_forced;        ///< A flag indicating if RLS is forced for this table.
         bool exists;            ///< A flag indicating if the table exists at this point.
         TableCacheRecord(uint64_t id,
                          uint64_t xid,
                          uint64_t lsn,
                          uint64_t namespace_id,
                          const std::string& name,
+                         bool rls_enabled,
+                         bool rls_forced,
                          bool exists)
             : id(id), xid(xid), lsn(lsn), namespace_id(namespace_id), name(name), exists(exists)
         {
