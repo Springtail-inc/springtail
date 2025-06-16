@@ -300,7 +300,7 @@ namespace springtail::pg_log_mgr {
             std::set<uint32_t> table_ids;
 
             // block on redis table sync queue w/timeout for shutdown
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Waiting for table sync queue");
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Waiting for table sync queue in DB: {}", _db_id);
             auto request = _redis_sync_queue.pop(REDIS_WORKER_ID, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (request == nullptr) {
                 continue; // timeout, check for shutdown
