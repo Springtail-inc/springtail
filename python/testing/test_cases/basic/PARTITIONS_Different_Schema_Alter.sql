@@ -46,8 +46,7 @@ ALTER TABLE partition_table_schema_alter.invoice
     FOR VALUES FROM ('2023-01-01') TO ('2024-01-01');
 
 ## verify
-SELECT * FROM partition_table_schema_alter.invoice;
+SELECT * FROM partition_table_schema_alter.invoice ORDER BY id;
 
 ## cleanup
-DROP SCHEMA child_table_schema_alter CASCADE;
 DROP SCHEMA partition_table_schema_alter CASCADE;

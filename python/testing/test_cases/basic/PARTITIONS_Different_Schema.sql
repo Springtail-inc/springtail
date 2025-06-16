@@ -20,8 +20,7 @@ INSERT INTO partition_table_schema.invoice (name, amount, purchase_date) VALUES
     ('Bob Smith', 300.00, '2023-03-01');
 
 ## verify
-SELECT * FROM partition_table_schema.invoice;
+SELECT * FROM partition_table_schema.invoice ORDER BY id;
 
 ## cleanup
-DROP SCHEMA child_table_schema CASCADE;
 DROP SCHEMA partition_table_schema CASCADE;

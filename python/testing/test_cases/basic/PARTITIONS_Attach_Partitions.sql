@@ -18,7 +18,7 @@ ALTER TABLE family_attach_partition
 INSERT INTO family_attach_partition VALUES (1, 'John', 'Sibling');
 
 ## verify
-SELECT * FROM family_attach_partition;
+SELECT * FROM family_attach_partition ORDER BY id;
 
 ## cleanup
 DROP TABLE family_attach_partition CASCADE;

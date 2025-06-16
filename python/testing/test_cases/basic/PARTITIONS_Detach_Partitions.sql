@@ -23,7 +23,7 @@ INSERT INTO family (name, age, relationship, gender) VALUES
 ALTER TABLE family DETACH PARTITION family_cousins;
 
 ## verify
-SELECT * FROM family;
+SELECT * FROM family ORDER BY id;
 
 ## cleanup
 DROP TABLE family CASCADE;

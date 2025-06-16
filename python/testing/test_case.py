@@ -541,7 +541,7 @@ class TestCase:
                             JOIN pg_type t ON a.atttypid = t.oid
                             JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
                             WHERE n.nspname = '{command["schema"]}' AND c.relname = '{command["table"]}'
-                                    AND c.relkind = 'r'
+                                    AND c.relkind IN ('r','p')
                                     AND a.attnum > 0
                                     AND NOT a.attisdropped
                             ORDER BY a.attnum ASC;"""

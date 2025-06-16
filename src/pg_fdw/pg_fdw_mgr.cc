@@ -1576,16 +1576,16 @@ namespace springtail::pg_fdw {
     {
         int len = vec.size();
 
-        List* list = (List*) std::malloc(sizeof(List));
+        List* list = (List*) palloc(sizeof(List));
         if (!list) return nullptr;
 
         list->type = T_List;
         list->length = len;
         list->max_length = len;
 
-        list->elements = (ListCell*) std::malloc(sizeof(ListCell) * len);
+        list->elements = (ListCell*) palloc(sizeof(ListCell) * len);
         if (!list->elements) {
-            std::free(list);
+            pfree(list);
             return nullptr;
         }
 

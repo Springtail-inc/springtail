@@ -1468,6 +1468,9 @@ Service::AttachPartition(grpc::ServerContext* context,
     LOG_INFO("got AttachPartition() -- db {} table {} xid {} lsn {}", request->db_id(),
               request->table_id(), request->xid(), request->lsn());
 
+    // acquire a shared lock to ensure no one is doing a finalize
+    boost::shared_lock lock(_write_mutex);
+
     XidLsn xid(request->xid(), request->lsn());
 
     auto ns_info = _get_namespace_info(request->db_id(), request->namespace_name(),
