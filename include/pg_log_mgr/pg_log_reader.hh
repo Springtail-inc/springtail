@@ -7,6 +7,7 @@
 
 #include <pg_log_mgr/wal_progress_tracker.hh>
 #include <pg_log_mgr/xid_ready.hh>
+#include <pg_log_mgr/index_requests_manager.hh>
 
 #include <storage/field.hh>
 
@@ -38,7 +39,8 @@ namespace springtail::pg_log_mgr {
         PgLogReader(uint64_t db_id, uint32_t queue_size,
                     const std::filesystem::path &repl_log_path,
                     const CommitterQueuePtr committer_queue,
-                    const bool archive_logs);
+                    const bool archive_logs,
+                    const std::shared_ptr<IndexRequestsManager> &index_requests_mgr);
 
         ~PgLogReader();
         /**
@@ -135,8 +137,9 @@ namespace springtail::pg_log_mgr {
 
         public:
             Batch(uint64_t db_id, int32_t pg_xid, const CommitterQueuePtr committer_queue,
-                  ExistsCachePtr exists_cache)
-                : _db(db_id), _pg_xid(pg_xid), _committer_queue(committer_queue), _exists_cache(exists_cache)
+                  ExistsCachePtr exists_cache, const std::shared_ptr<IndexRequestsManager>& index_requests_mgr)
+                : _db(db_id), _pg_xid(pg_xid), _committer_queue(committer_queue),
+                _exists_cache(exists_cache), _index_requests_mgr(index_requests_mgr)
             {
                 auto tracer = open_telemetry::OpenTelemetry::tracer("PgLogReader");
                 _span = tracer->StartSpan("Transaction");
@@ -339,6 +342,7 @@ namespace springtail::pg_log_mgr {
             CommitterQueuePtr _committer_queue; ///< Reference to the committer queue
 
             ExistsCachePtr _exists_cache; ///< Reference to the exists cache
+            std::shared_ptr<IndexRequestsManager> _index_requests_mgr;
 
             /** Records changes in the table validation state based on supported columns.  A valid
                 table contains std::nullopt, while an invalid one contains a JSON describing the
@@ -376,6 +380,12 @@ namespace springtail::pg_log_mgr {
 
         /** Cache indicating if a table exists at the latest XID seen committed by the log reader. */
         ExistsCachePtr _exists_cache;
+
+        /**
+         * @brief shared_ptr to the index requests manager to get
+         * index requests (create/drop) for an XID per db
+         */
+        std::shared_ptr<IndexRequestsManager> _index_requests_mgr;
 
         /** Function for cleaning up old log files. */
         void _remove_old_log_files();

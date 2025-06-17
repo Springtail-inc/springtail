@@ -20,6 +20,7 @@
 #include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/indexer.hh>
 #include <pg_log_mgr/index_reconciliation_queue_manager.hh>
+#include <pg_log_mgr/index_requests_manager.hh>
 
 #include <pg_repl/index_reconcile_request.hh>
 
@@ -42,11 +43,13 @@ namespace springtail::committer {
     class Committer {
     public:
         Committer(uint32_t worker_count, const std::shared_ptr<ConcurrentQueue<committer::XidReady>> &committer_queue,
-                std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> index_reconciliation_queue_mgr, uint32_t indexer_worker_count)
+                std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> index_reconciliation_queue_mgr,
+                const std::shared_ptr<pg_log_mgr::IndexRequestsManager> &index_requests_mgr, uint32_t indexer_worker_count)
             : _worker_count(worker_count),
               _indexer_worker_count(indexer_worker_count),
               _committer_queue(committer_queue),
-              _index_reconciliation_queue_mgr(index_reconciliation_queue_mgr)
+              _index_reconciliation_queue_mgr(index_reconciliation_queue_mgr),
+              _index_requests_mgr(index_requests_mgr)
         { }
 
         /** Initiate the committer loop. */
@@ -157,5 +160,11 @@ namespace springtail::committer {
         /** Indexer
          */
         std::unique_ptr<Indexer> _indexer;
+
+        /**
+         * @brief shared_ptr to the index requests manager to get
+         * index requests (create/drop) for an XID per db
+         */
+        std::shared_ptr<pg_log_mgr::IndexRequestsManager> _index_requests_mgr;
     };
 }

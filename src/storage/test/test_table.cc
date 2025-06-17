@@ -1086,6 +1086,69 @@ namespace {
         }
     }
 
+    TEST_P(Table_Test, RemoveAndRepopulate) {
+        auto client = XidMgrClient::get_instance();
+        auto server = xid_mgr::XidMgrServer::get_instance();
+        uint64_t access_xid = client->get_committed_xid(1, 0);
+        uint64_t target_xid = access_xid + 1;
+
+        // create the namespace and table in the sys_tbl_mgr
+        _init_sys_tbls(target_xid, 1006, "test_remove_repopulate");
+
+        // create a mutable table
+        TableMetadata metadata;
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
+        auto mtable = _create_mtable(1006, target_xid, metadata.roots);
+
+        // insert initial rows
+        _populate_table(mtable);
+
+        // remove all rows by iterating through the table
+        csv::CSVReader reader("test_btree_simple.csv");
+        for (auto &&r : reader) {
+            auto csvtuple = std::make_shared<FieldTuple>(_csv_fields, &r);
+            auto search_key = _schema->tuple_subset(csvtuple, _primary_keys);
+            mtable->remove(search_key, constant::UNKNOWN_EXTENT);
+        }
+
+        // repopulate with new data
+        _populate_table(mtable);
+
+        // finalize the table after all operations
+        metadata = mtable->finalize();
+        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        server->commit_xid(1, 1, target_xid, false);
+
+        // create an access table to verify the final state
+        access_xid = target_xid;
+        auto table = _create_table(1006, access_xid, metadata.roots);
+
+        // verify the data through primary index
+        int count = 0;
+        std::string prev = "";
+        for (auto &row : *table) {
+            if (prev != "") {
+                ASSERT_GT(_fields->at(1)->get_text(&row), prev);
+            }
+            prev = _fields->at(1)->get_text(&row);
+            ++count;
+        }
+        ASSERT_EQ(count, 5000); // should have the full set of repopulated rows
+
+        // verify through secondary index
+        auto secondary = table->index(1);
+        count = 0;
+        uint64_t table_id = 0;
+        auto table_id_f = secondary->get_schema()->get_field("table_id");
+        for (auto row : *secondary) {
+            auto current = table_id_f->get_uint64(&row);
+            ASSERT_LE(table_id, current);
+            table_id = current;
+            ++count;
+        }
+        ASSERT_EQ(count, 5000);
+    }
+
     INSTANTIATE_TEST_CASE_P(Table_Test,
                             Table_Test,
                             ::testing::Values(CacheSize{ 16384, 16384, 512, 16 },
