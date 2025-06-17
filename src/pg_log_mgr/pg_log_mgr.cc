@@ -635,15 +635,16 @@ namespace springtail::pg_log_mgr {
             // get log entry from queue
             PgLogQueueEntryPtr log_entry = this->_logger_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (log_entry == nullptr) {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Timeout waiting for log entry");
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Timeout waiting for log entry for db: {}", _db_id);
                 continue;
             }
 
-            LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Got log entry: path={}, start_offset={}, num_messages={}",
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Got log entry: path={}, start_offset={}, num_messages={}",
                       log_entry->path, log_entry->start_offset, log_entry->num_messages);
 
             // check for stall message, if so then wait for sync to complete
             if (log_entry->is_stall_message) {
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Received stall msg for db: {}", _db_id);
                 assert (_internal_state.is(STATE_SYNC_STALL));
                 // wait for sync to complete
                 _internal_state.set(STATE_SYNCING);
