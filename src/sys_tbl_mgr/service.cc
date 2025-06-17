@@ -24,7 +24,7 @@ Service::Ping(grpc::ServerContext* context,
 grpc::Status
 Service::CreateIndex(grpc::ServerContext* context,
                      const proto::IndexRequest* request,
-                     proto::DDLStatement* response)
+                     proto::IndexProcessRequest* response)
 {
     ServerSpan span(context, "SysTblMgrService", "CreateIndex");
 
@@ -36,10 +36,10 @@ Service::CreateIndex(grpc::ServerContext* context,
 
     try {
         // perform the CREATE INDEX
-        auto ddl = _create_index(*request);
+        const auto &index_info = _create_index(*request);
+        response->set_action("create_index");
+        *response->mutable_index() = index_info;
 
-        // serialize the JSON and return
-        response->set_statement(nlohmann::to_string(ddl));
         span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
         return grpc::Status::OK;
     } catch (const std::exception& e) {
@@ -191,27 +191,49 @@ Service::_set_index_state(const proto::SetIndexStateRequest& request)
     CHECK(index_info.table_id() == request.table_id() && index_info.id() == request.index_id());
     index_info.set_state(request.state());
 
-    auto index_names_t = _get_mutable_system_table(request.db_id(), sys_tbl::IndexNames::ID);
-    auto tuple = sys_tbl::IndexNames::Data::tuple(
-        index_info.namespace_id(), index_info.name(), index_info.table_id(), request.index_id(), xid.xid, xid.lsn,
-        static_cast<sys_tbl::IndexNames::State>(index_info.state()), index_info.is_unique());
-
-    // update the index state
-    index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
-
     std::map<uint32_t, uint32_t> keys;
     for (const auto& column : index_info.columns()) {
         assert(keys.find(column.idx_position()) == keys.end());
         keys[column.idx_position()] = column.position();
     }
 
+    return _upsert_index_name(request.db_id(), index_info, xid, keys);
+}
+
+bool
+Service::_upsert_index_name(uint64_t db_id,
+                            const proto::IndexInfo& index_info,
+                            const XidLsn& xid,
+                            const std::map<uint32_t, uint32_t>& keys,
+                            bool is_primary_index)
+{
+    auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);
+
+    auto is_unique = index_info.is_unique();
+    if (is_primary_index) {
+        is_unique = true;
+    }
+
+    auto tuple = sys_tbl::IndexNames::Data::tuple(
+        index_info.namespace_id(), index_info.name(), index_info.table_id(), index_info.id(), xid.xid, xid.lsn,
+        static_cast<sys_tbl::IndexNames::State>(index_info.state()), is_unique);
+
+    // update the index state
+    index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
+
     // update columns with the state XID
-    _write_index(xid, request.db_id(), index_info.table_id(), index_info.id(), keys);
+    if (is_primary_index) {
+        if(!keys.empty()) {
+            _write_index(xid, db_id, index_info.table_id(), constant::INDEX_PRIMARY, keys);
+        }
+    } else {
+        _write_index(xid, db_id, index_info.table_id(), index_info.id(), keys);
+    }
 
     // add to index cache
     {
         boost::unique_lock lock(_mutex);
-        _index_cache[request.db_id()][index_info.table_id()][index_info.id()].emplace_back(
+        _index_cache[db_id][index_info.table_id()][index_info.id()].emplace_back(
             xid, index_info);
     }
 
@@ -274,79 +296,37 @@ Service::GetUnfinishedIndexesInfo(grpc::ServerContext* context,
     return grpc::Status::OK;
 }
 
-nlohmann::json
+proto::IndexInfo
 Service::_create_index(const proto::IndexRequest& request)
 {
     XidLsn xid(request.xid(), request.lsn());
-
-    nlohmann::json ddl;
-    ddl["action"] = "create_index";
-    ddl["index"] = request.index().name();
-    ddl["schema"] = request.index().namespace_name();
-    ddl["id"] = request.index().id();
-    ddl["is_unique"] = request.index().is_unique();
-    ddl["table_id"] = request.index().table_id();
-    ddl["columns"] = nlohmann::json::array();
-
-    if (request.index().columns().empty()) {
-        return ddl;
-    }
 
     std::map<uint32_t, uint32_t> keys;
     for (const auto& column : request.index().columns()) {
         assert(keys.find(column.idx_position()) == keys.end());
         keys[column.idx_position()] = column.position();
-
-        // store the column data into the json
-        nlohmann::json column_json;
-        column_json["idx_position"] = column.idx_position();
-        column_json["position"] = column.position();
-        column_json["name"] = column.name();
-
-        // Insert columns in the order specified by idx_position.
-        // This ensures the index columns are arranged correctly,
-        // as their order may differ from the table column order.
-        if (ddl["columns"].size() <= column.idx_position()) {
-            ddl["columns"].get_ref<nlohmann::json::array_t&>().resize(column.idx_position() + 1);
-        }
-        ddl["columns"][column.idx_position()] = column_json;
     }
 
     // update index names
     // Create a copy to add namespace ID, before caching the index_info
     auto mutable_index_request = request;
-    {
-        // lookup the namespace info
-        auto ns_info = _get_namespace_info(request.db_id(), request.index().namespace_name(), xid);
-        CHECK(ns_info);
 
-        auto index_names_t = _get_mutable_system_table(request.db_id(), sys_tbl::IndexNames::ID);
-        auto tuple = sys_tbl::IndexNames::Data::tuple(
-            ns_info->id, request.index().name(), request.index().table_id(), request.index().id(),
-            xid.xid, xid.lsn, static_cast<sys_tbl::IndexNames::State>(request.index().state()),
-            request.index().is_unique());
+    // lookup the namespace info
+    auto ns_info = _get_namespace_info(request.db_id(), request.index().namespace_name(), xid);
+    CHECK(ns_info);
 
-        index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
+    // Set namespace ID for the requested index
+    mutable_index_request.mutable_index()->set_namespace_id(ns_info->id);
 
-        // Set namespace ID for the requested index
-        mutable_index_request.mutable_index()->set_namespace_id(ns_info->id);
-    }
+    _upsert_index_name(request.db_id(), mutable_index_request.index(), xid, keys);
 
-    _write_index(xid, request.db_id(), request.index().table_id(), request.index().id(), keys);
-
-    {
-        boost::unique_lock lock(_mutex);
-        _index_cache[request.db_id()][request.index().table_id()][request.index().id()]
-            .emplace_back(xid, mutable_index_request.index());
-    }
-
-    return ddl;
+    return mutable_index_request.index();
 }
 
 grpc::Status
 Service::DropIndex(grpc::ServerContext* context,
                    const proto::DropIndexRequest* request,
-                   proto::DDLStatement* response)
+                   proto::IndexProcessRequest* response)
 {
     LOG_INFO("got DropIndex(): db {}, index {}, xid {}:{}", request->db_id(),
                 request->index_id(), request->xid(), request->lsn());
@@ -354,19 +334,19 @@ Service::DropIndex(grpc::ServerContext* context,
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
-    nlohmann::json ddl;
-    ddl["action"] = "drop_index";
-    ddl["id"] = request->index_id();
-    ddl["name"] = request->name();
-    ddl["schema"] = request->namespace_name();
-
     XidLsn xid(request->xid(), request->lsn());
 
     // perform the DROP INDEX
     _drop_index(xid, request->db_id(), request->index_id(), std::nullopt, sys_tbl::IndexNames::State::BEING_DELETED);
 
-    // serialize the JSON and return
-    response->set_statement(nlohmann::to_string(ddl));
+    // Create response for the dropped index
+    proto::IndexInfo dropped_index;
+    dropped_index.set_id(request->index_id());
+    dropped_index.set_name(request->name());
+    dropped_index.set_namespace_name(request->namespace_name());
+    response->set_action("drop_index");
+    *response->mutable_index() = dropped_index;
+
     return grpc::Status::OK;
 }
 
@@ -489,26 +469,14 @@ Service::_drop_index(const XidLsn& xid,
 
     LOG_DEBUG(LOG_SCHEMA, "Drop index found {}:{} -- {}", db_id, index_info.table_id(),
                         index_id);
-    auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);
-    auto tuple = sys_tbl::IndexNames::Data::tuple(
-        std::get<1>(*info), index_info.name(), index_info.table_id(), index_id, xid.xid, xid.lsn,
-        index_state, index_info.is_unique());
-    index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
-
     std::map<uint32_t, uint32_t> keys;
     for (const auto& column : index_info.columns()) {
         assert(keys.find(column.idx_position()) == keys.end());
         keys[column.idx_position()] = column.position();
     }
 
-    // update columns with the state XID
-    _write_index(xid, db_id, index_info.table_id(), index_id, keys);
-
-    {
-        boost::unique_lock lock(_mutex);
-        index_info.set_state(static_cast<int8_t>(index_state));
-        _index_cache[db_id][index_info.table_id()][index_info.id()].emplace_back(xid, index_info);
-    }
+    index_info.set_state(static_cast<int32_t>(index_state));
+    _upsert_index_name(db_id, index_info, xid, keys);
 }
 
 grpc::Status
@@ -2693,23 +2661,7 @@ Service::_set_primary_index(uint64_t db_id,
         primary_keys[c.pk_position()] = c.position();
     }
 
-
-    auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);
-
-    auto tuple = sys_tbl::IndexNames::Data::tuple(
-        namespace_id, index.name(), index.table_id(), index.id(), xid.xid, xid.lsn,
-        static_cast<sys_tbl::IndexNames::State>(index.state()), true);
-    index_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
-
-    if (!primary_keys.empty()) {
-        _write_index(xid, db_id, table_id, constant::INDEX_PRIMARY, primary_keys);
-    }
-
-    // add to index cache
-    {
-        boost::unique_lock lock(_mutex);
-        _index_cache[db_id][table_id][index.id()].emplace_back(xid, index);
-    }
+    _upsert_index_name(db_id, index, xid, primary_keys, true);
 }
 
 void

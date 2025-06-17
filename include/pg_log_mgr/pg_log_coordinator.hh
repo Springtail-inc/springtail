@@ -10,6 +10,7 @@
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/committer.hh>
 #include <pg_log_mgr/index_reconciliation_queue_manager.hh>
+#include <pg_log_mgr/index_requests_manager.hh>
 #include <pg_repl/index_reconcile_request.hh>
 
 namespace springtail::pg_log_mgr {
@@ -48,6 +49,12 @@ namespace springtail::pg_log_mgr {
          * @brief Index reconciliation manager to access the index reconciliation queues
          **/
         std::shared_ptr<IndexReconciliationQueueManager> _index_reconciliation_queue_mgr;
+
+        /**
+         * @brief shared_ptr to the index requests manager to get
+         * index requests (create/drop) for an XID per db
+         */
+        std::shared_ptr<IndexRequestsManager> _index_requests_mgr;
 
         /**
          * @brief Function for performing shutdown that is called by Singleton

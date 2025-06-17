@@ -16,7 +16,7 @@ namespace {
         {
             std::vector<std::unique_ptr<ServiceRunner>> service_runners;
             service_runners.emplace_back(std::make_unique<ExceptionRunner>());
-
+            service_runners.emplace_back(std::make_unique<LoggingRunner>(std::nullopt, std::nullopt, std::nullopt));
             springtail_init_custom(service_runners);
         }
 
@@ -500,6 +500,7 @@ namespace {
             writer.log(108, 18, true);
             writer.log(109, 19, false);
             writer.log(110, 20, false);
+            writer.flush();
         }
         PgXactLogWriter::set_last_xid_in_storage(log_path, std::numeric_limits<uint64_t>::max(), true);
         {

@@ -17,14 +17,16 @@ namespace springtail::pg_log_mgr {
     PgLogReader::PgLogReader(uint64_t db_id, uint32_t queue_size,
                              const std::filesystem::path &repl_log_path,
                              const CommitterQueuePtr committer_queue,
-                             const bool archive_logs)
+                             const bool archive_logs,
+                             const std::shared_ptr<IndexRequestsManager> &index_requests_mgr)
         : _db_id(db_id),
           // retrieve the most recently committed XID at startup
          _committed_xid(xid_mgr::XidMgrServer::get_instance()->get_committed_xid(db_id, 0)),
           _archive_logs(archive_logs),
           _repl_log_path(repl_log_path),
           _committer_queue(committer_queue),
-          _msg_queue(queue_size)
+          _msg_queue(queue_size),
+          _index_requests_mgr(index_requests_mgr)
     {
         _xid_ts_tracker = std::make_shared<WalProgressTracker>();
 
@@ -168,18 +170,18 @@ namespace springtail::pg_log_mgr {
     PgLogReader::Batch::TableEntry::get_pg_fields(Batch *batch,
                                                   const XidLsn &xid,
                                                   const MutableFieldArrayPtr fields,
-                                                  const std::vector<int32_t> &pg_types)
+                                                  const std::vector<std::pair<int32_t, int>> &pg_types)
     {
         auto pg_fields = std::make_shared<FieldArray>();
         for (int i = 0; i < fields->size(); i++) {
             // check if the pg_type is a user type
             auto type = fields->at(i)->get_type();
-            if (pg_types[i] >= constant::FIRST_USER_DEFINED_PG_OID) {
-                auto utp = batch->_usertype_cache_lookup(pg_types[i], xid);
+            if (pg_types[i].first >= constant::FIRST_USER_DEFINED_PG_OID) {
+                auto utp = batch->_usertype_cache_lookup(pg_types[i].first, xid);
                 DCHECK(utp->exists);
-                pg_fields->push_back(std::make_shared<PgEnumField>(type, i, utp));
+                pg_fields->push_back(std::make_shared<PgEnumField>(type, pg_types[i].second, utp));
             } else {
-                pg_fields->push_back(std::make_shared<PgLogField>(type, i));
+                pg_fields->push_back(std::make_shared<PgLogField>(type, pg_types[i].second));
             }
         }
         return pg_fields;
@@ -683,11 +685,10 @@ namespace springtail::pg_log_mgr {
         // Add a message to skip indexes for this table
         // for the currently building indexes and the ones
         // belonging to this transaction
-        nlohmann::json ddl;
-        RedisDDL redis_ddl;
-        ddl["action"] = "abort_index";
-        ddl["table_id"] = table_oid;
-        redis_ddl.add_index_ddl(_db, xidlsn.xid, ddl.dump());
+        proto::IndexProcessRequest index_request;
+        index_request.set_action("abort_index");
+        index_request.mutable_index()->set_table_id(table_oid);
+        _index_requests_mgr->add_index_request(_db, xidlsn.xid, index_request);
     }
 
     void
@@ -788,20 +789,20 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::CREATE_INDEX:
             {
                 auto &index_msg = std::get<PgMsgIndex>(change->msg);
-                std::string &&ddl_stmt = client->create_index(_db, xidlsn, index_msg,
-                                                              sys_tbl::IndexNames::State::NOT_READY);
+                auto &&create_index_response = client->create_index(_db, xidlsn, index_msg,
+                                                                  sys_tbl::IndexNames::State::NOT_READY);
 
-                // Store the DDL statement for the Committer
-                redis_ddl.add_index_ddl(_db, xidlsn.xid, ddl_stmt);
+                // Store the index process request for the Committer
+                _index_requests_mgr->add_index_request(_db, xidlsn.xid, create_index_response);
                 break;
             }
         case PgMsgEnum::DROP_INDEX:
             {
                 auto &index_msg = std::get<PgMsgDropIndex>(change->msg);
-                std::string &&ddl_stmt = client->drop_index(_db, xidlsn, index_msg);
+                auto &&drop_index_response = client->drop_index(_db, xidlsn, index_msg);
 
-                // Store the DDL statement for the Committer
-                redis_ddl.add_index_ddl(_db, xidlsn.xid, ddl_stmt);
+                // Store the index process request for the Committer
+                _index_requests_mgr->add_index_request(_db, xidlsn.xid, drop_index_response);
                 break;
             }
         case PgMsgEnum::ALTER_RESYNC:
@@ -876,15 +877,9 @@ namespace springtail::pg_log_mgr {
         // consume messages from log; num_messages of -1 means go until eos
         bool eos = false; // end of stream
         while (num_messages != 0 && !eos) {
-            bool eob=false; // end of block
-
-            // while not at end of message block (or stream) process
-            while (!eob && !eos) {
-                // read next message
-                PgMsgPtr msg = _reader.read_message(filter, eos, eob);
-                if (msg == nullptr) {
-                    continue;
-                }
+            // read next message
+            PgMsgPtr msg = _reader.read_message(filter, eos);
+            if (msg != nullptr) {
                 msg->pg_log_timestamp = timestamp;
 
                 // process the message
@@ -892,7 +887,7 @@ namespace springtail::pg_log_mgr {
             }
 
             if (num_messages > 0) {
-                num_messages--;
+                --num_messages;
             }
         }
     }
@@ -1191,7 +1186,7 @@ namespace springtail::pg_log_mgr {
         _current_xact = xact;
 
         // prepare a batch for processing
-        _current_batch = std::make_shared<Batch>(_db_id, begin_msg.xid, _committer_queue, _exists_cache);
+        _current_batch = std::make_shared<Batch>(_db_id, begin_msg.xid, _committer_queue, _exists_cache, _index_requests_mgr);
         _batch_map.try_emplace(begin_msg.xid, _current_batch);
         _xid_ts_tracker->add_pg_xid(_current_xact->xid, _pg_log_timestamp);
     }
@@ -1274,7 +1269,7 @@ namespace springtail::pg_log_mgr {
         _xact_map.insert({xact->xid, xact});
 
         // prepare a batch for processing
-        _current_batch = std::make_shared<Batch>(_db_id, start_msg.xid, _committer_queue, _exists_cache);
+        _current_batch = std::make_shared<Batch>(_db_id, start_msg.xid, _committer_queue, _exists_cache, _index_requests_mgr);
         _batch_map.try_emplace(start_msg.xid, _current_batch);
         _xid_ts_tracker->add_pg_xid(xact->xid, _pg_log_timestamp);
     }

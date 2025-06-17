@@ -915,7 +915,7 @@ namespace springtail::pg_fdw {
         }
 
         // get current row
-        Extent::Row row{state->scan_asc? *(*state->iter_start) : *(*state->iter_end)};
+        const Extent::Row& row{state->scan_asc? *(*state->iter_start) : *(*state->iter_end)};
         state->rows_fetched++;
 
         memset(nulls, true, num_attrs * sizeof(bool));

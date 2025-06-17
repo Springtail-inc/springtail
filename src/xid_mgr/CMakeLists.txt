@@ -69,7 +69,9 @@ add_dsymutil_command(xid_client)
 add_executable(dump_xact_log test/dump_xact_log.cc)
 target_link_libraries(dump_xact_log
     PUBLIC springtail_xid_mgr
-           springtail_common)
+           springtail_common
+    PRIVATE Boost::program_options
+)
 target_include_directories(dump_xact_log PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_dsymutil_command(dump_xact_log)
 
