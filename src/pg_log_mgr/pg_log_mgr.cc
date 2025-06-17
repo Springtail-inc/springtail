@@ -357,6 +357,7 @@ namespace springtail::pg_log_mgr {
             res = PgCopyTable::copy_db(_db_id, xid);
         }
 
+        LOG_DEBUG(LOG_PG_LOG_MGR, "About to wait for _internal_state");
         // ensure the pipeline was stalled before we complete
         _internal_state.wait_for_state(STATE_SYNCING);
 
