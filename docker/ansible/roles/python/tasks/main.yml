@@ -1,0 +1,9 @@
+- name: Install pip packages
+  ansible.builtin.pip:
+    name:
+      - grpcio
+      - protobuf
+      - opentelemetry-sdk
+      - opentelemetry-exporter-otlp-proto-http
+      - opentelemetry-api
+    extra_args: --break-system-packages
