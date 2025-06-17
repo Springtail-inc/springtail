@@ -1,45 +1,14 @@
-#include <bit>
-#include <cstdint>
-#include <cstdio>
-#include <cstring>
-#include <cassert>
-#include <vector>
-#include <algorithm>
-
-#include <absl/log/check.h>
-#include <fmt/core.h>
-
 // springtail includes
-#include <common/common.hh>
-#include <pg_repl/pg_common.hh>
-#include <common/redis.hh>
-#include <common/redis_types.hh>
-#include <common/thread_pool.hh>
-#include <common/json.hh>
-#include <common/constants.hh>
-
-#include <redis/redis_containers.hh>
-
 #include <pg_log_mgr/sync_tracker.hh>
 
 #include <pg_repl/exception.hh>
-#include <pg_repl/pg_types.hh>
-#include <pg_repl/pg_copy_table.hh>
-#include <pg_repl/libpq_connection.hh>
-#include <pg_repl/pg_repl_msg.hh>
 
 #include <storage/schema.hh>
 #include <storage/field.hh>
 
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/system_tables.hh>
-#include <sys_tbl_mgr/table.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
-
-#include <xid_mgr/xid_mgr_client.hh>
-
-#include <proto/sys_tbl_mgr.pb.h>
-#include <proto/pg_copy_table.pb.h>
 
 extern "C" {
     #include <postgres.h>
@@ -811,17 +780,27 @@ namespace springtail
             case (SchemaType::NUMERIC): {
                 std::string_view tmp(row.data() + pos, length);
 
-                // TODO: convert the binary data into a numeric value
+                /*
                 // XXX print out the binary data here
-                std::vector<char> data(tmp.begin(), tmp.end());
                 std::stringstream ss;
                 ss << std::hex << std::setfill('0');
-                for (char c : data) {
-                    ss << std::setw(2) << static_cast<uint8_t>(c);
+                for (size_t i = 0; i < length; ++i) {
+                    ss << std::setw(2) << static_cast<unsigned int>(static_cast<unsigned char>(tmp.begin()[i]));
                 }
+
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Converting type '{}' into NUMERIC, value: {}", pg_type, ss.str());
-                
-                fields->push_back(std::make_shared<ConstTypeField<std::vector<char>>>(data));
+                std::stringstream trace_ss;
+                auto trace = cpptrace::generate_trace();
+                trace.print(trace_ss, false); // no color
+                LOG_INFO("---> __parse_row: backtrace\n{}", trace_ss.str());
+                */
+
+                std::shared_ptr<numeric::NumericData> numeric_value(numeric::numeric_receive(tmp.begin(), length, 0),
+                    [](numeric::Numeric ptr) {
+                        numeric::NumericData::free_numeric(ptr);
+                    });
+
+                fields->push_back(std::make_shared<ConstTypeField<std::shared_ptr<numeric::NumericData>>>(numeric_value));
                 pos += length;
                 break;
             }

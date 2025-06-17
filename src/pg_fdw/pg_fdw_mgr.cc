@@ -1377,7 +1377,7 @@ namespace springtail::pg_fdw {
         }
         case SchemaType::NUMERIC: {
             auto &&value = field->get_numeric(&row);
-            return PointerGetDatum(value);
+            return PointerGetDatum(value.get());
         }
         case SchemaType::BINARY: {
             auto &&value = field->get_binary(&row);

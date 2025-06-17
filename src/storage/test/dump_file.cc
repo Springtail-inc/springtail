@@ -1,8 +1,5 @@
-#include <fmt/ranges.h>
-
 #include <common/init.hh>
 #include <storage/field.hh>
-#include "pg_repl/pg_common.hh"
 
 using namespace springtail;
 

@@ -93,7 +93,7 @@ namespace springtail {
             throw TypeError("Getting text type unsupported for this field.");
         }
 
-        virtual const numeric::Numeric get_numeric(const void *row) const {
+        virtual const std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const {
             throw TypeError("Getting numeric type unsupported for this field.");
         }
 
@@ -165,7 +165,7 @@ namespace springtail {
                 return (this->get_text(lhs_row) < rhs->get_text(rhs_row));
 
             case SchemaType::NUMERIC:
-                return (numeric::NumericData::cmp(this->get_numeric(lhs_row),this->get_numeric(rhs_row)) == -1);
+                return (numeric::NumericData::cmp(this->get_numeric(lhs_row).get(),this->get_numeric(rhs_row).get()) == -1);
 
             case SchemaType::BINARY: {
                 // retrieve the binary data
@@ -259,7 +259,7 @@ namespace springtail {
                 return (this->get_text(lhs_row) == rhs->get_text(rhs_row));
 
             case SchemaType::NUMERIC:
-                return (numeric::NumericData::cmp(this->get_numeric(lhs_row), this->get_numeric(rhs_row)) == 0);
+                return (numeric::NumericData::cmp(this->get_numeric(lhs_row).get(), this->get_numeric(rhs_row).get()) == 0);
 
             case SchemaType::BINARY: {
                 auto lhval = this->get_binary(lhs_row);
@@ -348,7 +348,7 @@ namespace springtail {
             throw TypeError("Setting string unsupported for this field.");
         }
 
-        virtual void set_numeric(void *row, const numeric::Numeric value) {
+        virtual void set_numeric(void *row, const std::shared_ptr<numeric::NumericData> value) {
             throw TypeError("Setting numeric type unsupported for this field.");
         }
 
@@ -538,7 +538,7 @@ namespace springtail {
         template <typename T>
         inline T get_value(const void* row) const {
             T result;
-            std::memcpy(&result, 
+            std::memcpy(&result,
                     reinterpret_cast<const Extent::Row *>(row)->data() + _offset,
                     sizeof(T));
             return result;
@@ -616,16 +616,25 @@ namespace springtail {
             return e_row->get_text(var_off);
         }
 
-        const numeric::Numeric get_numeric(const void *row) const override {
+        const std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const override {
             // must be numeric type
             DCHECK_EQ(_type, SchemaType::NUMERIC);
 
             auto e_row = reinterpret_cast<const Extent::Row *>(row);
             uint32_t var_off;
             std::memcpy(&var_off, e_row->data() + _offset, sizeof(uint32_t));
+            /*
+            LOG_INFO("---> ExtentField: Offset: {}", var_off);
+            std::stringstream ss;
+            auto trace = cpptrace::generate_trace();
+            trace.print(ss, false); // no color
+            LOG_INFO("---> ExtentField: backtrace\n{}", ss.str());
+            */
             std::span<const char> numeric_data = e_row->get_binary(var_off);
             void *data_ptr = const_cast<char *>(numeric_data.data());
-            return reinterpret_cast<const numeric::Numeric>(data_ptr);
+            return std::shared_ptr<numeric::NumericData>(
+                reinterpret_cast<const numeric::Numeric>(data_ptr),
+                [](numeric::Numeric) {});
         }
 
         const std::span<const char> get_binary(const void *row) const override {
@@ -710,13 +719,12 @@ namespace springtail {
             std::memcpy(e_row->data() + _offset, &offset, sizeof(uint32_t));
         }
 
-        void set_numeric(void *row, const numeric::Numeric value) override {
-            // TODO: convert this to a packed numeric value for disk storage
+        void set_numeric(void *row, const std::shared_ptr<numeric::NumericData> value) override {
             DCHECK_EQ(_type, SchemaType::NUMERIC);
 
             auto e_row = reinterpret_cast<Extent::Row *>(row);
 
-            std::span<const char> numeric_data(reinterpret_cast<const char *>(value), value->varsize());
+            std::span<const char> numeric_data(reinterpret_cast<const char *>(value.get()), value->varsize());
 
             // store the numeric into the variable data
             uint32_t offset = e_row->set_binary(numeric_data);
@@ -832,7 +840,7 @@ namespace springtail {
                 return SchemaType::FLOAT32;
             } else if constexpr(std::is_same_v<T, std::string>) {
                 return SchemaType::TEXT;
-            } else if constexpr(std::is_same_v<numeric::NumericData, std::vector<char>>) {
+            } else if constexpr(std::is_same_v<T, std::shared_ptr<numeric::NumericData>>) {
                 return SchemaType::NUMERIC;
             } else if constexpr(std::is_same_v<T, std::vector<char>>) {
                 return SchemaType::BINARY;
@@ -937,8 +945,9 @@ namespace springtail {
             }
         }
 
-        const numeric::Numeric get_numeric(const void *row) const override {
-            if constexpr(std::is_same_v<T, numeric::NumericData>) {
+        const std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const override {
+            if constexpr(std::is_same_v<T, std::shared_ptr<numeric::NumericData>>) {
+                // LOG_INFO("---> ConstField: value = {}", _value->to_string());
                 return _value;
             } else {
                 throw TypeError();
@@ -1143,9 +1152,10 @@ namespace springtail {
             }
         }
 
-        const numeric::Numeric get_numeric(const void *row) const override {
-            if constexpr(std::is_same_v<T, std::vector<char>>) {
+        const std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const override {
+            if constexpr(std::is_same_v<T, std::shared_ptr<numeric::NumericData>>) {
                 if (_field->is_null(row)) {
+                    LOG_INFO("---> DefaultValueField: value = {}", _default->to_string());
                     return _default;
                 }
                 return _field->get_numeric(row);
@@ -1571,16 +1581,36 @@ namespace springtail {
             return std::string_view(col.data.data(), col.data.size());
         }
 
-        const numeric::Numeric get_numeric(const void *row) const override {
+        /*
+        std::string binary_to_hex(const char* data, size_t length) const {
+            std::stringstream ss;
+            ss << std::hex << std::setfill('0');
+            for (size_t i = 0; i < length; ++i) {
+                ss << std::setw(2) << static_cast<unsigned int>(static_cast<unsigned char>(data[i]));
+            }
+            return ss.str();
+        }
+        */
+
+        const std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const override {
             auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
             const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
+            /*
+            LOG_INFO("---> PgLogField: _offset = {}", _offset);
+            LOG_INFO("---> PgLogField: data = {}", binary_to_hex(col.data.begin().base(), col.data.size()));
+            std::stringstream ss;
+            auto trace = cpptrace::generate_trace();
+            trace.print(ss, false); // no color
+            LOG_INFO("---> PgLogField: backtrace\n{}", ss.str());
+            */
 
             // XXX we only support binary data for native types
             DCHECK_EQ(col.type, 'b');
 
             numeric::Numeric value = numeric::numeric_receive(col.data.begin().base(), col.data.size(), 0);
-            // read in the binary data as a string
-            return value;
+            return std::shared_ptr<numeric::NumericData>(value, [](numeric::Numeric ptr) {
+                numeric::NumericData::free_numeric(ptr);
+            });
         }
 
         const std::span<const char> get_binary(const void *row) const override {
@@ -1702,11 +1732,7 @@ namespace springtail {
                     case(SchemaType::NUMERIC):
                         {
                             // note: perform a copy here to store the constant value
-                            auto &&tmp = field->get_numeric(tuple->row());
-                            std::shared_ptr<numeric::NumericData> numeric_data(
-                                reinterpret_cast<numeric::NumericData*>(tmp),
-                                [](numeric::NumericData* ptr) { ::free(ptr); }
-                            );
+                            auto &&numeric_data = field->get_numeric(tuple->row());
                             _fields.push_back(std::make_shared<ConstTypeField<std::shared_ptr<numeric::NumericData>>>(
                                 std::move(numeric_data)
                             ));
