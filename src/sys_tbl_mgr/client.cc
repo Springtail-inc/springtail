@@ -303,7 +303,7 @@ Client::drop_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &ms
     return response.statement();
 }
 
-std::string
+proto::IndexProcessRequest
 Client::create_index(uint64_t db_id,
                      const XidLsn &xid,
                      const PgMsgIndex &msg,
@@ -313,20 +313,20 @@ Client::create_index(uint64_t db_id,
     auto *index = request.mutable_index();
     index->set_state(static_cast<int32_t>(state));
 
-    proto::DDLStatement response;
+    proto::IndexProcessRequest response;
     grpc_client::retry_rpc("SysTblMgr", "CreateIndex",
                            [this, &request, &response](grpc::ClientContext *context) {
                                return _stub->CreateIndex(context, request, &response);
                            });
 
-    if (response.statement().empty()) {
-        throw SysTblMgrError("No DDL statement");
+    if (response.index().id() == 0) {
+        throw SysTblMgrError("No Secondary Index created");
     }
 
     // Automatically invalidate the schema cache from the provided XID
     invalidate_table(db_id, msg.table_oid, xid);
 
-    return response.statement();
+    return response;
 }
 
 void
@@ -389,7 +389,7 @@ Client::get_unfinished_indexes_info(uint64_t db_id)
     return response;
 }
 
-std::string
+proto::IndexProcessRequest
 Client::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
 {
     proto::DropIndexRequest request;
@@ -397,7 +397,7 @@ Client::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
     request.set_index_id(msg.oid);
     request.set_namespace_name(msg.namespace_name);
 
-    proto::DDLStatement response;
+    proto::IndexProcessRequest response;
     grpc_client::retry_rpc("SysTblMgr", "DropIndex",
                            [this, &request, &response](grpc::ClientContext *context) {
                                return _stub->DropIndex(context, request, &response);
@@ -406,7 +406,7 @@ Client::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
     // Automatically invalidate the schema cache from the provided XID
     _schema_cache->invalidate_by_index(db_id, msg.oid, xid);
 
-    return response.statement();
+    return response;
 }
 
 void
