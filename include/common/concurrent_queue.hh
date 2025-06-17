@@ -5,7 +5,6 @@
 #include <condition_variable>
 #include <atomic>
 #include <memory>
-#include <common/logging.hh>
 
 namespace springtail {
     /**
@@ -88,7 +87,6 @@ namespace springtail {
             if (_queue.empty()) {
                 write_lock.unlock();
                 if (_shutdown) {
-                    LOG_DEBUG(LOG_PG_LOG_MGR, "Notify Queue shutdown to proceed");
                     _cv_shutdown.notify_all();
                 }
                 return nullptr;
