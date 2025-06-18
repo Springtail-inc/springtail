@@ -1,0 +1,46 @@
+---
+- name: Update the package cache & upgrade
+  ansible.builtin.apt:
+    update_cache: yes
+    upgrade: yes
+
+- name: Install PG Deps
+  ansible.builtin.apt:
+    name:
+      - postgresql-client-common
+      - postgresql-common
+      - libllvm19
+      - ssl-cert
+    state: present
+
+- name: Download Custom PG build from Custom URL
+  ansible.builtin.get_url:
+    url: "{{ custom_pg_package_url }}"
+    dest: /tmp/springtail-pg.tar
+    mode: '0644'
+
+- name: Copy to remote host
+  ansible.builtin.copy:
+    src: /tmp/springtail-pg.tar
+    dest: /tmp/springtail-pg.tar
+
+- name: Install Custom PG build
+  ansible.builtin.shell: |
+    export DEBIAN_FRONTEND=noninteractive
+    cd /tmp
+    tar xvf springtail-pg.tar
+    dpkg -i libpq5_16.9-1.pgdg24.04+1_arm64.deb postgresql-client-16_16.9-1.pgdg24.04+1_arm64.deb
+    dpkg -i postgresql-16_16.9-1.pgdg24.04+1_arm64.deb
+    rm -f /tmp/*.tar /tmp/*.deb /tmp/*.ddeb
+
+- name: Enable PG16
+  ansible.builtin.copy:
+    dest: /etc/postgresql/16/main/start.conf
+    content: "auto\n"
+    owner: postgres
+    group: postgres
+    mode: '0644'
+
+- name: Enable Unix Socket for PostgresSQL
+  ansible.builtin.shell: |
+    chmod a+rwx /var/run/postgresql

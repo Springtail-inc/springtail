@@ -1,4 +1,4 @@
-# The Dockerfile for CI build & tests (for GitHub Actions)
+# The Dockerfile for building release packages. No tests, no debug symbols, no extra tools.
 FROM ubuntu:noble
 
 ENV TINI_VERSION=v0.19.0 \
@@ -12,15 +12,8 @@ RUN apt-get update && apt-get install -y ansible-core
 # Copy over the ansible assets
 COPY docker/ansible/ /var/ansible/
 # Run Ansible playbook to install additional dependencies
-RUN ansible-playbook /var/ansible/playbook.base.yml --connection=local --inventory localhost, --extra-vars "ansible_python_interpreter=/usr/bin/python3"
+RUN ansible-playbook /var/ansible/playbook.ci.yml --connection=local --inventory localhost, --extra-vars "ansible_python_interpreter=/usr/bin/python3"
 
-# CI container specific setup
-# Configure services and create PostgreSQL user
-RUN service postgresql start && \
-    sudo -u postgres psql -c "CREATE USER springtail WITH PASSWORD 'springtail' SUPERUSER LOGIN" && \
-    service postgresql stop
-
-# Copy over the source code and run build
 WORKDIR /__w/springtail/springtail
 COPY . /__w/springtail/springtail
 RUN rm -rf release/* && \
@@ -30,12 +23,13 @@ RUN rm -rf release/* && \
     find . -name "#*" | xargs rm -f
 
 RUN ./vcpkg.sh && \
-    mkdir -p /home/dev/debug && \
+    mkdir -p /home/dev/release && \
+    mkdir -p /home/dev/external && \
     mkdir -p /home/dev/install && \
-    ln -s /home/dev/debug debug && \
+    ln -s /home/dev/release release && \
     ln -s /home/dev/install install && \
-    cmake -B debug -S . -D'CMAKE_BUILD_TYPE=Debug' -DVCPKG_INSTALL_OPTIONS="--allow-unsupported" && \
-    cd debug && \
+    cmake -B release -S . -DCMAKE_BUILD_TYPE=RelWithDebInfo -DNDEBUG=1 -DVCPKG_INSTALL_OPTIONS="--allow-unsupported" && \
+    cd release && \
     make -j6 && \
     cd .. && \
     pip3 install --break-system-packages -r python/performance/requirements.txt && \
@@ -44,6 +38,4 @@ RUN ./vcpkg.sh && \
 # Pull back the libpg_query
 RUN cd /home/dev/external && git clone https://github.com/Springtail-inc/libpg_query.git
 
-# Set tini as the container's entrypoint
-ENTRYPOINT ["/tini"]
 

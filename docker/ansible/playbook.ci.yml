@@ -1,0 +1,10 @@
+- name: Setup Springtail CI Environment
+  hosts: localhost
+  become: true
+  roles:
+    - common
+    - python
+    - custom-pg
+    - postgres-config
+    - user_dev
+    - entrypoint
