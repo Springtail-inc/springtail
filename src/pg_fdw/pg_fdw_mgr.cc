@@ -967,7 +967,7 @@ namespace springtail::pg_fdw {
     }
 
     List *
-    PgFdwMgr::fdw_can_sort(SpringtailPlanState *state, List *sortgroup)
+    PgFdwMgr::fdw_can_sort(SpringtailPlanState *state, List *sortgroup, bool use_secondary)
     {
         PgFdwState *pg_state = static_cast<PgFdwState *>(state->pg_fdw_state);
 
@@ -1045,23 +1045,22 @@ namespace springtail::pg_fdw {
             }
         }
 
-        // We don't use secondary indexes for full table scans.
-        // From the measurements it is faster to scan over the primary
-        // index and then have PG to sort the tuples.
-        // Uncomment this if you need to enable secondary index scans.
-        /*
-        for (auto const& idx: pg_state->indexes) {
-            if (idx.id == constant::INDEX_PRIMARY) {
-                // we already checked the primary index
-                continue;
-            }
-            List* p = check_index(idx, sortgroup);
-            if (p) {
-                pg_state->sortgroup_index = idx;
-                return p;
+        // We don't use secondary indexes for full table scans by default.
+        // Change the default (use_secondary = true) in the function signature
+        // if you need to enable secondary index scans.
+        if (use_secondary) {
+            for (auto const& idx: pg_state->indexes) {
+                if (idx.id == constant::INDEX_PRIMARY) {
+                    // we already checked the primary index
+                    continue;
+                }
+                List* p = check_index(idx, sortgroup);
+                if (p) {
+                    pg_state->sortgroup_index = idx;
+                    return p;
+                }
             }
         }
-        */
 
         return {};
     }
