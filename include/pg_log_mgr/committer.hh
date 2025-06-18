@@ -93,8 +93,9 @@ namespace springtail::committer {
          * @param tid The table ID
          * @param completed_xid The most recent XID we completed processing
          * @param xid The XID to process
+         * @param thread_name The name of the thread registered with the coordinator
          */
-        void _process_table(uint64_t db_id, uint64_t tid, uint64_t completed_xid, uint64_t xid);
+        void _process_table(uint64_t db_id, uint64_t tid, uint64_t completed_xid, uint64_t xid, const std::string &thread_name);
 
         /**
          * Process a single extent of mutations from the write cache.
