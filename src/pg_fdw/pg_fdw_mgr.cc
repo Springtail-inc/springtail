@@ -1045,6 +1045,11 @@ namespace springtail::pg_fdw {
             }
         }
 
+        // We don't use secondary indexes for full table scans.
+        // From the measurements it is faster to scan over the primary
+        // index and then have PG to sort the tuples.
+        // Uncomment this if you need to enable secondary index scans.
+        /*
         for (auto const& idx: pg_state->indexes) {
             if (idx.id == constant::INDEX_PRIMARY) {
                 // we already checked the primary index
@@ -1056,6 +1061,7 @@ namespace springtail::pg_fdw {
                 return p;
             }
         }
+        */
 
         return {};
     }
@@ -1070,7 +1076,8 @@ namespace springtail::pg_fdw {
         LOG_DEBUG(LOG_FDW, "fdw_get_path_keys");
 
         // generate list of elements, each element is: list of attnums, followed by row count
-        // [(('id',),1)]
+        // and cost multiplier
+        // [(('id',),1,100)]
 
         for (auto const& idx: pg_state->indexes) {
             List      *attnums = NULL;
@@ -1082,15 +1089,20 @@ namespace springtail::pg_fdw {
             }
             item = lappend(item, attnums);
 
-            double rows = 1; // number of rows with unique key
-            if (!idx.is_unique) {
-                rows = pg_state->stats.row_count/10;
-                if (rows < 1) {
-                    rows = 1;
+            // cost multiplier
+            auto cost = SPRINGTAIL_PRIMARY_COST;
+            if (idx.id != constant::INDEX_PRIMARY) {
+                if (idx.is_unique) {
+                    cost = SPRINGTAIL_SECONDARY_LOOKUP_COST;
+                } else {
+                    cost = SPRINGTAIL_SECONDARY_SCAN_COST;
                 }
             }
+
+            item = lappend(item, makeConst(INT8OID,
+                        -1, InvalidOid, 8, state->rows, false, true));
             item = lappend(item, makeConst(INT4OID,
-                        -1, InvalidOid, 4, rows, false, true));
+                        -1, InvalidOid, 4, cost, false, true));
             result = lappend(result, item);
         }
 
@@ -1127,6 +1139,7 @@ namespace springtail::pg_fdw {
                 break;
             }
         }
+        planstate->rows = *rows;
 
         // estimate width based on target list using most common types
         ListCell *lc;

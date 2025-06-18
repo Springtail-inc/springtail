@@ -115,10 +115,11 @@ findPaths(PlannerInfo *root,
     {
         List	   *item = lfirst(lc);
         List	   *attrnos = linitial(item);
-        ListCell   *attno_lc;
-        int			nbrows = ((Const *) lsecond(item))->constvalue;
+        uint64_t    nbrows = ((Const *) lsecond(item))->constvalue;
+        double		cost = (double)((Const *) lthird(item))->constvalue;
         List	   *allclauses = NULL;
         Bitmapset  *outer_relids = NULL;
+        ListCell   *attno_lc;
 
         /* Armed with this knowledge, look for a join condition */
         /* matching the path list. */
@@ -212,7 +213,7 @@ findPaths(PlannerInfo *root,
                                                        NULL,  /* default pathtarget */
                                                       nbrows,
                                                       startupCost,
-                                                      nbrows * baserel->reltarget->width,
+                                                      (double)nbrows * baserel->reltarget->width * cost,
                                                       NIL, /* no pathkeys */
                                                       NULL,
                                                       NULL,
@@ -958,7 +959,7 @@ multicorn_getForeignPaths(PlannerInfo *root,
     /* Handle sort pushdown */
     if (root->query_pathkeys)
     {
-        List		*deparsed = deparse_sortgroup(root, foreigntableid, baserel);
+        List* deparsed = deparse_sortgroup(root, foreigntableid, baserel);
 
         if (deparsed)
         {
@@ -996,6 +997,7 @@ multicorn_getForeignPaths(PlannerInfo *root,
         }
     }
 }
+
 
 ForeignScan *
 multicorn_getForeignPlan(PlannerInfo *root,
