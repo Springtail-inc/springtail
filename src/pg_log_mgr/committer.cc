@@ -210,6 +210,9 @@ namespace springtail::committer {
                     auto entry = std::make_shared<WorkerEntry>(db_id, tid, completed_xid, xid);
                     _worker_queue.push(entry);
                 }
+
+                // update the coordinator
+                Coordinator::mark_alive(keep_alive);
             }
 
             // wait for tables to complete their processing
@@ -218,7 +221,10 @@ namespace springtail::committer {
             LOG_DEBUG(LOG_COMMITTER, "Wait for {} tables to complete", _tid_set.size());
             {
                 boost::unique_lock lock(_mutex);
-                _cv.wait(lock, [this]() { return _tid_set.empty(); });
+                while (!_cv.wait_for(lock, boost::chrono::seconds(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT),
+                                     [this]() { return _tid_set.empty(); })) {
+                    Coordinator::mark_alive(keep_alive); // update the coordinator
+                }
             }
             LOG_DEBUG(LOG_COMMITTER, "All table processing complete for XID {}", xid);
 
