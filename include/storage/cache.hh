@@ -936,6 +936,11 @@ namespace springtail {
             }
 
             /**
+             * Internal implementation of append.  Page must be locked when called.
+             */
+            void _append(TuplePtr tuple, ExtentSchemaPtr schema);
+
+            /**
              * Checks if the provided extent needs to be split and performs the split if needed.
              */
             void _check_split(std::vector<ExtentRef>::iterator pos, CacheExtentPtr extent, ExtentSchemaPtr schema);
