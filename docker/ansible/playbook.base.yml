@@ -1,0 +1,12 @@
+- name: Setup Springtail Dev Environment
+  hosts: localhost
+  become: true
+  roles:
+    - common
+    - python
+    - custom-pg
+    - postgres-config
+    - redis
+    - ssh
+    - user_dev
+    - entrypoint

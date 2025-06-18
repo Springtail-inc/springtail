@@ -1,0 +1,39 @@
+- name: Set fact for PostgreSQL config paths
+  ansible.builtin.set_fact:
+    postgres_conf: /etc/postgresql/16/main/postgresql.conf
+    pg_hba_conf: /etc/postgresql/16/main/pg_hba.conf
+
+- name: Allow PostgresSQL to listen on all interfaces
+  ansible.builtin.replace:
+    path: "{{ postgres_conf }}"
+    regexp: '^#?listen_addresses\s*=\s*.*'
+    replace: "listen_addresses = '*'"
+
+- name: Allow password auth from any host
+  ansible.builtin.lineinfile:
+    path: "{{ pg_hba_conf }}"
+    line: 'host    all    all    0.0.0.0/0    md5'
+    create: yes
+
+- name: Replace peer with md5 for local connections
+  ansible.builtin.replace:
+    path: "{{ pg_hba_conf }}"
+    regexp: '^local\s+all\s+all\s+peer'
+    replace: 'local all all md5'
+
+- name: Configure PostgresSQL logging and wal settings
+  ansible.builtin.blockinfile:
+    path: "{{ postgres_conf }}"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - logging"
+    block: |
+      log_destination = 'stderr'
+      logging_collector = on
+      log_directory = '/var/log/postgresql'
+      log_filename = 'postgresql_%a.log'
+      log_file_mode = 0644
+      log_truncate_on_rotation = on
+      wal_level = logical
+      log_min_messages = debug1
+      max_prepared_transactions = 64
+      unix_socket_permissions = 0777
+      springtail_fdw.config_file_path = '/tmp/springtail/system.json'
