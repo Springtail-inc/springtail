@@ -344,7 +344,7 @@ namespace springtail::pg_log_mgr {
                                      STATE_SYNC_STALL);
 
         // notify xact handler to rollover log
-        _notify_xact_start_sync();
+        //_notify_xact_start_sync();
 
         // copy tables
         LOG_DEBUG(LOG_PG_LOG_MGR, "Copying tables for db {}; state=synchronizing", _db_id);
@@ -360,7 +360,7 @@ namespace springtail::pg_log_mgr {
         }
 
         // ensure the pipeline was stalled before we complete
-        _internal_state.wait_for_state(STATE_SYNCING);
+        //_internal_state.wait_for_state(STATE_SYNCING);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; res size={}", res.size());
         if (res.size() > 0) {
@@ -388,7 +388,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_process_copy_results(const std::vector<PgCopyResultPtr> &res)
     {
-        assert(_internal_state.is(STATE_SYNCING));
+        //assert(_internal_state.is(STATE_SYNCING));
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Pushing copy results to sync tracker");
 
@@ -406,8 +406,9 @@ namespace springtail::pg_log_mgr {
         }
 
         // process stalled messages; set state to replaying
+        LOG_DEBUG(LOG_PG_LOG_MGR, "About to set STATE_REPLAYING");
         _internal_state.set(STATE_REPLAYING);
-        _internal_state.wait_for_state(STATE_RUNNING);
+        //_internal_state.wait_for_state(STATE_RUNNING);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; state=replaying");
     }
@@ -633,21 +634,12 @@ namespace springtail::pg_log_mgr {
             // mark alive with coordinator
             Coordinator::mark_alive(keep_alive);
 
-            // get log entry from queue
-            PgLogQueueEntryPtr log_entry = this->_logger_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
-            if (log_entry == nullptr) {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Timeout waiting for log entry");
-                continue;
-            }
-
-            LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Got log entry: path={}, start_offset={}, num_messages={}",
-                      log_entry->path, log_entry->start_offset, log_entry->num_messages);
-
             // check for stall message, if so then wait for sync to complete
-            if (log_entry->is_stall_message) {
-                assert (_internal_state.is(STATE_SYNC_STALL));
+            if (_internal_state.is(STATE_SYNC_STALL) || _internal_state.is(STATE_REPLAYING)) {
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Received stall msg for db: {}", _db_id);
+                //assert (_internal_state.is(STATE_SYNC_STALL));
                 // wait for sync to complete
-                _internal_state.set(STATE_SYNCING);
+                //_internal_state.set(STATE_SYNCING);
 
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Waiting for sync to complete");
                 while (!_shutdown && !_internal_state.wait_for_state({ STATE_REPLAYING, STATE_RUNNING }, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT)) {
@@ -663,6 +655,16 @@ namespace springtail::pg_log_mgr {
 
                 continue;
             }
+
+            // get log entry from queue
+            PgLogQueueEntryPtr log_entry = this->_logger_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+            if (log_entry == nullptr ) {
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Timeout waiting for log entry for db: {}", _db_id);
+                continue;
+            }
+
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Got log entry: path={}, start_offset={}, num_messages={}",
+                      log_entry->path, log_entry->start_offset, log_entry->num_messages);
 
             LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Processing log entry: path={}, start_offset={}, num_messages={}",
                       log_entry->path, log_entry->start_offset, log_entry->num_messages);
