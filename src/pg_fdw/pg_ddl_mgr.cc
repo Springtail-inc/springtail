@@ -681,7 +681,34 @@ namespace springtail::pg_fdw {
 
             // nothing to actually change in the FDW
             return {};
+        } else if (action == "set_rls_enabled") {
+            // enable/disable row level security
+            // this is a no-op for the FDW, as we don't support RLS
+            LOG_DEBUG(LOG_FDW, "RLS enabled/disabled with JSON: {}", ddl.dump());
+
+            bool enabled = ddl.at("rls_enabled").get<bool>();
+            std::string enable_action = enabled ? "ENABLE" : "DISABLE";
+
+            return fmt::format("ALTER FOREIGN TABLE {}.{} {} ROW LEVEL SECURITY",
+                               conn->escape_identifier(ddl.at("schema").get<std::string>()),
+                               conn->escape_identifier(ddl.at("table").get<std::string>()),
+                               enable_action);
+
+        } else if (action == "set_rls_forced") {
+            // force row level security
+            // this is a no-op for the FDW, as we don't support RLS
+            LOG_DEBUG(LOG_FDW, "RLS forced with JSON: {}", ddl.dump());
+
+            bool forced = ddl.at("rls_forced").get<bool>();
+            std::string force_action = forced ? "FORCE" : "NO FORCE";
+
+            return fmt::format("ALTER FOREIGN TABLE {}.{} {} ROW LEVEL SECURITY",
+                               conn->escape_identifier(ddl.at("schema").get<std::string>()),
+                               conn->escape_identifier(ddl.at("table").get<std::string>()),
+                               force_action);
         }
+
+
 
         // can't currently support other kinds of DDL mutations
         LOG_ERROR("Bad DDL statement: {}", action.get<std::string>());

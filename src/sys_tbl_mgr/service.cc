@@ -634,13 +634,14 @@ Service::AlterTable(grpc::ServerContext* context,
     // note: table should always exist when calling alter_table()
     assert(table_info != nullptr);
 
+    auto new_info = std::make_shared<TableCacheRecord>(request->table().id(), request->xid(),
+                                                       request->lsn(), ns_info->id,
+                                                       request->table().name(), request->table().rls_enabled(),
+                                                       request->table().rls_forced(), true);
+
     if (table_info->namespace_id != ns_info->id) {
         // if the schema/namespace changed then update the table_names table
         // insert the new name for this oid
-        auto new_info = std::make_shared<TableCacheRecord>(request->table().id(), request->xid(),
-                                                           request->lsn(), ns_info->id,
-                                                           request->table().name(), request->table().rls_enabled(),
-                                                           request->table().rls_forced(), true);
         _set_table_info(request->db_id(), new_info);
 
         // set the DDL statement
@@ -654,10 +655,6 @@ Service::AlterTable(grpc::ServerContext* context,
     } else if (table_info->name != request->table().name()) {
         // if the name is changed, update the name in the table_names table
         // insert the new name for this oid
-        auto new_info = std::make_shared<TableCacheRecord>(request->table().id(), request->xid(),
-                                                           request->lsn(), ns_info->id,
-                                                           request->table().name(), request->table().rls_enabled(),
-                                                           request->table().rls_forced(), true);
         _set_table_info(request->db_id(), new_info);
 
         // set the DDL statement
@@ -675,6 +672,21 @@ Service::AlterTable(grpc::ServerContext* context,
 
         _set_primary_index(request->db_id(), ns_info->id, request->table().id(), table_info->name,
                            ns_info->name, xid);
+
+    } else if (table_info->rls_enabled != request->table().rls_enabled()) {
+        // if the RLS flags are changed, update the table_names table
+        _set_table_info(request->db_id(), new_info);
+
+        // set the DDL statement
+        ddl["action"] = "set_rls_enabled";
+        ddl["rls_enabled"] = request->table().rls_enabled();
+    } else if (table_info->rls_forced != request->table().rls_forced()) {
+        // if the RLS forced flags are changed, update the table_names table
+        _set_table_info(request->db_id(), new_info);
+
+        // set the DDL statement
+        ddl["action"] = "set_rls_forced";
+        ddl["rls_forced"] = request->table().rls_forced();
     } else {
         XidLsn xid(request->xid(), request->lsn());
 

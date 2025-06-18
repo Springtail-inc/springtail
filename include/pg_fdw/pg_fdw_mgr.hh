@@ -313,17 +313,19 @@ namespace springtail::pg_fdw {
                                           const std::unordered_map<uint64_t, std::string> &user_types);
 
         /** Helper to generate create foreign table sql */
-        static std::string _gen_fdw_table_sql(const std::string &server_name,
-                                              const std::string &schema,
-                                              const std::string &table,
-                                              uint64_t tid,
-                                              std::vector<std::tuple<std::string, std::string, bool>> &columns);
+        static std::vector<std::string> _gen_fdw_table_sql(const std::string &server_name,
+            const std::string &schema,
+            const std::string &table,
+            uint64_t tid,
+            bool rls_enabled,
+            bool rls_read_only,
+            std::vector<std::tuple<std::string, std::string, bool>> &columns);
 
         /** Helper to generate a system table create foreign table sql */
         static std::string _gen_fdw_system_table(const std::string &server,
-                                                 const std::string &table,
-                                                 uint64_t tid,
-                                                 const std::vector<SchemaColumn> &columns);
+            const std::string &table,
+            uint64_t tid,
+            const std::vector<SchemaColumn> &columns);
 
         /** Helper to iterate through system tables to generate import command list */
         static List *_import_springtail_catalog(const std::string &server,

@@ -297,6 +297,7 @@ class Scheduler:
                 name = LivenessDaemonType(int(id)).name
                 self._track_last_failures(name)
                 self.logger.error(f"Timeout for component: {name}, {timestamp} < {min_time} {time.time() * 1000 - timestamp}")
+                self.logger.error(f"Raw data:\n{data}")
                 if self.production:
                     self.production.send_sns('failure', name)
                 return True
