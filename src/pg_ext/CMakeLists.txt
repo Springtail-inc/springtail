@@ -5,6 +5,7 @@ set(LIB_PGEXT_SOURCES
     error.cc
     memory.cc
     guc.cc
+    containers.cc
 )
 
 # Create the library

@@ -8,6 +8,27 @@
 
 #include <pg_ext/export.hh>
 
+//// EXPORTED INTERFACES
+
+// Context management
+extern "C" PGEXT_API void *CurrentMemoryContext;
+
+extern "C" PGEXT_API void *AllocSetContextCreateInternal(void *parent,
+                                                         const char *name,
+                                                         size_t minContextSize,
+                                                         size_t initBlockSize,
+                                                         size_t maxBlockSize);
+extern "C" PGEXT_API void *MemoryContextAlloc(void *context, size_t size);
+extern "C" PGEXT_API void *MemoryContextAllocZero(void *context, size_t size);
+extern "C" PGEXT_API void MemoryContextDelete(void *context);
+
+// Memory management
+extern "C" PGEXT_API void *palloc(size_t size);
+extern "C" PGEXT_API void *palloc0(size_t size);
+extern "C" PGEXT_API void pfree(void *ptr);
+
+
+//// INTERNAL INTERFACES
 namespace pgext {
 
 /**
@@ -107,23 +128,52 @@ private:
     void* _alloc_large(size_t size);
 };
 
+/**
+ * C++ allocator that uses palloc() and pfree().
+ */
+template <typename T>
+struct PGAllocator {
+    using value_type = T;
+
+    PGAllocator() noexcept = default;
+    template <class U> PGAllocator(const PGAllocator<U>&) noexcept {}
+
+    T* allocate(std::size_t n) {
+        if (n > std::size_t(-1) / sizeof(T))
+            throw std::bad_alloc();
+        void* ptr = palloc(n * sizeof(T));
+        if (!ptr)
+            throw std::bad_alloc();
+        return static_cast<T*>(ptr);
+    }
+
+    void deallocate(T* p, std::size_t) noexcept {
+        pfree(p);
+    }
+
+    // Optional: allocator traits
+    template <typename U>
+    struct rebind {
+        using other = PGAllocator<U>;
+    };
+
+    // Required for some STL implementations (e.g. libstdc++)
+    using pointer = T*;
+    using const_pointer = const T*;
+    using reference = T&;
+    using const_reference = const T&;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+};
+
+// Equality (required by standard)
+template <typename T, typename U>
+bool operator==(const PGAllocator<T>&, const PGAllocator<U>&) noexcept {
+    return true;
+}
+template <typename T, typename U>
+bool operator!=(const PGAllocator<T>&, const PGAllocator<U>&) noexcept {
+    return false;
+}
+
 } // namespace pgext 
-
-//// EXPORTED INTERFACES
-
-// Context management
-extern "C" PGEXT_API void *CurrentMemoryContext;
-
-extern "C" PGEXT_API void *AllocSetContextCreateInternal(void *parent,
-                                                         const char *name,
-                                                         size_t minContextSize,
-                                                         size_t initBlockSize,
-                                                         size_t maxBlockSize);
-extern "C" PGEXT_API void *MemoryContextAlloc(void *context, size_t size);
-extern "C" PGEXT_API void *MemoryContextAllocZero(void *context, size_t size);
-extern "C" PGEXT_API void MemoryContextDelete(void *context);
-
-// Memory management
-extern "C" PGEXT_API void *palloc(size_t size);
-extern "C" PGEXT_API void *palloc0(size_t size);
-extern "C" PGEXT_API void pfree(void *ptr);

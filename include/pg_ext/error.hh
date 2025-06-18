@@ -3,6 +3,7 @@
 #include <signal.h>
 #include <pg_ext/export.hh>
 
+
 extern "C" PGEXT_API volatile sig_atomic_t InterruptPending;
 extern "C" PGEXT_API void ProcessInterrupts();
 
