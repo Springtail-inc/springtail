@@ -1,0 +1,5 @@
+- name: Allow root login via SSH
+  ansible.builtin.replace:
+    path: /etc/ssh/sshd_config
+    regexp: 'PermitRootLogin prohibit-password'
+    replace: 'PermitRootLogin yes'

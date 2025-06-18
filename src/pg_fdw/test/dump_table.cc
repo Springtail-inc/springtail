@@ -187,7 +187,7 @@ dump_table(uint64_t db_id,
 
     // create the fdw state for the table @xid and begin the scan
     PgFdwState *state = mgr->fdw_create_state(db_id, tid, xid, xid);
-    mgr->fdw_begin_scan(state, fields->size(), attrs, target_list, nullptr, nullptr);
+    mgr->fdw_begin_scan(state, fields->size(), attrs, target_list, nullptr);
 
     // iterate through the table and print the values
     Datum values[fields->size()];

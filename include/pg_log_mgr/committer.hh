@@ -12,6 +12,7 @@
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 #include <common/properties.hh>
+#include <common/time_trace.hh>
 
 #include <redis/redis_ddl.hh>
 #include <redis/redis_containers.hh>
@@ -19,6 +20,7 @@
 #include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/indexer.hh>
 #include <pg_log_mgr/index_reconciliation_queue_manager.hh>
+#include <pg_log_mgr/index_requests_manager.hh>
 
 #include <pg_repl/index_reconcile_request.hh>
 
@@ -41,10 +43,13 @@ namespace springtail::committer {
     class Committer {
     public:
         Committer(uint32_t worker_count, const std::shared_ptr<ConcurrentQueue<committer::XidReady>> &committer_queue,
-                std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> index_reconciliation_queue_mgr)
+                std::shared_ptr<pg_log_mgr::IndexReconciliationQueueManager> index_reconciliation_queue_mgr,
+                const std::shared_ptr<pg_log_mgr::IndexRequestsManager> &index_requests_mgr, uint32_t indexer_worker_count)
             : _worker_count(worker_count),
+              _indexer_worker_count(indexer_worker_count),
               _committer_queue(committer_queue),
-              _index_reconciliation_queue_mgr(index_reconciliation_queue_mgr)
+              _index_reconciliation_queue_mgr(index_reconciliation_queue_mgr),
+              _index_requests_mgr(index_requests_mgr)
         { }
 
         /** Initiate the committer loop. */
@@ -67,8 +72,6 @@ namespace springtail::committer {
          */
         void _invalidate_systbl_cache(uint64_t db, const nlohmann::json &completed_ddls);
 
-        void _create_indexer();
-
         /**
          * The structure that defines a worker job.
          */
@@ -90,8 +93,9 @@ namespace springtail::committer {
          * @param tid The table ID
          * @param completed_xid The most recent XID we completed processing
          * @param xid The XID to process
+         * @param thread_name The name of the thread registered with the coordinator
          */
-        void _process_table(uint64_t db_id, uint64_t tid, uint64_t completed_xid, uint64_t xid);
+        void _process_table(uint64_t db_id, uint64_t tid, uint64_t completed_xid, uint64_t xid, const std::string &thread_name);
 
         /**
          * Process a single extent of mutations from the write cache.
@@ -114,7 +118,15 @@ namespace springtail::committer {
         RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         bool _has_ddl_precommit = false; ///< Flag indiciating if the redis DDL is holding precommit entries
 
+        /**
+         * Table worker threads in the committer
+         */
         uint32_t _worker_count;
+
+        /**
+         * Indexer worker threads to process indexes
+         */
+        uint32_t _indexer_worker_count;
         ConcurrentQueue<WorkerEntry> _worker_queue; ///< The queue of work for the worker threads.
         std::shared_ptr<ConcurrentQueue<XidReady>> _committer_queue;
 
@@ -149,5 +161,11 @@ namespace springtail::committer {
         /** Indexer
          */
         std::unique_ptr<Indexer> _indexer;
+
+        /**
+         * @brief shared_ptr to the index requests manager to get
+         * index requests (create/drop) for an XID per db
+         */
+        std::shared_ptr<pg_log_mgr::IndexRequestsManager> _index_requests_mgr;
     };
 }

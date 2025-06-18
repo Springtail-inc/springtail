@@ -56,9 +56,6 @@ namespace springtail {
             _current_offset = start_offset;
             _seek_stream();
         }
-
-        // ...and read the header
-        _read_hdr = true;
     }
 
     void
@@ -70,85 +67,47 @@ namespace springtail {
 
         _stream.open(file, std::fstream::in | std::fstream::binary);
         if (!_stream.is_open()) {
+            LOG_ERROR("Unable to open file: {}", file);
             throw PgIOError();
         }
 
         _current_path = file;
         _current_offset = offset;
-        _end_offset = offset;
 
         if (_current_offset != 0) {
             _seek_stream();
         }
-
-        // read in the header from new file, this should reset the end_offset
-        _read_hdr = true;
-    }
-
-    bool
-    PgMsgStreamReader::_read_header()
-    {
-        char buffer[PgMsgStreamHeader::SIZE];
-        _header_offset = _current_offset;
-
-        LOG_DEBUG(LOG_PG_REPL, "Reading header at offset: {}", _header_offset);
-        if (!_read_buffer(buffer, PgMsgStreamHeader::SIZE)) {
-            LOG_DEBUG(LOG_PG_REPL, "End of file: {}", _current_path.c_str());
-            return false;
-        }
-
-        PgMsgStreamHeader header(buffer);
-        if (header.magic != PgMsgStreamHeader::PG_LOG_MAGIC) {
-            LOG_WARN("Invalid stream header magic number: {}, offset: {}",
-                        header.magic, _current_offset);
-            throw PgIOError();
-        }
-
-        LOG_DEBUG(LOG_PG_REPL, "Reading header at offset: {}, msg_length: {}", _header_offset, header.msg_length);
-
-        _end_offset = header.msg_length + _current_offset;
-        _proto_version = header.proto_version;
-
-        return true;
     }
 
     PgMsgPtr
     PgMsgStreamReader::read_message(const std::vector<char> &filter,
-                                    bool &eos, bool &eob)
+                                    bool &eos)
     {
         PgMsgPtr msg = read_message(filter);
         eos = end_of_stream();
-        eob = end_of_block();
         return msg;
     }
 
     PgMsgPtr
     PgMsgStreamReader::read_message(const std::vector<char> &filter)
     {
-        LOG_DEBUG(LOG_PG_REPL, "Reading message, current_offset: {}, end_offset: {}\n", _current_offset, _end_offset);
+        LOG_DEBUG(LOG_PG_REPL, "Reading message, current_offset: {}\n", _current_offset);
         // check if we've already encountered the end of the file
         if (end_of_stream()) {
             return nullptr;
         }
 
-        try {
-            // check if we are done reading this message block
-            if (_read_hdr || _end_offset == _current_offset) {
-                _read_hdr = false;
-                // if so read the header and check for eof
-                if (!_read_header()) {
-                    // hit eof; if we are at the end file, then we are done
-                    return nullptr;
-                }
-            }
+        // record the message offset
+        _message_offset = _current_offset;
 
+        try {
             // read the message type
             char msg_type = _recvint8();
             bool skip_msg = !_is_message_filtered(msg_type, filter);
             PgMsgPtr msg = nullptr;
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Reading message type: {}, current_offset: {}, end_offset: {}, skip_msg: {}",
-                        msg_type, _current_offset, _end_offset, skip_msg);
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Reading message type: {}, current_offset: {}, skip_msg: {}",
+                      msg_type, _current_offset, skip_msg);
 
             if (skip_msg) {
                 _skip_msg(msg_type);
@@ -162,12 +121,6 @@ namespace springtail {
                     msg->proto_version = _proto_version;
                     msg->is_streaming = is_streaming;
                 }
-            }
-
-            // sanity check to make sure we didn't go past end of message block
-            if (_current_offset > _end_offset) {
-                LOG_WARN("Overran end of message block");
-                throw PgMessageTooSmallError();
             }
 
             return msg;
@@ -306,7 +259,7 @@ namespace springtail {
     PgMsgStreamReader::_skip_string()
     {
         // Read characters until null terminator
-        while (_recvint8() != '\0' && _current_offset <= _end_offset) {}
+        while (_recvint8() != '\0') {}
     }
 
     void
@@ -1280,61 +1233,52 @@ namespace springtail {
     uint64_t
     PgMsgStreamReader::scan_log(const std::filesystem::path &file, bool truncate)
     {
-        std::ifstream stream(file, std::fstream::in | std::fstream::binary);
-        if (!stream.is_open()) {
-            throw PgIOError();
+        // updated logic:
+        // 1) scan for BEGIN/COMMIT records
+        //    b) if we see a COMMIT, then can record the LSN associated with that as the most recent
+        //    c) once we see EOF, return the latest completed LSN
+        // 2) if no LSN completed in this file, then return INVALID_LSN
+        static std::vector<char> filter = { pg_msg::MSG_COMMIT,
+                                            pg_msg::MSG_STREAM_COMMIT };
+        uint64_t end_lsn = INVALID_LSN;
+        uint64_t offset = 0;
+
+        PgMsgStreamReader reader(file);
+        do {
+            auto msg = reader.read_message(filter);
+
+            // nullptr if message skipped
+            if (msg == nullptr) {
+                continue;
+            }
+
+            // store the lsn
+            switch (msg->msg_type) {
+            case (PgMsgEnum::COMMIT):
+                end_lsn = std::get<PgMsgCommit>(msg->msg).xact_lsn;
+                offset = reader.offset();
+                break;
+
+            case (PgMsgEnum::STREAM_COMMIT):
+                end_lsn = std::get<PgMsgStreamCommit>(msg->msg).xact_lsn;
+                offset = reader.offset();
+                break;
+
+            default:
+                LOG_ERROR("Invalid message type: {}", static_cast<uint8_t>(msg->msg_type));
+                throw PgUnexpectedDataError();
+            }
+        } while (!reader.end_of_stream());
+
+        // fast-exit if the file contains no commits
+        if (end_lsn == INVALID_LSN) {
+            return end_lsn;
         }
 
-        uint64_t end_lsn=0;
-
-        while(true) {
-            uint64_t hdr_offset = stream.tellg();
-
-            char buffer[PgMsgStreamHeader::SIZE];
-            stream.read(buffer, PgMsgStreamHeader::SIZE);
-            if (stream.gcount() == 0 && stream.eof()) {
-                // we've hit the end of the file and are done
-                return end_lsn;
-            }
-
-            if (stream.gcount() != PgMsgStreamHeader::SIZE || stream.eof()) {
-                // we've read some of the header but failed to read it all
-                LOG_WARN("Failed to read header from file: {}", file);
-                if (truncate) {
-                    _truncate_file(file, hdr_offset);
-                } else {
-                    throw PgIOError();
-                }
-                return end_lsn;
-            }
-
-            PgMsgStreamHeader header(buffer);
-            if (header.magic != PgMsgStreamHeader::PG_LOG_MAGIC) {
-                LOG_WARN("Invalid stream header magic number: {}", header.magic);
-                throw PgIOError();
-            }
-
-            [[maybe_unused]] char c = stream.get(); // read the message type
-
-            LOG_DEBUG(LOG_PG_REPL, "Header: start_lsn: {}, end_lsn: {}, msg_length: {}, msg_type: {}",
-                                header.start_lsn, header.end_lsn, header.msg_length, c);
-
-            stream.seekg(header.msg_length-1, std::ios::cur);
-            if (stream.eof()) {
-                LOG_WARN("Failed to seek to end of message");
-                if (truncate) {
-                    _truncate_file(file, hdr_offset);
-                } else {
-                    throw PgIOError();
-                }
-            }
-
-            // update ending lsn if we have a valid one
-            // tt seems relation messages 'R' set lsn = 0
-            if (header.end_lsn != 0) {
-                end_lsn = header.end_lsn;
-            }
-        }
+        // note: do we need to close the stream before doing this?
+        // truncate to the end of the last-seen commit
+        _truncate_file(file, offset);
+        return end_lsn;
     }
 
     void
@@ -1342,10 +1286,12 @@ namespace springtail {
     {
         int fd = ::open(file.c_str(), O_WRONLY);
         if (fd == -1) {
+            LOG_ERROR("Failed to open file {} for truncation: {}", file, errno);
             throw PgIOError();
         }
 
         if (::ftruncate(fd, offset) == -1) {
+            LOG_ERROR("Failed to truncate file {} to offset {}: {}", file, offset, errno);
             ::close(fd);
             throw PgIOError();
         }
@@ -1371,17 +1317,6 @@ namespace springtail {
     {
         if (data.length == 0) {
             return _current_offset;
-        }
-
-        // write out header containing length if start of message
-        if (data.msg_offset == 0) {
-            char buffer[PgMsgStreamHeader::SIZE];
-            PgMsgStreamHeader header(data.msg_length, data.starting_lsn, data.ending_lsn, data.proto_version);
-            header.encode_header(buffer);
-
-            CHECK_EQ(::write(_fd, buffer, PgMsgStreamHeader::SIZE), PgMsgStreamHeader::SIZE);
-            _current_offset += PgMsgStreamHeader::SIZE;
-            _msg_end_offset = _current_offset + data.msg_length;
         }
 
         // write out message

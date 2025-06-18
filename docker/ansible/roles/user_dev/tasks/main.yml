@@ -1,0 +1,22 @@
+- name: Create dev user
+  ansible.builtin.user:
+    name: dev
+    shell: /bin/bash
+    groups: sudo
+    append: yes
+    password: "{{ 'dev' | password_hash('sha512') }}"
+
+- name: Allow passwordless sudo for dev
+  ansible.builtin.lineinfile:
+    path: /etc/sudoers
+    line: '%sudo ALL=(ALL:ALL) NOPASSWD:ALL'
+
+- name: Setup dev directories
+  ansible.builtin.file:
+    path: "/home/dev/{{ item }}"
+    state: directory
+    owner: dev
+  loop:
+    - debug
+    - external
+    - install

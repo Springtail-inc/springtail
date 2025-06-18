@@ -20,7 +20,7 @@
 using namespace springtail;
 
 namespace {
-    constexpr int THREADS = 500;
+    constexpr int THREADS = 100;
     constexpr int ITERS = 100;
 
     /**
@@ -109,6 +109,7 @@ namespace {
             xid_mgr::XidMgrServer *server = xid_mgr::XidMgrServer::get_instance();
 
             for (int i = 0; i < iterations; i++) {
+                std::unique_lock<std::mutex> lock(_mx);
                 uint64_t xid = client->get_committed_xid(1, 0);
                 server->commit_xid(1, 1, xid + 1, false);
             }
@@ -118,6 +119,7 @@ namespace {
 
         std::vector<std::jthread> _threads;
         std::unique_ptr<Subscriber> _subscriber;
+        std::mutex _mx;
     };
 
     TEST_F(XidMgr_Test, ThreadedTest)

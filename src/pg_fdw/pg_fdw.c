@@ -422,7 +422,7 @@ springtail_BeginForeignScan(ForeignScanState *node, int eflags)
     /* invalid during the execution (in particular with the cursor interface) */
     /* The copy occurs within the fdw_begin_scan() call */
     fdw_begin_scan(planstate->pg_fdw_state, slot->tts_tupleDescriptor->natts,
-            attrs, planstate->target_list, qual_list, planstate->pathkeys);
+            attrs, planstate->target_list, qual_list);
 
     return;
 }
@@ -465,7 +465,11 @@ springtail_ReScanForeignScan(ForeignScanState *node)
 {
     // reset state to beginning of table
     void *state = node->fdw_state;
-    fdw_reset_scan(state);
+
+    // build a simple qual list against constants only
+    List* qual_list = multicorn_buildSimpleQualList(node);
+
+    fdw_reset_scan(state, qual_list);
 }
 
 /**

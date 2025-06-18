@@ -18,7 +18,7 @@ namespace springtail::test::ddl_helpers {
 
     }
 
-    std::string create_index(uint64_t db_id, uint64_t table_id, uint64_t xid, uint64_t index_id,
+    proto::IndexProcessRequest create_index(uint64_t db_id, uint64_t table_id, uint64_t xid, uint64_t index_id,
             std::string idx_name, std::vector<PgMsgSchemaColumn> columns, sys_tbl::IndexNames::State idx_state)
     {
 

@@ -33,7 +33,8 @@ namespace springtail::pg_log_mgr {
                        int port,
                        bool archive_logs,
                        std::shared_ptr<ConcurrentQueue<committer::XidReady>> committer_queue,
-                       std::shared_ptr<IndexReconciliationQueueManager> index_reconciliation_queue_mgr)
+                       std::shared_ptr<IndexReconciliationQueueManager> index_reconciliation_queue_mgr,
+                       const std::shared_ptr<IndexRequestsManager> &index_requests_mgr)
     : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
       _host(host), _db_name(db_name), _user_name(user_name),
       _password(password), _pub_name(pub_name), _slot_name(slot_name),
@@ -43,9 +44,10 @@ namespace springtail::pg_log_mgr {
       _committer_queue(committer_queue),
       _xact_log_path(xact_log_path),
       _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
-      _index_reconciliation_queue_mgr(index_reconciliation_queue_mgr)
+      _index_reconciliation_queue_mgr(index_reconciliation_queue_mgr),
+      _index_requests_mgr(index_requests_mgr)
     {
-        _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, _committer_queue, archive_logs);
+        _pg_log_reader = std::make_shared<PgLogReader>(_db_id, QUEUE_SIZE, repl_log_path, _committer_queue, archive_logs, _index_requests_mgr);
 
         // construct the callback for watching for database state changes
         _cache_watcher_db_states = std::make_shared<RedisCache::RedisChangeWatcher>(
@@ -91,16 +93,8 @@ namespace springtail::pg_log_mgr {
             Properties::set_db_state(_db_id, state);
         }
 
-        // reset state if we were stuck in syncing or copy tables
-        if (state == redis::db_state_change::REDIS_STATE_SYNCING) {
-            // reset state to running; GC will move us back to syncing
-            state = redis::db_state_change::REDIS_STATE_RUNNING;
-            Properties::set_db_state(_db_id, state);
-        } else if (state == redis::db_state_change::REDIS_STATE_COPY_TABLES) {
-            // we were in copy tables state, reset to initialize to restart copy tables
-            state = redis::db_state_change::REDIS_STATE_INITIALIZE;
-            Properties::set_db_state(_db_id, state);
-        } else if (state == redis::db_state_change::REDIS_STATE_FAILED) {
+        // if the system failed, must be manually restarted in a valid state
+        if (state == redis::db_state_change::REDIS_STATE_FAILED) {
             LOG_ERROR("Database in failed state, cannot start up, db_id={}", _db_id);
             return;
         }
@@ -111,7 +105,7 @@ namespace springtail::pg_log_mgr {
             std::string(Properties::DATABASE_STATE_PATH) + "/" + std::to_string(_db_id),
             _cache_watcher_db_states);
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Starting up: DB state: {}", state);
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Starting up: db_id: {}, DB state: {}", _db_id, state);
 
         // need to add back table sync worker items to redis sync queue and clear the queue
         _redis_sync_queue.abort(REDIS_WORKER_ID);
@@ -125,7 +119,7 @@ namespace springtail::pg_log_mgr {
         uint64_t next_xid = committed_xid + 2;
         _pg_log_reader->set_next_xid(next_xid);
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Last committed XID: {}", committed_xid);
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Last committed XID: db_id: {}, xid: {}", _db_id, committed_xid);
 
         // Note: If we are in recovery then we need to start the copy and reader threads first so
         //       that we can perform log replay, then we can start streaming from the last LSN.  But
@@ -139,7 +133,10 @@ namespace springtail::pg_log_mgr {
             _wal_buffer_flag = true;
 
             // start streaming immediately so that we can't miss any mutations to copied tables
-            _start_streaming(lsn, true);
+            if (!_start_streaming(lsn, true)) {
+                LOG_ERROR("Failed to start streaming");
+                return;
+            }
 
             // initiate table copy thread; this will perform the initial copy of all tables
             _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
@@ -160,7 +157,10 @@ namespace springtail::pg_log_mgr {
             lsn = recovery.repair_logs();
 
             // once we have the target LSN the system is ready to start streaming
-            _start_streaming(lsn, false);
+            if (!_start_streaming(lsn, false)) {
+                LOG_ERROR("Failed to start streaming");
+                return;
+            }
 
             // set the system into the running state
             _startup_running();
@@ -178,6 +178,10 @@ namespace springtail::pg_log_mgr {
             // note: we wait to perform these actions until the log reader has been started
             // perform the any required log recovery here
             recovery.replay_logs();
+
+            // Initiate indexes recovery for this database before pg_log_reader messages
+            _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::Type::INDEX_RECOVERY_TRIGGER));
+
             _wal_buffer_flag = false;
             LOG_DEBUG(LOG_PG_LOG_MGR, "Done with recovery");
         }
@@ -209,9 +213,6 @@ namespace springtail::pg_log_mgr {
         // create directories if they don't exist
         std::filesystem::create_directories(_repl_log_path);
         std::filesystem::create_directories(_xact_log_path);
-
-        // set state to copy tables
-        Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_COPY_TABLES);
 
         // set internal state to copy tables
         _internal_state.set(STATE_STARTUP_SYNC);
@@ -345,12 +346,8 @@ namespace springtail::pg_log_mgr {
         // notify xact handler to rollover log
         _notify_xact_start_sync();
 
-        // set db state to syncing
-        Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_SYNCING);
-
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Copying tables; state=synchronizing");
-
         // copy tables
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Copying tables for db {}; state=synchronizing", _db_id);
         std::vector<PgCopyResultPtr> res;
         auto xid = _pg_log_reader->get_next_xid();
 
@@ -415,7 +412,7 @@ namespace springtail::pg_log_mgr {
         LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; state=replaying");
     }
 
-    void
+    bool
     PgLogMgr::_start_streaming(uint64_t lsn, bool do_init)
     {
         try {
@@ -433,7 +430,7 @@ namespace springtail::pg_log_mgr {
                     LOG_ERROR("Replication slot does not exist: db_id={}, slot={}", _db_id, _slot_name);
                     // shutdown
                     Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
-                    return;
+                    return false;
                 }
             }
 
@@ -449,17 +446,44 @@ namespace springtail::pg_log_mgr {
                          _db_id, e.what());
             // shutdown
             Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
-            return;
+            return false;
         } catch (const PgUnrecoverableError &e) {
             LOG_ERROR("Unrecoverable Error starting streaming in db_id={}: {}, setting state to failed",
                          _db_id, e.what());
             // shutdown
             Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
-            return;
+            return false;
         }
 
         // create the worker threads
         _writer_thread = std::thread(&PgLogMgr::_log_writer_thread, this);
+        // create the tracer thread
+        _tracer_thread = std::thread(&PgLogMgr::_trace_thread, this);
+
+        return true;
+    }
+
+    void
+    PgLogMgr::_trace_thread()
+    {
+        namespace fs = std::filesystem;
+        auto file_path = "/tmp/output_trace.txt";
+        auto clear_traces = "/tmp/clear_trace.txt";
+        while (!_shutdown) {
+            // if the file exists, log the traces and remove the file
+            if (fs::exists(file_path)) {
+                TIME_TRACESET_LOG(time_trace::traces);
+                fs::remove(file_path);
+            }
+            // if the clear traces file exists, clear the traces and remove the file
+            if (fs::exists(clear_traces)) {
+                TIME_TRACESET_LOG(time_trace::traces);
+                time_trace::traces.reset();
+                fs::remove(clear_traces);
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        }
     }
 
     bool
@@ -541,7 +565,7 @@ namespace springtail::pg_log_mgr {
             while (!_shutdown && _wal_buffer_flag) {
                 Coordinator::mark_alive(keep_alive);
 
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Recevied data in recovery mode");
+                LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Recevied data in recovery mode");
                 if (!_writer_read_data(data, logger, start_offset,
                     [&post_recovery_queue, &start_offset](uint64_t end_offset, const std::filesystem::path &file_path) {
                         if (!post_recovery_queue.empty()) {
@@ -573,7 +597,7 @@ namespace springtail::pg_log_mgr {
             while (!_shutdown) {
                 Coordinator::mark_alive(keep_alive);
 
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Recevied data in normal mode");
+                LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Received data in normal mode");
                 if (!_writer_read_data(data, logger, start_offset,
                     [this, &start_offset](uint64_t end_offset, const std::filesystem::path &file_path) {
                         _logger_queue.push(start_offset, end_offset, file_path);
@@ -616,22 +640,31 @@ namespace springtail::pg_log_mgr {
                 continue;
             }
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Got log entry: path={}, start_offset={}, num_messages={}",
-                                log_entry->path, log_entry->start_offset, log_entry->num_messages);
+            LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Got log entry: path={}, start_offset={}, num_messages={}",
+                      log_entry->path, log_entry->start_offset, log_entry->num_messages);
 
             // check for stall message, if so then wait for sync to complete
             if (log_entry->is_stall_message) {
                 assert (_internal_state.is(STATE_SYNC_STALL));
                 // wait for sync to complete
                 _internal_state.set(STATE_SYNCING);
+
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Waiting for sync to complete");
-                _internal_state.wait_for_state({ STATE_REPLAYING, STATE_RUNNING });
+                while (!_shutdown && !_internal_state.wait_for_state({ STATE_REPLAYING, STATE_RUNNING }, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT)) {
+                    Coordinator::mark_alive(keep_alive);
+                }
+
+                if (_shutdown) {
+                    break;
+                }
+
                 _internal_state.set(STATE_RUNNING);
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Sync to complete");
+
                 continue;
             }
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Processing log entry: path={}, start_offset={}, num_messages={}",
+            LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Processing log entry: path={}, start_offset={}, num_messages={}",
                       log_entry->path, log_entry->start_offset, log_entry->num_messages);
 
             auto file_timestamp = fs::extract_timestamp_from_file(log_entry->path, LOG_PREFIX_REPL, LOG_SUFFIX);

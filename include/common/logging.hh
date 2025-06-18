@@ -68,6 +68,7 @@ namespace springtail {
         LOG_SCHEMA = 0x400,
         LOG_COMMITTER = 0x800,
         LOG_SYS_TBL_MGR = 0x1000,
+        LOG_PG_LOG_MGR_DATA = 0x2000,
         LOG_ALL = 0xFFFFFFFF
     };
 

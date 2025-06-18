@@ -2,6 +2,7 @@ import logging
 from lxml import etree
 import os
 import springtail
+import time
 
 from test_case import TestCase
 
@@ -34,12 +35,11 @@ class TestSet:
         self._directory = directory
         self._config_file = config_file
         self._build_dir = build_dir
-        self._props = springtail.Properties(config_file, True)
         self._test_params = test_params
         self._name = os.path.splitext(os.path.basename(self._config_file))[0] + ' - ' + os.path.basename(self._directory)
 
         # constuct the special "config" test case for global setup and cleanup
-        self._config = TestCase(os.path.join(directory, _GLOBAL_CONFIG_FILE), self._props, self._build_dir, self._test_params, ['setup', 'cleanup'])
+        self._config = TestCase(os.path.join(directory, _GLOBAL_CONFIG_FILE), self._build_dir, self._test_params, ['setup', 'cleanup'])
         self._config.parse_file()
 
         # collect and parse the test cases from the directory
@@ -58,7 +58,7 @@ class TestSet:
 
             try:
                 # parse the test
-                self._tests[test_file] = TestCase(os.path.join(directory, test_file), self._props, self._build_dir, self._test_params)
+                self._tests[test_file] = TestCase(os.path.join(directory, test_file), self._build_dir, self._test_params)
                 self._tests[test_file].parse_file()
 
                 # if only a subset of test cases was requsted, limit them here
@@ -74,29 +74,37 @@ class TestSet:
 
 
     def _apply_replica_full(self) -> None:
-        table_sql = """SELECT nspname::text, relname::text
-                         FROM pg_catalog.pg_class
-                         JOIN pg_catalog.pg_namespace ON relnamespace=pg_namespace.oid
-                         LEFT OUTER JOIN pg_catalog.pg_index ON indrelid=pg_class.oid
-                        WHERE relkind = 'r'
-                          AND nspname NOT LIKE 'pg_%'
-                          AND nspname != 'information_schema'
-                          AND pg_index.indexrelid IS NULL
-                        ORDER BY pg_class.oid"""
-        primary_name = self._props.get_db_configs()[0]['name']
-        connection = springtail.connect_db_instance(self._props, primary_name)
-        with connection.cursor() as cursor:
-            # retrieve the list of tables without primary keys
-            cursor.execute(table_sql)
-            results = cursor.fetchall()
+        sql = "SELECT __pg_springtail_triggers.set_identity_on_tables_without_pk();"
+        for db_config in self._props.get_db_configs():
+            primary_name = db_config['name']
+            connection = springtail.connect_db_instance(self._props, primary_name)
+            with connection.cursor() as cursor:
+                cursor.execute(sql)
+            connection.commit()
+            connection.close()
 
-            # apply REPLICA IDENITFY FULL to each
-            for row in results:
-                logging.debug(f'ALTER TABLE "{row[0]}"."{row[1]}" REPLICA IDENTITY FULL')
-                cursor.execute(f'ALTER TABLE "{row[0]}"."{row[1]}" REPLICA IDENTITY FULL')
-        connection.commit()
-        connection.close()
+    def _add_databases(self) -> None:
+        added_databases = self._config.get_added_databases()
 
+        # add all new database to properties and redis
+        for db_name in added_databases:
+            self._props.add_database(db_name)
+
+        # add all new databases to Postgress instance
+        for db_config in self._props.get_db_configs():
+            db_name = db_config['name']
+            if db_name in added_databases:
+                springtail.cleanup_database(self._props, db_config)
+
+    def _remove_databases(self) -> None:
+        added_databases = self._config.get_added_databases()
+
+        # remove all added databases
+        for db_config in self._props.get_db_configs():
+            db_name = db_config['name']
+            if db_name in added_databases:
+                logging.debug(f'Dropping database {db_name}, config: {db_config}')
+                springtail.drop_database(self._props, db_config)
 
     def run(self,
             shutdown_on_fail: bool = False) -> bool:
@@ -107,13 +115,26 @@ class TestSet:
         Returns True if the tests all succeed, False otherwise
 
         """
+
+        self._props = springtail.Properties(self._config_file, True)
+        self._config.set_props(self._props)
+
         # make sure Springtail is stopped
         logging.debug('Stopping any existing Springtail instance')
-        springtail.stop(self._config_file, do_cleanup=True)
+        springtail.stop_with_properties(self._props, do_cleanup=True)
+
+        # add databases
+        self._add_databases()
+
+        # set database state appropriately
+        self._props.set_all_db_states('initialize')
 
         # perform the primary db setup
         logging.debug('Perform the global setup()')
         self._config.setup()
+
+        # install the event triggers for DDL statements
+        springtail.install_triggers(self._props, self._build_dir)
 
         # apply the REPLICA IDENTITY FULL to any tables without primary keys
         self._apply_replica_full()
@@ -130,7 +151,7 @@ class TestSet:
 
         # start Springtail
         logging.debug('Starting the Springtail instance')
-        springtail.start(self._config_file, self._build_dir, do_cleanup=False, do_init=True, postgres_only=False, do_fdw_install=False)
+        springtail.start(self._config_file, self._build_dir, do_cleanup=False, do_init=False, postgres_only=False, do_fdw_install=False)
 
         # stop the background mutations and verify correctness
         success = self._config.stop_background()
@@ -152,6 +173,7 @@ class TestSet:
 
             # run the actual test
             try:
+                self._tests[test_file].set_props(self._props)
                 self._tests[test_file].test()
                 self._tests[test_file].verify()
 
@@ -193,6 +215,9 @@ class TestSet:
         # perform the primary db cleanup
         logging.debug('Perform the global cleanup()')
         self._config.cleanup()
+
+        # remove databases that has been added
+        self._remove_databases()
 
         # cleanup custom postgres config
         springtail.cleanup_postgres_config()

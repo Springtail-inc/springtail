@@ -5,6 +5,8 @@
 #include <sys_tbl_mgr/table.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_client.hh>
+#include <common/json.hh>
+#include <common/properties.hh>
 
 //#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
 #include <common/time_trace.hh>
@@ -595,18 +597,17 @@ namespace indexer_helpers {
 
 
 
-        // find primary index
+        // find primary index root
         auto it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_PRIMARY; });
         assert(it != roots.end());
 
+        // initialize the primary index
         if (it->extent_id != constant::UNKNOWN_EXTENT) {
-            _began_empty = false;
             _primary_index->init(it->extent_id);
         } else {
-            _began_empty = true;
             _primary_index->init_empty();
         }
-
+        _use_empty = _primary_index->empty();
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
 
         // deal with secondary indexes
@@ -701,6 +702,12 @@ namespace indexer_helpers {
         // update the stats
         if (_id > constant::MAX_SYSTEM_TABLE_ID) {
             --_stats.row_count;
+            if (_stats.row_count == 0) {
+                // we've emptied the table, need to switch to using the _empty_page
+                // note: this is because the pages no longer have on-disk locations that can be
+                //       stored into the primary index
+                _use_empty = true;
+            }
         }
     }
 
@@ -767,7 +774,7 @@ namespace indexer_helpers {
     void
     MutableTable::_invalidate_indexes(StorageCache::PagePtr page)
     {
-        uint64_t old_eid = page->key().second;
+        uint64_t old_eid = page->key().first;
 
         // if there was no previous page, nothing to invalidate
         if (old_eid == constant::UNKNOWN_EXTENT) {
@@ -782,7 +789,7 @@ namespace indexer_helpers {
         if (_primary_key.empty()) {
             // no primary key, so use the old extent ID as the primary key
             auto pkey_fields = std::make_shared<FieldArray>(1);
-            pkey_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(orig_page->key().second);
+            pkey_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(orig_page->key().first);
             pkey = std::make_shared<FieldTuple>(pkey_fields, nullptr);
         } else {
             // has a primary key, get the last row of the original page for the primary index
@@ -797,14 +804,14 @@ namespace indexer_helpers {
         // INVALIDATE SECONDARY INDEXES
 
         for (auto const& [index_id, idx]: _secondary_indexes) {
-            indexer_helpers::invalidate_index_for_page(orig_page->key().second, orig_page, idx.first, idx.second, _schema);
+            indexer_helpers::invalidate_index_for_page(orig_page->key().first, orig_page, idx.first, idx.second, _schema);
         }
     }
 
     void
     MutableTable::_flush_and_populate_indexes(StorageCache::PagePtr::element_type* page)
     {
-        uint64_t old_eid = page->key().second;
+        uint64_t old_eid = page->key().first;
 
         // if the page is now empty, do nothing since the indexes will be flushed as empty
         if (page->empty()) {
@@ -968,14 +975,15 @@ namespace indexer_helpers {
     {
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_began_empty) {
+        if (_use_empty) {
             _append_empty(value);
             return;
         }
 
         // note: in this case there is no explicit primary key, so we need to append the row to the
         //       end of the file
-        auto &&row = *(_primary_index->last());
+        auto leaf_i = _primary_index->last();
+        auto row = *leaf_i;
         uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
 
         // get the page from the cache
@@ -997,7 +1005,7 @@ namespace indexer_helpers {
 
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_began_empty) {
+        if (_use_empty) {
             _insert_empty(value);
             return;
         }
@@ -1050,7 +1058,7 @@ namespace indexer_helpers {
 
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_began_empty) {
+        if (_use_empty) {
             return _upsert_empty(value);
         }
 
@@ -1084,14 +1092,11 @@ namespace indexer_helpers {
     void
     MutableTable::_remove_empty(TuplePtr value)
     {
-        // get the page from the cache if we don't have one
-        if (!_empty_page) {
-            _empty_page = std::make_unique< StorageCache::SafePagePtr>(
-                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid));
-        }
+        // note: if we are performing a remove, there must be a page already
+        CHECK(_empty_page != nullptr);
 
         // add the row to the page
-       (*_empty_page)->remove(value, _schema);
+        (*_empty_page)->remove(value, _schema);
     }
 
     void
@@ -1099,7 +1104,7 @@ namespace indexer_helpers {
     {
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_began_empty) {
+        if (_use_empty) {
             _remove_empty(key);
             return;
         }
@@ -1124,7 +1129,17 @@ namespace indexer_helpers {
         // note: it would be much more performant to perform all of the scan-based removals in
         //       an XID at once as a batch, since the table is likely to be much larger than the
         //       set of removals
-        auto fields = _schema->get_fields();
+
+        // if the primary_lookup tree is empty, we will maintain a single page of data that we will
+        // keep against the table and use for all operations.
+        if (_use_empty) {
+            // note: if we are performing a remove, there must be a page already
+            CHECK(_empty_page != nullptr);
+
+            // add the row to the page
+            (*_empty_page)->try_remove_by_scan(value, _schema);
+            return;
+        }
 
         // scan the index
         bool found = false;
@@ -1140,16 +1155,8 @@ namespace indexer_helpers {
             // check if we need to convert the page contents to a new schema
             _check_convert_page(page);
 
-            auto &&j = page->begin();
-            while (!found && j != page->end()) {
-                auto &&vrow = *j;
-                if (value->equal_strict(FieldTuple(fields, &vrow))) {
-                    page->remove(j);
-                    found = true;
-                } else {
-                    ++j;
-                }
-            }
+            // pass the value tuple and the schema down to the page
+            found = page->try_remove_by_scan(value, _schema);
 
             if (!found) {
                 ++i;
@@ -1193,7 +1200,7 @@ namespace indexer_helpers {
 
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
-        if (_began_empty) {
+        if (_use_empty) {
             _update_empty(value);
             return;
         }
@@ -1232,8 +1239,6 @@ namespace indexer_helpers {
 
     void Table::Iterator::Primary::next()
     {
-        TIME_TRACE_SCOPED(time_trace::traces, primary_index_iterator_next);
-
         if (!_end) {
             _end = _page->end();
         }
@@ -1284,13 +1289,28 @@ namespace indexer_helpers {
         --_page_i;
     }
 
+    Table::Iterator::Secondary::Secondary(const Table *table,
+            BTreePtr btree, const BTree::Iterator &btree_i,
+            ExtentSchemaPtr schema )
+        : 
+            Tracker{table, btree, btree_i},
+            _cache_size{Json::get_or<uint64_t>(Properties::get(Properties::STORAGE_CONFIG), "page_cache_size", 16384)},
+            _eid_buffer{_cache_size/2}
+    {
+        DCHECK(_cache_size);
+
+        _extent_id_f = schema->get_field(constant::INDEX_EID_FIELD);
+        _row_id_f = schema->get_field(constant::INDEX_RID_FIELD);
+        if (_btree_i != btree->end()) {
+            update_page();
+        }
+    }
+
     void Table::Iterator::Secondary::next()
     {
-        TIME_TRACE_SCOPED(time_trace::traces, secondary_index_iterator_next);
-
         ++_btree_i;
         if (_btree_i == _btree->end()) {
-            _page = {};
+            _page_map.clear();
             return;
         }
         update_page();
@@ -1303,15 +1323,44 @@ namespace indexer_helpers {
 
     void Table::Iterator::Secondary::update_page()
     {
-        CHECK(_btree_i != _btree->end());
+        DCHECK(_btree_i != _btree->end());
+        DCHECK(_page_map.size() <= _cache_size);
+        DCHECK(_eid_buffer.size() <= _cache_size);
         auto &&row = *_btree_i;
         uint64_t eid = _extent_id_f->get_uint64(&row);
-        if (_page.empty() || _extent_id != eid) {
+
+        if (_page_map.empty() || _extent_id != eid) {
             _extent_id = eid;
-            _page = _table->_read_page(_extent_id);
+            auto it = _page_map.find(eid);
+            if (it == _page_map.end()) {
+                TIME_TRACE_SCOPED(time_trace::traces, table_iterator_read_page);
+
+                // check if need to free space in the page map
+                if (_page_map.size() == _cache_size) {
+                    DCHECK(!_eid_buffer.empty());
+                    auto cached_eid = _eid_buffer.next();
+                    auto erase_it = _page_map.find(cached_eid);
+                    DCHECK(erase_it != _page_map.end());
+                    _page_map.erase(erase_it);
+                }
+
+                auto page = _table->_read_page(_extent_id);
+                //TODO: is this correct?
+                DCHECK(page->extent_count() == 1);
+
+                auto begin_it = page->begin();
+                PageMapItem pi{std::move(page), std::move(begin_it)};
+                auto [inserted_it, _] = _page_map.try_emplace(_extent_id, std::move(pi));
+                _eid_buffer.put(_extent_id);
+                _page_i_begin = inserted_it->second.it_begin;
+            } else {
+                _page_i_begin = it->second.it_begin;
+            }
         }
-        uint64_t row_id = _row_id_f->get_uint32(&row);
-        _page_i = _page->at(row_id);
+
+        auto row_id = _row_id_f->get_uint32(&row);
+        _page_i = _page_i_begin;
+        _page_i += row_id;
     }
 
     const Extent::Row& Table::Iterator::Secondary::row() const

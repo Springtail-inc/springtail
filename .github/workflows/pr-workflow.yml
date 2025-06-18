@@ -14,8 +14,14 @@ permissions:
   checks: write
 
 jobs:
+  system-settings-check:
+    uses: ./.github/workflows/system-settings-check.yml
+    with:
+      canonical_copy: 'system.json.settings'
+      target_files: 'prod.system.settings.json'
   test:
     uses: ./.github/workflows/test.yml
+    needs: [ system-settings-check ]
     if: ${{ github.event.pull_request.draft == false }}
     with:
       builder_image_version_tag: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}

@@ -150,11 +150,14 @@ namespace springtail {
         bool is_empty = node->page->empty();
         page_lock.unlock();
 
+        if (is_empty && node->parent == nullptr) {
+            // if the root page is empty, we can return immediately
+            return;
+        }
+
+        // check for empty non-root page
         if (is_empty) {
-            // check if this is a non-root page
-            if (node->parent != nullptr) {
-                _lock_and_remove_page(node);
-            }
+            _lock_and_remove_page(node);
         }
 
         boost::unique_lock cache_lock(_cache->mutex);
@@ -182,15 +185,8 @@ namespace springtail {
         // acquire an exclusive lock on the tree here
         boost::unique_lock lock(_mutex);
 
-        // evict all pages without flushing to disk
-        _root = nullptr;
-        {
-            boost::unique_lock cache_lock(_cache->mutex);
-            _cache_clear();
-        }
-
-        // set up an empty tree
-        init_empty();
+        // clear the root
+        _remove_root();
     }
 
     uint64_t
@@ -246,6 +242,12 @@ MutableBTree::_next_leaf(NodePtr node)
         // move to the next entry
         ++parent_i;
 
+        // release the current page back to the cache
+        {
+            boost::unique_lock cache_lock(_cache->mutex);
+            _cache_release(node->page);
+        }
+
         if (parent_i == node->parent->page->end()) {
             // if that was the last entry, move up the tree further
             node = node->parent;
@@ -254,7 +256,7 @@ MutableBTree::_next_leaf(NodePtr node)
             uint64_t extent_id = _branch_child_f->get_uint64(&*parent_i);
 
             // read the next child page
-            NodePtr child = _read_page(extent_id, node, parent_lock);
+            NodePtr child = _read_page(extent_id, node->parent, parent_lock);
 
             // if the child was flushed while we were reading the page, we need to re-find it in the parent
             if (!child) {
@@ -672,10 +674,8 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
         // evict pages until the size is under the watermark
         while (_cache->size > _cache->max_size) {
-            // if somehow there are no evictable pages, print a warning and return
-            if (_cache->lru.empty()) {
-                assert(0); // XXX we should never hit this case
-            }
+            // there should always be an evictable page
+            CHECK(!_cache->lru.empty());
 
             // get a page
             // note: coming off the LRU we know that no one else is currently using this page
@@ -1201,6 +1201,22 @@ MutableBTree::lower_bound(TuplePtr search_key,
         // evict the page from the cache
         boost::unique_lock cache_lock(_cache->mutex);
         _cache_evict(page->extent_id);
+    }
+
+    void
+    MutableBTree::_remove_root()
+    {
+        // note: the tree must be locked to perform this operation
+        _root = nullptr;
+
+        // evict all pages without flushing to disk
+        {
+            boost::unique_lock cache_lock(_cache->mutex);
+            _cache_clear();
+        }
+
+        // set up an empty tree
+        init_empty();
     }
 
     void

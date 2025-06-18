@@ -9,6 +9,7 @@ from enum import Enum, StrEnum
 from typing import Dict, Optional
 
 from component import Component
+from exceptions import ComponentFailureException
 
 # Get the parent directory of the current script (i.e., the project root directory)
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -57,6 +58,15 @@ LIVENESS_DAEMON_TO_SERVICE = {
     LivenessDaemonType.XID_SUBSCRIBER: 'fdw',
 }
 
+# Number of failures before a component is considered failed
+MAX_FAILURES = 5
+
+# Time between consecutive failures before considering a component failed
+FAILURE_WINDOW_THRESHOLD = 5 # seconds
+
+# Wait time between max failures before retrying
+RETRY_WAITTIME_BETWEEN_MAX_FAILURES = 5 # minutes
+
 class Scheduler:
     """Scheduler class to manage the lifecycle of components"""
 
@@ -86,6 +96,8 @@ class Scheduler:
         self.timeouts = {}
         self.allowed_timeout = allowed_timeout_secs * 1000
         self.db_states = {}
+        # Map of component_name to {count, time} where count is the number of failures and time is the last time it failed
+        self.last_fail_time = {}
 
         # Setup pubsub for liveness notifications
         self.pubsub = self.redis.pubsub(ignore_subscribe_messages=True)
@@ -171,6 +183,37 @@ class Scheduler:
 
         return self.start_all()
 
+    def _track_last_failures(self, name: str) -> None:
+        """
+        Track last failures for components
+
+        Args:
+            name: the name of the component
+
+        If we have reached the maximum failures and the last failure was less than FAILURE_WINDOW_THRESHOLD seconds ago, raise an exception
+        Otherwise, reset the failure count
+        """
+        if name not in self.last_fail_time:
+            # Initialize failure tracking
+            self.last_fail_time[name] = {'count': 1, 'time': time.time()}
+        else:
+            # If the last fail time is not within the failure window threshold, reset the failure count
+            if time.time() - self.last_fail_time[name]['time'] > FAILURE_WINDOW_THRESHOLD:
+                self.last_fail_time[name]['count'] = 1
+                self.last_fail_time[name]['time'] = time.time()
+
+        if self.last_fail_time[name]['count'] < MAX_FAILURES:
+            # Increment failure count
+            self.last_fail_time[name]['count'] += 1
+            self.last_fail_time[name]['time'] = time.time()
+        # If we have reached the maximum failures and the last failure was less than FAILURE_WINDOW_THRESHOLD seconds ago, raise an exception
+        elif time.time() - self.last_fail_time[name]['time'] < FAILURE_WINDOW_THRESHOLD:
+            raise ComponentFailureException(f"Component {name} has failed {MAX_FAILURES} times within {FAILURE_WINDOW_THRESHOLD} seconds, aborting", name)
+        # Reset failure count
+        else:
+            self.last_fail_time[name]['count'] = 1
+            self.last_fail_time[name]['time'] = time.time()
+
     def _track_db_state_changes(self) -> None:
         """
         Track database state changes
@@ -202,10 +245,11 @@ class Scheduler:
                 id, _ = msg['data'].split(':')
                 if id not in self.components:
                     return False
-
-                self.logger.error(f"PubSub: Error for component: {id}: {self.components[id].get_name()}")
+                component_name = self.components[id].get_name()
+                self.logger.error(f"PubSub: Error for component: {id}: {component_name}")
+                self._track_last_failures(component_name)
                 if self.production:
-                    self.production.send_sns('failure', component=self.components[id].get_name())
+                    self.production.send_sns('failure', component=component_name)
                 return True
 
         except redis.TimeoutError:
@@ -251,6 +295,7 @@ class Scheduler:
         for id, timestamp in self.timeouts.items():
             if timestamp < min_time:
                 name = LivenessDaemonType(int(id)).name
+                self._track_last_failures(name)
                 self.logger.error(f"Timeout for component: {name}, {timestamp} < {min_time} {time.time() * 1000 - timestamp}")
                 if self.production:
                     self.production.send_sns('failure', name)
@@ -268,6 +313,7 @@ class Scheduler:
         for id, component in self.components.items():
             if not component.is_alive():
                 self.logger.error(f"Component {component.get_name()} is not running")
+                self._track_last_failures(component.get_name())
                 if self.production:
                     self.production.send_sns('failure', component=component.get_name())
                 failed = True
@@ -321,7 +367,8 @@ class Scheduler:
                 self.logger.info("Shutting down services complete, installing binaries")
 
                 if self.production:
-                    self.production.install_binaries()
+                    config_gitsha = self.props.get_config_gitsha()
+                    self.production.install_binaries(config_gitsha)
                     if self.service_name == 'fdw':
                         self.logger.info("Installing postgres_fdw")
                         self.production.install_pgfdw()
@@ -377,6 +424,14 @@ class Scheduler:
             except redis.RedisError as e:
                 # XXX handle
                 self.logger.error(f"Redis error: {str(e)}")
+                continue
+            except ComponentFailureException as e:
+                error_message = traceback.format_exc()
+                self.logger.error(error_message)
+                if self.production:
+                    self.production.send_sns('max_retries_failed', component=e.component_name)
+                # sleep for RETRY_WAITTIME_BETWEEN_MAX_FAILURES minutes before retrying
+                time.sleep(RETRY_WAITTIME_BETWEEN_MAX_FAILURES * 60)
                 continue
             except Exception as e:
                 # XXX handle

@@ -61,6 +61,17 @@ namespace springtail {
         }
 
         /**
+         * Retrieve the elapsed time.
+         *
+         * @return Elapsed time in milliseconds.
+         */
+        std::chrono::microseconds
+        elapsed_micros() const
+        {
+            return std::chrono::duration_cast<std::chrono::microseconds>(_total_elapsed);
+        }
+
+        /**
          * Adds the _total_elapsed from the rhs to the Timer.
          */
         Timer &operator+=(const Timer &rhs) {

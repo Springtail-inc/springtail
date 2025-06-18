@@ -114,18 +114,21 @@ namespace springtail::pg_log_mgr {
             return false;
         }
 
+        // get the offset before writing the data
+        uint64_t start_offset = _writer.offset();
+
         // write message data, returns offset after write
         uint64_t current_offset = _writer.write_message(data);
 
         // write out header containing length if start of message
         if (data.msg_offset == 0) {
-            _msg_end_offset = _writer.msg_end_offset();
+            _msg_end_offset = start_offset + data.msg_length;
 
             // add LSN data to queue for fsync thread
             _add_lsn_to_queue(current_offset, data.starting_lsn);
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Write repl message start: start lsn={}, length={}, msg_length={}",
-                                data.starting_lsn, data.length, data.msg_length);
+            LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Write repl message start: start lsn={}, length={}, msg_length={}",
+                      data.starting_lsn, data.length, data.msg_length);
         }
 
         // update shared current offset atomic var
@@ -135,8 +138,8 @@ namespace springtail::pg_log_mgr {
             // full message written
             _add_lsn_to_queue(_msg_end_offset, data.ending_lsn);
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Write repl message end: start lsn={}, length={}, msg_length={}",
-                                data.ending_lsn, data.length, data.msg_length);
+            LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Write repl message end: start lsn={}, length={}, msg_length={}",
+                      data.ending_lsn, data.length, data.msg_length);
 
             return true;
         }

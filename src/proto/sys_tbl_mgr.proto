@@ -90,6 +90,15 @@ message IndexInfo {
   string table_name = 6;
   int32 state = 7;
   repeated IndexColumn columns = 8;
+  int64 namespace_id = 9;
+}
+
+message IndexInfoList {
+    repeated IndexInfo indexes = 1;
+}
+
+message IndexesInfo {
+    map<uint64, IndexInfoList> xid_index_map = 1;
 }
 
 message IndexRequest {
@@ -115,6 +124,15 @@ message DropIndexRequest {
   uint64 index_id = 4;
   string namespace_name = 5;
   string name = 6;
+}
+
+message IndexProcessRequest {
+  string action = 1;
+  IndexInfo index = 2;
+}
+
+message GetUnfinishedIndexesInfoRequest {
+  int64 db_id = 1;
 }
 
 message GetIndexInfoRequest {
@@ -231,10 +249,10 @@ service SysTblMgr {
   rpc Ping(google.protobuf.Empty) returns (google.protobuf.Empty) {}
 
   // Create a new index
-  rpc CreateIndex(IndexRequest) returns (DDLStatement) {}
+  rpc CreateIndex(IndexRequest) returns (IndexProcessRequest) {}
 
   // Drop an existing index
-  rpc DropIndex(DropIndexRequest) returns (DDLStatement) {}
+  rpc DropIndex(DropIndexRequest) returns (IndexProcessRequest) {}
 
   // Set index state
   rpc SetIndexState(SetIndexStateRequest) returns (google.protobuf.Empty) {}
@@ -295,4 +313,8 @@ service SysTblMgr {
 
   // Get user defined type
   rpc GetUserType(GetUserTypeRequest) returns (GetUserTypeResponse) {}
+
+  // Get unfinished indexs info to be recovered
+  rpc GetUnfinishedIndexesInfo(GetUnfinishedIndexesInfoRequest) returns (IndexesInfo) {}
+
 }

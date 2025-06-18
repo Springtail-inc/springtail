@@ -7,11 +7,9 @@ external
 vcpkg_installed
 .idea
 .docker
-docker
 .github
 .githooks
 .scannerwork
-.git
 .idea
 .scannerwork
 .vscode

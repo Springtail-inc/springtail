@@ -34,12 +34,12 @@ public:
     /** Creates an index within the system tables. */
     grpc::Status CreateIndex(grpc::ServerContext* context,
                              const proto::IndexRequest* request,
-                             proto::DDLStatement* response) override;
+                             proto::IndexProcessRequest* response) override;
 
     /** Drops an index within the system tables. */
     grpc::Status DropIndex(grpc::ServerContext* context,
                            const proto::DropIndexRequest* request,
-                           proto::DDLStatement* response) override;
+                           proto::IndexProcessRequest* response) override;
 
     /** Set the state of the index within the system tables. */
     grpc::Status SetIndexState(grpc::ServerContext* context,
@@ -152,6 +152,13 @@ public:
                         const proto::RevertRequest* request,
                         google::protobuf::Empty* response) override;
 
+    /**
+     * Get the list of indexes which are to be built/deleted, which will be
+     * used to complete the index commits while recovery
+     */
+    grpc::Status GetUnfinishedIndexesInfo(grpc::ServerContext* context,
+            const proto::GetUnfinishedIndexesInfoRequest* request,
+            proto::IndexesInfo* response) override;
 
 private:
     Service() = default;
@@ -292,6 +299,14 @@ private:
      * all committed to disk.
      */
     void _clear_schema_info(uint64_t db_id);
+
+    /**
+     * @brief Helper function to populate index columns for a given index (proto::IndexInfo)
+     * @param db_id Database ID
+     * @param info proto::IndexInfo - Index info from IndexNames table
+     * @param index_xid XidLsn to fetch columns for index
+     */
+    void _populate_index_columns(uint64_t db_id, proto::IndexInfo& info, XidLsn index_xid);
 
     /**
      * Helper function to read the full set of columns for a table from the on-disk system tables.
@@ -477,7 +492,7 @@ private:
     /**
      * Performs a create_index() assuming that the correct locks are already held.
      */
-    nlohmann::json _create_index(const proto::IndexRequest& request);
+    proto::IndexInfo _create_index(const proto::IndexRequest& request);
 
     /**
      * Performs a drop_index() assuming that the correct locks are already held.
@@ -518,9 +533,31 @@ private:
      */
     bool _set_index_state(const proto::SetIndexStateRequest& request);
 
+    /**
+     * @brief Upserts index name entry with the give index info
+     * @param db_id            Database ID
+     * @param index_info       proto::IndexInfo containing the index details
+     * @param xid              XidLsn entry at which index is mutated
+     * @param keys             Index keys
+     * @param is_primary_index Indicates if its primary or secondary index
+     * @return bool indicating the upsert is successful or not
+     */
+    bool _upsert_index_name(uint64_t db_id, const proto::IndexInfo& index_info, const XidLsn& xid,
+            const std::map<uint32_t, uint32_t>& keys, bool is_primary_index=false);
+
     /** Performs an get_index_info() assuming that the correct locks are already held.
      */
     proto::IndexInfo _get_index_info(const proto::GetIndexInfoRequest& request);
+
+
+    /**
+     * @brief Get the list of indexes which are to be built/deleted for the db,
+     * assuming correct locks are already held
+     *
+     * @param db_id Database ID
+     * @return IndexesInfo
+     */
+    proto::IndexesInfo _get_unfinished_indexes_info(uint64_t db_id);
 
     /** This doesn't return information about index columns
      */

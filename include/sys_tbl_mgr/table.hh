@@ -1,6 +1,7 @@
 #pragma once
 
-#include "common/constants.hh"
+#include <common/constants.hh>
+#include <common/circular_buffer.hh>
 #include <memory>
 #include <stdexcept>
 #include <storage/btree.hh>
@@ -194,15 +195,7 @@ namespace indexer_helpers {
             {
                 Secondary(const Table *table,
                         BTreePtr btree, const BTree::Iterator &btree_i,
-                        ExtentSchemaPtr schema )
-                    : Tracker{table, btree, btree_i}
-                {
-                    _extent_id_f = schema->get_field(constant::INDEX_EID_FIELD);
-                    _row_id_f = schema->get_field(constant::INDEX_RID_FIELD);
-                    if (_btree_i != btree->end()) {
-                        update_page();
-                    }
-                }
+                        ExtentSchemaPtr schema );
 
                 Secondary(Secondary&&) = default;
                 virtual ~Secondary() = default;
@@ -220,8 +213,21 @@ namespace indexer_helpers {
                 FieldPtr _extent_id_f;
                 FieldPtr _row_id_f;
 
+                struct PageMapItem {
+                    StorageCache::SafePagePtr page;
+                    StorageCache::Page::Iterator it_begin;
+                };
+                std::unordered_map<uint64_t, PageMapItem> _page_map;
+                uint64_t _cache_size;
+                // This it to keep a list of extent ids that are in 
+                // _page_map. The list is used for evicting items from the
+                // page map. We assume that secondary indexes jump
+                // around extent ids somewhat randomly. There is no need to
+                // pay for something like maintaining LRU.
+                CircularBuffer<uint64_t> _eid_buffer;
+
                 uint64_t _extent_id = 0;
-                StorageCache::SafePagePtr _page;
+                StorageCache::Page::Iterator _page_i_begin;
                 StorageCache::Page::Iterator _page_i;
 
                 void update_page();
@@ -777,12 +783,12 @@ namespace indexer_helpers {
 
         std::vector<std::string> _primary_key; ///< The key columns of the primary index.
 
-        /** A lookup version of the primary index.  Pinned to the most recent XID. */
-        bool _began_empty; ///< True if the table was empty at the access XID.
+        bool _use_empty; ///< True if the table started or became empty, requiring use of the _empty_page.
         FieldPtr _primary_extent_id_f; ///< A field accessor for the extent ID within the primary index extents.
 
         /** The primary index of the table. */
         MutableBTreePtr _primary_index; ///< The mutable primary index btree.
+
         /** A map of secondary indexes
          * first is the index id
          * second.first is btree

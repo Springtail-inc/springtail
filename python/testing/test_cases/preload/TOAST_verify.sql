@@ -1,4 +1,6 @@
 ## test
+
+### switch_db toast
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS random_binary_test (
@@ -47,6 +49,7 @@ DELETE FROM random_binary_test WHERE id = 2;
 DELETE FROM random_text_test WHERE id = 2;
 
 ## verify
+### switch_db toast
 SELECT * FROM random_binary_test ORDER BY id;
 SELECT data FROM random_binary_test ORDER BY id;
 SELECT * FROM random_text_test ORDER BY id;
@@ -56,6 +59,7 @@ SELECT * FROM preload_random_binary_test ORDER BY id;
 SELECT * FROM preload_random_text_test ORDER BY id;
 
 ## cleanup
+### switch_db toast
 DROP TABLE IF EXISTS random_binary_test;
 DROP TABLE IF EXISTS random_text_test;
 

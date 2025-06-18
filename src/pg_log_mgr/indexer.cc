@@ -20,22 +20,77 @@ namespace springtail::committer {
         LOG_INFO("Indexer created: {}", worker_count);
     }
 
-    void Indexer::process_ddls(uint64_t db_id, uint64_t xid, nlohmann::json const& ddls)
+    void Indexer::process_requests(uint64_t db_id, uint64_t xid, const std::list<proto::IndexProcessRequest> &index_requests)
     {
         std::scoped_lock lock(_xid_ddl_counter_map_mtx);
         // Set counter for XID for ddls
-        _xid_ddl_counter_map[xid].store(ddls.size());
-        for (auto const& ddl: ddls) {
-            auto action = ddl["action"];
+        _xid_ddl_counter_map[xid].store(index_requests.size());
+        for (auto const& index_request: index_requests) {
+            auto action = index_request.action();
             if (action == "create_index") {
-                build({db_id, xid, ddl});
+                build({db_id, xid, index_request});
             } else if (action == "drop_index") {
-                drop(db_id, ddl["id"], xid);
+                drop(db_id, index_request.index().id(), xid);
             } else if (action == "abort_index") {
-                abort_indexes(db_id, ddl["table_id"], xid);
+                abort_indexes(db_id, index_request.index().table_id(), xid);
             } else {
                 CHECK(false);
             }
+        }
+    }
+
+    void Indexer::_cleanup_for_db(uint64_t db_id) {
+        std::scoped_lock lock(_m, _pending_reconciliation_map_mtx, _table_idx_map_mtx);
+
+        // Clear _work_set entries for the db, to start fresh recovery
+        auto it = _work_set.begin();
+        while (it != _work_set.end()) {
+            if (it->second._db_id == db_id) {
+                it = _work_set.erase(it);  // erase returns the next valid iterator
+            } else {
+                ++it;
+            }
+        }
+
+        // Cleanup pending reconciliation map for the db
+        _pending_idx_reconciliation_map.erase(db_id);
+
+        // Cleanup table_idx_map for the db
+        _table_idx_map.erase(db_id);
+    }
+
+    void Indexer::recover_indexes(uint64_t db_id) {
+        // Cleanup for db from the previous run
+        _cleanup_for_db(db_id);
+
+        // Get indexes which were not completed during last shutdown/crash
+        auto unfinished_indexes_info = sys_tbl_mgr::Client::get_instance()->get_unfinished_indexes_info(db_id);
+
+        // Get each such XIDs and their indexes
+        for (const auto& [index_xid, idx_list]: unfinished_indexes_info.xid_index_map()) {
+            std::list<proto::IndexProcessRequest> index_requests;
+            for (const auto& index_info: idx_list.indexes()) {
+                // Build indexer-known ddl out of the indexes - to be created/dropped
+                if (static_cast<sys_tbl::IndexNames::State>(index_info.state())
+                        == sys_tbl::IndexNames::State::NOT_READY) {
+                    proto::IndexProcessRequest create_idx_request;
+                    create_idx_request.set_action("create_index");
+                    *create_idx_request.mutable_index() = std::move(index_info);
+                    index_requests.push_back(std::move(create_idx_request));
+                } else if (static_cast<sys_tbl::IndexNames::State>(index_info.state())
+                        == sys_tbl::IndexNames::State::BEING_DELETED) {
+                    proto::IndexProcessRequest drop_idx_request;
+                    drop_idx_request.set_action("drop_index");
+                    *drop_idx_request.mutable_index() = std::move(index_info);
+                    index_requests.push_back(std::move(drop_idx_request));
+                } else {
+                    // We shouldnt hit this point as we picked only the unfinished indexes
+                    CHECK(false);
+                }
+            }
+
+            // Schedule the index processing at its XID
+            process_requests(db_id, index_xid, std::move(index_requests));
         }
     }
 
@@ -67,11 +122,11 @@ namespace springtail::committer {
     void Indexer::build(IndexParams idx)
     {
         std::scoped_lock g(_m, _table_idx_map_mtx);
-        Key key(idx._db_id, idx._ddl["id"]);
+        Key key(idx._db_id, idx._index_request.index().id());
         // I don't think PG will issue two creates with the same index ID.
         CHECK(_work_set.find(key) == _work_set.end());
         auto client = sys_tbl_mgr::Client::get_instance();
-        proto::IndexInfo info = client->get_index_info(idx._db_id, idx._ddl["id"], {idx._xid, constant::MAX_LSN});
+        proto::IndexInfo info = client->get_index_info(idx._db_id, idx._index_request.index().id(), {idx._xid, constant::MAX_LSN});
         if (info.id() != 0 && static_cast<sys_tbl::IndexNames::State>(info.state()) == sys_tbl::IndexNames::State::READY) {
             // Decrement the counter as we are not going to process the create request
             // as the index already exists
@@ -82,7 +137,7 @@ namespace springtail::committer {
             // Insert into table-indices map
             _table_idx_map.try_emplace(idx._db_id)
                 .first->second
-                .try_emplace(idx._ddl["table_id"])
+                .try_emplace(idx._index_request.index().table_id())
                 .first->second.push_back(key);
             _work_set[key] = std::move(idx);
             _queue.push(key);
@@ -144,7 +199,7 @@ namespace springtail::committer {
 
     void Indexer::_drop(const Key& key, const IndexParams& idx, uint64_t end_xid)
     {
-        CHECK(idx._ddl.is_null());
+        CHECK(idx._status == IndexStatus::DELETING);
 
         auto [db_id, index_id] = key;
         LOG_INFO("Drop index {}, {}, {}", db_id, index_id, end_xid);
@@ -157,7 +212,7 @@ namespace springtail::committer {
 
             // fetch the latest state of the work item before we erase it
             work_item = _work_set.at(key);
-            CHECK(work_item._ddl.is_null());
+            CHECK(idx._status == IndexStatus::DELETING);
 
             _work_set.erase(key);
         }
@@ -172,40 +227,39 @@ namespace springtail::committer {
             return;
         }
 
+        // Index should be at BEING_DELETED to be dropped
+        DCHECK(static_cast<sys_tbl::IndexNames::State>(info.state()) == sys_tbl::IndexNames::State::BEING_DELETED);
+
         auto exists = TableMgr::get_instance()->exists(db_id, info.table_id(), xid.xid, xid.lsn);
         if (!exists) {
             // when dropping a table, PG generates DROP TABLE first
-            // following by DROP INDEX. We ignore DROP INDEX after DROP TABLE.
+            // following by DROP INDEX, We will mark the index as DELETED in this case.
             LOG_INFO("Table doesn't exists: {}, {}", info.table_id(), index_id);
+            client->set_index_state(db_id, xid, info.table_id(), index_id, sys_tbl::IndexNames::State::DELETED);
             return;
-        }
-
-        // index column positions
-        std::vector<uint32_t> idx_cols;
-        for (auto const& col : info.columns()) {
-            idx_cols.push_back(col.position());
         }
 
         auto meta = client->get_roots(db_id, info.table_id(), end_xid);
         auto it = std::ranges::find_if(meta->roots,
                 [&](auto const& v) { return index_id == v.index_id; });
-        CHECK(it != meta->roots.end());
+        // Erase roots if present, roots wont be there if index drop came in before processing build,
+        // and in that case, proceed for making index DELETED
+        if (it != meta->roots.end()) {
+            // XXX: Optimize roundtrips:
+            // https://linear.app/springtail/issue/SPR-679/optimize-indexer-to-reduce-roundtrips-to-systblmgr
 
-        // XXX: Optimize roundtrips:
-        // https://linear.app/springtail/issue/SPR-679/optimize-indexer-to-reduce-roundtrips-to-systblmgr
-        auto table =
-            TableMgr::get_instance()->get_mutable_table(db_id, info.table_id(), end_xid, end_xid);
-        auto root = table->create_index_root(index_id, idx_cols);
-        if (it->extent_id != constant::UNKNOWN_EXTENT) {
-            root->init(it->extent_id);
-        } else {
-            root->init_empty();
+            auto idx_cols = _get_index_cols(info);
+            auto table =
+                TableMgr::get_instance()->get_mutable_table(db_id, info.table_id(), end_xid, end_xid);
+            auto root = table->create_index_root(index_id, idx_cols);
+            if (it->extent_id != constant::UNKNOWN_EXTENT) {
+                root->init(it->extent_id);
+            } else {
+                root->init_empty();
+            }
+            root->truncate();
+            root->finalize();
         }
-        root->truncate();
-        root->finalize();
-
-        meta->roots.erase(it);
-        client->update_roots(db_id, info.table_id(), end_xid, *meta);
         client->set_index_state(db_id, xid, info.table_id(), index_id, sys_tbl::IndexNames::State::DELETED);
 
         // Cleanup table-index map
@@ -219,21 +273,18 @@ namespace springtail::committer {
     {
         constexpr int DROP_CHECK_PERIOD = 1000;
 
-        LOG_DEBUG(LOG_COMMITTER, "Build index: {}:{} - {}", key.first, key.second, idx._ddl.dump());
+        LOG_DEBUG(LOG_COMMITTER, "Build index: {}:{} - {}", key.first, key.second, idx._index_request.index().id());
 
         auto [db_id, index_id] = key;
-        auto tid = idx._ddl["table_id"];
+        auto tid = static_cast<uint64_t>(idx._index_request.index().table_id());
 
-        CHECK_EQ(idx._ddl["action"], "create_index");
+        CHECK_EQ(idx._index_request.action(), "create_index");
 
         auto client = sys_tbl_mgr::Client::get_instance();
         client->invalidate_table(db_id, tid, XidLsn{idx._xid});
 
         // index column positions
-        std::vector<uint32_t> idx_cols;
-        for (auto const& col : idx._ddl["columns"]) {
-            idx_cols.push_back(col["position"]);
-        }
+        auto idx_cols = _get_index_cols(idx._index_request.index());
 
         std::shared_ptr<std::vector<FieldPtr>> key_fields;
 
@@ -284,6 +335,28 @@ namespace springtail::committer {
         return {root, key, idx, tid};
     }
 
+    std::vector<uint32_t>
+    Indexer::_get_index_cols(proto::IndexInfo index_info)
+    {
+        std::vector<std::pair<uint32_t, uint32_t>> temp;
+
+        // Step 1: Collect (idx_position, position) pairs
+        for (const auto& column : index_info.columns()) {
+            temp.emplace_back(column.idx_position(), column.position());
+        }
+
+        // Step 2: Sort by idx_position
+        std::sort(temp.begin(), temp.end());
+
+        // Step 3: Extract position values into idx_cols
+        std::vector<uint32_t> idx_cols;
+        idx_cols.reserve(temp.size());
+        for (const auto& [_, pos] : temp) {
+            idx_cols.push_back(pos);
+        }
+        return idx_cols;
+    }
+
     bool
     Indexer::_was_dropped(const Key& key)
     {
@@ -297,7 +370,7 @@ namespace springtail::committer {
     Indexer::_commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx, uint64_t end_xid)
     {
         auto [db_id, index_id] = key;
-        auto tid = idx._ddl["table_id"];
+        auto tid = idx._index_request.index().table_id();
         XidLsn xid{end_xid, constant::INDEX_COMMIT_LSN};
 
         IndexParams work_item;
@@ -310,7 +383,10 @@ namespace springtail::committer {
         _work_set.erase(key);
         auto client = sys_tbl_mgr::Client::get_instance();
         proto::IndexInfo index_info = client->get_index_info(db_id, index_id, xid);
-        auto index_deleted = static_cast<sys_tbl::IndexNames::State>(index_info.state()) == sys_tbl::IndexNames::State::DELETED;
+
+        // Index should be at NOT_READY / BEING_DELETED to be processed
+        DCHECK(static_cast<sys_tbl::IndexNames::State>(index_info.state()) == sys_tbl::IndexNames::State::BEING_DELETED ||
+                static_cast<sys_tbl::IndexNames::State>(index_info.state()) == sys_tbl::IndexNames::State::NOT_READY);
 
         if (!root) {
             // if IndexStatus is BUILDING - stop could have got requested, so the index
@@ -319,19 +395,14 @@ namespace springtail::committer {
             //                              mark the state as DELETED
 
             if (work_item.is_status(IndexStatus::ABORTING)) {
-                auto table_exists = TableMgr::get_instance()->exists(db_id, tid, xid.xid, xid.lsn);
-                if (table_exists && !index_deleted) {
-                    // when dropping a table, PG generates DROP TABLE first
-                    // following by DROP INDEX. We ignore DROP INDEX after DROP TABLE, because
-                    // indexes will be set as DELETED directly as part of sys_tbl_mgr DROP TABLE
-                    client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
-                }
+                client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
             }
         } else {
             // Index building was attempted, finalize and process build/abort
             auto extent_id = root->finalize();
             if (work_item.is_status(IndexStatus::BUILDING)) {
                 auto meta = client->get_roots(db_id, tid, end_xid);
+                meta->roots.clear();
                 meta->roots.emplace_back(key.second, extent_id);
                 client->update_roots(db_id, tid, end_xid, *meta);
                 client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::READY);
@@ -341,9 +412,7 @@ namespace springtail::committer {
                 // may have got finalized while we were building.
                 root->truncate();
                 root->finalize();
-                if (!index_deleted) {
-                    client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
-                }
+                client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
             }
         }
 
@@ -437,10 +506,7 @@ namespace springtail::committer {
             LOG_DEBUG(LOG_COMMITTER, "Index reconciliation in progress: {}:{}", db_id, index_id);
 
             // index column positions
-            std::vector<uint32_t> idx_cols;
-            for (auto const& col : idx_state._idx._ddl["columns"]) {
-                idx_cols.push_back(col["position"]);
-            }
+            auto idx_cols = _get_index_cols(idx_state._idx._index_request.index());
 
             // Get the next_extent from disk using the stats last offset
             auto table = TableMgr::get_instance()->get_table(db_id, idx_state._tid, idx_state._idx._xid);

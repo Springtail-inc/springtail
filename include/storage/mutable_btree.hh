@@ -140,6 +140,13 @@ namespace springtail {
             return std::make_shared<FieldArray>(_leaf_keys->begin(), _leaf_keys->end());
         }
 
+        /**
+         * Helper function to determine if the btree is empty by checking if the root is empty.
+         */
+        bool empty() {
+            return _root->empty();
+        }
+
     private:
         /** The default maximum number of extents in an in-memory page before we automatically flush it to disk. */
         static const uint32_t MAX_EXTENT_COUNT = 16;
@@ -679,6 +686,12 @@ namespace springtail {
         void _remove_page(PagePtr page, PagePtr parent);
 
         /**
+         * Removes the root page of the tree, clears the cache and re-initializes the tree into an
+         * empty state.
+         */
+        void _remove_root();
+
+        /**
          * Removes an empty page from it's parent.  Both the parent and the page must *not* be
          * locked before calling this function.
          *
@@ -722,6 +735,18 @@ namespace springtail {
             using reference         = const Extent::Row &;  // or also value_type&
 
             Iterator() = default;
+            ~Iterator() {
+                if (_node == nullptr) {
+                    return;
+                }
+                auto node = _node;
+
+                boost::unique_lock cache_lock(_btree->_cache->mutex);
+                while (node->parent != nullptr) {
+                    _btree->_cache_release(node->page);
+                    node = node->parent;
+                }
+            }
 
             Iterator &operator++() {
                 ++_page_i;

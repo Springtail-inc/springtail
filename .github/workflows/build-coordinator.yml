@@ -2,6 +2,14 @@ name: Build Coordinator
 
 on:
   workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'The type of build to perform. For release build, we upload to the "prod-data-share.springtail.internal" bucket (in production account), for debug builds we upload to the "data-share.springtail.internal" bucket (in development account).'
+        type: choice
+        default: "release"
+        options:
+          - release
+          - debug
 
 permissions:
   id-token: write
@@ -13,12 +21,12 @@ jobs:
     runs-on: warp-ubuntu-latest-arm64-4x-spot
     timeout-minutes: 35
     container:
-      image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
+      image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ inputs.build_type == 'release'  && vars.RELEASE_BUILDER_IMAGE_VERSION  || vars.BUILDER_IMAGE_VERSION }}
       credentials:
         username: AWS
         password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
     env:
-      DATA_SHARE_BUCKET_NAME: data-share.springtail.internal
+      PACKAGE_BUCKET_NAME: ${{ inputs.build_type == 'release' && 'prod-data-share.springtail.internal' || 'data-share.springtail.internal' }}
       COORDINATOR_S3_PREFIX: stc
     steps:
       - name: Checkout code
@@ -41,7 +49,11 @@ jobs:
       - name: Build
         run: |
           git config --global --add safe.directory /__w/springtail/springtail
-          ./debug.sh -j 4
+          if [ "${{ inputs.build_type }}" = "release" ]; then
+            ./release.sh
+          else
+            ./debug.sh
+          fi
 
       - name: Pack Coordinator
         run: |
@@ -61,7 +73,7 @@ jobs:
           name="stc-${TIMESTAMP}.tar.gz"
           # Add this name to an current file
           echo $name > current
-          aws s3 cp stc.tar.gz s3://${DATA_SHARE_BUCKET_NAME}/${COORDINATOR_S3_PREFIX}/${name}
-          aws s3 cp current s3://${DATA_SHARE_BUCKET_NAME}/${COORDINATOR_S3_PREFIX}/current
+          aws s3 cp stc.tar.gz s3://${PACKAGE_BUCKET_NAME}/${COORDINATOR_S3_PREFIX}/${name}
+          aws s3 cp current s3://${PACKAGE_BUCKET_NAME}/${COORDINATOR_S3_PREFIX}/current
           rm stc.tar.gz
           rm current
