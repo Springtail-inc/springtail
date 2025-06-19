@@ -218,6 +218,7 @@ private:
     /**
      * Retrieve the TableCacheRecord either from the cache or from the system tables if not
      * available.
+     * @param db_id The ID of the database.
      * @param table_id The ID of the table.
      * @param xid The XID/LSN at which we are querying.
      */
@@ -407,6 +408,16 @@ private:
                                    uint64_t table_id,
                                    const XidLsn& access_xid,
                                    const XidLsn& target_xid);
+
+    /**
+     * Helper function to generate the history events for the child partition tables.
+     * @param request The table request for which we are generating the history events.
+     * @param history The history event to be generated.
+     *
+     * @return A vector of ColumnHistory objects containing the history events for the child partition tables.
+     */
+    nlohmann::json _generate_partition_updates(const proto::TableRequest& request,
+                                               const proto::ColumnHistory& history);
 
     /**
      * Helper function to extract a change entry for a schema by comparing the old and new

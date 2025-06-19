@@ -54,6 +54,47 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_get_partition_info(table_name TEXT)
+RETURNS JSON LANGUAGE plpgsql AS $$
+DECLARE
+BEGIN
+        RETURN (
+        SELECT json_agg(json_col)
+        FROM (
+            SELECT json_build_object(
+                'table_name', obj_select.table_name,
+                'table_id', obj_select.table_id::bigint,
+                'namespace_name', obj_select.namespace_name,
+                'namespace_id', obj_select.namespace_id::bigint,
+                'partition_bound', obj_select.partition_bound,
+                'partition_key', obj_select.partition_key
+            ) AS json_col
+            FROM (
+                WITH RECURSIVE children AS (
+                    SELECT inhrelid, inhparent
+                    FROM pg_inherits
+                    WHERE inhparent = table_name::regclass
+                    UNION ALL
+                    SELECT pi.inhrelid, pi.inhparent
+                    FROM pg_inherits pi
+                    JOIN children c ON c.inhrelid = pi.inhparent
+                )
+                SELECT
+                    child.relname AS table_name,
+                    child.oid AS table_id,
+                    child_ns.nspname AS namespace_name,
+                    child_ns.oid AS namespace_id,
+                    pg_get_expr(child.relpartbound, child.oid, TRUE) AS partition_bound,
+                    pg_get_partkeydef(child.oid) AS partition_key
+                FROM children
+                JOIN pg_class child ON child.oid = children.inhrelid
+                JOIN pg_namespace child_ns ON child_ns.oid = child.relnamespace
+            ) AS obj_select
+        ) AS json_columns
+    );
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for_table_ddl()
         RETURNS event_trigger LANGUAGE plpgsql AS $$
 DECLARE
@@ -70,6 +111,7 @@ DECLARE
     partition_bound text;
     partition_key text;
     partition_name text;
+    partition_info json;
     table_relname text;
     table_info RECORD;
     command_tag text;
@@ -98,52 +140,42 @@ BEGIN
         WHERE oid = obj.objid
         INTO table_relname, table_replident, table_persistence, rel_kind, parent_table_id, partition_bound, partition_key;
 
+        IF obj.command_tag = 'ALTER TABLE' AND parent_table_id IS NULL THEN
+            SELECT __pg_springtail_triggers.springtail_get_partition_info(obj.object_identity) INTO partition_info;
+        END IF;
+
         command_text := current_query();
 
         IF obj.command_tag = 'ALTER TABLE' AND position('detach partition' IN lower(command_text)) > 0 THEN
-            -- Use regex to extract partition name
-            match := regexp_matches(
-                command_text,
-                'DETACH\s+PARTITION\s+([^\s;]+)',
-                'i'
-            );
-
-            IF match IS NOT NULL THEN
-                partition_name := match[1];
-            END IF;
-
             msg := json_build_object('xid', txid_current(),
                 'cmd', 'DETACH PARTITION',
                 'table_id', obj.objid::bigint,
                 'schema', obj.schema_name,
                 'table', table_relname,
-                'partition_name', partition_name);
+                'parent_table_id', parent_table_id::int,
+                'partition_bound', partition_bound,
+                'partition_key', partition_key,
+                'partition_info', partition_info);
 
             PERFORM pg_logical_emit_message(true, 'springtail:' || 'DETACH PARTITION', msg::text);
+
+            CONTINUE;
         END IF;
 
         IF obj.command_tag = 'ALTER TABLE' AND position('attach partition' IN lower(command_text)) > 0 THEN
-            -- Use regex to extract partition name and partition bound
-            match := regexp_matches(
-                command_text,
-                'ATTACH PARTITION\s+([^\s]+)\s+FOR\s+VALUES\s+((?:IN\s*\([^)]+\))|(?:FROM\s*\([^)]+\)\s+TO\s*\([^)]+\)))',
-                'i'
-            );
-
-            IF match IS NOT NULL THEN
-                partition_name := match[1];
-                partition_bound := match[2];
-            END IF;
-
             msg := json_build_object('xid', txid_current(),
                 'cmd', 'ATTACH PARTITION',
                 'table_id', obj.objid::bigint,
                 'schema', obj.schema_name,
                 'table', table_relname,
-                'partition_name', partition_name,
-                'partition_bound', partition_bound);
+                'parent_table_id', parent_table_id::int,
+                'partition_bound', partition_bound,
+                'partition_key', partition_key,
+                'partition_info', partition_info);
 
             PERFORM pg_logical_emit_message(true, 'springtail:' || 'ATTACH PARTITION', msg::text);
+
+            CONTINUE;
         END IF;
 
         -- This is a corner case when an index is renamed through "ALTER TABLE" statement
@@ -217,7 +249,8 @@ BEGIN
             'columns', json_columns,
             'parent_table_id', parent_table_id::int,
             'partition_bound', partition_bound,
-            'partition_key', partition_key);
+            'partition_key', partition_key,
+            'partition_info', partition_info);
 
         -- command_tag is CREATE TABLE or ALTER TABLE
         PERFORM pg_logical_emit_message(true, 'springtail:' || command_tag, msg::text);

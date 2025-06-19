@@ -172,6 +172,15 @@ namespace springtail
         std::string collation;
     };
 
+    struct PartitionInfo {
+        std::string table_name;
+        uint64_t table_id;
+        std::string namespace_name;
+        uint64_t namespace_id;
+        std::string partition_bound;
+        std::string partition_key;
+    };
+
     /** Create table/alter table message decoded */
     struct PgMsgTable {
         LSN_t lsn;
@@ -183,6 +192,7 @@ namespace springtail
         uint64_t parent_table_id;
         std::string partition_bound;
         std::string partition_key;
+        std::vector<PartitionInfo> partition_info;
     };
 
     /** Drop table message decoded */
@@ -243,19 +253,21 @@ namespace springtail
         LSN_t lsn;
         int32_t xid;
         uint64_t table_id;
-        std::string schema;
-        std::string table;
+        std::string namespace_name;
+        std::string table_name;
         std::string partition_name;
         std::string partition_bound;
+        std::vector<PartitionInfo> partition_info;
     };
 
     struct PgMsgDetachPartition {
         LSN_t lsn;
         int32_t xid;
         uint64_t table_id;
-        std::string schema;
-        std::string table;
+        std::string namespace_name;
+        std::string table_name;
         std::string partition_name;
+        std::vector<PartitionInfo> partition_info;
     };
 
     struct PgMsgCopySync {

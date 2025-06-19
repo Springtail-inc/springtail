@@ -21,6 +21,15 @@ message TableColumn {
   optional string default_value = 10;
 }
 
+message PartitionInfo {
+  string table_name = 1;
+  int64 table_id = 2;
+  string namespace_name = 3;
+  int64 namespace_id = 4;
+  string partition_bound = 5;
+  string partition_key = 6;
+}
+
 message TableInfo {
   int64 id = 1;
   string namespace_name = 2;
@@ -29,6 +38,7 @@ message TableInfo {
   optional int32 parent_table_id = 5;
   optional string partition_key = 6;
   optional string partition_bound = 7;
+  repeated PartitionInfo partition_info = 8;
 }
 
 message TableRequest {
@@ -208,6 +218,7 @@ message AttachPartitionRequest {
   string table_name = 6;
   string partition_name = 7;
   string partition_bound = 8;
+  repeated PartitionInfo partition_info = 9;
 }
 
 message DetachPartitionRequest {
@@ -218,6 +229,7 @@ message DetachPartitionRequest {
   string namespace_name = 5;
   string table_name = 6;
   string partition_name = 7;
+  repeated PartitionInfo partition_info = 8;
 }
 
 message ColumnHistory {

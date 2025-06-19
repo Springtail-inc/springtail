@@ -641,6 +641,23 @@ Service::_create_table(const proto::TableRequest& request)
     return ddl;
 }
 
+nlohmann::json
+Service::_generate_partition_updates(const proto::TableRequest& request,
+                                     const proto::ColumnHistory& history)
+{
+    nlohmann::json ddl;
+    std::vector<uint64_t> table_ids;
+    for (auto &partition : request.table().partition_info()) {
+        table_ids.push_back(partition.table_id());
+    }
+
+    ddl["action"] = "resync_partitions";
+    ddl["parent_table_id"] = request.table().id();
+    ddl["table_ids"] = table_ids;
+
+    return ddl;
+}
+
 grpc::Status
 Service::AlterTable(grpc::ServerContext* context,
                     const proto::TableRequest* request,
@@ -768,16 +785,21 @@ Service::AlterTable(grpc::ServerContext* context,
         auto history = _generate_update(info->columns(), request->table().columns(),
                                         xid, (!partition_key.empty()), ddl);
 
-        // we won't apply any changes to the system tables in these cases
-        if (history.update_type() != static_cast<int8_t>(SchemaUpdateType::NO_CHANGE) &&
+        if (!partition_key.empty()) {
+            // Generate the history events for the the child partition tables
+            ddl = _generate_partition_updates(*request, history);
+        } else {
+            // we won't apply any changes to the system tables in these cases
+            if (history.update_type() != static_cast<int8_t>(SchemaUpdateType::NO_CHANGE) &&
             history.update_type() != static_cast<int8_t>(SchemaUpdateType::RESYNC)) {
             // write the column change to the schemas table and update the cache
             _set_schema_info(request->db_id(), request->table().id(), ns_info->id,
-                             request->table().name(), {history});
-        }
+                            request->table().name(), {history});
+            }
 
-        _set_primary_index(request->db_id(), ns_info->id, request->table().id(),
-                           request->table().name(), request->table().namespace_name(), xid);
+            _set_primary_index(request->db_id(), ns_info->id, request->table().id(),
+                        request->table().name(), request->table().namespace_name(), xid);
+        }
     }
 
     response->set_statement(nlohmann::to_string(ddl));
@@ -1473,27 +1495,18 @@ Service::AttachPartition(grpc::ServerContext* context,
 
     XidLsn xid(request->xid(), request->lsn());
 
-    auto ns_info = _get_namespace_info(request->db_id(), request->namespace_name(),
-                                       XidLsn(request->xid(), request->lsn()), false);
+    std::vector<uint64_t> table_ids;
+    for ( const auto &partition_info : request->partition_info() ) {
+        table_ids.push_back(partition_info.table_id());
+    }
 
     nlohmann::json ddl;
 
-    auto current_table_info = _get_table_info(request->db_id(), request->table_id(), XidLsn(request->xid(), request->lsn()));
+    ddl["action"] = "resync_partitions";
+    ddl["parent_table_id"] = request->table_id();
+    ddl["table_ids"] = table_ids;
 
-    CHECK(current_table_info);
-
-    auto table_info =
-        std::make_shared<TableCacheRecord>(request->table_id(), request->xid(), request->lsn(),
-                                           ns_info->id, request->table_name(), true,
-                                           current_table_info->parent_table_id, current_table_info->partition_key,
-                                           request->partition_bound());
-    _set_table_info(request->db_id(), table_info);
-
-    ddl["action"] = "attach_partition";
-    ddl["schema"] = request->namespace_name();
-    ddl["table"] = request->table_name();
-    ddl["partition_name"] = request->partition_name();
-    ddl["partition_bound"] = request->partition_bound();
+    LOG_DEBUG(LOG_SCHEMA, "Attach partition DDL: {}", ddl.dump());
 
     // serialize the JSON and return
     response->set_statement(nlohmann::to_string(ddl));
@@ -1514,22 +1527,16 @@ Service::DetachPartition(grpc::ServerContext* context,
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
-    XidLsn xid(request->xid(), request->lsn());
-
-    auto ns_info = _get_namespace_info(request->db_id(), request->namespace_name(),
-                                       XidLsn(request->xid(), request->lsn()), false);
+    std::vector<uint64_t> table_ids;
+    for ( const auto &partition_info : request->partition_info() ) {
+        table_ids.push_back(partition_info.table_id());
+    }
 
     nlohmann::json ddl;
 
-    auto table_info =
-        std::make_shared<TableCacheRecord>(request->table_id(), request->xid(), request->lsn(),
-                                           ns_info->id, request->table_name(), true);
-    _set_table_info(request->db_id(), table_info);
-
-    ddl["action"] = "detach_partition";
-    ddl["schema"] = request->namespace_name();
-    ddl["table"] = request->table_name();
-    ddl["partition_name"] = request->partition_name();
+    ddl["action"] = "resync_partitions";
+    ddl["parent_table_id"] = request->table_id();
+    ddl["table_ids"] = table_ids;
 
     LOG_DEBUG(LOG_SCHEMA, "Detach partition DDL: {}", ddl.dump());
     // serialize the JSON and return
@@ -3005,15 +3012,6 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
     for (const auto& [pos, old_col] : oldMap) {
         if (newMap.find(pos) == newMap.end()) {
 
-            if (partition_root) {
-                // Column has been removed
-                *update.mutable_column() = *old_col;
-                update.set_update_type(static_cast<int8_t>(SchemaUpdateType::REMOVE_COLUMN));
-                update.set_exists(false);
-                ddl["action"] = "col_drop";
-                ddl["column"] = old_col->name();
-                return update;
-            }
 
 #if ENABLE_SCHEMA_MUTATES
             // Column has been removed
@@ -3034,20 +3032,6 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
     for (const auto& [pos, new_col] : newMap) {
         if (oldMap.find(pos) == oldMap.end()) {
             // A new column has been added
-            if (partition_root) {
-                // If this is a partition root, we can add the column
-                *update.mutable_column() = *new_col;
-                update.set_update_type(static_cast<int8_t>(SchemaUpdateType::NEW_COLUMN));
-                update.set_exists(true);
-                ddl["action"] = "col_add";
-                ddl["column"]["name"] = new_col->name();
-                ddl["column"]["type"] = new_col->pg_type();
-                ddl["column"]["nullable"] = new_col->is_nullable();
-                if (new_col->has_default_value()) {
-                    ddl["column"]["default"] = new_col->default_value();
-                }
-                return update;
-            }
 
 #if ENABLE_SCHEMA_MUTATES
             if (new_col->has_default_value()) {
@@ -3095,16 +3079,6 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
             // A column going from nullable to not-nullable results in NULL values being
             // populated with a default, which aren't sent via the log.
             if (!old_col->is_nullable() && new_col->is_nullable()) {
-                if (partition_root) {
-                    // Column has been made nullable
-                    *update.mutable_column() = *new_col;
-                    update.set_update_type(static_cast<int8_t>(SchemaUpdateType::NULLABLE_CHANGE));
-                    update.set_exists(true);
-                    ddl["action"] = "col_nullable";
-                    ddl["column"]["name"] = new_col->name();
-                    ddl["column"]["nullable"] = new_col->is_nullable();
-                    return update;
-                }
 #if ENABLE_SCHEMA_MUTATES
                 *update.mutable_column() = *new_col;
                 update.set_update_type(static_cast<int8_t>(SchemaUpdateType::NULLABLE_CHANGE));
@@ -3121,17 +3095,6 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
 
             // Changing from nullable to not-nullable requires a resync
             if (old_col->is_nullable() && !new_col->is_nullable()) {
-
-                if (partition_root) {
-                    // Column has been made not-nullable
-                    *update.mutable_column() = *new_col;
-                    update.set_update_type(static_cast<int8_t>(SchemaUpdateType::NULLABLE_CHANGE));
-                    update.set_exists(true);
-                    ddl["action"] = "col_not_nullable";
-                    ddl["column"]["name"] = new_col->name();
-                    ddl["column"]["nullable"] = new_col->is_nullable();
-                    return update;
-                }
 
                 ddl["action"] = "resync";
                 update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));

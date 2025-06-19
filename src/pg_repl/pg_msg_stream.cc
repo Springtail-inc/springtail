@@ -947,6 +947,18 @@ namespace springtail {
             table_msg.partition_bound = "";
         }
 
+        for (auto &partition_info : json["partition_info"]) {
+            PartitionInfo info;
+            info.partition_bound = partition_info["partition_bound"];
+            info.table_id = partition_info["table_id"];
+            info.namespace_id = partition_info["namespace_id"];
+            info.table_name = partition_info["table_name"];
+            if (partition_info.contains("partition_key") && !partition_info["partition_key"].is_null()) {
+                info.partition_key = partition_info["partition_key"];
+            }
+            table_msg.partition_info.push_back(info);
+        }
+
         _decode_schema_columns(json["columns"], table_msg.columns);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded create table: json: {}", json.dump());
@@ -1182,10 +1194,23 @@ namespace springtail {
         LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded attach partition: json: {}", json.dump());
 
         json["table_id"].get_to(attach_partition_msg.table_id);
-        json["schema"].get_to(attach_partition_msg.schema);
-        json["table"].get_to(attach_partition_msg.table);
-        json["partition_name"].get_to(attach_partition_msg.partition_name);
-        json["partition_bound"].get_to(attach_partition_msg.partition_bound);
+        json["schema"].get_to(attach_partition_msg.namespace_name);
+        json["table"].get_to(attach_partition_msg.table_name);
+        if (json.contains("partition_bound") && !json["partition_bound"].is_null()) {
+            json["partition_bound"].get_to(attach_partition_msg.partition_bound);
+        }
+
+        for (auto &partition_info : json["partition_info"]) {
+            PartitionInfo info;
+            info.partition_bound = partition_info["partition_bound"];
+            info.table_id = partition_info["table_id"];
+            info.namespace_id = partition_info["namespace_id"];
+            info.table_name = partition_info["table_name"];
+            if (partition_info.contains("partition_key") && !partition_info["partition_key"].is_null()) {
+                info.partition_key = partition_info["partition_key"];
+            }
+            attach_partition_msg.partition_info.push_back(info);
+        }
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::ATTACH_PARTITION);
         msg->msg.emplace<PgMsgAttachPartition>(attach_partition_msg);
@@ -1203,9 +1228,20 @@ namespace springtail {
         LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded detach partition: json: {}", json.dump());
 
         json["table_id"].get_to(detach_partition_msg.table_id);
-        json["schema"].get_to(detach_partition_msg.schema);
-        json["table"].get_to(detach_partition_msg.table);
-        json["partition_name"].get_to(detach_partition_msg.partition_name);
+        json["schema"].get_to(detach_partition_msg.namespace_name);
+        json["table"].get_to(detach_partition_msg.table_name);
+
+        for (auto &partition_info : json["partition_info"]) {
+            PartitionInfo info;
+            info.partition_bound = partition_info["partition_bound"];
+            info.table_id = partition_info["table_id"];
+            info.namespace_id = partition_info["namespace_id"];
+            info.table_name = partition_info["table_name"];
+            if (partition_info.contains("partition_key") && !partition_info["partition_key"].is_null()) {
+                info.partition_key = partition_info["partition_key"];
+            }
+            detach_partition_msg.partition_info.push_back(info);
+        }
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DETACH_PARTITION);
         msg->msg.emplace<PgMsgDetachPartition>(detach_partition_msg);

@@ -643,21 +643,23 @@ namespace springtail::pg_fdw {
             }
 
             uint32_t type_oid = col.at("type").get<uint32_t>();
-            // XXX a fix is required to pull type name from the trigger data
-            // see _gen_fdw_table_sql()
-            assert(false);
-            return fmt::format("ALTER FOREIGN TABLE {}.{} ADD COLUMN {} {} {};",
+            auto it = _type_cache.find(type_oid);
+            std::string type_name;
+            if (it != _type_cache.end()) {
+                type_name = std::get<0>(it->second);
+            }
+            return fmt::format("ALTER {} TABLE {}.{} ADD COLUMN {} {} {};",
+                               is_regular_table_type ? "FOREIGN" : "",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(col.at("name").get<std::string>()),
-                               type_map.at(type_oid),
+                               type_name,
                                constraints);
-
-            CHECK(false); // XXX col["type_name"] must be added and checked
         }
 
         else if (action == "col_drop") {  // alter table drop column
-            return fmt::format("ALTER FOREIGN TABLE {}.{} DROP COLUMN {};",
+            return fmt::format("ALTER {} TABLE {}.{} DROP COLUMN {};",
+                               is_regular_table_type ? "FOREIGN" : "",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(ddl.at("column").get<std::string>()));
