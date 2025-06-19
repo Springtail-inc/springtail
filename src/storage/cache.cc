@@ -15,6 +15,11 @@
 
 namespace springtail {
 
+namespace {
+/* Thread-local variable to identify the background flushing thread. */
+thread_local bool is_cleaner_thread = false;
+}
+
     /* static member initialization must happen outside of class */
     StorageCache* StorageCache::_instance = {nullptr};
     boost::mutex StorageCache::_instance_mutex;
@@ -182,7 +187,7 @@ namespace springtail {
         LOG_DEBUG(LOG_CACHE, "{}, {}", file, xid);
         boost::unique_lock lock(_mutex);
 
-        _make_page_space(1);
+        _make_page_space();
         return std::make_shared<Page>(file, xid);
     }
 
@@ -274,7 +279,11 @@ namespace springtail {
 
             // make sure that this page won't be selected for eviction while performing this flush
             if (page->_use_count == 0) {
-                _lru.erase(page->_lru_pos);
+                if (page->_is_dirty) {
+                    _dirty_lru.erase(page->_lru_pos);
+                } else {
+                    _clean_lru.erase(page->_lru_pos);
+                }
             }
             ++(page->_use_count);
 
@@ -387,6 +396,45 @@ namespace springtail {
         _flush_list.erase(file);
     }
 
+void
+StorageCache::PageCache::background_cleaner()
+{
+    // set the thread name
+    pthread_setname_np(pthread_self(), "cache-cleaner");
+
+    // mark is as the flushing thread
+    is_cleaner_thread = true;
+
+    while (!_shutdown_cleaner) {
+        // hold the cache lock
+        boost::unique_lock lock(_mutex);
+
+        // wake up when the dirty cache gets too full
+        _cleaner_cond.wait(lock, [this]() {
+            return _shutdown_cleaner || _dirty_lru.size() > _low_dirty_pages;
+        });
+
+        while (_dirty_lru.size() > _low_dirty_pages) {
+            // flush dirty pages
+            auto page = _dirty_lru.front();
+            _dirty_lru.pop_front();
+
+            // take ownership of this page for the eviction
+            ++(page->_use_count);
+
+            // try to evict the page
+            _try_evict_dirty(page);
+
+            // once we cross a threshold, wake up waiting threads
+            if (_waiting_for_cleaner && _dirty_lru.size() < _high_dirty_pages) {
+                // wake up anyone waiting
+                _waiting_for_cleaner = false;
+                _cleaner_block.notify_all();
+            }
+        }
+    }
+}
+
     void
     StorageCache::PageCache::_put(PagePtr page)
     {
@@ -395,7 +443,11 @@ namespace springtail {
 
         // if the page has no users, place it onto the back of the LRU list
         if (page->_use_count == 0) {
-            page->_lru_pos = _lru.insert(_lru.end(), page);
+            if (page->_is_dirty) {
+                page->_lru_pos = _dirty_lru.insert(_dirty_lru.end(), page);
+            } else {
+                page->_lru_pos = _clean_lru.insert(_clean_lru.end(), page);
+            }
         }
     }
 
@@ -416,14 +468,14 @@ namespace springtail {
         // make space for the page; evict if we need to make space
         // note: we do this after creating the Page to avoid a race where two people might create
         //       the same page since they both don't find it in the cache
-        _make_page_space(1);
+        _make_page_space();
 
         // return it
         return page;
     }
 
     void
-    StorageCache::PageCache::_try_evict(PagePtr page)
+    StorageCache::PageCache::_try_evict_dirty(PagePtr page)
     {
         // issue the associated callback for the page's eviction
         bool success = true;
@@ -461,6 +513,16 @@ namespace springtail {
             return;
         }
 
+        // evict the now-clean page
+        _evict_clean(page);
+    }
+
+    void
+    StorageCache::PageCache::_evict_clean(PagePtr page)
+    {
+        DCHECK(page->_use_count == 1);
+        DCHECK(!page->_is_dirty);
+
         // remove the page from the cache
         LOG_DEBUG(LOG_CACHE, "Page evict file {} eid {} xid {}",
                             page->key().first, page->key().second, page->xid());
@@ -475,31 +537,45 @@ namespace springtail {
     }
 
     void
-    StorageCache::PageCache::_make_page_space(uint32_t space_needed)
+    StorageCache::PageCache::_make_page_space()
     {
-        // if there is space in the cache, utilize it
-        while (_size + space_needed > _max_size) {
-            // try to use any space that is available
-            if (_size < _max_size) {
-                space_needed -= _max_size - _size;
-                _size = _max_size;
-            }
-
-            // evict a page from the LRU and then check the sizes again
-            auto page = _lru.front();
-            _lru.pop_front();
-
-            // take ownership of this page for the eviction
-            ++(page->_use_count);
-
-            // try to evict the page
-            _try_evict(page);
-
-            // note: once we've performed an eviction, try again to get the space we need
+        // check if there's vacant space in the cache
+        if (_size < _max_size) {
+            ++_size;
+            return;
         }
 
-        // at this point we know there is enough space in the cache for the remaining size
-        _size += space_needed;
+        if (!is_cleaner_thread) {
+            // if we have too many dirty pages, we must block until the cleaner catches up
+            if (_dirty_lru.size() >= _low_dirty_pages) {
+                // wake up the background cleaner
+                _cleaner_cond.notify_one();
+
+                // if we have too many dirty pages, we must block
+                if (_dirty_lru.size() >= _max_dirty_pages) {
+                    _waiting_for_cleaner = true;
+                }
+
+                // if we have to wait, block until the cleaner wakes us
+                if (_waiting_for_cleaner) {
+                    boost::unique_lock lock(_mutex, boost::adopt_lock);
+                    _cleaner_block.wait(lock, [this]() { return !_waiting_for_cleaner; });
+                }
+            }
+        }
+
+        // evict a page from the LRU
+        auto page = _clean_lru.front();
+        _clean_lru.pop_front();
+
+        // take ownership of this page for the eviction
+        ++(page->_use_count);
+
+        // evict the page
+        _evict_clean(page);
+
+        // re-aquire the space
+        ++_size;
     }
 
     StorageCache::PagePtr
@@ -530,7 +606,11 @@ namespace springtail {
         // if the page is on the LRU list, remove it
         if (page_i->second->_use_count == 0) {
             TIME_TRACE_SCOPED(time_trace::traces, cache__try_get__lru_erase);
-            _lru.erase(page_i->second->_lru_pos);
+            if (page_i->second->_is_dirty) {
+                _dirty_lru.erase(page_i->second->_lru_pos);
+            } else {
+                _clean_lru.erase(page_i->second->_lru_pos);
+            }
         }
 
         // increment it's use count
