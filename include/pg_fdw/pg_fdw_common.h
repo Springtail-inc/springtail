@@ -34,6 +34,7 @@ typedef struct SpringtailTargetColumn {
 typedef struct SpringtailPlanState {
     uint64_t tid;
     double   width;
+    uint64_t rows; 
     List    *target_list;       ///< List of target columns (SpringtailTargetColumn)
     List    *pathkeys;          ///< List of de-parsed path keys (DeparsedSortGroup)
     List    *qual_list;         ///< List of predicate clauses (BaseQual)
