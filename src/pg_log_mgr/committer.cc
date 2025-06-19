@@ -210,6 +210,9 @@ namespace springtail::committer {
                     auto entry = std::make_shared<WorkerEntry>(db_id, tid, completed_xid, xid);
                     _worker_queue.push(entry);
                 }
+
+                // update the coordinator
+                Coordinator::mark_alive(keep_alive);
             }
 
             // wait for tables to complete their processing
@@ -218,24 +221,22 @@ namespace springtail::committer {
             LOG_DEBUG(LOG_COMMITTER, "Wait for {} tables to complete", _tid_set.size());
             {
                 boost::unique_lock lock(_mutex);
-                _cv.wait(lock, [this]() { return _tid_set.empty(); });
+                while (!_cv.wait_for(lock, boost::chrono::seconds(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT),
+                                     [this]() { return _tid_set.empty(); })) {
+                    Coordinator::mark_alive(keep_alive); // update the coordinator
+                }
             }
             LOG_DEBUG(LOG_COMMITTER, "All table processing complete for XID {}", xid);
 
-            nlohmann::json index_ddls = _redis_ddl.get_index_ddls_xid(db_id, xid);
+            auto index_requests = _index_requests_mgr->get_index_requests(db_id, xid);
 
             // Trigger index reconciliation for the earliest pending XID
             if (result->type() == XidReady::Type::RECONCILE_INDEX) {
                 _indexer->process_index_reconciliation(db_id, result->reconcile().reconcile_xid(), xid);
             }
 
-            if (!index_ddls.is_null()) {
-                _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
-
-                // process the indexes - create/drop, allowing them to happen in the background
-                _indexer->process_ddls(db_id, xid, index_ddls);
-
-                _redis_ddl.commit_index_ddl(db_id, xid);
+            if (!index_requests.empty()) {
+                _indexer->process_requests(db_id, xid, index_requests);
             }
 
             if (!completed_ddls.is_null()) {
@@ -361,11 +362,12 @@ namespace springtail::committer {
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
 
         // register the thread on startup
-        auto& keep_alive = coordinator->register_thread(daemon_type, worker_id);
+        coordinator->register_thread(daemon_type, worker_id);
 
         // note: also wait on an empty queue to ensure it is drained before shutdown
         while (!_shutdown || !_worker_queue.empty()) {
             // update the coordinator
+            auto &keep_alive = coordinator->find_thread(daemon_type, worker_id);
             Coordinator::mark_alive(keep_alive);
 
             // wait for work on the queue
@@ -381,7 +383,7 @@ namespace springtail::committer {
             }
 
             // process all of the mutations for a given table in a given XID
-            _process_table(entry->db_id, entry->tid, entry->completed_xid, entry->xid);
+            _process_table(entry->db_id, entry->tid, entry->completed_xid, entry->xid, worker_id);
 
             // mark the table processing as complete
             {
@@ -401,8 +403,13 @@ namespace springtail::committer {
     Committer::_process_table(uint64_t db_id,
                               uint64_t tid,
                               uint64_t completed_xid,
-                              uint64_t xid)
+                              uint64_t xid,
+                              const std::string &thread_name)
     {
+        // find the coordinator keep-alive
+        constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
+        auto &keep_alive = Coordinator::get_instance()->find_thread(daemon_type, thread_name);
+
         // construct the mutable table object
         auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, xid, true);
 
@@ -426,11 +433,20 @@ namespace springtail::committer {
 
             // process each extent of ordered mutations
             for (auto wc_extent : extent_list) {
+                // update the coordinator
+                Coordinator::mark_alive(keep_alive);
+
+                // process the extent
                 _process_extent(db_id, tid, table, wc_extent);
             }
         }
         TIME_TRACE_STOP(process_extents_trace);
         TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("process_extents-xid_{}", xid), process_extents_trace);
+
+        // XXX we are doing this because the finalize can take a long time.  What we should do
+        //     instead is update the cache to use async IO so that we can initiate all of the page
+        //     flush requests and then perform the keep-alives while waiting for completion
+        Coordinator::get_instance()->unregister_thread(daemon_type, thread_name);
 
         time_trace::Trace finalize_trace;
         TIME_TRACE_START(finalize_trace);
@@ -438,6 +454,9 @@ namespace springtail::committer {
         auto &&metadata = table->finalize();
         TIME_TRACE_STOP(finalize_trace);
         TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("finalize-xid_{}", xid), finalize_trace);
+
+        // XXX see above comment, need to change this
+        Coordinator::get_instance()->register_thread(daemon_type, thread_name);
 
         if (min_commit_ts) {
             // log how long it took to process this table

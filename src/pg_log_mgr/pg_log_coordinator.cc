@@ -72,6 +72,9 @@ namespace springtail::pg_log_mgr {
         // Initialize Index reconciliation queue manager
         _index_reconciliation_queue_mgr = std::make_shared<IndexReconciliationQueueManager>();
 
+        // Initialize Index requests manager
+        _index_requests_mgr = std::make_shared<IndexRequestsManager>();
+
         // read log mgr config
         nlohmann::json log_mgr_config = Properties::get(Properties::LOG_MGR_CONFIG);
         auto optional_repl_log = Json::get<std::string>(log_mgr_config, "replication_log_path");
@@ -88,7 +91,7 @@ namespace springtail::pg_log_mgr {
         }
 
         // Start the committer thread
-        _committer = std::make_shared<springtail::committer::Committer>(1, _committer_queue, _index_reconciliation_queue_mgr, indexer_worker_threads);
+        _committer = std::make_shared<springtail::committer::Committer>(1, _committer_queue, _index_reconciliation_queue_mgr, _index_requests_mgr, indexer_worker_threads);
         _committer_thread = std::thread(&springtail::committer::Committer::run, _committer);
 
         // get instance id
@@ -131,7 +134,7 @@ namespace springtail::pg_log_mgr {
         // create log mgr
         auto log_mgr = std::make_shared<PgLogMgr>(db_id, repl_log_path, xact_log_path, _host, db_name, _user_name,
                                                          _password, pub_name, slot_name, _log_size_rollover_threshold,
-                                                         _port, _archive_logs, _committer_queue, _index_reconciliation_queue_mgr);
+                                                         _port, _archive_logs, _committer_queue, _index_reconciliation_queue_mgr, _index_requests_mgr);
         _log_mgrs[db_id] = log_mgr;
 
         lock.unlock();
