@@ -56,6 +56,11 @@ public:
     std::atomic<uint64_t> &register_thread(DaemonType type, const std::string &thread_id = "0");
 
     /**
+     * @brief Retrieve the keep-alive for a given thread.
+     */
+    std::atomic<uint64_t> &find_thread(DaemonType type, const std::string &thread_id = "0");
+
+    /**
      * @brief Unregister a thread with the coordinator
      * @param type daemon type
      * @param thread_id thread id
