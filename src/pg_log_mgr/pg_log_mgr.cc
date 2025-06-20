@@ -403,6 +403,9 @@ namespace springtail::pg_log_mgr {
             PgXactMsg redis_xact(_db_id, r);
 
             SyncTracker::get_instance()->add_sync(std::get<pg_log_mgr::PgXactMsg::TableSyncMsg>(redis_xact.msg));
+
+            // Send sync message for this copy result
+            PgCopyTable::send_sync_msg(_db_id, r);
         }
 
         // process stalled messages; set state to replaying

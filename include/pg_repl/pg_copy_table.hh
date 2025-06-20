@@ -451,5 +451,12 @@ namespace springtail
         static std::vector<PgCopyResultPtr>
             copy_table(uint64_t db_id, uint64_t xid,
                        const nlohmann::json &include_json);
+
+        /**
+         * @brief Send sync replication message
+         * @param db_id database id
+         * @param Table Copy result
+         */
+        static void send_sync_msg(uint64_t db_id, PgCopyResultPtr result);
     };
 }

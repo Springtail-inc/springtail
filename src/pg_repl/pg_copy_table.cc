@@ -1016,6 +1016,22 @@ namespace springtail
             }
         }
 
+        //if (result->tids.size() > 0) {
+        //    copy_table._send_sync_msg(result);
+        //}
+
+        // end the copy
+        copy_table._end_copy();
+        copy_table.disconnect();
+    }
+
+    void
+    PgCopyTable::send_sync_msg(uint64_t db_id, PgCopyResultPtr result)
+    {
+        // create copy table object and connect to db
+        PgCopyTable copy_table;
+        copy_table.connect(db_id);
+
         if (result->tids.size() > 0) {
             copy_table._send_sync_msg(result);
         }
