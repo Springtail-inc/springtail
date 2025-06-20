@@ -401,7 +401,6 @@ namespace springtail::pg_log_mgr {
         }
 
         // process stalled messages; set state to replaying
-        LOG_DEBUG(LOG_PG_LOG_MGR, "About to set STATE_REPLAYING");
         _internal_state.set(STATE_REPLAYING);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; state=replaying");
