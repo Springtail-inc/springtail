@@ -938,13 +938,9 @@ namespace springtail {
         }
         if (!json["partition_key"].is_null()) {
             json["partition_key"].get_to(table_msg.partition_key);
-        } else {
-            table_msg.partition_key = "";
         }
         if (!json["partition_bound"].is_null()) {
             json["partition_bound"].get_to(table_msg.partition_bound);
-        } else {
-            table_msg.partition_bound = "";
         }
 
         for (auto &partition_info : json["partition_info"]) {

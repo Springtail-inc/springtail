@@ -15,15 +15,18 @@ set(PG_FDW_SOURCES
     multicorn_util.c
     pg_fdw_mgr.cc
     pg_fdw_mgr_wrap.cc
+    pg_fdw_ddl_common.cc
 )
 
 set(PG_DDL_SOURCES
     pg_ddl_mgr.cc
+    pg_fdw_ddl_common.cc
 )
 
 set(PG_FDW_TEST_SOURCES
     test/mock_pg.c
     pg_fdw_mgr.cc
+    pg_fdw_ddl_common.cc
 )
 
 # For postgres regression tests

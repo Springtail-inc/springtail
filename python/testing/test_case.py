@@ -556,6 +556,18 @@ class TestCase:
                             WHERE n.nspname = '{command["schema"]}' AND t.relname = '{command["table"]}' AND c.contype = 'p';"""
                 results['primary'] = self._execute_sql(cursor, sql, True, txn)
 
+                # retrieve the partition information for the table
+                sql = f"""SELECT
+                            CASE WHEN t.relispartition THEN
+                                (SELECT inhparent FROM pg_inherits WHERE inhrelid = t.oid)
+                            END as parent_oid,
+                            pg_get_expr(t.relpartbound, t.oid, TRUE) as partition_bound,
+                            pg_get_partkeydef(t.oid) as partition_key
+                        FROM pg_class t
+                        JOIN pg_catalog.pg_namespace n ON (t.relnamespace = n.oid)
+                        WHERE n.nspname = '{command["schema"]}' AND t.relname = '{command["table"]}';"""
+                results['partition_info'] = self._execute_sql(cursor, sql, True, txn)
+
                 sql = f"""SELECT c.oid as table_id,
                                     i.indexrelid as index_id,
                                     unnest(string_to_array(i.indkey::text, ' '))::int as column_id
@@ -683,7 +695,8 @@ class TestCase:
                 results = {}
 
                 # retrieve the column data
-                with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists"
+                with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists",
+                                "table_names"."parent_table_id", "table_names"."partition_bound", "table_names"."partition_key"
                                 FROM "__pg_springtail_catalog"."table_names"
                                 JOIN "__pg_springtail_catalog"."namespace_names" ON "namespace_names"."namespace_id" = "table_names"."namespace_id"
                                 WHERE "namespace_names"."name" = '{command["schema"]}' AND "table_names"."name" = '{command["table"]}'
@@ -697,6 +710,11 @@ class TestCase:
                           SELECT name, pg_type, nullable, position FROM ranked_columns WHERE rn = 1 AND exists IS TRUE ORDER BY position ASC;"""
 
                 results['columns'] = self._execute_sql(cursor, sql, True, 'replica')
+
+                # retrieve the partition information for the table
+                sql = f"""WITH latest_table AS ({with_sql})
+                          SELECT parent_table_id, partition_bound, partition_key FROM latest_table LIMIT 1;"""
+                results['partition_info'] = self._execute_sql(cursor, sql, True, 'replica')
 
                 # retrieve the primary key data
                 with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists"

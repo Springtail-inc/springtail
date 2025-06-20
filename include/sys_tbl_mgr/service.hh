@@ -425,14 +425,12 @@ private:
      * @param old_schema The schema before the alteration.
      * @param new_schema The schema after the alteration.
      * @param xid The XID/LSN at which the alteration occurred.
-     * @param partition_root A flag indicating if this is a partition root table (holds no data)
      * @param ddl The JSON object to which the DDL statement will be added.
      */
     proto::ColumnHistory _generate_update(
         const google::protobuf::RepeatedPtrField<proto::TableColumn>& old_schema,
         const google::protobuf::RepeatedPtrField<proto::TableColumn>& new_schema,
         const XidLsn& xid,
-        bool partition_root,
         nlohmann::json& ddl);
 
     // CACHE FOR NAMESPACES

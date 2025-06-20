@@ -23,7 +23,14 @@ INSERT INTO family (name, age, relationship, gender) VALUES
 ALTER TABLE family DETACH PARTITION family_cousins;
 
 ## verify
+### schema_check public family
+### schema_check public family_cousins
+### schema_check public family_grandparents
+### schema_check public family_siblings
 SELECT * FROM family ORDER BY id;
+SELECT * FROM family_cousins ORDER BY id;
+SELECT * FROM family_grandparents ORDER BY id;
+SELECT * FROM family_siblings ORDER BY id;
 
 ## cleanup
 DROP TABLE family CASCADE;

@@ -524,31 +524,31 @@ namespace springtail::pg_fdw {
         std::string partition_key;
         std::string partition_bound;
 
-        if (ddl.contains("parent_table_id")) {
+        if (ddl.contains("parent_table_id") && !ddl.at("parent_table_id").is_null()) {
             parent_table_id = ddl.at("parent_table_id").get<uint64_t>();
         } else {
             parent_table_id = 0;
         }
 
-        if (ddl.contains("parent_namespace_name")) {
+        if (ddl.contains("parent_namespace_name") && !ddl.at("parent_namespace_name").is_null()) {
             parent_namespace_name = ddl.at("parent_namespace_name").get<std::string>();
         } else {
             parent_namespace_name = "";
         }
 
-        if (ddl.contains("parent_table_name")) {
+        if (ddl.contains("parent_table_name") && !ddl.at("parent_table_name").is_null()) {
             parent_table_name = ddl.at("parent_table_name").get<std::string>();
         } else {
             parent_table_name = "";
         }
 
-        if (ddl.contains("partition_key")) {
+        if (ddl.contains("partition_key") && !ddl.at("partition_key").is_null()) {
             partition_key = ddl.at("partition_key").get<std::string>();
         } else {
             partition_key = "";
         }
 
-        if (ddl.contains("partition_bound")) {
+        if (ddl.contains("partition_bound") && !ddl.at("partition_bound").is_null()) {
             partition_bound = ddl.at("partition_bound").get<std::string>();
         } else {
             partition_bound = "";

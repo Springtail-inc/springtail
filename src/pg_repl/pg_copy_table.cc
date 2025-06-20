@@ -583,6 +583,8 @@ namespace springtail
         // partition info
         if (_schema.parent_oid.has_value()) {
             table_info->set_parent_table_id(static_cast<int32_t>(_schema.parent_oid.value()));
+        } else {
+            table_info->set_parent_table_id(constant::INVALID_TABLE);
         }
 
         if (_schema.partition_key.has_value()) {

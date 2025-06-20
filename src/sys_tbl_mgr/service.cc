@@ -522,47 +522,48 @@ Service::_create_table(const proto::TableRequest& request)
     ddl["columns"] = nlohmann::json::array();
 
     // partition info
-    std::optional<uint64_t> parent_table_id;
+    std::optional<uint64_t> parent_table_id = constant::INVALID_TABLE;
     if (request.table().has_parent_table_id()) {
         parent_table_id = request.table().parent_table_id();
         ddl["parent_table_id"] = parent_table_id.value();
         auto parent_table_info = _get_table_info(request.db_id(), parent_table_id.value(), xid);
-        if (parent_table_info == nullptr) {
-            LOG_ERROR("Parent table {} not found for table {} in namespace {}",
-                      parent_table_id.value(), request.table().name(), request.table().namespace_name());
-            ddl["parent_table_name"] = "";
-            ddl["parent_namespace_name"] = "";
-        } else {
+        if (parent_table_id.value() != constant::INVALID_TABLE) {
+            if (parent_table_info == nullptr) {
+                LOG_ERROR("Parent table not found: {}@{} - {}", request.db_id(), xid.xid, parent_table_id.value());
+                throw SysTblMgrError("Parent table not found");
+            }
             auto namespace_name = _get_namespace_info(request.db_id(), parent_table_info->namespace_id, xid);
             if (namespace_name == nullptr) {
-                ddl["parent_namespace_name"] = "";
-            } else {
-                ddl["parent_namespace_name"] = namespace_name->name;
+                LOG_ERROR("Parent namespace not found: {}@{} - {}", request.db_id(), xid.xid, parent_table_id.value());
+                throw SysTblMgrError("Parent namespace not found");
             }
+            ddl["parent_namespace_name"] = namespace_name->name;
             ddl["parent_table_name"] = parent_table_info->name;
+        } else {
+            parent_table_id = std::nullopt;
         }
-    } else {
-        ddl["parent_table_id"] = constant::INVALID_TABLE;
-        ddl["parent_table_name"] = "";
-        ddl["parent_namespace_name"] = "";
     }
 
     // partition key -- this is a parent table; either root or intermediate
-    std::optional<std::string> partition_key;
+    std::optional<std::string> partition_key = std::nullopt;
     if (request.table().has_partition_key()) {
         partition_key = request.table().partition_key();
         ddl["partition_key"] = partition_key.value();
-    } else {
-        ddl["partition_key"] = "";
+        // Ensure empty values are set to null to ensure the table is storing nulls properly
+        if (partition_key.value() == "") {
+            partition_key = std::nullopt;
+        }
     }
 
     // this is a partitioned table, it is a leaf if partition_key is empty
-    std::optional<std::string> partition_bound;
+    std::optional<std::string> partition_bound = std::nullopt;
     if (request.table().has_partition_bound()) {
         partition_bound = request.table().partition_bound();
         ddl["partition_bound"] = partition_bound.value();
-    } else {
-        ddl["partition_bound"] = "";
+        // Ensure empty values are set to null to ensure the table is storing nulls properly
+        if (partition_bound.value() == "") {
+            partition_bound = std::nullopt;
+        }
     }
 
     // add table name
@@ -665,11 +666,14 @@ Service::AlterTable(grpc::ServerContext* context,
     assert(table_info != nullptr);
 
     // check if the table is a partitioned table
-    uint64_t parent_table_id = constant::INVALID_TABLE;
-    std::string partition_key = "";
-    std::string partition_bound = "";
+    std::optional<uint64_t> parent_table_id = std::nullopt;
+    std::optional<std::string> partition_key = std::nullopt;
+    std::optional<std::string> partition_bound = std::nullopt;
     if (request->table().has_parent_table_id()) {
         parent_table_id = request->table().parent_table_id();
+        if (parent_table_id.value() == constant::INVALID_TABLE) {
+            parent_table_id = std::nullopt;
+        }
     }
     if (request->table().has_partition_key()) {
         partition_key = request->table().partition_key();
@@ -679,9 +683,15 @@ Service::AlterTable(grpc::ServerContext* context,
     }
 
     // update the partition details
-    ddl["partition_key"] = partition_key;
-    ddl["partition_bound"] = partition_bound;
-    ddl["parent_table_id"] = parent_table_id;
+    if (partition_key.has_value()) {
+        ddl["partition_key"] = partition_key.value();
+    }
+    if (partition_bound.has_value()) {
+        ddl["partition_bound"] = partition_bound.value();
+    }
+    if (parent_table_id.has_value()) {
+        ddl["parent_table_id"] = parent_table_id.value();
+    }
 
     if (table_info->namespace_id != ns_info->id) {
         // if the schema/namespace changed then update the table_names table
@@ -726,25 +736,6 @@ Service::AlterTable(grpc::ServerContext* context,
 
         _set_primary_index(request->db_id(), ns_info->id, request->table().id(), table_info->name,
                            ns_info->name, xid);
-    } else if (table_info->parent_table_id != parent_table_id) {
-        auto new_info = std::make_shared<TableCacheRecord>(request->table().id(), request->xid(),
-                                                           request->lsn(), ns_info->id,
-                                                           request->table().name(), true,
-                                                           parent_table_id, partition_key,
-                                                           partition_bound);
-        _set_table_info(request->db_id(), new_info);
-
-        if (table_info->parent_table_id == constant::INVALID_TABLE) {
-            CHECK_NE(parent_table_id, constant::INVALID_TABLE);
-            // moving table to a partitioned table
-            ddl["action"] = "alter_parent_set";
-            // TODO: get parent table name
-            // ddl["parent_table_name"] = parent_table_name;
-            // ddl["parent_table_schema"] = parent_table_schema;
-        } else if (parent_table_id == constant::INVALID_TABLE) {
-            // promote back to full table
-            ddl["action"] = "alter_parent_clear";
-        }
     } else {
         XidLsn xid(request->xid(), request->lsn());
 
@@ -753,12 +744,10 @@ Service::AlterTable(grpc::ServerContext* context,
 
         // generate a tuple for the change
         // note: _generate_update() sets the necessary elements of the ddl
-        // use partition_key to determine if this is a root of a partitioned table, in which case
-        // it will not hold any data, so no need to resync the data
         auto history = _generate_update(info->columns(), request->table().columns(),
-                                        xid, (!partition_key.empty()), ddl);
+                                        xid, ddl);
 
-        if (!partition_key.empty()) {
+        if (!partition_key.has_value()) {
             // Generate the history events for the the child partition tables
             ddl = _generate_partition_updates(*request, history);
         } else {
@@ -829,18 +818,12 @@ Service::_drop_table(const proto::DropTableRequest& request)
 
     if (old_table_info->parent_table_id.has_value()) {
         ddl["parent_table_id"] = old_table_info->parent_table_id.value();
-    } else {
-        ddl["parent_table_id"] = constant::INVALID_TABLE;
     }
     if (old_table_info->partition_key.has_value() && !old_table_info->partition_key.value().empty()) {
         ddl["partition_key"] = old_table_info->partition_key.value();
-    } else {
-        ddl["partition_key"] = "";
     }
     if (old_table_info->partition_bound.has_value() && !old_table_info->partition_bound.value().empty()) {
         ddl["partition_bound"] = old_table_info->partition_bound.value();
-    } else {
-        ddl["partition_bound"] = "";
     }
 
     XidLsn xid(request.xid(), request.lsn());
@@ -1500,16 +1483,70 @@ Service::DetachPartition(grpc::ServerContext* context,
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
-    std::vector<uint64_t> table_ids;
+    XidLsn xid(request->xid(), request->lsn());
+
+    auto table = TableMgr::get_instance()->get_table(request->db_id(), sys_tbl::TableNames::ID,
+        xid.xid);
+    // get field array
+    auto fields = table->extent_schema()->get_fields();
+
+    std::unordered_set<uint64_t> system_table_ids;
+
+    // Iterate the table_names table and find the child tables who has the parent_table_id as the current_table_id
+    for (auto row : (*table)) {
+        auto table_id = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
+        auto parent_table_id = fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->get_uint64(&row);
+
+        if (parent_table_id == request->table_id()) {
+            system_table_ids.insert(table_id);
+        }
+    }
+
+    // Parse the requested table ids
+    std::unordered_set<uint64_t> table_ids;
     for ( const auto &partition_info : request->partition_info() ) {
-        table_ids.push_back(partition_info.table_id());
+        table_ids.insert(partition_info.table_id());
+    }
+
+    // Get the different in order to identify the detached table
+    std::vector<uint64_t> result;
+    for (const auto& elem : system_table_ids) {
+        if (table_ids.find(elem) == table_ids.end()) {
+            result.push_back(elem);
+        }
+    }
+
+    // Update the system table for the detached table
+    std::string partition_name = "";
+    for (const auto& detached_table_id : result) {
+
+        auto table_info = _get_table_info(request->db_id(), detached_table_id, xid);
+
+        // note: table should always exist when calling alter_table()
+        assert(table_info != nullptr);
+
+        std::optional<std::string> partition_key = std::nullopt;
+        if ( table_info->partition_key != "" ) {
+            partition_key = table_info->partition_key;
+        }
+
+        // update the system table
+        auto updated_table_info =
+            std::make_shared<TableCacheRecord>(detached_table_id, request->xid(), request->lsn(),
+                                               table_info->namespace_id, table_info->name, true,
+                                               std::nullopt, partition_key, std::nullopt);
+        _set_table_info(request->db_id(), updated_table_info);
+
+        partition_name = table_info->name;
     }
 
     nlohmann::json ddl;
 
-    ddl["action"] = "resync_partitions";
+    ddl["action"] = "detach_partition";
+    ddl["partition_name"] = partition_name;
+    ddl["schema"] = request->namespace_name();
+    ddl["table"] = request->table_name();
     ddl["parent_table_id"] = request->table_id();
-    ddl["table_ids"] = table_ids;
 
     LOG_DEBUG(LOG_SCHEMA, "Detach partition DDL: {}", ddl.dump());
     // serialize the JSON and return
@@ -1770,15 +1807,15 @@ Service::_get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     info->name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row);
     info->exists = exists;
 
-    uint64_t parent_table_id = 0;
+    uint64_t parent_table_id = constant::INVALID_TABLE;
     if (!fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->is_null(&row)) {
         parent_table_id = fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->get_uint64(&row);
     }
-    std::string partition_key = "";
+    std::string partition_key;
     if (!fields->at(sys_tbl::TableNames::Data::PARTITION_KEY)->is_null(&row)) {
         partition_key = fields->at(sys_tbl::TableNames::Data::PARTITION_KEY)->get_text(&row);
     }
-    std::string partition_bound = "";
+    std::string partition_bound;
     if (!fields->at(sys_tbl::TableNames::Data::PARTITION_BOUND)->is_null(&row)) {
         partition_bound = fields->at(sys_tbl::TableNames::Data::PARTITION_BOUND)->get_text(&row);
     }
@@ -2963,7 +3000,6 @@ proto::ColumnHistory
 Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableColumn>& old_schema,
                           const google::protobuf::RepeatedPtrField<proto::TableColumn>& new_schema,
                           const XidLsn& xid,
-                          bool partition_root,
                           nlohmann::json& ddl)
 {
     proto::ColumnHistory update;
@@ -3076,17 +3112,6 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
 
             // Check for a change in the data type
             if (old_col->pg_type() != new_col->pg_type()) {
-                if (partition_root) {
-                    // Column has changed type
-                    *update.mutable_column() = *new_col;
-                    update.set_update_type(static_cast<int8_t>(SchemaUpdateType::TYPE_CHANGE));
-                    update.set_exists(true);
-                    ddl["action"] = "col_type_change";
-                    ddl["column"]["name"] = new_col->name();
-                    ddl["column"]["type"] = new_col->pg_type();
-                    return update;
-                }
-
                 ddl["action"] = "resync";
                 update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
                 return update;
@@ -3094,7 +3119,6 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
 
             // Check for a primary key position change
             if (old_col->pk_position() != new_col->pk_position()) {
-                CHECK_EQ(partition_root, false);
                 ddl["action"] = "resync";
                 update.set_update_type(static_cast<int8_t>(SchemaUpdateType::RESYNC));
                 return update;

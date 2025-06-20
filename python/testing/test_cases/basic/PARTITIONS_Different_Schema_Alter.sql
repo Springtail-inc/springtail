@@ -46,6 +46,9 @@ ALTER TABLE partition_table_schema_alter.invoice
     FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
 
 ## verify
+### schema_check public partition_table_schema_alter invoice
+### schema_check public child_table_schema_alter invoice_2023
+### schema_check public child_table_schema_alter invoice_2024
 SELECT * FROM partition_table_schema_alter.invoice ORDER BY id;
 
 ## cleanup
