@@ -64,6 +64,18 @@ namespace springtail {
         }
 
         /**
+         * @brief Joins strings into a single string with a delimiter between them.
+         * @param delimiter delimiter string (e.g., ",")
+         * @param vec vector of strings to join
+         */
+        std::string
+        join_string(const std::string &delimiter,
+                    const std::vector<std::string> &vec)
+        {
+            return join_string(delimiter, vec.begin(), vec.end());
+        }
+
+        /**
          * @brief Split a string based on a delimiter
          * @param delimiter delimiter string (e.g., ":")
          * @param string_value string to split (e.g., "this:is:a:string")

@@ -32,6 +32,8 @@ namespace springtail::pg_fdw {
         static constexpr int MAX_CONNECTION_CACHE_SIZE = 10;
         /** Max number of threads in the thread manager pool */
         static constexpr int MAX_THREAD_POOL_SIZE = 4;
+        /** Policy sync interval in seconds */
+        static constexpr int POLICY_SYNC_INTERVAL_SECONDS = 30;
 
         /**
          * Start the main thread
@@ -53,7 +55,10 @@ namespace springtail::pg_fdw {
         /**
          * @brief This function notifies DDL manager to exit the main loop
          */
-        void notify_shutdown() { _is_shutting_down = true; }
+        void notify_shutdown() {
+            _is_shutting_down = true;
+            _policy_shutdown_cv.notify_all();
+        }
 
         /**
          * @brief Generate enum alter type sql statement
@@ -73,6 +78,10 @@ namespace springtail::pg_fdw {
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections
         RedisCache::RedisChangeWatcherPtr _cache_watcher;           ///< redis cache callback object
         std::shared_ptr<common::MultiQueueThreadManager> _thread_manager;   ///< thread manager that processes DDL requests
+
+        std::thread _policy_sync_thread;              ///< thread for syncing policies
+        std::condition_variable _policy_shutdown_cv;  ///< condition variable for shutdown notification
+        std::mutex _policy_shutdown_mutex;            ///< mutex for shutdown notification
 
         std::string _fdw_id;                       ///< FDW ID
 
@@ -100,6 +109,13 @@ namespace springtail::pg_fdw {
 
         /** Initialize the FDW */
         void _init_fdw(const std::string &username, const std::string &password);
+
+        /** Redis callback for database ID changes */
+        void _on_database_ids_changed(const std::string &path,
+                                      const nlohmann::json &new_value);
+
+        /** Policy sync thread; sync policy changes to FDW */
+        void _policy_sync_thread();
 
         /**
          * Method to get the create schema query

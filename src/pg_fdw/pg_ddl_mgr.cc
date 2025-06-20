@@ -41,44 +41,64 @@ namespace springtail::pg_fdw {
     static constexpr char VERIFY_DB_EXISTS[] =
         "SELECT 1 FROM  pg_database WHERE datname = '{}'";
 
+    static constexpr char POLICY_DIFF_SELECT[] =
+        "SELECT diff_type, table_oid, table_name, schema_name, "
+        "       policy_oid, policy_name, policy_name_old, "
+        "       policy_permissive, policy_roles, policy_qual "
+        "FROM __pg_springtail_triggers.policy_diff('{}');";
+
+
     PgDDLMgr::PgDDLMgr() : _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE)
     {
         _cache_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
-            [this](const std::string &path, const nlohmann::json &new_value) -> void {
-                LOG_DEBUG(LOG_FDW, "Replicated databases: {}", new_value.dump(4));
-                CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
-                // get a vector of old database ids from _log_mgrs
-                std::shared_lock<std::shared_mutex> lock(_db_mutex);
-                auto keys = std::views::keys(_db_xid_map);
-                lock.unlock();
-                std::vector<uint64_t> old_db_ids{ keys.begin(), keys.end() };
-                // get a vector of new database ids from new_value
-                std::vector<uint64_t> new_db_ids = Properties::get_instance()->get_database_ids(new_value);
-                // diff the vectors
-                RedisCache::array_diff(old_db_ids, new_db_ids, true, true);
-                // everything in old_db_ids needs to be removed
-                for (auto db_id: old_db_ids) {
-                    _remove_replicated_database(db_id);
-                }
-                // everything in new_db_ids needs to be added
-                for (auto db_id: new_db_ids) {
-                    _add_replicated_database(db_id);
-                }
+            [this](const std::string& path, const nlohmann::json& new_value) {
+                _on_database_ids_changed(path, new_value);
             }
         );
+    }
+
+    void PgDDLMgr::_on_database_ids_changed(const std::string &path,
+                                            const nlohmann::json &new_value)
+    {
+        LOG_DEBUG(LOG_FDW, "Replicated databases: {}", new_value.dump(4));
+        CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
+
+        // get a vector of old database ids from _log_mgrs
+        std::shared_lock<std::shared_mutex> lock(_db_mutex);
+        auto keys = std::views::keys(_db_xid_map);
+        lock.unlock();
+        std::vector<uint64_t> old_db_ids{ keys.begin(), keys.end() };
+
+        // get a vector of new database ids from new_value
+        std::vector<uint64_t> new_db_ids = Properties::get_instance()->get_database_ids(new_value);
+
+        // diff the vectors
+        RedisCache::array_diff(old_db_ids, new_db_ids, true, true);
+
+        // everything in old_db_ids needs to be removed
+        for (auto db_id: old_db_ids) {
+            _remove_replicated_database(db_id);
+        }
+
+        // everything in new_db_ids needs to be added
+        for (auto db_id: new_db_ids) {
+            _add_replicated_database(db_id);
+        }
     }
 
     void
     PgDDLMgr::_internal_shutdown() {
         std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
         redis_cache->remove_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
+
+        _policy_thread.join();
     }
 
     void
     PgDDLMgr::init(const std::string &fdw_id,
-                      const std::string &username,
-                      const std::string &password,
-                      const std::optional<std::string> &hostname)
+                   const std::string &username,
+                   const std::string &password,
+                   const std::optional<std::string> &hostname)
     {
         // set fdw id
         _fdw_id = fdw_id;
@@ -124,7 +144,120 @@ namespace springtail::pg_fdw {
 
         _thread_manager = std::make_shared<common::MultiQueueThreadManager>(MAX_THREAD_POOL_SIZE);
         _thread_manager->start();
+
+        // create a new thread to run the policy sync
+        _policy_sync_thread = std::thread(&PgDDLMgr::_policy_sync_thread, this);
     }
+
+    void
+    PgDDLMgr::_policy_sync_database(uint64_t db_id, const std::string &db_name)
+    {
+        std::string host;
+        int port;
+        std::string user;
+        std::string password;
+
+        Properties::get_primary_db_config(host, port, user, password);
+
+        auto conn = std::make_shared<LibPqConnection>();
+        conn->connect(host, db_name, user, password, port, false);
+
+        conn->exec(fmt::format(POLICY_DIFF_SELECT, _fdw_id));
+
+        if (conn->ntuples() == 0) {
+            conn->clear();
+            return;
+        }
+
+        std::vector<std::string> sql_commands;
+
+        // iterate through the result set and process the policy diffs
+        for (int i = 0; i < conn->ntuples(); i++) {
+            std::string diff_type = conn->get_string(i, 0);
+            uint32_t table_oid = conn->get_int32(i, 1);
+            std::string table_name = conn->escape_identifier(conn->get_string(i, 2));
+            std::string schema_name = conn->escape_identifier(conn->get_string(i, 3));
+            uint32_t policy_oid = conn->get_int32(i, 4);
+            std::string policy_name = conn->escape_identifier(conn->get_string(i, 5));
+            auto policy_name_old = conn->get_string_optional(i, 6);
+
+            if (diff_type == "REMOVED") {
+                sql_commands.push_back(
+                    fmt::format("DROP POLICY IF EXISTS {} ON {}.{}",
+                                policy_name, schema_name, table_name));
+                continue;
+            }
+
+            // these are only valid for ADDED and MODIFIED diffs
+            bool policy_permissive = conn->get_boolean(i, 7);
+            std::string policy_roles = conn->get_string(i, 8);
+            std::string policy_qual = conn->get_string(i, 9);
+
+            // convert roles to {} from json array string
+            nlohmann::json roles_json = nlohmann::json::parse(policy_roles);
+            std::vector<std::string> roles;
+            for (auto &role : roles_json) {
+                roles.push_back(conn->escape_identifier(role.get<std::string>()));
+            }
+            policy_roles = fmt::format("{}", common::join_string(", ", roles));
+
+            if (diff_type == "ADDED") {
+                sql_commands.push_back(
+                    fmt::format("CREATE POLICY {} ON {}.{} "
+                                "AS {} "
+                                "FOR SELECT TO {} "
+                                "USING ({})",
+                                policy_name, schema_name, table_name, policy_permissive ? "PERMISSIVE" : "RESTRICTIVE",
+                                policy_roles, policy_qual);
+                continue;
+            }
+
+            if (diff_type == "MODIFIED") {
+                // if the policy name has changed, we need to drop the old one
+                if (policy_name_old.has_value() && policy_name_old.value() != policy_name) {
+                    sql_commands.push_back(
+                        fmt::format("ALTER POLICY {} ON {}.{} RENAME TO {}",
+                                    policy_name_old.value(), schema_name, table_name, policy_name));
+                }
+                // modify the existing policy
+                // XXX if roles/qual hasn't changed, we don't need to do anything
+                sql_commands.push_back(
+                    fmt::format("ALTER POLICY {} ON {}.{} "
+                                "FOR SELECT TO {} USING ({})",
+                                policy_name, schema_name, table_name,
+                                policy_roles, policy_qual));
+            }
+
+        }
+
+        conn->clear();
+    }
+
+    void
+    PgDDLMgr::_policy_sync_thread()
+    {
+        // run the policy sync every 10 seconds
+        while (!_is_shutting_down) {
+            try {
+                // sync policies
+                auto databases = Properties::get_instance()->get_databases();
+                for (auto db_id : databases) {
+                    _policy_sync_database(db_id.first, db_id.second);
+                }
+
+            } catch (const std::exception &e) {
+                LOG_ERROR(LOG_FDW, "Error syncing policies: {}", e.what());
+            }
+
+            // sleep for POLICY_SYNC_INTERVAL_SECONDS
+            _policy_shutdown_cv.wait_for(
+                std::unique_lock<std::mutex>(_policy_shutdown_mutex),
+                std::chrono::seconds(POLICY_SYNC_INTERVAL_SECONDS),
+                [this]() { return _is_shutting_down; }
+            );
+        }
+    }
+
 
     std::map<uint64_t, std::map<uint64_t, std::pair<std::string, std::string>>>
     PgDDLMgr::_get_usertypes(uint64_t db_id, uint64_t xid)
@@ -791,8 +924,8 @@ namespace springtail::pg_fdw {
 
     void
     PgDDLMgr::_create_schemas(LibPqConnectionPtr conn,
-                    const uint64_t db_id,
-                    const std::string &db_name)
+                             const uint64_t db_id,
+                             const std::string &db_name)
     {
 
         auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});

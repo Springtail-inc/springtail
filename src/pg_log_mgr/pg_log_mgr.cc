@@ -49,34 +49,42 @@ namespace springtail::pg_log_mgr {
 
         // construct the callback for watching for database state changes
         _cache_watcher_db_states = std::make_shared<RedisCache::RedisChangeWatcher>(
-            [this](const std::string &path, const nlohmann::json &new_value) -> void {
-                LOG_DEBUG(LOG_PG_LOG_MGR,"Replicated database state change; path: {}, state: {}",
-                    path, new_value.dump(4));
-                CHECK(path.starts_with(Properties::DATABASE_STATE_PATH));
-
-                // extract database id
-                std::vector<std::string> path_parts;
-                common::split_string("/", path, path_parts);
-                CHECK_EQ(path_parts.size(), 2);
-                uint64_t db_id = stoull(path_parts[1]);
-                CHECK_EQ(db_id, _db_id);
-
-                // if we ever get in here, this means that this database will be deleted
-                if (new_value.type() == nlohmann::json::value_t::null) {
-                    return;
-                }
-
-                // extract state and handle state change
-                CHECK(new_value.type() == nlohmann::json::value_t::string);
-                std::string state_str = new_value.get<std::string>();
-                redis::db_state_change::DBState state = redis::db_state_change::db_state_map[state_str];
-
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Received state change: {}", redis::db_state_change::db_state_to_name[state]);
-                _handle_external_state_change(state);
+            [this](const std::string &path, const nlohmann::json &new_value) {
+                _on_database_state_changed(path, new_value);
             }
         );
     }
 
+    void
+    PgLogMgr::_on_database_state_changed(const std::string &path,
+                                         const nlohmann::json &new_value)
+    {
+        LOG_DEBUG(LOG_PG_LOG_MGR,"Replicated database state change; path: {}, state: {}",
+                  path, new_value.dump(4));
+
+        CHECK(path.starts_with(Properties::DATABASE_STATE_PATH));
+
+        // extract database id
+        std::vector<std::string> path_parts;
+        common::split_string("/", path, path_parts);
+        CHECK_EQ(path_parts.size(), 2);
+        
+        uint64_t db_id = stoull(path_parts[1]);
+        CHECK_EQ(db_id, _db_id);
+
+        // if we ever get in here, this means that this database will be deleted
+        if (new_value.type() == nlohmann::json::value_t::null) {
+            return;
+        }
+
+        // extract state and handle state change
+        CHECK(new_value.type() == nlohmann::json::value_t::string);
+        std::string state_str = new_value.get<std::string>();
+        redis::db_state_change::DBState state = redis::db_state_change::db_state_map[state_str];
+
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Received state change: {}", redis::db_state_change::db_state_to_name[state]);
+        _handle_external_state_change(state);
+    }
 
     void
     PgLogMgr::startup()
