@@ -343,9 +343,6 @@ namespace springtail::pg_log_mgr {
         _internal_state.wait_and_set({STATE_RUNNING, STATE_STARTUP_SYNC, STATE_REPLAYING},
                                      STATE_SYNC_STALL);
 
-        // notify xact handler to rollover log
-        //_notify_xact_start_sync();
-
         // copy tables
         LOG_DEBUG(LOG_PG_LOG_MGR, "Copying tables for db {}; state=synchronizing", _db_id);
         std::vector<PgCopyResultPtr> res;
@@ -358,9 +355,6 @@ namespace springtail::pg_log_mgr {
         } else {
             res = PgCopyTable::copy_db(_db_id, xid);
         }
-
-        // ensure the pipeline was stalled before we complete
-        //_internal_state.wait_for_state(STATE_SYNCING);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; res size={}", res.size());
         if (res.size() > 0) {
@@ -388,8 +382,6 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_process_copy_results(const std::vector<PgCopyResultPtr> &res)
     {
-        //assert(_internal_state.is(STATE_SYNCING));
-
         LOG_DEBUG(LOG_PG_LOG_MGR, "Pushing copy results to sync tracker");
 
         for (const auto &r : res) {
@@ -411,7 +403,6 @@ namespace springtail::pg_log_mgr {
         // process stalled messages; set state to replaying
         LOG_DEBUG(LOG_PG_LOG_MGR, "About to set STATE_REPLAYING");
         _internal_state.set(STATE_REPLAYING);
-        //_internal_state.wait_for_state(STATE_RUNNING);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; state=replaying");
     }
@@ -639,11 +630,6 @@ namespace springtail::pg_log_mgr {
 
             // check for stall message, if so then wait for sync to complete
             if (_internal_state.is(STATE_SYNC_STALL) || _internal_state.is(STATE_REPLAYING)) {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Received stall msg for db: {}", _db_id);
-                //assert (_internal_state.is(STATE_SYNC_STALL));
-                // wait for sync to complete
-                //_internal_state.set(STATE_SYNCING);
-
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Waiting for sync to complete");
                 while (!_shutdown && !_internal_state.wait_for_state({ STATE_REPLAYING, STATE_RUNNING }, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT)) {
                     Coordinator::mark_alive(keep_alive);

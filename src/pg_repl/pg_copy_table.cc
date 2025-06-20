@@ -1016,10 +1016,6 @@ namespace springtail
             }
         }
 
-        //if (result->tids.size() > 0) {
-        //    copy_table._send_sync_msg(result);
-        //}
-
         // end the copy
         copy_table._end_copy();
         copy_table.disconnect();
