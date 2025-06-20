@@ -1930,9 +1930,13 @@ namespace springtail::pg_fdw {
                 fields->at(idx) = std::make_shared<ConstTypeField<std::string>>(str);
                 break;
             }
-            case NUMERICOID: // DECIMAL(x,y)
-                fields->at(idx) = std::make_shared<ConstTypeField<std::vector<char>>>(std::move(_numeric_datum_to_vector(qual->value)));
+            case NUMERICOID: {// DECIMAL(x,y)
+                std::shared_ptr<numeric::NumericData> numeric_datum(
+                    reinterpret_cast<numeric::Numeric>(qual->value),
+                    [](numeric::Numeric ptr) {});
+                fields->at(idx) = std::make_shared<ConstTypeField<std::shared_ptr<numeric::NumericData>>>(numeric_datum);
                 break;
+            }
             default:
                 // handle enum user defined type
                 if (qual->base.typeoid >= FirstNormalObjectId) {
