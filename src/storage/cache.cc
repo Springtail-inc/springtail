@@ -15,10 +15,8 @@
 
 namespace springtail {
 
-namespace {
 /* Thread-local variable to identify the background flushing thread. */
-thread_local bool is_cleaner_thread = false;
-}
+thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
 
     /* static member initialization must happen outside of class */
     StorageCache* StorageCache::_instance = {nullptr};
@@ -403,14 +401,15 @@ StorageCache::PageCache::background_cleaner()
     pthread_setname_np(pthread_self(), "cache-cleaner");
 
     // mark is as the flushing thread
-    is_cleaner_thread = true;
+    _is_cleaner_thread = true;
 
+    auto timeout = boost::chrono::seconds(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
     while (!_shutdown_cleaner) {
         // hold the cache lock
         boost::unique_lock lock(_mutex);
 
         // wake up when the dirty cache gets too full
-        _cleaner_cond.wait(lock, [this]() {
+        _cleaner_cond.wait_for(lock, timeout, [this]() {
             return _shutdown_cleaner || _dirty_lru.size() > _low_dirty_pages;
         });
 
@@ -420,6 +419,7 @@ StorageCache::PageCache::background_cleaner()
             _dirty_lru.pop_front();
 
             // take ownership of this page for the eviction
+            DCHECK_EQ(page->_use_count, 0);
             ++(page->_use_count);
 
             // try to evict the page
@@ -545,14 +545,14 @@ StorageCache::PageCache::background_cleaner()
             return;
         }
 
-        if (!is_cleaner_thread) {
+        if (!_is_cleaner_thread) {
             // if we have too many dirty pages, we must block until the cleaner catches up
-            if (_dirty_lru.size() >= _low_dirty_pages) {
+            if (_dirty_lru.size() > _low_dirty_pages) {
                 // wake up the background cleaner
                 _cleaner_cond.notify_one();
 
                 // if we have too many dirty pages, we must block
-                if (_dirty_lru.size() >= _max_dirty_pages) {
+                if (_dirty_lru.size() > _max_dirty_pages) {
                     _waiting_for_cleaner = true;
                 }
 
@@ -560,6 +560,7 @@ StorageCache::PageCache::background_cleaner()
                 if (_waiting_for_cleaner) {
                     boost::unique_lock lock(_mutex, boost::adopt_lock);
                     _cleaner_block.wait(lock, [this]() { return !_waiting_for_cleaner; });
+                    lock.release(); // release the lock so it doesn't get unlocked
                 }
             }
         }
@@ -569,6 +570,7 @@ StorageCache::PageCache::background_cleaner()
         _clean_lru.pop_front();
 
         // take ownership of this page for the eviction
+        DCHECK_EQ(page->_use_count, 0);
         ++(page->_use_count);
 
         // evict the page

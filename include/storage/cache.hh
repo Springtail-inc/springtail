@@ -1226,6 +1226,8 @@ namespace springtail {
             boost::condition_variable _cleaner_cond; ///< To wake up the cleaner.
             boost::condition_variable _cleaner_block; ///< To wait for the cleaner to clean pages.
             std::thread _cleaner_thread; ///< The cleaner thread.
+
+            static thread_local bool _is_cleaner_thread; ///< Flag set true for the cleaner thread.
         };
 
     public:
