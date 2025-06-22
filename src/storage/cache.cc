@@ -490,6 +490,10 @@ StorageCache::PageCache::background_cleaner()
                 // mark the page as flushing
                 page->_is_flushing = true;
                 auto callback = page->_flush_callback;
+
+                // mark the page as clean pre-emptively in case someone else gets the page after
+                // flush and re-dirties it
+                page->_is_dirty = false;
                 lock.unlock();
 
                 success = callback(page);
@@ -505,9 +509,11 @@ StorageCache::PageCache::background_cleaner()
                 page->_is_flushing = false;
                 page->_flush_cond.notify_all();
             }
+        } else {
+            page->_is_dirty = false; // mark the page as clean so that we can evict it
         }
 
-        if (!success || page->_use_count > 1) {
+        if (!success || page->_use_count > 1 || page->_is_dirty) {
             // if page can't be evicted then release the page back to the cache
             _put(page);
             return;
