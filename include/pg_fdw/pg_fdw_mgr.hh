@@ -197,9 +197,10 @@ namespace springtail::pg_fdw {
          *  Called from get_foreign_paths
          * @param state Plan state
          * @param sortgroup List of DeparsedSortGroup
+         * @param use_secondary Make use the secondary indexes to match the sortgroup
          * @return List or sublist of path keys based on sort group
          */
-        List *fdw_can_sort(SpringtailPlanState *state, List *sortgroup);
+        List *fdw_can_sort(SpringtailPlanState *state, List *sortgroup, bool use_secondary = false);
 
         /** Get list of path keys -- indexes
          * @param state Planstate

@@ -968,7 +968,7 @@ namespace springtail::pg_fdw {
     }
 
     List *
-    PgFdwMgr::fdw_can_sort(SpringtailPlanState *state, List *sortgroup)
+    PgFdwMgr::fdw_can_sort(SpringtailPlanState *state, List *sortgroup, bool use_secondary)
     {
         PgFdwState *pg_state = static_cast<PgFdwState *>(state->pg_fdw_state);
 
@@ -1046,15 +1046,20 @@ namespace springtail::pg_fdw {
             }
         }
 
-        for (auto const& idx: pg_state->indexes) {
-            if (idx.id == constant::INDEX_PRIMARY) {
-                // we already checked the primary index
-                continue;
-            }
-            List* p = check_index(idx, sortgroup);
-            if (p) {
-                pg_state->sortgroup_index = idx;
-                return p;
+        // We don't use secondary indexes for full table scans by default.
+        // Change the default (use_secondary = true) in the function signature
+        // if you need to enable secondary index scans.
+        if (use_secondary) {
+            for (auto const& idx: pg_state->indexes) {
+                if (idx.id == constant::INDEX_PRIMARY) {
+                    // we already checked the primary index
+                    continue;
+                }
+                List* p = check_index(idx, sortgroup);
+                if (p) {
+                    pg_state->sortgroup_index = idx;
+                    return p;
+                }
             }
         }
 
@@ -1071,7 +1076,8 @@ namespace springtail::pg_fdw {
         LOG_DEBUG(LOG_FDW, "fdw_get_path_keys");
 
         // generate list of elements, each element is: list of attnums, followed by row count
-        // [(('id',),1)]
+        // and cost multiplier
+        // [(('id',),1,100)]
 
         for (auto const& idx: pg_state->indexes) {
             List      *attnums = NULL;
@@ -1083,15 +1089,20 @@ namespace springtail::pg_fdw {
             }
             item = lappend(item, attnums);
 
-            double rows = 1; // number of rows with unique key
-            if (!idx.is_unique) {
-                rows = pg_state->stats.row_count/10;
-                if (rows < 1) {
-                    rows = 1;
+            // cost multiplier
+            auto cost = SPRINGTAIL_PRIMARY_COST;
+            if (idx.id != constant::INDEX_PRIMARY) {
+                if (idx.is_unique) {
+                    cost = SPRINGTAIL_SECONDARY_LOOKUP_COST;
+                } else {
+                    cost = SPRINGTAIL_SECONDARY_SCAN_COST;
                 }
             }
+
+            item = lappend(item, makeConst(INT8OID,
+                        -1, InvalidOid, 8, state->rows, false, true));
             item = lappend(item, makeConst(INT4OID,
-                        -1, InvalidOid, 4, rows, false, true));
+                        -1, InvalidOid, 4, cost, false, true));
             result = lappend(result, item);
         }
 
@@ -1128,6 +1139,7 @@ namespace springtail::pg_fdw {
                 break;
             }
         }
+        planstate->rows = *rows;
 
         // estimate width based on target list using most common types
         ListCell *lc;
