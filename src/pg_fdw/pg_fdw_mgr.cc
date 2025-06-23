@@ -280,6 +280,9 @@ namespace springtail::pg_fdw {
         // the type category doesn't matter for these checks since enum check is done above
         SchemaType pg_schema_type = convert_pg_type(pg_type, 'N');
         if (column.type == pg_schema_type) {
+            if (pg_schema_type == SchemaType::BINARY) {
+                return false;
+            }
             return true;
         }
 

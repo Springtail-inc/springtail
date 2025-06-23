@@ -5,6 +5,11 @@
 
 #include <absl/log/check.h>
 
+// This code was ported over from
+// https://github.com/postgres/postgres/blob/master/src/backend/utils/adt/numeric.c
+// and
+// https://github.com/postgres/postgres/blob/master/src/include/utils/numeric.h
+
 namespace springtail::numeric {
 
     // TODO: fix comments

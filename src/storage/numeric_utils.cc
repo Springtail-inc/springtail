@@ -6,6 +6,11 @@
 #include <common/logging.hh>
 #include <storage/numeric_utils.hh>
 
+// This code was ported over from
+// https://github.com/postgres/postgres/blob/master/src/backend/utils/adt/numeric.c
+// and
+// https://github.com/postgres/postgres/blob/master/src/include/utils/numeric.h
+
 namespace springtail::numeric {
 
     static constexpr NumericVar const_nan =
@@ -38,7 +43,7 @@ namespace springtail::numeric {
     }
 
     static std::string
-    sing_to_string(int sign)
+    sign_to_string(int sign)
     {
         std::string sign_str;
         switch (sign) {
@@ -637,7 +642,7 @@ namespace springtail::numeric {
     NumericVar::to_debug_string() const
     {
         std::vector<int16_t> digits_array(digits, digits + ndigits);
-        std::string sign_str = sing_to_string(sign);
+        std::string sign_str = sign_to_string(sign);
         std::string out = fmt::format("VAR w={} d={} nd={} {} \"{:04}\"",
             weight, dscale, ndigits, sign_str, fmt::join(digits_array, " "));
         return out;
@@ -650,7 +655,7 @@ namespace springtail::numeric {
         int numeric_ndigits = ndigits();
 
         std::vector<int16_t> digits_array(numeric_digits, numeric_digits + numeric_ndigits);
-        std::string sign_str = sing_to_string(sign());
+        std::string sign_str = sign_to_string(sign());
         std::string out = fmt::format("NUMERIC w={} d={} nd={} {} \"{:04}\"",
             weight(), dscale(), numeric_ndigits, sign_str, fmt::join(digits_array, " "));
         return out;

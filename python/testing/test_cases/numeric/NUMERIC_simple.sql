@@ -83,6 +83,7 @@ INSERT INTO sales_hash (sale_date, amount) VALUES
   ('2023-01-24', 180.00);
 
 CREATE INDEX idx_sales_hash_date ON sales_hash (sale_date);
+CREATE INDEX idx_sales_hash_amount ON sales_hash (amount);
 
 CREATE TABLE country_sales (
     id SERIAL,
@@ -103,7 +104,7 @@ FROM (
 ) AS combos,
 generate_series(1, 25);
 
--- TODO: test NUMERIC as primary key and NUMERIC as an index field and as a part of composite index
+-- test NUMERIC as primary key
 CREATE TABLE measurements (
     reading NUMERIC PRIMARY KEY,
     sensor_id TEXT NOT NULL,
@@ -116,15 +117,43 @@ SELECT
     'sensor_' || (i % 10)
 FROM generate_series(1, 10) AS s(i);
 
+-- test NUMERIC with composite index
+CREATE TABLE coordinates (
+    x NUMERIC,
+    y NUMERIC
+);
+
+CREATE INDEX coordinates_xy_idx ON coordinates (x, y);
+
+INSERT INTO coordinates (x, y)
+SELECT
+    ROUND((random() * 1000)::NUMERIC, 4),
+    ROUND((random() * 500)::NUMERIC, 4)
+FROM generate_series(1, 100);
+
+
 ## verify
 -- verify
 SELECT * FROM employees ORDER BY id;
 SELECT * FROM sales ORDER BY id;
 SELECT * FROM sales_hash ORDER BY id;
+SELECT * FROM sales_hash ORDER BY amount ASC;
+SELECT * FROM sales_hash ORDER BY amount DESC;
+
+SELECT * FROM sales_hash WHERE amount = 330.00;
+SELECT * FROM sales_hash WHERE amount < 330.00 ORDER BY amount ASC;
+SELECT * FROM sales_hash WHERE amount > 330.00 ORDER BY amount ASC;
+SELECT * FROM sales_hash WHERE amount < 330.00 ORDER BY amount DESC;
+SELECT * FROM sales_hash WHERE amount > 330.00 ORDER BY amount DESC;
 
 SELECT * FROM country_sales ORDER BY id;
 
 SELECT * FROM measurements ORDER BY reading;
+
+SELECT * FROM coordinates ORDER BY x ASC, y ASC;
+SELECT * FROM coordinates ORDER BY x ASC, y DESC;
+SELECT * FROM coordinates ORDER BY x DESC, y ASC;
+SELECT * FROM coordinates ORDER BY x DESC, y DESC;
 
 ## cleanup
 -- cleanup
