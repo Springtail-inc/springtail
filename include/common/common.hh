@@ -68,7 +68,7 @@ namespace springtail {
          * @param delimiter delimiter string (e.g., ",")
          * @param vec vector of strings to join
          */
-        std::string
+        static inline std::string
         join_string(const std::string &delimiter,
                     const std::vector<std::string> &vec)
         {

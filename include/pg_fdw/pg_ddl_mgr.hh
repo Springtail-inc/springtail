@@ -115,7 +115,13 @@ namespace springtail::pg_fdw {
                                       const nlohmann::json &new_value);
 
         /** Policy sync thread; sync policy changes to FDW */
-        void _policy_sync_thread();
+        void _policy_sync_thread_func();
+
+        /** Helper to sync policies for a database */
+        std::vector<std::string> _policy_sync_database(uint64_t db_id, const std::string &db_name);
+
+        /** Helper to apply SQL commands */
+        void _apply_sql_commands(uint64_t db_id, const std::string &db_name, const std::vector<std::string> &sql_commands);
 
         /**
          * Method to get the create schema query

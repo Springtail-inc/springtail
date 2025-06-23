@@ -91,7 +91,7 @@ namespace springtail::pg_fdw {
         std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
         redis_cache->remove_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
 
-        _policy_thread.join();
+        _policy_sync_thread.join();
     }
 
     void
@@ -146,10 +146,10 @@ namespace springtail::pg_fdw {
         _thread_manager->start();
 
         // create a new thread to run the policy sync
-        _policy_sync_thread = std::thread(&PgDDLMgr::_policy_sync_thread, this);
+        _policy_sync_thread = std::thread(&PgDDLMgr::_policy_sync_thread_func, this);
     }
 
-    void
+    std::vector<std::string>
     PgDDLMgr::_policy_sync_database(uint64_t db_id, const std::string &db_name)
     {
         std::string host;
@@ -166,18 +166,17 @@ namespace springtail::pg_fdw {
 
         if (conn->ntuples() == 0) {
             conn->clear();
-            return;
+            return {};
         }
 
         std::vector<std::string> sql_commands;
 
         // iterate through the result set and process the policy diffs
+        // skip table_oid (1) and policy_oid (4)
         for (int i = 0; i < conn->ntuples(); i++) {
             std::string diff_type = conn->get_string(i, 0);
-            uint32_t table_oid = conn->get_int32(i, 1);
             std::string table_name = conn->escape_identifier(conn->get_string(i, 2));
             std::string schema_name = conn->escape_identifier(conn->get_string(i, 3));
-            uint32_t policy_oid = conn->get_int32(i, 4);
             std::string policy_name = conn->escape_identifier(conn->get_string(i, 5));
             auto policy_name_old = conn->get_string_optional(i, 6);
 
@@ -203,12 +202,17 @@ namespace springtail::pg_fdw {
 
             if (diff_type == "ADDED") {
                 sql_commands.push_back(
+                    fmt::format("DROP POLICY IF EXISTS {} ON {}.{}",
+                                policy_name, schema_name, table_name));
+
+                // create the new policy
+                sql_commands.push_back(
                     fmt::format("CREATE POLICY {} ON {}.{} "
                                 "AS {} "
                                 "FOR SELECT TO {} "
                                 "USING ({})",
                                 policy_name, schema_name, table_name, policy_permissive ? "PERMISSIVE" : "RESTRICTIVE",
-                                policy_roles, policy_qual);
+                                policy_roles, policy_qual));
                 continue;
             }
 
@@ -231,30 +235,58 @@ namespace springtail::pg_fdw {
         }
 
         conn->clear();
+
+        return sql_commands;
     }
 
     void
-    PgDDLMgr::_policy_sync_thread()
+    PgDDLMgr::_apply_sql_commands(uint64_t db_id, const std::string &db_name, const std::vector<std::string> &sql_commands)
+    {
+        if (sql_commands.empty()) {
+            return;
+        }
+
+        // get the connection for the database
+        auto conn = _connect_fdw(db_id, db_name);
+        if (!conn) {
+            throw Error("Failed to get connection for database " + std::to_string(db_id));
+        }
+
+        // apply each sql command
+        for (const auto &sql : sql_commands) {
+            LOG_DEBUG(LOG_FDW, "Applying SQL command: {}", sql);
+            conn->exec(sql);
+        }
+    }
+
+    void
+    PgDDLMgr::_policy_sync_thread_func()
     {
         // run the policy sync every 10 seconds
         while (!_is_shutting_down) {
             try {
                 // sync policies
                 auto databases = Properties::get_instance()->get_databases();
-                for (auto db_id : databases) {
-                    _policy_sync_database(db_id.first, db_id.second);
+                for (auto db : databases) {
+                    auto &&sql_commands = _policy_sync_database(db.first, db.second);
+                    if (!sql_commands.empty()) {
+                        _apply_sql_commands(db.first, db.second, sql_commands);
+                    }
                 }
-
             } catch (const std::exception &e) {
-                LOG_ERROR(LOG_FDW, "Error syncing policies: {}", e.what());
+                LOG_ERROR("Error syncing policies: {}", e.what());
+                // on error we should drop the primary fdw policy table and try resyncing from scratch
             }
 
             // sleep for POLICY_SYNC_INTERVAL_SECONDS
-            _policy_shutdown_cv.wait_for(
-                std::unique_lock<std::mutex>(_policy_shutdown_mutex),
-                std::chrono::seconds(POLICY_SYNC_INTERVAL_SECONDS),
-                [this]() { return _is_shutting_down; }
-            );
+            auto lock = std::unique_lock<std::mutex>(_policy_shutdown_mutex);
+            while (!_is_shutting_down) {
+                _policy_shutdown_cv.wait_for(
+                    lock,
+                    std::chrono::seconds(POLICY_SYNC_INTERVAL_SECONDS),
+                    [this]() { return this->_is_shutting_down.load(); }
+                );
+            }
         }
     }
 
