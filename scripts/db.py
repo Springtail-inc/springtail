@@ -74,7 +74,23 @@ def get_database_info(conn) -> dict:
 
     # Query 7: Custom types \dT
     cursor.execute("""
-        SELECT DISTINCT t.typname as type
+        SELECT DISTINCT t.typname as type,
+            CASE t.typcategory
+                WHEN 'A' THEN 'array'
+                WHEN 'B' THEN 'boolean'
+                WHEN 'C' THEN 'composite'
+                WHEN 'D' THEN 'date/time'
+                WHEN 'E' THEN 'enum'
+                WHEN 'G' THEN 'geometric'
+                WHEN 'I' THEN 'network address'
+                WHEN 'N' THEN 'numeric'
+                WHEN 'P' THEN 'pseudo-type'
+                WHEN 'S' THEN 'string'
+                WHEN 'T' THEN 'timespan'
+                WHEN 'U' THEN 'user-defined'
+                WHEN 'V' THEN 'bit-string'
+                ELSE 'unknown'
+            END as category
         FROM pg_type t
         LEFT JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
         WHERE (t.typrelid = 0 OR (SELECT c.relkind = 'c' FROM pg_catalog.pg_class c WHERE c.oid = t.typrelid))
@@ -82,7 +98,7 @@ def get_database_info(conn) -> dict:
         AND n.nspname NOT IN ('pg_catalog', 'information_schema');
     """)
     types = cursor.fetchall()
-    database_info['custom_types'] = [type[0] for type in types]
+    database_info['custom_types'] = [f"{type[0]}: ({type[1]})" for type in types]
 
     # Query 8: Get active connections for this db
     cursor.execute("""
@@ -148,6 +164,7 @@ def get_database_info(conn) -> dict:
     database_info['collation'] = encoding_info[1]
     database_info['ctype'] = encoding_info[2]
 
+    # Query 13: Tables with policies
     cursor.execute("""
         SELECT
         COUNT(DISTINCT p.polrelid) AS tables_with_policies
@@ -160,6 +177,21 @@ def get_database_info(conn) -> dict:
     """)
     tables_with_policies = cursor.fetchone()[0]
     database_info['tables_with_policies'] = tables_with_policies
+
+    # Query 14: Get the number partitioned tables
+    cursor.execute("""
+        SELECT
+            COUNT(*)
+        FROM
+            pg_class AS pc
+        JOIN
+            pg_namespace AS pn ON pc.relnamespace = pn.oid
+        WHERE
+            pc.relkind = 'p' -- 'p' denotes a partitioned table
+            AND pn.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast');
+    """)
+    partitioned_tables = cursor.fetchone()[0]
+    database_info['partitioned_tables'] = partitioned_tables
 
     cursor.close()
     return database_info
@@ -284,6 +316,7 @@ def main():
         print(f"Number of tables: {db_info['num_tables']}")
         print(f"Tables without primary key: {db_info['tables_without_primary_key']}")
         print(f"Tables with policies: {db_info['tables_with_policies']}")
+        print(f"Number of partitioned tables: {db_info['partitioned_tables']}")
         print("Largest tables:")
         for table, size in db_info['top_tables']:
             print(f"  {table}: {size}")
