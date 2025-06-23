@@ -693,6 +693,16 @@ def start(config_file: str,
         print("Starting postgres...")
         start_postgres()
 
+        if do_fdw_install:
+            # install fdw
+            print("\nInstalling foreign data wrapper...")
+            install_fdw(build_dir)
+
+        # start replication on db instance
+        print("\nStarting replication on database instance...")
+        check_log_writable(props)
+        start_replication(props, build_dir)
+
 def status() -> None:
     """Function to check the status of the Springtail system."""
     print("Checking status...")

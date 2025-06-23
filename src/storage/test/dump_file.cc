@@ -1,3 +1,5 @@
+#include <fmt/ranges.h>
+
 #include <common/init.hh>
 #include <storage/field.hh>
 

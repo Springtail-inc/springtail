@@ -1,14 +1,9 @@
 #pragma once
 
-#include <arpa/inet.h>
 #include <stdint.h>
-#include <string.h>
+#include <string>
 
-#include <span>
-
-#include <fmt/ranges.h>
-
-#include <common/logging.hh>
+#include <absl/log/check.h>
 
 namespace springtail::numeric {
 
@@ -138,7 +133,16 @@ namespace springtail::numeric {
 
         void alloc(int number_of_digits);
         void free();
+
+        /*
+         * trunc
+         *
+         * Truncate (towards zero) the value of a variable at rscale decimal digits
+         * after the decimal point.  NOTE: we allow rscale < 0 here, implying
+         * truncation before the decimal point.
+         */
         void trunc(int rscale);
+
         /*
          * round
          *
@@ -156,7 +160,47 @@ namespace springtail::numeric {
          * Returns true on success, false on failure (if escontext points to an
          * ErrorSaveContext; otherwise errors are thrown).
          */
-        bool apply_typmod(const TypeMod &typmod);
+        void apply_typmod(const TypeMod &typmod);
+        /*
+         * strip
+         *
+         * Strip any leading and trailing zeroes from a numeric variable
+         */
+        void strip();
+
+        /*
+         * to_string() -
+         *
+         *	Convert a var to text representation (guts of numeric_out).
+         *	The var is displayed to the number of digits indicated by its dscale.
+         *	Returns a palloc'd string.
+         */
+        std::string to_string();
+
+        /*
+         * from_string()
+         *
+         *	Parse a string and put the number into a variable
+         *
+         * This function does not handle leading or trailing spaces.  It returns
+         * the end+1 position parsed into *endptr, so that caller can check for
+         * trailing spaces/garbage if deemed necessary.
+         *
+         * cp is the place to actually start parsing; str is what to use in error
+         * reports.  (Typically cp would be the same except advanced over spaces.)
+         *
+         * Returns true on success, false on failure (if escontext points to an
+         * ErrorSaveContext; otherwise errors are thrown).
+         */
+        void from_string(const std::string_view &str);
+
+        /*
+         * dump() - Dump a value in the variable format for debugging
+         */
+        void dump(const std::string &str);
+
+        std::string to_debug_string() const;
+
     } NumericVar;
 
     // Disk storage format for numeric values
@@ -257,8 +301,15 @@ namespace springtail::numeric {
         /*
          * dump() - Dump a value in the db storage format for debugging
          */
-        void dump(const char *str);
+        void dump(const std::string &str);
 
+        std::string to_debug_string() const;
+
+        /*
+         * to_string() -
+         *
+         *	Output function for numeric data type
+         */
         std::string to_string() const;
 
         /*
@@ -270,7 +321,17 @@ namespace springtail::numeric {
          * Returns true on success, false on failure (if escontext points to an
          * ErrorSaveContext; otherwise errors are thrown).
          */
-        bool apply_typmod_special(const TypeMod &typmod);
+        void apply_typmod_special(const TypeMod &typmod);
+
+        /*
+         * to_var() -
+         *
+         *	Initialize a variable from packed db format. The digits array is not
+         *	copied, which saves some cycles when the resulting var is not modified.
+         *	Also, there's no need to call free_var().
+         *
+         */
+        const NumericVar to_var() const;
 
         /*
          * make_numeric() -
@@ -288,7 +349,7 @@ namespace springtail::numeric {
          * External format is a sequence of int16's:
          * ndigits, weight, sign, dscale, NumericDigits.
          */
-        static NumericData *recv(StringInfo buf, uint32_t typmod);
+        static NumericData *recv(StringInfo buf, const TypeMod &typmod);
 
         /* ----------
          * cmp_abs_common() -
@@ -310,11 +371,18 @@ namespace springtail::numeric {
                                     const NumericDigit *var2digits, int var2ndigits, int var2weight, int var2sign);
 
         static int cmp(const NumericData *num1, const NumericData *num2);
+
+        /*
+         * numeric_from_string() -
+         *
+         *	Input function for numeric data type
+         */
+        static NumericData *numeric_from_string(const std::string_view &str, const TypeMod &typmod);
     };
 
     typedef struct NumericData *Numeric;
 
-    static inline Numeric numeric_receive(const char *buf, int32_t length, uint32_t typmod)
+    static inline Numeric numeric_receive(const char *buf, int32_t length, int32_t typmod)
     {
         StringInfoData info;
         info.data = const_cast<char *>(buf);
@@ -322,11 +390,6 @@ namespace springtail::numeric {
         info.maxlen = length;
         info.cursor = 0;
         return NumericData::recv(&info, typmod);
-    }
-
-    static inline int numeric_compare(const std::span<const char> &lhs, const std::span<const char> &rhs)
-    {
-        return NumericData::cmp(reinterpret_cast<const NumericData *>(lhs.data()), reinterpret_cast<const NumericData *>(rhs.data()));
     }
 
 } // namespace springtail::numeric

@@ -121,4 +121,11 @@ springtail_unit_test(test_extent
   WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
 )
 
+springtail_unit_test(test_numeric
+  SOURCES test/test_numeric.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_storage GTest::gtest_main
+  WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
+)
+
 install(TARGETS dump_system_tables dump_headers RUNTIME DESTINATION bin/utils)

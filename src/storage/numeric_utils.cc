@@ -1,21 +1,80 @@
+#include <arpa/inet.h>
+
+#include <fmt/ranges.h>
 #include <string>
+
+#include <common/logging.hh>
 #include <storage/numeric_utils.hh>
 
 namespace springtail::numeric {
 
+    static constexpr NumericVar const_nan =
+        {0, 0, NUMERIC_NAN, 0, NULL, NULL};
+
+    static constexpr NumericVar const_pinf =
+        {0, 0, NUMERIC_PINF, 0, NULL, NULL};
+
+    static constexpr NumericVar const_ninf =
+        {0, 0, NUMERIC_NINF, 0, NULL, NULL};
+
+    static bool
+    ichar_equals(char a, char b)
+    {
+        return std::tolower(static_cast<unsigned char>(a)) ==
+                std::tolower(static_cast<unsigned char>(b));
+    }
+
+    static bool
+    inequals(std::string_view lhs, std::string_view rhs, size_t len)
+    {
+        for (int i = 0; i < len; ++i)
+        {
+            if (!ichar_equals(lhs[i], rhs[i]))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static std::string
+    sing_to_string(int sign)
+    {
+        std::string sign_str;
+        switch (sign) {
+            case NUMERIC_POS:
+            sign_str = "POS";
+            break;
+        case NUMERIC_NEG:
+            sign_str = "NEG";
+            break;
+        case NUMERIC_NAN:
+            sign_str = "NaN";
+            break;
+        case NUMERIC_PINF:
+            sign_str = "Infinity";
+            break;
+        case NUMERIC_NINF:
+            sign_str = "-Infinity";
+            break;
+        default:
+            sign_str = fmt::format("SIGN=0x{:x}", sign);
+            break;
+        }
+        return sign_str;
+    }
+
     void
     StringInfoData::copybytes(void *buf, int datalen)
     {
-        if (datalen < 0 || datalen > (len - cursor)) {
-            LOG_ERROR("Numeric: insufficient data left in message");
-            DCHECK(false);
-        }
+        CHECK (!(datalen < 0 || datalen > (len - cursor)))
+            << "Numeric: insufficient data left in message";
         memcpy(buf, &data[cursor], datalen);
         cursor += datalen;
     }
 
     unsigned int
-    StringInfoData:: getint(int b)
+    StringInfoData::getint(int b)
     {
         unsigned int result;
         unsigned char n8;
@@ -37,8 +96,7 @@ namespace springtail::numeric {
                 result = ntohl(n32);
                 break;
             default:
-                LOG_ERROR("Numeric: unsupported integer size {}", b);
-                DCHECK(false);
+                CHECK(false) << "Numeric: unsupported integer size " << b;
                 break;
         }
         return result;
@@ -51,7 +109,8 @@ namespace springtail::numeric {
             ::free(buf);
         }
         buf = reinterpret_cast<NumericDigit *>(malloc((number_of_digits + 1) * sizeof(NumericDigit)));
-        buf[0] = 0;/* spare digit for rounding */
+        /* spare digit for rounding */
+        buf[0] = 0;
         digits = buf + 1;
         ndigits = number_of_digits;
     }
@@ -188,7 +247,8 @@ namespace springtail::numeric {
 
                 if (number_of_digits < 0)
                 {
-                    CHECK(number_of_digits == -1);/* better not have added > 1 digit */
+                    /* better not have added > 1 digit */
+                    CHECK(number_of_digits == -1);
                     CHECK(digits > buf);
                     digits--;
                     ndigits++;
@@ -198,13 +258,12 @@ namespace springtail::numeric {
         }
     }
 
-    bool
+    void
     NumericVar::apply_typmod(const TypeMod &typmod)
     {
         /* Do nothing if we have an invalid typmod */
         if (!typmod.is_valid())
-            return true;
-
+            return;
 
         int precision = typmod.precision();
         int scale = typmod.scale();
@@ -242,62 +301,413 @@ namespace springtail::numeric {
                     else if (dig < 1000)
                         ddigits -= 1;
 
-                    if (ddigits > maxdigits)
-                    {
-                        LOG_ERROR("Numeric: numeric field overflow; A field with precision {}, scale {} must round to an absolute value less than {}{}.",
-                            precision, scale, maxdigits ? "10^" : "", maxdigits ? maxdigits : 1);
-                        DCHECK(false);
-                    }
+                    CHECK (ddigits <= maxdigits) <<
+                        "Numeric: numeric field overflow; A field with precision " << precision <<
+                        ", scale " << scale <<
+                        " must round to an absolute value less than " << (maxdigits ? "10^" : "") <<
+                        (maxdigits ? maxdigits : 1) << ".";
                     break;
                 }
                 ddigits -= DEC_DIGITS;
             }
         }
-        return true;
+    }
+
+    void
+    NumericVar::strip()
+    {
+        /* Strip leading zeroes */
+        while (ndigits > 0 && *digits == 0)
+        {
+            digits++;
+            weight--;
+            ndigits--;
+        }
+
+        /* Strip trailing zeroes */
+        while (ndigits > 0 && digits[ndigits - 1] == 0)
+        {
+            ndigits--;
+        }
+
+        /* If it's zero, normalize the sign and weight */
+        if (ndigits == 0)
+        {
+            sign = NUMERIC_POS;
+            weight = 0;
+        }
     }
 
     std::string
-    NumericData::to_string() const
+    NumericVar::to_string()
+    {
+        std::string result;
+        int d;
+        NumericDigit dig;
+        NumericDigit d1;
+
+        /*
+         * Allocate space for the result.
+         *
+         * i is set to the # of decimal digits before decimal point. dscale is the
+         * # of decimal digits we will print after decimal point. We may generate
+         * as many as DEC_DIGITS-1 excess digits at the end, and in addition we
+         * need room for sign, decimal point, null terminator.
+         */
+        int i = (weight + 1) * DEC_DIGITS;
+        if (i <= 0)
+            i = 1;
+
+        int size = i + dscale + DEC_DIGITS - 1 + 2; // +2 for sign and null terminator
+        result.reserve(size);
+
+        /*
+         * Output a dash for negative values
+         */
+        if (sign == NUMERIC_NEG)
+            result += '-';
+
+        /*
+         * Output all digits before the decimal point
+         */
+        if (weight < 0)
+        {
+            d = weight + 1;
+            result += '0';
+        }
+        else
+        {
+            for (d = 0; d <= weight; d++)
+            {
+                dig = (d < ndigits) ? digits[d] : 0;
+                /* In the first digit, suppress extra leading decimal zeroes */
+                {
+                    bool putit = (d > 0);
+
+                    d1 = dig / 1000;
+                    dig -= d1 * 1000;
+                    putit |= (d1 > 0);
+                    if (putit)
+                    {
+                        result += (d1 + '0');
+                    }
+                    d1 = dig / 100;
+                    dig -= d1 * 100;
+                    putit |= (d1 > 0);
+                    if (putit)
+                    {
+                        result += (d1 + '0');
+                    }
+                    d1 = dig / 10;
+                    dig -= d1 * 10;
+                    putit |= (d1 > 0);
+                    if (putit)
+                    {
+                        result += (d1 + '0');
+                    }
+                    result += (dig + '0');
+                }
+            }
+        }
+
+        /*
+         * If requested, output a decimal point and all the digits that follow it.
+         * We initially put out a multiple of DEC_DIGITS digits, then truncate if
+         * needed.
+         */
+        if (dscale > 0)
+        {
+            result += '.';
+            for (i = 0; i < dscale; d++, i += DEC_DIGITS)
+            {
+                dig = (d >= 0 && d < ndigits) ? digits[d] : 0;
+                d1 = dig / 1000;
+                dig -= d1 * 1000;
+                result += (d1 + '0');
+                d1 = dig / 100;
+                dig -= d1 * 100;
+                result += (d1 + '0');
+                d1 = dig / 10;
+                dig -= d1 * 10;
+                result += (d1 + '0');
+                result = (dig + '0');
+            }
+        }
+
+        /*
+         * terminate the string and return it
+         */
+        result += '\0';
+        return result;
+    }
+
+    void
+    NumericVar::from_string(const std::string_view &str)
+    {
+        int new_sign = NUMERIC_POS;
+        size_t len = str.length();
+        const char *cp = str.data();
+        const char *cp_end = str.data() + str.length();
+
+        CHECK(cp != cp_end);
+        /*
+         * We first parse the string to extract decimal digits and determine the
+         * correct decimal weight.  Then convert to NBASE representation.
+         */
+        switch (*cp)
+        {
+            case '+':
+                new_sign = NUMERIC_POS;
+                cp++;
+                break;
+
+            case '-':
+                new_sign = NUMERIC_NEG;
+                cp++;
+                break;
+        }
+
+        CHECK(cp != cp_end);
+
+        bool have_dp = false;
+        if (*cp == '.')
+        {
+            have_dp = true;
+            cp++;
+            CHECK(cp != cp_end);
+        }
+
+        CHECK(isdigit((unsigned char) *cp)) << "Numeric: invalid numeric string: " << str;
+
+        size_t alloc_size = len - (cp - str.data()) + DEC_DIGITS * 2;
+        unsigned char *decdigits = (unsigned char *) malloc(alloc_size);
+
+        /* leading padding for digit alignment later */
+        memset(decdigits, 0, DEC_DIGITS);
+        int i = DEC_DIGITS;
+
+        int dweight = -1;
+        while (cp != cp_end)
+        {
+            if (isdigit((unsigned char) *cp))
+            {
+                decdigits[i++] = *cp++ - '0';
+                if (!have_dp)
+                {
+                    dweight++;
+                }
+                else
+                {
+                    dscale++;
+                }
+            }
+            else if (*cp == '.')
+            {
+                CHECK(!have_dp) << "Numeric: invalid numeric string: " << str;
+                have_dp = true;
+                cp++;
+                CHECK(cp != cp_end);
+                /* decimal point must not be followed by underscore */
+                CHECK (*cp != '_') << "Numeric: invalid numeric string: " << str;
+            }
+            else if (*cp == '_')
+            {
+                /* underscore must be followed by more digits */
+                cp++;
+                CHECK(cp != cp_end);
+                CHECK(isdigit((unsigned char) *cp)) << "Numeric: invalid numeric string: " << str;
+            }
+            else {
+                break;
+            }
+        }
+
+        int ddigits = i - DEC_DIGITS;
+        /* trailing padding for digit alignment later */
+        memset(decdigits + i, 0, DEC_DIGITS - 1);
+
+        int new_dscale = 0;
+        /* Handle exponent, if any */
+        if (cp != cp_end && (*cp == 'e' || *cp == 'E'))
+        {
+            int64_t		exponent = 0;
+            bool		neg = false;
+
+            /*
+             * At this point, dweight and dscale can't be more than about
+             * INT_MAX/2 due to the MaxAllocSize limit on string length, so
+             * constraining the exponent similarly should be enough to prevent
+             * integer overflow in this function.  If the value is too large to
+             * fit in storage format, make_result() will complain about it later;
+             * for consistency use the same ereport errcode/text as make_result().
+             */
+
+            /* exponent sign */
+            cp++;
+            CHECK(cp != cp_end);
+            if (*cp == '+')
+            {
+                cp++;
+            }
+            else if (*cp == '-')
+            {
+                neg = true;
+                cp++;
+            }
+
+            /* exponent digits */
+            CHECK(isdigit((unsigned char) *cp)) << "Numeric: invalid numeric string: " << str;
+
+            while (cp != cp_end)
+            {
+                if (isdigit((unsigned char) *cp))
+                {
+                    exponent = exponent * 10 + (*cp++ - '0');
+                    CHECK(exponent <= INT32_MAX / 2) << "Numeric: invalid numeric string: " << str;
+                }
+                else if (*cp == '_')
+                {
+                    /* underscore must be followed by more digits */
+                    cp++;
+                    CHECK(cp != cp_end);
+                    CHECK(isdigit((unsigned char) *cp)) << "Numeric: invalid numeric string: " << str;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            if (neg)
+            {
+                exponent = -exponent;
+            }
+
+            dweight += (int) exponent;
+            new_dscale -= (int) exponent;
+            if (new_dscale < 0)
+            {
+                new_dscale = 0;
+            }
+        }
+
+        /*
+         * Okay, convert pure-decimal representation to base NBASE.  First we need
+         * to determine the converted weight and ndigits.  offset is the number of
+         * decimal zeroes to insert before the first given digit to have a
+         * correctly aligned first NBASE digit.
+         */
+        int new_weight;
+        if (dweight >= 0)
+            new_weight = (dweight + 1 + DEC_DIGITS - 1) / DEC_DIGITS - 1;
+        else
+            new_weight = -((-dweight - 1) / DEC_DIGITS + 1);
+
+        int offset = (new_weight + 1) * DEC_DIGITS - (dweight + 1);
+        int new_ndigits = (ddigits + offset + DEC_DIGITS - 1) / DEC_DIGITS;
+
+        alloc(new_ndigits);
+        sign = new_sign;
+        weight = new_weight;
+        dscale = new_dscale;
+
+        i = DEC_DIGITS - offset;
+        NumericDigit *new_digits = digits;
+
+        while (new_ndigits-- > 0)
+        {
+            *new_digits++ = ((decdigits[i] * 10 + decdigits[i + 1]) * 10 +
+                            decdigits[i + 2]) * 10 + decdigits[i + 3];
+            i += DEC_DIGITS;
+        }
+
+        ::free(decdigits);
+
+        /* Strip any leading/trailing zeroes, and normalize weight if zero */
+        strip();
+    }
+
+    void
+    NumericVar::dump(const std::string &str)
+    {
+        LOG_DEBUG(LOG_STORAGE, "{}: {} ({})", str, this->to_debug_string(), this->to_string());
+    }
+
+    std::string
+    NumericVar::to_debug_string() const
+    {
+        std::vector<int16_t> digits_array(digits, digits + ndigits);
+        std::string sign_str = sing_to_string(sign);
+        std::string out = fmt::format("VAR w={} d={} nd={} {} \"{:04}\"",
+            weight, dscale, ndigits, sign_str, fmt::join(digits_array, " "));
+        return out;
+    }
+
+    std::string
+    NumericData::to_debug_string() const
     {
         const NumericDigit *numeric_digits = digits();
         int numeric_ndigits = ndigits();
 
         std::vector<int16_t> digits_array(numeric_digits, numeric_digits + numeric_ndigits);
-        std::string sign_str;
-        switch(sign())
-        {
-            case NUMERIC_POS:
-                sign_str = "POS";
-                break;
-            case NUMERIC_NEG:
-                sign_str = "NEG";
-                break;
-            case NUMERIC_NAN:
-                sign_str = "NaN";
-                break;
-            case NUMERIC_PINF:
-                sign_str = "Infinity";
-                break;
-            case NUMERIC_NINF:
-                sign_str = "-Infinity";
-                break;
-            default:
-                sign_str = fmt::format("SIGN=0x{:x}", sign());
-                break;
-        }
-        std::string out = fmt::format("NUMERIC w={} d={} {} {:04}",
-            weight(), dscale(), sign_str, fmt::join(digits_array, ""));
+        std::string sign_str = sing_to_string(sign());
+        std::string out = fmt::format("NUMERIC w={} d={} nd={} {} \"{:04}\"",
+            weight(), dscale(), numeric_ndigits, sign_str, fmt::join(digits_array, " "));
         return out;
     }
 
-    void NumericData::dump(const char *str)
+    void NumericData::dump(const std::string &str)
     {
-        LOG_DEBUG(LOG_STORAGE, "{}: {}", str, this->to_string());
+        LOG_DEBUG(LOG_STORAGE, "{}: {} ({})", str, this->to_debug_string(), this->to_string());
     }
 
-    bool NumericData::apply_typmod_special(const TypeMod &typmod)
+    std::string NumericData::to_string() const
     {
-        CHECK(is_special());/* caller error if not */
+        /*
+         * Handle NaN and infinities
+         */
+        if (is_special())
+        {
+            if (is_pinf())
+            {
+                return "Infinity";
+            }
+            else if (is_ninf())
+            {
+                return "-Infinity";
+            }
+            else if (is_nan())
+            {
+                return "NaN";
+            }
+        }
+
+        /*
+         * Get the number in the variable format.
+         */
+        NumericVar	x = to_var();
+        return x.to_string();
+    }
+
+    const NumericVar
+    NumericData::to_var() const
+    {
+        NumericVar result;
+        result.ndigits = ndigits();
+        result.weight = weight();
+        result.sign = sign();
+        result.dscale = dscale();
+        result.digits = digits();
+        /* digits array is not palloc'd */
+        result.buf = nullptr;
+        return result;
+    }
+
+    void
+    NumericData::apply_typmod_special(const TypeMod &typmod)
+    {
+        /* caller error if not */
+        CHECK(is_special()) << "NumericData does not contain a special value";
 
         /*
          * NaN is allowed regardless of the typmod; that's rather dubious perhaps,
@@ -305,24 +715,14 @@ namespace springtail::numeric {
          * typmod restriction, since an infinity shouldn't be claimed to fit in
          * any finite number of digits.
          */
-        if (is_nan()) {
-            return true;
-        }
-
         /* Do nothing if we have a default typmod (-1) */
-        if (!typmod.is_valid()) {
-            return true;
-        }
-
-        int precision = typmod.precision();
-        int scale = typmod.scale();
-
-        LOG_ERROR("Numeric: numeric field overflow; A field with precision {}, scale {} cannot hold an infinite value.",
-                    precision, scale);
-        DCHECK(false);
+        CHECK(is_nan() || !typmod.is_valid()) <<
+            "Numeric: numeric field overflow; A field with precision " << typmod.precision() <<
+            ", scale" <<  typmod.scale() << "cannot hold an infinite value.";
     }
 
-    NumericData *NumericData::make_numeric(const NumericVar *var)
+    NumericData *
+    NumericData::make_numeric(const NumericVar *var)
     {
         NumericData     *result;
         NumericDigit    *digits = var->digits;
@@ -336,19 +736,14 @@ namespace springtail::numeric {
              * but it seems worthwhile to expend a few cycles to ensure that we
              * never write any nonzero reserved bits to disk.
              */
-            if (!(sign == NUMERIC_NAN || sign == NUMERIC_PINF || sign == NUMERIC_NINF))
-            {
-                LOG_ERROR("Numeric: invalid numeric sign value 0x{:x}", sign);
-                DCHECK(false);
-            }
+            CHECK(sign == NUMERIC_NAN || sign == NUMERIC_PINF || sign == NUMERIC_NINF) <<
+                "Numeric: invalid numeric sign value " << std::hex << sign << std::dec;
 
             result = static_cast<NumericData *>(::malloc(NUMERIC_HDRSZ_SHORT));
 
             result->set_varsize(NUMERIC_HDRSZ_SHORT);
             result->choice.n_header = sign;
             /* the header word is all we need */
-
-            result->dump("make_result()");
             return result;
         }
 
@@ -396,28 +791,24 @@ namespace springtail::numeric {
         result->digits(digits, n);
 
         /* Check for overflow of int16 fields */
-        if (result->weight() != weight || result->dscale() != var->dscale)
-        {
-            LOG_ERROR("Numeric: alue overflows numeric format");
-            DCHECK(false);
-        }
-
-        result->dump("make_result()");
+        CHECK(result->weight() == weight && result->dscale() == var->dscale) <<
+            "Numeric: value overflows numeric format";
         return result;
     }
 
-    void NumericData::free_numeric(NumericData *make_numeric)
+    void
+    NumericData::free_numeric(NumericData *make_numeric)
     {
         if (make_numeric != nullptr) {
             ::free(make_numeric);
         }
     }
 
-    NumericData *NumericData::recv(StringInfo buf, uint32_t typmod)
+    NumericData *
+    NumericData::recv(StringInfo buf, const TypeMod &typmod)
     {
         NumericVar  value;
         NumericData *res;
-        TypeMod typmod_obj(typmod);
 
         memset(&value, 0, sizeof(NumericVar));
 
@@ -429,68 +820,55 @@ namespace springtail::numeric {
         /* we allow any int16 for weight --- OK? */
 
         value.sign = (uint16_t) buf->getint(sizeof(uint16_t));
-        if (!(value.sign == NUMERIC_POS ||
+        CHECK(value.sign == NUMERIC_POS ||
             value.sign == NUMERIC_NEG ||
             value.sign == NUMERIC_NAN ||
             value.sign == NUMERIC_PINF ||
-            value.sign == NUMERIC_NINF))
-        {
-            LOG_ERROR("Numeric: invalid sign in external \"numeric\" value");
-            DCHECK(false);
-        }
+            value.sign == NUMERIC_NINF) << "Numeric: invalid sign in external \"numeric\" value";
 
         value.dscale = (uint16_t) buf->getint(sizeof(uint16_t));
-        if ((value.dscale & NUMERIC_DSCALE_MASK) != value.dscale) {
-            LOG_ERROR("Numeric: invalid scale in external \"numeric\" value");
-            DCHECK(false);
-        }
+        CHECK((value.dscale & NUMERIC_DSCALE_MASK) == value.dscale) <<
+            "Numeric: invalid scale in external \"numeric\" value";
 
         for (int i = 0; i < len; i++)
         {
             NumericDigit d = buf->getint(sizeof(NumericDigit));
 
-            if (d < 0 || d >= NBASE)
-            {
-                LOG_ERROR("Numeric: invalid digit in external \"numeric\" value");
-                DCHECK(false);
-            }
+            CHECK (d >= 0 && d < NBASE) <<
+                "Numeric: invalid digit in external \"numeric\" value";
             value.digits[i] = d;
         }
 
         /*
          * If the given dscale would hide any digits, truncate those digits away.
          * We could alternatively throw an error, but that would take a bunch of
-         * extra code (about as much as trunc_var involves), and it might cause
-         * client compatibility issues.  Be careful not to apply trunc_var to
+         * extra code (about as much as trunc() involves), and it might cause
+         * client compatibility issues.  Be careful not to apply trunc() to
          * special values, as it could do the wrong thing; we don't need it
          * anyway, since make_result will ignore all but the sign field.
          *
          * After doing that, be sure to check the typmod restriction.
          */
-        if (value.sign == NUMERIC_POS ||
-            value.sign == NUMERIC_NEG)
+        if (value.sign == NUMERIC_POS || value.sign == NUMERIC_NEG)
         {
             value.trunc(value.dscale);
-
-            (void) value.apply_typmod(typmod);
-
+            value.apply_typmod(typmod);
             res = NumericData::make_numeric(&value);
         }
         else
         {
             /* apply_typmod_special wants us to make the Numeric first */
             res = NumericData::make_numeric(&value);
-
-            (void) res->apply_typmod_special(typmod);
+            res->apply_typmod_special(typmod);
         }
 
         value.free();
-
         return res;
     }
 
-    int NumericData::cmp_abs_common(const NumericDigit *var1digits, int var1ndigits, int var1weight,
-                                    const NumericDigit *var2digits, int var2ndigits, int var2weight)
+    int
+    NumericData::cmp_abs_common(const NumericDigit *var1digits, int var1ndigits, int var1weight,
+                                const NumericDigit *var2digits, int var2ndigits, int var2weight)
     {
         int i1 = 0;
         int i2 = 0;
@@ -577,7 +955,146 @@ namespace springtail::numeric {
                             var1digits, var1ndigits, var1weight);
     }
 
-    int NumericData::cmp(const NumericData *num1, const NumericData *num2)
+    NumericData *
+    NumericData::numeric_from_string(const std::string_view &str, const TypeMod &typmod)
+    {
+        Numeric res;
+        const char *cp = str.data();
+        const char *cp_end = str.data() + str.length();
+
+        /* Skip leading spaces */
+        while (cp != cp_end)
+        {
+            if (!isspace((unsigned char) *cp))
+                break;
+            cp++;
+        }
+
+        /*
+         * Process the number's sign. This duplicates logic in set_var_from_str(),
+         * but it's worth doing here, since it simplifies the handling of
+         * infinities and non-decimal integers.
+         */
+        int sign = NUMERIC_POS;
+
+        if (*cp == '+')
+        {
+            cp++;
+        }
+        else if (*cp == '-')
+        {
+            sign = NUMERIC_NEG;
+            cp++;
+        }
+
+        CHECK(cp != cp_end) << "Numeric: invalid numeric string: " << str;
+
+        /*
+         * Check for NaN and infinities.  We recognize the same strings allowed by
+         * float8in().
+         *
+         * Since all other legal inputs have a digit or a decimal point after the
+         * sign, we need only check for NaN/infinity if that's not the case.
+         */
+        if (!isdigit((unsigned char) *cp) && *cp != '.')
+        {
+            /*
+             * The number must be NaN or infinity; anything else can only be a
+             * syntax error. Note that NaN mustn't have a sign.
+             */
+            if (((cp_end - cp) >= 3) && inequals(cp, "NaN", 3))
+            {
+                res = make_numeric(&const_nan);
+                cp += 3;
+            }
+            else if (((cp_end - cp) >= 8) && inequals(cp, "Infinity", 8) == 0)
+            {
+                res = make_numeric(sign == NUMERIC_POS ? &const_pinf : &const_ninf);
+                cp += 8;
+            }
+            else if (((cp_end - cp) >= 3) && inequals(cp, "inf", 3) == 0)
+            {
+                res = make_numeric(sign == NUMERIC_POS ? &const_pinf : &const_ninf);
+                cp += 3;
+            }
+            else
+            {
+                CHECK(false) << "Numeric: invalid numeric string: " << str;
+            }
+
+            /*
+             * Check for trailing junk; there should be nothing left but spaces.
+             *
+             * We intentionally do this check before applying the typmod because
+             * we would like to throw any trailing-junk syntax error before any
+             * semantic error resulting from apply_typmod_special().
+             */
+            while (cp < cp_end)
+            {
+                CHECK(isspace((unsigned char) *cp));
+                cp++;
+            }
+
+            res->apply_typmod_special(typmod);
+        }
+        else
+        {
+            /*
+            * We have a normal numeric value, which may be a non-decimal integer
+            * or a regular decimal number.
+            */
+            NumericVar  value;
+            int         base;
+
+            memset(&value, 0, sizeof(NumericVar));
+
+            /*
+             * Determine the number's base by looking for a non-decimal prefix
+             * indicator ("0x", "0o", or "0b").
+             */
+            if (cp[0] == '0')
+            {
+                switch (cp[1])
+                {
+                    case 'x':
+                    case 'X':
+                        base = 16;
+                        break;
+                    case 'o':
+                    case 'O':
+                        base = 8;
+                        break;
+                    case 'b':
+                    case 'B':
+                        base = 2;
+                        break;
+                    default:
+                        base = 10;
+                }
+            }
+            else
+            {
+                base = 10;
+            }
+
+            // TODO: this case is not supported, otherwise way more functionality has
+            //      to be ported over
+            CHECK(base == 10) << "Numeric: non-decimal integer parsing is not supported yet";
+
+            /* Parse the rest of the number and apply the sign */
+            std::string_view num_str = str.substr(cp - str.data());
+            value.from_string(num_str);
+            value.sign = sign;
+            value.apply_typmod(typmod);
+
+            res = NumericData::make_numeric(&value);
+            value.free();
+        }
+        return res;
+    }
+
+    int
+    NumericData::cmp(const NumericData *num1, const NumericData *num2)
     {
         int result;
 
