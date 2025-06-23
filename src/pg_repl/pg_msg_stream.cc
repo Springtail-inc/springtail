@@ -907,6 +907,20 @@ namespace springtail {
         return decoded_msg;
     }
 
+    PartitionData
+    _decode_partition_data(const nlohmann::json &partition_data){
+        PartitionData data;
+        data.partition_bound = partition_data["partition_bound"];
+        data.table_id = partition_data["table_id"];
+        data.namespace_id = partition_data["namespace_id"];
+        data.table_name = partition_data["table_name"];
+        if (partition_data.contains("partition_key") && !partition_data["partition_key"].is_null()) {
+            data.partition_key = partition_data["partition_key"];
+        }
+        data.parent_table_id = partition_data["parent_table_id"];
+        return data;
+    }
+
     PgMsgPtr
     PgMsgStreamReader::_decode_create_table(PgMsgMessage &message, char *buffer, int len)
     {
@@ -943,16 +957,8 @@ namespace springtail {
             json["partition_bound"].get_to(table_msg.partition_bound);
         }
 
-        for (auto &partition_info : json["partition_info"]) {
-            PartitionInfo info;
-            info.partition_bound = partition_info["partition_bound"];
-            info.table_id = partition_info["table_id"];
-            info.namespace_id = partition_info["namespace_id"];
-            info.table_name = partition_info["table_name"];
-            if (partition_info.contains("partition_key") && !partition_info["partition_key"].is_null()) {
-                info.partition_key = partition_info["partition_key"];
-            }
-            table_msg.partition_info.push_back(info);
+        for (auto &partition_data : json["partition_data"]) {
+            table_msg.partition_data.push_back(_decode_partition_data(partition_data));
         }
 
         _decode_schema_columns(json["columns"], table_msg.columns);
@@ -1196,16 +1202,8 @@ namespace springtail {
             json["partition_bound"].get_to(attach_partition_msg.partition_bound);
         }
 
-        for (auto &partition_info : json["partition_info"]) {
-            PartitionInfo info;
-            info.partition_bound = partition_info["partition_bound"];
-            info.table_id = partition_info["table_id"];
-            info.namespace_id = partition_info["namespace_id"];
-            info.table_name = partition_info["table_name"];
-            if (partition_info.contains("partition_key") && !partition_info["partition_key"].is_null()) {
-                info.partition_key = partition_info["partition_key"];
-            }
-            attach_partition_msg.partition_info.push_back(info);
+        for (auto &partition_data : json["partition_data"]) {
+            attach_partition_msg.partition_data.push_back(_decode_partition_data(partition_data));
         }
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::ATTACH_PARTITION);
@@ -1227,16 +1225,8 @@ namespace springtail {
         json["schema"].get_to(detach_partition_msg.namespace_name);
         json["table"].get_to(detach_partition_msg.table_name);
 
-        for (auto &partition_info : json["partition_info"]) {
-            PartitionInfo info;
-            info.partition_bound = partition_info["partition_bound"];
-            info.table_id = partition_info["table_id"];
-            info.namespace_id = partition_info["namespace_id"];
-            info.table_name = partition_info["table_name"];
-            if (partition_info.contains("partition_key") && !partition_info["partition_key"].is_null()) {
-                info.partition_key = partition_info["partition_key"];
-            }
-            detach_partition_msg.partition_info.push_back(info);
+        for (auto &partition_data : json["partition_data"]) {
+            detach_partition_msg.partition_data.push_back(_decode_partition_data(partition_data));
         }
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DETACH_PARTITION);

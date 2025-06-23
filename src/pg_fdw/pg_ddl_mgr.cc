@@ -778,7 +778,7 @@ namespace springtail::pg_fdw {
                     ddl.at("schema").get<std::string>(),
                     partition_name);
             }
-            std::string alter = fmt::format("ALTER TABLE {}.{} ATTACH PARTITION {} FOR VALUES {};",
+            std::string alter = fmt::format("ALTER TABLE {}.{} ATTACH PARTITION {} {};",
                                             conn->escape_identifier(ddl.at("schema")),
                                             conn->escape_identifier(ddl.at("table")),
                                             partition_name,

@@ -727,8 +727,17 @@ namespace springtail::pg_log_mgr {
 
                 // check for re-sync
                 nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
+
                 if (action.get<std::string>() == "resync") {
                     _mark_table_resync(table_msg.oid, xidlsn, pg_xids);
+                } else if (action.get<std::string>() == "resync_partitions") {
+                    nlohmann::json table_ids = nlohmann::json::parse(ddl_stmt).at("table_ids");
+                    // Mark the parent table for resync
+                    _mark_table_resync(table_msg.oid, xidlsn, pg_xids);
+                    for (auto table_id : table_ids.get<std::vector<uint64_t>>()) {
+                        // Mark the partition table for resync
+                        _mark_table_resync(table_id, xidlsn, pg_xids);
+                    }
                 } else if (action.get<std::string>() != "no_change") {
                     redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 }
@@ -823,19 +832,9 @@ namespace springtail::pg_log_mgr {
                 auto &attach_partition_msg = std::get<PgMsgAttachPartition>(change->msg);
                 std::string &&ddl_stmt = client->attach_partition(_db, xidlsn, attach_partition_msg);
 
-                nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
-                if (action.get<std::string>() == "resync_partitions") {
-                    nlohmann::json table_ids = nlohmann::json::parse(ddl_stmt).at("table_ids");
-                    // Mark the parent table for resync
-                    _mark_table_resync(attach_partition_msg.table_id, xidlsn, pg_xids);
-                    for (auto table_id : table_ids.get<std::vector<uint64_t>>()) {
-                        // Mark the partition table for resync
-                        _mark_table_resync(table_id, xidlsn, pg_xids);
-                    }
-                } else {
-                    // Store the DDL statement for the Committer
-                    redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
-                }
+                // Store the DDL statement for the Committer
+                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+
                 break;
             }
         case PgMsgEnum::DETACH_PARTITION:

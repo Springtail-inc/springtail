@@ -54,7 +54,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_get_partition_info(table_name TEXT)
+CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_get_partition_data(table_name TEXT)
 RETURNS JSON LANGUAGE plpgsql AS $$
 DECLARE
 BEGIN
@@ -67,7 +67,8 @@ BEGIN
                 'namespace_name', obj_select.namespace_name,
                 'namespace_id', obj_select.namespace_id::bigint,
                 'partition_bound', obj_select.partition_bound,
-                'partition_key', obj_select.partition_key
+                'partition_key', obj_select.partition_key,
+                'parent_table_id', obj_select.parent_table_id::bigint
             ) AS json_col
             FROM (
                 WITH RECURSIVE children AS (
@@ -85,7 +86,8 @@ BEGIN
                     child_ns.nspname AS namespace_name,
                     child_ns.oid AS namespace_id,
                     pg_get_expr(child.relpartbound, child.oid, TRUE) AS partition_bound,
-                    pg_get_partkeydef(child.oid) AS partition_key
+                    pg_get_partkeydef(child.oid) AS partition_key,
+                    children.inhparent AS parent_table_id
                 FROM children
                 JOIN pg_class child ON child.oid = children.inhrelid
                 JOIN pg_namespace child_ns ON child_ns.oid = child.relnamespace
@@ -111,7 +113,7 @@ DECLARE
     partition_bound text;
     partition_key text;
     partition_name text;
-    partition_info json;
+    partition_data json;
     table_relname text;
     table_info RECORD;
     command_tag text;
@@ -141,11 +143,12 @@ BEGIN
         INTO table_relname, table_replident, table_persistence, rel_kind, parent_table_id, partition_bound, partition_key;
 
         IF obj.command_tag = 'ALTER TABLE' AND parent_table_id IS NULL THEN
-            SELECT __pg_springtail_triggers.springtail_get_partition_info(obj.object_identity) INTO partition_info;
+            SELECT __pg_springtail_triggers.springtail_get_partition_data(obj.object_identity) INTO partition_data;
         END IF;
 
         command_text := current_query();
 
+        -- Handle the detach partition event
         IF obj.command_tag = 'ALTER TABLE' AND position('detach partition' IN lower(command_text)) > 0 THEN
             msg := json_build_object('xid', txid_current(),
                 'cmd', 'DETACH PARTITION',
@@ -155,13 +158,14 @@ BEGIN
                 'parent_table_id', parent_table_id::int,
                 'partition_bound', partition_bound,
                 'partition_key', partition_key,
-                'partition_info', partition_info);
+                'partition_data', partition_data);
 
             PERFORM pg_logical_emit_message(true, 'springtail:' || 'DETACH PARTITION', msg::text);
 
             CONTINUE;
         END IF;
 
+        -- Handle the attach partition event
         IF obj.command_tag = 'ALTER TABLE' AND position('attach partition' IN lower(command_text)) > 0 THEN
             msg := json_build_object('xid', txid_current(),
                 'cmd', 'ATTACH PARTITION',
@@ -171,7 +175,7 @@ BEGIN
                 'parent_table_id', parent_table_id::int,
                 'partition_bound', partition_bound,
                 'partition_key', partition_key,
-                'partition_info', partition_info);
+                'partition_data', partition_data);
 
             PERFORM pg_logical_emit_message(true, 'springtail:' || 'ATTACH PARTITION', msg::text);
 
@@ -250,7 +254,7 @@ BEGIN
             'parent_table_id', parent_table_id::int,
             'partition_bound', partition_bound,
             'partition_key', partition_key,
-            'partition_info', partition_info);
+            'partition_data', partition_data);
 
         -- command_tag is CREATE TABLE or ALTER TABLE
         PERFORM pg_logical_emit_message(true, 'springtail:' || command_tag, msg::text);

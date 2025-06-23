@@ -59,6 +59,18 @@ _set_request_common(Req &r, uint64_t db_id, const XidLsn &xid)
     r.set_lsn(xid.lsn);
 }
 
+void
+_set_partition_data(proto::PartitionData *info, const PartitionData &partition_data)
+{
+    info->set_table_name(partition_data.table_name);
+    info->set_table_id(partition_data.table_id);
+    info->set_namespace_name(partition_data.namespace_name);
+    info->set_namespace_id(partition_data.namespace_id);
+    info->set_partition_bound(partition_data.partition_bound);
+    info->set_partition_key(partition_data.partition_key);
+    info->set_parent_table_id(partition_data.parent_table_id);
+}
+
 proto::TableRequest
 _gen_table_request(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
 {
@@ -91,14 +103,9 @@ _gen_table_request(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
         }
     }
 
-    for (const auto &partition_info : msg.partition_info) {
-        auto *info = table->add_partition_info();
-        info->set_table_name(partition_info.table_name);
-        info->set_table_id(partition_info.table_id);
-        info->set_namespace_name(partition_info.namespace_name);
-        info->set_namespace_id(partition_info.namespace_id);
-        info->set_partition_bound(partition_info.partition_bound);
-        info->set_partition_key(partition_info.partition_key);
+    for (const auto &partition_data : msg.partition_data) {
+        auto *info = table->add_partition_data();
+        _set_partition_data(info, partition_data);
     }
 
     return request;
@@ -328,14 +335,9 @@ Client::attach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgAttachPar
     request.set_partition_name(msg.partition_name);
     request.set_partition_bound(msg.partition_bound);
 
-    for (const auto &partition_info : msg.partition_info) {
-        auto *info = request.add_partition_info();
-        info->set_table_name(partition_info.table_name);
-        info->set_table_id(partition_info.table_id);
-        info->set_namespace_name(partition_info.namespace_name);
-        info->set_namespace_id(partition_info.namespace_id);
-        info->set_partition_bound(partition_info.partition_bound);
-        info->set_partition_key(partition_info.partition_key);
+    for (const auto &partition_data : msg.partition_data) {
+        auto *info = request.add_partition_data();
+        _set_partition_data(info, partition_data);
     }
 
     proto::DDLStatement response;
@@ -360,14 +362,9 @@ Client::detach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgDetachPar
     request.set_table_name(msg.table_name);
     request.set_partition_name(msg.partition_name);
 
-    for (const auto &partition_info : msg.partition_info) {
-        auto *info = request.add_partition_info();
-        info->set_table_name(partition_info.table_name);
-        info->set_table_id(partition_info.table_id);
-        info->set_namespace_name(partition_info.namespace_name);
-        info->set_namespace_id(partition_info.namespace_id);
-        info->set_partition_bound(partition_info.partition_bound);
-        info->set_partition_key(partition_info.partition_key);
+    for (const auto &partition_data : msg.partition_data) {
+        auto *info = request.add_partition_data();
+        _set_partition_data(info, partition_data);
     }
 
     proto::DDLStatement response;
