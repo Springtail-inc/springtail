@@ -798,10 +798,6 @@ namespace springtail::pg_fdw {
                                             partition_name);
 
             return alter;
-        } else if (action == "alter_parent_set") {
-            return "";
-        } else if (action == "alter_parent_clear") {
-            return "";
         }
 
         // can't currently support other kinds of DDL mutations
