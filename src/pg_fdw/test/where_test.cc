@@ -284,7 +284,7 @@ namespace {
                 SpringtailPlanState plan;
                 plan.pg_fdw_state = state;
                 // this should setup the sortgroup index
-                mgr->fdw_can_sort(&plan, sortgroup);
+                mgr->fdw_can_sort(&plan, sortgroup, true);
                 index_id = state->sortgroup_index->id;
             }
 

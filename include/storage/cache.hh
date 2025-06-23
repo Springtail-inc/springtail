@@ -1093,9 +1093,21 @@ namespace springtail {
         public:
             PageCache(uint64_t max_size)
                 : _max_size(max_size),
-                  _size(0)
+                  _size(0),
+                  _max_dirty_pages(max_size * 0.9),
+                  _high_dirty_pages(max_size * 0.75),
+                  _low_dirty_pages(max_size * 0.5)
             {
                 _cache.reserve(max_size);
+
+                // start the background cleaner
+                _cleaner_thread = std::thread(&PageCache::background_cleaner, this);
+            }
+
+            ~PageCache()
+            {
+                _shutdown_cleaner = true;
+                _cleaner_thread.join();
             }
 
             /**
@@ -1138,12 +1150,20 @@ namespace springtail {
              */
             void drop_file(const std::filesystem::path &file);
 
+            /**
+             * The background cleaner thread.
+             */
+            void background_cleaner();
+
+            /**
+             * Validate the cache state.
+             */
             void validate() const {
                 uint32_t size = 0;
                 for (const auto &entry : _cache) {
                     size += entry.second.size();
                 }
-                CHECK_EQ(size, _lru.size());
+                CHECK_EQ(size, _clean_lru.size() + _dirty_lru.size());
             }
 
         private:
@@ -1159,10 +1179,15 @@ namespace springtail {
             PagePtr _try_get(const std::filesystem::path &file, uint64_t extent_id, uint64_t xid);
 
             /**
-             * Helper to try and evict a page from the cache.  Will silently fail if there is a
+             * Helper to try and evict a dirty page from the cache.  Will silently fail if there is a
              * registered flush_callback that does not succeed.
              */
-            void _try_evict(PagePtr page);
+            void _try_evict_dirty(PagePtr page);
+
+            /**
+             * Helper to evict a clean page from the cache.
+             */
+            void _evict_clean(PagePtr page);
 
             /**
              * Helper to create a Page in the cache, potentially evicting another page to make space
@@ -1172,9 +1197,9 @@ namespace springtail {
                             uint64_t xid, const std::vector<uint64_t> &offsets);
 
             /**
-             * Makes space for some number of pages, evicting existing pages in the cache if necessary.
+             * Makes space for a page, evicting an existing page in the cache if necessary.
              */
-            void _make_page_space(uint32_t space_needed);
+            void _make_page_space();
 
         private:
             using XidMap = std::map<uint64_t, PagePtr>;
@@ -1183,13 +1208,26 @@ namespace springtail {
             boost::mutex _mutex; ///< Mutex to protect the cache members
 
             CacheMap _cache; ///< The page cache, keyed by CacheKey and XID
-            std::list<PagePtr> _lru; ///< LRU list of pages.
+            std::list<PagePtr> _clean_lru; ///< LRU list of clean pages.
+            std::list<PagePtr> _dirty_lru; ///< LRU list of dirty pages.
 
             /** List of pages with flush callbacks for each file. */
             std::map<std::filesystem::path, std::list<PagePtr>> _flush_list;
 
             uint64_t _max_size; ///< The max number of pages in the cache.
             uint64_t _size; ///< The current number of pages in the cache.
+
+            uint64_t _max_dirty_pages; ///< The max number of dirty pages before we block requests.
+            uint64_t _high_dirty_pages; ///< The number of dirty pages when the cleaner unblocks requests.
+            uint64_t _low_dirty_pages; ///< The number of dirty pages at which the cleaner is woken up.
+
+            bool _waiting_for_cleaner = false; ///< Flag indicating if someone is waiting for the cleaner.
+            std::atomic<bool> _shutdown_cleaner = false; ///< Flag indicating if the cleaner should shut down.
+            boost::condition_variable _cleaner_cond; ///< To wake up the cleaner.
+            boost::condition_variable _cleaner_block; ///< To wait for the cleaner to clean pages.
+            std::thread _cleaner_thread; ///< The cleaner thread.
+
+            static thread_local bool _is_cleaner_thread; ///< Flag set true for the cleaner thread.
         };
 
     public:
