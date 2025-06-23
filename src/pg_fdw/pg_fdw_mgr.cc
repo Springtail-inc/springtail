@@ -1521,7 +1521,7 @@ namespace springtail::pg_fdw {
         List        *commands = NIL;
         std::string  sql;
 
-        auto import_catalog = [&]<typename T>(const auto& tab_name) {
+        auto import_catalog = [exclude, limit, &table_set, &server, &commands, &sql]<typename T>(const auto& tab_name) {
             if (!((exclude && table_set.contains(tab_name)) ||
                   (limit && !table_set.contains(tab_name)))) {
                 sql = _gen_fdw_system_table(server, tab_name, T::ID, T::Data::SCHEMA);

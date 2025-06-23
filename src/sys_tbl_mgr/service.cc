@@ -530,17 +530,14 @@ Service::_create_table(const proto::TableRequest& request)
         if (parent_table_id.value() != constant::INVALID_TABLE) {
             if (parent_table_info == nullptr) {
                 LOG_ERROR("Parent table not found: {}@{} - {}", request.db_id(), xid.xid, parent_table_id.value());
-                throw SysTblMgrError("Parent table not found");
+            } else {
+                ddl["parent_table_name"] = parent_table_info->name;
+                auto namespace_name = _get_namespace_info(request.db_id(), parent_table_info->namespace_id, xid);
+                if (namespace_name == nullptr) {
+                    LOG_ERROR("Parent namespace not found: {}@{} - {}", request.db_id(), xid.xid, parent_table_id.value());
+                }
+                ddl["parent_namespace_name"] = namespace_name->name;
             }
-            auto namespace_name = _get_namespace_info(request.db_id(), parent_table_info->namespace_id, xid);
-            if (namespace_name == nullptr) {
-                LOG_ERROR("Parent namespace not found: {}@{} - {}", request.db_id(), xid.xid, parent_table_id.value());
-                throw SysTblMgrError("Parent namespace not found");
-            }
-            ddl["parent_namespace_name"] = namespace_name->name;
-            ddl["parent_table_name"] = parent_table_info->name;
-        } else {
-            parent_table_id = std::nullopt;
         }
     }
 
@@ -549,10 +546,6 @@ Service::_create_table(const proto::TableRequest& request)
     if (request.table().has_partition_key()) {
         partition_key = request.table().partition_key();
         ddl["partition_key"] = partition_key.value();
-        // Ensure empty values are set to null to ensure the table is storing nulls properly
-        if (partition_key.value() == "") {
-            partition_key = std::nullopt;
-        }
     }
 
     // this is a partitioned table, it is a leaf if partition_key is empty
@@ -560,10 +553,6 @@ Service::_create_table(const proto::TableRequest& request)
     if (request.table().has_partition_bound()) {
         partition_bound = request.table().partition_bound();
         ddl["partition_bound"] = partition_bound.value();
-        // Ensure empty values are set to null to ensure the table is storing nulls properly
-        if (partition_bound.value() == "") {
-            partition_bound = std::nullopt;
-        }
     }
 
     // add table name
@@ -1848,14 +1837,14 @@ Service::_get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     // make sure table ID exists at this XID/LSN
     if (row_i == table_names_t->end() ||
         fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row) != table_id) {
-        LOG_WARN("No table info at xid {}:{}", xid.xid, xid.lsn);
+        LOG_WARN("No table info for {} at xid {}:{}", table_id, xid.xid, xid.lsn);
         return nullptr;
     }
 
     // make sure that the table is marked as existing at this XID/LSN
     bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
     if (!exists) {
-        LOG_WARN("Table marked non-existant at xid {}:{}", xid.xid, xid.lsn);
+        LOG_WARN("Table {} marked non-existant at xid {}:{}", table_id, xid.xid, xid.lsn);
         return nullptr;
     }
 
