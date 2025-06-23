@@ -153,7 +153,7 @@ namespace springtail::pg_fdw {
         /** Begin scan
          * @param state PgFdwState
          * @param num_attrs Number of attributes
--        * @param attrs Array of pg attributes
+         * @param attrs Array of pg attributes
          * @param target_list List of target columns (Value or String)
          * @param qual_list List of predicate clauses (BaseQual)
          * @param sortgroup List of sort group columns (DeparsedSortGroup)

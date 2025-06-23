@@ -280,20 +280,6 @@ namespace springtail::pg_fdw {
         // the type category doesn't matter for these checks since enum check is done above
         SchemaType pg_schema_type = convert_pg_type(pg_type, 'N');
         if (column.type == pg_schema_type) {
-            /*
-            if (pg_schema_type == SchemaType::BINARY) {
-                // TODO: fix this when we have full support for numeric types
-                if (pg_type == NUMERICOID &&
-                    (qual->base.op == QualOpName::EQUALS || qual->base.op == QualOpName::NOT_EQUALS)) {
-                    // only support equality of NUMERICOID binary types
-                    return true;
-                } else {
-                    // don't support comparisons of binary types
-                    return false;
-                }
-            }
-            */
-
             return true;
         }
 
@@ -1826,10 +1812,8 @@ namespace springtail::pg_fdw {
             case CHAROID:
             case UUIDOID:
             case NUMERICOID:    // DECIMAL(x,y)
+                // TODO: https://linear.app/springtail/issue/SPR-556/
                 return true;
-            // case NUMERICOID: // DECIMAL(x,y)
-                //TODO: https://linear.app/springtail/issue/SPR-556/
-            //     return (op == EQUALS || op == NOT_EQUALS);
             case VARCHAROID:
             case TEXTOID:
                 // due to different collations/encodings we only support equality for text

@@ -943,7 +943,6 @@ namespace springtail {
 
         const std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const override {
             if constexpr(std::is_same_v<T, std::shared_ptr<numeric::NumericData>>) {
-                // LOG_INFO("---> ConstField: value = {}", _value->to_string());
                 return _value;
             } else {
                 throw TypeError();
@@ -1148,6 +1147,7 @@ namespace springtail {
             }
         }
 
+        // TODO: verify default values
         const std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const override {
             if constexpr(std::is_same_v<T, std::shared_ptr<numeric::NumericData>>) {
                 if (_field->is_null(row)) {
@@ -1227,7 +1227,7 @@ namespace springtail {
         }
 
         bool equal_strict(const Tuple &rhs) const {
-            // check the tuple lengths and types using CHECK()
+            // check the tuple lengths and types using CHECK_EQ()
             // we assume correct usage in production
             CHECK_EQ(this->size(), rhs.size());
             return _equal(rhs, size());

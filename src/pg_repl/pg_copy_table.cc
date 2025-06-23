@@ -780,21 +780,6 @@ namespace springtail
             case (SchemaType::NUMERIC): {
                 std::string_view tmp(row.data() + pos, length);
 
-                /*
-                // XXX print out the binary data here
-                std::stringstream ss;
-                ss << std::hex << std::setfill('0');
-                for (size_t i = 0; i < length; ++i) {
-                    ss << std::setw(2) << static_cast<unsigned int>(static_cast<unsigned char>(tmp.begin()[i]));
-                }
-
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Converting type '{}' into NUMERIC, value: {}", pg_type, ss.str());
-                std::stringstream trace_ss;
-                auto trace = cpptrace::generate_trace();
-                trace.print(trace_ss, false); // no color
-                LOG_INFO("---> __parse_row: backtrace\n{}", trace_ss.str());
-                */
-
                 std::shared_ptr<numeric::NumericData> numeric_value(numeric::numeric_receive(tmp.begin(), length, 0),
                     [](numeric::Numeric ptr) {
                         numeric::NumericData::free_numeric(ptr);
