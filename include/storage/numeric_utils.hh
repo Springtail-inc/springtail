@@ -12,7 +12,6 @@
 
 namespace springtail::numeric {
 
-    // TODO: fix comments
     typedef int16_t NumericDigit;
 
     struct NumericShort
@@ -80,166 +79,298 @@ namespace springtail::numeric {
     #define NUMERIC_SHORT_WEIGHT_MAX        NUMERIC_SHORT_WEIGHT_MASK
     #define NUMERIC_SHORT_WEIGHT_MIN        (-(NUMERIC_SHORT_WEIGHT_MASK+1))
 
+    /**
+     * @brief Input structure for parcing data from the buffer
+     *
+     */
     struct StringInfoData
     {
-        char   *data;
-        int     len;
-        int     maxlen;
-        int     cursor;
+        char   *_data;      ///< character buffer
+        int     _len;       ///< data length
+        int     _maxlen;    ///< maximum data length
+        int     _cursor;    ///< current cursor position
 
+        /**
+         * @brief Copy bytes into buffer
+         *
+         * @param buf - buffer pointer
+         * @param datalen - number of bytes to copy
+         */
         void copybytes(void *buf, int datalen);
+
+        /**
+         * @brief Extract in value from the input
+         *
+         * @param b - number of bytes
+         * @return unsigned int - integer value/LOG
+         */
         unsigned int getint(int b);
     };
 
     typedef StringInfoData *StringInfo;
 
+    /**
+     * @brief Class for handling typemod operations. This has been ported for completeness.
+     *  At the moment, we pass 0 as typmode value which makes typmode invalid and none of
+     *  the precision() and scale() functions end up being used.
+     *
+     */
     class TypeMod {
     public:
         TypeMod(int32_t typmod) : _typmod(typmod) {}
 
-        /*
-         * Because of the offset, valid numeric typmods are at least VARHDRSZ
+        /**
+         * @brief Verify if typmod value is valid.
+         *      Because of the offset, valid numeric typmods are at least VARHDRSZ.
+         *
+         * @return true
+         * @return false
          */
         bool is_valid() const
         {
             return (_typmod >= static_cast<int32_t>(sizeof(int32_t)));
         }
 
-        /*
-         * precision() - Extract the precision from a numeric typmod.
+        /**
+         * @brief Extract the precision from a numeric typmod.
+         *
+         * @return int
          */
         int precision() const
         {
             return ((_typmod - static_cast<int32_t>(sizeof(int32_t))) >> 16) & 0xffff;
         }
 
-        /*
-         * scale() - Extract the scale from a numeric typmod
+        /**
+         * @brief Extract the scale from a numeric typmod
+         *
+         * @return int
          */
         int scale() const
         {
             return (((_typmod - static_cast<int32_t>(sizeof(int32_t))) & 0x7ff) ^ 1024) - 1024;
         }
     private:
-        int32_t _typmod;
+        int32_t _typmod;    ///< typmod value
     };
 
-    // Protocol storage format for numeric values
-    typedef struct NumericVar
+    struct NumericVarLiteral
     {
-        int         ndigits;        /* # of digits in digits[] - can be 0! */
-        int         weight;         /* weight of first digit */
-        int         sign;           /* NUMERIC_POS, _NEG, _NAN, _PINF, or _NINF */
-        int         dscale;         /* display scale */
-        NumericDigit *buf;          /* start of palloc'd space for digits[] */
-        NumericDigit *digits;       /* base-NBASE digits */
+        int             _ndigits;               ///< # of digits in digits[] - can be 0!
+        int             _weight;                ///< weight of first digit
+        int             _sign;                  ///< NUMERIC_POS, _NEG, _NAN, _PINF, or _NINF
+        int             _dscale;                ///< display scale
+        NumericDigit *  _digits;                ///< base-NBASE digits
 
+        constexpr NumericVarLiteral(
+            int ndigits,
+            int weight,
+            int sign,
+            int dscale,
+            NumericDigit *digits
+        ) :
+            _ndigits(ndigits),
+            _weight(weight),
+            _sign(sign),
+            _dscale(dscale),
+            _digits(digits) {}
+    };
+
+    /**
+     * @brief This structure represents protocol level storage format of the numeric value.
+     *
+     */
+    struct NumericVar : public NumericVarLiteral
+    {
+        std::unique_ptr<NumericDigit[]>  _buf{nullptr};  ///< start of alloc'd space for digits[]
+
+        explicit NumericVar(int ndigits = 0) :
+            NumericVarLiteral(ndigits, 0, 0, 0, nullptr)
+        {
+            CHECK(ndigits >= 0);
+            if (ndigits > 0) {
+                alloc(ndigits);
+            }
+        }
+
+        NumericVar(const NumericVarLiteral &num_lit) :
+            NumericVarLiteral(num_lit) {}
+
+        /**
+         * @brief Powers for rounding numeric variables
+         *
+         */
         static constexpr int round_powers[4] = {0, 1000, 100, 10};
 
-        void alloc(int number_of_digits);
-        void free();
-
-        /*
-         * trunc
+        /**
+         * @brief Allocate buffer for the given number of digits
          *
-         * Truncate (towards zero) the value of a variable at rscale decimal digits
-         * after the decimal point.  NOTE: we allow rscale < 0 here, implying
-         * truncation before the decimal point.
+         * @param number_of_digits - size of the buffer in terms of digits
+         */
+        void alloc(int number_of_digits);
+
+        /**
+         * @brief Truncate (towards zero) the value of a variable at rscale decimal digits
+         *          after the decimal point.
+         *  NOTE: we allow rscale < 0 here, implying truncation before the decimal point.
+         *
+         * @param rscale - rscale value
          */
         void trunc(int rscale);
 
-        /*
-         * round
+        /**
+         * @brief Round the value of a variable to no more than rscale decimal digits
+         *      after the decimal point.
+         *  NOTE: we allow rscale < 0 here, implying rounding before the decimal point.
          *
-         * Round the value of a variable to no more than rscale decimal digits
-         * after the decimal point.  NOTE: we allow rscale < 0 here, implying
-         * rounding before the decimal point.
+         * @param rscale - rscale value
          */
         void round(int rscale);
-        /*
-         * apply_typmod() -
+
+        /**
+         * @brief Do bounds checking and rounding according to the specified typmod.
+         * NOTE: that this is only applied to normal finite values.
+         * NOTE: we do not pass a valid typmod value anywhere in our code, so this function
+         *      does for the most part nothing.
          *
-         * Do bounds checking and rounding according to the specified typmod.
-         * Note that this is only applied to normal finite values.
-         *
-         * Returns true on success, false on failure (if escontext points to an
-         * ErrorSaveContext; otherwise errors are thrown).
+         * @param typmod - typmod value to apply
          */
         void apply_typmod(const TypeMod &typmod);
-        /*
-         * strip
+
+        /**
+         * @brief Strip any leading and trailing zeroes from a numeric variable
          *
-         * Strip any leading and trailing zeroes from a numeric variable
          */
         void strip();
 
-        /*
-         * to_string() -
-         *
-         *	Convert a var to text representation (guts of numeric_out).
+        /**
+         * @brief Convert a var to text representation.
          *	The var is displayed to the number of digits indicated by its dscale.
-         *	Returns a palloc'd string.
+         *
+         * @return std::string - string representing numeric variable
          */
         std::string to_string();
 
-        /*
-         * from_string()
+        /**
+         * @brief Parse a string and put the number into a variable
+         * This function does not handle leading or trailing spaces.
          *
-         *	Parse a string and put the number into a variable
-         *
-         * This function does not handle leading or trailing spaces.  It returns
-         * the end+1 position parsed into *endptr, so that caller can check for
-         * trailing spaces/garbage if deemed necessary.
-         *
-         * cp is the place to actually start parsing; str is what to use in error
-         * reports.  (Typically cp would be the same except advanced over spaces.)
-         *
-         * Returns true on success, false on failure (if escontext points to an
-         * ErrorSaveContext; otherwise errors are thrown).
+         * @param str - input string
          */
         void from_string(const std::string_view &str);
 
-        /*
-         * dump() - Dump a value in the variable format for debugging
+        /**
+         * @brief Write this numeric value to the debug log with the given message
+         *
+         * @param str - message to print together with the value
          */
         void dump(const std::string &str);
 
+        /**
+         * @brief Convert variable to debug string that prints all elements of the variable
+         *
+         * @return std::string - returns debug string
+         */
         std::string to_debug_string() const;
 
-    } NumericVar;
+    };
 
-    // Disk storage format for numeric values
+    /**
+     * @brief This structure represents a numeric value in disc storage format.
+     *
+     */
     struct NumericData
     {
-        int32_t             vl_len_;/* varlena header (do not touch directly!) */
-        union NumericChoice choice; /* choice of format */
+        int32_t             _vl_len_;   ///< varlena header (do not touch directly!)
+        union NumericChoice _choice;    ///< choice of format
 
+        /**
+         * @brief Allocate numeric data value
+         *
+         * @param size - size of numeric data value
+         * @return std::shared_ptr<NumericData> - shared pointer to allocated data
+         */
+        static std::shared_ptr<NumericData> alloc(size_t size)
+        {
+            return std::shared_ptr<NumericData>(
+                reinterpret_cast<NumericData *>(
+                    new unsigned char[size]()),
+                [](NumericData *ptr) {
+                    delete[] reinterpret_cast<unsigned char *>(ptr);
+                }
+            );
+        }
+
+        /**
+         * @brief Set the varsize of numeric object
+         *
+         * @param len
+         */
         void set_varsize(int len)
         {
-            vl_len_ = len << 2;
+            _vl_len_ = len << 2;
         }
+
+        /**
+         * @brief Get varsize of numeric object
+         *
+         * @return int32_t - size of numeric object
+         */
         int32_t varsize() const
         {
-            return (vl_len_ >> 2) & 0x3FFFFFFF;
+            return (_vl_len_ >> 2) & 0x3FFFFFFF;
         }
+
+        /**
+         * @brief Check if numeric data can have short representation or require a long one
+         *
+         * @param weight - weight of the numeric object
+         * @param dscale - dscale of the numeric object
+         * @return true     - use short representation
+         * @return false    - use long representation
+         */
         static bool can_be_short(int16_t weight, uint16_t dscale)
         {
             return ((dscale) <= NUMERIC_SHORT_DSCALE_MAX && (weight) <= NUMERIC_SHORT_WEIGHT_MAX && (weight) >= NUMERIC_SHORT_WEIGHT_MIN);
         }
 
+        /**
+         * @brief Check if the numeric object uses short format
+         *
+         * @return true     - uses short format
+         * @return false    - uses long format
+         */
         bool header_is_short() const
         {
-            return (choice.n_header & 0x8000) != 0;
+            return (_choice.n_header & NUMERIC_SHORT) != 0;
         }
+
+        /**
+         * @brief Get size of the numeric object header
+         *
+         * @return size_t - header size
+         */
         size_t  header_size() const
         {
-            return sizeof(int32_t) + sizeof(uint16_t) +
-                   (header_is_short() ? 0 : sizeof(int16_t));
+            return sizeof(int32_t) + sizeof(uint16_t) + (header_is_short() ? 0 : sizeof(int16_t));
         }
+
+        /**
+         * @brief Get digits array of the numeric data
+         *
+         * @return NumericDigit* - digits pointer
+         */
         NumericDigit *digits() const
         {
-            return const_cast<NumericDigit *>(header_is_short() ? choice.n_short.n_data : choice.n_long.n_data);
+            return const_cast<NumericDigit *>(header_is_short() ? _choice.n_short.n_data : _choice.n_long.n_data);
         }
+
+        /**
+         * @brief Set digit values of the numeric data
+         *
+         * @param in_digits - input digits array
+         * @param n         - number of digits to copy
+         */
         void digits(NumericDigit *in_digits, int n)
         {
             NumericDigit *out_digits = digits();
@@ -248,152 +379,263 @@ namespace springtail::numeric {
                 memcpy(out_digits, in_digits, n * sizeof(NumericDigit));
             }
         }
+
+        /**
+         * @brief Number of digits that this numeric data holds or can hold
+         *
+         * @return int - number of digits
+         */
         int ndigits() const
         {
             return (varsize() - header_size()) / sizeof(NumericDigit);
         }
+
+        /**
+         * @brief Get extended flagbits from the header
+         *
+         * @return uint16_t - extended flagbits
+         */
         uint16_t ext_flagbits() const
         {
-            return choice.n_header & NUMERIC_EXT_SIGN_MASK;
+            return _choice.n_header & NUMERIC_EXT_SIGN_MASK;
         }
+
+        /**
+         * @brief Get sign flagbits from the header
+         *
+         * @return uint16_t - sign flagbits
+         */
         uint16_t flagbits() const
         {
-            return choice.n_header & NUMERIC_SIGN_MASK;
+            return _choice.n_header & NUMERIC_SIGN_MASK;
         }
+
+        /**
+         * @brief Check if the numeric value has short representation
+         *
+         * @return true     - short
+         * @return false    - long
+         */
         bool is_short() const
         {
             return flagbits() == NUMERIC_SHORT;
         }
+
+        /**
+         * @brief Check if numeric value is special
+         *
+         * @return true     - special number
+         * @return false    - normal number
+         */
         bool is_special() const
         {
             return flagbits() == NUMERIC_SPECIAL;
         }
+
+        /**
+         * @brief Check if this numeric value represents NaN
+         *
+         * @return true     - NaN
+         * @return false    - not NaN
+         */
         bool is_nan() const
         {
-            return choice.n_header == NUMERIC_NAN;
+            return _choice.n_header == NUMERIC_NAN;
         }
+
+        /**
+         * @brief Check if this numeric value represents positive infinity
+         *
+         * @return true     - positive infinity
+         * @return false    - not positive infinity
+         */
         bool is_pinf() const
         {
-            return choice.n_header == NUMERIC_PINF;
+            return _choice.n_header == NUMERIC_PINF;
         }
-        bool is_ninf() const
+
+        /**
+         * @brief Check if this numeric value represents negative infinity
+         *
+         * @return true     - negative infinity
+         * @return false    - not negative infinity
+         */
+         bool is_ninf() const
         {
-            return choice.n_header == NUMERIC_NINF;
+            return _choice.n_header == NUMERIC_NINF;
         }
-        bool is_inf() const
+
+        /**
+         * @brief Check if this numeric value represents infinity, either positive or negative
+         *
+         * @return true     - infinity
+         * @return false    - not infinity
+         */
+         bool is_inf() const
         {
-            return (choice.n_header & ~NUMERIC_INF_SIGN_MASK) == NUMERIC_PINF;
+            return (_choice.n_header & ~NUMERIC_INF_SIGN_MASK) == NUMERIC_PINF;
         }
+
+        /**
+         * @brief Get the sign of this numeric value
+         *
+         * @return uint16_t
+         */
         uint16_t sign() const
         {
             return is_short() ?
-                ((choice.n_short.n_header & NUMERIC_SHORT_SIGN_MASK) ?
-                NUMERIC_NEG : NUMERIC_POS) :
-                (is_special() ? ext_flagbits() : flagbits());
+                ((_choice.n_short.n_header & NUMERIC_SHORT_SIGN_MASK) ?
+                    NUMERIC_NEG : NUMERIC_POS) :
+                    (is_special() ? ext_flagbits() : flagbits());
         }
+
+        /**
+         * @brief Get dscale of this numeric value
+         *
+         * @return uint16_t - dscale
+         */
         uint16_t dscale() const
         {
             return header_is_short() ?
-                ((choice.n_short.n_header & NUMERIC_SHORT_DSCALE_MASK) >> NUMERIC_SHORT_DSCALE_SHIFT) :
-                (choice.n_long.n_sign_dscale & NUMERIC_DSCALE_MASK);
+                ((_choice.n_short.n_header & NUMERIC_SHORT_DSCALE_MASK) >> NUMERIC_SHORT_DSCALE_SHIFT) :
+                (_choice.n_long.n_sign_dscale & NUMERIC_DSCALE_MASK);
         }
+
+        /**
+         * @brief Get weight of this numeric value
+         *
+         * @return int16_t - weight
+         */
         int16_t weight() const
         {
             return header_is_short() ?
-                ((choice.n_short.n_header & NUMERIC_SHORT_WEIGHT_SIGN_MASK ? ~NUMERIC_SHORT_WEIGHT_MASK : 0) |
-                    (choice.n_short.n_header & NUMERIC_SHORT_WEIGHT_MASK)) : choice.n_long.n_weight;
+                ((_choice.n_short.n_header & NUMERIC_SHORT_WEIGHT_SIGN_MASK ? ~NUMERIC_SHORT_WEIGHT_MASK : 0) |
+                    (_choice.n_short.n_header & NUMERIC_SHORT_WEIGHT_MASK)) : _choice.n_long.n_weight;
         }
-        /*
-         * dump() - Dump a value in the db storage format for debugging
-         */
-        void dump(const std::string &str);
 
+        /**
+         * @brief Write this numeric value to the debug log with the given message
+         *
+         * @param str - message to print together with the value
+         */
+         void dump(const std::string &str);
+
+         /**
+          * @brief Convert this numeric value to the debug string
+          *
+          * @return std::string - debug string
+          */
         std::string to_debug_string() const;
 
-        /*
-         * to_string() -
+        /**
+         * @brief Convert this numeric value to a string
          *
-         *	Output function for numeric data type
+         * @return std::string - numeric value in string format
          */
         std::string to_string() const;
 
-        /*
-         * apply_typmod_special() -
-         *
-         * Do bounds checking according to the specified typmod, for an Inf or NaN.
+        /**
+         * @brief Do bounds checking according to the specified typmod, for an Inf or NaN.
          * For convenience of most callers, the value is presented in packed form.
          *
-         * Returns true on success, false on failure (if escontext points to an
-         * ErrorSaveContext; otherwise errors are thrown).
+         * @param typmod
          */
         void apply_typmod_special(const TypeMod &typmod);
 
-        /*
-         * to_var() -
-         *
-         *	Initialize a variable from packed db format. The digits array is not
+        /**
+         * @brief Initialize a variable from packed db format. The digits array is not
          *	copied, which saves some cycles when the resulting var is not modified.
-         *	Also, there's no need to call free_var().
+         *	Also, there's no need to call free.
          *
+         * @return const NumericVar - converted numeric variable
          */
         const NumericVar to_var() const;
 
-        /*
-         * make_numeric() -
-         *
-         * Create the packed db numeric format in palloc()'d memory from
+        /**
+         * @brief Create the packed db numeric format in alloc()'d memory from
          * a variable.  This will handle NaN and Infinity cases.
-         */
-        static NumericData *make_numeric(const NumericVar *var);
-
-        static void free_numeric(NumericData *make_numeric);
-
-        /*
-         * recv - converts external binary format to numeric
          *
-         * External format is a sequence of int16's:
-         * ndigits, weight, sign, dscale, NumericDigits.
+         * @param var
+         * @return NumericData*
          */
-        static NumericData *recv(StringInfo buf, const TypeMod &typmod);
+        static std::shared_ptr<NumericData> make_numeric(const NumericVar &var);
 
-        /* ----------
-         * cmp_abs_common() -
+        /**
+         * @brief Converts external binary format to numeric
          *
-         * Main routine of cmp_abs(). This function can be used by both
-         * NumericVar and Numeric.
-         * ----------
+         * @param buf       - input buffer
+         * @param typmod    - typmod of the value
+         * @return NumericData* - allocated numeric value
+         */
+        static std::shared_ptr<NumericData> recv(StringInfo buf, const TypeMod &typmod);
+
+        /**
+         * @brief Main routine of absolute comparison. This function can be used by both
+         *          NumericVar and NumericData.
+         *
+         * @param var1digits    - var1 digits
+         * @param var1ndigits   - var1 number of digits
+         * @param var1weight    - var1 weight
+         * @param var2digits    - var2 digits
+         * @param var2ndigits   - var2 number of digits
+         * @param var2weight    - var2 weight
+         * @return int  - -1 - less, 0 - equal, 1 - greater
          */
         static int cmp_abs_common(  const NumericDigit *var1digits, int var1ndigits, int var1weight,
                                     const NumericDigit *var2digits, int var2ndigits, int var2weight);
 
-        /*
-         * cmp_var_common() -
+        /**
+         * @brief Main routine of cmp(). This function can be used by both NumericVar and Numeric.
          *
-         * Main routine of cmp_var(). This function can be used by both
-         * NumericVar and Numeric.
+         * @param var1digits    - var1 digits
+         * @param var1ndigits   - var1 number of digits
+         * @param var1weight    - var1 weight
+         * @param var1sign      - var1 sign
+         * @param var2digits    - var2 digits
+         * @param var2ndigits   - var2 number of digits
+         * @param var2weight    - var2 weight
+         * @param var2sign      - var2 sign
+         * @return int  - -1 - less, 0 - equal, 1 - greater
          */
-        static int cmp_var_common(  const NumericDigit *var1digits, int var1ndigits, int var1weight, int var1sign,
+        static int cmp_common(  const NumericDigit *var1digits, int var1ndigits, int var1weight, int var1sign,
                                     const NumericDigit *var2digits, int var2ndigits, int var2weight, int var2sign);
 
-        static int cmp(const NumericData *num1, const NumericData *num2);
-
-        /*
-         * numeric_from_string() -
+        /**
+         * @brief Compare two numeric values.
          *
-         *	Input function for numeric data type
+         * @param num1  - numeric value 1
+         * @param num2  - numeric value 2
+         * @return int  - -1 - less, 0 - equal, 1 - greater
          */
-        static NumericData *numeric_from_string(const std::string_view &str, const TypeMod &typmod);
+        static int cmp(const std::shared_ptr<NumericData> num1, const std::shared_ptr<NumericData> num2);
+
+        /**
+         * @brief Convert numeric string respresentation into numeric on disc representation
+         *
+         * @param str               - input string
+         * @param typmod            - typmod value
+         * @return NumericData*     - newly created numeric data value
+         */
+        static std::shared_ptr<NumericData> numeric_from_string(const std::string_view &str, const TypeMod &typmod);
     };
 
     typedef struct NumericData *Numeric;
 
-    static inline Numeric numeric_receive(const char *buf, int32_t length, int32_t typmod)
+    /**
+     * @brief Read numeric data from input buffer with the given typmod
+     *
+     * @param buf       - input buffer
+     * @param length    - input length
+     * @param typmod    - typmod value
+     * @return Numeric  - newly created numeric value
+     */
+    static inline std::shared_ptr<NumericData> numeric_receive(const char *buf, int32_t length, int32_t typmod)
     {
         StringInfoData info;
-        info.data = const_cast<char *>(buf);
-        info.len = length;
-        info.maxlen = length;
-        info.cursor = 0;
+        info._data = const_cast<char *>(buf);
+        info._len = length;
+        info._maxlen = length;
+        info._cursor = 0;
         return NumericData::recv(&info, typmod);
     }
 

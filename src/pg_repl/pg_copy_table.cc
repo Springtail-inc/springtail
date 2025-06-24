@@ -780,11 +780,7 @@ namespace springtail
             case (SchemaType::NUMERIC): {
                 std::string_view tmp(row.data() + pos, length);
 
-                std::shared_ptr<numeric::NumericData> numeric_value(numeric::numeric_receive(tmp.begin(), length, 0),
-                    [](numeric::Numeric ptr) {
-                        numeric::NumericData::free_numeric(ptr);
-                    });
-
+                std::shared_ptr<numeric::NumericData> numeric_value = numeric::numeric_receive(tmp.begin(), length, 0);
                 fields->push_back(std::make_shared<ConstTypeField<std::shared_ptr<numeric::NumericData>>>(numeric_value));
                 pos += length;
                 break;

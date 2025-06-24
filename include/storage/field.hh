@@ -164,8 +164,8 @@ namespace springtail {
                 return (this->get_text(lhs_row) < rhs->get_text(rhs_row));
 
             case SchemaType::NUMERIC: {
-                numeric::Numeric lhs_numeric = this->get_numeric(lhs_row).get();
-                numeric::Numeric rhs_numeric = rhs->get_numeric(rhs_row).get();
+                std::shared_ptr<numeric::NumericData> lhs_numeric = this->get_numeric(lhs_row);
+                std::shared_ptr<numeric::NumericData> rhs_numeric = rhs->get_numeric(rhs_row);
                 return (numeric::NumericData::cmp(lhs_numeric, rhs_numeric) == -1);
             }
 
@@ -260,8 +260,11 @@ namespace springtail {
             case SchemaType::TEXT:
                 return (this->get_text(lhs_row) == rhs->get_text(rhs_row));
 
-            case SchemaType::NUMERIC:
-                return (numeric::NumericData::cmp(this->get_numeric(lhs_row).get(), rhs->get_numeric(rhs_row).get()) == 0);
+            case SchemaType::NUMERIC: {
+                std::shared_ptr<numeric::NumericData> lhs_numeric = this->get_numeric(lhs_row);
+                std::shared_ptr<numeric::NumericData> rhs_numeric = rhs->get_numeric(rhs_row);
+                return (numeric::NumericData::cmp(lhs_numeric, rhs_numeric) == 0);
+            }
 
             case SchemaType::BINARY: {
                 auto lhval = this->get_binary(lhs_row);
@@ -1577,17 +1580,6 @@ namespace springtail {
             return std::string_view(col.data.data(), col.data.size());
         }
 
-        /*
-        std::string binary_to_hex(const char* data, size_t length) const {
-            std::stringstream ss;
-            ss << std::hex << std::setfill('0');
-            for (size_t i = 0; i < length; ++i) {
-                ss << std::setw(2) << static_cast<unsigned int>(static_cast<unsigned char>(data[i]));
-            }
-            return ss.str();
-        }
-        */
-
         const std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const override {
             auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
             const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
@@ -1595,10 +1587,7 @@ namespace springtail {
             // XXX we only support binary data for native types
             DCHECK_EQ(col.type, 'b');
 
-            numeric::Numeric value = numeric::numeric_receive(col.data.begin().base(), col.data.size(), 0);
-            return std::shared_ptr<numeric::NumericData>(value, [](numeric::Numeric ptr) {
-                numeric::NumericData::free_numeric(ptr);
-            });
+            return numeric::numeric_receive(col.data.begin().base(), col.data.size(), 0);
         }
 
         const std::span<const char> get_binary(const void *row) const override {

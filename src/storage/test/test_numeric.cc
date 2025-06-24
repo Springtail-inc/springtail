@@ -33,16 +33,16 @@ namespace {
         std::string nine("9");
         std::string ten("10");
 
-        numeric::Numeric num_1 = numeric::NumericData::numeric_from_string(one, 0);
-        numeric::Numeric num_2 = numeric::NumericData::numeric_from_string(two, 0);
-        numeric::Numeric num_3 = numeric::NumericData::numeric_from_string(three, 0);
-        numeric::Numeric num_4 = numeric::NumericData::numeric_from_string(four, 0);
-        numeric::Numeric num_5 = numeric::NumericData::numeric_from_string(five, 0);
-        numeric::Numeric num_6 = numeric::NumericData::numeric_from_string(six, 0);
-        numeric::Numeric num_7 = numeric::NumericData::numeric_from_string(seven, 0);
-        numeric::Numeric num_8 = numeric::NumericData::numeric_from_string(eight, 0);
-        numeric::Numeric num_9 = numeric::NumericData::numeric_from_string(nine, 0);
-        numeric::Numeric num_10 = numeric::NumericData::numeric_from_string(ten, 0);
+        std::shared_ptr<numeric::NumericData> num_1 = numeric::NumericData::numeric_from_string(one, 0);
+        std::shared_ptr<numeric::NumericData> num_2 = numeric::NumericData::numeric_from_string(two, 0);
+        std::shared_ptr<numeric::NumericData> num_3 = numeric::NumericData::numeric_from_string(three, 0);
+        std::shared_ptr<numeric::NumericData> num_4 = numeric::NumericData::numeric_from_string(four, 0);
+        std::shared_ptr<numeric::NumericData> num_5 = numeric::NumericData::numeric_from_string(five, 0);
+        std::shared_ptr<numeric::NumericData> num_6 = numeric::NumericData::numeric_from_string(six, 0);
+        std::shared_ptr<numeric::NumericData> num_7 = numeric::NumericData::numeric_from_string(seven, 0);
+        std::shared_ptr<numeric::NumericData> num_8 = numeric::NumericData::numeric_from_string(eight, 0);
+        std::shared_ptr<numeric::NumericData> num_9 = numeric::NumericData::numeric_from_string(nine, 0);
+        std::shared_ptr<numeric::NumericData> num_10 = numeric::NumericData::numeric_from_string(ten, 0);
 
         num_1->dump("num_1");
         num_2->dump("num_2");
@@ -58,16 +58,5 @@ namespace {
         EXPECT_EQ(numeric::NumericData::cmp(num_1, num_1), 0);
         EXPECT_EQ(numeric::NumericData::cmp(num_1, num_2), -1);
         EXPECT_EQ(numeric::NumericData::cmp(num_2, num_1), 1);
-
-        numeric::NumericData::free_numeric(num_1);
-        numeric::NumericData::free_numeric(num_2);
-        numeric::NumericData::free_numeric(num_3);
-        numeric::NumericData::free_numeric(num_4);
-        numeric::NumericData::free_numeric(num_5);
-        numeric::NumericData::free_numeric(num_6);
-        numeric::NumericData::free_numeric(num_7);
-        numeric::NumericData::free_numeric(num_8);
-        numeric::NumericData::free_numeric(num_9);
-        numeric::NumericData::free_numeric(num_10);
     }
 } // namespace

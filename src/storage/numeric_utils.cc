@@ -13,14 +13,9 @@
 
 namespace springtail::numeric {
 
-    static constexpr NumericVar const_nan =
-        {0, 0, NUMERIC_NAN, 0, NULL, NULL};
-
-    static constexpr NumericVar const_pinf =
-        {0, 0, NUMERIC_PINF, 0, NULL, NULL};
-
-    static constexpr NumericVar const_ninf =
-        {0, 0, NUMERIC_NINF, 0, NULL, NULL};
+    static constexpr NumericVarLiteral const_nan{0, 0, NUMERIC_NAN, 0, nullptr};
+    static constexpr NumericVarLiteral const_pinf{0, 0, NUMERIC_PINF, 0, nullptr};
+    static constexpr NumericVarLiteral const_ninf{0, 0, NUMERIC_NINF, 0, nullptr};
 
     static bool
     ichar_equals(char a, char b)
@@ -69,13 +64,15 @@ namespace springtail::numeric {
         return sign_str;
     }
 
+    // --------------- StringInfoData -----------------
+
     void
     StringInfoData::copybytes(void *buf, int datalen)
     {
-        CHECK (!(datalen < 0 || datalen > (len - cursor)))
+        CHECK (!(datalen < 0 || datalen > (_len - _cursor)))
             << "Numeric: insufficient data left in message";
-        memcpy(buf, &data[cursor], datalen);
-        cursor += datalen;
+        memcpy(buf, &_data[_cursor], datalen);
+        _cursor += datalen;
     }
 
     unsigned int
@@ -107,28 +104,16 @@ namespace springtail::numeric {
         return result;
     }
 
+    // --------------- NumericVar -----------------
+
     void
     NumericVar::alloc(int number_of_digits)
     {
-        if (buf != nullptr) {
-            ::free(buf);
-        }
-        buf = reinterpret_cast<NumericDigit *>(malloc((number_of_digits + 1) * sizeof(NumericDigit)));
-        /* spare digit for rounding */
-        buf[0] = 0;
-        digits = buf + 1;
-        ndigits = number_of_digits;
-    }
-
-    void
-    NumericVar::free()
-    {
-        if (buf != NULL) {
-            ::free(buf);
-        }
-        buf = nullptr;
-        digits = nullptr;
-        sign = NUMERIC_NAN;
+        _buf = std::make_unique<NumericDigit[]>(number_of_digits + 1);
+        // spare digit for rounding
+        _buf[0] = 0;
+        _digits = _buf.get() + 1;
+        _ndigits = number_of_digits;
     }
 
     void
@@ -137,28 +122,28 @@ namespace springtail::numeric {
         int di;
         int number_of_digits;
 
-        dscale = rscale;
+        _dscale = rscale;
 
         /* decimal digits wanted */
-        di = (weight + 1) * DEC_DIGITS + rscale;
+        di = (_weight + 1) * DEC_DIGITS + rscale;
 
         /*
         * If di <= 0, the value loses all digits.
         */
         if (di <= 0)
         {
-            ndigits = 0;
-            weight = 0;
-            sign = NUMERIC_POS;
+            _ndigits = 0;
+            _weight = 0;
+            _sign = NUMERIC_POS;
         }
         else
         {
             /* NBASE digits wanted */
             number_of_digits = (di + DEC_DIGITS - 1) / DEC_DIGITS;
 
-            if (number_of_digits <= ndigits)
+            if (number_of_digits <= _ndigits)
             {
-                ndigits = number_of_digits;
+                _ndigits = number_of_digits;
 
                 /* 0, or number of decimal digits to keep in last NBASE digit */
                 di %= DEC_DIGITS;
@@ -169,8 +154,8 @@ namespace springtail::numeric {
                     int extra, pow10;
 
                     pow10 = round_powers[di];
-                    extra = digits[--number_of_digits] % pow10;
-                    digits[number_of_digits] -= extra;
+                    extra = _digits[--number_of_digits] % pow10;
+                    _digits[number_of_digits] -= extra;
                 }
             }
         }
@@ -183,10 +168,10 @@ namespace springtail::numeric {
         int number_of_digits;
         int carry;
 
-        dscale = rscale;
+        _dscale = rscale;
 
         /* decimal digits wanted */
-        di = (weight + 1) * DEC_DIGITS + rscale;
+        di = (_weight + 1) * DEC_DIGITS + rscale;
 
         /*
          * If di = 0, the value loses all digits, but could round up to 1 if its
@@ -194,9 +179,9 @@ namespace springtail::numeric {
          */
         if (di < 0)
         {
-            ndigits = 0;
-            weight = 0;
-            sign = NUMERIC_POS;
+            _ndigits = 0;
+            _weight = 0;
+            _sign = NUMERIC_POS;
         }
         else
         {
@@ -206,46 +191,46 @@ namespace springtail::numeric {
             /* 0, or number of decimal digits to keep in last NBASE digit */
             di %= DEC_DIGITS;
 
-            if (number_of_digits < ndigits ||
-                (number_of_digits == ndigits && di > 0))
+            if (number_of_digits < _ndigits ||
+                (number_of_digits == _ndigits && di > 0))
             {
-                ndigits = number_of_digits;
+                _ndigits = number_of_digits;
 
                 if (di == 0)
-                    carry = (digits[number_of_digits] >= HALF_NBASE) ? 1 : 0;
+                    carry = (_digits[number_of_digits] >= HALF_NBASE) ? 1 : 0;
                 else
                 {
                     /* Must round within last NBASE digit */
                     int extra, pow10;
 
                     pow10 = round_powers[di];
-                    extra = digits[--number_of_digits] % pow10;
-                    digits[number_of_digits] -= extra;
+                    extra = _digits[--number_of_digits] % pow10;
+                    _digits[number_of_digits] -= extra;
                     carry = 0;
                     if (extra >= pow10 / 2)
                     {
-                        pow10 += digits[number_of_digits];
+                        pow10 += _digits[number_of_digits];
                         if (pow10 >= NBASE)
                         {
                             pow10 -= NBASE;
                             carry = 1;
                         }
-                        digits[number_of_digits] = pow10;
+                        _digits[number_of_digits] = pow10;
                     }
                 }
 
                 /* Propagate carry if needed */
                 while (carry)
                 {
-                    carry += digits[--number_of_digits];
+                    carry += _digits[--number_of_digits];
                     if (carry >= NBASE)
                     {
-                        digits[number_of_digits] = carry - NBASE;
+                        _digits[number_of_digits] = carry - NBASE;
                         carry = 1;
                     }
                     else
                     {
-                        digits[number_of_digits] = carry;
+                        _digits[number_of_digits] = carry;
                         carry = 0;
                     }
                 }
@@ -254,10 +239,10 @@ namespace springtail::numeric {
                 {
                     /* better not have added > 1 digit */
                     CHECK(number_of_digits == -1);
-                    CHECK(digits > buf);
-                    digits--;
-                    ndigits++;
-                    weight++;
+                    CHECK(_digits > _buf.get());
+                    _digits--;
+                    _ndigits++;
+                    _weight++;
                 }
             }
         }
@@ -278,8 +263,8 @@ namespace springtail::numeric {
         round(scale);
 
         /* but don't allow var->dscale to be negative */
-        if (dscale < 0)
-            dscale = 0;
+        if (_dscale < 0)
+            _dscale = 0;
 
         /*
          * Check for overflow - note we can't do this before rounding, because
@@ -288,13 +273,13 @@ namespace springtail::numeric {
          * but perhaps might not have been yet. In any case, we must recognize a
          * true zero, whose weight doesn't mean anything.
          */
-        int ddigits = (weight + 1) * DEC_DIGITS;
+        int ddigits = (_weight + 1) * DEC_DIGITS;
         if (ddigits > maxdigits)
         {
             /* Determine true weight; and check for all-zero result */
-            for (int i = 0; i < ndigits; i++)
+            for (int i = 0; i < _ndigits; i++)
             {
-                NumericDigit dig = digits[i];
+                NumericDigit dig = _digits[i];
 
                 if (dig)
                 {
@@ -322,24 +307,24 @@ namespace springtail::numeric {
     NumericVar::strip()
     {
         /* Strip leading zeroes */
-        while (ndigits > 0 && *digits == 0)
+        while (_ndigits > 0 && *_digits == 0)
         {
-            digits++;
-            weight--;
-            ndigits--;
+            _digits++;
+            _weight--;
+            _ndigits--;
         }
 
         /* Strip trailing zeroes */
-        while (ndigits > 0 && digits[ndigits - 1] == 0)
+        while (_ndigits > 0 && _digits[_ndigits - 1] == 0)
         {
-            ndigits--;
+            _ndigits--;
         }
 
         /* If it's zero, normalize the sign and weight */
-        if (ndigits == 0)
+        if (_ndigits == 0)
         {
-            sign = NUMERIC_POS;
-            weight = 0;
+            _sign = NUMERIC_POS;
+            _weight = 0;
         }
     }
 
@@ -359,32 +344,32 @@ namespace springtail::numeric {
          * as many as DEC_DIGITS-1 excess digits at the end, and in addition we
          * need room for sign, decimal point, null terminator.
          */
-        int i = (weight + 1) * DEC_DIGITS;
+        int i = (_weight + 1) * DEC_DIGITS;
         if (i <= 0)
             i = 1;
 
-        int size = i + dscale + DEC_DIGITS - 1 + 2; // +2 for sign and null terminator
+        int size = i + _dscale + DEC_DIGITS - 1 + 2; // +2 for sign and null terminator
         result.reserve(size);
 
         /*
          * Output a dash for negative values
          */
-        if (sign == NUMERIC_NEG)
+        if (_sign == NUMERIC_NEG)
             result += '-';
 
         /*
          * Output all digits before the decimal point
          */
-        if (weight < 0)
+        if (_weight < 0)
         {
-            d = weight + 1;
+            d = _weight + 1;
             result += '0';
         }
         else
         {
-            for (d = 0; d <= weight; d++)
+            for (d = 0; d <= _weight; d++)
             {
-                dig = (d < ndigits) ? digits[d] : 0;
+                dig = (d < _ndigits) ? _digits[d] : 0;
                 /* In the first digit, suppress extra leading decimal zeroes */
                 {
                     bool putit = (d > 0);
@@ -420,12 +405,12 @@ namespace springtail::numeric {
          * We initially put out a multiple of DEC_DIGITS digits, then truncate if
          * needed.
          */
-        if (dscale > 0)
+        if (_dscale > 0)
         {
             result += '.';
-            for (i = 0; i < dscale; d++, i += DEC_DIGITS)
+            for (i = 0; i < _dscale; d++, i += DEC_DIGITS)
             {
-                dig = (d >= 0 && d < ndigits) ? digits[d] : 0;
+                dig = (d >= 0 && d < _ndigits) ? _digits[d] : 0;
                 d1 = dig / 1000;
                 dig -= d1 * 1000;
                 result += (d1 + '0');
@@ -485,7 +470,7 @@ namespace springtail::numeric {
         CHECK(isdigit((unsigned char) *cp)) << "Numeric: invalid numeric string: " << str;
 
         size_t alloc_size = len - (cp - str.data()) + DEC_DIGITS * 2;
-        unsigned char *decdigits = (unsigned char *) malloc(alloc_size);
+        unsigned char decdigits[alloc_size] = {0};
 
         /* leading padding for digit alignment later */
         memset(decdigits, 0, DEC_DIGITS);
@@ -503,7 +488,7 @@ namespace springtail::numeric {
                 }
                 else
                 {
-                    dscale++;
+                    _dscale++;
                 }
             }
             else if (*cp == '.')
@@ -612,12 +597,12 @@ namespace springtail::numeric {
         int new_ndigits = (ddigits + offset + DEC_DIGITS - 1) / DEC_DIGITS;
 
         alloc(new_ndigits);
-        sign = new_sign;
-        weight = new_weight;
-        dscale = new_dscale;
+        _sign = new_sign;
+        _weight = new_weight;
+        _dscale = new_dscale;
 
         i = DEC_DIGITS - offset;
-        NumericDigit *new_digits = digits;
+        NumericDigit *new_digits = _digits;
 
         while (new_ndigits-- > 0)
         {
@@ -625,8 +610,6 @@ namespace springtail::numeric {
                             decdigits[i + 2]) * 10 + decdigits[i + 3];
             i += DEC_DIGITS;
         }
-
-        ::free(decdigits);
 
         /* Strip any leading/trailing zeroes, and normalize weight if zero */
         strip();
@@ -641,12 +624,14 @@ namespace springtail::numeric {
     std::string
     NumericVar::to_debug_string() const
     {
-        std::vector<int16_t> digits_array(digits, digits + ndigits);
-        std::string sign_str = sign_to_string(sign);
+        std::vector<int16_t> digits_array(_digits, _digits + _ndigits);
+        std::string sign_str = sign_to_string(_sign);
         std::string out = fmt::format("VAR w={} d={} nd={} {} \"{:04}\"",
-            weight, dscale, ndigits, sign_str, fmt::join(digits_array, " "));
+            _weight, _dscale, _ndigits, sign_str, fmt::join(digits_array, " "));
         return out;
     }
+
+    // --------------- NumericData -----------------
 
     std::string
     NumericData::to_debug_string() const
@@ -698,13 +683,13 @@ namespace springtail::numeric {
     NumericData::to_var() const
     {
         NumericVar result;
-        result.ndigits = ndigits();
-        result.weight = weight();
-        result.sign = sign();
-        result.dscale = dscale();
-        result.digits = digits();
-        /* digits array is not palloc'd */
-        result.buf = nullptr;
+        result._ndigits = ndigits();
+        result._weight = weight();
+        result._sign = sign();
+        result._dscale = dscale();
+        result._digits = digits();
+        /* digits array is not alloc'd */
+        result._buf = nullptr;
         return result;
     }
 
@@ -726,13 +711,13 @@ namespace springtail::numeric {
             ", scale" <<  typmod.scale() << "cannot hold an infinite value.";
     }
 
-    NumericData *
-    NumericData::make_numeric(const NumericVar *var)
+    std::shared_ptr<NumericData>
+    NumericData::make_numeric(const NumericVar &var)
     {
-        NumericData     *result;
-        NumericDigit    *digits = var->digits;
-        int             weight = var->weight;
-        int             sign = var->sign;
+        std::shared_ptr<NumericData> result;
+        NumericDigit    *digits = var._digits;
+        int             weight = var._weight;
+        int             sign = var._sign;
 
         if ((sign & NUMERIC_SIGN_MASK) == NUMERIC_SPECIAL)
         {
@@ -744,15 +729,15 @@ namespace springtail::numeric {
             CHECK(sign == NUMERIC_NAN || sign == NUMERIC_PINF || sign == NUMERIC_NINF) <<
                 "Numeric: invalid numeric sign value " << std::hex << sign << std::dec;
 
-            result = static_cast<NumericData *>(::malloc(NUMERIC_HDRSZ_SHORT));
+            result = alloc(NUMERIC_HDRSZ_SHORT);
 
             result->set_varsize(NUMERIC_HDRSZ_SHORT);
-            result->choice.n_header = sign;
+            result->_choice.n_header = sign;
             /* the header word is all we need */
             return result;
         }
 
-        int n = var->ndigits;
+        int n = var._ndigits;
 
         /* truncate leading zeroes */
         while (n > 0 && *digits == 0)
@@ -773,66 +758,55 @@ namespace springtail::numeric {
         }
 
         /* Build the result */
-        if (NumericData::can_be_short(weight, var->dscale))
+        if (NumericData::can_be_short(weight, var._dscale))
         {
             int len = NUMERIC_HDRSZ_SHORT + n * sizeof(NumericDigit);
-            result = static_cast<NumericData *>(::malloc(len));
+            result = alloc(len);
             result->set_varsize(len);
-            result->choice.n_short.n_header =
+            result->_choice.n_short.n_header =
                 (sign == NUMERIC_NEG ? (NUMERIC_SHORT | NUMERIC_SHORT_SIGN_MASK) : NUMERIC_SHORT)
-                | (var->dscale << NUMERIC_SHORT_DSCALE_SHIFT)
+                | (var._dscale << NUMERIC_SHORT_DSCALE_SHIFT)
                 | (weight < 0 ? NUMERIC_SHORT_WEIGHT_SIGN_MASK : 0)
                 | (weight & NUMERIC_SHORT_WEIGHT_MASK);
         }
         else
         {
             int len = NUMERIC_HDRSZ + n * sizeof(NumericDigit);
-            result = static_cast<NumericData *>(::malloc(len));
+            result = alloc(len);
             result->set_varsize(len);
-            result->choice.n_long.n_sign_dscale = sign | (var->dscale & NUMERIC_DSCALE_MASK);
-            result->choice.n_long.n_weight = weight;
+            result->_choice.n_long.n_sign_dscale = sign | (var._dscale & NUMERIC_DSCALE_MASK);
+            result->_choice.n_long.n_weight = weight;
         }
 
         result->digits(digits, n);
 
         /* Check for overflow of int16 fields */
-        CHECK(result->weight() == weight && result->dscale() == var->dscale) <<
+        CHECK(result->weight() == weight && result->dscale() == var._dscale) <<
             "Numeric: value overflows numeric format";
         return result;
     }
 
-    void
-    NumericData::free_numeric(NumericData *make_numeric)
-    {
-        if (make_numeric != nullptr) {
-            ::free(make_numeric);
-        }
-    }
-
-    NumericData *
+    std::shared_ptr<NumericData>
     NumericData::recv(StringInfo buf, const TypeMod &typmod)
     {
-        NumericVar  value;
-        NumericData *res;
-
-        memset(&value, 0, sizeof(NumericVar));
+        std::shared_ptr<NumericData> res;
 
         int len = (uint16_t) buf->getint(sizeof(uint16_t));
 
-        value.alloc(len);
+        NumericVar value(len);
 
-        value.weight = (int16_t) buf->getint(sizeof(int16_t));
+        value._weight = (int16_t) buf->getint(sizeof(int16_t));
         /* we allow any int16 for weight --- OK? */
 
-        value.sign = (uint16_t) buf->getint(sizeof(uint16_t));
-        CHECK(value.sign == NUMERIC_POS ||
-            value.sign == NUMERIC_NEG ||
-            value.sign == NUMERIC_NAN ||
-            value.sign == NUMERIC_PINF ||
-            value.sign == NUMERIC_NINF) << "Numeric: invalid sign in external \"numeric\" value";
+        value._sign = (uint16_t) buf->getint(sizeof(uint16_t));
+        CHECK(value._sign == NUMERIC_POS ||
+            value._sign == NUMERIC_NEG ||
+            value._sign == NUMERIC_NAN ||
+            value._sign == NUMERIC_PINF ||
+            value._sign == NUMERIC_NINF) << "Numeric: invalid sign in external \"numeric\" value";
 
-        value.dscale = (uint16_t) buf->getint(sizeof(uint16_t));
-        CHECK((value.dscale & NUMERIC_DSCALE_MASK) == value.dscale) <<
+        value._dscale = (uint16_t) buf->getint(sizeof(uint16_t));
+        CHECK((value._dscale & NUMERIC_DSCALE_MASK) == value._dscale) <<
             "Numeric: invalid scale in external \"numeric\" value";
 
         for (int i = 0; i < len; i++)
@@ -841,7 +815,7 @@ namespace springtail::numeric {
 
             CHECK (d >= 0 && d < NBASE) <<
                 "Numeric: invalid digit in external \"numeric\" value";
-            value.digits[i] = d;
+            value._digits[i] = d;
         }
 
         /*
@@ -854,20 +828,19 @@ namespace springtail::numeric {
          *
          * After doing that, be sure to check the typmod restriction.
          */
-        if (value.sign == NUMERIC_POS || value.sign == NUMERIC_NEG)
+        if (value._sign == NUMERIC_POS || value._sign == NUMERIC_NEG)
         {
-            value.trunc(value.dscale);
+            value.trunc(value._dscale);
             value.apply_typmod(typmod);
-            res = NumericData::make_numeric(&value);
+            res = NumericData::make_numeric(value);
         }
         else
         {
             /* apply_typmod_special wants us to make the Numeric first */
-            res = NumericData::make_numeric(&value);
+            res = NumericData::make_numeric(value);
             res->apply_typmod_special(typmod);
         }
 
-        value.free();
         return res;
     }
 
@@ -927,7 +900,7 @@ namespace springtail::numeric {
         return 0;
     }
 
-    int NumericData::cmp_var_common(const NumericDigit *var1digits, int var1ndigits, int var1weight, int var1sign,
+    int NumericData::cmp_common(const NumericDigit *var1digits, int var1ndigits, int var1weight, int var1sign,
                                     const NumericDigit *var2digits, int var2ndigits, int var2weight, int var2sign)
     {
         if (var1ndigits == 0)
@@ -960,10 +933,10 @@ namespace springtail::numeric {
                             var1digits, var1ndigits, var1weight);
     }
 
-    NumericData *
+    std::shared_ptr<NumericData>
     NumericData::numeric_from_string(const std::string_view &str, const TypeMod &typmod)
     {
-        Numeric res;
+        std::shared_ptr<NumericData> res;
         const char *cp = str.data();
         const char *cp_end = str.data() + str.length();
 
@@ -1009,17 +982,17 @@ namespace springtail::numeric {
              */
             if (((cp_end - cp) >= 3) && inequals(cp, "NaN", 3))
             {
-                res = make_numeric(&const_nan);
+                res = make_numeric(const_nan);
                 cp += 3;
             }
             else if (((cp_end - cp) >= 8) && inequals(cp, "Infinity", 8) == 0)
             {
-                res = make_numeric(sign == NUMERIC_POS ? &const_pinf : &const_ninf);
+                res = make_numeric(sign == NUMERIC_POS ? const_pinf : const_ninf);
                 cp += 8;
             }
             else if (((cp_end - cp) >= 3) && inequals(cp, "inf", 3) == 0)
             {
-                res = make_numeric(sign == NUMERIC_POS ? &const_pinf : &const_ninf);
+                res = make_numeric(sign == NUMERIC_POS ? const_pinf : const_ninf);
                 cp += 3;
             }
             else
@@ -1048,15 +1021,12 @@ namespace springtail::numeric {
             * We have a normal numeric value, which may be a non-decimal integer
             * or a regular decimal number.
             */
-            NumericVar  value;
-            int         base;
-
-            memset(&value, 0, sizeof(NumericVar));
 
             /*
              * Determine the number's base by looking for a non-decimal prefix
              * indicator ("0x", "0o", or "0b").
              */
+            int         base;
             if (cp[0] == '0')
             {
                 switch (cp[1])
@@ -1088,18 +1058,18 @@ namespace springtail::numeric {
 
             /* Parse the rest of the number and apply the sign */
             std::string_view num_str = str.substr(cp - str.data());
+            NumericVar  value;
             value.from_string(num_str);
-            value.sign = sign;
+            value._sign = sign;
             value.apply_typmod(typmod);
 
-            res = NumericData::make_numeric(&value);
-            value.free();
+            res = NumericData::make_numeric(value);
         }
         return res;
     }
 
     int
-    NumericData::cmp(const NumericData *num1, const NumericData *num2)
+    NumericData::cmp(const std::shared_ptr<NumericData> num1, const std::shared_ptr<NumericData> num2)
     {
         int result;
 
@@ -1143,10 +1113,10 @@ namespace springtail::numeric {
         }
         else
         {
-            result = cmp_var_common(num1->digits(), num1->ndigits(),
-                                    num1->weight(), num1->sign(),
-                                    num2->digits(), num2->ndigits(),
-                                    num2->weight(), num2->sign());
+            result = cmp_common(num1->digits(), num1->ndigits(),
+                                num1->weight(), num1->sign(),
+                                num2->digits(), num2->ndigits(),
+                                num2->weight(), num2->sign());
         }
         return result;
     }
