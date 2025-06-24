@@ -1,4 +1,5 @@
 #include <arpa/inet.h>
+#include <stdio.h>
 
 #include <fmt/ranges.h>
 #include <string>
@@ -346,7 +347,9 @@ namespace springtail::numeric {
          */
         int i = (_weight + 1) * DEC_DIGITS;
         if (i <= 0)
+        {
             i = 1;
+        }
 
         int size = i + _dscale + DEC_DIGITS - 1 + 2; // +2 for sign and null terminator
         result.reserve(size);
@@ -355,7 +358,9 @@ namespace springtail::numeric {
          * Output a dash for negative values
          */
         if (_sign == NUMERIC_NEG)
-            result += '-';
+        {
+            result.push_back('-');
+        }
 
         /*
          * Output all digits before the decimal point
@@ -363,7 +368,7 @@ namespace springtail::numeric {
         if (_weight < 0)
         {
             d = _weight + 1;
-            result += '0';
+            result.push_back('0');
         }
         else
         {
@@ -379,23 +384,23 @@ namespace springtail::numeric {
                     putit |= (d1 > 0);
                     if (putit)
                     {
-                        result += (d1 + '0');
+                        result.push_back(d1 + '0');
                     }
                     d1 = dig / 100;
                     dig -= d1 * 100;
                     putit |= (d1 > 0);
                     if (putit)
                     {
-                        result += (d1 + '0');
+                        result.push_back(d1 + '0');
                     }
                     d1 = dig / 10;
                     dig -= d1 * 10;
                     putit |= (d1 > 0);
                     if (putit)
                     {
-                        result += (d1 + '0');
+                        result.push_back(d1 + '0');
                     }
-                    result += (dig + '0');
+                    result.push_back(dig + '0');
                 }
             }
         }
@@ -407,27 +412,27 @@ namespace springtail::numeric {
          */
         if (_dscale > 0)
         {
-            result += '.';
+            result.push_back('.');
             for (i = 0; i < _dscale; d++, i += DEC_DIGITS)
             {
                 dig = (d >= 0 && d < _ndigits) ? _digits[d] : 0;
                 d1 = dig / 1000;
                 dig -= d1 * 1000;
-                result += (d1 + '0');
+                result.push_back(d1 + '0');
                 d1 = dig / 100;
                 dig -= d1 * 100;
-                result += (d1 + '0');
+                result.push_back(d1 + '0');
                 d1 = dig / 10;
                 dig -= d1 * 10;
-                result += (d1 + '0');
-                result = (dig + '0');
+                result.push_back(d1 + '0');
+                result.push_back(dig + '0');
             }
         }
 
         /*
          * terminate the string and return it
          */
-        result += '\0';
+        result.push_back('\0');
         return result;
     }
 
@@ -477,6 +482,7 @@ namespace springtail::numeric {
         int i = DEC_DIGITS;
 
         int dweight = -1;
+        int new_dscale = 0;
         while (cp != cp_end)
         {
             if (isdigit((unsigned char) *cp))
@@ -488,7 +494,7 @@ namespace springtail::numeric {
                 }
                 else
                 {
-                    _dscale++;
+                    new_dscale++;
                 }
             }
             else if (*cp == '.')
@@ -516,7 +522,6 @@ namespace springtail::numeric {
         /* trailing padding for digit alignment later */
         memset(decdigits + i, 0, DEC_DIGITS - 1);
 
-        int new_dscale = 0;
         /* Handle exponent, if any */
         if (cp != cp_end && (*cp == 'e' || *cp == 'E'))
         {
@@ -589,9 +594,13 @@ namespace springtail::numeric {
          */
         int new_weight;
         if (dweight >= 0)
+        {
             new_weight = (dweight + 1 + DEC_DIGITS - 1) / DEC_DIGITS - 1;
+        }
         else
+        {
             new_weight = -((-dweight - 1) / DEC_DIGITS + 1);
+        }
 
         int offset = (new_weight + 1) * DEC_DIGITS - (dweight + 1);
         int new_ndigits = (ddigits + offset + DEC_DIGITS - 1) / DEC_DIGITS;

@@ -61,7 +61,7 @@ namespace springtail::numeric {
      * We could mask off the remaining bits before testing the active bits, but
      * currently those bits must be zeroes, so masking would just add cycles.
      */
-    #define NUMERIC_EXT_SIGN_MASK   0xF000/* high bits plus NaN/Inf flag bits */
+    #define NUMERIC_EXT_SIGN_MASK   0xF000  /* high bits plus NaN/Inf flag bits */
     #define NUMERIC_NAN             0xC000
     #define NUMERIC_PINF            0xD000
     #define NUMERIC_NINF            0xF000
