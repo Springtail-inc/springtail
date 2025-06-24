@@ -1195,6 +1195,9 @@ namespace springtail {
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded attach partition: json: {}", json.dump());
 
+        attach_partition_msg.xid = message.xid;
+        attach_partition_msg.lsn = message.lsn;
+
         json["table_id"].get_to(attach_partition_msg.table_id);
         json["schema"].get_to(attach_partition_msg.namespace_name);
         json["table"].get_to(attach_partition_msg.table_name);
@@ -1220,6 +1223,9 @@ namespace springtail {
         nlohmann::json json = nlohmann::json::parse(data_str);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded detach partition: json: {}", json.dump());
+
+        detach_partition_msg.xid = message.xid;
+        detach_partition_msg.lsn = message.lsn;
 
         json["table_id"].get_to(detach_partition_msg.table_id);
         json["schema"].get_to(detach_partition_msg.namespace_name);

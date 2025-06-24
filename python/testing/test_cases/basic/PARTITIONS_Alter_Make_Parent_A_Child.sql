@@ -29,7 +29,7 @@ ALTER TABLE level0 ATTACH PARTITION level1 FOR VALUES IN ('a');
 ### schema_check public level2a
 ### schema_check public level2b
 ### schema_check public level0
-SELECT * FROM level0;
+SELECT * FROM level0 ORDER BY id;
 
 ## cleanup
 DROP TABLE level0 CASCADE;
