@@ -343,7 +343,7 @@ namespace springtail {
                 assert(update.nullable);
                 break;
 
-            case (SchemaUpdateType::TYPE_CHANGE):
+            case SchemaUpdateType::TYPE_CHANGE:
 
                 break;
 

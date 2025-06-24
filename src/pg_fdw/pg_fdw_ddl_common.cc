@@ -1,4 +1,4 @@
-#include "pg_fdw/pg_fdw_ddl_common.hh"
+#include <pg_fdw/pg_fdw_ddl_common.hh>
 
 namespace springtail::pg_fdw {
     std::string_view
@@ -51,8 +51,7 @@ namespace springtail::pg_fdw {
         }
 
         // make sure that the table is marked as existing at this XID/LSN
-        bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
-        if (!exists) {
+        if (bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row); !exists) {
             LOG_WARN("Table marked non-existant at xid {}:{}", schema_xid, constant::MAX_LSN);
             return std::make_pair("", 0);
         }
@@ -69,7 +68,7 @@ namespace springtail::pg_fdw {
                          bool limit,
                          const std::set<std::string> &table_set,
                          [[maybe_unused]] const std::string_view namespace_name, // used only for logging
-                         std::map<std::string, std::tuple<uint64_t,uint64_t, uint64_t>> &table_map,
+                         std::map<std::string, std::tuple<uint64_t,uint64_t, uint64_t>, std::less<>> &table_map,
                          std::map<uint64_t, PartitionInfo> &table_partition_map)
     {
         // get the table names table to iterate over
@@ -105,8 +104,7 @@ namespace springtail::pg_fdw {
             uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
             uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
 
-            bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
-            if (!exists) {
+            if (bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row); !exists) {
                 // find table and compare xids, remove if this xid is >= to the one in the map
                 auto entry = table_map.find(table_name);
                 if (entry != table_map.end() && xid >= std::get<1>(entry->second)) {
@@ -121,7 +119,7 @@ namespace springtail::pg_fdw {
             LOG_DEBUG(LOG_FDW, "Found table {}.{} tid={}, xid={}", namespace_name, table_name, tid, xid);
 
             // lookup table in map, if found the xid if it is newer
-            auto entry = table_map.try_emplace(table_name, tid, xid, table_ns_id);
+            auto [it, inserted] = table_map.try_emplace(table_name, tid, xid, table_ns_id);
 
             // Insert the partition details in the partition map
             uint64_t parent_table_id = 0;
@@ -139,14 +137,14 @@ namespace springtail::pg_fdw {
 
             table_partition_map.try_emplace(
                 tid,
-                PartitionInfo(parent_table_id, partition_key, partition_bound)
+                parent_table_id, partition_key, partition_bound
             );
 
-            if (entry.second == false) {
+            if (!inserted) {
                 LOG_DEBUG(LOG_FDW, "Table {} already exists in schema {}", table_name, namespace_name);
                 // update if xid is newer
-                if (xid > std::get<1>(entry.first->second)) {
-                    entry.first->second = {tid, xid, table_ns_id};
+                if (xid > std::get<1>(it->second)) {
+                    it->second = {tid, xid, table_ns_id};
                 }
             }
         }

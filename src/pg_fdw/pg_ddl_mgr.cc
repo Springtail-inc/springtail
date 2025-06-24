@@ -633,9 +633,8 @@ namespace springtail::pg_fdw {
             }
 
             uint32_t type_oid = col.at("type").get<uint32_t>();
-            auto it = _type_cache.find(type_oid);
             std::string type_name;
-            if (it != _type_cache.end()) {
+            if (auto it = _type_cache.find(type_oid); it != _type_cache.end()) {
                 type_name = std::get<0>(it->second);
             }
             return fmt::format("ALTER {} TABLE {}.{} ADD COLUMN {} {} {};",
@@ -837,8 +836,7 @@ namespace springtail::pg_fdw {
             }
         }
 
-        auto it = _type_cache.find(pg_type);
-        if (it != _type_cache.end()) {
+        if (auto it = _type_cache.find(pg_type); it != _type_cache.end()) {
             return std::get<0>(it->second);
         }
 

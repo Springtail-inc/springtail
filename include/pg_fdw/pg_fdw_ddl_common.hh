@@ -216,7 +216,7 @@ namespace springtail::pg_fdw {
                              bool limit,
                              const std::set<std::string> &table_set,
                              [[maybe_unused]] const std::string_view namespace_name, // used only for logging
-                             std::map<std::string, std::tuple<uint64_t,uint64_t, uint64_t>> &table_map,
+                             std::map<std::string, std::tuple<uint64_t,uint64_t, uint64_t>, std::less<>> &table_map,
                              std::map<uint64_t, PartitionInfo> &table_partition_map);
         /**
          * @brief Get the schema ddl object

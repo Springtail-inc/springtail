@@ -1514,7 +1514,7 @@ namespace springtail::pg_fdw {
 
     List *
     PgFdwMgr::_import_springtail_catalog(const std::string &server,
-                                         const std::set<std::string, std::less<std::string>> table_set,
+                                         const std::set<std::string, std::less<>> table_set,
                                          bool exclude, bool limit)
     {
         List        *commands = NIL;
@@ -1618,7 +1618,7 @@ namespace springtail::pg_fdw {
     {
 
         auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
-        std::set<std::string, std::less<std::string>> table_set;
+        std::set<std::string, std::less<>> table_set;
 
         // construct list of either excluded or limited tables
         if (exclude || limit) {
