@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <optional>
 
 #include <common/init.hh>
 #include <common/json.hh>
@@ -89,13 +90,13 @@ namespace {
         auto &&row = *row_i;
 
         // verify the name exists at 2 and 3, deleted at 4
-        auto tuple = sys_tbl::TableNames::Data::tuple(90000, "x", 100000, 2, 1, true);
+        auto tuple = sys_tbl::TableNames::Data::tuple(90000, "x", 100000, 2, 1, true, std::nullopt, std::nullopt, std::nullopt);
         auto tuple2 = std::make_shared<FieldTuple>(fields, &row);
         ASSERT_TRUE(tuple->equal_strict(*tuple2));
         ++row_i;
         auto &&next_row = *row_i;
 
-        tuple = sys_tbl::TableNames::Data::tuple(90000, "x", 100000, 4, 0, false);
+        tuple = sys_tbl::TableNames::Data::tuple(90000, "x", 100000, 4, 0, false, std::nullopt, std::nullopt, std::nullopt);
         tuple2 = std::make_shared<FieldTuple>(fields, &next_row);
         ASSERT_TRUE(tuple->equal_strict(*tuple2));
         ++row_i;
