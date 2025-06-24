@@ -249,7 +249,7 @@ namespace springtail::numeric {
          *
          * @return std::string - string representing numeric variable
          */
-        std::string to_string();
+        std::string to_string() const;
 
         /**
          * @brief Parse a string and put the number into a variable
@@ -257,14 +257,14 @@ namespace springtail::numeric {
          *
          * @param str - input string
          */
-        void from_string(const std::string_view &str);
+        void from_string(std::string_view str);
 
         /**
          * @brief Write this numeric value to the debug log with the given message
          *
          * @param str - message to print together with the value
          */
-        void dump(const std::string &str);
+        void dump(const std::string &str) const;
 
         /**
          * @brief Convert variable to debug string that prints all elements of the variable
@@ -518,7 +518,7 @@ namespace springtail::numeric {
          *
          * @param str - message to print together with the value
          */
-         void dump(const std::string &str);
+         void dump(const std::string &str) const;
 
          /**
           * @brief Convert this numeric value to the debug string
@@ -616,7 +616,7 @@ namespace springtail::numeric {
          * @param typmod            - typmod value
          * @return NumericData*     - newly created numeric data value
          */
-        static std::shared_ptr<NumericData> numeric_from_string(const std::string_view &str, const TypeMod &typmod);
+        static std::shared_ptr<NumericData> from_string(std::string_view str, const TypeMod &typmod);
     };
 
     typedef struct NumericData *Numeric;

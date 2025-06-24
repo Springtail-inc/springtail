@@ -329,7 +329,7 @@ namespace springtail::numeric {
     }
 
     std::string
-    NumericVar::to_string()
+    NumericVar::to_string() const
     {
         std::string result;
         int d;
@@ -432,7 +432,7 @@ namespace springtail::numeric {
     }
 
     void
-    NumericVar::from_string(const std::string_view &str)
+    NumericVar::from_string(std::string_view str)
     {
         int new_sign = NUMERIC_POS;
         size_t len = str.length();
@@ -616,7 +616,7 @@ namespace springtail::numeric {
     }
 
     void
-    NumericVar::dump(const std::string &str)
+    NumericVar::dump(const std::string &str) const
     {
         LOG_DEBUG(LOG_STORAGE, "{}: {} ({})", str, this->to_debug_string(), this->to_string());
     }
@@ -646,7 +646,7 @@ namespace springtail::numeric {
         return out;
     }
 
-    void NumericData::dump(const std::string &str)
+    void NumericData::dump(const std::string &str) const
     {
         LOG_DEBUG(LOG_STORAGE, "{}: {} ({})", str, this->to_debug_string(), this->to_string());
     }
@@ -934,7 +934,7 @@ namespace springtail::numeric {
     }
 
     std::shared_ptr<NumericData>
-    NumericData::numeric_from_string(const std::string_view &str, const TypeMod &typmod)
+    NumericData::from_string(std::string_view str, const TypeMod &typmod)
     {
         std::shared_ptr<NumericData> res;
         const char *cp = str.data();

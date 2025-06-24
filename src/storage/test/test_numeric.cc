@@ -33,16 +33,16 @@ namespace {
         std::string nine("9");
         std::string ten("10");
 
-        std::shared_ptr<numeric::NumericData> num_1 = numeric::NumericData::numeric_from_string(one, 0);
-        std::shared_ptr<numeric::NumericData> num_2 = numeric::NumericData::numeric_from_string(two, 0);
-        std::shared_ptr<numeric::NumericData> num_3 = numeric::NumericData::numeric_from_string(three, 0);
-        std::shared_ptr<numeric::NumericData> num_4 = numeric::NumericData::numeric_from_string(four, 0);
-        std::shared_ptr<numeric::NumericData> num_5 = numeric::NumericData::numeric_from_string(five, 0);
-        std::shared_ptr<numeric::NumericData> num_6 = numeric::NumericData::numeric_from_string(six, 0);
-        std::shared_ptr<numeric::NumericData> num_7 = numeric::NumericData::numeric_from_string(seven, 0);
-        std::shared_ptr<numeric::NumericData> num_8 = numeric::NumericData::numeric_from_string(eight, 0);
-        std::shared_ptr<numeric::NumericData> num_9 = numeric::NumericData::numeric_from_string(nine, 0);
-        std::shared_ptr<numeric::NumericData> num_10 = numeric::NumericData::numeric_from_string(ten, 0);
+        std::shared_ptr<numeric::NumericData> num_1 = numeric::NumericData::from_string(one, 0);
+        std::shared_ptr<numeric::NumericData> num_2 = numeric::NumericData::from_string(two, 0);
+        std::shared_ptr<numeric::NumericData> num_3 = numeric::NumericData::from_string(three, 0);
+        std::shared_ptr<numeric::NumericData> num_4 = numeric::NumericData::from_string(four, 0);
+        std::shared_ptr<numeric::NumericData> num_5 = numeric::NumericData::from_string(five, 0);
+        std::shared_ptr<numeric::NumericData> num_6 = numeric::NumericData::from_string(six, 0);
+        std::shared_ptr<numeric::NumericData> num_7 = numeric::NumericData::from_string(seven, 0);
+        std::shared_ptr<numeric::NumericData> num_8 = numeric::NumericData::from_string(eight, 0);
+        std::shared_ptr<numeric::NumericData> num_9 = numeric::NumericData::from_string(nine, 0);
+        std::shared_ptr<numeric::NumericData> num_10 = numeric::NumericData::from_string(ten, 0);
 
         num_1->dump("num_1");
         num_2->dump("num_2");
