@@ -346,6 +346,9 @@ namespace springtail::pg_log_mgr {
         // notify xact handler to rollover log
         _notify_xact_start_sync();
 
+        // ensure the pipeline was stalled before we complete
+        _internal_state.wait_for_state(STATE_SYNCING);
+
         // copy tables
         LOG_DEBUG(LOG_PG_LOG_MGR, "Copying tables for db {}; state=synchronizing", _db_id);
         std::vector<PgCopyResultPtr> res;
@@ -358,9 +361,6 @@ namespace springtail::pg_log_mgr {
         } else {
             res = PgCopyTable::copy_db(_db_id, xid);
         }
-
-        // ensure the pipeline was stalled before we complete
-        _internal_state.wait_for_state(STATE_SYNCING);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; res size={}", res.size());
         if (res.size() > 0) {
@@ -405,11 +405,14 @@ namespace springtail::pg_log_mgr {
             SyncTracker::get_instance()->add_sync(std::get<pg_log_mgr::PgXactMsg::TableSyncMsg>(redis_xact.msg));
         }
 
-        // process stalled messages; set state to replaying
-        _internal_state.set(STATE_REPLAYING);
-        _internal_state.wait_for_state(STATE_RUNNING);
-
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; state=replaying");
+        if (_redis_sync_queue.peek() == nullptr) {
+            // process stalled messages; set state to replaying
+            _internal_state.set(STATE_REPLAYING);
+            _internal_state.wait_for_state(STATE_RUNNING);
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; state=replaying");
+        } else {
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; still more to process, dont wakeup log reader");
+        }
     }
 
     bool

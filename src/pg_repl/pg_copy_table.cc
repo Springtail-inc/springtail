@@ -506,7 +506,8 @@ namespace springtail
                              const std::string &schema_name,
                              uint64_t table_oid,
                              uint64_t schema_oid,
-                             const PgCopyResultPtr &snapshot_details)
+                             const PgCopyResultPtr &snapshot_details,
+                             bool initial_copy)
     {
         // set the schema
         _set_schema(table_name, schema_name, table_oid, schema_oid);
@@ -524,10 +525,12 @@ namespace springtail
             // mark the table as invalid, we won't copy it
             TableValidator::get_instance()->mark_invalid(table_oid, table_info);
 
-            // mark the copy as "in-flight" to wake up the log reader
-            // note: we don't need a schema since we are going to ignore this table
-            pg_log_mgr::SyncTracker::get_instance()->mark_inflight(db_id, _schema.table_oid, xid,
-                                                                   snapshot_details, nullptr);
+            if (!initial_copy) {
+                // mark the copy as "in-flight" to wake up the log reader
+                // note: we don't need a schema since we are going to ignore this table
+                pg_log_mgr::SyncTracker::get_instance()->mark_inflight(db_id, _schema.table_oid, xid,
+                        snapshot_details, nullptr);
+            }
 
             return std::make_shared<PgCopyResult::TableInfo>(table_oid, nullptr, nullptr);
         }
@@ -600,9 +603,11 @@ namespace springtail
         auto table = TableMgr::get_instance()->get_snapshot_table(db_id, _schema.table_oid, xid.xid,
                                                                   schema, _schema.secondary_keys);
 
-        // mark the copy as inflight and record the snapshot details
-        pg_log_mgr::SyncTracker::get_instance()->mark_inflight(db_id, _schema.table_oid, xid,
-                                                               snapshot_details, schema);
+        if (!initial_copy) {
+            // mark the copy as inflight and record the snapshot details
+            pg_log_mgr::SyncTracker::get_instance()->mark_inflight(db_id, _schema.table_oid, xid,
+                    snapshot_details, schema);
+        }
 
         // start the COPY
         _prepare_copy();
@@ -966,7 +971,8 @@ namespace springtail
     PgCopyTable::_worker(uint64_t db_id,
                          uint64_t target_xid,
                          CopyQueuePtr copy_queue,
-                         PgCopyResultPtr result)
+                         PgCopyResultPtr result,
+                         bool initial_copy)
     {
         // create copy table object and connect to db
         PgCopyTable copy_table;
@@ -1001,7 +1007,8 @@ namespace springtail
                                                    request->schema_name,
                                                    request->table_oid,
                                                    request->schema_oid,
-                                                   result);
+                                                   result,
+                                                   initial_copy);
 
                 // add the table oid to the result
                 result->add_table(info);
@@ -1219,7 +1226,8 @@ namespace springtail
                                 std::optional<std::string> schema_name,
                                 std::optional<std::pair<std::string, std::string>> schema_table,
                                 std::optional<std::set<uint32_t>> table_tids,
-                                std::optional<nlohmann::json> include_json)
+                                std::optional<nlohmann::json> include_json,
+                                bool initial_copy)
     {
         CopyQueuePtr copy_queue = std::make_shared<CopyQueue>();
 
@@ -1263,7 +1271,7 @@ namespace springtail
             PgCopyResultPtr copy_result = std::make_shared<PgCopyResult>(target_xid);
             table_results.push_back(copy_result);
             workers.push_back(std::thread(&PgCopyTable::_worker,
-                              db_id, target_xid, copy_queue, copy_result));
+                              db_id, target_xid, copy_queue, copy_result, initial_copy));
         }
 
         // iterate through the tables and copy them

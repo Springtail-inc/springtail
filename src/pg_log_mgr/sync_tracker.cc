@@ -32,15 +32,9 @@ SyncTracker::issue_resync_and_wait(uint64_t db_id,
     TableSyncRequest request(table_id, xid);
     table_sync_queue.push(request);
 
-    // wait for the resync to begin
-    auto wait = std::make_shared<Wait>();
-    auto wait_i = _wait_map.emplace(db_id, wait).first;
-    wait->condition.wait(lock, [&wait]() {
-        return wait->notified;
-    });
+    // add the table to the resync map; will get removed when mark_inflight() is called
+    _resync_map[db_id][table_id].insert(xid);
 
-    // clear the entry
-    _wait_map.erase(wait_i);
 }
 
 void
@@ -54,16 +48,26 @@ SyncTracker::mark_inflight(uint64_t db_id,
               db_id, table_id, xid.xid, xid.lsn);
     std::unique_lock lock(_mutex);
 
+    // find the db map
+    auto db_i = _resync_map.find(db_id);
+    CHECK(db_i != _resync_map.end());
+    if (db_i != _resync_map.end()) {
+        auto table_i = db_i->second.find(table_id);
+        CHECK(table_i != db_i->second.end());
+
+        // clear from the resync map
+        table_i->second.erase(xid);
+        if (table_i->second.empty()) {
+            db_i->second.erase(table_i);
+            if (db_i->second.empty()) {
+                _resync_map.erase(db_i);
+            }
+        }
+    }
+
     // add the entry to the inflight map
     auto entry = std::make_shared<Inflight>(copy->pg_xid, copy->xmax, copy->xips, schema);
     _inflight_map[db_id].emplace(table_id, entry);
-
-    // if the log reader is waiting, notify it to continue operation
-    auto wait_i = _wait_map.find(db_id);
-    if (wait_i != _wait_map.end()) {
-        wait_i->second->notified = true;
-        wait_i->second->condition.notify_one();
-    }
 }
 
 void
@@ -197,6 +201,14 @@ SyncTracker::add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
         std::unique_lock lock(_mutex);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "db {} table_id {} pg_xid {}", db_id, table_id, pg_xid);
+
+        // first check the resync map
+        auto resync_i = _resync_map.find(db_id);
+        if (resync_i != _resync_map.end()) {
+            if (resync_i->second.contains(table_id)) {
+                return { true, true }; // if the table is present, skip
+            }
+        }
 
         // check the inflight map
         auto inflight_i = _inflight_map.find(db_id);

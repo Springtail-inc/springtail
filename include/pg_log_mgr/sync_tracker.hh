@@ -264,6 +264,10 @@ namespace springtail::pg_log_mgr {
         /** Used to track all of the table syncs operating at a given snapshot XID. */
         DbMap<PgXidMap<std::shared_ptr<XidRecord>>> _sync_map;
 
+        /** db-> table indicating that a resync was issued but it hasn't been picked up by the copy
+          thread yet. */
+        std::map<uint64_t, std::map<uint64_t, std::set<XidLsn>>> _resync_map;
+
         /** Entry is added here when a copy for the table is in-flight but hasn't completed. */
         DbMap<TableMap<std::shared_ptr<Inflight>>> _inflight_map;
 

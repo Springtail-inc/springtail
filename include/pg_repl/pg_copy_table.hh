@@ -266,7 +266,8 @@ namespace springtail
                                                const std::string &schema_name,
                                                uint64_t table_oid,
                                                uint64_t schema_oid,
-                                               const PgCopyResultPtr &snapshot_details);
+                                               const PgCopyResultPtr &snapshot_details,
+                                               bool initial_copy);
 
         /**
          * @brief End the copy, commit the transaction
@@ -289,7 +290,8 @@ namespace springtail
         static void _worker(uint64_t db_id,
                             uint64_t target_xid,
                             CopyQueuePtr copy_queue,
-                            PgCopyResultPtr result);
+                            PgCopyResultPtr result,
+                            bool initial_copy);
 
         /** Get where clause condition for inclusion of schemas */
        static std::string _get_schema_condition(LibPqConnection &connection, uint64_t db_id);
@@ -332,7 +334,8 @@ namespace springtail
             std::optional<std::string> schema_name = std::nullopt,
             std::optional<std::pair<std::string, std::string>> table_name = std::nullopt,
             std::optional<std::set<uint32_t>> table_oids = std::nullopt,
-            std::optional<nlohmann::json> include_json = std::nullopt);
+            std::optional<nlohmann::json> include_json = std::nullopt,
+            bool initial_copy=false);
 
     public:
 
