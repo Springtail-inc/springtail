@@ -579,9 +579,9 @@ namespace springtail::pg_fdw {
                 auto fully_qualified_type_name = fmt::format("{}.{}",
                                         conn->escape_identifier(col.at("type_namespace").get<std::string>()),
                                         conn->escape_identifier(col.at("type_name").get<std::string>()));
-                columns.emplace_back(std::make_tuple(col.at("name"),
-                                                    fully_qualified_type_name,
-                                                    col.at("nullable")));
+                columns.emplace_back(col.at("name"),
+                                     fully_qualified_type_name,
+                                     col.at("nullable"));
             }
 
             return PgFdwCommon::_gen_fdw_table_sql(server_name, ddl.at("schema"), ddl.at("table"), ddl.at("tid"), columns,

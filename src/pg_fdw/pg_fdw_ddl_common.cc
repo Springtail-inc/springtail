@@ -121,7 +121,7 @@ namespace springtail::pg_fdw {
             LOG_DEBUG(LOG_FDW, "Found table {}.{} tid={}, xid={}", namespace_name, table_name, tid, xid);
 
             // lookup table in map, if found the xid if it is newer
-            auto entry = table_map.insert({table_name, {tid, xid, table_ns_id}});
+            auto entry = table_map.try_emplace(table_name, tid, xid, table_ns_id);
 
             // Insert the partition details in the partition map
             uint64_t parent_table_id = 0;

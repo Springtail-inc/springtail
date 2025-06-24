@@ -1475,14 +1475,14 @@ _get_modified_partition_details(uint64_t db_id,
     if ( is_attached ) {
         // Get the difference in order to identify the attached partition
         for (const auto& tid : table_ids) {
-            if (system_table_ids.find(tid) == system_table_ids.end()) {
+            if (!system_table_ids.contains(tid)) {
                 result.push_back(tid);
             }
         }
     } else {
         // Get the difference in order to identify the detached partition
         for (const auto& tid : system_table_ids) {
-            if (table_ids.find(tid) == table_ids.end()) {
+            if (!table_ids.contains(tid)) {
                 result.push_back(tid);
             }
         }

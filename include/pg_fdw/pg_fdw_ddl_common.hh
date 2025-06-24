@@ -36,15 +36,15 @@ namespace springtail::pg_fdw {
               _partition_bound(std::move(partition_bound)) {}
 
         uint64_t parent_table_id() const { return _parent_table_id; }
-        const std::string_view parent_namespace_name() const { return _parent_namespace_name; }
-        const std::string_view parent_table_name() const { return _parent_table_name; }
-        const std::string_view partition_key() const { return _partition_key; }
-        const std::string_view partition_bound() const { return _partition_bound; }
+        std::string_view parent_namespace_name() const { return _parent_namespace_name; }
+        std::string_view parent_table_name() const { return _parent_table_name; }
+        std::string_view partition_key() const { return _partition_key; }
+        std::string_view partition_bound() const { return _partition_bound; }
 
-        const std::string_view set_parent_namespace_name(const std::string_view parent_namespace_name) { return _parent_namespace_name = parent_namespace_name; }
-        const std::string_view set_parent_table_name(const std::string_view parent_table_name) { return _parent_table_name = parent_table_name; }
-        const std::string_view set_partition_key(const std::string_view partition_key) { return _partition_key = partition_key; }
-        const std::string_view set_partition_bound(const std::string_view partition_bound) { return _partition_bound = partition_bound; }
+        std::string_view set_parent_namespace_name(const std::string_view parent_namespace_name) { return _parent_namespace_name = parent_namespace_name; }
+        std::string_view set_parent_table_name(const std::string_view parent_table_name) { return _parent_table_name = parent_table_name; }
+        std::string_view set_partition_key(const std::string_view partition_key) { return _partition_key = partition_key; }
+        std::string_view set_partition_bound(const std::string_view partition_bound) { return _partition_bound = partition_bound; }
 
     private:
         uint64_t _parent_table_id;
@@ -366,9 +366,8 @@ namespace springtail::pg_fdw {
                 }
 
                 std::string column_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(&row));
-                bool exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(&row);
-                if (!exists) {
-                    auto it = std::find_if(columns.begin(), columns.end(),
+                if (bool exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(&row); !exists) {
+                    auto it = std::ranges::find_if(columns.begin(), columns.end(),
                     [&column_name](const std::tuple<std::string, std::string, bool> &column) {
                             return std::get<0>(column) == column_name;
                         });
