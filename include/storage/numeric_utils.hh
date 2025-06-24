@@ -12,7 +12,7 @@
 
 namespace springtail::numeric {
 
-    typedef int16_t NumericDigit;
+    using NumericDigit = int16_t;
 
     struct NumericShort
     {
