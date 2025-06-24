@@ -1187,7 +1187,7 @@ namespace springtail {
     }
 
     PgMsgPtr
-    PgMsgStreamReader::_decode_attach_partition(const PgMsgMessage &message, char *buffer, int len)
+    PgMsgStreamReader::_decode_attach_partition(const PgMsgMessage &message, const char *buffer, int len)
     {
         PgMsgAttachPartition attach_partition_msg;
         std::string data_str(buffer, len);
@@ -1216,7 +1216,7 @@ namespace springtail {
     }
 
     PgMsgPtr
-    PgMsgStreamReader::_decode_detach_partition(const PgMsgMessage &message, char *buffer, int len)
+    PgMsgStreamReader::_decode_detach_partition(const PgMsgMessage &message, const char *buffer, int len)
     {
         PgMsgDetachPartition detach_partition_msg;
         std::string data_str(buffer, len);

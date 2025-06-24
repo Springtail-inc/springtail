@@ -367,11 +367,12 @@ namespace springtail::pg_fdw {
 
                 std::string column_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(&row));
                 if (bool exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(&row); !exists) {
-                    auto it = std::ranges::find_if(columns.begin(), columns.end(),
-                    [&column_name](const std::tuple<std::string, std::string, bool> &column) {
+                    if (auto it = std::ranges::find_if(columns,
+                        [&column_name](const std::tuple<std::string, std::string, bool> &column) {
                             return std::get<0>(column) == column_name;
                         });
-                    if (it != columns.end()) {
+                        it != columns.end())
+                    {
                         columns.erase(it);
                     }
                     continue;

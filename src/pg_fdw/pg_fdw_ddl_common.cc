@@ -106,8 +106,7 @@ namespace springtail::pg_fdw {
 
             if (bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row); !exists) {
                 // find table and compare xids, remove if this xid is >= to the one in the map
-                auto entry = table_map.find(table_name);
-                if (entry != table_map.end() && xid >= std::get<1>(entry->second)) {
+                if (auto entry = table_map.find(table_name); entry != table_map.end() && xid >= std::get<1>(entry->second)) {
                     // remove this table entry
                     table_map.erase(entry);
                 }
