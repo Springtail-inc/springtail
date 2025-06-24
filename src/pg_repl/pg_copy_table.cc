@@ -326,12 +326,10 @@ namespace springtail
 
         // get any table partition info
         _connection.exec(fmt::format(TABLE_PARTITION_QUERY, table_oid));
-        if (_connection.ntuples() > 0) {
-            if ( _connection.nfields() == 3 ) {
-                _schema.parent_oid = _connection.get_int32_optional(0, 0);
-                _schema.partition_bound = _connection.get_string_optional(0, 1);
-                _schema.partition_key = _connection.get_string_optional(0, 2);
-            }
+        if (_connection.ntuples() > 0 && _connection.nfields() == 3 ) {
+            _schema.parent_oid = _connection.get_int32_optional(0, 0);
+            _schema.partition_bound = _connection.get_string_optional(0, 1);
+            _schema.partition_key = _connection.get_string_optional(0, 2);
         }
         _connection.clear();
 

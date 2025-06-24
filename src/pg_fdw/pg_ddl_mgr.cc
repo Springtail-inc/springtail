@@ -518,40 +518,30 @@ namespace springtail::pg_fdw {
 
     PartitionInfo
     _get_partition_info(const nlohmann::json &ddl){
-        uint64_t parent_table_id;
-        std::string parent_namespace_name;
-        std::string parent_table_name;
-        std::string partition_key;
-        std::string partition_bound;
+        uint64_t parent_table_id = 0;
+        std::string parent_namespace_name = "";
+        std::string parent_table_name = "";
+        std::string partition_key = "";
+        std::string partition_bound = "";
 
         if (ddl.contains("parent_table_id") && !ddl.at("parent_table_id").is_null()) {
             parent_table_id = ddl.at("parent_table_id").get<uint64_t>();
-        } else {
-            parent_table_id = 0;
         }
 
         if (ddl.contains("parent_namespace_name") && !ddl.at("parent_namespace_name").is_null()) {
             parent_namespace_name = ddl.at("parent_namespace_name").get<std::string>();
-        } else {
-            parent_namespace_name = "";
         }
 
         if (ddl.contains("parent_table_name") && !ddl.at("parent_table_name").is_null()) {
             parent_table_name = ddl.at("parent_table_name").get<std::string>();
-        } else {
-            parent_table_name = "";
         }
 
         if (ddl.contains("partition_key") && !ddl.at("partition_key").is_null()) {
             partition_key = ddl.at("partition_key").get<std::string>();
-        } else {
-            partition_key = "";
         }
 
         if (ddl.contains("partition_bound") && !ddl.at("partition_bound").is_null()) {
             partition_bound = ddl.at("partition_bound").get<std::string>();
-        } else {
-            partition_bound = "";
         }
 
         PartitionInfo partition_info(parent_table_id,
@@ -589,7 +579,7 @@ namespace springtail::pg_fdw {
                 auto fully_qualified_type_name = fmt::format("{}.{}",
                                         conn->escape_identifier(col.at("type_namespace").get<std::string>()),
                                         conn->escape_identifier(col.at("type_name").get<std::string>()));
-                columns.push_back(std::make_tuple(col.at("name"),
+                columns.emplace_back(std::make_tuple(col.at("name"),
                                                     fully_qualified_type_name,
                                                     col.at("nullable")));
             }
@@ -919,7 +909,7 @@ namespace springtail::pg_fdw {
             // Create the parent partition tables
             std::vector<std::string> ddl = PgFdwCommon::get_schema_ddl(db_id, xid, SPRINGTAIL_FDW_SERVER_NAME, schema.second,
                                              false, false, {},
-                                             [this, escaped_schema, &user_types](uint32_t pg_type, uint64_t namespace_id) {
+                                             [this, escaped_schema, &user_types](uint32_t pg_type,[[maybe_unused]] uint64_t namespace_id) {
                                                  return _get_type_name(pg_type, escaped_schema, user_types);
                                              },
                                              [conn](const std::string &name) {

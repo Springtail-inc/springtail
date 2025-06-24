@@ -196,8 +196,8 @@ private:
                          const std::string& name,
                          bool exists,
                          std::optional<uint64_t> parent_table_id,
-                         std::optional<std::string> partition_key,
-                         std::optional<std::string> partition_bound)
+                         const std::optional<std::string> partition_key,
+                         const std::optional<std::string> partition_bound)
             : id(id), xid(xid), lsn(lsn), namespace_id(namespace_id), name(name), exists(exists),
               parent_table_id(parent_table_id), partition_key(partition_key), partition_bound(partition_bound)
         {

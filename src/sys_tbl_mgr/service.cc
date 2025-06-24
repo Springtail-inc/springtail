@@ -1452,18 +1452,18 @@ _get_modified_partition_details(uint64_t db_id,
 
     // Parse the requested table ids
     std::unordered_set<uint64_t> table_ids;
-    for ( const auto &partition_data : partition_data ) {
-        if (partition_data.parent_table_id() != table_id) {
+    for ( const auto &part_data : partition_data ) {
+        if (part_data.parent_table_id() != table_id) {
             LOG_WARN("Parent table id {} does not match the current table id {}",
-                partition_data.parent_table_id(), table_id);
+                part_data.parent_table_id(), table_id);
             continue;
         }
-        table_ids.insert(partition_data.table_id());
+        table_ids.insert(part_data.table_id());
         if (partition_map != nullptr) {
             partition_map->insert(std::make_pair(
-                partition_data.table_id(), std::make_pair(
-                    partition_data.partition_bound(),
-                    partition_data.partition_key()
+                part_data.table_id(), std::make_pair(
+                    part_data.partition_bound(),
+                    part_data.partition_key()
                 )
             ));
         }
@@ -1474,16 +1474,16 @@ _get_modified_partition_details(uint64_t db_id,
 
     if ( is_attached ) {
         // Get the difference in order to identify the attached partition
-        for (const auto& table_id : table_ids) {
-            if (system_table_ids.find(table_id) == system_table_ids.end()) {
-                result.push_back(table_id);
+        for (const auto& tid : table_ids) {
+            if (system_table_ids.find(tid) == system_table_ids.end()) {
+                result.push_back(tid);
             }
         }
     } else {
         // Get the difference in order to identify the detached partition
-        for (const auto& table_id : system_table_ids) {
-            if (table_ids.find(table_id) == table_ids.end()) {
-                result.push_back(table_id);
+        for (const auto& tid : system_table_ids) {
+            if (table_ids.find(tid) == table_ids.end()) {
+                result.push_back(tid);
             }
         }
     }

@@ -68,7 +68,7 @@ namespace springtail::pg_fdw {
                          bool exclude,
                          bool limit,
                          const std::set<std::string> &table_set,
-                         std::string namespace_name,
+                         [[maybe_unused]] const std::string_view namespace_name, // used only for logging
                          std::map<std::string, std::tuple<uint64_t,uint64_t, uint64_t>> &table_map,
                          std::map<uint64_t, PartitionInfo> &table_partition_map)
     {
@@ -109,11 +109,9 @@ namespace springtail::pg_fdw {
             if (!exists) {
                 // find table and compare xids, remove if this xid is >= to the one in the map
                 auto entry = table_map.find(table_name);
-                if (entry != table_map.end()) {
-                    if (xid >= std::get<1>(entry->second)) {
-                        // remove this table entry
-                        table_map.erase(entry);
-                    }
+                if (entry != table_map.end() && xid >= std::get<1>(entry->second)) {
+                    // remove this table entry
+                    table_map.erase(entry);
                 }
                 LOG_DEBUG(LOG_FDW, "Removed non-existant table {}.{} tid={}, xid={}",
                                     namespace_name, table_name, tid, xid);

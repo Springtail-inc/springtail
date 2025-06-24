@@ -957,7 +957,7 @@ namespace springtail {
             json["partition_bound"].get_to(table_msg.partition_bound);
         }
 
-        for (auto &partition_data : json["partition_data"]) {
+        for (const auto &partition_data : json["partition_data"]) {
             table_msg.partition_data.push_back(_decode_partition_data(partition_data));
         }
 
@@ -1205,11 +1205,11 @@ namespace springtail {
             json["partition_bound"].get_to(attach_partition_msg.partition_bound);
         }
 
-        for (auto &partition_data : json["partition_data"]) {
+        for (const auto &partition_data : json["partition_data"]) {
             attach_partition_msg.partition_data.push_back(_decode_partition_data(partition_data));
         }
 
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::ATTACH_PARTITION);
+        auto msg = std::make_shared<PgMsg>(PgMsgEnum::ATTACH_PARTITION);
         msg->msg.emplace<PgMsgAttachPartition>(attach_partition_msg);
 
         return msg;
@@ -1231,11 +1231,11 @@ namespace springtail {
         json["schema"].get_to(detach_partition_msg.namespace_name);
         json["table"].get_to(detach_partition_msg.table_name);
 
-        for (auto &partition_data : json["partition_data"]) {
+        for (const auto &partition_data : json["partition_data"]) {
             detach_partition_msg.partition_data.push_back(_decode_partition_data(partition_data));
         }
 
-        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DETACH_PARTITION);
+        auto msg = std::make_shared<PgMsg>(PgMsgEnum::DETACH_PARTITION);
         msg->msg.emplace<PgMsgDetachPartition>(detach_partition_msg);
 
         return msg;
