@@ -619,7 +619,7 @@ namespace springtail::numeric {
         static std::shared_ptr<NumericData> from_string(std::string_view str, const TypeMod &typmod);
     };
 
-    typedef struct NumericData *Numeric;
+    using Numeric = struct NumericData *;
 
     /**
      * @brief Read numeric data from input buffer with the given typmod
