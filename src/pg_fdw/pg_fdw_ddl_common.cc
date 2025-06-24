@@ -66,7 +66,7 @@ namespace springtail::pg_fdw {
                          uint64_t namespace_id,
                          bool exclude,
                          bool limit,
-                         const std::set<std::string> &table_set,
+                         const std::set<std::string, std::less<>> &table_set,
                          [[maybe_unused]] const std::string_view namespace_name, // used only for logging
                          std::map<std::string, std::tuple<uint64_t,uint64_t, uint64_t>, std::less<>> &table_map,
                          std::map<uint64_t, PartitionInfo> &table_partition_map)

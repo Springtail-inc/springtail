@@ -214,7 +214,7 @@ namespace springtail::pg_fdw {
                              uint64_t namespace_id,
                              bool exclude,
                              bool limit,
-                             const std::set<std::string> &table_set,
+                             const std::set<std::string, std::less<>> &table_set,
                              [[maybe_unused]] const std::string_view namespace_name, // used only for logging
                              std::map<std::string, std::tuple<uint64_t,uint64_t, uint64_t>, std::less<>> &table_map,
                              std::map<uint64_t, PartitionInfo> &table_partition_map);
@@ -240,7 +240,7 @@ namespace springtail::pg_fdw {
                        const std::string &server_name,
                        const std::string &namespace_name,
                        bool exclude, bool limit,
-                       const std::set<std::string> &table_set,
+                       const std::set<std::string, std::less<>> &table_set,
                        Func1 type_name_resolver,
                        Func2 escape_identifier,
                        bool is_fdw)
@@ -278,7 +278,7 @@ namespace springtail::pg_fdw {
             uint64_t namespace_id = ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&row);
 
             // map from table name -> <table id, xid, table_ns_id>
-            std::map<std::string, std::tuple<uint64_t,uint64_t, uint64_t>> table_map;
+            std::map<std::string, std::tuple<uint64_t,uint64_t, uint64_t>, std::less<>> table_map;
             std::map<uint64_t, PartitionInfo> table_partition_map;
 
             // iterate over the table names table and populate the table map
