@@ -1154,7 +1154,7 @@ namespace springtail {
         const std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const override {
             if constexpr(std::is_same_v<T, std::shared_ptr<numeric::NumericData>>) {
                 if (_field->is_null(row)) {
-                    LOG_INFO("---> DefaultValueField: value = {}", _default->to_string());
+                    LOG_DEBUG(LOG_STORAGE, "---> DefaultValueField: value = {}", _default->to_string());
                     return _default;
                 }
                 return _field->get_numeric(row);
