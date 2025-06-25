@@ -12,6 +12,24 @@ namespace springtail {
         static constexpr int MAX_RETRY_COUNT = 5;  ///< max retry count for connection
         static constexpr int RETRY_SLEEP_SECS = 2; ///< initial sleep time in sec between retries
 
+        /* Some SQLSTATEs see: get_sql_state() */
+        // Class 00 — Successful Completion
+        static constexpr const char* SQL_SUCCESSFUL_COMPLETION     = "00000";
+
+        // Class 01 — Warning
+        static constexpr const char* SQL_WARNING                   = "01000";
+
+        // Class 02 — No Data (e.g. UPDATE/DELETE affected 0 rows)
+        static constexpr const char* SQL_NO_DATA                   = "02000";
+
+        // Class 42 — Syntax or Access Rule Violation
+        static constexpr const char* SQL_SYNTAX_ERROR              = "42601";
+        static constexpr const char* SQL_UNDEFINED_TABLE           = "42P01";
+        static constexpr const char* SQL_UNDEFINED_COLUMN          = "42703";
+        static constexpr const char* SQL_DUPLICATE_COLUMN          = "42701";
+        static constexpr const char* SQL_DUPLICATE_TABLE           = "42P07";
+        static constexpr const char* SQL_INSUFFICIENT_PRIVILEGE    = "42501";
+
         LibPqConnection() {};
 
         ~LibPqConnection() {
@@ -72,9 +90,15 @@ namespace springtail {
 
         /**
          * @brief Get error message from connection; should not be freed
-         * @return pointer to error message from underlying connection; should not be freed
+         * @return std::string of error message from underlying connection; should not be freed
          */
-        char *error_message();
+        std::string error_message();
+
+        /**
+         * @brief Get error message from last query result
+         * @return std::string of error message from last query result; if none then return connection error_message()
+         */
+        std::string result_error_message();
 
         /**
          * @brief Get copy data; uses internal buffer
@@ -107,6 +131,24 @@ namespace springtail {
          * @brief Execute libpq query helper; sets result internally
          * @param connection libpq connection
          * @param cmd SQL command
+         * @return true if result is successful; false otherwise; check result separately
+         */
+        bool exec_no_throw(const std::string &cmd);
+
+        /**
+         * @brief Execute libpq query helper; sets result internally
+         * @param connection libpq connection
+         * @param cmd SQL command
+         * @return true if result is successful; false otherwise; check result separately
+         */
+        bool exec_no_throw(const char *cmd);
+
+        /**
+         * @brief Execute libpq query helper; sets result internally
+         * @param connection libpq connection
+         * @param cmd SQL command
+         * @throws PgQueryError if result is not successful
+         * @throws PgNotConnectedError if not connected
          */
         void exec(const std::string &cmd);
 
@@ -114,8 +156,16 @@ namespace springtail {
          * @brief Execute libpq query helper; sets result internally
          * @param connection libpq connection
          * @param cmd SQL command
+         * @throws PgQueryError if result is not successful
+         * @throws PgNotConnectedError if not connected
          */
         void exec(const char *cmd);
+
+        /**
+         * @brief Get sql state from last query result
+         * @return sql state string; empty if no result
+         */
+        std::string get_sql_state();
 
         /**
          * @brief Retreive an int32 column value from a query result

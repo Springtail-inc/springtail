@@ -158,11 +158,55 @@ namespace springtail {
      * @brief Get error message from connection; should not be freed
      * @return pointer to error message from underlying connection; should not be freed
      */
-    char *LibPqConnection::error_message()
+    std::string LibPqConnection::error_message()
     {
-        return PQerrorMessage(_connection);
+        char *err = PQerrorMessage(_connection);
+        if (err == nullptr) {
+            return {};
+        }
+        return std::string(err);
     }
 
+    std::string LibPqConnection::result_error_message()
+    {
+        // try and get error message from result; if not available, then return connection error message
+        if (_result == nullptr) {
+            return error_message();
+        }
+
+        char *err = PQresultErrorMessage(_result);
+        if (err == nullptr) {
+            return error_message();
+        }
+        return std::string(err);
+    }
+
+    bool LibPqConnection::exec_no_throw(const std::string &cmd)
+    {
+        return exec_no_throw(cmd.c_str());
+    }
+
+    bool LibPqConnection::exec_no_throw(const char *cmd)
+    {
+        clear();
+
+        if (_connection == nullptr) {
+            return false;
+        }
+
+        CHECK_EQ(_is_replication, false);
+
+        LOG_DEBUG(LOG_PG_REPL, "Executing query: {}", cmd);
+        _result = PQexec(_connection, cmd);
+
+         if (PQresultStatus(_result) != PGRES_COMMAND_OK &&
+             PQresultStatus(_result) != PGRES_TUPLES_OK &&
+             PQresultStatus(_result) != PGRES_COPY_OUT) {
+            return false; // error executing query
+        }
+
+        return true;
+    }
 
     /**
      * @brief Execute libpq query helper; sets result internally
@@ -172,7 +216,6 @@ namespace springtail {
     {
         exec(cmd.c_str());
     }
-
 
     /**
      * @brief Execute libpq query helper; sets result internally
@@ -184,25 +227,27 @@ namespace springtail {
             throw PgNotConnectedError();
         }
 
-        CHECK_EQ(_is_replication, false);
-
-        // clear old result if there was one
-        clear();
-
-        LOG_DEBUG(LOG_PG_REPL, "Executing query: {}", cmd);
-        PGresult *res = PQexec(_connection, cmd);
-        if (PQresultStatus(res) != PGRES_COMMAND_OK &&
-            PQresultStatus(res) != PGRES_TUPLES_OK &&
-            PQresultStatus(res) != PGRES_COPY_OUT) {
-            std::string error_message = fmt::format("msg={}, status={}", PQerrorMessage(_connection), PQresultErrorMessage(res));
+        if (exec_no_throw(cmd) == false) {
+            std::string error_message = fmt::format("msg={}, status={}", PQerrorMessage(_connection), PQresultErrorMessage(_result));
             LOG_ERROR("Error executing query: {}", error_message);
-            PQclear(res);
+            PQclear(_result);
+            throw PgQueryError();
+        }
+    }
+
+    std::string LibPqConnection::get_sql_state()
+    {
+        if (_result == nullptr) {
+            return {};
+        }
+
+        const char *state = PQresultErrorField(_result, PG_DIAG_SQLSTATE);
+        if (state == nullptr) {
             throw PgQueryError();
         }
 
-        _result = res;
+        return std::string(state);
     }
-
 
     /**
      * @brief Retreive an int32 column value from a query result

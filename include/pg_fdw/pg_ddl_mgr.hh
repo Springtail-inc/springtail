@@ -130,6 +130,9 @@ namespace springtail::pg_fdw {
         /** Helper to sync role members for a database */
         void _role_member_sync_database(LibPqConnectionPtr conn, std::vector<std::string> &sql_commands);
 
+        /** Helper to sync table ownership */
+        void _table_owner_sync_database(LibPqConnectionPtr conn, uint64_t db_id, const std::string &db_name);
+
         /** Helper to apply SQL commands */
         void _apply_sql_commands(uint64_t db_id, const std::string &db_name, const std::vector<std::string> &sql_commands);
 
@@ -211,14 +214,12 @@ namespace springtail::pg_fdw {
          * @param schemas set of schemas to update (output)
          * @return std::string sql statement
          */
-        std::string
-        _gen_sql_from_json(LibPqConnectionPtr conn,
+        std::string _gen_sql_from_json(LibPqConnectionPtr conn,
                            const std::string &server_name,
                            const nlohmann::json &ddl);
 
         /** Helper to generate sql for FDW foreign table */
-        std::string
-        _gen_fdw_table_sql(LibPqConnectionPtr conn,
+        std::string _gen_fdw_table_sql(LibPqConnectionPtr conn,
                            const std::string &server_name,
                            const std::string &schema,
                            const std::string &table,

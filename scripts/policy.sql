@@ -28,7 +28,7 @@ CREATE OR REPLACE FUNCTION __pg_springtail_triggers.reset_policy_diff(fdw_id_var
 RETURNS VOID
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path TO __pg_springtail_triggers, pg_catalog, pg_temp
+SET search_path TO __pg_springtail_triggers
 AS $$
 BEGIN
     -- If fdw_id_var is NULL, it indicates a request to reset the entire role snapshot history,

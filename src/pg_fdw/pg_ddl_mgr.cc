@@ -59,6 +59,11 @@ namespace springtail::pg_fdw {
         "SELECT diff_type, role_name, member_name "
         "FROM __pg_springtail_triggers.role_member_diff('{}');";
 
+    static constexpr char TABLE_OWNER_DIFF_SELECT[] =
+        "SELECT diff_type, table_name, schema_name, "
+        "       role_owner_name, table_oid "
+        "FROM __pg_springtail_triggers.table_owner_diff('{}');";
+
 
     PgDDLMgr::PgDDLMgr() :
         _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE, [](LibPqConnectionPtr conn) -> bool {
@@ -328,6 +333,71 @@ namespace springtail::pg_fdw {
     }
 
     void
+    PgDDLMgr::_table_owner_sync_database(LibPqConnectionPtr conn, uint64_t db_id, const std::string &db_name)
+    {
+        // execute on primary
+        conn->exec(fmt::format(TABLE_OWNER_DIFF_SELECT, _fdw_id));
+
+        if (conn->ntuples() == 0) {
+            conn->clear();
+            return;
+        }
+
+        // prepare a list of SQL commands to apply; <cmd, table_oid>
+        std::vector<std::pair<std::string, uint32_t>> sql_commands;
+
+        // iterate through the result set and process the table owner diffs
+        for (int i = 0; i < conn->ntuples(); i++) {
+            std::string diff_type = conn->get_string(i, 0);
+            std::string table_name = conn->escape_identifier(conn->get_string(i, 1));
+            std::string schema_name = conn->escape_identifier(conn->get_string(i, 2));
+            std::string role_owner_name = conn->escape_identifier(conn->get_string(i, 3));
+            uint32_t table_oid = conn->get_int32(i, 4);
+
+            if (diff_type == "REMOVED") {
+                // nothing to do these tables are already dropped
+                continue;
+            }
+
+            if (diff_type == "ADDED" || diff_type == "MODIFIED") {
+                sql_commands.push_back(
+                    std::make_pair(fmt::format("ALTER FOREIGN TABLE {}.{} OWNER TO {}",
+                                               schema_name, table_name, role_owner_name), table_oid));
+            }
+        }
+        conn->clear();
+
+        if (sql_commands.empty()) {
+            return;
+        }
+
+        // get the connection for the database
+        auto fdw_conn = _get_fdw_connection(db_id, db_name);
+        if (!fdw_conn) {
+            throw Error("Failed to get connection for database " + std::to_string(db_id));
+        }
+
+        // apply the sql commands, it is possible some of these may fail if the table does not exist
+        for (const auto &[sql, table_oid] : sql_commands) {
+            LOG_DEBUG(LOG_FDW, "Applying SQL command: {}", sql);
+            if (!fdw_conn->exec_no_throw(sql)) {
+                LOG_WARN("Failed to apply SQL command: {}", sql);
+                // if the command fails, we remove the table so that it will trigger as being re-added
+                // on the next sync.
+                DCHECK_EQ(fdw_conn->get_sql_state(), LibPqConnection::SQL_UNDEFINED_TABLE)
+                    << "Unexpected SQLSTATE: " << fdw_conn->get_sql_state();
+                conn->exec(fmt::format("SELECT __pg_springtail_triggers.remove_table('{}', {})",
+                                        _fdw_id, table_oid));
+                conn->clear();
+            }
+            fdw_conn->clear();
+        }
+
+        // release the connection back to the cache
+        _release_fdw_connection(db_id, fdw_conn);
+    }
+
+    void
     PgDDLMgr::_apply_sql_commands(uint64_t db_id, const std::string &db_name,
                                   const std::vector<std::string> &sql_commands)
     {
@@ -384,6 +454,11 @@ namespace springtail::pg_fdw {
 
                     // apply the sql commands to the database
                     _apply_sql_commands(db_id, db_name, sql_commands);
+
+                    // sync table owners for this database
+                    _table_owner_sync_database(conn, db_id, db_name);
+
+                    conn->disconnect();
                 }
             } catch (const std::exception &e) {
                 LOG_ERROR("Error syncing policies: {}", e.what());
@@ -401,7 +476,6 @@ namespace springtail::pg_fdw {
             }
         }
     }
-
 
     std::map<uint64_t, std::map<uint64_t, std::pair<std::string, std::string>>>
     PgDDLMgr::_get_usertypes(uint64_t db_id, uint64_t xid)

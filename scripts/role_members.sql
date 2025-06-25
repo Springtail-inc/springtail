@@ -19,7 +19,7 @@ CREATE OR REPLACE FUNCTION __pg_springtail_triggers.reset_role_member_diff(fdw_i
 RETURNS VOID
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path TO __pg_springtail_triggers, pg_catalog, pg_temp
+SET search_path TO __pg_springtail_triggers
 AS $$
 BEGIN
     IF fdw_id_var IS NULL THEN
