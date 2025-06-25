@@ -1115,6 +1115,13 @@ namespace springtail::pg_log_mgr {
             // issue the updates to the system tables
             for (auto &entry : swap->table_info()) {
                 auto copy_info = entry->info;
+                if (copy_info == nullptr) {
+                    // During resync if the table is found to be invalid as part of the copy flow, the table
+                    // becomes invalidated the copy_ptr becomes null, in those cases we don't need to
+                    // perform any operaion and just skip
+                    LOG_DEBUG(LOG_PG_LOG_MGR, "Copy info not present for table {}", entry->table_id);
+                    continue;
+                }
 
                 if (copy_info->is_table_dropped()) {
                     // Table is dropped when the sync was in queue/in-progress
@@ -1131,13 +1138,6 @@ namespace springtail::pg_log_mgr {
                     // update the existence cache for the referenced tables
                     _exists_cache->insert(db_id, entry->table_id, true);
 
-                    if (copy_info == nullptr) {
-                        // During resync if the table is found to be invalid as part of the copy flow, the table
-                        // becomes invalidated the copy_ptr becomes null, in those cases we don't need to
-                        // perform any operaion and just skip
-                        LOG_DEBUG(LOG_PG_LOG_MGR, "Copy info not present for table {}", entry->table_id);
-                        continue;
-                    }
                     LOG_DEBUG(LOG_PG_LOG_MGR, "table_id {}", entry->table_id);
 
                     // perform the table swap

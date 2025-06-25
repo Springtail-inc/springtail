@@ -236,7 +236,9 @@ namespace springtail::pg_log_mgr {
         void _copy_thread();
 
         /** Process copy table results; insert into redis */
-        void _process_copy_results(const std::vector<PgCopyResultPtr> &res);
+        bool _process_copy_results(const std::vector<PgCopyResultPtr> &res);
+
+        std::set<uint32_t> _get_copy_table_ids();
 
         /** Redis cache callback for watching database state change */
         RedisCache::RedisChangeWatcherPtr _cache_watcher_db_states;

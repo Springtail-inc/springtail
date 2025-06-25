@@ -50,7 +50,7 @@ SyncTracker::mark_inflight(uint64_t db_id,
 
     // find the db map
     auto db_i = _resync_map.find(db_id);
-    CHECK(db_i != _resync_map.end());
+    //CHECK(db_i != _resync_map.end());
     if (db_i != _resync_map.end()) {
         auto table_i = db_i->second.find(table_id);
         CHECK(table_i != db_i->second.end());
