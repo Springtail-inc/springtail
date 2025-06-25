@@ -32,8 +32,11 @@ namespace springtail::pg_fdw {
         "WHERE schema_name NOT LIKE 'pg_%' "
         " AND schema_name <> 'information_schema'";
 
-    static constexpr char CREATE_FDW_USER[] =
-        "CREATE USER {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '{}'";
+    static constexpr char CREATE_USER[] =
+        "CREATE USER {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '{}' IN ROLE pg_read_all_data";
+
+    static constexpr char CREATE_ROLE[] =
+        "CREATE ROLE {} WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE IN ROLE pg_read_all_data";
 
     static constexpr char DROP_DATABASE[] =
         "DROP DATABASE IF EXISTS {} WITH (FORCE)";
@@ -42,19 +45,37 @@ namespace springtail::pg_fdw {
         "SELECT 1 FROM  pg_database WHERE datname = '{}'";
 
     static constexpr char POLICY_DIFF_SELECT[] =
-        "SELECT diff_type, table_oid, table_name, schema_name, "
-        "       policy_oid, policy_name, policy_name_old, "
+        "SELECT diff_type, table_name, schema_name, "
+        "       policy_oid, policy_name, "
         "       policy_permissive, policy_roles, policy_qual "
         "FROM __pg_springtail_triggers.policy_diff('{}');";
 
+    static constexpr char ROLE_DIFF_SELECT[] =
+        "SELECT diff_type, rolname, rolsuper, "
+        "    rolinherit, rolcanlogin, rolbypassrls "
+        "FROM __pg_springtail_triggers.role_diff('{}');";
 
-    PgDDLMgr::PgDDLMgr() : _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE)
+    static constexpr char ROLE_MEMBER_DIFF_SELECT[] =
+        "SELECT diff_type, role_name, member_name "
+        "FROM __pg_springtail_triggers.role_member_diff('{}');";
+
+
+    PgDDLMgr::PgDDLMgr() :
+        _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE, [](LibPqConnectionPtr conn) -> bool {
+            // evict callback for the connection cache
+            conn->disconnect();
+            return true;
+        })
     {
+        // initialize the cache watcher
         _cache_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [this](const std::string& path, const nlohmann::json& new_value) {
                 _on_database_ids_changed(path, new_value);
             }
         );
+
+        // start the sync thread
+        _sync_thread = std::thread(&PgDDLMgr::_sync_thread_func, this);
     }
 
     void PgDDLMgr::_on_database_ids_changed(const std::string &path,
@@ -91,7 +112,7 @@ namespace springtail::pg_fdw {
         std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
         redis_cache->remove_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
 
-        _policy_sync_thread.join();
+        _sync_thread.join();
     }
 
     void
@@ -122,9 +143,8 @@ namespace springtail::pg_fdw {
         Json::get_to<int>(fdw_config, "port", _port);
 
         // get fdw user for proxy to use, this user only has select permissions
-        std::string fdw_username, fdw_password;
-        Json::get_to<std::string>(fdw_config, "fdw_user", fdw_username);
-        Json::get_to<std::string>(fdw_config, "password", fdw_password);
+        Json::get_to<std::string>(fdw_config, "fdw_user", _fdw_username);
+        Json::get_to<std::string>(fdw_config, "password", _fdw_password);
 
         if (fdw_config.contains("db_prefix")) {
             // if the FDW is using a prefix, prepend it
@@ -132,7 +152,7 @@ namespace springtail::pg_fdw {
         }
 
         LOG_DEBUG(LOG_FDW, "FDW ID: {}, Host: {}, Port: {}, Username: {}, FDW Username: {}",
-                     _fdw_id, _hostname, _port, _username, fdw_username);
+                     _fdw_id, _hostname, _port, _username, _fdw_username);
 
         // add subscribers to pubsub threads
         _db_instance_id = Properties::get_db_instance_id();
@@ -140,45 +160,34 @@ namespace springtail::pg_fdw {
         std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
         redis_cache->add_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
 
-        _init_fdw(username, password);
+        _init_fdw();
 
         _thread_manager = std::make_shared<common::MultiQueueThreadManager>(MAX_THREAD_POOL_SIZE);
         _thread_manager->start();
 
-        // create a new thread to run the policy sync
-        _policy_sync_thread = std::thread(&PgDDLMgr::_policy_sync_thread_func, this);
+        // create a new thread to run the policy and role sync
+        _sync_thread = std::thread(&PgDDLMgr::_sync_thread_func, this);
     }
 
-    std::vector<std::string>
-    PgDDLMgr::_policy_sync_database(uint64_t db_id, const std::string &db_name)
+    void
+    PgDDLMgr::_policy_sync_database(LibPqConnectionPtr conn,
+                                    std::vector<std::string> &sql_commands)
     {
-        std::string host;
-        int port;
-        std::string user;
-        std::string password;
-
-        Properties::get_primary_db_config(host, port, user, password);
-
-        auto conn = std::make_shared<LibPqConnection>();
-        conn->connect(host, db_name, user, password, port, false);
-
+        // execute on primary
         conn->exec(fmt::format(POLICY_DIFF_SELECT, _fdw_id));
 
         if (conn->ntuples() == 0) {
             conn->clear();
-            return {};
+            return;
         }
 
-        std::vector<std::string> sql_commands;
-
         // iterate through the result set and process the policy diffs
-        // skip table_oid (1) and policy_oid (4)
         for (int i = 0; i < conn->ntuples(); i++) {
             std::string diff_type = conn->get_string(i, 0);
-            std::string table_name = conn->escape_identifier(conn->get_string(i, 2));
-            std::string schema_name = conn->escape_identifier(conn->get_string(i, 3));
-            std::string policy_name = conn->escape_identifier(conn->get_string(i, 5));
-            auto policy_name_old = conn->get_string_optional(i, 6);
+            std::string table_name = conn->escape_identifier(conn->get_string(i, 1));
+            std::string schema_name = conn->escape_identifier(conn->get_string(i, 2));
+            std::string policy_name = conn->escape_identifier(conn->get_string(i, 3));
+            auto policy_name_old = conn->get_string_optional(i, 4);
 
             if (diff_type == "REMOVED") {
                 sql_commands.push_back(
@@ -188,9 +197,9 @@ namespace springtail::pg_fdw {
             }
 
             // these are only valid for ADDED and MODIFIED diffs
-            bool policy_permissive = conn->get_boolean(i, 7);
-            std::string policy_roles = conn->get_string(i, 8);
-            std::string policy_qual = conn->get_string(i, 9);
+            bool policy_permissive = conn->get_boolean(i, 5);
+            std::string policy_roles = conn->get_string(i, 6);
+            std::string policy_qual = conn->get_string(i, 7);
 
             // convert roles to {} from json array string
             nlohmann::json roles_json = nlohmann::json::parse(policy_roles);
@@ -231,23 +240,103 @@ namespace springtail::pg_fdw {
                                 policy_name, schema_name, table_name,
                                 policy_roles, policy_qual));
             }
-
         }
-
         conn->clear();
-
-        return sql_commands;
     }
 
     void
-    PgDDLMgr::_apply_sql_commands(uint64_t db_id, const std::string &db_name, const std::vector<std::string> &sql_commands)
+    PgDDLMgr::_roles_sync_database(LibPqConnectionPtr conn,
+                                   std::vector<std::string> &sql_commands)
+    {
+        // execute on primary
+        conn->exec(fmt::format(ROLE_DIFF_SELECT, _fdw_id));
+
+        if (conn->ntuples() == 0) {
+            conn->clear();
+            return;
+        }
+
+        // iterate through the result set and process the role diffs
+        for (int i = 0; i < conn->ntuples(); i++) {
+            std::string diff_type = conn->get_string(i, 0);
+            std::string role_name = conn->escape_identifier(conn->get_string(i, 1));
+            bool rolsuper = conn->get_boolean(i, 2);
+            bool rolinherit = conn->get_boolean(i, 3);
+            bool rolcanlogin = conn->get_boolean(i, 4);
+            bool rolbypassrls = conn->get_boolean(i, 5);
+
+            if (diff_type == "REMOVED") {
+                sql_commands.push_back(fmt::format("DROP ROLE IF EXISTS {}", role_name));
+                continue;
+            }
+
+            if (diff_type == "ADDED") {
+                if (rolcanlogin) {
+                    // create a new user with login
+                    sql_commands.push_back(fmt::format(CREATE_USER, role_name, _fdw_password));
+                } else {
+                    // create a new role without login
+                    sql_commands.push_back(fmt::format(CREATE_ROLE, role_name));
+                }
+                // fall through
+            }
+
+            if (diff_type == "MODIFIED" || diff_type == "ADDED") {
+                // modify the existing role
+                sql_commands.push_back(
+                    fmt::format("ALTER ROLE {} WITH {} {} {}",
+                                role_name,
+                                (rolsuper || rolbypassrls) ? "BYPASSRLS" : "NOBYPASSRLS",
+                                rolinherit ? "INHERIT" : "NOINHERIT",
+                                rolcanlogin ? "LOGIN" : "NOLOGIN"));
+            }
+        }
+        conn->clear();
+    }
+
+    void
+    PgDDLMgr::_role_member_sync_database(LibPqConnectionPtr conn,
+                                         std::vector<std::string> &sql_commands)
+    {
+        // execute on primary
+        conn->exec(fmt::format(ROLE_MEMBER_DIFF_SELECT, _fdw_id));
+
+        if (conn->ntuples() == 0) {
+            conn->clear();
+            return;
+        }
+
+        // iterate through the result set and process the role member diffs
+        for (int i = 0; i < conn->ntuples(); i++) {
+            std::string diff_type = conn->get_string(i, 0);
+            std::string role_name = conn->escape_identifier(conn->get_string(i, 1));
+            std::string member_name = conn->escape_identifier(conn->get_string(i, 2));
+
+            DCHECK_NE(diff_type, "MODIFIED") << "Role member diffs should not be modified";
+
+            if (diff_type == "REMOVED") {
+                sql_commands.push_back(fmt::format("REVOKE {} FROM {}", member_name, role_name));
+                continue;
+            }
+
+            if (diff_type == "ADDED") {
+                sql_commands.push_back(fmt::format("GRANT {} TO {}", member_name, role_name));
+                continue;
+            }
+        }
+        conn->clear();
+    }
+
+    void
+    PgDDLMgr::_apply_sql_commands(uint64_t db_id, const std::string &db_name,
+                                  const std::vector<std::string> &sql_commands)
     {
         if (sql_commands.empty()) {
             return;
         }
 
         // get the connection for the database
-        auto conn = _connect_fdw(db_id, db_name);
+        auto conn = _get_fdw_connection(db_id, db_name);
         if (!conn) {
             throw Error("Failed to get connection for database " + std::to_string(db_id));
         }
@@ -257,21 +346,44 @@ namespace springtail::pg_fdw {
             LOG_DEBUG(LOG_FDW, "Applying SQL command: {}", sql);
             conn->exec(sql);
         }
+
+        _release_fdw_connection(db_id, conn);
     }
 
     void
-    PgDDLMgr::_policy_sync_thread_func()
+    PgDDLMgr::_sync_thread_func()
     {
-        // run the policy sync every 10 seconds
+        std::string host;
+        int port;
+        std::string user;
+        std::string password;
+
+        // run the sync thread every 10 seconds
         while (!_is_shutting_down) {
             try {
-                // sync policies
+                // get primary db connection
+                Properties::get_primary_db_config(host, port, user, password);
+                auto conn = std::make_shared<LibPqConnection>();
+
+                // iterate through all databases and perform sync operations
                 auto databases = Properties::get_instance()->get_databases();
-                for (auto db : databases) {
-                    auto &&sql_commands = _policy_sync_database(db.first, db.second);
-                    if (!sql_commands.empty()) {
-                        _apply_sql_commands(db.first, db.second, sql_commands);
-                    }
+                for (auto &[db_id, db_name] : databases) {
+                    std::vector<std::string> sql_commands;
+
+                    // connect to the primary database
+                    conn->connect(host, db_name, user, password, port, false);
+
+                    // sync user roles for this database
+                    _roles_sync_database(conn, sql_commands);
+
+                    // sync role members for this database
+                    _role_member_sync_database(conn, sql_commands);
+
+                    // sync policies for this database
+                    _policy_sync_database(conn, sql_commands);
+
+                    // apply the sql commands to the database
+                    _apply_sql_commands(db_id, db_name, sql_commands);
                 }
             } catch (const std::exception &e) {
                 LOG_ERROR("Error syncing policies: {}", e.what());
@@ -279,11 +391,11 @@ namespace springtail::pg_fdw {
             }
 
             // sleep for POLICY_SYNC_INTERVAL_SECONDS
-            auto lock = std::unique_lock<std::mutex>(_policy_shutdown_mutex);
+            auto lock = std::unique_lock<std::mutex>(_sync_shutdown_mutex);
             while (!_is_shutting_down) {
-                _policy_shutdown_cv.wait_for(
+                _sync_shutdown_cv.wait_for(
                     lock,
-                    std::chrono::seconds(POLICY_SYNC_INTERVAL_SECONDS),
+                    std::chrono::seconds(SYNC_INTERVAL_SECONDS),
                     [this]() { return this->_is_shutting_down.load(); }
                 );
             }
@@ -389,35 +501,14 @@ namespace springtail::pg_fdw {
     }
 
     void
-    PgDDLMgr::_init_fdw(const std::string &username, const std::string &password)
+    PgDDLMgr::_init_fdw()
     {
         // get map of dbs id:name from redis
         auto dbs = Properties::get_databases();
 
-        // connect to the db to setup the replicated dbs, the fdw user and foreign servers
-        LibPqConnectionPtr conn = _connect_fdw(std::nullopt, "template1");
-
-        // see if the fdw user exists, if not create it
-        _fdw_username = username;
-        conn->exec(fmt::format("SELECT 1 FROM pg_roles WHERE rolname = '{}'", username));
-        if (conn->ntuples() == 0) {
-            // create the user
-            conn->clear();
-            conn->exec(fmt::format(CREATE_FDW_USER, username, password));
-            conn->clear();
-        }
-
         // go through each db and drop/create the database on the fdw
         for (const auto &[db_id, db_name] : dbs) {
-            _create_database(conn, db_id, db_name);
-        }
-
-        // close the connection
-        conn->disconnect();
-
-        // go through each db and create the foreign server, connect to each db
-        for (const auto &[db_id, db_name] : dbs) {
-            _create_schemas(conn, db_id, db_name);
+            _add_replicated_database(db_id, db_name, false);
         }
     }
 
@@ -573,7 +664,7 @@ namespace springtail::pg_fdw {
     }
 
     LibPqConnectionPtr
-    PgDDLMgr::_connect_fdw(std::optional<uint64_t> db_id_opt, const std::string &db_name)
+    PgDDLMgr::_get_fdw_connection(std::optional<uint64_t> db_id_opt, const std::string &db_name)
     {
         // check if we have a connection in the cache
         LibPqConnectionPtr conn = nullptr;
@@ -585,12 +676,17 @@ namespace springtail::pg_fdw {
         }
 
         uint64_t db_id = db_id_opt.value();
+
+        std::unique_lock<std::mutex> lock(_fdw_conn_cache_mutex);
         conn = _fdw_conn_cache.get(db_id);
 
         // check if the connection is still valid
         if (conn != nullptr) {
             if (conn->is_connected()) {
                 LOG_DEBUG(LOG_FDW, "Reusing connection for db_id: {}", db_id);
+                // evict the connection from the cache with no callback
+                // this is so that it can be used and no-one else will try to use it
+                _fdw_conn_cache.evict(db_id, true);
                 return conn;
             }
             _fdw_conn_cache.evict(db_id);
@@ -600,12 +696,30 @@ namespace springtail::pg_fdw {
 
         // use libpq to connect to the database
         conn = std::make_shared<LibPqConnection>();
-        conn->connect(_hostname, db_name, _username, _password, _port, false);
+        conn->connect(_hostname, _db_prefix + db_name, _username, _password, _port, false);
 
-        // save the connection in the cache
-        _fdw_conn_cache.insert(db_id, conn);
-
+        // the connection should be released back to the cache
         return conn;
+    }
+
+    void
+    PgDDLMgr::_release_fdw_connection(uint64_t db_id, LibPqConnectionPtr conn)
+    {
+        // check if the connection is still valid
+        if (conn == nullptr || !conn->is_connected()) {
+            return;
+        }
+
+        // insert the connection into the cache
+        std::unique_lock<std::mutex> lock(_fdw_conn_cache_mutex);
+        if (_fdw_conn_cache.peek(db_id) == nullptr) {
+            LOG_DEBUG(LOG_FDW, "Releasing connection for db_id: {}", db_id);
+            _fdw_conn_cache.insert(db_id, conn);
+            return;
+        }
+
+        LOG_DEBUG(LOG_FDW, "Releasing existing connection for db_id: {}", db_id);
+        conn->disconnect();
     }
 
     bool
@@ -614,7 +728,7 @@ namespace springtail::pg_fdw {
     {
         // get the database name for the db_id; XXX should see if we can swtich to OID
         std::string db_name = Properties::get_db_name(db_id);
-        LibPqConnectionPtr conn = _connect_fdw(db_id, _db_prefix + db_name);
+        LibPqConnectionPtr conn = _get_fdw_connection(db_id, _db_prefix + db_name);
 
         try {
             // generate a DDL statement for each JSON in the transaction
@@ -638,9 +752,12 @@ namespace springtail::pg_fdw {
             // execute the set of statements
             _execute_ddl(conn, db_id, schema_xid, txn);
 
+            _release_fdw_connection(db_id, conn);
+
             return true;
 
         } catch (Error &e) {
+            _release_fdw_connection(db_id, conn);
             e.log_backtrace();
             assert(0); // assert in debug
             return false;
@@ -932,8 +1049,8 @@ namespace springtail::pg_fdw {
 
     void
     PgDDLMgr::_create_database(LibPqConnectionPtr conn,
-                     const uint64_t db_id,
-                     const std::string &db_name)
+                               const uint64_t db_id,
+                               const std::string &db_name)
     {
         auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
         LOG_DEBUG(LOG_FDW, "Creating DB ID: {}, DB Name: {}", db_id, db_name);
@@ -955,9 +1072,8 @@ namespace springtail::pg_fdw {
     }
 
     void
-    PgDDLMgr::_create_schemas(LibPqConnectionPtr conn,
-                             const uint64_t db_id,
-                             const std::string &db_name)
+    PgDDLMgr::_create_schemas(const uint64_t db_id,
+                              const std::string &db_name)
     {
 
         auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
@@ -971,10 +1087,7 @@ namespace springtail::pg_fdw {
         // get user types from system tables
         auto &&user_types = _get_usertypes(db_id, xid);
 
-        // connect to the database on the fdw
-        conn = _connect_fdw(db_id, _db_prefix + db_name);
-
-        std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
+        auto conn = _get_fdw_connection(db_id, db_name);
 
         // drop and create the fdw extension
         conn->exec(fmt::format("DROP EXTENSION IF EXISTS {} CASCADE", SPRINGTAIL_FDW_EXTENSION));
@@ -987,6 +1100,7 @@ namespace springtail::pg_fdw {
         conn->exec(fmt::format("DROP SERVER IF EXISTS {}", SPRINGTAIL_FDW_SERVER_NAME));
         conn->clear();
 
+        std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
         conn->exec(fmt::format("CREATE SERVER {} FOREIGN DATA WRAPPER {} OPTIONS (id '{}', db_id '{}', db_name '{}', schema_xid '{}')",
                                 SPRINGTAIL_FDW_SERVER_NAME, SPRINGTAIL_FDW_EXTENSION, _fdw_id, db_id, prefixed_name, xid));
         conn->clear();
@@ -1046,40 +1160,52 @@ namespace springtail::pg_fdw {
 
         // update redis with the schema xid
         redis_ddl.update_schema_xid(_fdw_id, db_id, xid);
-
-        // close the connection
-        conn->disconnect();
     }
 
     void
-    PgDDLMgr::_add_replicated_database(uint64_t db_id)
+    PgDDLMgr::_add_replicated_database(uint64_t db_id,
+                                       const std::optional<std::string> &db_name_opt,
+                                       bool check_exists)
+
     {
         auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
-        nlohmann::json db_config = Properties::get_db_config(db_id);
-        std::string db_name = db_config["name"];
 
-        // acquire lock
-        std::shared_lock shared_lock(_db_mutex);
-        if (_db_xid_map.contains(db_id)) {
-            return;
+        std::string db_name;
+        if (!db_name_opt.has_value()) {
+            // if db_name is not provided, get it from the properties
+            nlohmann::json db_config = Properties::get_db_config(db_id);
+            db_name = db_config["name"];
+        } else {
+            db_name = db_name_opt.value();
         }
-        shared_lock.unlock();
+
+        if (check_exists) {
+            // check if the database already exists in the fdw
+            std::shared_lock shared_lock(_db_mutex);
+            if (_db_xid_map.contains(db_id)) {
+                LOG_DEBUG(LOG_FDW, "Database {} already exists in the fdw", db_name);
+                return;
+            }
+        }
 
         // verify that the database does not exist before trying to add it
-        LibPqConnectionPtr conn = _connect_fdw(std::nullopt, "postgres");
-        std::string prefixed_name = conn->escape_string(_db_prefix + db_name);
-        conn->exec(fmt::format(VERIFY_DB_EXISTS, prefixed_name));
-        if (conn->ntuples() > 0) {
-            conn->disconnect();
-            return;
+        LibPqConnectionPtr conn = _get_fdw_connection(std::nullopt, "postgres");
+        if (check_exists) {
+            std::string prefixed_name = conn->escape_string(_db_prefix + db_name);
+            conn->exec(fmt::format(VERIFY_DB_EXISTS, prefixed_name));
+            if (conn->ntuples() > 0) {
+                conn->disconnect();
+                return;
+            }
+            conn->clear();
         }
-        conn->clear();
 
         // add database
         _create_database(conn, db_id, db_name);
         conn->disconnect();
 
-        _create_schemas(conn, db_id, db_name);
+        // create schemas
+        _create_schemas(db_id, db_name);
     }
 
     void
@@ -1097,7 +1223,7 @@ namespace springtail::pg_fdw {
         std::string db_name = db_config["name"];
 
         // drop database
-        LibPqConnectionPtr conn = _connect_fdw(std::nullopt, "postgres");
+        LibPqConnectionPtr conn = _get_fdw_connection(std::nullopt, "postgres");
         std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
         std::string drop_db = fmt::format(DROP_DATABASE, prefixed_name);
         conn->exec(drop_db);

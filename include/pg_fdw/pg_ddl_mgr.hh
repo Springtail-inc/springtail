@@ -32,8 +32,8 @@ namespace springtail::pg_fdw {
         static constexpr int MAX_CONNECTION_CACHE_SIZE = 10;
         /** Max number of threads in the thread manager pool */
         static constexpr int MAX_THREAD_POOL_SIZE = 4;
-        /** Policy sync interval in seconds */
-        static constexpr int POLICY_SYNC_INTERVAL_SECONDS = 30;
+        /** Sync thread check interval in seconds */
+        static constexpr int SYNC_INTERVAL_SECONDS = 30;
 
         /**
          * Start the main thread
@@ -57,7 +57,7 @@ namespace springtail::pg_fdw {
          */
         void notify_shutdown() {
             _is_shutting_down = true;
-            _policy_shutdown_cv.notify_all();
+            _sync_shutdown_cv.notify_all();
         }
 
         /**
@@ -76,20 +76,23 @@ namespace springtail::pg_fdw {
                                               const LibPqConnectionPtr conn);
     private:
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections
+        std::mutex _fdw_conn_cache_mutex;  ///< mutex for fdw connection cache
+
         RedisCache::RedisChangeWatcherPtr _cache_watcher;           ///< redis cache callback object
         std::shared_ptr<common::MultiQueueThreadManager> _thread_manager;   ///< thread manager that processes DDL requests
 
-        std::thread _policy_sync_thread;              ///< thread for syncing policies
-        std::condition_variable _policy_shutdown_cv;  ///< condition variable for shutdown notification
-        std::mutex _policy_shutdown_mutex;            ///< mutex for shutdown notification
+        std::thread _sync_thread;              ///< thread for syncing policies and roles
+        std::condition_variable _sync_shutdown_cv;  ///< condition variable for shutdown notification
+        std::mutex _sync_shutdown_mutex;            ///< mutex for shutdown notification
 
         std::string _fdw_id;                       ///< FDW ID
 
         std::string _hostname;                     ///< hostname
-        std::string _username;                     ///< username
-        std::string _password;                     ///< password
+        std::string _username;                     ///< username (ddl user superuser)
+        std::string _password;                     ///< password (ddl user password)
         std::string _db_prefix;                    ///< db prefix, may be empty
-        std::string _fdw_username;                 ///< FDW username
+        std::string _fdw_username;                 ///< FDW username (ro-only)
+        std::string _fdw_password;                 ///< FDW password
         uint64_t _db_instance_id;                  ///< database instance id
         int _port;                                 ///< port
 
@@ -101,6 +104,7 @@ namespace springtail::pg_fdw {
 
         /** Private constructor */
         PgDDLMgr();
+
         /** Private destructor */
         ~PgDDLMgr() override = default;
 
@@ -108,17 +112,23 @@ namespace springtail::pg_fdw {
         void _internal_shutdown() override;
 
         /** Initialize the FDW */
-        void _init_fdw(const std::string &username, const std::string &password);
+        void _init_fdw();
 
         /** Redis callback for database ID changes */
         void _on_database_ids_changed(const std::string &path,
                                       const nlohmann::json &new_value);
 
-        /** Policy sync thread; sync policy changes to FDW */
-        void _policy_sync_thread_func();
+        /** Sync thread; sync policy changes, roles, role memberships etc to FDW */
+        void _sync_thread_func();
 
         /** Helper to sync policies for a database */
-        std::vector<std::string> _policy_sync_database(uint64_t db_id, const std::string &db_name);
+        void _policy_sync_database(LibPqConnectionPtr conn, std::vector<std::string> &sql_commands);
+
+        /** Helper to sync roles for a database */
+        void _roles_sync_database(LibPqConnectionPtr conn, std::vector<std::string> &sql_commands);
+
+        /** Helper to sync role members for a database */
+        void _role_member_sync_database(LibPqConnectionPtr conn, std::vector<std::string> &sql_commands);
 
         /** Helper to apply SQL commands */
         void _apply_sql_commands(uint64_t db_id, const std::string &db_name, const std::vector<std::string> &sql_commands);
@@ -147,7 +157,10 @@ namespace springtail::pg_fdw {
                                            LibPqConnectionPtr conn);
 
         /** Helper to connect to fdw db */
-        LibPqConnectionPtr _connect_fdw(std::optional<uint64_t> db_id, const std::string &db_name);
+        LibPqConnectionPtr _get_fdw_connection(std::optional<uint64_t> db_id, const std::string &db_name);
+
+        /** Helper to release FDW connection back to the cache */
+        void _release_fdw_connection(uint64_t db_id, LibPqConnectionPtr conn);
 
         /**
          * @brief Helper to apply outstanding DDL changes to the FDW tables.
@@ -214,43 +227,36 @@ namespace springtail::pg_fdw {
 
         /**
          * @brief Function for creating a replicated database
-         *
          * @param conn - connection object
          * @param db_id - database id
          * @param db_name - database name
          */
-        void
-        _create_database(LibPqConnectionPtr conn,
+        void _create_database(LibPqConnectionPtr conn,
                          const uint64_t db_id,
                          const std::string &db_name);
 
         /**
          * @brief Function for creating a replicated database schemas
-         *
-         * @param conn - connection object
          * @param db_id - database id
          * @param db_name - database name
          */
-        void
-        _create_schemas(LibPqConnectionPtr conn,
-                        const uint64_t db_id,
-                        const std::string &db_name);
+        void _create_schemas(const uint64_t db_id,
+                             const std::string &db_name);
 
         /**
          * @brief Function for adding a new replicated database
-         *
          * @param db_id - databese id
          */
-        void
-        _add_replicated_database(uint64_t db_id);
+        void _add_replicated_database(uint64_t db_id,
+                                      const std::optional<std::string> &db_name_opt = std::nullopt,
+                                      bool check_exists = false);
+
 
         /**
          * @brief Function for removing an existing replicated database
-         *
          * @param db_id - databese id
          */
-        void
-        _remove_replicated_database(uint64_t db_id);
+        void _remove_replicated_database(uint64_t db_id);
 
     };
 
