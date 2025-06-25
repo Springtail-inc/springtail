@@ -171,6 +171,22 @@ namespace springtail {
     }
 
     void
+    TableMgr::attach_partition(uint64_t db_id,
+                               const XidLsn &xid,
+                               const PgMsgAttachPartition &msg)
+    {
+        sys_tbl_mgr::Client::get_instance()->attach_partition(db_id, xid, msg);
+    }
+
+    void
+    TableMgr::detach_partition(uint64_t db_id,
+                               const XidLsn &xid,
+                               const PgMsgDetachPartition &msg)
+    {
+        sys_tbl_mgr::Client::get_instance()->detach_partition(db_id, xid, msg);
+    }
+
+    void
     TableMgr::finalize_metadata(uint64_t db_id,
                                 uint64_t xid)
     {
