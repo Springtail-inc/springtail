@@ -56,6 +56,9 @@ namespace springtail::constant {
     /** The format of a raw data file name. */
     static constexpr std::string_view DATA_FILE = "raw";
 
+/** The maximum offset with a single subfile.  Based on a 32-bit offset in the extent ID. */
+static constexpr uint32_t MAX_SUBFILE_OFFSET = 0xC0000000;
+
     /** The format of a roots file. */
     static constexpr std::string_view ROOTS_FILE = "roots";
     static constexpr std::string_view ROOTS_XID_FILE = "roots.{}";

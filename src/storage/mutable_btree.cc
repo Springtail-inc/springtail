@@ -206,9 +206,8 @@ namespace springtail {
             _root = new_root;
         }
 
-        // sync the file to ensure all data is written to disk
-        auto handle = IOMgr::get_instance()->open(_file, IOMgr::IO_MODE::WRITE, true);
-        handle->sync();
+        // flush the file to ensure all data is written to disk
+        StorageCache::get_instance()->flush(_file);
 
         // mark the tree as finalized so that additional changes can't be made at this XID
         _finalized = true;

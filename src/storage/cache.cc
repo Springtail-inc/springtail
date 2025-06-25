@@ -248,12 +248,9 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
         open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_FLUSH_CALLS);
         const auto start_time = std::chrono::system_clock::now();
 
-        //Get the end offset of data file for the table
-        //to be returned if nothing to flush
-        uint64_t end_offset = 0;
-        if (std::filesystem::exists(file)) {
-            end_offset = std::filesystem::file_size(file);
-        }
+        // Get the end offset of the last data file for the table
+        // to be returned if nothing to flush
+        uint64_t end_offset = StorageCache::get_instance()->_data_cache->get_end_extent_id(file);
 
         // go through the dirty page list for the file
         auto file_i = _flush_list.find(file);
@@ -334,8 +331,11 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
         // flush list for the file must be empty, so remove it
         _flush_list.erase(file);
 
-        //Get the end offset of data file for the table
-        return std::filesystem::file_size(file);
+        // ensure that the data is actually sync()'d to disk
+        StorageCache::get_instance()->_data_cache->sync(file);
+
+        // Get the end offset of data file for the table
+        return StorageCache::get_instance()->_data_cache->get_end_extent_id(file);
     }
 
     void
@@ -1345,6 +1345,31 @@ StorageCache::PageCache::background_cleaner()
         return extent;
     }
 
+void
+StorageCache::DataCache::sync(const std::filesystem::path &file)
+{
+    uint32_t file_id = _get_output_file_id(file);
+    auto path = file;
+    path += fmt::format(".{:08x}", file_id);
+
+    auto handle = IOMgr::get_instance()->open(path, IOMgr::IO_MODE::WRITE, true);
+    handle->sync();
+}
+
+ExtentId
+StorageCache::DataCache::get_end_extent_id(const std::filesystem::path &file)
+{
+    uint32_t file_id = _get_output_file_id(file);
+    uint32_t end_offset = 0;
+    auto path = file;
+    path += fmt::format(".{:08x}", file_id);
+    if (std::filesystem::exists(path)) {
+        end_offset = std::filesystem::file_size(path);
+    }
+
+    return ExtentId(file_id, end_offset);
+}
+
     void
     StorageCache::DataCache::put(CacheExtentPtr extent)
     {
@@ -1556,18 +1581,41 @@ StorageCache::PageCache::background_cleaner()
         // perform the flush
         {
             boost::unique_lock lock(_mutex, boost::adopt_lock);
+
+            // SPR-847 this is where we need to determine the correct file to write to and set the
+            //         extent ID appropriately -- we need to check some kind of mapping from _file
+            //         -> latest file ID -- we can also use this to perform the rotation to the next
+            //         file in the case that the file has grown too large / fragmented
+            auto file_id = _get_output_file_id(extent->_file);
+
+            // SPR-847 update the subfile stats
+            auto &stats = _subfile_stats[extent->_file];
+            if (extent->header().prev_offset != constant::UNKNOWN_EXTENT) {
+                auto prev_file_id = ExtentId(extent->header().prev_offset).file_id();
+                ++stats[prev_file_id].dead;
+            }
+            ++stats[file_id].total;
             lock.unlock();
 
-            auto handle = IOMgr::get_instance()->open(extent->_file, IOMgr::IO_MODE::APPEND, true);
-            auto response = extent->async_flush(handle);
+            auto path = extent->_file;
+            path += fmt::format(".{:08x}", file_id);
+
+            auto handle = IOMgr::get_instance()->open(path, IOMgr::IO_MODE::APPEND, true);
+            auto future = extent->async_flush(handle);
 
             // XXX we could do this asynchronously and return a future that completes when the extent ID
             //     becomes available... should be safe to do so since we are already putting the extent
             //     into an exclusive FLUSHING state
-            extent->_extent_id = response.get()->offset;
+            auto response = future.get();
+            extent->_extent_id = ExtentId(file_id, response->offset);
 
             lock.lock();
             lock.release();
+
+            // SPR-847 check if we need to rotate the file
+            if (response->next_offset > constant::MAX_SUBFILE_OFFSET) {
+                _rotate_file(extent->_file);
+            }
         }
 
         // update the cache ID as pointing to the new extent ID
@@ -1580,6 +1628,39 @@ StorageCache::PageCache::background_cleaner()
         extent->_flush_cv->notify_all();
         extent->_flush_cv = nullptr;
     }
+
+uint32_t
+StorageCache::DataCache::_get_output_file_id(const std::filesystem::path &file)
+{
+    // find the latest file ID for the given file
+    // SPR-847 need to have durable storage for this with memory limits
+    auto it = _file_id_cache.find(file);
+    if (it == _file_id_cache.end()) {
+        // SPR-847 figure out what the latest output subfile is XXXXXX
+        auto result = _file_id_cache.insert({ file, 0 });
+        CHECK(result.second);
+        it = result.first;
+    }
+    return it->second;
+}
+
+void
+StorageCache::DataCache::_rotate_file(const std::filesystem::path &file)
+{
+    uint32_t file_id = _get_output_file_id(file) + 1;
+
+    // sync the current file to ensure the data is on disk
+    auto path = file;
+    path += fmt::format(".{:08x}", file_id);
+
+    auto handle = IOMgr::get_instance()->open(path, IOMgr::IO_MODE::WRITE, true);
+    handle->sync();
+
+    // update the output subfile
+    // SPR-847 update the system table with the next file ID as the output ID
+    _file_id_cache[file] = file_id;
+    _subfile_stats[file][file_id] = { 0, 0 };
+}
 
     void
     StorageCache::DataCache::_make_extent_space()
@@ -1687,8 +1768,12 @@ StorageCache::PageCache::background_cleaner()
         lock.unlock();
 
         // read the extent
-        auto handle = IOMgr::get_instance()->open(file, IOMgr::READ, true);
-        auto response = handle->read(extent_id);
+        auto eid = ExtentId(extent_id);
+        auto path = file;
+        path += fmt::format(".{:08x}", eid.file_id());
+
+        auto handle = IOMgr::get_instance()->open(path, IOMgr::READ, true);
+        auto response = handle->read(eid.offset());
         auto extent = std::make_shared<CacheExtent>(response->data, file, extent_id);
 
         // reacquire the lock once IO complete

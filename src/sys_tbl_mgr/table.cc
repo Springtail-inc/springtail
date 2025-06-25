@@ -468,8 +468,12 @@ namespace indexer_helpers {
         // and if the extent's XID is different than the XID passed
         // update page cache XID with extent's XID. This can avoid
         // direct IO access from here
-        auto data_file_handle = IOMgr::get_instance()->open(_table_dir / constant::DATA_FILE, IOMgr::IO_MODE::READ, true);
-        auto response = data_file_handle->read(extent_id);
+        ExtentId eid(extent_id);
+        auto path = _table_dir / constant::DATA_FILE;
+        path += fmt::format(".{:08x}", eid.file_id());
+
+        auto data_file_handle = IOMgr::get_instance()->open(path, IOMgr::IO_MODE::READ, true);
+        auto response = data_file_handle->read(eid.offset());
         if (response->data.empty()) {
             return {nullptr, 0};
         } else {

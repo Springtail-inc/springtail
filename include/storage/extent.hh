@@ -20,6 +20,27 @@ namespace springtail {
     class MutableFieldTuple;
     class CompressedExtent;
 
+/**
+ * Wrapper class to manipulate extent IDs.
+ */
+class ExtentId {
+public:
+    explicit ExtentId(uint64_t id) : _file_id(id >> 32), _offset(id & 0xFFFFFFFF) {}
+    ExtentId(uint32_t file_id, uint32_t offset) : _file_id(file_id), _offset(offset) {}
+
+    uint32_t file_id() const { return _file_id; }
+    uint32_t offset() const { return _offset; }
+
+    operator uint64_t() const {
+        uint64_t id = _file_id;
+        return (id << 32) | _offset;
+    }
+
+private:
+    uint32_t _file_id; ///< The sub-file referenced by this extent ID.
+    uint32_t _offset; ///< The offset in the sub-file where this extent is positioned.
+};
+
     class ExtentType {
     private:
         uint8_t _type;

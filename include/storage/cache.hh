@@ -449,6 +449,16 @@ namespace springtail {
              */
             CacheExtentPtr get_empty(const std::filesystem::path &file, const ExtentHeader &header);
 
+            /**
+             * Sync any outstanding writes to the file to disk.
+             */
+            void sync(const std::filesystem::path &file);
+
+            /**
+             * Returns the ending extent ID for the given data file.
+             */
+            ExtentId get_end_extent_id(const std::filesystem::path &file);
+
         private:
             /**
              * Retrieve an extent from the cache based on a cache ID.  Cache IDs are generated when
@@ -486,6 +496,16 @@ namespace springtail {
              * cached, this function will retrieve the extent from disk.
              */
             CacheExtentPtr _get_clean(const std::filesystem::path& file, uint64_t extent_id);
+
+            /**
+             * Helper to retrieve the latest subfile for a given data file.
+             */
+            uint32_t _get_output_file_id(const std::filesystem::path &file);
+
+            /**
+             * Helper to rotate a given data file to the next subfile.
+             */
+            void _rotate_file(const std::filesystem::path &file);
 
             /**
              * Internal helper to make space for a new extent within the cache by evicting another extent.
@@ -528,6 +548,11 @@ namespace springtail {
                 bool signaled = false;
             };
 
+            struct SubFileStats {
+                uint32_t dead = 0;
+                uint32_t total = 0;
+            };
+
         private:
             boost::mutex _mutex; ///< Mutex on the cache object to maintain thread-safety.
 
@@ -546,6 +571,9 @@ namespace springtail {
             uint64_t _size; ///< The current size of the cache.
             uint64_t _max_size; ///< The maximum allowed size of the cache.
             uint64_t _next_cache_id; ///< The next cache ID to assign.
+
+            std::map<std::filesystem::path, uint32_t> _file_id_cache;
+            std::map<std::filesystem::path, std::map<uint32_t, SubFileStats>> _subfile_stats;
         };
 
     public:
