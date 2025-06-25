@@ -33,7 +33,7 @@ SyncTracker::issue_resync_and_wait(uint64_t db_id,
     table_sync_queue.push(request);
 
     // add the table to the resync map; will get removed when mark_inflight() is called
-    _resync_map[db_id][table_id].insert(xid);
+    _resync_map[db_id].insert(table_id);
 
 }
 
@@ -56,12 +56,9 @@ SyncTracker::mark_inflight(uint64_t db_id,
         CHECK(table_i != db_i->second.end());
 
         // clear from the resync map
-        table_i->second.erase(xid);
-        if (table_i->second.empty()) {
-            db_i->second.erase(table_i);
-            if (db_i->second.empty()) {
-                _resync_map.erase(db_i);
-            }
+        db_i->second.erase(table_i);
+        if (db_i->second.empty()) {
+            _resync_map.erase(db_i);
         }
     }
 
