@@ -73,10 +73,10 @@ namespace springtail::numeric {
     constexpr uint16_t NUMERIC_SHORT_DSCALE_MASK        = 0x1F80;
     constexpr uint16_t NUMERIC_SHORT_DSCALE_SHIFT       = 7;
     constexpr uint16_t NUMERIC_SHORT_DSCALE_MAX         = (NUMERIC_SHORT_DSCALE_MASK >> NUMERIC_SHORT_DSCALE_SHIFT);
-    constexpr uint16_t NUMERIC_SHORT_WEIGHT_SIGN_MASK   = 0x0040;
-    constexpr uint16_t NUMERIC_SHORT_WEIGHT_MASK        = 0x003F;
-    constexpr uint16_t NUMERIC_SHORT_WEIGHT_MAX         = NUMERIC_SHORT_WEIGHT_MASK;
-    constexpr uint16_t NUMERIC_SHORT_WEIGHT_MIN         = (-(NUMERIC_SHORT_WEIGHT_MASK+1));
+    constexpr  int16_t NUMERIC_SHORT_WEIGHT_SIGN_MASK   = 0x0040;
+    constexpr  int16_t NUMERIC_SHORT_WEIGHT_MASK        = 0x003F;
+    constexpr  int16_t NUMERIC_SHORT_WEIGHT_MAX         = NUMERIC_SHORT_WEIGHT_MASK;
+    constexpr  int16_t NUMERIC_SHORT_WEIGHT_MIN         = (-(NUMERIC_SHORT_WEIGHT_MASK+1));
 
     /**
      * @brief Input structure for parcing data from the buffer
@@ -330,7 +330,9 @@ namespace springtail::numeric {
          */
         static bool can_be_short(int16_t weight, uint16_t dscale)
         {
-            return ((dscale) <= NUMERIC_SHORT_DSCALE_MAX && (weight) <= NUMERIC_SHORT_WEIGHT_MAX && (weight) >= NUMERIC_SHORT_WEIGHT_MIN);
+            return (((dscale) <= NUMERIC_SHORT_DSCALE_MAX) &&
+                    ((weight) <= NUMERIC_SHORT_WEIGHT_MAX) &&
+                    ((weight) >= NUMERIC_SHORT_WEIGHT_MIN));
         }
 
         /**
