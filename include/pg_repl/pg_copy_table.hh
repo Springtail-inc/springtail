@@ -174,6 +174,8 @@ namespace springtail
          */
         void _reset_schema();
 
+        bool _is_table_dropped(uint64_t schema_oid, uint64_t table_oid);
+
         /**
          * @brief Extract schema from table and store in internal _schema object
          * @details Uses atttypid from pg_attribute table for identifier of the type.

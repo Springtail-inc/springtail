@@ -515,7 +515,8 @@ namespace springtail::pg_log_mgr {
                 // check if there's an ongoing sync for this table
                 auto sync_skip = SyncTracker::get_instance()->should_skip(_db, *tid, pg_xid_txn);
                 if (sync_skip.should_skip()) {
-                    LOG_DEBUG(LOG_PG_LOG_MGR, "Skip DDL: tid={} pg_xid={}\n", *tid, pg_xid_txn);
+                    SyncTracker::get_instance()->mark_table_drop(_db, *tid, pg_xid_txn);
+                    LOG_DEBUG(LOG_PG_LOG_MGR, "Marked drop for sync to handle, Skip DDL: tid={} pg_xid={}\n", *tid, pg_xid_txn);
                     return;
                 }
 
@@ -1113,46 +1114,60 @@ namespace springtail::pg_log_mgr {
 
             // issue the updates to the system tables
             for (auto &entry : swap->table_info()) {
-                // update the existence cache for the referenced tables
-                _exists_cache->insert(db_id, entry->table_id, true);
-
                 auto copy_info = entry->info;
-                if (copy_info == nullptr) {
-                    // During resync if the table is found to be invalid as part of the copy flow, the table
-                    // becomes invalidated the copy_ptr becomes null, in those cases we don't need to
-                    // perform any operaion and just skip
-                    LOG_DEBUG(LOG_PG_LOG_MGR, "Copy info not present for table {}", entry->table_id);
-                    continue;
+
+                if (copy_info->is_table_dropped()) {
+                    // Table is dropped when the sync was in queue/in-progress
+
+                    auto table_req = copy_info->table_req();
+                    auto table_info = table_req.table();
+                    PgMsgDropTable drop_msg;
+                    drop_msg.oid = table_info.id();
+                    drop_msg.namespace_name = table_info.namespace_name();
+                    drop_msg.table = table_info.name();
+                    std::string &&ddl_stmt = client->drop_table(_db_id, XidLsn{xid}, std::move(drop_msg));
+                    ddls.emplace_back(ddl_stmt);
+                } else {
+                    // update the existence cache for the referenced tables
+                    _exists_cache->insert(db_id, entry->table_id, true);
+
+                    if (copy_info == nullptr) {
+                        // During resync if the table is found to be invalid as part of the copy flow, the table
+                        // becomes invalidated the copy_ptr becomes null, in those cases we don't need to
+                        // perform any operaion and just skip
+                        LOG_DEBUG(LOG_PG_LOG_MGR, "Copy info not present for table {}", entry->table_id);
+                        continue;
+                    }
+                    LOG_DEBUG(LOG_PG_LOG_MGR, "table_id {}", entry->table_id);
+
+                    // perform the table swap
+                    auto *namespace_req = copy_info->mutable_namespace_req();
+                    namespace_req->set_xid(xid);
+                    namespace_req->set_lsn(constant::RESYNC_NAMESPACE_LSN);
+
+                    auto *create = copy_info->mutable_table_req();
+                    create->set_xid(xid);
+                    create->set_lsn(constant::RESYNC_CREATE_LSN);
+
+                    auto *indexes = copy_info->mutable_index_reqs();
+                    std::vector<proto::IndexRequest> indexes_vec;
+                    for (auto &index : *indexes) {
+                        index.set_xid(xid);
+                        index.set_lsn(constant::RESYNC_CREATE_LSN);
+                        indexes_vec.push_back(index);
+                    }
+
+                    auto *roots = copy_info->mutable_roots_req();
+                    roots->set_xid(xid);
+
+                    // note: this will also invalidate the table's client cache entry
+                    auto ddl_str = client->swap_sync_table(*namespace_req, *create, indexes_vec, *roots);
+
+                    // store the ddl mutations for the FDWs
+                    auto ddl = nlohmann::json::parse(ddl_str);
+                    assert(ddl.is_array());
+                    ddls.insert(ddls.end(), ddl.begin(), ddl.end());
                 }
-                LOG_DEBUG(LOG_PG_LOG_MGR, "table_id {}", entry->table_id);
-
-                // perform the table swap
-                auto *namespace_req = copy_info->mutable_namespace_req();
-                namespace_req->set_xid(xid);
-                namespace_req->set_lsn(constant::RESYNC_NAMESPACE_LSN);
-
-                auto *create = copy_info->mutable_table_req();
-                create->set_xid(xid);
-                create->set_lsn(constant::RESYNC_CREATE_LSN);
-
-                auto *indexes = copy_info->mutable_index_reqs();
-                std::vector<proto::IndexRequest> indexes_vec;
-                for (auto &index : *indexes) {
-                    index.set_xid(xid);
-                    index.set_lsn(constant::RESYNC_CREATE_LSN);
-                    indexes_vec.push_back(index);
-                }
-
-                auto *roots = copy_info->mutable_roots_req();
-                roots->set_xid(xid);
-
-                // note: this will also invalidate the table's client cache entry
-                auto ddl_str = client->swap_sync_table(*namespace_req, *create, indexes_vec, *roots);
-
-                // store the ddl mutations for the FDWs
-                auto ddl = nlohmann::json::parse(ddl_str);
-                assert(ddl.is_array());
-                ddls.insert(ddls.end(), ddl.begin(), ddl.end());
             }
             LOG_INFO("Swapped synced tables: {}@{}", db_id, xid);
 

@@ -90,6 +90,20 @@ SyncTracker::add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
         }
     }
 
+    // clear the dropped_tables map for the provided tables in the db
+    auto dropped_tables_i = _dropped_tables_map.find(sync_msg.db_id);
+    if (dropped_tables_i != _dropped_tables_map.end()) {
+        // clear all of the tables from being in-flight
+        for (auto &entry : sync_msg.tids) {
+            dropped_tables_i->second.erase(entry->table_id);
+        }
+
+        // remove the db from the map if the table set is empty
+        if (dropped_tables_i->second.empty()) {
+            _dropped_tables_map.erase(dropped_tables_i);
+        }
+    }
+
     // find the db in the _sync_map
     auto db_i = _sync_map.find(sync_msg.db_id);
 
@@ -191,6 +205,18 @@ SyncTracker::add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
         for (const auto &entry : swap->table_info()) {
             db_i->second.erase(entry->table_id);
         }
+    }
+
+    void
+    SyncTracker::mark_table_drop(uint64_t db_id,
+                                 uint64_t table_id,
+                                 uint32_t pg_xid)
+    {
+        std::unique_lock lock(_mutex);
+
+        LOG_DEBUG(LOG_PG_LOG_MGR, "db {} table_id {} pg_xid {}", db_id, table_id, pg_xid);
+        // add to the dropped_tables map; will get removed when add_sync() is called
+        _dropped_tables_map[db_id].insert(table_id);
     }
 
     SyncTracker::SkipDetails

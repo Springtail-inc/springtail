@@ -141,6 +141,8 @@ namespace springtail::pg_log_mgr {
          */
         SkipDetails should_skip(uint64_t db_id, uint64_t table_id, uint32_t pg_xid) const;
 
+        void mark_table_drop(uint64_t db_id, uint64_t table_id, uint32_t pg_xid);
+
     private:
         /**
          * Internal class representing the PG snapshot details
@@ -273,6 +275,10 @@ namespace springtail::pg_log_mgr {
 
         /** PgLogReader waits for copy to start here. */
         DbMap<std::shared_ptr<Wait>> _wait_map;
+
+        /** db-> table map indicating that the table is dropped while copy is scheduled */
+        std::map<uint64_t, std::set<uint64_t>> _dropped_tables_map;
+
     };
 
     class SyncTrackerRunner : public ServiceRunner {

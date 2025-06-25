@@ -244,6 +244,12 @@ namespace springtail
         return {pg_xid8, _schema.xids};
     }
 
+    bool PgCopyTable::_is_table_dropped(uint64_t schema_oid, uint64_t table_oid) {
+        _connection.exec(
+                fmt::format("SELECT 1 FROM pg_class WHERE oid = {} AND relnamespace = {}", table_oid, schema_oid));
+        return (_connection.ntuples() == 0);
+    }
+
     void PgCopyTable::_get_secondary_indexes()
     {
         _connection.exec(fmt::format(SECONDARY_INDEX_QUERY, _schema.table_oid));
@@ -669,6 +675,7 @@ namespace springtail
         stats->set_end_offset(metadata.stats.end_offset);
         roots_req->set_snapshot_xid(metadata.snapshot_xid);
 
+        copy_info->set_is_table_dropped(_is_table_dropped(schema_oid, table_oid));
         return std::make_shared<PgCopyResult::TableInfo>(table_oid, copy_info, schema);
     }
 
@@ -948,7 +955,7 @@ namespace springtail
         auto db_config = Properties::get_db_config(db_id);
         auto include_json = db_config["include"];
 
-        return _internal_copy(db_id, xid, std::nullopt, std::nullopt, std::nullopt, include_json);
+        return _internal_copy(db_id, xid, std::nullopt, std::nullopt, std::nullopt, include_json, true);
     }
 
     std::vector<PgCopyResultPtr>
