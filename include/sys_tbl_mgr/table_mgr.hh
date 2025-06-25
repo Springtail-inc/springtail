@@ -75,6 +75,16 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base,
         void drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg);
 
         /**
+         * Attach a partition to a table.
+         */
+        void attach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgAttachPartition &msg);
+
+        /**
+         * Detach a partition from a table.
+         */
+        void detach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgDetachPartition &msg);
+
+        /**
          * Update the roots of a table.
          */
         void update_roots(uint64_t db_id, uint64_t table_id, uint64_t target_xid,
