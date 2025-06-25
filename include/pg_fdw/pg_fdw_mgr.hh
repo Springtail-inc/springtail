@@ -329,7 +329,7 @@ namespace springtail::pg_fdw {
 
         /** Helper to iterate through system tables to generate import command list */
         static List *_import_springtail_catalog(const std::string &server,
-                                                const std::set<std::string, std::less<>> table_set,
+                                                const std::set<std::string, std::less<>> &table_set,
                                                 bool exclude, bool limit);
 
         static void _handle_exception(const Error &e);

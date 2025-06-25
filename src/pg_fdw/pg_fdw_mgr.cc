@@ -1514,7 +1514,7 @@ namespace springtail::pg_fdw {
 
     List *
     PgFdwMgr::_import_springtail_catalog(const std::string &server,
-                                         const std::set<std::string, std::less<>> table_set,
+                                         const std::set<std::string, std::less<>> &table_set,
                                          bool exclude, bool limit)
     {
         List        *commands = NIL;

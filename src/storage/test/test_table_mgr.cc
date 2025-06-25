@@ -87,8 +87,8 @@ namespace {
         create_msg.parent_table_id = 0;
         create_msg.partition_key = "";
         create_msg.partition_bound = "";
-        create_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 0, 0, false, true});
-        create_msg.columns.push_back({"col2", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 1, 0, true, false});
+        create_msg.columns.emplace_back("col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 0, 0, false, true);
+        create_msg.columns.emplace_back("col2", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 1, 0, true, false);
 
         TableMgr::get_instance()->create_table(db_id, {2, 2}, create_msg);
 
@@ -102,8 +102,8 @@ namespace {
         alter_msg.parent_table_id = 0;
         alter_msg.partition_key = "";
         alter_msg.partition_bound = "";
-        alter_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 0, 0, false, true});
-        alter_msg.columns.push_back({"colnew", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 1, 0, true, false});
+        alter_msg.columns.emplace_back("col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 0, 0, false, true);
+        alter_msg.columns.emplace_back("colnew", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 1, 0, true, false);
 
         TableMgr::get_instance()->alter_table(db_id, {3, 3}, alter_msg);
 
@@ -128,9 +128,9 @@ namespace {
         create_parent_table_msg.parent_table_id = 0;
         create_parent_table_msg.partition_key = "BY LIST (role)";
         create_parent_table_msg.partition_bound = "";
-        create_parent_table_msg.columns.push_back({"id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true});
-        create_parent_table_msg.columns.push_back({"name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true});
-        create_parent_table_msg.columns.push_back({"role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false});
+        create_parent_table_msg.columns.emplace_back("id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true);
+        create_parent_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
+        create_parent_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
 
         TableMgr::get_instance()->create_table(db_id, {5, 5}, create_parent_table_msg);
 
@@ -143,9 +143,9 @@ namespace {
         create_child_table_msg.parent_table_id = 100000;
         create_child_table_msg.partition_key = "";
         create_child_table_msg.partition_bound = "FOR VALUES IN ('Sibling')";
-        create_child_table_msg.columns.push_back({"id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true});
-        create_child_table_msg.columns.push_back({"name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true});
-        create_child_table_msg.columns.push_back({"role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false});
+        create_child_table_msg.columns.emplace_back("id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true);
+        create_child_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
+        create_child_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
 
         TableMgr::get_instance()->create_table(db_id, {6, 6}, create_child_table_msg);
 
@@ -161,9 +161,9 @@ namespace {
         create_parent_alter_table_msg.parent_table_id = 0;
         create_parent_alter_table_msg.partition_key = "BY LIST (role)";
         create_parent_alter_table_msg.partition_bound = "";
-        create_parent_alter_table_msg.columns.push_back({"id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true});
-        create_parent_alter_table_msg.columns.push_back({"name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true});
-        create_parent_alter_table_msg.columns.push_back({"role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false});
+        create_parent_alter_table_msg.columns.emplace_back("id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true);
+        create_parent_alter_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
+        create_parent_alter_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
 
         TableMgr::get_instance()->create_table(db_id, {7, 7}, create_parent_alter_table_msg);
 
@@ -176,9 +176,9 @@ namespace {
         create_child_alter_table_msg.parent_table_id = 100000;
         create_child_alter_table_msg.partition_key = "";
         create_child_alter_table_msg.partition_bound = "FOR VALUES IN ('Sibling')";
-        create_child_alter_table_msg.columns.push_back({"id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true});
-        create_child_alter_table_msg.columns.push_back({"name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true});
-        create_child_alter_table_msg.columns.push_back({"role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false});
+        create_child_alter_table_msg.columns.emplace_back("id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true);
+        create_child_alter_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
+        create_child_alter_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
 
         TableMgr::get_instance()->create_table(db_id, {8, 8}, create_child_alter_table_msg);
 
@@ -191,10 +191,10 @@ namespace {
         alter_parent_alter_table_msg.parent_table_id = 0;
         alter_parent_alter_table_msg.partition_key = "BY LIST (role)";
         alter_parent_alter_table_msg.partition_bound = "";
-        alter_parent_alter_table_msg.columns.push_back({"id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true});
-        alter_parent_alter_table_msg.columns.push_back({"name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true});
-        alter_parent_alter_table_msg.columns.push_back({"role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false});
-        alter_parent_alter_table_msg.columns.push_back({"family", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 2, 0, true, false});
+        alter_parent_alter_table_msg.columns.emplace_back("id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true);
+        alter_parent_alter_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
+        alter_parent_alter_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
+        alter_parent_alter_table_msg.columns.emplace_back("family", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 2, 0, true, false);
 
         TableMgr::get_instance()->alter_table(db_id, {9, 9}, alter_parent_alter_table_msg);
 
@@ -210,9 +210,9 @@ namespace {
         create_parent_attach_table_msg.parent_table_id = 0;
         create_parent_attach_table_msg.partition_key = "BY LIST (role)";
         create_parent_attach_table_msg.partition_bound = "";
-        create_parent_attach_table_msg.columns.push_back({"id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true});
-        create_parent_attach_table_msg.columns.push_back({"name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true});
-        create_parent_attach_table_msg.columns.push_back({"role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false});
+        create_parent_attach_table_msg.columns.emplace_back("id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true);
+        create_parent_attach_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
+        create_parent_attach_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
 
         TableMgr::get_instance()->create_table(db_id, {11, 11}, create_parent_attach_table_msg);
 
@@ -225,9 +225,9 @@ namespace {
         create_child_attach_table_msg.parent_table_id = 0;
         create_child_attach_table_msg.partition_key = "";
         create_child_attach_table_msg.partition_bound = "";
-        create_child_attach_table_msg.columns.push_back({"id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true});
-        create_child_attach_table_msg.columns.push_back({"name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true});
-        create_child_attach_table_msg.columns.push_back({"role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false});
+        create_child_attach_table_msg.columns.emplace_back("id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true);
+        create_child_attach_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
+        create_child_attach_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
 
         TableMgr::get_instance()->create_table(db_id, {12, 12}, create_child_attach_table_msg);
 
@@ -249,7 +249,7 @@ namespace {
         data.partition_bound = "FOR VALUES IN ('Sibling')";
         data.partition_key = "";
         data.parent_table_id = 400000;
-        attach_partition_msg.partition_data.push_back(data);
+        attach_partition_msg.partition_data.emplace_back(data);
 
         TableMgr::get_instance()->attach_partition(db_id, {14, 14}, attach_partition_msg);
 
