@@ -1920,7 +1920,10 @@ namespace springtail::pg_fdw {
             case NUMERICOID: {// DECIMAL(x,y)
                 std::shared_ptr<numeric::NumericData> numeric_datum(
                     reinterpret_cast<numeric::Numeric>(qual->value),
-                    [](numeric::Numeric ptr) {});
+                    [](numeric::Numeric ptr) {
+                        // this is shared pointer to the data inside ConstQual
+                        // as this data is not owned by this pointer, no need to remove it
+                    });
                 fields->at(idx) = std::make_shared<ConstTypeField<std::shared_ptr<numeric::NumericData>>>(numeric_datum);
                 break;
             }

@@ -632,7 +632,10 @@ namespace springtail {
             void *data_ptr = const_cast<char *>(numeric_data.data());
             auto ret = std::shared_ptr<numeric::NumericData>(
                 reinterpret_cast<const numeric::Numeric>(data_ptr),
-                [](numeric::Numeric) {});
+                [](numeric::Numeric) {
+                    // this is shared pointer to the data inside extent
+                    // as this data is not owned by this pointer, no need to remove it
+                });
             return ret;
         }
 

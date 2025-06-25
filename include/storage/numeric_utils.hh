@@ -34,23 +34,22 @@ namespace springtail::numeric {
         struct NumericShort n_short;    /* Short form (2-byte header) */
     };
 
-    #define NBASE                   10000
-    #define HALF_NBASE              5000
-    #define DEC_DIGITS              4       /* decimal digits per NBASE digit */
-    #define NUMERIC_DSCALE_MASK     0x3FFF
+    constexpr uint16_t  NBASE                   = 10000;
+    constexpr uint16_t  HALF_NBASE              = 5000;
+    constexpr uint16_t  DEC_DIGITS              = 4;    /* decimal digits per NBASE digit */
+    constexpr uint16_t  NUMERIC_DSCALE_MASK     = 0x3FFF;
 
-    #define NUMERIC_HDRSZ       (sizeof(int32_t) + sizeof(uint16_t) + sizeof(int16_t))
-    #define NUMERIC_HDRSZ_SHORT (sizeof(int32_t) + sizeof(uint16_t))
+    constexpr size_t NUMERIC_HDRSZ              = (sizeof(int32_t) + sizeof(uint16_t) + sizeof(int16_t));
+    constexpr size_t NUMERIC_HDRSZ_SHORT        = (sizeof(int32_t) + sizeof(uint16_t));
 
     /*
      * Interpretation of high bits.
      */
-
-     #define NUMERIC_SIGN_MASK      0xC000
-     #define NUMERIC_POS            0x0000
-     #define NUMERIC_NEG            0x4000
-     #define NUMERIC_SHORT          0x8000
-     #define NUMERIC_SPECIAL        0xC000
+    constexpr uint16_t NUMERIC_SIGN_MASK   = 0xC000;
+    constexpr uint16_t NUMERIC_POS         = 0x0000;
+    constexpr uint16_t NUMERIC_NEG         = 0x4000;
+    constexpr uint16_t NUMERIC_SHORT       = 0x8000;
+    constexpr uint16_t NUMERIC_SPECIAL     = 0xC000;
 
     /*
      * Definitions for special values (NaN, positive infinity, negative infinity).
@@ -61,23 +60,23 @@ namespace springtail::numeric {
      * We could mask off the remaining bits before testing the active bits, but
      * currently those bits must be zeroes, so masking would just add cycles.
      */
-    #define NUMERIC_EXT_SIGN_MASK   0xF000  /* high bits plus NaN/Inf flag bits */
-    #define NUMERIC_NAN             0xC000
-    #define NUMERIC_PINF            0xD000
-    #define NUMERIC_NINF            0xF000
-    #define NUMERIC_INF_SIGN_MASK   0x2000
+    constexpr uint16_t NUMERIC_EXT_SIGN_MASK    = 0xF000;
+    constexpr uint16_t NUMERIC_NAN              = 0xC000;
+    constexpr uint16_t NUMERIC_PINF             = 0xD000;
+    constexpr uint16_t NUMERIC_NINF             = 0xF000;
+    constexpr uint16_t NUMERIC_INF_SIGN_MASK    = 0x2000;
 
     /*
      * Short format definitions.
      */
-    #define NUMERIC_SHORT_SIGN_MASK         0x2000
-    #define NUMERIC_SHORT_DSCALE_MASK       0x1F80
-    #define NUMERIC_SHORT_DSCALE_SHIFT      7
-    #define NUMERIC_SHORT_DSCALE_MAX        (NUMERIC_SHORT_DSCALE_MASK >> NUMERIC_SHORT_DSCALE_SHIFT)
-    #define NUMERIC_SHORT_WEIGHT_SIGN_MASK  0x0040
-    #define NUMERIC_SHORT_WEIGHT_MASK       0x003F
-    #define NUMERIC_SHORT_WEIGHT_MAX        NUMERIC_SHORT_WEIGHT_MASK
-    #define NUMERIC_SHORT_WEIGHT_MIN        (-(NUMERIC_SHORT_WEIGHT_MASK+1))
+    constexpr uint16_t NUMERIC_SHORT_SIGN_MASK          = 0x2000;
+    constexpr uint16_t NUMERIC_SHORT_DSCALE_MASK        = 0x1F80;
+    constexpr uint16_t NUMERIC_SHORT_DSCALE_SHIFT       = 7;
+    constexpr uint16_t NUMERIC_SHORT_DSCALE_MAX         = (NUMERIC_SHORT_DSCALE_MASK >> NUMERIC_SHORT_DSCALE_SHIFT);
+    constexpr uint16_t NUMERIC_SHORT_WEIGHT_SIGN_MASK   = 0x0040;
+    constexpr uint16_t NUMERIC_SHORT_WEIGHT_MASK        = 0x003F;
+    constexpr uint16_t NUMERIC_SHORT_WEIGHT_MAX         = NUMERIC_SHORT_WEIGHT_MASK;
+    constexpr uint16_t NUMERIC_SHORT_WEIGHT_MIN         = (-(NUMERIC_SHORT_WEIGHT_MASK+1));
 
     /**
      * @brief Input structure for parcing data from the buffer

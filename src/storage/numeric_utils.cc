@@ -39,7 +39,7 @@ namespace springtail::numeric {
     }
 
     static std::string
-    sign_to_string(int sign)
+    sign_to_string(uint16_t sign)
     {
         std::string sign_str;
         switch (sign) {
