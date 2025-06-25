@@ -226,7 +226,7 @@ install(FILES
 )
 
 springtail_unit_test(test_pg_ddl_mgr
-    SOURCES test/test_pg_ddl_mgr.cc pg_ddl_mgr.cc
+    SOURCES test/test_pg_ddl_mgr.cc pg_ddl_mgr.cc pg_fdw_ddl_common.cc
     INCLUDES ${PROJECT_SOURCE_DIR}/include ${PostgreSQL_INCLUDE_DIRS}
     LIBS springtail_pg
         springtail_common
