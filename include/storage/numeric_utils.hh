@@ -14,13 +14,13 @@ namespace springtail::numeric {
 
     using NumericDigit = int16_t;
 
-    struct NumericShort
+    struct __attribute__((packed)) NumericShort
     {
         uint16_t     n_header;      /* Sign + display scale + weight */
         NumericDigit n_data[];      /* Digits */
     };
 
-    struct NumericLong
+    struct __attribute__((packed)) NumericLong
     {
         uint16_t        n_sign_dscale;  /* Sign + display scale */
         int16_t         n_weight;       /* Weight of 1st digit*/
@@ -278,7 +278,7 @@ namespace springtail::numeric {
      * @brief This structure represents a numeric value in disc storage format.
      *
      */
-    struct NumericData
+    struct __attribute__((packed)) NumericData
     {
         int32_t             _vl_len_;   ///< varlena header (do not touch directly!)
         union NumericChoice _choice;    ///< choice of format
@@ -363,7 +363,9 @@ namespace springtail::numeric {
          */
         NumericDigit *digits() const
         {
-            return const_cast<NumericDigit *>(header_is_short() ? _choice.n_short.n_data : _choice.n_long.n_data);
+            return const_cast<NumericDigit *>(reinterpret_cast<const NumericDigit *>((header_is_short() ?
+                (reinterpret_cast<const char *>(&_choice.n_short) + offsetof(NumericShort, n_data)) :
+                (reinterpret_cast<const char *>(&_choice.n_long) + offsetof(NumericLong, n_data)))));
         }
 
         /**
@@ -630,7 +632,8 @@ namespace springtail::numeric {
      * @param typmod    - typmod value
      * @return Numeric  - newly created numeric value
      */
-    static inline std::shared_ptr<NumericData> numeric_receive(const char *buf, int32_t length, int32_t typmod)
+    static inline std::shared_ptr<NumericData>
+    numeric_receive(const char *buf, int32_t length, int32_t typmod)
     {
         StringInfoData info;
         info._data = const_cast<char *>(buf);
@@ -640,4 +643,15 @@ namespace springtail::numeric {
         return NumericData::recv(&info, typmod);
     }
 
+    static inline std::shared_ptr<NumericData>
+    make_numeric_from_span(const std::span<const char> numeric_data)
+    {
+        void *data_ptr = const_cast<char *>(numeric_data.data());
+        return std::shared_ptr<numeric::NumericData>(
+            reinterpret_cast<const numeric::Numeric>(data_ptr),
+            [](numeric::Numeric) {
+                // this is shared pointer to the data inside extent
+                // as this data is not owned by this pointer, no need to remove it
+            });
+    }
 } // namespace springtail::numeric

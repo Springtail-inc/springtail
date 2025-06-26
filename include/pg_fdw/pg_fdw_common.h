@@ -4,11 +4,11 @@
 extern "C" {
 #endif
 
-#include "postgres.h"
-#include "nodes/pg_list.h"
-#include "commands/explain.h"
-#include "foreign/fdwapi.h"
-#include "nodes/makefuncs.h"
+#include <postgres.h>
+#include <nodes/pg_list.h>
+#include <commands/explain.h>
+#include <foreign/fdwapi.h>
+#include <nodes/makefuncs.h>
 
 #include <pg_fdw/constants.hh>
 

@@ -30,7 +30,6 @@
 
 //#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
 #include <common/time_trace.hh>
-#include "storage/field.hh"
 
 extern "C" {
     #include <postgres.h>
@@ -1393,7 +1392,10 @@ namespace springtail::pg_fdw {
         }
         case SchemaType::NUMERIC: {
             auto &&value = field->get_numeric(&row);
-            return PointerGetDatum(value.get());
+            int32_t size = value->varsize();
+            Numeric data = reinterpret_cast<Numeric>(palloc(size));
+            memcpy(data, value.get(), size);
+            return PointerGetDatum(data);
         }
         case SchemaType::BINARY: {
             auto &&value = field->get_binary(&row);
@@ -1830,7 +1832,6 @@ namespace springtail::pg_fdw {
             case CHAROID:
             case UUIDOID:
             case NUMERICOID:    // DECIMAL(x,y)
-                // TODO: https://linear.app/springtail/issue/SPR-556/
                 return true;
             case VARCHAROID:
             case TEXTOID:
@@ -1845,33 +1846,6 @@ namespace springtail::pg_fdw {
                 LOG_DEBUG(LOG_FDW, "Type not suitable for sorting: {}", pg_type);
                 return false;
         }
-    }
-
-    std::vector<char>
-    PgFdwMgr::_numeric_datum_to_vector(Datum value)
-    {
-        // Get the send function for the numeric type
-        Oid numeric_type_id = NUMERICOID;
-        bool is_varlena;
-        Oid numeric_out_func;
-
-        // Look up the send function for NUMERICOID
-        getTypeBinaryOutputInfo(numeric_type_id, &numeric_out_func, &is_varlena);
-
-        // Use the send function (typically numeric_send) to convert to binary format
-        bytea *output_bytes = OidSendFunctionCall(numeric_out_func, value);
-
-        // Extract data and length from the bytea structure
-        uint8_t *data = reinterpret_cast<uint8_t *>(VARDATA(output_bytes));
-        size_t length = VARSIZE(output_bytes) - VARHDRSZ;
-
-        // Copy to std::vector
-        std::vector<char> result(data, data + length);
-
-        // Free the bytea result
-        pfree(output_bytes);
-
-        return result;
     }
 
     void

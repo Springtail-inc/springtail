@@ -107,10 +107,10 @@ namespace springtail {
                   bool nulls_last=true) const
         {
             // types must match
-            CHECK_EQ(this->get_type(), rhs->get_type());
+            DCHECK_EQ(this->get_type(), rhs->get_type());
 
             // cannot call less_than() on undefined fields
-            CHECK(!(this->is_undefined(lhs_row) || rhs->is_undefined(rhs_row)));
+            DCHECK(!(this->is_undefined(lhs_row) || rhs->is_undefined(rhs_row)));
 
             // handle nulls
             if (this->is_null(lhs_row)) {
@@ -164,8 +164,8 @@ namespace springtail {
                 return (this->get_text(lhs_row) < rhs->get_text(rhs_row));
 
             case SchemaType::NUMERIC: {
-                std::shared_ptr<numeric::NumericData> lhs_numeric = this->get_numeric(lhs_row);
-                std::shared_ptr<numeric::NumericData> rhs_numeric = rhs->get_numeric(rhs_row);
+                auto lhs_numeric = this->get_numeric(lhs_row);
+                auto rhs_numeric = rhs->get_numeric(rhs_row);
                 return (numeric::NumericData::cmp(lhs_numeric, rhs_numeric) == -1);
             }
 
@@ -204,10 +204,10 @@ namespace springtail {
               const void *rhs_row)
         {
             // types must match
-            CHECK_EQ(this->get_type(), rhs->get_type());
+            DCHECK_EQ(this->get_type(), rhs->get_type());
 
             // cannot call equal() on undefined fields
-            CHECK(!(this->is_undefined(lhs_row) || rhs->is_undefined(rhs_row)));
+            DCHECK(!(this->is_undefined(lhs_row) || rhs->is_undefined(rhs_row)));
 
             // handle nulls
             if (this->is_null(lhs_row)) {
@@ -261,8 +261,8 @@ namespace springtail {
                 return (this->get_text(lhs_row) == rhs->get_text(rhs_row));
 
             case SchemaType::NUMERIC: {
-                std::shared_ptr<numeric::NumericData> lhs_numeric = this->get_numeric(lhs_row);
-                std::shared_ptr<numeric::NumericData> rhs_numeric = rhs->get_numeric(rhs_row);
+                auto lhs_numeric = this->get_numeric(lhs_row);
+                auto rhs_numeric = rhs->get_numeric(rhs_row);
                 return (numeric::NumericData::cmp(lhs_numeric, rhs_numeric) == 0);
             }
 
@@ -481,7 +481,7 @@ namespace springtail {
         void
         allow_null(uint32_t null_offset, uint8_t null_bit)
         {
-            CHECK(null_bit < 8);
+            DCHECK(null_bit < 8);
 
             _can_null = true;
             _null_offset = null_offset;
@@ -491,7 +491,7 @@ namespace springtail {
         void
         allow_undefined(uint32_t undefined_offset, uint8_t undefined_bit)
         {
-            CHECK(undefined_bit < 8);
+            DCHECK(undefined_bit < 8);
 
             _can_undefined = true;
             _undefined_offset = undefined_offset;
@@ -629,14 +629,7 @@ namespace springtail {
             uint32_t var_off;
             std::memcpy(&var_off, e_row->data() + _offset, sizeof(uint32_t));
             std::span<const char> numeric_data = e_row->get_binary(var_off);
-            void *data_ptr = const_cast<char *>(numeric_data.data());
-            auto ret = std::shared_ptr<numeric::NumericData>(
-                reinterpret_cast<const numeric::Numeric>(data_ptr),
-                [](numeric::Numeric) {
-                    // this is shared pointer to the data inside extent
-                    // as this data is not owned by this pointer, no need to remove it
-                });
-            return ret;
+            return numeric::make_numeric_from_span(numeric_data);
         }
 
         const std::span<const char> get_binary(const void *row) const override {
@@ -1233,9 +1226,9 @@ namespace springtail {
         }
 
         bool equal_strict(const Tuple &rhs) const {
-            // check the tuple lengths and types using CHECK_EQ()
+            // check the tuple lengths and types using DCHECK_EQ()
             // we assume correct usage in production
-            CHECK_EQ(this->size(), rhs.size());
+            DCHECK_EQ(this->size(), rhs.size());
             return _equal(rhs, size());
         }
 
@@ -1321,9 +1314,9 @@ namespace springtail {
         const void *_row;
 
         bool _equal(const Tuple &rhs, size_t size) const {
-            CHECK(size);
+            DCHECK(size);
             for (int i = 0; i != size; ++i) {
-                CHECK_EQ(this->field(i)->get_type(), rhs.field(i)->get_type());
+                DCHECK_EQ(this->field(i)->get_type(), rhs.field(i)->get_type());
                 if (!this->field(i)->equal(this->row(), rhs.field(i), rhs.row())) {
                     return false;
                 }
@@ -1494,7 +1487,7 @@ namespace springtail {
             DCHECK_EQ(col.type, 'b');
 
             // boolean should 1 byte
-            CHECK_EQ(col.data.size(), 1);
+            DCHECK_EQ(col.data.size(), 1);
 
             // read in the binary data and convert to a boolean
             return (col.data[0] == 1);
@@ -1508,7 +1501,7 @@ namespace springtail {
             DCHECK_EQ(col.type, 'b');
 
             // int16 should be 2 bytes
-            CHECK_EQ(col.data.size(), 2);
+            DCHECK_EQ(col.data.size(), 2);
 
             // read in the binary data and convert to a 16-bit int
             return recvint16(col.data.data());
@@ -1522,7 +1515,7 @@ namespace springtail {
             DCHECK_EQ(col.type, 'b');
 
             // int32 should be 4 bytes
-            CHECK_EQ(col.data.size(), 4);
+            DCHECK_EQ(col.data.size(), 4);
 
             // read in the binary data and convert to a 32-bit int
             return recvint32(col.data.data());
@@ -1536,7 +1529,7 @@ namespace springtail {
             DCHECK_EQ(col.type, 'b');
 
             // int64 should be 8 bytes
-            CHECK_EQ(col.data.size(), 8);
+            DCHECK_EQ(col.data.size(), 8);
 
             // read in the binary data and convert to a 64-bit int
             return recvint64(col.data.data());
@@ -1550,7 +1543,7 @@ namespace springtail {
             DCHECK_EQ(col.type, 'b');
 
             // float should be 4 bytes
-            CHECK_EQ(col.data.size(), 4);
+            DCHECK_EQ(col.data.size(), 4);
 
             // read in the binary data and convert to a 32-bit float
             int32_t value = recvint32(col.data.data());
@@ -1565,7 +1558,7 @@ namespace springtail {
             DCHECK_EQ(col.type, 'b');
 
             // double should be 8 bytes
-            CHECK_EQ(col.data.size(), 8);
+            DCHECK_EQ(col.data.size(), 8);
 
             // read in the binary data and convert to a 64-bit float
             int64_t value = recvint64(col.data.data());

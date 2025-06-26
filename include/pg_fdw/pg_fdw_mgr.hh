@@ -298,9 +298,6 @@ namespace springtail::pg_fdw {
                                     Oid pg_oid,
                                     int32_t atttypmod);
 
-        /** Helper to convert a numeric datum to binary */
-        std::vector<char> _numeric_datum_to_vector(Datum value);
-
         /** Helper to setup quals and scan iterator in state, called from begin_scan */
         void _init_quals(PgFdwState *state, List *qual_list);
 
