@@ -1267,6 +1267,9 @@ namespace springtail::pg_fdw {
         // scan index
         if (state->index) {
             r.emplace_back("   Scan index", state->index->name);
+            if (state->are_index_fields) {
+                r.emplace_back("   Scan type", "simple");
+            }
         }
 
         // collect quals

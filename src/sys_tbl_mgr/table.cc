@@ -1400,33 +1400,11 @@ namespace indexer_helpers {
         _page_i += row_id;
     }
 
-    const Extent::Row& Table::Iterator::Secondary::row() const
-    {
-        return *_page_i;
-    }
-
     Table::Iterator::SecondarySimple::SecondarySimple(const Table *table,
             BTreePtr btree, const BTree::Iterator &btree_i)
         : 
             Tracker{table, btree, btree_i}
     {}
-
-    void Table::Iterator::SecondarySimple::next()
-    {
-        ++_btree_i;
-        if (_btree_i == _btree->end()) {
-            return;
-        }
-    }
-    void Table::Iterator::SecondarySimple::prev()
-    {
-        --_btree_i;
-    }
-
-    const Extent::Row& Table::Iterator::SecondarySimple::row() const
-    {
-        return *_btree_i;
-    }
 
     Table::Iterator::Iterator(const Table *table, uint32_t index_id, bool simple)
     { 

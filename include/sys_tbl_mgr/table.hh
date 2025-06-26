@@ -168,8 +168,7 @@ namespace indexer_helpers {
                 void next();
                 void prev();
 
-                const Extent::Row& row() const 
-                {
+                const Extent::Row& row() const {
                     return *_page_i;
                 }
 
@@ -202,7 +201,9 @@ namespace indexer_helpers {
 
                 void next();
                 void prev();
-                const Extent::Row& row() const;
+                const Extent::Row& row() const {
+                    return *_page_i;
+                }
 
                 friend bool operator==(const Secondary& a, const Secondary& b) {
                     const Tracker& ta = a;
@@ -246,9 +247,15 @@ namespace indexer_helpers {
                 SecondarySimple(SecondarySimple&&) = default;
                 virtual ~SecondarySimple() = default;
 
-                void next();
-                void prev();
-                const Extent::Row& row() const;
+                void next() {
+                    ++_btree_i;
+                }
+                void prev() {
+                    --_btree_i;
+                }
+                const Extent::Row& row() const {
+                    return *_btree_i;
+                }
 
                 friend bool operator==(const SecondarySimple& a, const SecondarySimple& b) {
                     const Tracker& ta = a;
