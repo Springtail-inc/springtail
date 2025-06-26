@@ -88,7 +88,7 @@ protected:
         runners->emplace_back(std::make_unique<IOMgrRunner>());
 
         auto service_runners = test::get_services(true, true, false);
-        std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
+        std::ranges::move(service_runners, std::back_inserter(runners.value()));
 
         springtail_init_test(runners, LOG_ALL ^ LOG_STORAGE);
 
@@ -108,10 +108,10 @@ TEST_F(PgFdwCommonTest, GetParentTableInfo_Success)
     const std::string expected_name = "parent_partition_table";
     const uint64_t expected_namespace_id = 90000;
 
-    auto result = pg_fdw_common_->_get_parent_table_info(db_id, schema_xid, table_id);
+    auto [parent_table_name, parent_namespace_id] = PgFdwCommon::_get_parent_table_info(db_id, schema_xid, table_id);
 
-    EXPECT_EQ(result.first, expected_name);
-    EXPECT_EQ(result.second, expected_namespace_id);
+    EXPECT_EQ(parent_table_name, expected_name);
+    EXPECT_EQ(parent_namespace_id, expected_namespace_id);
 }
 
 TEST_F(PgFdwCommonTest, GetParentTableInfo_TableNotFound)
@@ -120,10 +120,10 @@ TEST_F(PgFdwCommonTest, GetParentTableInfo_TableNotFound)
     const uint64_t schema_xid = 10;
     const uint64_t non_existent_table_id = 9999;
 
-    auto result = pg_fdw_common_->_get_parent_table_info(db_id, schema_xid, non_existent_table_id);
+    auto [parent_table_name, parent_namespace_id] = PgFdwCommon::_get_parent_table_info(db_id, schema_xid, non_existent_table_id);
 
-    EXPECT_TRUE(result.first.empty());
-    EXPECT_EQ(result.second, 0);
+    EXPECT_TRUE(parent_table_name.empty());
+    EXPECT_EQ(parent_namespace_id, 0);
 }
 
 TEST_F(PgFdwCommonTest, GetParentTableInfo_TableMarkedNonExistent)
@@ -132,10 +132,10 @@ TEST_F(PgFdwCommonTest, GetParentTableInfo_TableMarkedNonExistent)
     const uint64_t schema_xid = 10;
     const uint64_t table_id = 500002;
 
-    auto result = pg_fdw_common_->_get_parent_table_info(db_id, schema_xid, table_id);
+    auto [parent_table_name, parent_namespace_id] = PgFdwCommon::_get_parent_table_info(db_id, schema_xid, table_id);
 
-    EXPECT_TRUE(result.first.empty());
-    EXPECT_EQ(result.second, 0);
+    EXPECT_TRUE(parent_table_name.empty());
+    EXPECT_EQ(parent_namespace_id, 0);
 }
 
 TEST_F(PgFdwCommonTest, GetNamespaceName_Success)
@@ -144,9 +144,9 @@ TEST_F(PgFdwCommonTest, GetNamespaceName_Success)
     const uint64_t schema_xid = 5;
     const uint64_t namespace_id = 8888;
 
-    auto result = pg_fdw_common_->_get_namespace_name(db_id, schema_xid, namespace_id);
+    auto namespace_name = PgFdwCommon::_get_namespace_name(db_id, schema_xid, namespace_id);
 
-    EXPECT_EQ(result, "dummy");
+    EXPECT_EQ(namespace_name, "dummy");
 }
 
 TEST_F(PgFdwCommonTest, GetNamespaceName_NamespaceNotFound)
@@ -155,9 +155,9 @@ TEST_F(PgFdwCommonTest, GetNamespaceName_NamespaceNotFound)
     const uint64_t schema_xid = 5;
     const uint64_t non_existent_namespace_id = 9999;
 
-    auto result = pg_fdw_common_->_get_namespace_name(db_id, schema_xid, non_existent_namespace_id);
+    auto namespace_name = PgFdwCommon::_get_namespace_name(db_id, schema_xid, non_existent_namespace_id);
 
-    EXPECT_EQ(result, "");
+    EXPECT_EQ(namespace_name, "");
 }
 
 TEST_F(PgFdwCommonTest, GetNamespaceName_NonExistent)
@@ -166,9 +166,9 @@ TEST_F(PgFdwCommonTest, GetNamespaceName_NonExistent)
     const uint64_t schema_xid = 6;
     const uint64_t non_existent_namespace_id = 8888;
 
-    auto result = pg_fdw_common_->_get_namespace_name(db_id, schema_xid, non_existent_namespace_id);
+    auto namespace_name = PgFdwCommon::_get_namespace_name(db_id, schema_xid, non_existent_namespace_id);
 
-    EXPECT_TRUE(result.empty());
+    EXPECT_TRUE(namespace_name.empty());
 }
 
 TEST_F(PgFdwCommonTest, GetNamespaceName_NamespaceMarkedNonExistent)
@@ -177,9 +177,9 @@ TEST_F(PgFdwCommonTest, GetNamespaceName_NamespaceMarkedNonExistent)
     const uint64_t schema_xid = 6;
     const uint64_t namespace_id = 1000;
 
-    auto result = pg_fdw_common_->_get_namespace_name(db_id, schema_xid, namespace_id);
+    auto namespace_name = PgFdwCommon::_get_namespace_name(db_id, schema_xid, namespace_id);
 
-    EXPECT_TRUE(result.empty());
+    EXPECT_TRUE(namespace_name.empty());
 }
 
 TEST_F(PgFdwCommonTest, IterateTableNames_Success)
@@ -193,7 +193,7 @@ TEST_F(PgFdwCommonTest, IterateTableNames_Success)
 
     const std::set<std::string, std::less<>> &table_set = {};
     // iterate over the table names table and populate the table map
-    pg_fdw_common_->_iterate_table_names(db_id, schema_xid, namespace_id, false, false, table_set, "public", table_map, table_partition_map);
+    PgFdwCommon::_iterate_table_names(db_id, schema_xid, namespace_id, false, false, table_set, "public", table_map, table_partition_map);
 
     EXPECT_EQ(table_partition_map.size(), 2);
     EXPECT_EQ(table_partition_map.at(500001).parent_table_id(), 0);

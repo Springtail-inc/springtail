@@ -35,7 +35,7 @@ namespace {
             _log_file = std::filesystem::path(LOG_FILE);
 
             // parse json commands and write to log file
-            process_json_cmd_file(std::filesystem::path(__FILE__).parent_path() / "test_msgs.json");
+            process_json_cmd_file(std::filesystem::path("test_msgs.json"));
         }
 
         void TearDown() override {
