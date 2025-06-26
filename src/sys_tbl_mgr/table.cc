@@ -1431,7 +1431,6 @@ namespace indexer_helpers {
     Table::Iterator::Iterator(const Table *table, uint32_t index_id, bool simple)
     { 
         if (index_id == constant::INDEX_PRIMARY) {
-            CHECK(!simple);
             _tracker.emplace<Primary>(table, table->_primary_index, 
                     table->_primary_index->end(), 
                     StorageCache::SafePagePtr{}, 
