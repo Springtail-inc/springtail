@@ -94,7 +94,7 @@ OpenTelemetry::SpdlogExporter::_log_span(const opentelemetry::sdk::trace::SpanDa
         log_str += fmt::format("\n      Attribute - {}: {}", key, value_str);
     }
 
-    OpenTelemetry::get_context_variables([&log_str](opentelemetry::nostd::string_view key, opentelemetry::nostd::string_view value) {
+    OpenTelemetry::get_instance()->get_context_variables([&log_str](opentelemetry::nostd::string_view key, opentelemetry::nostd::string_view value) {
         log_str += fmt::format("\n      Attribute - {}: {}", std::string(key), std::string(value));
         return true;
     });

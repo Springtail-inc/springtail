@@ -289,7 +289,7 @@ namespace springtail::pg_log_mgr {
         if (_internal_state.is(STATE_STARTUP_SYNC)) {
             // Create the namespaces before starting the copy thread
             auto xid = _pg_log_reader->get_next_xid();
-            auto token_init = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(_db_id)}, {"xid", std::to_string(xid)}});
+            auto token_init = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(_db_id)}, {"xid", std::to_string(xid)}});
 
             PgCopyTable::create_namespaces(_db_id, xid);
             PgCopyTable::create_usertypes(_db_id, xid);
@@ -319,7 +319,7 @@ namespace springtail::pg_log_mgr {
 
             CHECK(!table_ids.empty());
 
-            auto token_commit_worker = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(_db_id)}});
+            auto token_commit_worker = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(_db_id)}});
 
             // ensure we've stopped committing
             // note: there's a race condition that could result in this being called multiple times
@@ -351,7 +351,7 @@ namespace springtail::pg_log_mgr {
         std::vector<PgCopyResultPtr> res;
         auto xid = _pg_log_reader->get_next_xid();
 
-        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(xid)}});
+        auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(xid)}});
         LOG_DEBUG(LOG_PG_LOG_MGR, "Copying tables; target xid={}", xid);
         if (table_ids.has_value()) {
             res = PgCopyTable::copy_tables(_db_id, xid, table_ids.value());

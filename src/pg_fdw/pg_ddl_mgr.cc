@@ -743,7 +743,7 @@ namespace springtail::pg_fdw {
                      const uint64_t db_id,
                      const std::string &db_name)
     {
-        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
+        auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
         LOG_DEBUG(LOG_FDW, "Creating DB ID: {}, DB Name: {}", db_id, db_name);
 
         // drop and create database on fdw
@@ -768,7 +768,7 @@ namespace springtail::pg_fdw {
                     const std::string &db_name)
     {
 
-        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
+        auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
         RedisDDL redis_ddl;
 
         uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
@@ -862,7 +862,7 @@ namespace springtail::pg_fdw {
     void
     PgDDLMgr::_add_replicated_database(uint64_t db_id)
     {
-        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
+        auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
         nlohmann::json db_config = Properties::get_db_config(db_id);
         std::string db_name = db_config["name"];
 
@@ -893,7 +893,7 @@ namespace springtail::pg_fdw {
     void
     PgDDLMgr::_remove_replicated_database(uint64_t db_id)
     {
-        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
+        auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
         std::shared_lock shared_lock(_db_mutex);
         if (!_db_xid_map.contains(db_id)) {
             return;

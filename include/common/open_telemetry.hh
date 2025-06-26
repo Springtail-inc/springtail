@@ -30,14 +30,14 @@ public:
 
     static void flush();
 
-    static inline void
+    inline void
     log(const spdlog::source_loc &loc, const std::string &logger_name, spdlog::level::level_enum lvl, const std::string &formatted_msg)
     {
-        if (!_inited_flag || _shutdown_flag || !(get_instance()->_otel_enabled && get_instance()->_otel_remote)) {
+        if (!_inited_flag || _shutdown_flag || !(_otel_enabled && _otel_remote)) {
             return;
         }
         spdlog::details::log_msg message(loc, logger_name, lvl, formatted_msg);
-        get_instance()->_log(message);
+        _log(message);
     }
 
     /**
@@ -46,7 +46,7 @@ public:
      * @param callback - function called for each key/value pair
      * @return std::unordered_map<std::string, std::string> - map of current key/value pairs for the given scope
      */
-    static void
+    void
     get_context_variables(opentelemetry::nostd::function_ref<bool(opentelemetry::nostd::string_view, opentelemetry::nostd::string_view)> callback);
 
     /**
@@ -55,7 +55,7 @@ public:
      * @param attributes - map of key/value pairs
      * @return std::unique_ptr<opentelemetry::context::Token> - scope token
      */
-    static std::unique_ptr<opentelemetry::context::Token>
+    std::unique_ptr<opentelemetry::context::Token>
     set_context_variables(const std::unordered_map<std::string, std::string>& attributes);
 
     /**
@@ -65,28 +65,25 @@ public:
      * @param attr_value - variable value
      * @return std::unique_ptr<opentelemetry::context::Token> - scope token
      */
-    static std::unique_ptr<opentelemetry::context::Token>
+    std::unique_ptr<opentelemetry::context::Token>
     set_context_variable(const std::string &attr_key, const std::string &attr_value);
 
-    static inline void
+    inline void
     increment_counter(std::string_view name)
     {
-        _assert_instance();
-        get_instance()->_increment_counter(name);
+        _increment_counter(name);
     }
 
-    static inline void
+    inline void
     record_histogram(std::string_view name, double value)
     {
-        _assert_instance();
-        get_instance()->_record_histogram(name, value);
+        _record_histogram(name, value);
     }
 
-    static inline opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer>
+    inline opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer>
     tracer(const std::string_view& name)
     {
-        _assert_instance();
-        return get_instance()->_tracer(name);
+        return _tracer(name);
     }
 
 private:

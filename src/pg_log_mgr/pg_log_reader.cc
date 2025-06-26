@@ -48,7 +48,7 @@ namespace springtail::pg_log_mgr {
     {
         time_trace::Trace commit_trace;
         TIME_TRACE_START(commit_trace);
-        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
         _span->AddEvent("commit", {{"pg_commit_time", commit_ts.to_unix_ns()}});
 
         // update any changes in the table invalidation state
@@ -105,7 +105,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::abort(PostgresTimestamp abort_ts)
     {
-        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
         _span->AddEvent("aborted", {{"pg_abort_time", abort_ts.to_unix_ns()}});
 
         // drop any batches for all active txns
@@ -121,7 +121,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::abort_subtxn(int32_t pg_xid, PostgresTimestamp abort_ts)
     {
-        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
 
         // Add subtransaction abort event with the provided timestamp
         _span->AddEvent("subtransaction_abort", {
@@ -255,7 +255,7 @@ namespace springtail::pg_log_mgr {
             return;
         }
 
-        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
         auto txn = _get_txn(pg_xid);
 
         // get the Extent containing mutations
@@ -312,7 +312,7 @@ namespace springtail::pg_log_mgr {
                                  int32_t pg_xid,
                                  const PgMsgTruncate &msg)
     {
-        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
 
         // get the current txn
         auto txn = _get_txn(pg_xid);
@@ -454,7 +454,7 @@ namespace springtail::pg_log_mgr {
                                       uint32_t pg_xid_txn,
                                       PgMsgPtr msg)
     {
-        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
 
         // perform the table column validations and update the message accordingly
         if (!_handle_validation(msg)) {
@@ -1236,7 +1236,7 @@ namespace springtail::pg_log_mgr {
             // Record latency between postgres commit time and when we process it
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - postgres_timestamp.to_system_time());
-            open_telemetry::OpenTelemetry::record_histogram(PG_LOG_MGR_LOG_READER_LATENCIES, duration.count());
+            open_telemetry::OpenTelemetry::get_instance()->record_histogram(PG_LOG_MGR_LOG_READER_LATENCIES, duration.count());
             LOG_DEBUG(LOG_PG_LOG_MGR, "Commit processed {} milliseconds after postgres commit",
                       duration.count());
 
