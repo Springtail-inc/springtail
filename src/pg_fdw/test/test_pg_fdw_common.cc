@@ -97,8 +97,6 @@ protected:
     static void TearDownTestSuite() {
         springtail_shutdown();
     }
-    void SetUp() override {}
-    void TearDown() override {}
 };
 
 
