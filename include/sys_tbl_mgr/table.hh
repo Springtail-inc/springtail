@@ -234,7 +234,9 @@ namespace indexer_helpers {
             };
 
             /**
-             * This is to iterate using the secondary index.
+             * This is to iterate using the secondary index. It is different from
+             * the Secondary type in so that it doesn't provide access to full data rows but
+             * to the index values only.
              */
             struct SecondarySimple : Tracker
             {
