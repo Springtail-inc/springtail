@@ -1201,9 +1201,7 @@ namespace springtail {
         json["table_id"].get_to(attach_partition_msg.table_id);
         json["schema"].get_to(attach_partition_msg.namespace_name);
         json["table"].get_to(attach_partition_msg.table_name);
-        if (json.contains("partition_bound") && !json["partition_bound"].is_null()) {
-            json["partition_bound"].get_to(attach_partition_msg.partition_bound);
-        }
+        json["partition_key"].get_to(attach_partition_msg.partition_key);
 
         for (const auto &partition_data : json["partition_data"]) {
             attach_partition_msg.partition_data.push_back(_decode_partition_data(partition_data));
@@ -1230,6 +1228,7 @@ namespace springtail {
         json["table_id"].get_to(detach_partition_msg.table_id);
         json["schema"].get_to(detach_partition_msg.namespace_name);
         json["table"].get_to(detach_partition_msg.table_name);
+        json["partition_key"].get_to(detach_partition_msg.partition_key);
 
         for (const auto &partition_data : json["partition_data"]) {
             detach_partition_msg.partition_data.push_back(_decode_partition_data(partition_data));

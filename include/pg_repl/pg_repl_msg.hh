@@ -256,8 +256,7 @@ namespace springtail
         uint64_t table_id;
         std::string namespace_name;
         std::string table_name;
-        std::string partition_name;
-        std::string partition_bound;
+        std::string partition_key;
         std::vector<PartitionData> partition_data;
     };
 
@@ -267,7 +266,7 @@ namespace springtail
         uint64_t table_id;
         std::string namespace_name;
         std::string table_name;
-        std::string partition_name;
+        std::string partition_key;
         std::vector<PartitionData> partition_data;
     };
 

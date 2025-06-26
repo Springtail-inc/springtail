@@ -332,8 +332,7 @@ Client::attach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgAttachPar
     request.set_table_id(msg.table_id);
     request.set_table_name(msg.table_name);
     request.set_namespace_name(msg.namespace_name);
-    request.set_partition_name(msg.partition_name);
-    request.set_partition_bound(msg.partition_bound);
+    request.set_partition_key(msg.partition_key);
 
     for (const auto &partition_data : msg.partition_data) {
         auto *info = request.add_partition_data();
@@ -360,7 +359,7 @@ Client::detach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgDetachPar
     request.set_table_id(msg.table_id);
     request.set_namespace_name(msg.namespace_name);
     request.set_table_name(msg.table_name);
-    request.set_partition_name(msg.partition_name);
+    request.set_partition_key(msg.partition_key);
 
     for (const auto &partition_data : msg.partition_data) {
         auto *info = request.add_partition_data();

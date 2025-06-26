@@ -112,7 +112,6 @@ DECLARE
     parent_table_id oid;
     partition_bound text;
     partition_key text;
-    partition_name text;
     partition_data json;
     table_relname text;
     table_info RECORD;
@@ -155,8 +154,6 @@ BEGIN
                 'table_id', obj.objid::bigint,
                 'schema', obj.schema_name,
                 'table', table_relname,
-                'parent_table_id', parent_table_id::int,
-                'partition_bound', partition_bound,
                 'partition_key', partition_key,
                 'partition_data', partition_data);
 
@@ -172,8 +169,6 @@ BEGIN
                 'table_id', obj.objid::bigint,
                 'schema', obj.schema_name,
                 'table', table_relname,
-                'parent_table_id', parent_table_id::int,
-                'partition_bound', partition_bound,
                 'partition_key', partition_key,
                 'partition_data', partition_data);
 
