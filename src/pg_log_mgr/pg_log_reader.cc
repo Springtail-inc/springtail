@@ -515,8 +515,7 @@ namespace springtail::pg_log_mgr {
                 // check if there's an ongoing sync for this table
                 auto sync_skip = SyncTracker::get_instance()->should_skip(_db, *tid, pg_xid_txn);
                 if (sync_skip.should_skip()) {
-                    SyncTracker::get_instance()->mark_table_drop(_db, *tid, pg_xid_txn);
-                    LOG_DEBUG(LOG_PG_LOG_MGR, "Marked drop for sync to handle, Skip DDL: tid={} pg_xid={}\n", *tid, pg_xid_txn);
+                    LOG_DEBUG(LOG_PG_LOG_MGR, "Skip DDL: tid={} pg_xid={}\n", *tid, pg_xid_txn);
                     return;
                 }
 

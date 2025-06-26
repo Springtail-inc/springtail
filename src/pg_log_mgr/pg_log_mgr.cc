@@ -314,6 +314,9 @@ namespace springtail::pg_log_mgr {
                                     request->xid().xid, request->xid().lsn);
                 table_ids.insert(request->table_id());
 
+                // Mark table's XID to be processed for resync
+                SyncTracker::get_instance()->pick_table_for_sync(_db_id, request->table_id(), request->xid());
+
                 request = _redis_sync_queue.try_pop(REDIS_WORKER_ID);
             } while (request != nullptr);
 
@@ -428,16 +431,11 @@ namespace springtail::pg_log_mgr {
             SyncTracker::get_instance()->add_sync(std::get<pg_log_mgr::PgXactMsg::TableSyncMsg>(redis_xact.msg));
         }
 
-        if (_redis_sync_queue.peek() == nullptr) {
-            // process stalled messages; set state to replaying
-            _internal_state.set(STATE_REPLAYING);
-            _internal_state.wait_for_state(STATE_RUNNING);
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; state=replaying");
-            return false;
-        } else {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; still more to process, dont wakeup log reader");
-            return true;
-        }
+        // process stalled messages; set state to replaying
+        _internal_state.set(STATE_REPLAYING);
+        _internal_state.wait_for_state(STATE_RUNNING);
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; state=replaying");
+        return false;
     }
 
     bool

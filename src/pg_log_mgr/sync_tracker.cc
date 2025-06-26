@@ -33,8 +33,19 @@ SyncTracker::issue_resync_and_wait(uint64_t db_id,
     table_sync_queue.push(request);
 
     // add the table to the resync map; will get removed when mark_inflight() is called
-    _resync_map[db_id].insert(table_id);
+    _resync_map[db_id][table_id].insert(xid);
+}
 
+void
+SyncTracker::pick_table_for_sync(uint64_t db_id,
+                                 uint64_t table_id,
+                                 const XidLsn &xid)
+{
+    LOG_DEBUG(LOG_PG_LOG_MGR, "Pick for Sync: db {} table {} xid {}:{}",
+              db_id, table_id, xid.xid, xid.lsn);
+    std::unique_lock lock(_mutex);
+
+    _resync_picked_map[db_id][table_id] = xid;
 }
 
 void
@@ -48,17 +59,29 @@ SyncTracker::mark_inflight(uint64_t db_id,
               db_id, table_id, xid.xid, xid.lsn);
     std::unique_lock lock(_mutex);
 
-    // find the db map
+    // Find the XID of the table thats picked for resync
+    auto picked_db_i = _resync_picked_map.find(db_id);
+    CHECK(picked_db_i != _resync_picked_map.end());
+    auto picked_table_i = picked_db_i->second.find(table_id);
+    CHECK(picked_table_i != picked_db_i->second.end());
+    auto picked_table_xid = picked_table_i->second;
+
+    // Erase the entries from the resync_map
     auto db_i = _resync_map.find(db_id);
-    //CHECK(db_i != _resync_map.end());
+    CHECK(db_i != _resync_map.end());
     if (db_i != _resync_map.end()) {
         auto table_i = db_i->second.find(table_id);
         CHECK(table_i != db_i->second.end());
 
         // clear from the resync map
-        db_i->second.erase(table_i);
-        if (db_i->second.empty()) {
-            _resync_map.erase(db_i);
+        // Erase all elements less than or equal to xid2
+        table_i->second.erase(table_i->second.begin(), table_i->second.upper_bound(picked_table_xid));
+
+        if (table_i->second.empty()) {
+            db_i->second.erase(table_i);
+            if (db_i->second.empty()) {
+                _resync_map.erase(db_i);
+            }
         }
     }
 
@@ -84,20 +107,6 @@ SyncTracker::add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
         // remove the db from the map if the table set is empty
         if (inflight_i->second.empty()) {
             _inflight_map.erase(inflight_i);
-        }
-    }
-
-    // clear the dropped_tables map for the provided tables in the db
-    auto dropped_tables_i = _dropped_tables_map.find(sync_msg.db_id);
-    if (dropped_tables_i != _dropped_tables_map.end()) {
-        // clear all of the tables from being in-flight
-        for (auto &entry : sync_msg.tids) {
-            dropped_tables_i->second.erase(entry->table_id);
-        }
-
-        // remove the db from the map if the table set is empty
-        if (dropped_tables_i->second.empty()) {
-            _dropped_tables_map.erase(dropped_tables_i);
         }
     }
 
@@ -202,18 +211,6 @@ SyncTracker::add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
         for (const auto &entry : swap->table_info()) {
             db_i->second.erase(entry->table_id);
         }
-    }
-
-    void
-    SyncTracker::mark_table_drop(uint64_t db_id,
-                                 uint64_t table_id,
-                                 uint32_t pg_xid)
-    {
-        std::unique_lock lock(_mutex);
-
-        LOG_DEBUG(LOG_PG_LOG_MGR, "db {} table_id {} pg_xid {}", db_id, table_id, pg_xid);
-        // add to the dropped_tables map; will get removed when add_sync() is called
-        _dropped_tables_map[db_id].insert(table_id);
     }
 
     SyncTracker::SkipDetails
