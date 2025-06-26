@@ -1113,6 +1113,8 @@ namespace springtail::pg_log_mgr {
 
             // issue the updates to the system tables
             for (auto &entry : swap->table_info()) {
+                // update the existence cache for the referenced tables
+                _exists_cache->insert(db_id, entry->table_id, true);
                 auto copy_info = entry->info;
                 if (copy_info == nullptr) {
                     // During resync if the table is found to be invalid as part of the copy flow, the table
@@ -1134,8 +1136,6 @@ namespace springtail::pg_log_mgr {
                     std::string &&ddl_stmt = client->drop_table(_db_id, XidLsn{xid}, std::move(drop_msg));
                     ddls.emplace_back(ddl_stmt);
                 } else {
-                    // update the existence cache for the referenced tables
-                    _exists_cache->insert(db_id, entry->table_id, true);
 
                     LOG_DEBUG(LOG_PG_LOG_MGR, "table_id {}", entry->table_id);
 
