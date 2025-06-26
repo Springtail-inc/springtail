@@ -233,7 +233,29 @@ namespace indexer_helpers {
                 void update_page();
             };
 
-            std::variant<std::monostate, Primary, Secondary> _tracker;
+            /**
+             * This is to iterate using the secondary index.
+             */
+            struct SecondarySimple : Tracker
+            {
+                SecondarySimple(const Table *table,
+                        BTreePtr btree, const BTree::Iterator &btree_i);
+
+                SecondarySimple(SecondarySimple&&) = default;
+                virtual ~SecondarySimple() = default;
+
+                void next();
+                void prev();
+                const Extent::Row& row() const;
+
+                friend bool operator==(const SecondarySimple& a, const SecondarySimple& b) {
+                    const Tracker& ta = a;
+                    const Tracker& tb = b;
+                    return ta == tb;
+                }
+            };
+
+            std::variant<std::monostate, Primary, Secondary, SecondarySimple> _tracker;
 
         public:
             using iterator_category = std::bidirectional_iterator_tag;
@@ -244,6 +266,9 @@ namespace indexer_helpers {
 
             reference operator*() { 
                 if (auto p = std::get_if<Primary>(&_tracker)) {
+                    return p->row();
+                }
+                if (auto p = std::get_if<SecondarySimple>(&_tracker)) {
                     return p->row();
                 }
                 auto p = std::get_if<Secondary>(&_tracker);
@@ -260,6 +285,8 @@ namespace indexer_helpers {
                     p->next();
                 } else if (auto p = std::get_if<Secondary>(&_tracker)) {
                     p->next();
+                } else if (auto p = std::get_if<SecondarySimple>(&_tracker)) {
+                    p->next();
                 } else {
                     assert(false);
                 }
@@ -273,6 +300,8 @@ namespace indexer_helpers {
                 if (auto p = std::get_if<Primary>(&_tracker)) {
                     p->prev();
                 } else if (auto p = std::get_if<Secondary>(&_tracker)) {
+                    p->prev();
+                } else if (auto p = std::get_if<SecondarySimple>(&_tracker)) {
                     p->prev();
                 } else {
                     assert(false);
@@ -290,6 +319,10 @@ namespace indexer_helpers {
                     return *pa == *pb;
                 } else if (auto pa = std::get_if<Secondary>(&a._tracker)) {
                     auto pb =  std::get_if<Secondary>(&b._tracker);
+                    assert(pb);
+                    return *pa == *pb;
+                } else if (auto pa = std::get_if<SecondarySimple>(&a._tracker)) {
+                    auto pb =  std::get_if<SecondarySimple>(&b._tracker);
                     assert(pb);
                     return *pa == *pb;
                 }
@@ -324,7 +357,7 @@ namespace indexer_helpers {
             }
 
             /** Specifically for the end() iterator. */
-            Iterator(const Table *table, uint32_t index_id);
+            Iterator(const Table *table, uint32_t index_id, bool simple);
 
             /** For constructing an Iterator from the Table functions. */
             Iterator(const Table *table,
@@ -337,9 +370,15 @@ namespace indexer_helpers {
 
             Iterator(const Table *table,
                      BTreePtr btree, const BTree::Iterator &btree_i,
-                     ExtentSchemaPtr index_schema)
+                     ExtentSchemaPtr index_schema )
             { 
                 _tracker.emplace<Secondary>(table, btree, btree_i, index_schema);
+            }
+
+            Iterator(const Table *table,
+                     BTreePtr btree, const BTree::Iterator &btree_i)
+            { 
+                _tracker.emplace<SecondarySimple>(table, btree, btree_i);
             }
         };
 
@@ -396,31 +435,31 @@ namespace indexer_helpers {
          * Returns an iterator to the first row that is greater than or equal to the provided search
          * key.  Search key must match the primary index order.
          */
-        Iterator lower_bound(TuplePtr search_key, uint32_t index_id = constant::INDEX_PRIMARY);
+        Iterator lower_bound(TuplePtr search_key, uint64_t index_id = constant::INDEX_PRIMARY, bool simple = false);
 
-        Iterator upper_bound(TuplePtr search_key, uint32_t index_id = constant::INDEX_PRIMARY);
+        Iterator upper_bound(TuplePtr search_key, uint64_t index_id = constant::INDEX_PRIMARY, bool simple = false);
 
         /**
          * Returns an iterator to the first row that is less than or equal to the provided search
          * key.  Search key must match the primary index order.
          */
-        Iterator inverse_lower_bound(TuplePtr search_key, uint32_t index_id = constant::INDEX_PRIMARY);
+        Iterator inverse_lower_bound(TuplePtr search_key, uint64_t index_id = constant::INDEX_PRIMARY, bool simple = false);
 
         /**
          * An iterator to the start of the table.
          */
-        Iterator begin(uint32_t index_id = constant::INDEX_PRIMARY);
+        Iterator begin(uint64_t index_id = constant::INDEX_PRIMARY, bool simple = false);
 
         /**
          * An iterator to the end of the table.
          */
-        Iterator end(uint32_t index_id = constant::INDEX_PRIMARY)
+        Iterator end(uint64_t index_id = constant::INDEX_PRIMARY, bool simple = false)
         {
             // check for vacant table
             if (index_id == constant::INDEX_PRIMARY && _primary_index == nullptr) {
                 return Iterator(this);
             }
-            return Iterator(this, index_id);
+            return Iterator(this, index_id, simple);
         }
 
         /**
@@ -434,6 +473,16 @@ namespace indexer_helpers {
             }
             return _secondary_indexes.at(idx).first;
         }
+
+        /** 
+         * Get the index schema.
+         */
+        ExtentSchemaPtr get_index_schema(uint64_t index_id) const;
+
+        /** 
+         * Get the secondary index column names in the order as they appear in the index.
+         */
+        std::vector<std::string> get_index_column_names(uint64_t index_id) const;
 
         /**
          * Reads an extent from the tree and returns it.
