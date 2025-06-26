@@ -338,17 +338,17 @@ namespace springtail::pg_log_mgr {
         }
     }
 
-    std::set<uint32_t>
+    std::pair<uint32_t, std::optional<XidLsn>>
     PgLogMgr::_get_copy_table_ids() {
-        std::set<uint32_t> table_ids;
+        uint32_t table_id = -1;
         auto request = _redis_sync_queue.pop(REDIS_WORKER_ID, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
         if (request != nullptr) {
             // populate the tables to copy; check for more work
             LOG_DEBUG(LOG_PG_LOG_MGR, "Table sync queue: {}@{}:{}", request->table_id(),
                     request->xid().xid, request->xid().lsn);
-            table_ids.insert(request->table_id());
+            return std::make_pair(request->table_id(), request->xid());
         }
-        return table_ids;
+        return std::make_pair(table_id, std::nullopt);
     }
 
     void
@@ -386,9 +386,16 @@ namespace springtail::pg_log_mgr {
                 // process copy results
                 copy_task_pending = _process_copy_results(res);
                 if (copy_task_pending) {
-                    auto more_table_ids = _get_copy_table_ids();
-                    LOG_DEBUG(LOG_PG_LOG_MGR, "Copying more tables; target xid={}", xid);
-                    res = PgCopyTable::copy_tables(_db_id, xid, more_table_ids);
+                    auto [next_table_id, next_xid_lsn] = _get_copy_table_ids();
+                    if (next_table_id != -1) {
+                        xid = _pg_log_reader->get_next_xid();
+                        SyncTracker::get_instance()->pick_table_for_sync(_db_id, next_table_id, next_xid_lsn.value());
+                        LOG_DEBUG(LOG_PG_LOG_MGR, "Copying more tables; target xid={}", xid);
+                        res = PgCopyTable::copy_tables(_db_id, xid, std::set<uint32_t>{next_table_id});
+                    } else {
+                        // Not able to fetch next table, so exit copy
+                        copy_task_pending = false;
+                    }
                 }
             } else {
                 // no tables copied
@@ -431,11 +438,16 @@ namespace springtail::pg_log_mgr {
             SyncTracker::get_instance()->add_sync(std::get<pg_log_mgr::PgXactMsg::TableSyncMsg>(redis_xact.msg));
         }
 
-        // process stalled messages; set state to replaying
-        _internal_state.set(STATE_REPLAYING);
-        _internal_state.wait_for_state(STATE_RUNNING);
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; state=replaying");
-        return false;
+        if (_redis_sync_queue.peek() == nullptr) {
+            // process stalled messages; set state to replaying
+            _internal_state.set(STATE_REPLAYING);
+            _internal_state.wait_for_state(STATE_RUNNING);
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; state=replaying");
+            return false;
+        } else {
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; More to process, dont wake up logreader");
+            return true;
+        }
     }
 
     bool
