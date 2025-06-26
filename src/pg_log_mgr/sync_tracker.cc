@@ -65,6 +65,10 @@ SyncTracker::mark_inflight(uint64_t db_id,
     auto picked_table_i = picked_db_i->second.find(table_id);
     CHECK(picked_table_i != picked_db_i->second.end());
     auto picked_table_xid = picked_table_i->second;
+    picked_db_i->second.erase(table_id);
+    if (picked_db_i->second.empty()) {
+        _resync_picked_map.erase(picked_db_i);
+    }
 
     // Erase the entries from the resync_map
     auto db_i = _resync_map.find(db_id);
