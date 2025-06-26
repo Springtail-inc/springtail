@@ -1146,7 +1146,6 @@ namespace springtail {
             }
         }
 
-        // TODO: verify default values
         const std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const override {
             if constexpr(std::is_same_v<T, std::shared_ptr<numeric::NumericData>>) {
                 if (_field->is_null(row)) {

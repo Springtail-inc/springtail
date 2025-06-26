@@ -689,14 +689,14 @@ def start(config_file: str,
         print("\nSpringtail system started successfully.")
 
     else:
-        # start postgres
-        print("Starting postgres...")
-        start_postgres()
-
         if do_fdw_install:
             # install fdw
             print("\nInstalling foreign data wrapper...")
             install_fdw(build_dir)
+
+        # start postgres
+        print("Starting postgres...")
+        start_postgres()
 
         # start replication on db instance
         print("\nStarting replication on database instance...")
