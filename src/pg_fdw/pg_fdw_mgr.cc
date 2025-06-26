@@ -560,8 +560,7 @@ namespace springtail::pg_fdw {
         ListCell *lc;
         std::vector<std::string> target_colnames;
 
-        // init quals
-        CHECK_EQ(state->filtered_quals.empty(), true);
+        // reset quals
         _init_quals(state, qual_list);
 
         int i = 0;
@@ -759,13 +758,9 @@ namespace springtail::pg_fdw {
             state->index = std::move(best_index);
             state->filtered_quals = std::move(best);
         } else {
-            // Always use the sortgroup index
             state->index = *state->sortgroup_index;
-
             auto index_quals = _get_index_quals(state, *state->sortgroup_index, qual_list);
-            if (!index_quals.empty()) {
-                state->filtered_quals = std::move(index_quals);
-            }
+            state->filtered_quals = std::move(index_quals);
         }
 
         // note: just because we have some quals doesn't mean we can use them
@@ -1024,6 +1019,26 @@ namespace springtail::pg_fdw {
             }
             return r;
         };
+
+        // we'll use the qual indexes to figure out if we should reply
+        // with a sort index. We prioritize qual indexes.
+        CHECK_EQ(pg_state->filtered_quals.empty(), true);
+        _init_quals(pg_state, state->qual_list);
+
+        // we have a qual index
+        if (!pg_state->filtered_quals.empty()) {
+            CHECK(pg_state->index.has_value());
+            List* p = check_index(pg_state->index.value(), sortgroup);
+            if (p) {
+                // we can use the same index for sorting
+                pg_state->sortgroup_index = pg_state->index;
+                return p;
+            }
+            // don't do sort push down
+            return {};
+        }
+
+        // no qual indexes found
 
         // try the primary index first
         auto it = std::find_if(pg_state->indexes.begin(), pg_state->indexes.end(),
