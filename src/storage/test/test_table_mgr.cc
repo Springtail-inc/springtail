@@ -251,7 +251,7 @@ namespace {
         data.parent_table_id = 400000;
         attach_partition_msg.partition_data.emplace_back(data);
 
-        TableMgr::get_instance()->attach_partition(db_id, {14, 14}, attach_partition_msg);
+        sys_tbl_mgr::Client::get_instance()->attach_partition(db_id, {14, 14}, attach_partition_msg);
 
         TableMgr::get_instance()->finalize_metadata(db_id, 15);
 

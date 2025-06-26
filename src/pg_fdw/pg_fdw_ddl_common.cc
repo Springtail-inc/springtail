@@ -10,18 +10,13 @@ namespace springtail::pg_fdw {
         auto ns_i = ns_table->inverse_lower_bound(ns_key);
 
         if (ns_i == ns_table->end()) {
-            LOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
+            LOG_WARN("Namespace not found {} @ {}:{}",
                         namespace_id, schema_xid, constant::MAX_LSN);
             return "";
         }
 
         auto ns_fields = ns_table->extent_schema()->get_fields();
         auto &&row = *ns_i;
-        if (namespace_id != ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&row)) {
-            LOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
-                        namespace_id, schema_xid, constant::MAX_LSN);
-            return "";
-        }
         if (!ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row)) {
             LOG_WARN("Namespace marked as not-exists {} @ {}:{}",
                         namespace_id, schema_xid, constant::MAX_LSN);
