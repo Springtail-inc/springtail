@@ -188,7 +188,7 @@ TEST_F(PgFdwCommonTest, IterateTableNames_Success)
     const uint64_t schema_xid = 6;
     const uint64_t namespace_id = 90000;
 
-    std::map<std::string, std::tuple<uint64_t,uint64_t, uint64_t>, std::less<>> table_map;
+    std::map<std::string, PgFdwCommon::TableEntry> table_map;
     std::map<uint64_t, PartitionInfo> table_partition_map;
 
     const std::set<std::string, std::less<>> &table_set = {};
