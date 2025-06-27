@@ -56,7 +56,7 @@ namespace springtail::pg_fdw {
 
     class PgFdwCommon : public Singleton<PgFdwCommon> {
         friend class Singleton<PgFdwCommon>;
-    private:
+    public:
         struct TableEntry {
             uint64_t table_id;
             uint64_t xid;
@@ -70,7 +70,6 @@ namespace springtail::pg_fdw {
         using TableMap = std::map<std::string, TableEntry>;
         using PartitionMap = std::map<uint64_t, PartitionInfo>;
         using ColumnList = std::vector<ColumnInfo>;
-    public:
         /**
          * @brief Helper to process a table and generate the query either for the FDW or the DDL manager
          *
