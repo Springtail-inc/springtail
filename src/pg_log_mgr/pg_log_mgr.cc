@@ -394,12 +394,16 @@ namespace springtail::pg_log_mgr {
                         res = PgCopyTable::copy_tables(_db_id, xid, std::set<uint32_t>{next_table_id});
                     } else {
                         // Not able to fetch next table, so exit copy
+                        LOG_DEBUG(LOG_PG_LOG_MGR, "Couldn't fetch more tables; setting state=running");
+                        // set to running this unblocks the xact handler
+                        _internal_state.set(STATE_RUNNING);
+                        Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_RUNNING);
                         copy_task_pending = false;
                     }
                 }
             } else {
                 // no tables copied
-                LOG_DEBUG(LOG_PG_LOG_MGR, "No tables copied; setting state=running");
+                LOG_DEBUG(LOG_PG_LOG_MGR, "No more tables copied; setting state=running");
                 // set to running this unblocks the xact handler
                 _internal_state.set(STATE_RUNNING);
                 Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_RUNNING);
