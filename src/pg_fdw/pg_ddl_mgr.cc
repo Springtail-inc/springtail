@@ -519,10 +519,10 @@ namespace springtail::pg_fdw {
     PartitionInfo
     _get_partition_info(const nlohmann::json &ddl){
         uint64_t parent_table_id = 0;
-        std::string parent_namespace_name = "";
-        std::string parent_table_name = "";
-        std::string partition_key = "";
-        std::string partition_bound = "";
+        std::string parent_namespace_name;
+        std::string parent_table_name;
+        std::string partition_key;
+        std::string partition_bound;
 
         if (ddl.contains("parent_table_id") && !ddl.at("parent_table_id").is_null()) {
             parent_table_id = ddl.at("parent_table_id").get<uint64_t>();
