@@ -638,6 +638,24 @@ private:
     uint64_t _get_write_xid(uint64_t db_id);
 
     /**
+     * @brief Helper function to extract the modified partition details to either attach or detach the
+     * partition to the parent table.
+     * @param db_id The database ID.
+     * @param xid The XID/LSN at which the alteration occurred.
+     * @param table_id The ID of the parent table.
+     * @param partition_data The partition data.
+     * @param partition_map The partition map.
+     * @param is_attached Whether the partition is being attached or detached.
+     * @return std::vector<uint64_t> The modified partition details.
+     */
+    std::vector<uint64_t> _get_modified_partition_details(uint64_t db_id,
+                                const XidLsn &xid,
+                                uint64_t table_id,
+                                const google::protobuf::RepeatedPtrField<proto::PartitionData> &partition_data,
+                                std::unordered_map<uint64_t, std::pair<std::string, std::string>> *partition_map,
+                                bool is_attached);
+
+    /**
      * Set the read and write XIDs.
      */
     void _set_xids(uint64_t db_id, const XidLsn& read_xid, uint64_t write_xid);

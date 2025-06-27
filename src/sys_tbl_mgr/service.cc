@@ -1426,12 +1426,12 @@ Service::GetUserType(grpc::ServerContext* context,
 }
 
 std::vector<uint64_t>
-_get_modified_partition_details(uint64_t db_id,
-                                const XidLsn &xid,
-                                uint64_t table_id,
-                                const google::protobuf::RepeatedPtrField<proto::PartitionData> &partition_data,
-                                std::unordered_map<uint64_t, std::pair<std::string, std::string>> *partition_map,
-                                bool is_attached)
+Service::_get_modified_partition_details(uint64_t db_id,
+                                         const XidLsn &xid,
+                                         uint64_t table_id,
+                                         const google::protobuf::RepeatedPtrField<proto::PartitionData> &partition_data,
+                                         std::unordered_map<uint64_t, std::pair<std::string, std::string>> *partition_map,
+                                         bool is_attached)
 {
     auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID,
         xid.xid);
@@ -1445,14 +1445,38 @@ _get_modified_partition_details(uint64_t db_id,
         auto tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
         auto parent_table_id = fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->get_uint64(&row);
 
+        // make sure that the table is marked as existing at this XID/LSN
+        bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
+        if (!exists) {
+            LOG_WARN("Table {} marked non-existant at xid {}:{}", table_id, xid.xid, xid.lsn);
+            continue;
+        }
+
         if (parent_table_id == table_id) {
             system_table_ids.insert(tid);
+        }
+    }
+
+    std::unordered_set<uint64_t> cached_system_table_ids;
+    // Validate the system table ids from disk and verify from cache
+    // Only add the tables that have the right table parent table id
+    for (const auto &tid : system_table_ids) {
+        auto table_info = _get_table_info(db_id, tid, xid);
+        if (table_info != nullptr && table_info->parent_table_id == table_id) {
+            // Cache updated with the table information and parent table id matches
+            cached_system_table_ids.insert(tid);
         }
     }
 
     // Parse the requested table ids
     std::unordered_set<uint64_t> table_ids;
     for ( const auto &part_data : partition_data ) {
+        auto table_info = _get_table_info(db_id, part_data.table_id(), xid);
+        // Populated the cache system table information from the partition data
+        if (table_info != nullptr && table_info->parent_table_id == table_id) {
+            cached_system_table_ids.insert(part_data.table_id());
+        }
+        // Validate the partition data parent table id to match the current table_id
         if (part_data.parent_table_id() != table_id) {
             LOG_WARN("Parent table id {} does not match the current table id {}",
                 part_data.parent_table_id(), table_id);
@@ -1475,13 +1499,13 @@ _get_modified_partition_details(uint64_t db_id,
     if ( is_attached ) {
         // Get the difference in order to identify the attached partition
         for (const auto& tid : table_ids) {
-            if (!system_table_ids.contains(tid)) {
+            if (!cached_system_table_ids.contains(tid)) {
                 result.push_back(tid);
             }
         }
     } else {
         // Get the difference in order to identify the detached partition
-        for (const auto& tid : system_table_ids) {
+        for (const auto& tid : cached_system_table_ids) {
             if (!table_ids.contains(tid)) {
                 result.push_back(tid);
             }
@@ -1512,7 +1536,9 @@ Service::AttachPartition(grpc::ServerContext* context,
     // Update the system table for the attached partition
     std::string partition_name = "";
     std::string partition_bound = "";
+    std::string partition_schema = "";
     for (const auto& attached_table_id : attached_partitions) {
+        LOG_DEBUG(LOG_SCHEMA, "[DEBUG] Attaching Partition for table ID: {}, to parent table ID: {}", attached_table_id, request->table_id());
         auto table_info = _get_table_info(request->db_id(), attached_table_id, xid);
 
         // note: table should always exist when calling alter_table()
@@ -1532,12 +1558,18 @@ Service::AttachPartition(grpc::ServerContext* context,
                                                request->table_id(), partition_key, partition_bound);
         _set_table_info(request->db_id(), updated_table_info);
 
+        // get the namespace info
+        auto ns_info = _get_namespace_info(request->db_id(), table_info->namespace_id, xid);
+        assert(ns_info != nullptr);
+
+        partition_schema = ns_info->name;
         partition_name = table_info->name;
     }
 
     nlohmann::json ddl;
 
     ddl["action"] = "attach_partition";
+    ddl["partition_schema"] = partition_schema;
     ddl["partition_name"] = partition_name;
     ddl["partition_bound"] = partition_bound;
     ddl["schema"] = request->namespace_name();
@@ -1570,7 +1602,9 @@ Service::DetachPartition(grpc::ServerContext* context,
 
     // Update the system table for the detached table
     std::string partition_name = "";
+    std::string partition_schema = "";
     for (const auto& detached_table_id : detached_partitions) {
+        LOG_DEBUG(LOG_SCHEMA, "[DEBUG] Detaching Partition for table ID: {}, from parent table ID: {}", detached_table_id, request->table_id());
         auto table_info = _get_table_info(request->db_id(), detached_table_id, xid);
 
         // note: table should always exist when calling alter_table()
@@ -1588,17 +1622,24 @@ Service::DetachPartition(grpc::ServerContext* context,
                                                std::nullopt, partition_key, std::nullopt);
         _set_table_info(request->db_id(), updated_table_info);
 
+        // get the namespace info
+        auto ns_info = _get_namespace_info(request->db_id(), table_info->namespace_id, xid);
+        assert(ns_info != nullptr);
+
+        partition_schema = ns_info->name;
         partition_name = table_info->name;
     }
 
     nlohmann::json ddl;
 
     ddl["action"] = "detach_partition";
+    ddl["partition_schema"] = partition_schema;
     ddl["partition_name"] = partition_name;
     ddl["schema"] = request->namespace_name();
     ddl["table"] = request->table_name();
 
     LOG_DEBUG(LOG_SCHEMA, "Detach partition DDL: {}", ddl.dump());
+
     // serialize the JSON and return
     response->set_statement(nlohmann::to_string(ddl));
     span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);

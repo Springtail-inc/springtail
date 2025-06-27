@@ -20,6 +20,8 @@ INSERT INTO partition_table_schema.invoice (name, amount, purchase_date) VALUES
     ('Bob Smith', 300.00, '2023-03-01');
 
 ## verify
+### schema_check partition_table_schema invoice
+### schema_check child_table_schema invoice_2023
 SELECT * FROM partition_table_schema.invoice ORDER BY id;
 
 ## cleanup

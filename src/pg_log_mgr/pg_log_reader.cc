@@ -830,6 +830,8 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::ATTACH_PARTITION:
             {
                 auto &attach_partition_msg = std::get<PgMsgAttachPartition>(change->msg);
+                LOG_DEBUG(LOG_PG_LOG_MGR, "ATTACH PARTITION: xid={}, pg_xid={}, tid={}", xidlsn.xid,
+                    attach_partition_msg.xid, attach_partition_msg.table_id);
                 std::string &&ddl_stmt = client->attach_partition(_db, xidlsn, attach_partition_msg);
 
                 // Store the DDL statement for the Committer
@@ -840,6 +842,8 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::DETACH_PARTITION:
             {
                 auto &detach_partition_msg = std::get<PgMsgDetachPartition>(change->msg);
+                LOG_DEBUG(LOG_PG_LOG_MGR, "DETACH PARTITION: xid={}, pg_xid={}, tid={}", xidlsn.xid,
+                    detach_partition_msg.xid, detach_partition_msg.table_id);
                 std::string &&ddl_stmt = client->detach_partition(_db, xidlsn, detach_partition_msg);
 
                 // Store the DDL statement for the Committer

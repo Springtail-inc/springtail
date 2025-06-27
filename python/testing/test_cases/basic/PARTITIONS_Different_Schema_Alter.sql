@@ -27,28 +27,28 @@ CREATE TABLE child_table_schema_alter.invoice_2024 (
     PRIMARY KEY (id, purchase_date)
 );
 
+ALTER TABLE partition_table_schema_alter.invoice
+    ATTACH PARTITION child_table_schema_alter.invoice_2023
+    FOR VALUES FROM ('2023-01-01') TO ('2024-01-01');
+
 INSERT INTO child_table_schema_alter.invoice_2023 (name, amount, purchase_date) VALUES
     ('John Doe', 100.00, '2023-01-01'),
     ('Jane Doe', 200.00, '2023-02-01'),
     ('Bob Doe', 300.00, '2023-03-01');
+
+ALTER TABLE partition_table_schema_alter.invoice
+    ATTACH PARTITION child_table_schema_alter.invoice_2024
+    FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
 
 INSERT INTO child_table_schema_alter.invoice_2024 (name, amount, purchase_date) VALUES
     ('Jerry Smith', 400.00, '2024-01-01'),
     ('Morty Smith', 500.00, '2024-02-01'),
     ('Beth Smith', 600.00, '2024-03-01');
 
-ALTER TABLE partition_table_schema_alter.invoice
-    ATTACH PARTITION child_table_schema_alter.invoice_2023
-    FOR VALUES FROM ('2023-01-01') TO ('2024-01-01');
-
-ALTER TABLE partition_table_schema_alter.invoice
-    ATTACH PARTITION child_table_schema_alter.invoice_2024
-    FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
-
 ## verify
-### schema_check public partition_table_schema_alter invoice
-### schema_check public child_table_schema_alter invoice_2023
-### schema_check public child_table_schema_alter invoice_2024
+### schema_check partition_table_schema_alter invoice
+### schema_check child_table_schema_alter invoice_2023
+### schema_check child_table_schema_alter invoice_2024
 SELECT * FROM partition_table_schema_alter.invoice ORDER BY id;
 
 ## cleanup

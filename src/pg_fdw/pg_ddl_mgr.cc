@@ -762,30 +762,20 @@ namespace springtail::pg_fdw {
             // nothing to actually change in the FDW
             return {};
         } else if (action == "attach_partition") {
-            std::string partition_name = ddl.at("partition_name");
-            if ( partition_name.find(".") == std::string::npos) {
-                partition_name = fmt::format("{}.{}",
-                    ddl.at("schema").get<std::string>(),
-                    partition_name);
-            }
-            std::string alter = fmt::format("ALTER TABLE {}.{} ATTACH PARTITION {} {};",
+            std::string alter = fmt::format("ALTER TABLE {}.{} ATTACH PARTITION {}.{} {};",
                                             conn->escape_identifier(ddl.at("schema")),
                                             conn->escape_identifier(ddl.at("table")),
-                                            partition_name,
+                                            conn->escape_identifier(ddl.at("partition_schema")),
+                                            conn->escape_identifier(ddl.at("partition_name")),
                                             ddl.at("partition_bound").get<std::string>());
 
             return alter;
         } else if (action == "detach_partition") {
-            std::string partition_name = ddl.at("partition_name");
-            if ( partition_name.find(".") == std::string::npos) {
-                partition_name = fmt::format("{}.{}",
-                        ddl.at("schema").get<std::string>(),
-                        partition_name);
-            }
-            std::string alter = fmt::format("ALTER TABLE {}.{} DETACH PARTITION {};",
+            std::string alter = fmt::format("ALTER TABLE {}.{} DETACH PARTITION {}.{};",
                                             conn->escape_identifier(ddl.at("schema")),
                                             conn->escape_identifier(ddl.at("table")),
-                                            partition_name);
+                                            conn->escape_identifier(ddl.at("partition_schema")),
+                                            conn->escape_identifier(ddl.at("partition_name")));
 
             return alter;
         }
