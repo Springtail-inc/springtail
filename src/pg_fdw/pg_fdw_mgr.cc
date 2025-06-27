@@ -628,7 +628,7 @@ namespace springtail::pg_fdw {
                         })) {
                 auto ind_schema = state->table->get_index_schema(state->index->id);
                 state->fields = ind_schema->get_fields(target_colnames);
-                state->are_index_fields  = true;
+                state->index_only_scan  = true;
             }
         }
 
@@ -693,8 +693,8 @@ namespace springtail::pg_fdw {
             // Usually the index is defined by sortgroup in this case.
             LOG_DEBUG(LOG_FDW, "Setting up iterators for full index scan: tid={}, index={}, ASC={}",
                     state->tid ,state->index->id, state->scan_asc);
-            state->iter_start.emplace(state->table->begin(state->index->id, state->are_index_fields));
-            state->iter_end.emplace(state->table->end(state->index->id, state->are_index_fields));
+            state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan));
+            state->iter_end.emplace(state->table->end(state->index->id, state->index_only_scan));
             return;
         }
 
@@ -706,37 +706,37 @@ namespace springtail::pg_fdw {
         QualOpName op = qual->base.op;
 
         LOG_DEBUG(LOG_FDW, "Setting up iterators for qual scan: tid: {}, index: {}, op: {}, fields: {}, index cols: {}",
-                            state->tid, state->index->id, qual->base.opname, tuple->to_string(), state->are_index_fields);
+                            state->tid, state->index->id, qual->base.opname, tuple->to_string(), state->index_only_scan);
 
         switch (op) {
             case LESS_THAN:
-                state->iter_start.emplace(state->table->begin(state->index->id, state->are_index_fields));
-                state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id, state->are_index_fields));
+                state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan));
+                state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id, state->index_only_scan));
                 break;
             case LESS_THAN_EQUALS:
-                state->iter_start.emplace(state->table->begin(state->index->id, state->are_index_fields));
-                state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id, state->are_index_fields));
+                state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan));
+                state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id, state->index_only_scan));
                 break;
             case NOT_EQUALS:
                 if (state->scan_asc) {
-                    state->iter_start.emplace(state->table->begin(state->index->id, state->are_index_fields));
-                    state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id, state->are_index_fields));
+                    state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan));
+                    state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id, state->index_only_scan));
                 } else {
-                    state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id, state->are_index_fields));
-                    state->iter_end.emplace(state->table->end(state->index->id, state->are_index_fields));
+                    state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id, state->index_only_scan));
+                    state->iter_end.emplace(state->table->end(state->index->id, state->index_only_scan));
                 }
                 break;
             case EQUALS:
-                state->iter_start.emplace(state->table->lower_bound(tuple, state->index->id, state->are_index_fields));
-                state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id, state->are_index_fields));
+                state->iter_start.emplace(state->table->lower_bound(tuple, state->index->id, state->index_only_scan));
+                state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id, state->index_only_scan));
                 break;
             case GREATER_THAN_EQUALS:
-                state->iter_start.emplace(state->table->lower_bound(tuple, state->index->id, state->are_index_fields));
-                state->iter_end.emplace(state->table->end(state->index->id, state->are_index_fields));
+                state->iter_start.emplace(state->table->lower_bound(tuple, state->index->id, state->index_only_scan));
+                state->iter_end.emplace(state->table->end(state->index->id, state->index_only_scan));
                 break;
             case GREATER_THAN:
-                state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id, state->are_index_fields));
-                state->iter_end.emplace(state->table->end(state->index->id, state->are_index_fields));
+                state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id, state->index_only_scan));
+                state->iter_end.emplace(state->table->end(state->index->id, state->index_only_scan));
                 break;
             case UNSUPPORTED:
                 CHECK(false);
@@ -878,10 +878,10 @@ namespace springtail::pg_fdw {
             if (state->scan_asc) {
                 // check if we need to switch iterators for not equals
                 // we start scanning from begin -> lower-bound, then switch to upper-bound -> end
-                if (state->index.has_value() && state->iter_end != state->table->end(state->index->id, state->are_index_fields)) {
+                if (state->index.has_value() && state->iter_end != state->table->end(state->index->id, state->index_only_scan)) {
                     auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
-                    state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id, state->are_index_fields));
-                    state->iter_end.emplace(state->table->end(state->index->id, state->are_index_fields));
+                    state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id, state->index_only_scan));
+                    state->iter_end.emplace(state->table->end(state->index->id, state->index_only_scan));
                     return false;
                 } else if (!state->index.has_value() && state->iter_end != state->table->end()) {
                     auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
@@ -892,10 +892,10 @@ namespace springtail::pg_fdw {
             } else {
                 // check if we need to switch iterators for not equals
                 // we start scanning from end -> upper-bound, then switch to lower-bound -> begin
-                if (state->index.has_value() && state->iter_start !=state->table->begin(state->index->id, state->are_index_fields)) {
+                if (state->index.has_value() && state->iter_start !=state->table->begin(state->index->id, state->index_only_scan)) {
                     auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
-                    state->iter_start.emplace(state->table->begin(state->index->id, state->are_index_fields));
-                    state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id, state->are_index_fields));
+                    state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan));
+                    state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id, state->index_only_scan));
                     return false;
                 } else if (!state->index.has_value() && state->iter_start !=state->table->begin() ) {
                     auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
@@ -1267,8 +1267,8 @@ namespace springtail::pg_fdw {
         // scan index
         if (state->index) {
             r.emplace_back("   Scan index", state->index->name);
-            if (state->are_index_fields) {
-                r.emplace_back("   Scan type", "simple");
+            if (state->index_only_scan) {
+                r.emplace_back("   Scan type", "index only");
             }
         }
 

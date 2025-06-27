@@ -239,13 +239,13 @@ namespace indexer_helpers {
              * the Secondary type in so that it doesn't provide access to full data rows but
              * to the index values only.
              */
-            struct SecondarySimple : Tracker
+            struct SecondaryIndexOnly : Tracker
             {
-                SecondarySimple(const Table *table,
+                SecondaryIndexOnly(const Table *table,
                         BTreePtr btree, const BTree::Iterator &btree_i);
 
-                SecondarySimple(SecondarySimple&&) = default;
-                virtual ~SecondarySimple() = default;
+                SecondaryIndexOnly(SecondaryIndexOnly&&) = default;
+                virtual ~SecondaryIndexOnly() = default;
 
                 void next() {
                     ++_btree_i;
@@ -257,14 +257,14 @@ namespace indexer_helpers {
                     return *_btree_i;
                 }
 
-                friend bool operator==(const SecondarySimple& a, const SecondarySimple& b) {
+                friend bool operator==(const SecondaryIndexOnly& a, const SecondaryIndexOnly& b) {
                     const Tracker& ta = a;
                     const Tracker& tb = b;
                     return ta == tb;
                 }
             };
 
-            std::variant<std::monostate, Primary, Secondary, SecondarySimple> _tracker;
+            std::variant<std::monostate, Primary, Secondary, SecondaryIndexOnly> _tracker;
 
         public:
             using iterator_category = std::bidirectional_iterator_tag;
@@ -277,7 +277,7 @@ namespace indexer_helpers {
                 if (auto p = std::get_if<Primary>(&_tracker)) {
                     return p->row();
                 }
-                if (auto p = std::get_if<SecondarySimple>(&_tracker)) {
+                if (auto p = std::get_if<SecondaryIndexOnly>(&_tracker)) {
                     return p->row();
                 }
                 auto p = std::get_if<Secondary>(&_tracker);
@@ -294,7 +294,7 @@ namespace indexer_helpers {
                     p->next();
                 } else if (auto p = std::get_if<Secondary>(&_tracker)) {
                     p->next();
-                } else if (auto p = std::get_if<SecondarySimple>(&_tracker)) {
+                } else if (auto p = std::get_if<SecondaryIndexOnly>(&_tracker)) {
                     p->next();
                 } else {
                     assert(false);
@@ -310,7 +310,7 @@ namespace indexer_helpers {
                     p->prev();
                 } else if (auto p = std::get_if<Secondary>(&_tracker)) {
                     p->prev();
-                } else if (auto p = std::get_if<SecondarySimple>(&_tracker)) {
+                } else if (auto p = std::get_if<SecondaryIndexOnly>(&_tracker)) {
                     p->prev();
                 } else {
                     assert(false);
@@ -330,8 +330,8 @@ namespace indexer_helpers {
                     auto pb =  std::get_if<Secondary>(&b._tracker);
                     assert(pb);
                     return *pa == *pb;
-                } else if (auto pa = std::get_if<SecondarySimple>(&a._tracker)) {
-                    auto pb =  std::get_if<SecondarySimple>(&b._tracker);
+                } else if (auto pa = std::get_if<SecondaryIndexOnly>(&a._tracker)) {
+                    auto pb =  std::get_if<SecondaryIndexOnly>(&b._tracker);
                     assert(pb);
                     return *pa == *pb;
                 }
@@ -366,7 +366,7 @@ namespace indexer_helpers {
             }
 
             /** Specifically for the end() iterator. */
-            Iterator(const Table *table, uint32_t index_id, bool simple);
+            Iterator(const Table *table, uint32_t index_id, bool index_only);
 
             /** For constructing an Iterator from the Table functions. */
             Iterator(const Table *table,
@@ -387,7 +387,7 @@ namespace indexer_helpers {
             Iterator(const Table *table,
                      BTreePtr btree, const BTree::Iterator &btree_i)
             { 
-                _tracker.emplace<SecondarySimple>(table, btree, btree_i);
+                _tracker.emplace<SecondaryIndexOnly>(table, btree, btree_i);
             }
         };
 
@@ -444,31 +444,31 @@ namespace indexer_helpers {
          * Returns an iterator to the first row that is greater than or equal to the provided search
          * key.  Search key must match the primary index order.
          */
-        Iterator lower_bound(TuplePtr search_key, uint64_t index_id = constant::INDEX_PRIMARY, bool simple = false);
+        Iterator lower_bound(TuplePtr search_key, uint64_t index_id = constant::INDEX_PRIMARY, bool index_only = false);
 
-        Iterator upper_bound(TuplePtr search_key, uint64_t index_id = constant::INDEX_PRIMARY, bool simple = false);
+        Iterator upper_bound(TuplePtr search_key, uint64_t index_id = constant::INDEX_PRIMARY, bool index_only = false);
 
         /**
          * Returns an iterator to the first row that is less than or equal to the provided search
          * key.  Search key must match the primary index order.
          */
-        Iterator inverse_lower_bound(TuplePtr search_key, uint64_t index_id = constant::INDEX_PRIMARY, bool simple = false);
+        Iterator inverse_lower_bound(TuplePtr search_key, uint64_t index_id = constant::INDEX_PRIMARY, bool index_only = false);
 
         /**
          * An iterator to the start of the table.
          */
-        Iterator begin(uint64_t index_id = constant::INDEX_PRIMARY, bool simple = false);
+        Iterator begin(uint64_t index_id = constant::INDEX_PRIMARY, bool index_only = false);
 
         /**
          * An iterator to the end of the table.
          */
-        Iterator end(uint64_t index_id = constant::INDEX_PRIMARY, bool simple = false)
+        Iterator end(uint64_t index_id = constant::INDEX_PRIMARY, bool index_only = false)
         {
             // check for vacant table
             if (index_id == constant::INDEX_PRIMARY && _primary_index == nullptr) {
                 return Iterator(this);
             }
-            return Iterator(this, index_id, simple);
+            return Iterator(this, index_id, index_only);
         }
 
         /**

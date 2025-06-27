@@ -287,7 +287,7 @@ namespace indexer_helpers {
     }
 
     Table::Iterator
-    Table::lower_bound(TuplePtr search_key, uint64_t index_id, bool simple)
+    Table::lower_bound(TuplePtr search_key, uint64_t index_id, bool index_only)
     {
         // check if the table is vacant
         if (_primary_index == nullptr) {
@@ -301,17 +301,17 @@ namespace indexer_helpers {
             // find the extent that could contain the lower_bound() key
             auto &&i = btree->lower_bound(search_key);
             if (i == btree->end()) {
-                return end(index_id, simple);
+                return end(index_id, index_only);
             }
 
-            if (!simple) {
+            if (!index_only) {
                 auto index_schema = _create_index_schema(_schema, cols);
                 return Iterator(this, btree, i, index_schema);
             }
             return Iterator(this, btree, i);
         }
 
-        CHECK(!simple);
+        CHECK(!index_only);
 
         BTreePtr btree = index(index_id);
 
@@ -334,7 +334,7 @@ namespace indexer_helpers {
     }
 
     Table::Iterator
-    Table::upper_bound(TuplePtr search_key, uint64_t index_id, bool simple)
+    Table::upper_bound(TuplePtr search_key, uint64_t index_id, bool index_only)
     {
         // check if the table is vacant
         if (_primary_index == nullptr) {
@@ -347,17 +347,17 @@ namespace indexer_helpers {
             // find the extent that could contain the lower_bound() key
             auto &&i = btree->upper_bound(search_key);
             if (i == btree->end()) {
-                return end(index_id, simple);
+                return end(index_id, index_only);
             }
             
-            if (!simple) {
+            if (!index_only) {
                 auto index_schema = _create_index_schema(_schema, cols);
                 return Iterator(this, btree, i, index_schema);
             }
             return Iterator(this, btree, i);
         }
 
-        CHECK(!simple);
+        CHECK(!index_only);
 
         // find the extent that could contain the upper_bound() key
         auto &&i = _primary_index->upper_bound(search_key);
@@ -378,7 +378,7 @@ namespace indexer_helpers {
     }
 
     Table::Iterator
-    Table::inverse_lower_bound(TuplePtr search_key, uint64_t index_id, bool simple)
+    Table::inverse_lower_bound(TuplePtr search_key, uint64_t index_id, bool index_only)
     {
         // check if the table is vacant
         if (_primary_index == nullptr) {
@@ -393,17 +393,17 @@ namespace indexer_helpers {
             auto &&i = btree->inverse_lower_bound(search_key);
 
             if (i == btree->end()) {
-                return end(index_id, simple);
+                return end(index_id, index_only);
             }
 
-            if (!simple) {
+            if (!index_only) {
                 auto index_schema = _create_index_schema(_schema, cols);
                 return Iterator(this, btree, i, index_schema);
             }
             return Iterator(this, btree, i);
         }
 
-        CHECK(!simple);
+        CHECK(!index_only);
 
         // if the primary index is empty, return end()
         if (_primary_index->empty()) {
@@ -448,7 +448,7 @@ namespace indexer_helpers {
     }
 
     Table::Iterator
-    Table::begin(uint64_t index_id, bool simple)
+    Table::begin(uint64_t index_id, bool index_only)
     {
         // check if the table is vacant
         if (_primary_index == nullptr) {
@@ -456,7 +456,7 @@ namespace indexer_helpers {
         }
 
         if (index_id == constant::INDEX_PRIMARY) {
-            CHECK(!simple);
+            CHECK(!index_only);
 
             // check if the table is empty
             auto &&index_i = _primary_index->begin();
@@ -472,10 +472,10 @@ namespace indexer_helpers {
             // find the extent that could contain the lower_bound() key
             auto i = btree->begin();
             if (i == btree->end()) {
-                return end(index_id, simple);
+                return end(index_id, index_only);
             }
 
-            if (simple) {
+            if (index_only) {
                 return Iterator(this, btree, i);
             }
 
@@ -1400,22 +1400,22 @@ namespace indexer_helpers {
         _page_i += row_id;
     }
 
-    Table::Iterator::SecondarySimple::SecondarySimple(const Table *table,
+    Table::Iterator::SecondaryIndexOnly::SecondaryIndexOnly(const Table *table,
             BTreePtr btree, const BTree::Iterator &btree_i)
         : 
             Tracker{table, btree, btree_i}
     {}
 
-    Table::Iterator::Iterator(const Table *table, uint32_t index_id, bool simple)
+    Table::Iterator::Iterator(const Table *table, uint32_t index_id, bool index_only)
     { 
         if (index_id == constant::INDEX_PRIMARY) {
             _tracker.emplace<Primary>(table, table->_primary_index, 
                     table->_primary_index->end(), 
                     StorageCache::SafePagePtr{}, 
                     StorageCache::Page::Iterator{});
-        } else if (simple) {
+        } else if (index_only) {
             auto const& [btree, _] = table->_secondary_indexes.at(index_id);
-            _tracker.emplace<SecondarySimple>(table, btree, 
+            _tracker.emplace<SecondaryIndexOnly>(table, btree, 
                     btree->end());
         } else {
             auto const& [btree, cols] = table->_secondary_indexes.at(index_id);
