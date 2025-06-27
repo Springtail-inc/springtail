@@ -56,6 +56,20 @@ namespace springtail::pg_fdw {
 
     class PgFdwCommon : public Singleton<PgFdwCommon> {
         friend class Singleton<PgFdwCommon>;
+    private:
+        struct TableEntry {
+            uint64_t table_id;
+            uint64_t xid;
+            uint64_t namespace_id;
+        };
+        struct ColumnInfo {
+            std::string column_name;
+            std::string type_name;
+            bool nullable;
+        };
+        using TableMap = std::map<std::string, TableEntry>;
+        using PartitionMap = std::map<uint64_t, PartitionInfo>;
+        using ColumnList = std::vector<ColumnInfo>;
     public:
         /**
          * @brief Helper to process a table and generate the query either for the FDW or the DDL manager
@@ -74,8 +88,8 @@ namespace springtail::pg_fdw {
                        const std::string &namespace_name,
                        const std::string &table_name,
                        const uint64_t &table_oid,
-                       const std::vector<std::tuple<std::string, std::string, bool>> &columns,
-                       const std::map<uint64_t, PartitionInfo> &table_partition_map,
+                       const ColumnList &columns,
+                       const PartitionMap &table_partition_map,
                        bool is_fdw,
                        Func escape_identifier)
         {
@@ -120,7 +134,7 @@ namespace springtail::pg_fdw {
                            const std::string &namespace_name,
                            const std::string &table,
                            uint64_t tid,
-                           const std::vector<std::tuple<std::string, std::string, bool>> &columns,
+                           const ColumnList &columns,
                            const PartitionInfo &partition_info,
                            bool is_foreign_table,
                            Func escape_identifier)
@@ -216,8 +230,8 @@ namespace springtail::pg_fdw {
                              bool limit,
                              const std::set<std::string, std::less<>> &table_set,
                              [[maybe_unused]] const std::string_view namespace_name, // used only for logging
-                             std::map<std::string, std::tuple<uint64_t,uint64_t, uint64_t>, std::less<>> &table_map,
-                             std::map<uint64_t, PartitionInfo> &table_partition_map);
+                             TableMap &table_map,
+                             PartitionMap &table_partition_map);
         /**
          * @brief Get the schema ddl object
          *
@@ -278,8 +292,8 @@ namespace springtail::pg_fdw {
             uint64_t namespace_id = ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&row);
 
             // map from table name -> <table id, xid, table_ns_id>
-            std::map<std::string, std::tuple<uint64_t,uint64_t, uint64_t>, std::less<>> table_map;
-            std::map<uint64_t, PartitionInfo> table_partition_map;
+            TableMap table_map;
+            PartitionMap table_partition_map;
 
             // iterate over the table names table and populate the table map
             _iterate_table_names(db_id, schema_xid, namespace_id, exclude, limit, table_set, namespace_name, table_map, table_partition_map);
@@ -287,7 +301,7 @@ namespace springtail::pg_fdw {
             // reorganize the table_map to be from tid -> {xid, table}
             std::map<uint64_t, std::tuple<uint64_t, std::string, uint64_t>> tid_map;
             for (const auto &[table_name, table_info] : table_map) {
-                tid_map[std::get<0>(table_info)] = {std::get<1>(table_info), table_name, std::get<2>(table_info)};
+                tid_map[table_info.table_id] = {table_info.xid, table_name, table_info.namespace_id};
             }
 
             // Populate the parent table names for the partitioned tables
@@ -318,7 +332,7 @@ namespace springtail::pg_fdw {
             // Move on to iterating through the schemas table
 
             // column list: name, type, nullable
-            std::vector<std::tuple<std::string, std::string, bool>> columns;
+            ColumnList columns;
 
             uint64_t current_tid=0;
             std::string current_table;
@@ -366,13 +380,13 @@ namespace springtail::pg_fdw {
                 }
 
                 std::string column_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(&row));
-                if (bool exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(&row); !exists) {
-                    if (auto it = std::ranges::find_if(columns,
-                        [&column_name](const std::tuple<std::string, std::string, bool> &column) {
-                            return std::get<0>(column) == column_name;
-                        });
-                        it != columns.end())
-                    {
+                bool exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(&row);
+                if (!exists) {
+                    auto it = std::ranges::find_if(columns,
+                    [&column_name](const ColumnInfo &column) {
+                        return column.column_name == column_name;
+                    });
+                    if (it != columns.end()) {
                         columns.erase(it);
                     }
                     continue;

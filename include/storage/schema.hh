@@ -30,8 +30,7 @@ namespace springtail {
         RESYNC = 4,
         NEW_INDEX = 5,
         DROP_INDEX = 6,
-        TYPE_CHANGE = 7,
-        NO_CHANGE = 8
+        NO_CHANGE = 7
     };
 
     /**

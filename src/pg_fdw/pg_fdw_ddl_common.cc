@@ -46,7 +46,8 @@ namespace springtail::pg_fdw {
         }
 
         // make sure that the table is marked as existing at this XID/LSN
-        if (bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row); !exists) {
+        bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
+        if (!exists) {
             LOG_WARN("Table marked non-existant at xid {}:{}", schema_xid, constant::MAX_LSN);
             return std::make_pair("", 0);
         }
@@ -63,8 +64,8 @@ namespace springtail::pg_fdw {
                          bool limit,
                          const std::set<std::string, std::less<>> &table_set,
                          [[maybe_unused]] const std::string_view namespace_name, // used only for logging
-                         std::map<std::string, std::tuple<uint64_t,uint64_t, uint64_t>, std::less<>> &table_map,
-                         std::map<uint64_t, PartitionInfo> &table_partition_map)
+                         TableMap &table_map,
+                         PartitionMap &table_partition_map)
     {
         // get the table names table to iterate over
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID,
@@ -99,9 +100,11 @@ namespace springtail::pg_fdw {
             uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
             uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
 
-            if (bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row); !exists) {
+            bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
+            if (!exists) {
                 // find table and compare xids, remove if this xid is >= to the one in the map
-                if (auto entry = table_map.find(table_name); entry != table_map.end() && xid >= std::get<1>(entry->second)) {
+                auto entry = table_map.find(table_name);
+                if (entry != table_map.end() && xid >= entry->second.xid) {
                     // remove this table entry
                     table_map.erase(entry);
                 }
@@ -137,7 +140,7 @@ namespace springtail::pg_fdw {
             if (!inserted) {
                 LOG_DEBUG(LOG_FDW, "Table {} already exists in schema {}", table_name, namespace_name);
                 // update if xid is newer
-                if (xid > std::get<1>(it->second)) {
+                if (xid > it->second.xid) {
                     it->second = {tid, xid, table_ns_id};
                 }
             }
