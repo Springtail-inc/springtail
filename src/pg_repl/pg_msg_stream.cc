@@ -931,6 +931,8 @@ namespace springtail {
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded create table: json: {}", json.dump());
+
         // check object type, could be an index, default value or something other
         // than a table
         std::string object_type;
@@ -962,8 +964,6 @@ namespace springtail {
         }
 
         _decode_schema_columns(json["columns"], table_msg.columns);
-
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded create table: json: {}", json.dump());
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_TABLE);
         msg->msg.emplace<PgMsgTable>(table_msg);

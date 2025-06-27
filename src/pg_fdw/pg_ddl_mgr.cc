@@ -573,7 +573,7 @@ namespace springtail::pg_fdw {
         auto const &action = ddl.at("action");
         if (action == "create") { // create table
             // generate the CREATE TABLE statement
-            std::vector<std::tuple<std::string, std::string, bool>> columns;
+            std::vector<PgFdwCommon::ColumnInfo> columns;
 
             for (const auto &col : ddl.at("columns")) {
                 auto fully_qualified_type_name = fmt::format("{}.{}",
