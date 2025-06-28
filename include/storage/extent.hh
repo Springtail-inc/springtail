@@ -69,16 +69,21 @@ namespace springtail {
             the bottom 7 bits indicate the type. */
         std::vector<uint8_t> field_types;
 
-        uint64_t prev_offset; ///< The location of the previous extent that this extent is overwriting.  Set to zero for new extents.
-
+        uint64_t prev_offset; ///< The location of the previous extent that this extent is overwriting.  Set to UNKNOWN_EXTENT for new extents.
+        uint32_t prev_size; ///< The on-disk size in bytes of the previous extent.  Used for vacuuming.
 
         /** Constructor for uncommitted extents.*/
-        ExtentHeader(ExtentType type, uint64_t xid, uint32_t row_size, const std::vector<uint8_t> &types, uint64_t prev = 0)
+        ExtentHeader(ExtentType type,
+                     uint64_t xid,
+                     uint32_t row_size,
+                     const std::vector<uint8_t> &types,
+                     uint64_t prev_offset = constant::UNKNOWN_EXTENT)
             : type(type),
               xid(xid),
               row_size(row_size),
               field_types(types),
-              prev_offset(prev)
+              prev_offset(prev_offset),
+              prev_size(0)
         { }
 
         /** Constructor that deserializes the header. */
@@ -88,11 +93,12 @@ namespace springtail {
 
             std::memcpy(&xid, data->data(), sizeof(uint64_t));
             std::memcpy(&prev_offset, data->data() + 8, sizeof(uint64_t));
-            std::memcpy(&row_size, data->data() + 16, sizeof(uint32_t));
-            std::memcpy(&field_count, data->data() + 20, sizeof(uint32_t));
+            std::memcpy(&prev_size, data->data() + 16, sizeof(uint32_t));
+            std::memcpy(&row_size, data->data() + 20, sizeof(uint32_t));
+            std::memcpy(&field_count, data->data() + 24, sizeof(uint32_t));
             field_types.resize(field_count);
-            std::memcpy(field_types.data(), data->data() + 24, field_count);
-            type = ExtentType(*reinterpret_cast<uint8_t *>(data->data() + 24 + field_count));
+            std::memcpy(field_types.data(), data->data() + 28, field_count);
+            type = ExtentType(*reinterpret_cast<uint8_t *>(data->data() + 28 + field_count));
         }
 
         /** Serialize the header. */
@@ -103,10 +109,11 @@ namespace springtail {
 
             std::memcpy(data.data(), &xid, sizeof(uint64_t));
             std::memcpy(data.data() + 8, &prev_offset, sizeof(uint64_t));
-            std::memcpy(data.data() + 16, &row_size, sizeof(uint32_t));
-            std::memcpy(data.data() + 20, &field_count, sizeof(uint32_t));
-            std::memcpy(data.data() + 24, field_types.data(), field_count);
-            *reinterpret_cast<uint8_t *>(data.data() + 24 + field_count) =
+            std::memcpy(data.data() + 16, &prev_size, sizeof(uint32_t));
+            std::memcpy(data.data() + 20, &row_size, sizeof(uint32_t));
+            std::memcpy(data.data() + 24, &field_count, sizeof(uint32_t));
+            std::memcpy(data.data() + 28, field_types.data(), field_count);
+            *reinterpret_cast<uint8_t *>(data.data() + 28 + field_count) =
                 static_cast<uint8_t>(type);
 
             return data;
@@ -270,7 +277,7 @@ namespace springtail {
                uint64_t xid,
                uint32_t row_size,
                std::vector<uint8_t> types)
-            : _header(type, xid, row_size, types)
+            : _header(type, xid, row_size, types, constant::UNKNOWN_EXTENT)
         {
             // empty extent
             _fixed_data = std::make_shared<std::vector<char>>();
