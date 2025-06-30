@@ -59,6 +59,7 @@ namespace springtail::pg_fdw {
         uint64_t tid;
         uint64_t xid;
         FieldArrayPtr fields = nullptr;       ///< Fields for the columns from the target list
+        bool index_only_scan = false;        ///< indicates that fields are part of the index itself
         FieldArrayPtr qual_fields = nullptr;  ///< Fields for the columns from the qual list
         TableStats stats;                     ///< Table statistics
         int rows_fetched = 0;                 ///< Number of rows fetched
