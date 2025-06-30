@@ -4,31 +4,12 @@
 #include <pg_fdw/pg_fdw.h>
 
 #include "postgres.h"
-#include "access/htup_details.h"
-#include "access/reloptions.h"
-#include "access/sysattr.h"
 #include "access/xact.h"
-#include "catalog/pg_foreign_table.h"
-#include "commands/copy.h"
 #include "commands/defrem.h"
-#include "commands/explain.h"
-#include "commands/vacuum.h"
 #include "foreign/fdwapi.h"
 #include "foreign/foreign.h"
-#include "funcapi.h"
-#include "miscadmin.h"
-#include "nodes/makefuncs.h"
 #include "nodes/pg_list.h"
-#include "optimizer/cost.h"
-#include "optimizer/pathnode.h"
-#include "optimizer/planmain.h"
-#include "optimizer/restrictinfo.h"
-#include "utils/memutils.h"
-#include "utils/rel.h"
 #include "utils/guc.h"
-#include "utils/builtins.h"
-#include "postmaster/bgworker.h"
-
 
 PG_MODULE_MAGIC;
 

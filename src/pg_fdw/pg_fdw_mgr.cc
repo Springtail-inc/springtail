@@ -280,16 +280,8 @@ namespace springtail::pg_fdw {
         SchemaType pg_schema_type = convert_pg_type(pg_type, 'N');
         if (column.type == pg_schema_type) {
             if (pg_schema_type == SchemaType::BINARY) {
-                if (pg_type == NUMERICOID &&
-                    (qual->base.op == QualOpName::EQUALS || qual->base.op == QualOpName::NOT_EQUALS)) {
-                    // only support equality of NUMERICOID binary types
-                    return true;
-                } else {
-                    // don't support comparisons of binary types
-                    return false;
-                }
+                return false;
             }
-
             return true;
         }
 
@@ -620,11 +612,19 @@ namespace springtail::pg_fdw {
         }
 
         // set target columns; will contain filtered qual columns as well
-        if (target_colnames.empty()) {
-            // if no target columns, use all columns
-            state->fields = state->table->extent_schema()->get_fields();
-        } else {
-            // otherwise, use target columns (by name
+        if (!target_colnames.empty() && state->index.has_value() && state->index->id != constant::INDEX_PRIMARY) {
+            // check if all target columns are part of the index
+            auto index_colnames = state->table->get_index_column_names(state->index->id);
+            if (std::ranges::all_of(target_colnames, [&index_colnames](const auto& n) ->bool {
+                        return std::ranges::find(index_colnames, n) != index_colnames.end();
+                        })) {
+                auto ind_schema = state->table->get_index_schema(state->index->id);
+                state->fields = ind_schema->get_fields(target_colnames);
+                state->index_only_scan  = true;
+            }
+        }
+
+        if (!state->fields) {
             state->fields = state->table->extent_schema()->get_fields(target_colnames);
         }
 
@@ -640,7 +640,7 @@ namespace springtail::pg_fdw {
 
 
     FieldTuplePtr
-    PgFdwMgr::_gen_qual_tuple(const std::vector<ConstQual*> &quals, const FieldArrayPtr qual_fields)
+    PgFdwMgr::_gen_qual_tuple(const std::vector<ConstQualPtr> &quals, const FieldArrayPtr qual_fields)
     {
         // create the field tuple used for bounds, it is based on the number of EQUAL quals
         // the tuple always has at least the first qual field from the primary key
@@ -685,8 +685,8 @@ namespace springtail::pg_fdw {
             // Usually the index is defined by sortgroup in this case.
             LOG_DEBUG(LOG_FDW, "Setting up iterators for full index scan: tid={}, index={}, ASC={}",
                     state->tid ,state->index->id, state->scan_asc);
-            state->iter_start.emplace(state->table->begin(state->index->id));
-            state->iter_end.emplace(state->table->end(state->index->id));
+            state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan));
+            state->iter_end.emplace(state->table->end(state->index->id, state->index_only_scan));
             return;
         }
 
@@ -697,38 +697,38 @@ namespace springtail::pg_fdw {
         FieldTuplePtr tuple = _gen_qual_tuple(state->filtered_quals, state->qual_fields);
         QualOpName op = qual->base.op;
 
-        LOG_DEBUG(LOG_FDW, "Setting up iterators for qual scan: tid: {}, index: {}, op: {}, fields: {}",
-                            state->tid, state->index->id, qual->base.opname, tuple->to_string());
+        LOG_DEBUG(LOG_FDW, "Setting up iterators for qual scan: tid: {}, index: {}, op: {}, fields: {}, index cols: {}",
+                            state->tid, state->index->id, qual->base.opname, tuple->to_string(), state->index_only_scan);
 
         switch (op) {
             case LESS_THAN:
-                state->iter_start.emplace(state->table->begin(state->index->id));
-                state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id));
+                state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan));
+                state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id, state->index_only_scan));
                 break;
             case LESS_THAN_EQUALS:
-                state->iter_start.emplace(state->table->begin(state->index->id));
-                state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id));
+                state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan));
+                state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id, state->index_only_scan));
                 break;
             case NOT_EQUALS:
                 if (state->scan_asc) {
-                    state->iter_start.emplace(state->table->begin(state->index->id));
-                    state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id));
+                    state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan));
+                    state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id, state->index_only_scan));
                 } else {
-                    state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id));
-                    state->iter_end.emplace(state->table->end(state->index->id));
+                    state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id, state->index_only_scan));
+                    state->iter_end.emplace(state->table->end(state->index->id, state->index_only_scan));
                 }
                 break;
             case EQUALS:
-                state->iter_start.emplace(state->table->lower_bound(tuple, state->index->id));
-                state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id));
+                state->iter_start.emplace(state->table->lower_bound(tuple, state->index->id, state->index_only_scan));
+                state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id, state->index_only_scan));
                 break;
             case GREATER_THAN_EQUALS:
-                state->iter_start.emplace(state->table->lower_bound(tuple, state->index->id));
-                state->iter_end.emplace(state->table->end(state->index->id));
+                state->iter_start.emplace(state->table->lower_bound(tuple, state->index->id, state->index_only_scan));
+                state->iter_end.emplace(state->table->end(state->index->id, state->index_only_scan));
                 break;
             case GREATER_THAN:
-                state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id));
-                state->iter_end.emplace(state->table->end(state->index->id));
+                state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id, state->index_only_scan));
+                state->iter_end.emplace(state->table->end(state->index->id, state->index_only_scan));
                 break;
             case UNSUPPORTED:
                 CHECK(false);
@@ -808,7 +808,7 @@ namespace springtail::pg_fdw {
         LOG_DEBUG(LOG_FDW, "fdw_reset_scan: tid: {}", state->tid);
 
         state->filtered_quals.clear();
-        
+
         // init quals
         _init_quals(state, qual_list);
 
@@ -870,10 +870,10 @@ namespace springtail::pg_fdw {
             if (state->scan_asc) {
                 // check if we need to switch iterators for not equals
                 // we start scanning from begin -> lower-bound, then switch to upper-bound -> end
-                if (state->index.has_value() && state->iter_end != state->table->end(state->index->id)) {
+                if (state->index.has_value() && state->iter_end != state->table->end(state->index->id, state->index_only_scan)) {
                     auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
-                    state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id));
-                    state->iter_end.emplace(state->table->end(state->index->id));
+                    state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id, state->index_only_scan));
+                    state->iter_end.emplace(state->table->end(state->index->id, state->index_only_scan));
                     return false;
                 } else if (!state->index.has_value() && state->iter_end != state->table->end()) {
                     auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
@@ -884,10 +884,10 @@ namespace springtail::pg_fdw {
             } else {
                 // check if we need to switch iterators for not equals
                 // we start scanning from end -> upper-bound, then switch to lower-bound -> begin
-                if (state->index.has_value() && state->iter_start !=state->table->begin(state->index->id)) {
+                if (state->index.has_value() && state->iter_start !=state->table->begin(state->index->id, state->index_only_scan)) {
                     auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
-                    state->iter_start.emplace(state->table->begin(state->index->id));
-                    state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id));
+                    state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan));
+                    state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id, state->index_only_scan));
                     return false;
                 } else if (!state->index.has_value() && state->iter_start !=state->table->begin() ) {
                     auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
@@ -1259,6 +1259,9 @@ namespace springtail::pg_fdw {
         // scan index
         if (state->index) {
             r.emplace_back("   Scan index", state->index->name);
+            if (state->index_only_scan) {
+                r.emplace_back("   Scan type", "index only");
+            }
         }
 
         // collect quals
@@ -1397,6 +1400,13 @@ namespace springtail::pg_fdw {
         case SchemaType::TEXT: {
             const std::string_view value(field->get_text(&row));
             return PointerGetDatum(cstring_to_text_with_len(value.data(), value.size()));
+        }
+        case SchemaType::NUMERIC: {
+            auto &&value = field->get_numeric(&row);
+            int32_t size = value->varsize();
+            Numeric data = reinterpret_cast<Numeric>(palloc(size));
+            memcpy(data, value.get(), size);
+            return PointerGetDatum(data);
         }
         case SchemaType::BINARY: {
             auto &&value = field->get_binary(&row);
@@ -1832,10 +1842,8 @@ namespace springtail::pg_fdw {
             case BOOLOID:
             case CHAROID:
             case UUIDOID:
+            case NUMERICOID:    // DECIMAL(x,y)
                 return true;
-            case NUMERICOID: // DECIMAL(x,y)
-                //TODO: https://linear.app/springtail/issue/SPR-556/
-                return (op == EQUALS || op == NOT_EQUALS);
             case VARCHAROID:
             case TEXTOID:
                 // due to different collations/encodings we only support equality for text
@@ -1849,33 +1857,6 @@ namespace springtail::pg_fdw {
                 LOG_DEBUG(LOG_FDW, "Type not suitable for sorting: {}", pg_type);
                 return false;
         }
-    }
-
-    std::vector<char>
-    PgFdwMgr::_numeric_datum_to_vector(Datum value)
-    {
-        // Get the send function for the numeric type
-        Oid numeric_type_id = NUMERICOID;
-        bool is_varlena;
-        Oid numeric_out_func;
-
-        // Look up the send function for NUMERICOID
-        getTypeBinaryOutputInfo(numeric_type_id, &numeric_out_func, &is_varlena);
-
-        // Use the send function (typically numeric_send) to convert to binary format
-        bytea *output_bytes = OidSendFunctionCall(numeric_out_func, value);
-
-        // Extract data and length from the bytea structure
-        uint8_t *data = reinterpret_cast<uint8_t *>(VARDATA(output_bytes));
-        size_t length = VARSIZE(output_bytes) - VARHDRSZ;
-
-        // Copy to std::vector
-        std::vector<char> result(data, data + length);
-
-        // Free the bytea result
-        pfree(output_bytes);
-
-        return result;
     }
 
     void
@@ -1936,9 +1917,16 @@ namespace springtail::pg_fdw {
                 fields->at(idx) = std::make_shared<ConstTypeField<std::string>>(str);
                 break;
             }
-            case NUMERICOID: // DECIMAL(x,y)
-                fields->at(idx) = std::make_shared<ConstTypeField<std::vector<char>>>(std::move(_numeric_datum_to_vector(qual->value)));
+            case NUMERICOID: {// DECIMAL(x,y)
+                std::shared_ptr<numeric::NumericData> numeric_datum(
+                    reinterpret_cast<numeric::Numeric>(qual->value),
+                    [](numeric::Numeric ptr) {
+                        // this is shared pointer to the data inside ConstQual
+                        // as this data is not owned by this pointer, no need to remove it
+                    });
+                fields->at(idx) = std::make_shared<ConstTypeField<std::shared_ptr<numeric::NumericData>>>(numeric_datum);
                 break;
+            }
             default:
                 // handle enum user defined type
                 if (qual->base.typeoid >= FirstNormalObjectId) {
