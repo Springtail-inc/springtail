@@ -371,14 +371,14 @@ OpenTelemetry::_internal_shutdown()
 }
 
 opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer>
-OpenTelemetry::_tracer(const std::string_view& name)
+OpenTelemetry::tracer(const std::string_view& name)
 {
     auto provider = opentelemetry::trace::Provider::GetTracerProvider();
     return provider->GetTracer(name.data());
 }
 
 void
-OpenTelemetry::_increment_counter(std::string_view name)
+OpenTelemetry::increment_counter(std::string_view name)
 {
     if (!_otel_enabled) {
         return;
@@ -399,7 +399,7 @@ OpenTelemetry::_increment_counter(std::string_view name)
 }
 
 void
-OpenTelemetry::_record_histogram(std::string_view name, double value)
+OpenTelemetry::record_histogram(std::string_view name, double value)
 {
     if (!_otel_enabled) {
         return;

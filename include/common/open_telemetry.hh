@@ -68,23 +68,25 @@ public:
     std::unique_ptr<opentelemetry::context::Token>
     set_context_variable(const std::string &attr_key, const std::string &attr_value);
 
-    inline void
-    increment_counter(std::string_view name)
-    {
-        _increment_counter(name);
-    }
+    /**
+     * @brief Increment a counter
+     * @param name The name of the counter
+     */
+     void increment_counter(std::string_view name);
 
-    inline void
-    record_histogram(std::string_view name, double value)
-    {
-        _record_histogram(name, value);
-    }
 
-    inline opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer>
-    tracer(const std::string_view& name)
-    {
-        return _tracer(name);
-    }
+     /**
+      * @brief Record a value in the histogram
+      * @param name The name of the histogram
+      * @param value The value to record
+      * @param attributes The attributes to record
+      */
+     void record_histogram(std::string_view name, double value);
+
+     /**
+     * @brief Retrieve the otel Tracer by name.
+     */
+     opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer(const std::string_view& name);
 
 private:
     OpenTelemetry() = default;      ///< default constructor
@@ -214,25 +216,5 @@ private:
     void _register_histogram(std::string_view name, std::string_view description, std::string_view unit);
 
     void _log(const spdlog::details::log_msg &msg);
-
-    /**
-     * @brief Increment a counter
-     * @param name The name of the counter
-     */
-     void _increment_counter(std::string_view name);
-
-     /**
-      * @brief Record a value in the histogram
-      * @param name The name of the histogram
-      * @param value The value to record
-      * @param attributes The attributes to record
-      */
-     void _record_histogram(std::string_view name, double value);
-
-     /**
-     * @brief Retrieve the otel Tracer by name.
-     */
-     opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> _tracer(const std::string_view& name);
-
 };
 }  // namespace springtail::open_telemetry
