@@ -1617,7 +1617,7 @@ namespace springtail::pg_fdw {
                                         const std::string &db_name,
                                         uint64_t schema_xid)
     {
-        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
+        auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
         List                 *commands = NIL;
         std::set<std::string> table_set;
 

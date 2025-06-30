@@ -86,7 +86,7 @@ namespace springtail::committer {
                 emplace_result.first->second = timestamp;
             }
 
-            auto token_1 = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
+            auto token_1 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
 
             // handle a TABLE_SYNC_START
             if (result->type() == XidReady::Type::TABLE_SYNC_START) {
@@ -107,7 +107,7 @@ namespace springtail::committer {
                 completed_xid = itr->second;
             }
 
-            auto token_2 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(completed_xid)}});
+            auto token_2 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(completed_xid)}});
             LOG_INFO("Last completed XID: {}@{}", db_id, completed_xid);
 
             // handle a TABLE_SYNC_COMMIT
@@ -123,7 +123,7 @@ namespace springtail::committer {
                 completed_xid = result->swap().xid();
                 nlohmann::json ddls = result->swap().ddls();
 
-                auto token_3 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(completed_xid)}});
+                auto token_3 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(completed_xid)}});
 
                 // pre-commit the DDLs in case there's a failure
                 _redis_ddl.precommit_ddl(db_id, completed_xid, ddls);
@@ -172,7 +172,7 @@ namespace springtail::committer {
                 xid = result->xact().xid();
                 pg_xid = result->xact().pg_xid();
             }
-            auto token_4 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(xid)}});
+            auto token_4 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(xid)}});
             LOG_INFO("Process XID: {}@{}", db_id, xid);
             assert(xid > completed_xid);
 
@@ -462,7 +462,7 @@ namespace springtail::committer {
             // log how long it took to process this table
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - min_commit_ts->to_system_time());
-            open_telemetry::OpenTelemetry::record_histogram(PG_LOG_MGR_BTREE_LATENCIES, duration.count());
+            open_telemetry::OpenTelemetry::get_instance()->record_histogram(PG_LOG_MGR_BTREE_LATENCIES, duration.count());
             LOG_INFO("Processed table {} in {} milliseconds", tid, duration.count());
         }
         // update the system table roots

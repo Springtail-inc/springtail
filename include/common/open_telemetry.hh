@@ -30,14 +30,14 @@ public:
 
     static void flush();
 
-    static inline void
+    inline void
     log(const spdlog::source_loc &loc, const std::string &logger_name, spdlog::level::level_enum lvl, const std::string &formatted_msg)
     {
-        if (!_inited_flag || _shutdown_flag || !(get_instance()->_otel_enabled && get_instance()->_otel_remote)) {
+        if (!_inited_flag || _shutdown_flag || !(_otel_enabled && _otel_remote)) {
             return;
         }
         spdlog::details::log_msg message(loc, logger_name, lvl, formatted_msg);
-        get_instance()->_log(message);
+        _log(message);
     }
 
     /**
@@ -46,7 +46,7 @@ public:
      * @param callback - function called for each key/value pair
      * @return std::unordered_map<std::string, std::string> - map of current key/value pairs for the given scope
      */
-    static void
+    void
     get_context_variables(opentelemetry::nostd::function_ref<bool(opentelemetry::nostd::string_view, opentelemetry::nostd::string_view)> callback);
 
     /**
@@ -55,7 +55,7 @@ public:
      * @param attributes - map of key/value pairs
      * @return std::unique_ptr<opentelemetry::context::Token> - scope token
      */
-    static std::unique_ptr<opentelemetry::context::Token>
+    std::unique_ptr<opentelemetry::context::Token>
     set_context_variables(const std::unordered_map<std::string, std::string>& attributes);
 
     /**
@@ -65,29 +65,28 @@ public:
      * @param attr_value - variable value
      * @return std::unique_ptr<opentelemetry::context::Token> - scope token
      */
-    static std::unique_ptr<opentelemetry::context::Token>
+    std::unique_ptr<opentelemetry::context::Token>
     set_context_variable(const std::string &attr_key, const std::string &attr_value);
 
-    static inline void
-    increment_counter(std::string_view name)
-    {
-        _assert_instance();
-        get_instance()->_increment_counter(name);
-    }
+    /**
+     * @brief Increment a counter
+     * @param name The name of the counter
+     */
+     void increment_counter(std::string_view name);
 
-    static inline void
-    record_histogram(std::string_view name, double value)
-    {
-        _assert_instance();
-        get_instance()->_record_histogram(name, value);
-    }
 
-    static inline opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer>
-    tracer(const std::string_view& name)
-    {
-        _assert_instance();
-        return get_instance()->_tracer(name);
-    }
+     /**
+      * @brief Record a value in the histogram
+      * @param name The name of the histogram
+      * @param value The value to record
+      * @param attributes The attributes to record
+      */
+     void record_histogram(std::string_view name, double value);
+
+     /**
+     * @brief Retrieve the otel Tracer by name.
+     */
+     opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer(const std::string_view& name);
 
 private:
     OpenTelemetry() = default;      ///< default constructor
@@ -217,25 +216,5 @@ private:
     void _register_histogram(std::string_view name, std::string_view description, std::string_view unit);
 
     void _log(const spdlog::details::log_msg &msg);
-
-    /**
-     * @brief Increment a counter
-     * @param name The name of the counter
-     */
-     void _increment_counter(std::string_view name);
-
-     /**
-      * @brief Record a value in the histogram
-      * @param name The name of the histogram
-      * @param value The value to record
-      * @param attributes The attributes to record
-      */
-     void _record_histogram(std::string_view name, double value);
-
-     /**
-     * @brief Retrieve the otel Tracer by name.
-     */
-     opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> _tracer(const std::string_view& name);
-
 };
 }  // namespace springtail::open_telemetry
