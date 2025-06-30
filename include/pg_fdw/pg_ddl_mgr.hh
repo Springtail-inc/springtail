@@ -1,7 +1,6 @@
 #pragma once
 
 #include <vector>
-#include <set>
 #include <optional>
 
 #include <nlohmann/json.hpp>
@@ -17,7 +16,7 @@
 #include <sys_tbl_mgr/table_mgr.hh>
 
 #include <pg_repl/libpq_connection.hh>
-#include "common/logging.hh"
+#include <common/logging.hh>
 
 namespace springtail::pg_fdw {
 

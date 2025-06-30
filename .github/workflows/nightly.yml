@@ -37,7 +37,8 @@ jobs:
       PACKAGES_S3_PREFIX: nightly-builds
       TEST_LOGS_S3_PREFIX: nightly-testlogs
       NUM_PROCS: ${{ vars.NUM_PROCS }}
-      INTEGRATION_TEST_ITERATIONS: ${{ vars.INTEGRATION_TEST_ITERATIONS || 1 }}
+      #INTEGRATION_TEST_ITERATIONS: ${{ vars.INTEGRATION_TEST_ITERATIONS || 1 }}
+      INTEGRATION_TEST_ITERATIONS: 3
       # The path to the Springtail logs, keep consistent with the `log_path` inside
       # system.json.test
       SPRINGTAIL_LOG_PATH: /opt/springtail/logs

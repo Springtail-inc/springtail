@@ -153,7 +153,7 @@ namespace springtail::pg_fdw {
         /** Begin scan
          * @param state PgFdwState
          * @param num_attrs Number of attributes
--        * @param attrs Array of pg attributes
+         * @param attrs Array of pg attributes
          * @param target_list List of target columns (Value or String)
          * @param qual_list List of predicate clauses (BaseQual)
          * @param sortgroup List of sort group columns (DeparsedSortGroup)
@@ -297,9 +297,6 @@ namespace springtail::pg_fdw {
                                     int32_t springtail_oid,
                                     Oid pg_oid,
                                     int32_t atttypmod);
-
-        /** Helper to convert a numeric datum to binary */
-        std::vector<char> _numeric_datum_to_vector(Datum value);
 
         /** Helper to setup quals and scan iterator in state, called from begin_scan */
         void _init_quals(PgFdwState *state, List *qual_list);
