@@ -5,6 +5,7 @@
 #include <common/init.hh>
 
 #include <xid_mgr/pg_xact_log_writer.hh>
+#include <xid_mgr/pg_xact_log_reader.hh>
 
 using namespace springtail;
 using namespace springtail::xid_mgr;
@@ -52,6 +53,31 @@ main(int argc, char **argv)
     std::filesystem::path db_path = base_dir + "/" + std::to_string(db_id);
 
     PgXactLogWriter::set_last_xid_in_storage(db_path, xid, archive);
+
+    // verify xid logs
+    PgXactLogReader reader(db_path);
+    bool has_more = reader.begin();
+
+    std::set<uint64_t> xids;
+    std::set<uint32_t> pg_xids;
+    uint64_t last_xid = 0;
+
+    while (has_more) {
+        uint64_t xid = reader.get_xid();
+        uint32_t pg_xid = reader.get_pg_xid();
+
+        CHECK(!xids.contains(xid)) << "Xid " << xid << " already exists in the set";
+        xids.insert(xid);
+
+        CHECK(!pg_xids.contains(pg_xid)) << "PgXid " << pg_xid << " already exists in the set";
+        pg_xids.insert(pg_xid);
+
+        CHECK_GT(xid, last_xid) << "Xid " << xid << " is not greater than the last xid " << last_xid;
+        last_xid = xid;
+
+        has_more = reader.next();
+    };
+
 
     springtail_shutdown();
     return 0;

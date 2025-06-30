@@ -102,7 +102,7 @@ def kill_processes(names : List[str]) -> None:
             proc.kill()
 
 
-def run_command(command, args : List[str], outfile : str = None, no_err : bool = False, cwd : str = os.getcwd(), timeout : float = None) -> Optional[str]:
+def run_command(command, args : List[str], outfile : Optional[str] = None, no_err : bool = False, cwd : str = os.getcwd(), timeout : Optional[float] = None) -> Optional[str]:
     """Run the given command with the given arguments and return the last line of the output."""
     command_with_args = [command] + args
 
@@ -131,7 +131,7 @@ def run_command(command, args : List[str], outfile : str = None, no_err : bool =
         raise Exception(f"Command failed with error: {result.stderr}")
 
     if outfile:
-        return result.returncode
+        return str(result.returncode)
 
     # Split the output into lines and get the last line
     output_lines = result.stdout.strip().split('\n')

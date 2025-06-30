@@ -326,8 +326,11 @@ def _install_triggers(conn: psycopg2.extensions.connection, build_dir: str) -> N
     """Install the triggers in the database using an existing connection."""
     # Trigger scripts
     parent_dir = os.path.dirname(build_dir)
-    trigger_sql = os.path.join(parent_dir, 'scripts/triggers.sql')
-    execute_sql_script(conn, trigger_sql)
+
+    for script in ['triggers.sql', 'roles.sql', 'role_members.sql', 'policy.sql', 'table_owners.sql']:
+        script_path = os.path.join(parent_dir, 'scripts', script)
+        execute_sql_script(conn, script_path)
+
 
 def install_triggers(props: Properties, build_dir: str) -> None:
     """Install the triggers in the database."""
@@ -561,7 +564,7 @@ def current_xid(props: Properties, db_id: int) -> int:
 
 def restart(props: Properties,
             build_dir: str,
-            start_xid: int = None,
+            start_xid: Optional[int] = None,
             unarchive_logs: bool = False) -> None:
     # Stop the daemons
     print("\nStopping daemons...")
@@ -593,7 +596,7 @@ def restart(props: Properties,
 
     if start_xid is not None:
         # roll start_xid back
-        ts = int(datetime.datetime.utcnow().timestamp())
+        ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
         log_file = "/tmp/roll_back_" + str(ts) + ".log"
         print(f"Running command: roll_back_xact_log; rolling back to xid: {start_xid}, output log: {log_file}")
         run_command(os.path.join(build_dir, 'src/xid_mgr/roll_back_xact_log'), ['-p', xact_path, '-d', '1', '-a', 'true', '-x', str(start_xid)], log_file)

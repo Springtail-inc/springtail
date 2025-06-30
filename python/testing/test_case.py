@@ -6,8 +6,16 @@ import os
 import psycopg2
 import springtail
 import time
-import common
 import threading
+import sys
+
+from typing import Optional
+
+# Get the parent directory of the current script (i.e., the project root directory)
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(project_root, 'shared')) # Add the /shared directory to the Python path
+
+import common
 
 _GLOBAL_CONFIG_FILE = '__config.sql'
 
@@ -136,6 +144,7 @@ class TestCase:
         line_num = 0
 
         with open(self._filename, 'r') as f:
+            section = ''
             for line in f:
                 line_num += 1
 
@@ -271,6 +280,19 @@ class TestCase:
                             'wait_for': int(directive[3]) if len(directive) > 3 else self._metadata['sync_timeout']
                         }, section, is_threaded, cur_txn, line_num)
 
+                    elif directive[0] == 'policy_check':
+                        if section != 'verify':
+                            self._raise_error(f'{line_num}: "policy_check" must be part of the "verify" section')
+                        if len(directive) < 3:
+                            self._raise_error(f'{line_num}: "policy_check" must specify a schema, table, and policy name')
+
+                        self._append_command({
+                            'type': 'policy_check',
+                            'schema': directive[1],
+                            'table': directive[2],
+                            'policy_name': directive[3]
+                        }, section, is_threaded, cur_txn, line_num)
+
                     # Usage - table_exists <schema> <table> <replica_exists>
                     # Ex: ### table_exists public test_init true
                     # Determines if a specific table is present in the replica, used in scenarios where an valid table
@@ -304,6 +326,21 @@ class TestCase:
                             'table': directive[2],
                             'index': directive[3],
                             'replica_exists': directive[4] == 'true'
+                        }, section, is_threaded, cur_txn, line_num)
+
+                    # Usage - role_exists <role_name>
+                    # Ex: ### role_exists public test_init true
+                    # Determines if a specific role is present in the replica, also checks role flags
+                    elif directive[0] == 'role_exists':
+                        if section != 'verify':
+                            self._raise_error(f'{line_num}: "role_exists" must be part of the "verify" section')
+                        if len(directive) < 2:
+                            self._raise_error(f'{line_num}: "role_exists" must specify a role_name value')
+
+                        self._append_command({
+                            'type': 'role_exists',
+                            'role_name': directive[1],
+                            'wait_for': int(directive[2]) if len(directive) > 2 else self._metadata['sync_timeout']
                         }, section, is_threaded, cur_txn, line_num)
 
                     elif directive[0] == 'autocommit':
@@ -401,7 +438,7 @@ class TestCase:
             cursor.copy_from(f, table, sep=',', null='')
 
 
-    def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool, txn: str = 'replica', quiet: bool = False) -> list:
+    def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool, txn: str = 'replica', quiet: bool = False) -> Optional[list]:
         """Execute the provided SQL using the provided cursor."""
         if not quiet:
             logging.debug(f'Execute transaction {txn} SQL: {sql}')
@@ -418,7 +455,7 @@ class TestCase:
             self._raise_failure(f'Unknown error: {e}')
 
 
-    def _execute_command(self, command: dict, do_fetch: bool = False) -> list:
+    def _execute_command(self, command: dict, do_fetch: bool = False) -> Optional[dict]:
         """Execute a sql command or test directive.  When executing a
         SQL statement, will use the "txn" key to determine which
         transaction to run the SQL statement within.
@@ -505,7 +542,7 @@ class TestCase:
                 # Wait for sync row to appear in replica
                 try:
                     replica_name = self._db_prefix + db_name
-                    sync_time = common.wait_for_replica_condition(
+                    common.wait_for_replica_condition(
                         self._fdw[replica_name],
                         f"SELECT MAX(sync) FROM sync_control WHERE test = '{self._name}'",
                         (self._sync_step,),
@@ -568,17 +605,59 @@ class TestCase:
                 """
                 results['secondary'] = self._execute_sql(cursor, sql, True, txn)
 
+                # get table info
+                sql = f"""SELECT c.relname as name,
+                                    c.relrowsecurity as row_security,
+                                    c.relforcerowsecurity as force_row_security
+                            FROM pg_class c
+                            JOIN pg_namespace n ON c.relnamespace = n.oid
+                            WHERE n.nspname = '{command["schema"]}' AND c.relname = '{command["table"]}';"""
+
+                results['table_info'] = self._execute_sql(cursor, sql, True, txn)
+
                 return results
 
-        if command['type'] == "add_db":
-            return None
+            elif command['type'] == "add_db":
+                return None
 
-        elif command['type'] == "switch_db":
-            self._connections[txn]['current_db'] = command['database_name']
-            return None
+            elif command['type'] == "switch_db":
+                self._connections[txn]['current_db'] = command['database_name']
+                return None
+
+            elif command['type'] == 'role_exists':
+                results = {}
+
+                    # check the role flags
+                sql = f"""SELECT rolcanlogin, rolinherit, (rolsuper or rolbypassrls) as rolbypassrls,
+                                 to_json(rolconfig)::text as rolconfig
+                          FROM pg_roles WHERE rolname = '{command["role_name"]}';"""
+                sql_result = self._execute_sql(cursor, sql, True, txn)
+
+                results['role'] = sql_result[0] if sql_result else None
+
+                return results
+
+            elif command['type'] == 'policy_check':
+                results = {}
+
+                # get the policies for the table
+                sql = f"""SELECT p.polname AS name,
+                                 p.polpermissive AS permissive,
+                                 p.polcmd AS command,
+                                 p.polroles AS roles,
+                                 pg_get_expr(p.polqual, p.polrelid) AS qual,
+                                 pg_get_expr(p.polwithcheck, p.polrelid) AS with_check
+                          FROM pg_policy p
+                          JOIN pg_class c ON c.oid = p.polrelid
+                          JOIN pg_namespace n ON n.oid = c.relnamespace
+                          WHERE n.nspname = '{command["schema"]}' AND c.relname = '{command["table"]}'
+                            AND p.polname = '{command["policy_name"]}';"""
+                results['policies'] = self._execute_sql(cursor, sql, True, txn)
+
+                return results
 
 
-    def _wait_for_index_reconciliation(self, wait_for: int) -> bool:
+    def _wait_for_index_reconciliation(self, wait_for: int) -> None:
         query = """
             SELECT count(DISTINCT index_id)
             FROM __pg_springtail_catalog.index_names
@@ -601,6 +680,19 @@ class TestCase:
             self._raise_failure(f'Secondary indexes not in sync within {wait_for}s.')
 
 
+    def _wait_for_role(self, role_name: str, wait_for: int) -> None:
+        query = f"""
+            SELECT EXISTS (
+                SELECT 1 FROM pg_roles WHERE rolname = '{role_name}'
+            );
+        """
+
+        try:
+            common.wait_for_replica_condition(self._fdw[self._replica_name], query, (True,), timeout=wait_for)
+        except Exception as e:
+            self._raise_failure(f'Role {role_name} not found in replica within {wait_for}s.')
+
+
     def _get_ranking_sql(self, is_index_query: bool = False) -> str:
         index_cond = 'AND n.index_id <> 0' if is_index_query is True else 'AND n.index_id = 0'
 
@@ -619,7 +711,7 @@ class TestCase:
 
         return ranking_sql
 
-    def _replica_command(self, command: dict) -> list:
+    def _replica_command(self, command: dict) -> Optional[dict]:
         """Runs a SQL command against the Springtail replica
         database.
 
@@ -655,6 +747,7 @@ class TestCase:
                 results['exists'] = replica_result
 
                 return results
+
             elif command['type'] == 'index_exists':
                 results = {}
                 replica_result = True
@@ -679,6 +772,7 @@ class TestCase:
                 results['exists'] = replica_result
 
                 return results
+
             elif command['type'] == 'schema_check':
                 results = {}
 
@@ -711,6 +805,16 @@ class TestCase:
                           SELECT column_id, position FROM ranked_columns ORDER BY position ASC;"""
                 results['primary'] = self._execute_sql(cursor, sql, True, 'replica')
 
+                sql = f"""SELECT "table_names"."name",  "table_names"."rls_enabled", "table_names"."rls_forced"
+                                FROM "__pg_springtail_catalog"."table_names"
+                                JOIN "__pg_springtail_catalog"."namespace_names" ON "namespace_names"."namespace_id" = "table_names"."namespace_id"
+                                WHERE "namespace_names"."name" = '{command["schema"]}' AND "table_names"."name" = '{command["table"]}'
+                                  AND "table_names"."exists" IS TRUE
+                                ORDER BY "table_names"."xid" DESC, "table_names"."lsn" DESC
+                                LIMIT 1"""
+
+                results['table_info'] = self._execute_sql(cursor, sql, True, 'replica')
+
                 # Wait for index reconciliation
                 self._wait_for_index_reconciliation(command["wait_for"])
 
@@ -718,6 +822,39 @@ class TestCase:
                 sql = f"""WITH latest_table AS ({with_sql}), ranked_indexes AS ({index_sql})
                          SELECT table_id, index_id, column_id FROM ranked_indexes ORDER BY column_id ASC;"""
                 results['secondary'] = self._execute_sql(cursor, sql, True, 'replica')
+
+                return results
+
+            elif command['type'] == 'role_exists':
+                results = {}
+
+                self._wait_for_role(command["role_name"], command["wait_for"])
+
+                # check the role flags
+                sql = f"""SELECT rolcanlogin, rolinherit, rolbypassrls, to_json(rolconfig)::text as rolconfig
+                          FROM pg_roles WHERE rolname = '{command["role_name"]}';"""
+                sql_result = self._execute_sql(cursor, sql, True, 'replica')
+
+                results['role'] = sql_result[0] if sql_result else None
+
+                return results
+
+            elif command['type'] == 'policy_check':
+                results = {}
+
+                # get the policies for the table
+                sql = f"""SELECT p.polname AS name,
+                                 p.polpermissive AS permissive,
+                                 p.polcmd AS command,
+                                 p.polroles AS roles,
+                                 pg_get_expr(p.polqual, p.polrelid) AS qual,
+                                 pg_get_expr(p.polwithcheck, p.polrelid) AS with_check
+                          FROM pg_policy p
+                          JOIN pg_class c ON c.oid = p.polrelid
+                          JOIN pg_namespace n ON n.oid = c.relnamespace
+                          WHERE n.nspname = '{command["schema"]}' AND c.relname = '{command["table"]}'
+                            AND p.polname = '{command["policy_name"]}';"""
+                results['policies'] = self._execute_sql(cursor, sql, True, txn)
 
                 return results
 

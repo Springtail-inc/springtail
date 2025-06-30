@@ -76,7 +76,7 @@ namespace springtail
         "FROM pg_catalog.pg_namespace "
         "WHERE nspname NOT LIKE 'pg_%' "
         "{}" // Placeholder for namespace condition
-        "AND nspname != 'information_schema';";
+        "AND nspname NOT IN ('information_schema', '__pg_springtail_triggers');";
 
     /** Query oid from table and schema */
     static constexpr char TABLE_OID_QUERY[] =
@@ -193,8 +193,8 @@ namespace springtail
         "SELECT relname::text as table_name, nspname as schema_name, "
         "       c.oid::integer as table_oid, ns.oid as namespace_oid, "
         "       c.relrowsecurity, c.relforcerowsecurity "
-        "FROM pg_catalog.pg_class c"
-        "JOIN pg_catalog.pg_namespace ns"
+        "FROM pg_catalog.pg_class c "
+        "JOIN pg_catalog.pg_namespace ns "
         "ON relnamespace=ns.oid "
         "WHERE c.oid = {};";
 

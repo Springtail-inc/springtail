@@ -1,6 +1,7 @@
 -- Triggers for create/alter table and drop table events
 -- https://www.postgresql.org/docs/current/plpgsql-trigger.html
-CREATE SCHEMA IF NOT EXISTS __pg_springtail_triggers;
+
+CREATE SCHEMA IF NOT EXISTS __pg_springtail_triggers; -- NOTE: if this schema changes, change pg_copy_table.cc too
 
 CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for_drops()
         RETURNS event_trigger LANGUAGE plpgsql AS $$
@@ -69,6 +70,8 @@ DECLARE
     table_relname text;
     table_info RECORD;
     command_tag text;
+    rel_rowsecurity boolean;
+    rel_forcerowsecurity boolean;
 BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() AS cmd
         WHERE cmd.command_tag IN ('ALTER TABLE', 'CREATE TABLE', 'ALTER INDEX')
@@ -86,7 +89,7 @@ BEGIN
         SELECT relname, relreplident, relpersistence, relkind, relrowsecurity, relforcerowsecurity
         FROM pg_class
         WHERE oid = obj.objid
-        INTO table_relname, table_replident, table_persistence, rel_kind, relrowsecurity, relforcerowsecurity;
+        INTO table_relname, table_replident, table_persistence, rel_kind, rel_rowsecurity, rel_forcerowsecurity;
 
         -- This is a corner case when an index is renamed through "ALTER TABLE" statement
         -- In this case our object is an index, not a table. So, we can't do anything with it here.
@@ -157,8 +160,8 @@ BEGIN
             'schema', obj.schema_name,
             'table', table_relname,
             'columns', json_columns,
-            'rls_enabled', relrowsecurity::boolean,
-            'rls_forced', relforcerowsecurity::boolean);
+            'rls_enabled', rel_rowsecurity,
+            'rls_forced', rel_forcerowsecurity);
 
         -- command_tag is CREATE TABLE or ALTER TABLE
         PERFORM pg_logical_emit_message(true, 'springtail:' || command_tag, msg::text);
@@ -312,6 +315,8 @@ DECLARE
     ind_obj record;
     json_columns json;
     table_info RECORD;
+    rel_rowsecurity boolean;
+    rel_forcerowsecurity boolean;
 BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() as cmd
     LOOP
@@ -344,7 +349,7 @@ BEGIN
             SELECT relname, relreplident, relpersistence, relkind, relrowsecurity, relforcerowsecurity
             FROM pg_class
             WHERE oid = obj.objid
-            INTO table_relname, table_replident, table_persistence, rel_kind, rel_row_security, rel_force_row_security;
+            INTO table_relname, table_replident, table_persistence, rel_kind, rel_rowsecurity, rel_forcerowsecurity;
 
             -- This is a corner case when an index is renamed through "ALTER TABLE" statement
             -- In this case our object is an index, not a table. So, we can't do anything with it here.
@@ -403,8 +408,8 @@ BEGIN
                 'schema', obj.schema_name,
                 'table', table_relname,
                 'columns', json_columns,
-                'rls_enabled', rel_row_security::boolean,
-                'rls_forced', rel_force_row_security::boolean
+                'rls_enabled', rel_rowsecurity::boolean,
+                'rls_forced', rel_forcerowsecurity::boolean
             );
 
         ELSIF obj.command_tag = 'CREATE INDEX' THEN

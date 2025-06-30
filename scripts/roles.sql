@@ -1,4 +1,7 @@
--- filepath: /Users/garth/src/springtail2/scripts/roles.sql
+
+-- Now includes rolconfig from pg_roles
+-- Omit roles that are system-defined and omit members of those roles
+
 CREATE SCHEMA IF NOT EXISTS __pg_springtail_triggers;
 
 DROP TABLE IF EXISTS __pg_springtail_triggers.role_snapshot_history;
@@ -10,6 +13,7 @@ CREATE TABLE IF NOT EXISTS __pg_springtail_triggers.role_snapshot_history (
     rolinherit BOOLEAN,
     rolcanlogin BOOLEAN,
     rolbypassrls BOOLEAN,
+    rolconfig TEXT[], -- Added rolconfig column
     snapshot_time TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (fdw_id, role_oid)
 );
@@ -28,8 +32,6 @@ SECURITY DEFINER
 SET search_path TO __pg_springtail_triggers
 AS $$
 BEGIN
-    -- If fdw_id_var is NULL, it indicates a request to reset the entire role snapshot history,
-    -- so the entire table is truncated to remove all entries.
     IF fdw_id_var IS NULL THEN
         TRUNCATE __pg_springtail_triggers.role_snapshot_history;
     ELSE
@@ -52,6 +54,7 @@ DROP FUNCTION IF EXISTS __pg_springtail_triggers.role_diff;
  * - rolinherit: Whether the role inherits privileges
  * - rolcanlogin: Whether the role can login
  * - rolbypassrls: Whether the role bypasses row-level security
+ * - rolconfig: The role's configuration array
  */
 CREATE OR REPLACE FUNCTION __pg_springtail_triggers.role_diff(fdw_id_var TEXT)
 RETURNS TABLE (
@@ -61,7 +64,9 @@ RETURNS TABLE (
     rolsuper BOOLEAN,
     rolinherit BOOLEAN,
     rolcanlogin BOOLEAN,
-    rolbypassrls BOOLEAN
+    rolbypassrls BOOLEAN,
+    rolconfig TEXT, -- Convert from TEXT[] to json array
+    rolconfig_changed BOOLEAN
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -79,7 +84,8 @@ BEGIN
         rolsuper BOOLEAN,
         rolinherit BOOLEAN,
         rolcanlogin BOOLEAN,
-        rolbypassrls BOOLEAN
+        rolbypassrls BOOLEAN,
+        rolconfig TEXT[]
     ) ON COMMIT DROP;
 
     -- Populate the temporary table with the current state of roles
@@ -90,7 +96,8 @@ BEGIN
         r.rolsuper,
         r.rolinherit,
         r.rolcanlogin,
-        r.rolbypassrls
+        r.rolbypassrls,
+        r.rolconfig
     FROM
         pg_roles AS r
     WHERE
@@ -129,6 +136,7 @@ BEGIN
             rs.rolinherit,
             rs.rolcanlogin,
             rs.rolbypassrls,
+            rs.rolconfig,
             v_current_snapshot_time
         FROM
             __pg_springtail_current_role_snapshot as rs;
@@ -141,7 +149,9 @@ BEGIN
             rs.rolsuper,
             rs.rolinherit,
             rs.rolcanlogin,
-            rs.rolbypassrls
+            rs.rolbypassrls,
+            to_json(rs.rolconfig)::TEXT AS rolconfig,
+            (rs.rolconfig IS NOT NULL) AS rolconfig_changed
         FROM
             __pg_springtail_current_role_snapshot as rs;
         RETURN;
@@ -160,7 +170,9 @@ BEGIN
         cur.rolsuper,
         cur.rolinherit,
         cur.rolcanlogin,
-        cur.rolbypassrls
+        cur.rolbypassrls,
+        to_json(cur.rolconfig)::TEXT AS rolconfig,
+        (cur.rolconfig IS DISTINCT FROM prev.rolconfig) AS rolconfig_changed
     FROM
         __pg_springtail_current_role_snapshot AS cur
     FULL OUTER JOIN
@@ -175,7 +187,8 @@ BEGIN
                 cur.rolinherit IS DISTINCT FROM prev.rolinherit OR
                 cur.rolcanlogin IS DISTINCT FROM prev.rolcanlogin OR
                 cur.rolbypassrls IS DISTINCT FROM prev.rolbypassrls OR
-                cur.rolname IS DISTINCT FROM prev.rolname
+                cur.rolname IS DISTINCT FROM prev.rolname OR
+                cur.rolconfig IS DISTINCT FROM prev.rolconfig
             )
         );
 
@@ -192,6 +205,7 @@ BEGIN
         rs.rolinherit,
         rs.rolcanlogin,
         rs.rolbypassrls,
+        rs.rolconfig,
         v_current_snapshot_time
     FROM
         __pg_springtail_current_role_snapshot as rs;

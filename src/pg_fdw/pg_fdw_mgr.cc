@@ -60,17 +60,6 @@ extern "C" {
 namespace springtail::pg_fdw {
     using springtail::Index;
 
-    /** Structure used by import schema to track tables */
-    struct TableInfo {
-        uint64_t tid; ///< table id
-        uint64_t xid; ///< table xid
-        bool rls_enabled; ///< row level security enabled
-        bool rls_forced; ///< row level security forced
-        std::string table_name; ///< table name
-    };
-    using TableInfoPtr = std::shared_ptr<TableInfo>;
-
-
     static std::string
     _get_value_string(const ConstQual& qual)
     {
@@ -824,7 +813,7 @@ namespace springtail::pg_fdw {
         LOG_DEBUG(LOG_FDW, "fdw_reset_scan: tid: {}", state->tid);
 
         state->filtered_quals.clear();
-
+        
         // init quals
         _init_quals(state, qual_list);
 
@@ -1454,24 +1443,17 @@ namespace springtail::pg_fdw {
         throw FdwError(fmt::format("Failed to find type name for {}", pg_type));
     }
 
-    std::vector<std::string>
+    std::string
     PgFdwMgr::_gen_fdw_table_sql(const std::string &server_name,
                                  const std::string &schema,
                                  const std::string &table,
                                  uint64_t tid,
-                                 bool rls_enabled,
-                                 bool rls_forced,
                                  std::vector<std::tuple<std::string, std::string, bool>> &columns)
     {
-        std::vector<std::string> result;
-
-        auto schema_quoted = quote_identifier(schema.c_str());
-        auto table_quoted = quote_identifier(table.c_str());
-
         // no schema name needed
         std::string create = fmt::format("CREATE FOREIGN TABLE {}.{} (\n",
-                                         schema_quoted,
-                                         table_quoted);
+                                         quote_identifier(schema.c_str()),
+                                         quote_identifier(table.c_str()));
 
         // iterate over the columns, adding each to the create statement
         // name, type, is_nullable, default value
@@ -1498,22 +1480,7 @@ namespace springtail::pg_fdw {
 
         LOG_DEBUG(LOG_FDW, "Generated SQL: {}", create);
 
-        result.push_back(create);
-
-        if (rls_enabled) {
-            // add RLS policies if enabled
-            std::string rls_policy = fmt::format("ALTER FOREIGN TABLE {}.{} ENABLE ROW LEVEL SECURITY;",
-                                                 schema_quoted, table_quoted);
-            result.push_back(rls_policy);
-        }
-
-        if (rls_forced) {
-            std::string rls_force = fmt::format("ALTER FOREIGN TABLE {}.{} FORCE ROW LEVEL SECURITY;",
-                                                schema_quoted, table_quoted);
-            result.push_back(rls_force);
-        }
-
-        return result;
+        return create;
     }
 
     std::string
@@ -1530,7 +1497,7 @@ namespace springtail::pg_fdw {
             columns.push_back({ column.name, type_name, column.nullable });
         }
 
-        return _gen_fdw_table_sql(server, CATALOG_SCHEMA_NAME, table_name, tid, false, false, columns)[0];
+        return _gen_fdw_table_sql(server, CATALOG_SCHEMA_NAME, table_name, tid, columns);
     }
 
     List *
@@ -1671,7 +1638,7 @@ namespace springtail::pg_fdw {
         auto fields = table->extent_schema()->get_fields();
 
         // map from table name -> <table id, xid>
-        std::unordered_map<std::string, TableInfoPtr> table_map;
+        std::map<std::string, std::pair<uint64_t,uint64_t>> table_map;
 
         // iterate over the table names table and populate the table map
         for (auto row : (*table)) {
@@ -1705,7 +1672,7 @@ namespace springtail::pg_fdw {
                 // find table and compare xids, remove if this xid is >= to the one in the map
                 auto entry = table_map.find(table_name);
                 if (entry != table_map.end()) {
-                    if (xid >= entry->second->xid) {
+                    if (xid >= entry->second.second) {
                         // remove this table entry
                         table_map.erase(entry);
                     }
@@ -1717,26 +1684,21 @@ namespace springtail::pg_fdw {
 
             LOG_DEBUG(LOG_FDW, "Found table {}.{} tid={}, xid={}", namespace_name, table_name, tid, xid);
 
-            // get RLS info
-            bool rls_enabled = fields->at(sys_tbl::TableNames::Data::RLS_ENABLED)->get_bool(&row);
-            bool rls_forced = fields->at(sys_tbl::TableNames::Data::RLS_FORCED)->get_bool(&row);
-
             // lookup table in map, if found the xid if it is newer
-            auto new_table = std::make_shared<TableInfo>(tid, xid, rls_enabled, rls_forced, table_name);
-            auto entry = table_map.insert({table_name, new_table});
+            auto entry = table_map.insert({table_name, {tid, xid}});
             if (entry.second == false) {
                 LOG_DEBUG(LOG_FDW, "Table {} already exists in schema {}", table_name, namespace_name);
                 // update if xid is newer
-                if (xid > entry.first->second->xid) {
-                    entry.first->second = new_table;
+                if (xid > entry.first->second.second) {
+                    entry.first->second = {tid, xid};
                 }
             }
         }
 
         // reorganize the table_map to be from tid -> {xid, table}
-        std::unordered_map<uint64_t, TableInfoPtr> tid_map;
+        std::map<uint64_t, std::tuple<uint64_t, std::string>> tid_map;
         for (const auto &[table_name, table_info] : table_map) {
-            tid_map[table_info->tid] = table_info;
+            tid_map[table_info.first] = {table_info.second, table_name};
         }
 
         // Move on to iterating through the schemas table
@@ -1744,17 +1706,20 @@ namespace springtail::pg_fdw {
         // column list: name, type, nullable
         std::vector<std::tuple<std::string, std::string, bool>> columns;
 
+        uint64_t current_tid=0;
+        std::string current_table;
 
         // get the schemas table
-        table = TableMgr::get_instance()->get_table(db_id, sys_tbl::Schemas::ID, schema_xid);
-        auto idx_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::Indexes::ID, schema_xid);
+        table = TableMgr::get_instance()->get_table(db_id, sys_tbl::Schemas::ID,
+                                                    schema_xid);
+
+        auto idx_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::Indexes::ID,
+                                                             schema_xid);
+
         auto idx_fields = idx_table->extent_schema()->get_fields();
-        fields = table->extent_schema()->get_fields();
 
         // iterate through it
-        uint64_t current_tid=0;
-        TableInfoPtr current_table=nullptr;
-
+        fields = table->extent_schema()->get_fields();
         for (auto row : (*table)) {
             uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(&row);
 
@@ -1763,19 +1728,16 @@ namespace springtail::pg_fdw {
             // check if we have moved to next tid
             if (tid != current_tid) {
 
-                if (current_table != nullptr) {
+                if (!current_table.empty()) {
                     // dump this table
-                    auto sql = _gen_fdw_table_sql(server, namespace_name, current_table->table_name,
-                                                  current_tid, current_table->rls_enabled,
-                                                  current_table->rls_forced, columns);
-                    for (const auto &command : sql) {
-                        commands = lappend(commands, pstrdup(command.c_str()));
-                    }
+                    std::string sql = _gen_fdw_table_sql(server, namespace_name, current_table,
+                                                         current_tid, columns);
+                    commands = lappend(commands, pstrdup(sql.c_str()));
                 }
 
                 // reset state
                 columns.clear();
-                current_table = nullptr;
+                current_table = "";
 
                 // do lookup of new tid in map
                 auto it = tid_map.find(tid);
@@ -1787,7 +1749,7 @@ namespace springtail::pg_fdw {
 
                 // update current vars based on this tid and info from tid_map
                 current_tid = tid;
-                current_table = it->second;
+                current_table = std::get<1>(it->second);
             }
 
             std::string column_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(&row));
@@ -1813,12 +1775,8 @@ namespace springtail::pg_fdw {
         // process last table
         if (columns.size() > 0) {
             // dump this table
-            auto sql = _gen_fdw_table_sql(server, namespace_name, current_table->table_name,
-                                                  current_tid, current_table->rls_enabled,
-                                                  current_table->rls_forced, columns);
-            for (const auto &command : sql) {
-                commands = lappend(commands, pstrdup(command.c_str()));
-            }
+            std::string sql = _gen_fdw_table_sql(server, namespace_name, current_table, current_tid, columns);
+            commands = lappend(commands, pstrdup(sql.c_str()));
         }
 
         return commands;

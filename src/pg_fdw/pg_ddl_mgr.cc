@@ -35,9 +35,6 @@ namespace springtail::pg_fdw {
     static constexpr char CREATE_USER[] =
         "CREATE USER {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '{}' IN ROLE pg_read_all_data";
 
-    static constexpr char CREATE_ROLE[] =
-        "CREATE ROLE {} WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE IN ROLE pg_read_all_data";
-
     static constexpr char DROP_DATABASE[] =
         "DROP DATABASE IF EXISTS {} WITH (FORCE)";
 
@@ -52,7 +49,7 @@ namespace springtail::pg_fdw {
 
     static constexpr char ROLE_DIFF_SELECT[] =
         "SELECT diff_type, rolname, rolsuper, "
-        "    rolinherit, rolcanlogin, rolbypassrls "
+        "    rolinherit, rolcanlogin, rolbypassrls, rolconfig, rolconfig_changed "
         "FROM __pg_springtail_triggers.role_diff('{}');";
 
     static constexpr char ROLE_MEMBER_DIFF_SELECT[] =
@@ -78,9 +75,6 @@ namespace springtail::pg_fdw {
                 _on_database_ids_changed(path, new_value);
             }
         );
-
-        // start the sync thread
-        _sync_thread = std::thread(&PgDDLMgr::_sync_thread_func, this);
     }
 
     void PgDDLMgr::_on_database_ids_changed(const std::string &path,
@@ -269,6 +263,8 @@ namespace springtail::pg_fdw {
             bool rolinherit = conn->get_boolean(i, 3);
             bool rolcanlogin = conn->get_boolean(i, 4);
             bool rolbypassrls = conn->get_boolean(i, 5);
+            auto rolconfig = conn->get_string_optional(i, 6);
+            bool rolconfig_changed = conn->get_boolean(i, 7);
 
             if (diff_type == "REMOVED") {
                 sql_commands.push_back(fmt::format("DROP ROLE IF EXISTS {}", role_name));
@@ -276,13 +272,9 @@ namespace springtail::pg_fdw {
             }
 
             if (diff_type == "ADDED") {
-                if (rolcanlogin) {
-                    // create a new user with login
-                    sql_commands.push_back(fmt::format(CREATE_USER, role_name, _fdw_password));
-                } else {
-                    // create a new role without login
-                    sql_commands.push_back(fmt::format(CREATE_ROLE, role_name));
-                }
+                // create a new user with password, even if nologin is set
+                // in case it changes later, we can control with LOGIN/NOLOGIN
+                sql_commands.push_back(fmt::format(CREATE_USER, role_name, _fdw_password));
                 // fall through
             }
 
@@ -294,6 +286,23 @@ namespace springtail::pg_fdw {
                                 (rolsuper || rolbypassrls) ? "BYPASSRLS" : "NOBYPASSRLS",
                                 rolinherit ? "INHERIT" : "NOINHERIT",
                                 rolcanlogin ? "LOGIN" : "NOLOGIN"));
+
+                if (rolconfig_changed) {
+                    // if the role config has changed, we need to set it
+                    if (!rolconfig.has_value() || rolconfig.value().empty()) {
+                        sql_commands.push_back(fmt::format("ALTER ROLE {} RESET ALL", role_name));
+                    } else {
+                        // stored as json text array
+                        nlohmann::json config_json = nlohmann::json::parse(rolconfig.value());
+                        DCHECK(config_json.is_array()) << "Role config must be a JSON array";
+
+                        // iterate through the config and set each one
+                        for (const auto &config : config_json.items()) {
+                            std::string config_str = config.value().get<std::string>();
+                            sql_commands.push_back(fmt::format("ALTER ROLE {} SET {}", role_name, config_str));
+                        }
+                    }
+                }
             }
         }
         conn->clear();
@@ -386,7 +395,7 @@ namespace springtail::pg_fdw {
                 // on the next sync.
                 DCHECK_EQ(fdw_conn->get_sql_state(), LibPqConnection::SQL_UNDEFINED_TABLE)
                     << "Unexpected SQLSTATE: " << fdw_conn->get_sql_state();
-                conn->exec(fmt::format("SELECT __pg_springtail_triggers.remove_table('{}', {})",
+                conn->exec(fmt::format("SELECT __pg_springtail_triggers.table_owner_remove('{}', {})",
                                         _fdw_id, table_oid));
                 conn->clear();
             }
@@ -508,7 +517,7 @@ namespace springtail::pg_fdw {
             std::string value_json(fields->at(sys_tbl::UserTypes::Data::VALUE)->get_text(&row));
 
             // only enums supported
-            DCHECK(fields->at(sys_tbl::UserTypes::Data::TYPE)->get_uint8(&row) == constant::USER_TYPE_ENUM);
+            DCHECK_EQ(fields->at(sys_tbl::UserTypes::Data::TYPE)->get_uint8(&row), constant::USER_TYPE_ENUM);
 
             // insert into map by namespace_id
             LOG_DEBUG(LOG_FDW, "Adding user type: {}.{} = {}:{}", namespace_id, type_id, type_name, value_json);

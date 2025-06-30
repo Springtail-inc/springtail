@@ -6,6 +6,7 @@
 #include <optional>
 
 #include <fmt/format.h>
+#include <common/logging.hh>
 
 namespace springtail {
     class fs {
@@ -288,6 +289,7 @@ namespace springtail {
                     // Extract the timestamp from the file name
                     auto timestamp = extract_timestamp_from_file(path, prefix, suffix);
                     if (timestamp.has_value() && Compare()(timestamp.value(), timestamp_limit)) {
+                        LOG_INFO("Removing file: {}", path.string());
                         if (!archive) {
                             std::filesystem::remove(path);
                         } else {

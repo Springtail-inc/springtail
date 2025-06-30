@@ -39,13 +39,19 @@ int main(int argc, char *argv[])
         has_more = reader.next();
     };
 
-    std::string format_str = fmt::format("pgxid: {{:>{}}} | xid: {{:>{}}} | real_commit: {{}}",
+    std::string format_str = fmt::format("pgxid: {{:>{}}} | xid: {{:>{}}} | real_commit: {{}}\n",
                                          pg_xid_max_len + 1, xid_max_len + 1);
     has_more = reader.begin();
 
+    std::string filename;
     while (has_more) {
+        std::string current_filename = reader.get_current_file().filename().string();
+        if (filename.empty() || current_filename != filename) {
+            filename = reader.get_current_file().filename();
+            std::cout << fmt::format("File: {}\n", filename);
+        }
         std::cout << fmt::format(fmt::runtime(format_str.c_str()),
-                                 reader.get_pg_xid(), reader.get_xid(), reader.get_real_commit()) << std::endl;
+                                 reader.get_pg_xid(), reader.get_xid(), reader.get_real_commit());
         has_more = reader.next();
     };
 

@@ -78,6 +78,16 @@ public:
         return _current_xid.real_commit;
     }
 
+    /**
+     * @brief Get the current file name
+     * @return std::filesystem::path - the current file name, if any
+     */
+    std::filesystem::path
+    get_current_file() const
+    {
+        return _current_file.value_or(std::filesystem::path());
+    }
+
 private:
     std::filesystem::path _base_dir;        ///< full path to transaction logs directory
     std::optional<std::filesystem::path> _current_file;     ///< the name of the current file
