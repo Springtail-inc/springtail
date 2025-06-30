@@ -1,5 +1,6 @@
 # source files
-set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc io_file.cc io_request.cc btree.cc mutable_btree.cc cache.cc)
+set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc io_file.cc io_request.cc btree.cc mutable_btree.cc cache.cc
+                    numeric_utils.cc)
 
 find_package(lz4 REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
@@ -115,6 +116,13 @@ springtail_unit_test(test_cache
 # extent test
 springtail_unit_test(test_extent
   SOURCES test/test_extent.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_storage GTest::gtest_main
+  WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
+)
+
+springtail_unit_test(test_numeric
+  SOURCES test/test_numeric.cc
   INCLUDES ${CMAKE_SOURCE_DIR}/include
   LIBS springtail_storage GTest::gtest_main
   WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test

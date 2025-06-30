@@ -823,16 +823,9 @@ StorageCache::PageCache::background_cleaner()
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
-        // if the page is empty, create an empty extent to back it
-        if (_extents.empty()) {
-            // create an empty extent
-            ExtentHeader header(ExtentType(), _end_xid, schema->row_size(), schema->field_types());
-            auto extent = SafeExtent(_file, std::move(header));
-            _extents.emplace_back( extent.get_ref() );
-
-            // insert the tuple into the extent
-            auto row = (*extent)->append();
-            MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
+        // if the page is empty, do an _append() which handles the empty extent case
+        if (_empty()) {
+            _append(tuple, schema);
             return;
         }
 
@@ -882,6 +875,14 @@ StorageCache::PageCache::background_cleaner()
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
+        // perform the internal append
+        _append(tuple, schema);
+    }
+
+    void
+    StorageCache::Page::_append(TuplePtr tuple,
+                                ExtentSchemaPtr schema)
+    {
         // if the page is empty, create an empty extent to back it
         if (_extents.empty()) {
             // create an empty extent

@@ -17,7 +17,6 @@ set(PG_LOG_SOURCES
 add_library(springtail_pglog ${PG_LOG_SOURCES})
 target_include_directories(springtail_pglog
     PRIVATE ${CMAKE_SOURCE_DIR}/include
-    PRIVATE ${CMAKE_SOURCE_DIR}/src/xid_mgr/gen-cpp # for thrift headers
 )
 target_link_libraries(springtail_pglog
     PUBLIC springtail_pg
