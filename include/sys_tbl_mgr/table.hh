@@ -351,7 +351,7 @@ namespace indexer_helpers {
         friend bool operator==(const Iterator& a, const Iterator& b) {
             struct visitor {
                 const Iterator& _b;
-                visitor(const Iterator&b) : _b{b} {}
+                explicit visitor(const Iterator&b) : _b{b} {}
                 bool operator()(const Primary& t) {
                     return t == std::get<Primary>(_b._tracker);
                 }
