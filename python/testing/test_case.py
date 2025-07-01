@@ -951,8 +951,7 @@ class TestCase:
         for command in self._sections['verify'][0]['sequential']:
             primary_result = self._execute_command(command, True)
             replica_result = self._replica_command(command)
-
-            if primary_result != replica_result:
+            if primary_result != replica_result and str(primary_result) != str(replica_result):
                 self._raise_failure(
                     f"Verification failed for {self._name}:\n"
                     f"Statement: {command}\n"

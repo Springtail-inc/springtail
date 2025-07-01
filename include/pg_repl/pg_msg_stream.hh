@@ -217,7 +217,7 @@ namespace springtail {
         uint64_t _message_offset = 0;   ///< offset of the message we just read
         uint64_t _current_offset;       ///< current file offset for next read
         uint64_t _end_msg_offset;       ///< ending message offset in end file
-        uint64_t _internal_offset;      ///< internal offset within file, not to be altered by user
+        uint64_t _internal_offset = 0;      ///< internal offset within file, not to be altered by user
 
         int _proto_version;             ///< protocol version of message block (from header)
 

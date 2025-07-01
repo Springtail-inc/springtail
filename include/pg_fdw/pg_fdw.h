@@ -55,7 +55,7 @@ List *fdw_can_sort(SpringtailPlanState *state, List *sortgroup);
 List *fdw_get_path_keys(SpringtailPlanState *state);
 
 /** Explain scan */
-void fdw_explain_scan(ForeignScanState *node, ExplainState *es);
+void fdw_explain_scan(ForeignScanState *node, struct ExplainState *es);
 
 #ifdef __cplusplus
 }

@@ -141,7 +141,7 @@ namespace springtail::pg_log_mgr {
                 : _db(db_id), _pg_xid(pg_xid), _committer_queue(committer_queue),
                 _exists_cache(exists_cache), _index_requests_mgr(index_requests_mgr)
             {
-                auto tracer = open_telemetry::OpenTelemetry::tracer("PgLogReader");
+                auto tracer = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader");
                 _span = tracer->StartSpan("Transaction");
                 _span->SetAttribute("pg_xid", pg_xid);
             }
