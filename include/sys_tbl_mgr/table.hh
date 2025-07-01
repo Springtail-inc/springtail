@@ -183,176 +183,221 @@ namespace indexer_helpers {
                 }
 
                 StorageCache::SafePagePtr _page; ///< A pointer to the data page currently being processed.
-                StorageCache::Page::Iterator _page_i; ///< An iterator into the Extent.
-                std::optional<StorageCache::Page::Iterator> _end;
+            StorageCache::Page::Iterator _page_i; ///< An iterator into the Extent.
+            std::optional<StorageCache::Page::Iterator> _end;
+        };
+
+        /**
+         * This is to iterate using the secondary index.
+         */
+        struct Secondary : Tracker
+        {
+            Secondary(const Table *table,
+                    BTreePtr btree, const BTree::Iterator &btree_i,
+                    ExtentSchemaPtr schema );
+
+            Secondary(Secondary&&) = default;
+            virtual ~Secondary() = default;
+
+            void next();
+            void prev();
+            const Extent::Row& row() const {
+                return *_page_i;
+            }
+
+            friend bool operator==(const Secondary& a, const Secondary& b) {
+                const Tracker& ta = a;
+                const Tracker& tb = b;
+                return ta == tb;
+            }
+
+            FieldPtr _extent_id_f;
+            FieldPtr _row_id_f;
+
+            struct PageMapItem {
+                StorageCache::SafePagePtr page;
+                StorageCache::Page::Iterator it_begin;
+            };
+            std::unordered_map<uint64_t, PageMapItem> _page_map;
+            uint64_t _cache_size;
+            // This it to keep a list of extent ids that are in 
+            // _page_map. The list is used for evicting items from the
+            // page map. We assume that secondary indexes jump
+            // around extent ids somewhat randomly. There is no need to
+            // pay for something like maintaining LRU.
+            CircularBuffer<uint64_t> _eid_buffer;
+
+            uint64_t _extent_id = 0;
+            StorageCache::Page::Iterator _page_i_begin;
+            StorageCache::Page::Iterator _page_i;
+
+            void update_page();
+        };
+
+        /**
+         * This is to iterate using the secondary index. It is different from
+         * the Secondary type in so that it doesn't provide access to full data rows but
+         * to the index values only.
+         */
+        struct SecondaryIndexOnly : Tracker
+        {
+            SecondaryIndexOnly(const Table *table,
+                    BTreePtr btree, const BTree::Iterator &btree_i);
+
+            SecondaryIndexOnly(SecondaryIndexOnly&&) = default;
+            virtual ~SecondaryIndexOnly() = default;
+
+            void next() {
+                ++_btree_i;
+            }
+            void prev() {
+                --_btree_i;
+            }
+            const Extent::Row& row() const {
+                return *_btree_i;
+            }
+
+            friend bool operator==(const SecondaryIndexOnly& a, const SecondaryIndexOnly& b) {
+                const Tracker& ta = a;
+                const Tracker& tb = b;
+                return ta == tb;
+            }
+        };
+
+        std::variant<std::monostate, Primary, Secondary, SecondaryIndexOnly> _tracker;
+
+    public:
+        using iterator_category = std::bidirectional_iterator_tag;
+        using difference_type   = std::ptrdiff_t;
+        using value_type        = const Extent::Row;
+        using pointer           = const Extent::Row *;  // or also value_type*
+        using reference         = const Extent::Row &;  // or also value_type&
+
+        reference operator*() { 
+
+            struct visitor {
+                reference operator()(const Primary& t) {
+                    return t.row();
+                }
+                reference operator()(const SecondaryIndexOnly& t) {
+                    return t.row();
+                }
+                reference operator()(const Secondary& t) {
+                    return t.row();
+                }
+                reference operator()(const std::monostate&) {
+                    DCHECK(false);
+                    // the throw is to make compiler happy
+                    throw std::runtime_error("Bad variant state");
+                }
             };
 
-            /**
-             * This is to iterate using the secondary index.
-             */
-            struct Secondary : Tracker
-            {
-                Secondary(const Table *table,
-                        BTreePtr btree, const BTree::Iterator &btree_i,
-                        ExtentSchemaPtr schema );
+            return std::visit<reference>(visitor{}, _tracker);
+        }
 
-                Secondary(Secondary&&) = default;
-                virtual ~Secondary() = default;
+        pointer operator->() { return &*(*this); }
 
-                void next();
-                void prev();
-                const Extent::Row& row() const {
-                    return *_page_i;
+        /**
+         * Move the iterator forward to the next row.
+         */
+        Iterator& operator++() {
+            struct visitor {
+                void operator()(Primary& t) {
+                    t.next();
                 }
-
-                friend bool operator==(const Secondary& a, const Secondary& b) {
-                    const Tracker& ta = a;
-                    const Tracker& tb = b;
-                    return ta == tb;
+                void operator()(SecondaryIndexOnly& t) {
+                    t.next();
                 }
-
-                FieldPtr _extent_id_f;
-                FieldPtr _row_id_f;
-
-                struct PageMapItem {
-                    StorageCache::SafePagePtr page;
-                    StorageCache::Page::Iterator it_begin;
-                };
-                std::unordered_map<uint64_t, PageMapItem> _page_map;
-                uint64_t _cache_size;
-                // This it to keep a list of extent ids that are in 
-                // _page_map. The list is used for evicting items from the
-                // page map. We assume that secondary indexes jump
-                // around extent ids somewhat randomly. There is no need to
-                // pay for something like maintaining LRU.
-                CircularBuffer<uint64_t> _eid_buffer;
-
-                uint64_t _extent_id = 0;
-                StorageCache::Page::Iterator _page_i_begin;
-                StorageCache::Page::Iterator _page_i;
-
-                void update_page();
-            };
-
-            /**
-             * This is to iterate using the secondary index. It is different from
-             * the Secondary type in so that it doesn't provide access to full data rows but
-             * to the index values only.
-             */
-            struct SecondaryIndexOnly : Tracker
-            {
-                SecondaryIndexOnly(const Table *table,
-                        BTreePtr btree, const BTree::Iterator &btree_i);
-
-                SecondaryIndexOnly(SecondaryIndexOnly&&) = default;
-                virtual ~SecondaryIndexOnly() = default;
-
-                void next() {
-                    ++_btree_i;
+                void operator()(Secondary& t) {
+                    t.next();
                 }
-                void prev() {
-                    --_btree_i;
-                }
-                const Extent::Row& row() const {
-                    return *_btree_i;
-                }
-
-                friend bool operator==(const SecondaryIndexOnly& a, const SecondaryIndexOnly& b) {
-                    const Tracker& ta = a;
-                    const Tracker& tb = b;
-                    return ta == tb;
+                void operator()(const std::monostate&) {
+                    DCHECK(false);
+                    // the throw is to make compiler happy
+                    throw std::runtime_error("Bad variant state");
                 }
             };
+            std::visit(visitor{}, _tracker);
+            return *this;
+        }
 
-            std::variant<std::monostate, Primary, Secondary, SecondaryIndexOnly> _tracker;
-
-        public:
-            using iterator_category = std::bidirectional_iterator_tag;
-            using difference_type   = std::ptrdiff_t;
-            using value_type        = const Extent::Row;
-            using pointer           = const Extent::Row *;  // or also value_type*
-            using reference         = const Extent::Row &;  // or also value_type&
-
-            reference operator*() { 
-                if (auto p = std::get_if<Primary>(&_tracker)) {
-                    return p->row();
+        /**
+         * Move the iterator backward to the previous row.
+         */
+        Iterator& operator--() {
+            struct visitor {
+                void operator()(Primary& t) {
+                    t.prev();
                 }
-                if (auto p = std::get_if<SecondaryIndexOnly>(&_tracker)) {
-                    return p->row();
+                void operator()(SecondaryIndexOnly& t) {
+                    t.prev();
                 }
-                auto p = std::get_if<Secondary>(&_tracker);
-                assert(p);
-                return p->row();
-            }
-            pointer operator->() { return &*(*this); }
-
-            /**
-             * Move the iterator forward to the next row.
-             */
-            Iterator& operator++() {
-                if (auto p = std::get_if<Primary>(&_tracker)) {
-                    p->next();
-                } else if (auto p = std::get_if<Secondary>(&_tracker)) {
-                    p->next();
-                } else if (auto p = std::get_if<SecondaryIndexOnly>(&_tracker)) {
-                    p->next();
-                } else {
-                    assert(false);
+                void operator()(Secondary& t) {
+                    t.prev();
                 }
-                return *this;
-            }
-
-            /**
-             * Move the iterator backward to the previous row.
-             */
-            Iterator& operator--() {
-                if (auto p = std::get_if<Primary>(&_tracker)) {
-                    p->prev();
-                } else if (auto p = std::get_if<Secondary>(&_tracker)) {
-                    p->prev();
-                } else if (auto p = std::get_if<SecondaryIndexOnly>(&_tracker)) {
-                    p->prev();
-                } else {
-                    assert(false);
+                void operator()(const std::monostate&) {
+                    DCHECK(false);
+                    // the throw is to make compiler happy
+                    throw std::runtime_error("Bad variant state");
                 }
-                return *this;
-            }
+            };
+            std::visit(visitor{}, _tracker);
+            return *this;
+        }
 
-            /**
-             * Compares two iterators for equality.
-             */
-            friend bool operator==(const Iterator& a, const Iterator& b) {
-                if (auto pa = std::get_if<Primary>(&a._tracker)) {
-                    auto pb =  std::get_if<Primary>(&b._tracker);
-                    assert(pb);
-                    return *pa == *pb;
-                } else if (auto pa = std::get_if<Secondary>(&a._tracker)) {
-                    auto pb =  std::get_if<Secondary>(&b._tracker);
-                    assert(pb);
-                    return *pa == *pb;
-                } else if (auto pa = std::get_if<SecondaryIndexOnly>(&a._tracker)) {
-                    auto pb =  std::get_if<SecondaryIndexOnly>(&b._tracker);
-                    assert(pb);
-                    return *pa == *pb;
+        /**
+         * Compares two iterators for equality.
+         */
+        friend bool operator==(const Iterator& a, const Iterator& b) {
+            struct visitor {
+                const Iterator& _b;
+                visitor(const Iterator&b) : _b{b} {}
+                bool operator()(const Primary& t) {
+                    return t == std::get<Primary>(_b._tracker);
                 }
-                assert(false);
-                return false;
-            }
-
-            /**
-             * Compares two iterators for inequality.
-             */
-            friend bool operator!= (const Iterator& a, const Iterator& b) { return !(a == b); }
-
-
-            /** This will return the current extent id of the iterator.
-            */
-            uint64_t extent_id() const {
-                if (auto p = std::get_if<Primary>(&_tracker)) {
-                    return p->_page_i.extent_id();
+                bool operator()(const SecondaryIndexOnly& t) {
+                    return t == std::get<SecondaryIndexOnly>(_b._tracker);
                 }
-                throw std::runtime_error("Unsupported for secondary indexes");
-            }
+                bool operator()(const Secondary& t) {
+                    return t == std::get<Secondary>(_b._tracker);
+                }
+                bool operator()(const std::monostate&) {
+                    DCHECK(false);
+                    // the throw is to make compiler happy
+                    throw std::runtime_error("Bad variant state");
+                }
+            };
+            return std::visit<bool>(visitor{b}, a._tracker);
+        }
+
+        /**
+         * Compares two iterators for inequality.
+         */
+        friend bool operator!= (const Iterator& a, const Iterator& b) { return !(a == b); }
+
+
+        /** This will return the current extent id of the iterator.
+        */
+        uint64_t extent_id() const {
+            struct visitor {
+                uint64_t operator()(const Primary& t) {
+                    return t._page_i.extent_id();
+                }
+                uint64_t operator()(const SecondaryIndexOnly& t) {
+                    DCHECK(false);
+                    throw std::runtime_error("Unsupported for secondary indexes");
+                }
+                uint64_t operator()(const Secondary& t) {
+                    DCHECK(false);
+                    throw std::runtime_error("Unsupported for secondary indexes");
+                }
+                uint64_t operator()(const std::monostate&) {
+                    DCHECK(false);
+                    throw std::runtime_error("Bad variant state");
+                }
+            };
+            return std::visit<uint64_t>(visitor{}, _tracker);
+        }
 
         private:
             /** Specifically for the end() iterator of a vacant table. */
