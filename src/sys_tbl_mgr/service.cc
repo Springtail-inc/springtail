@@ -1538,7 +1538,7 @@ Service::AttachPartition(grpc::ServerContext* context,
     std::string partition_bound = "";
     std::string partition_schema = "";
     for (const auto& attached_table_id : attached_partitions) {
-        LOG_DEBUG(LOG_SCHEMA, "[DEBUG] Attaching Partition for table ID: {}, to parent table ID: {}", attached_table_id, request->table_id());
+        LOG_DEBUG(LOG_SCHEMA, "Attaching Partition for table ID: {}, to parent table ID: {}", attached_table_id, request->table_id());
         auto table_info = _get_table_info(request->db_id(), attached_table_id, xid);
 
         // note: table should always exist when calling alter_table()
@@ -1604,7 +1604,7 @@ Service::DetachPartition(grpc::ServerContext* context,
     std::string partition_name = "";
     std::string partition_schema = "";
     for (const auto& detached_table_id : detached_partitions) {
-        LOG_DEBUG(LOG_SCHEMA, "[DEBUG] Detaching Partition for table ID: {}, from parent table ID: {}", detached_table_id, request->table_id());
+        LOG_DEBUG(LOG_SCHEMA, "Detaching Partition for table ID: {}, from parent table ID: {}", detached_table_id, request->table_id());
         auto table_info = _get_table_info(request->db_id(), detached_table_id, xid);
 
         // note: table should always exist when calling alter_table()

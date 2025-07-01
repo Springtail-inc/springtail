@@ -97,27 +97,243 @@ BEGIN
 END;
 $$;
 
+-- Handle partition events
+CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_handle_partition_events(
+    table_id oid,
+    table_name TEXT,
+    schema_name TEXT,
+    partition_key TEXT,
+    partition_data JSON
+)
+    RETURNS boolean LANGUAGE plpgsql AS $$
+DECLARE
+    command_text text;
+    msg text;
+BEGIN
+    command_text := current_query();
+
+    -- Handle the detach partition event
+    IF position('detach partition' IN lower(command_text)) > 0 THEN
+        msg := json_build_object('xid', txid_current(),
+            'cmd', 'DETACH PARTITION',
+            'table_id', table_id::bigint,
+            'schema', schema_name,
+            'table', table_name,
+            'partition_key', partition_key,
+            'partition_data', partition_data);
+
+        PERFORM pg_logical_emit_message(true, 'springtail:' || 'DETACH PARTITION', msg::text);
+        RETURN TRUE;
+    END IF;
+
+    -- Handle the attach partition event
+    IF position('attach partition' IN lower(command_text)) > 0 THEN
+        msg := json_build_object('xid', txid_current(),
+            'cmd', 'ATTACH PARTITION',
+            'table_id', table_id::bigint,
+            'schema', schema_name,
+            'table', table_name,
+            'partition_key', partition_key,
+            'partition_data', partition_data);
+
+        PERFORM pg_logical_emit_message(true, 'springtail:' || 'ATTACH PARTITION', msg::text);
+        RETURN TRUE;
+    END IF;
+
+    RETURN FALSE;
+END;
+$$;
+
+-- Handle index events
+CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_handle_index_events(
+    obj_id oid,
+    object_identity text,
+    object_type text,
+    command_tag text,
+    schema_name text
+)
+    RETURNS void  LANGUAGE plpgsql AS $$
+DECLARE
+    ind_obj record;
+    json_columns json;
+    msg text;
+BEGIN
+    EXECUTE format('SELECT
+            c.oid AS table_oid,
+            c.relname AS table_name,
+            i.indisunique AS is_unique,
+            i.indisprimary AS primary_idx,
+            i.indkey AS indkey
+        FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid
+        WHERE i.indexrelid = %s', obj_id) INTO ind_obj;
+
+    IF ind_obj.primary_idx IS true THEN
+        RETURN;
+    END IF;
+
+    -- get index columns
+    SELECT json_agg(json_col)
+    FROM (
+        SELECT json_build_object('name', pga.attname,
+            'position', pga.attnum,
+            'idx_position', array_position(ind_obj.indkey, pga.attnum)
+        ) AS json_col
+        FROM pg_attribute pga
+        WHERE
+            pga.attrelid=ind_obj.table_oid
+            AND (array_position(ind_obj.indkey, pga.attnum) IS NOT NULL)
+            AND attisdropped=false
+    ) AS obj_select
+    INTO json_columns;
+
+    -- build msg json object
+    msg := json_build_object('xid', txid_current(),
+        'cmd', command_tag,
+        'oid', obj_id::bigint,
+        'obj', object_type,
+        'schema', schema_name,
+        'identity', object_identity,
+        'table_oid', ind_obj.table_oid::bigint,
+        'table_name', ind_obj.table_name,
+        'is_unique', ind_obj.is_unique,
+        'columns', json_columns);
+
+    -- command_tag is CREATE INDEX
+    -- RAISE NOTICE 'springtail: % op, %', obj.command_tag, msg::text;
+    PERFORM pg_logical_emit_message(true, 'springtail:' || command_tag, msg::text);
+END;
+$$;
+
+-- Handle table events
+CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_handle_table_events(
+    obj_id oid,
+    object_identity text,
+    command_tag text,
+    schema_name text
+)
+    RETURNS json LANGUAGE plpgsql AS $$
+DECLARE
+    -- Table meta
+    table_relname text;
+    table_replident "char";
+    table_persistence "char";
+    rel_kind "char";
+    has_pkey boolean;
+    json_columns json;
+    -- Partition details
+    parent_table_id oid;
+    partition_bound text;
+    partition_key text;
+    partition_data json;
+    is_partition_event boolean;
+    -- Table details output
+    table_info text;
+BEGIN
+    -- Get the table details from pg_class along with the partition details
+    SELECT pg_class.relname, pg_class.relreplident, pg_class.relpersistence, pg_class.relkind, CASE WHEN pg_class.relispartition THEN
+            (SELECT inhparent FROM pg_inherits WHERE inhrelid = pg_class.oid)
+        END as parent_table_id,
+        pg_get_expr(pg_class.relpartbound, pg_class.oid, TRUE) as partition_bound,
+        pg_get_partkeydef(pg_class.oid) as partition_key
+    FROM pg_class
+    WHERE oid = obj_id
+    INTO table_relname, table_replident, table_persistence, rel_kind, parent_table_id, partition_bound, partition_key;
+
+    -- Only during the ALTER command, get the partition details. This is required to handle the partition events
+    IF command_tag = 'ALTER TABLE' AND parent_table_id IS NULL THEN
+        SELECT __pg_springtail_triggers.springtail_get_partition_data(object_identity) INTO partition_data;
+
+        -- Handler for attach and detach partition events
+        SELECT __pg_springtail_triggers.springtail_handle_partition_events(
+            obj_id,
+            table_relname,
+            schema_name,
+            partition_key,
+            partition_data
+        ) INTO is_partition_event;
+
+        IF is_partition_event IS TRUE THEN
+            RETURN NULL;
+        END IF;
+    END IF;
+
+    -- This is a corner case when an index is renamed through "ALTER TABLE" statement
+    -- In this case our object is an index, not a table. So, we can't do anything with it here.
+    -- 'i' - normal index, 'I' - partitioned index
+    -- 'r' - normal table, 'p' - partitioned table
+    IF rel_kind <> 'r' AND rel_kind <> 'p' THEN
+        RETURN NULL;
+    END IF;
+
+    SELECT json_agg(json_col)
+    FROM (
+        SELECT json_build_object('name', column_name,
+            'is_nullable', is_nullable::boolean,
+            'pg_type', atttypid::int,
+            'default', column_default,
+            'is_pkey', coalesce((pga.attnum=any(pgi.indkey))::boolean, false),
+            'position', ordinal_position,
+            'pkey_pos', array_position(pgi.indkey, pga.attnum),
+            'is_generated', (pga.attgenerated = 's')::boolean,
+            'type_name', t.typname,
+            'collation', col.collname,
+            'is_user_defined_type', (t.typnamespace <> 'pg_catalog'::regnamespace AND t.typnamespace <> 'information_schema'::regnamespace)::boolean,
+            'is_non_standard_collation', coalesce((col.collname NOT IN ('C', 'en_US.UTF-8', 'default'))::boolean, false),
+            'type_category', t.typcategory,
+            'type_namespace', nsp.nspname
+        ) AS json_col
+        FROM pg_attribute pga
+        JOIN information_schema.columns
+        ON column_name=pga.attname
+        LEFT OUTER JOIN pg_index pgi
+        ON pga.attrelid=pgi.indrelid AND pgi.indisprimary
+        LEFT JOIN pg_type t ON pga.atttypid = t.oid
+        LEFT JOIN pg_collation col ON pga.attcollation = col.oid AND pga.attcollation <> 0
+        LEFT JOIN pg_catalog.pg_namespace nsp ON nsp.oid = t.typnamespace
+        WHERE pga.attrelid=obj_id
+            AND quote_literal(table_schema) = quote_literal(schema_name)
+            AND quote_literal(table_name) = quote_literal(table_relname)
+            AND atttypid > 0
+        ORDER BY ordinal_position
+    ) AS obj_select
+    INTO json_columns;
+
+    SELECT true WHERE json_columns::jsonb @> '[{"is_pkey": true}]'::jsonb INTO has_pkey;
+
+    -- If a table is created or altered, and it doesn't have a primary key, set REPLICA IDENTITY to FULL
+    IF table_replident <> 'f' AND has_pkey IS NULL AND table_persistence = 'p' THEN
+        EXECUTE format('ALTER TABLE %s.%s REPLICA IDENTITY %s', quote_ident(schema_name), quote_ident(table_relname), 'FULL');
+    END IF;
+
+    -- Form the JSON containing the table information including column details, partition info etc
+    table_info = json_build_object(
+        'table_name', table_relname,
+        'partition_bound', partition_bound,
+        'partition_key', partition_key,
+        'partition_data', partition_data,
+        'parent_table_id', parent_table_id::bigint,
+        'columns', json_columns,
+        'has_pkey', has_pkey,
+        'table_persistence', table_persistence,
+        'table_replident', table_replident,
+        'rel_kind', rel_kind
+    );
+
+    -- RAISE NOTICE 'springtail: % op, %', command_tag, table_info::text;
+
+    RETURN table_info;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for_table_ddl()
         RETURNS event_trigger LANGUAGE plpgsql AS $$
 DECLARE
     obj record;
     ind_obj record;
     msg text;
-    json_columns json;
     index_columns json;
-    has_pkey boolean;
-    table_persistence "char";
-    table_replident "char";
-    rel_kind "char";
-    parent_table_id oid;
-    partition_bound text;
-    partition_key text;
-    partition_data json;
-    table_relname text;
-    table_info RECORD;
+    table_info json;
     command_tag text;
-    command_text text;
-    match text[];
 BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() AS cmd
         WHERE cmd.command_tag IN ('ALTER TABLE', 'CREATE TABLE', 'ALTER INDEX')
@@ -130,104 +346,15 @@ BEGIN
             CONTINUE;
         END IF;
 
-        -- BEGIN of what should have been a function, if you change it here,
-        -- it should also be change in the springtail_event_trigger_for_schema_ddl()
-        SELECT pg_class.relname, pg_class.relreplident, pg_class.relpersistence, pg_class.relkind, CASE WHEN pg_class.relispartition THEN
-                (SELECT inhparent FROM pg_inherits WHERE inhrelid = pg_class.oid)
-            END as parent_table_id,
-            pg_get_expr(pg_class.relpartbound, pg_class.oid, TRUE) as partition_bound,
-            pg_get_partkeydef(pg_class.oid) as partition_key
-        FROM pg_class
-        WHERE oid = obj.objid
-        INTO table_relname, table_replident, table_persistence, rel_kind, parent_table_id, partition_bound, partition_key;
+        -- Handle table events
+        SELECT __pg_springtail_triggers.springtail_handle_table_events(obj.objid, obj.object_identity, obj.command_tag, obj.schema_name) INTO table_info;
 
-        IF obj.command_tag = 'ALTER TABLE' AND parent_table_id IS NULL THEN
-            SELECT __pg_springtail_triggers.springtail_get_partition_data(obj.object_identity) INTO partition_data;
-        END IF;
-
-        command_text := current_query();
-
-        -- Handle the detach partition event
-        IF obj.command_tag = 'ALTER TABLE' AND position('detach partition' IN lower(command_text)) > 0 THEN
-            msg := json_build_object('xid', txid_current(),
-                'cmd', 'DETACH PARTITION',
-                'table_id', obj.objid::bigint,
-                'schema', obj.schema_name,
-                'table', table_relname,
-                'partition_key', partition_key,
-                'partition_data', partition_data);
-
-            PERFORM pg_logical_emit_message(true, 'springtail:' || 'DETACH PARTITION', msg::text);
-
+        -- Check if the JSON is empty
+        IF table_info IS NULL THEN
             CONTINUE;
         END IF;
 
-        -- Handle the attach partition event
-        IF obj.command_tag = 'ALTER TABLE' AND position('attach partition' IN lower(command_text)) > 0 THEN
-            msg := json_build_object('xid', txid_current(),
-                'cmd', 'ATTACH PARTITION',
-                'table_id', obj.objid::bigint,
-                'schema', obj.schema_name,
-                'table', table_relname,
-                'partition_key', partition_key,
-                'partition_data', partition_data);
-
-            PERFORM pg_logical_emit_message(true, 'springtail:' || 'ATTACH PARTITION', msg::text);
-
-            CONTINUE;
-        END IF;
-
-        -- This is a corner case when an index is renamed through "ALTER TABLE" statement
-        -- In this case our object is an index, not a table. So, we can't do anything with it here.
-        -- 'i' - normal index, 'I' - partitioned index
-        -- 'r' - normal table, 'p' - partitioned table
-        IF rel_kind <> 'r' AND rel_kind <> 'p' THEN
-            CONTINUE;
-        END IF;
-
-        SELECT json_agg(json_col)
-        FROM (
-            SELECT json_build_object('name', column_name,
-                'is_nullable', is_nullable::boolean,
-                'pg_type', atttypid::int,
-                'default', column_default,
-                'is_pkey', coalesce((pga.attnum=any(pgi.indkey))::boolean, false),
-                'position', ordinal_position,
-                'pkey_pos', array_position(pgi.indkey, pga.attnum),
-                'is_generated', (pga.attgenerated = 's')::boolean,
-                'type_name', t.typname,
-                'collation', col.collname,
-                'is_user_defined_type', (t.typnamespace <> 'pg_catalog'::regnamespace AND t.typnamespace <> 'information_schema'::regnamespace)::boolean,
-                'is_non_standard_collation', coalesce((col.collname NOT IN ('C', 'en_US.UTF-8', 'default'))::boolean, false),
-                'type_category', t.typcategory,
-                'type_namespace', nsp.nspname
-            ) AS json_col
-            FROM pg_attribute pga
-            JOIN information_schema.columns
-            ON column_name=pga.attname
-            LEFT OUTER JOIN pg_index pgi
-            ON pga.attrelid=pgi.indrelid AND pgi.indisprimary
-            LEFT JOIN pg_type t ON pga.atttypid = t.oid
-            LEFT JOIN pg_collation col ON pga.attcollation = col.oid AND pga.attcollation <> 0
-            LEFT JOIN pg_catalog.pg_namespace nsp ON nsp.oid = t.typnamespace
-            WHERE pga.attrelid=obj.objid
-                AND quote_literal(table_schema) = quote_literal(obj.schema_name)
-                AND quote_literal(table_name) = quote_literal(table_relname)
-                AND atttypid > 0
-            ORDER BY ordinal_position
-        ) AS obj_select
-        INTO json_columns;
-
-        SELECT true WHERE json_columns::jsonb @> '[{"is_pkey": true}]'::jsonb INTO has_pkey;
-
-        -- If a table is created or altered, and it doesn't have a primary key, set REPLICA IDENTITY to FULL
-        IF table_replident <> 'f' AND has_pkey IS NULL AND table_persistence = 'p' THEN
-            EXECUTE format('ALTER TABLE %s.%s REPLICA IDENTITY %s', quote_ident(obj.schema_name), quote_ident(table_relname), 'FULL');
-        END IF;
-        -- END of what should have been a function, if you change it here,
-        -- it should also be change in the springtail_event_trigger_for_schema_ddl()
-
-        IF table_persistence <> 'p' THEN
+        IF table_info->>'table_persistence' <> 'p' THEN
             --- RAISE NOTICE 'springtail: skipping operation %, on object %, with identity %, due to wrong persistence type: %', obj.command_tag, obj.object_type, obj.object_identity, table_persistence;
             CONTINUE;
         END IF;
@@ -244,21 +371,21 @@ BEGIN
             'oid', obj.objid::bigint,
             'obj', obj.object_type,
             'schema', obj.schema_name,
-            'table', table_relname,
-            'columns', json_columns,
-            'parent_table_id', parent_table_id::int,
-            'partition_bound', partition_bound,
-            'partition_key', partition_key,
-            'partition_data', partition_data);
+            'table', table_info->'table_name',
+            'columns', table_info->'columns',
+            'parent_table_id', table_info->'parent_table_id',
+            'partition_bound', table_info->'partition_bound',
+            'partition_key', table_info->'partition_key',
+            'partition_data', table_info->'partition_data'
+        );
 
         -- command_tag is CREATE TABLE or ALTER TABLE
         PERFORM pg_logical_emit_message(true, 'springtail:' || command_tag, msg::text);
-
-        -- RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objid, table_replident;
+        -- RAISE NOTICE 'springtail: % op, %', command_tag, msg::text;
 
         -- If a table is altered, and it has a primary key, set REPLICA IDENTITY to DEFAULT
-        IF obj.command_tag IN ('ALTER TABLE', 'ALTER INDEX') AND table_replident = 'f' AND has_pkey IS TRUE THEN
-            EXECUTE format('ALTER TABLE %s.%s REPLICA IDENTITY %s', quote_ident(obj.schema_name), quote_ident(table_relname), 'DEFAULT');
+        IF obj.command_tag IN ('ALTER TABLE', 'ALTER INDEX') AND table_info->>'table_replident' = 'f' AND table_info->>'has_pkey' = 'true' THEN
+            EXECUTE format('ALTER TABLE %s.%s REPLICA IDENTITY %s', quote_ident(obj.schema_name), quote_ident(table_info->>'table_name'), 'DEFAULT');
         END IF;
 
         -- XXX To fix for ALTER TABLE later; right now indexes dropped or alters in alter table are not modified
@@ -331,60 +458,7 @@ BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() as cmd
         WHERE cmd.object_type = 'index'
     LOOP
-
-        -- RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_type, obj.object_identity, obj.objid;
-
-        -- BEGIN of what should have been a function, if you change it here,
-        -- it should also be change in the springtail_event_trigger_for_schema_ddl()
-
-        -- additionl index and table info
-        EXECUTE format('SELECT
-                c.oid AS table_oid,
-                c.relname AS table_name,
-                i.indisunique AS is_unique,
-                i.indisprimary AS primary_idx,
-                i.indkey AS indkey
-            FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid
-            WHERE i.indexrelid = %s', obj.objid) INTO ind_obj;
-
-        IF ind_obj.primary_idx IS true THEN
-            CONTINUE;
-        END IF;
-
-        -- get index columns
-        SELECT json_agg(json_col)
-        FROM (
-            SELECT json_build_object('name', pga.attname,
-                'position', pga.attnum,
-                'idx_position', array_position(ind_obj.indkey, pga.attnum)
-            ) AS json_col
-            FROM pg_attribute pga
-            WHERE
-                pga.attrelid=ind_obj.table_oid
-                AND (array_position(ind_obj.indkey, pga.attnum) IS NOT NULL)
-                AND attisdropped=false
-        ) AS obj_select
-        INTO json_columns;
-
-        -- build msg json object
-        msg := json_build_object('xid', txid_current(),
-            'cmd', obj.command_tag,
-            'oid', obj.objid::bigint,
-            'obj', obj.object_type,
-            'schema', obj.schema_name,
-            'identity', obj.object_identity,
-            'table_oid', ind_obj.table_oid::bigint,
-            'table_name', ind_obj.table_name,
-            'is_unique', ind_obj.is_unique,
-            'columns', json_columns);
-
-        -- END of what should have been a function, if you change it here,
-        -- it should also be change in the springtail_event_trigger_for_table_ddl()
-
-        -- command_tag is CREATE INDEX
-        PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
-
-        -- RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objsubid, tab_obj.primary_idx;
+        PERFORM __pg_springtail_triggers.springtail_handle_index_events(obj.objid, obj.object_identity, obj.object_type, obj.command_tag, obj.schema_name);
     END LOOP;
 END;
 $$;
@@ -395,17 +469,7 @@ DECLARE
     obj record;
     schema_obj record;
     msg text;
-    table_persistence "char";
-    table_replident "char";
-    table_relname text;
-    rel_kind "char";
-    has_pkey boolean;
-    ind_obj record;
-    json_columns json;
-    parent_table_id oid;
-    partition_bound text;
-    partition_key text;
-    table_info RECORD;
+    table_info json;
 BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() as cmd
     LOOP
@@ -430,134 +494,30 @@ BEGIN
 
         ELSIF obj.command_tag = 'CREATE TABLE' THEN
             -- command_tag is CREATE TABLE inside CREATE SCHEMA
-            -- RAISE NOTICE 'springtail springtail_event_trigger_for_schema_ddl: obj.command_tag %, obj.type %, obj.object_identity %, obj.objid %, obj.schema_name %',
-            --     obj.command_tag, obj.object_type, obj.object_identity, obj.objid, obj.schema_name;
+            -- Handle table events
+            SELECT __pg_springtail_triggers.springtail_handle_table_events(obj.objid, obj.object_identity, obj.command_tag, obj.schema_name) INTO table_info;
 
-            -- BEGIN of what should have been a function, if you change it here,
-            -- it should also be change in the springtail_event_trigger_for_table_ddl()
-            SELECT pg_class.relname, pg_class.relreplident, pg_class.relpersistence, pg_class.relkind, CASE WHEN pg_class.relispartition THEN
-                    (SELECT inhparent FROM pg_inherits WHERE inhrelid = pg_class.oid)
-                END as parent_table_id,
-                pg_get_expr(pg_class.relpartbound, pg_class.oid, TRUE) as partition_bound,
-                pg_get_partkeydef(pg_class.oid) as partition_key
-            FROM pg_class
-            WHERE oid = obj.objid
-            INTO table_relname, table_replident, table_persistence, rel_kind, parent_table_id, partition_bound, partition_key;
-
-            -- This is a corner case when an index is renamed through "ALTER TABLE" statement
-            -- In this case our object is an index, not a table. So, we can't do anything with it here.
-            -- 'i' - normal index, 'I' - partitioned index
-            -- 'r' - normal table, 'p' - partitioned table
-            IF rel_kind <> 'r' AND rel_kind <> 'p' THEN
+            -- Check if the JSON is empty
+            IF table_info IS NULL THEN
                 CONTINUE;
             END IF;
-
-            SELECT json_agg(json_col)
-            FROM (
-                SELECT json_build_object('name', column_name,
-                    'is_nullable', is_nullable::boolean,
-                    'pg_type', atttypid::int,
-                    'default', column_default,
-                    'is_pkey', coalesce((pga.attnum=any(pgi.indkey))::boolean, false),
-                    'position', ordinal_position,
-                    'pkey_pos', array_position(pgi.indkey, pga.attnum),
-                    'is_generated', (pga.attgenerated = 's')::boolean,
-                    'type_name', t.typname,
-                    'collation', col.collname,
-                    'is_user_defined_type', (t.typnamespace <> 'pg_catalog'::regnamespace AND t.typnamespace <> 'information_schema'::regnamespace)::boolean,
-                    'is_non_standard_collation', coalesce((col.collname NOT IN ('C', 'en_US.UTF-8', 'default'))::boolean, false),
-                    'type_category', t.typcategory,
-                    'type_namespace', nsp.nspname
-                ) AS json_col
-                FROM pg_attribute pga
-                JOIN information_schema.columns
-                ON column_name=pga.attname
-                LEFT OUTER JOIN pg_index pgi
-                ON pga.attrelid=pgi.indrelid AND pgi.indisprimary
-                LEFT JOIN pg_type t ON pga.atttypid = t.oid
-                LEFT JOIN pg_collation col ON pga.attcollation = col.oid AND pga.attcollation <> 0
-                LEFT JOIN pg_catalog.pg_namespace nsp ON nsp.oid = t.typnamespace
-                WHERE pga.attrelid=obj.objid
-                    AND quote_literal(table_schema) = quote_literal(obj.schema_name)
-                    AND quote_literal(table_name) = quote_literal(table_relname)
-                    AND atttypid > 0
-                ORDER BY ordinal_position
-            ) AS obj_select
-            INTO json_columns;
-
-            SELECT true WHERE json_columns::jsonb @> '[{"is_pkey": true}]'::jsonb INTO has_pkey;
-
-            -- If a table is created or altered, and it doesn't have a primary key, set REPLICA IDENTITY to FULL
-            IF table_replident <> 'f' AND has_pkey IS NULL AND table_persistence = 'p' THEN
-                EXECUTE format('ALTER TABLE %s.%s REPLICA IDENTITY %s', quote_ident(obj.schema_name), quote_ident(table_relname), 'FULL');
-            END IF;
-            -- END of what should have been a function, if you change it here,
-            -- it should also be change in the springtail_event_trigger_for_table_ddl()
 
             msg := json_build_object('xid', txid_current(),
                 'cmd', obj.command_tag,
                 'oid', obj.objid::bigint,
                 'obj', obj.object_type,
                 'schema', obj.schema_name,
-                'table', table_relname,
-                'columns', json_columns,
-                'parent_table_id', parent_table_id::int,
-                'partition_bound', partition_bound,
-                'partition_key', partition_key
+                'table', table_info->'table_name',
+                'columns', table_info->'columns',
+                'parent_table_id', table_info->'parent_table_id',
+                'partition_bound', table_info->'partition_bound',
+                'partition_key', table_info->'partition_key',
+                'partition_data', table_info->'partition_data'
             );
 
         ELSIF obj.command_tag = 'CREATE INDEX' THEN
-            -- command_tag is CREATE INDEX inside CREATE SCHEMA
-            -- RAISE NOTICE 'springtail springtail_event_trigger_for_schema_ddl: obj.command_tag %, obj.type %, obj.object_identity %, obj.objid %, obj.schema_name %',
-            --     obj.command_tag, obj.object_type, obj.object_identity, obj.objid, obj.schema_name;
-
-            -- BEGIN of what should have been a function, if you change it here,
-            -- it should also be change in the springtail_event_trigger_for_index_ddl()
-
-            -- additionl index and table info
-            EXECUTE format('SELECT
-                    c.oid AS table_oid,
-                    c.relname AS table_name,
-                    i.indisunique AS is_unique,
-                    i.indisprimary AS primary_idx,
-                    i.indkey AS indkey
-                FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid
-                WHERE i.indexrelid = %s', obj.objid) INTO ind_obj;
-
-            IF ind_obj.primary_idx IS true THEN
-                CONTINUE;
-            END IF;
-
-            -- get index columns
-            SELECT json_agg(json_col)
-            FROM (
-                SELECT json_build_object('name', pga.attname,
-                    'position', pga.attnum,
-                    'idx_position', array_position(ind_obj.indkey, pga.attnum)
-                ) AS json_col
-                FROM pg_attribute pga
-                WHERE
-                    pga.attrelid=ind_obj.table_oid
-                    AND (array_position(ind_obj.indkey, pga.attnum) IS NOT NULL)
-                    AND attisdropped=false
-            ) AS obj_select
-            INTO json_columns;
-
-            -- build msg json object
-            msg := json_build_object('xid', txid_current(),
-                'cmd', obj.command_tag,
-                'oid', obj.objid::bigint,
-                'obj', obj.object_type,
-                'schema', obj.schema_name,
-                'identity', obj.object_identity,
-                'table_oid', ind_obj.table_oid::bigint,
-                'table_name', ind_obj.table_name,
-                'is_unique', ind_obj.is_unique,
-                'columns', json_columns);
-
-            -- END of what should have been a function, if you change it here,
-            -- it should also be change in the springtail_event_trigger_for_table_ddl()
-
+            PERFORM __pg_springtail_triggers.springtail_handle_index_events(obj.objid, obj.object_identity, obj.object_type, obj.command_tag, obj.schema_name);
+            CONTINUE;
         END IF;
 
         IF msg IS NOT NULL THEN

@@ -16,6 +16,7 @@
 #include <sys_tbl_mgr/table_mgr.hh>
 
 #include <pg_repl/libpq_connection.hh>
+#include <pg_fdw/pg_fdw_ddl_common.hh>
 #include <common/logging.hh>
 
 namespace springtail::pg_fdw {
