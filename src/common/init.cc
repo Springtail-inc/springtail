@@ -239,7 +239,6 @@ std::map<ServiceId, std::string> dependencies_names = {
     {ServiceId::PgLogCoordinatorId,    "PgLogCoordinator"}
 };
 
-// TODO: need proper error messages and exceptions, use CHECK()
 std::vector<ServiceId>
 topo_sort()
 {
@@ -305,7 +304,7 @@ springtail_shutdown()
         if (it == running_services.end()) {
             continue;
         }
-        it->second();
+        it->second(dependencies_names[service_id]);
     }
 }
 

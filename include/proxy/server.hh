@@ -22,7 +22,7 @@
 namespace springtail::pg_proxy {
 
     class ProxyServer : public Singleton<ProxyServer>,
-                        public AutoRegisterShutdown<ProxyServer, ServiceId::ServiceRegisterId>
+                        public AutoRegisterShutdown<ProxyServer, ServiceId::ProxyServerId>
     {
         friend class Singleton<ProxyServer>;
     public:

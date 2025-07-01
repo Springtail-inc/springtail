@@ -209,7 +209,7 @@ enum class ServiceId: int32_t
     ServiceCountId
 };
 
-using ShutdownFunc = void(*)();
+using ShutdownFunc = void(*)(const std::string &name);
 
 void springtail_register_service(ServiceId service_id, ShutdownFunc fn);
 
@@ -220,7 +220,8 @@ protected:
     {
         springtail_register_service(Id, &do_shutdown);
     }
-    static void do_shutdown() {
+    static void do_shutdown(const std::string &name) {
+        LOG_INFO("Stopping service {}", name);
         T::shutdown();
     }
 };
