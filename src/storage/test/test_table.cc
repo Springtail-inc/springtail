@@ -1037,6 +1037,34 @@ namespace {
             ASSERT_EQ(it, begin_it);
         }
 
+        // test simple secondary iterator
+        {
+            auto end_it = table->end(1, true);
+
+            // use the secondary index to iterate over the same set
+            auto k = std::make_shared<ConstTypeField<uint64_t>>(test_value);
+            std::vector<ConstFieldPtr> v({ k });
+            auto key = std::make_shared<ValueTuple>(v);
+
+            auto it = table->lower_bound(key, 1, true);
+            auto idx_schema = table->get_index_schema(1);
+            auto fields = idx_schema->get_fields();
+
+            int count = 0;
+            int equal = 0;
+            for (; it != end_it; ++it) {
+                auto row = *it;
+                auto value = fields->at(0)->get_uint64(&row);
+                if (value == test_value) {
+                    ++equal;
+                }
+                ASSERT_LE(test_value, value);
+                ++count;
+            }
+            ASSERT_EQ(count, set_size);
+            ASSERT_EQ(equal, equal_count);
+        }
+
         {
             auto it = table->inverse_lower_bound(key, 1);
             int count = 0;

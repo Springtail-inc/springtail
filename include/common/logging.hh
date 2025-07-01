@@ -206,13 +206,13 @@ namespace springtail {
                 std::string formatted_msg = fmt::vformat(fmt, fmt::make_format_args(args...));
 
                 // log to otel sink
-                open_telemetry::OpenTelemetry::log(loc, spdlog::default_logger()->name(), lvl, formatted_msg);
+                open_telemetry::OpenTelemetry::get_instance()->log(loc, spdlog::default_logger()->name(), lvl, formatted_msg);
 
                 // put together the full message
                 std::string full_msg;
 
                 // extract baggage
-                open_telemetry::OpenTelemetry::get_context_variables([&full_msg](opentelemetry::nostd::string_view key, opentelemetry::nostd::string_view value) {
+                open_telemetry::OpenTelemetry::get_instance()->get_context_variables([&full_msg](opentelemetry::nostd::string_view key, opentelemetry::nostd::string_view value) {
                     std::string_view key_sv{key.data(), key.size()};
                     std::string_view value_sv{value.data(), value.size()};
 

@@ -37,7 +37,8 @@ jobs:
       PACKAGES_S3_PREFIX: nightly-builds
       TEST_LOGS_S3_PREFIX: nightly-testlogs
       NUM_PROCS: ${{ vars.NUM_PROCS }}
-      INTEGRATION_TEST_ITERATIONS: ${{ vars.INTEGRATION_TEST_ITERATIONS || 1 }}
+      #INTEGRATION_TEST_ITERATIONS: ${{ vars.INTEGRATION_TEST_ITERATIONS || 1 }}
+      INTEGRATION_TEST_ITERATIONS: 3
       # The path to the Springtail logs, keep consistent with the `log_path` inside
       # system.json.test
       SPRINGTAIL_LOG_PATH: /opt/springtail/logs
@@ -310,7 +311,7 @@ jobs:
           # Do not break out if errors occur
           set +e
           _LOG_FLAG="failed"
-          python3 test_runner.py -t -s postgres_all
+          python3 test_runner_new.py -t -s postgres_all -b ../../../debug
           if [ $? -eq 0 ]; then
               _LOG_FLAG="succeeded"
           fi
@@ -337,17 +338,36 @@ jobs:
           else
             echo "*** No Springtail Proxy Logs to found inside ${SPRINGTAIL_LOG_PATH}"
           fi
+
+          # Find the file matching this name exactly: `regression.diff.pg.out`
+          # under the $TMPDIR directory (recursive) and upload it to S3
+          regression_pg_diff_file=$(find /tmp -name "regression.diff.pg.out")
+          # Only upload to S3 if the file exists
+          if [ -f "$regression_pg_diff_file" ]; then
+              regression_pg_diff_s3_key="${TEST_LOG_S3_FULL_PREFIX}/regression_pg.diff.${GITHUB_SHORT_SHA}-${_TIMESTAMP}.out"
+              aws s3 cp $regression_pg_diff_file $regression_pg_diff_s3_key
+              echo "*** PG Regression Diff S3 Key: $regression_pg_diff_s3_key"
+          fi
           # Find the file matching this name exactly: `regression.diff.proxy.out`
           # under the $TMPDIR directory (recursive) and upload it to S3
-          regression_diff_file=$(find /tmp -name "regression.diff.proxy.out")
+          regression_proxy_diff_file=$(find /tmp -name "regression.diff.proxy.out")
           # Only upload to S3 if the file exists
-          if [ -f "$regression_diff_file" ]; then
-              regression_diff_s3_key="${TEST_LOG_S3_FULL_PREFIX}/regression.diff.proxy-${GITHUB_SHORT_SHA}-${_TIMESTAMP}.out"  
-              aws s3 cp $regression_diff_file $regression_diff_s3_key
-              echo "*** Proxy Regression Diff S3 Key: $regression_diff_s3_key"
+          if [ -f "$regression_proxy_diff_file" ]; then
+              regression_proxy_diff_s3_key="${TEST_LOG_S3_FULL_PREFIX}/regression_proxy.diff.${GITHUB_SHORT_SHA}-${_TIMESTAMP}.out"
+              aws s3 cp $regression_proxy_diff_file $regression_proxy_diff_s3_key
+              echo "*** Proxy Regression Diff S3 Key: $regression_proxy_diff_s3_key"
           fi
           # Eventually fail the step
           if [ "$_LOG_FLAG" = "failed" ]; then
+            # Find the file matching this name exactly: `regression.result.proxy.out`
+            # under the $TMPDIR directory (recursive) and upload it to S3
+            regression_result_diff_file=$(find /tmp -name "regression_result.diff.out")
+            # Only upload to S3 if the file exists
+            if [ -f "$regression_result_diff_file" ]; then
+                regression_result_diff_s3_key="${TEST_LOG_S3_FULL_PREFIX}/regression_result.diff.${GITHUB_SHORT_SHA}-${_TIMESTAMP}.out"
+                aws s3 cp $regression_result_diff_file $regression_result_diff_s3_key
+                echo "*** Proxy Regression Result Diff S3 Key: $regression_result_diff_s3_key"
+            fi
             exit 1
           fi
 
