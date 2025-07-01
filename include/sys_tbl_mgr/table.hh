@@ -130,7 +130,7 @@ namespace indexer_helpers {
                 {}
 
                 friend bool operator==(const Tracker& a, const Tracker& b) {
-                    CHECK_EQ(a._table, b._table);
+                    DCHECK_EQ(a._table, b._table);
                     if (a._btree == nullptr && b._btree == nullptr) {
                         return true;
                     } else if (a._btree == nullptr || b._btree == nullptr) {
@@ -286,7 +286,7 @@ namespace indexer_helpers {
                     return t.row();
                 }
                 reference operator() [[noreturn]] (const std::monostate&) const {
-                    DCHECK(false);
+                    CHECK(false);
                 }
             };
 
@@ -310,7 +310,7 @@ namespace indexer_helpers {
                     t.next();
                 }
                 void operator()(const std::monostate&) const {
-                    DCHECK(false);
+                    CHECK(false);
                 }
             };
             std::visit(visitor{}, _tracker);
@@ -332,7 +332,7 @@ namespace indexer_helpers {
                     t.prev();
                 }
                 void operator()(const std::monostate&) const {
-                    DCHECK(false);
+                    CHECK(false);
                 }
             };
             std::visit(visitor{}, _tracker);
@@ -356,7 +356,7 @@ namespace indexer_helpers {
                     return t == std::get<Secondary>(_b._tracker);
                 }
                 bool operator() [[noreturn]] (const std::monostate&) const {
-                    DCHECK(false);
+                    CHECK(false);
                 }
             };
             return std::visit<bool>(visitor{b}, a._tracker);
@@ -376,13 +376,13 @@ namespace indexer_helpers {
                     return t._page_i.extent_id();
                 }
                 uint64_t operator() [[noreturn]] (const SecondaryIndexOnly&) const {
-                    DCHECK(false);
+                    CHECK(false);
                 }
                 uint64_t operator() [[noreturn]] (const Secondary&) const {
-                    DCHECK(false);
+                    CHECK(false);
                 }
                 uint64_t operator() [[noreturn]] (const std::monostate&) const {
-                    DCHECK(false);
+                    CHECK(false);
                 }
             };
             return std::visit<uint64_t>(visitor{}, _tracker);
