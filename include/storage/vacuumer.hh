@@ -42,8 +42,8 @@ private:
         uint64_t offset;
         uint64_t size;
     };
-    using HoleList = std::map<std::filesystem::path, std::list<HoleInfo>>;
-    using ExtentMap = std::map<uint64_t, HoleList>;
+    using HoleList = std::map<uint64_t, std::list<HoleInfo>>;
+    using ExtentMap = std::map<std::filesystem::path, HoleList>;
 
     using SnapshotList = std::list<std::filesystem::path>;
     using SnapshotMap = std::map<uint64_t, SnapshotList>;
@@ -53,6 +53,36 @@ private:
     SnapshotMap _snapshot_map; ///< Maps XID -> list of table snapshot directories
 
     RedisDDL _redis_ddl; ///< Interface to the DDL structures in Redis.
+
+    constexpr uint64_t kPunchAlign = 64 * 1024;  // 64KB punch alignment
+
+    // Round a value up to the nearest multiple of `align`
+    inline uint64_t align_up(uint64_t val, uint64_t align) {
+        return ((val + align - 1) / align) * align;
+    }
+
+    // Round a value down to the nearest multiple of `align`
+    inline uint64_t align_down(uint64_t val, uint64_t align) {
+        return (val / align) * align;
+    }
+
+    /**
+     * @brief Perform actual hole punching using fallocate.
+     *
+     * @param file File to punch.
+     * @param input_extents Aligned extents to punch
+     * @return List of successfully punched extents
+     */
+    std::vector<HoleInfo> Vacuumer::hole_punch_file(const std::string& file,
+                                                    const std::vector<HoleInfo>& input_extents);
+
+    /**
+     * @brief Get vacuum-safe XID for a DB
+     *
+     * @param file File to punch
+     * @return XID until which extents can be punched
+     */
+    uint64_t get_vacuum_cutoff_xid(const std::string& file);
 };
 
 }
