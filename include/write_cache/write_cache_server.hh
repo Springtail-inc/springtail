@@ -5,13 +5,13 @@
 #include <memory>
 
 #include <grpc/grpc_server_manager.hh>
-#include <common/service_register.hh>
-#include <common/singleton.hh>
+#include <common/init.hh>
 #include <write_cache/write_cache_index.hh>
 
 namespace springtail {
 
-    class WriteCacheServer final : public Singleton<WriteCacheServer>
+    class WriteCacheServer final : public Singleton<WriteCacheServer>,
+                                   public AutoRegisterShutdown<WriteCacheServer, ServiceId::WriteCacheServerId>
     {
         friend class Singleton<WriteCacheServer>;
     public:
@@ -28,11 +28,11 @@ namespace springtail {
             return it->second;
         }
 
-        void startup();
-
     private:
         WriteCacheServer();
         ~WriteCacheServer() override = default;
+
+        void _startup();
 
         /** indexes mutex */
         std::mutex _mutex;
@@ -43,19 +43,6 @@ namespace springtail {
         GrpcServerManager _grpc_server_manager;
 
         void _internal_shutdown() override;
-    };
-
-    class WriteCacheRunner : public ServiceRunner {
-    public:
-        WriteCacheRunner() :
-            ServiceRunner("WriteCacheServer") {}
-        bool start() override {
-            WriteCacheServer::get_instance()->startup();
-            return true;
-        }
-        void stop() override {
-            WriteCacheServer::shutdown();
-        }
     };
 
 } // namespace springtail

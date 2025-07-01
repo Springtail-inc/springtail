@@ -47,14 +47,8 @@ namespace {
             _base_dir = std::filesystem::temp_directory_path() / "test_table";
             std::filesystem::remove_all(_base_dir);
 
-            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-            runners.emplace();
-            runners->emplace_back(std::make_unique<IOMgrRunner>());
-
-            auto service_runners = test::get_services(true, true, false);
-            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
-
-            springtail_init_test(runners);
+            springtail_init_test();
+            test::start_services(true, true, false);
 
             auto client = sys_tbl_mgr::Client::get_instance();
 
@@ -992,7 +986,7 @@ namespace {
             ASSERT_GT(value, test_value_down);
         }
 
-        // make sure that that we have enough equal values 
+        // make sure that that we have enough equal values
         // for testing the bounds functions
         ASSERT_GT(equal_count, 1);
 

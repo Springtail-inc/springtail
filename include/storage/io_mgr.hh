@@ -6,7 +6,7 @@
 #include <queue>
 #include <lz4.h>
 
-#include <common/service_register.hh>
+#include <common/init.hh>
 #include <common/singleton.hh>
 #include <common/thread_pool.hh>
 #include <common/object_cache.hh>
@@ -23,7 +23,8 @@ namespace springtail {
     /**
      * @brief Singleton IOMgr; used to retrieve IOSysFHs
      */
-    class IOMgr : public Singleton<IOMgr> {
+    class IOMgr : public Singleton<IOMgr>,
+                  public AutoRegisterShutdown<IOMgr, ServiceId::IOMgrId> {
         friend class Singleton<IOMgr>;
     public:
         /** IO Mode for opening a file; APPEND appends to end of file; WRITE allows overwrite */
@@ -32,14 +33,6 @@ namespace springtail {
         static const int NUM_THREADS = 1;             ///< initial thread count
         static const int MAX_FILE_OBJECTS = 32;       ///< initial file object in file cache, use resize to change
         static const int MAX_FILE_HANDLES_PER_FILE=4; ///< number of read file handles per file object
-
-        /**
-         * @brief Initialize IOMgr object
-         * @param num_threads     Initial number of threads for thread pool (NUM_THREADS)
-         * @param max_filehandles Initial size of file handle cache (MAX_FILE_OBJECTS)
-         */
-         void init(int num_threads, int max_filehandles);
-
 
         /**
          * @brief Open a file, retrieve virtual FH from IOMgr singleton instance
@@ -95,8 +88,6 @@ namespace springtail {
          */
         void resize_cache(int size) { _file_cache->resize(size); };
 
-        //
-
         /**
          * @brief Put compressor object back in pool
          * @param compressor
@@ -128,12 +119,22 @@ namespace springtail {
          * @param num_threads     Initial number of threads for thread pool (NUM_THREADS)
          * @param max_filehandles Initial size of file handle cache (MAX_FILE_OBJECTS)
          */
-        IOMgr() = default;
+        IOMgr()
+        {
+            _init(IOMgr::NUM_THREADS, IOMgr::MAX_FILE_OBJECTS);
+        }
 
         /**
          * @brief Destroy the IOMgr object
          */
         ~IOMgr() override = default;
+
+        /**
+         * @brief Initialize IOMgr object
+         * @param num_threads     Initial number of threads for thread pool (NUM_THREADS)
+         * @param max_filehandles Initial size of file handle cache (MAX_FILE_OBJECTS)
+         */
+        void _init(int num_threads, int max_filehandles);
 
         /**
          * @brief Shuts down the IOMgr instance by deleting _instance.  It causes the thread pool and LRU cache
@@ -168,21 +169,4 @@ namespace springtail {
         static bool _evict_callback(std::shared_ptr<IOFile> filehandle);
     };
 
-    class IOMgrRunner : public ServiceRunner {
-    public:
-        IOMgrRunner() :
-            ServiceRunner("IOMgr") {}
-
-        bool start()
-        {
-            IOMgr::get_instance()->init(IOMgr::NUM_THREADS, IOMgr::MAX_FILE_OBJECTS);
-            return true;
-        }
-
-        void stop()
-        {
-            IOMgr::shutdown();
-        }
-
-    };
-}
+} // springtail

@@ -23,9 +23,9 @@ Server::Server()
 }
 
 void
-Server::startup()
+Server::start()
 {
-    _grpc_server_manager.startup();
+    get_instance()->_grpc_server_manager.startup();
 }
 
 void

@@ -35,10 +35,12 @@ XidMgrServer::XidMgrServer() {
     _grpc_server_manager.addService(_service.get());
 
     _archive_logs = Json::get_or<bool>(json, "archive_logs", false);
+
+    _startup();
 }
 
 void
-XidMgrServer::startup()
+XidMgrServer::_startup()
 {
     start_thread();
     _grpc_server_manager.startup();
@@ -49,6 +51,11 @@ XidMgrServer::_internal_shutdown()
 {
     _service->shutdown();
     _grpc_server_manager.shutdown();
+    if (_cleanup_on_shutdown) {
+        for (const auto &db_pair: _xact_log_data) {
+            cleanup(db_pair.first, std::numeric_limits<uint64_t>::max());
+        }
+    }
     std::unique_lock lock(_mutex);
     _xact_log_data.clear();
 }

@@ -10,10 +10,7 @@ int
 main(int argc,
      char *argv[])
 {
-    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-    runners.emplace();
-    runners->emplace_back(std::make_unique<IOMgrRunner>());
-    springtail_init(runners);
+    springtail_init();
 
     // construct a schema for testing
     std::vector<SchemaColumn> columns({

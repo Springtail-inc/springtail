@@ -202,6 +202,7 @@ namespace springtail {
          */
         static void _shutdown() {
             if (_instance != nullptr) {
+                _instance->stop_thread();
                 _instance->_thread.join();
                 _instance->_internal_shutdown();
                 delete _instance;

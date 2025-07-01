@@ -16,10 +16,11 @@ WriteCacheServer::WriteCacheServer()
 
     _grpc_server_manager.init(rpc_json);
     _grpc_server_manager.addService(WriteCacheService::get_instance());
+    _startup();
 }
 
 void
-WriteCacheServer::startup()
+WriteCacheServer::_startup()
 {
     _grpc_server_manager.startup();
 }

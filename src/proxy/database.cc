@@ -539,10 +539,11 @@ namespace springtail::pg_proxy
                 iter->second->set_state(state);
             }
         );
+        _init();
     }
 
     void
-    DatabaseMgr::init()
+    DatabaseMgr::_init()
     {
         nlohmann::json json = Properties::get(Properties::PROXY_CONFIG);
         size_t pool_size_limit = Json::get_or<size_t>(json, "pool_size_limit", 0);

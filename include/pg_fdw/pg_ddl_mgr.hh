@@ -1,14 +1,11 @@
 #pragma once
 
 #include <vector>
-#include <set>
 #include <optional>
 
 #include <nlohmann/json.hpp>
 
-#include <common/properties.hh>
-#include <common/object_cache.hh>
-#include <common/singleton.hh>
+#include <common/init.hh>
 #include <common/multi_queue_thread_manager.hh>
 
 #include <redis/redis_ddl.hh>
@@ -17,7 +14,6 @@
 #include <sys_tbl_mgr/table_mgr.hh>
 
 #include <pg_repl/libpq_connection.hh>
-#include "common/logging.hh"
 
 namespace springtail::pg_fdw {
 
@@ -25,7 +21,9 @@ namespace springtail::pg_fdw {
      * @brief DDL Mgr, applies changes from Redis queue
      * to the FDW tables
      */
-    class PgDDLMgr final : public Singleton<PgDDLMgr> {
+    class PgDDLMgr final : public Singleton<PgDDLMgr>,
+                           public AutoRegisterShutdown<PgDDLMgr, ServiceId::PgDDLMgrId>
+    {
             friend class Singleton<PgDDLMgr>;
     public:
         /** Max number of connections to cache */
@@ -69,7 +67,11 @@ namespace springtail::pg_fdw {
                                               const nlohmann::json &from,
                                               const nlohmann::json &to,
                                               const LibPqConnectionPtr conn);
-    private:
+
+        static void start(const std::string &_username,
+                          const std::string &_password,
+                          std::optional<std::string> _hostname);
+
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections
         RedisCache::RedisChangeWatcherPtr _cache_watcher;           ///< redis cache callback object
         std::shared_ptr<common::MultiQueueThreadManager> _thread_manager;   ///< thread manager that processes DDL requests
@@ -89,6 +91,8 @@ namespace springtail::pg_fdw {
 
         std::map<uint32_t, std::string> _type_map;  ///< map of PG type OIDs to type names
         std::atomic<bool> _is_shutting_down{false}; ///< shutting down flag
+
+        std::thread _pg_ddl_mgr_thread;
 
         /** Private constructor */
         PgDDLMgr();
@@ -232,39 +236,4 @@ namespace springtail::pg_fdw {
 
     };
 
-    class PgDDLMgrRunner : public ServiceRunner {
-    public:
-        PgDDLMgrRunner(const std::string &username,
-                       const std::string &password,
-                       const std::optional<std::string> &hostname) :
-            ServiceRunner("PgDDLMgr"),
-            _username(username),
-            _password(password),
-            _hostname(hostname) {}
-
-        bool start() override
-        {
-            // start the ddl main thread
-            std::string fdw_id = Properties::get_fdw_id();
-
-            LOG_DEBUG(LOG_FDW, "Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}",
-                        fdw_id, _username, _password, _hostname.value_or(""));
-            PgDDLMgr::get_instance()->init(fdw_id, _username, _password, _hostname);
-            _pg_ddl_mgr_thread = std::thread(&PgDDLMgr::run, PgDDLMgr::get_instance());
-            return true;
-        }
-
-        void stop() override
-        {
-            PgDDLMgr::get_instance()->notify_shutdown();
-            _pg_ddl_mgr_thread.join();
-            PgDDLMgr::shutdown();
-        }
-
-    private:
-        std::thread _pg_ddl_mgr_thread;
-        std::string _username;                     ///< username
-        std::string _password;                     ///< password
-        std::optional<std::string> _hostname;      ///< hostname
-    };
-}
+} // springtail::pg_fdw

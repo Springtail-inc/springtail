@@ -3,8 +3,7 @@
 #include <boost/thread.hpp>
 
 #include <common/constants.hh>
-#include <common/singleton.hh>
-#include <common/service_register.hh>
+#include <common/init.hh>
 
 #include <storage/schema.hh>
 #include <storage/xid.hh>
@@ -16,7 +15,8 @@ namespace springtail {
     /** Interface for accessing all of the schemas for a specific table.  This includes retrieving
      *  the data schema, primary and secondary index schemas, and data in the write cache -- all at
      *  a specific XID. */
-    class SchemaMgr : public Singleton<SchemaMgr>
+    class SchemaMgr : public Singleton<SchemaMgr>,
+                      public AutoRegisterShutdown<SchemaMgr, ServiceId::SchemaMgrId>
     {
         friend class Singleton<SchemaMgr>;
     public:
@@ -105,22 +105,4 @@ namespace springtail {
         std::map<uint32_t, SchemaColumn> _convert_columns(const std::vector<SchemaColumn> &columns);
     };
 
-    class SchemaMgrRunner : public ServiceRunner {
-    public:
-        SchemaMgrRunner() : ServiceRunner("SchemaMgr") {}
-
-        ~SchemaMgrRunner() override = default;
-
-        bool start() override
-        {
-            SchemaMgr::get_instance();
-            return true;
-        }
-
-        void stop() override
-        {
-            SchemaMgr::shutdown();
-        }
-    };
-
-}
+} // springtail

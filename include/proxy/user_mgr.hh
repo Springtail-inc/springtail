@@ -9,8 +9,7 @@
 #include <condition_variable>
 
 #include <common/logging.hh>
-#include <common/service_register.hh>
-#include <common/singleton.hh>
+#include <common/init.hh>
 
 #include <pg_repl/libpq_connection.hh>
 
@@ -187,18 +186,14 @@ namespace springtail::pg_proxy {
     /**
      * @brief Cache of user credentials. Queries Redis for creds.
      */
-    class UserMgr final : public SingletonWithThread<UserMgr> {
+    class UserMgr final : public SingletonWithThread<UserMgr>,
+                          public  AutoRegisterShutdown<UserMgr, ServiceId::UserMgrId>
+    {
     public:
         /**
          * @brief Sleep interval for user manager thread
          */
         static constexpr uint32_t USER_MGR_SLEEP_INTERVAL_SECS = 15;
-
-        /**
-         * @brief Initialize UserMgr object
-         * @param sleep_interval - UserMgr thread sleep interval in seconds
-         */
-        void init(const uint32_t sleep_interval);
 
         void stop_thread() override {
             SingletonWithThread<UserMgr>::stop_thread();
@@ -233,11 +228,21 @@ namespace springtail::pg_proxy {
         /**
          * @brief Private constructor
          */
-        UserMgr() = default;
+        UserMgr()
+        {
+            _init();
+        }
+
         /**
          * @brief Private destructor
          */
         ~UserMgr() override = default;
+
+        /**
+         * @brief Initialize UserMgr object
+         * @param sleep_interval - UserMgr thread sleep interval in seconds
+         */
+        void _init();
 
         /**
          * @brief Comparison operator for ordering User objects by username inside the map container
@@ -306,28 +311,4 @@ namespace springtail::pg_proxy {
          */
         void _connect_primary_db(LibPqConnection &conn);
     };
-
-    class UserMgrRunner : public ServiceRunner {
-    public:
-        explicit UserMgrRunner(uint32_t sleep_interval) :
-            ServiceRunner("UserMgr"),
-            _sleep_interval(sleep_interval) {}
-
-        ~UserMgrRunner() override = default;
-
-        bool start() override
-        {
-            UserMgr::get_instance()->init(_sleep_interval);
-            return true;
-        }
-
-        void stop() override
-        {
-            UserMgr::get_instance()->stop_thread();
-            UserMgr::shutdown();
-        }
-    private:
-        uint32_t _sleep_interval;
-    };
-
 } // namespace springtail::pg_proxy

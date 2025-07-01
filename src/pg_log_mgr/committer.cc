@@ -1,9 +1,6 @@
-#include <opentelemetry/metrics/meter.h>
-#include <opentelemetry/metrics/provider.h>
-
 #include <common/constants.hh>
 #include <common/coordinator.hh>
-#include <common/open_telemetry.hh>
+#include <common/logging.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <proto/pg_copy_table.pb.h>
 #include <redis/db_state_change.hh>
@@ -30,7 +27,7 @@ namespace springtail::committer {
     {
         // perform cleanup for any Committer threads in a previous run
         cleanup();
-        
+
         // use the same worker count for Indexer
         _indexer = std::make_unique<Indexer>(_indexer_worker_count, _index_reconciliation_queue_mgr);
 

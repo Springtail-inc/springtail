@@ -213,12 +213,8 @@ main(int argc,
         return 1;
     }
 
-    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-    runners.emplace();
-    runners->emplace_back(std::make_unique<IOMgrRunner>());
-
     // no logging
-    springtail_init(runners, false, std::nullopt, LOG_NONE);
+    springtail_init(false, std::nullopt, LOG_NONE);
 
     // open the file
     auto handle = IOMgr::get_instance()->open(argv[1], IOMgr::READ, true);

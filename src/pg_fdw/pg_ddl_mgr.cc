@@ -69,9 +69,26 @@ namespace springtail::pg_fdw {
     }
 
     void
-    PgDDLMgr::_internal_shutdown() {
+    PgDDLMgr::_internal_shutdown()
+    {
+        notify_shutdown();
+        _pg_ddl_mgr_thread.join();
         std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
         redis_cache->remove_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
+    }
+
+    void
+    PgDDLMgr::start(const std::string &_username,
+                    const std::string &_password,
+                    std::optional<std::string> _hostname)
+    {
+        // start the ddl main thread
+        std::string fdw_id = Properties::get_fdw_id();
+
+        LOG_DEBUG(LOG_FDW, "Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}",
+                    fdw_id, _username, _password, _hostname.value_or(""));
+        PgDDLMgr::get_instance()->init(fdw_id, _username, _password, _hostname);
+        PgDDLMgr::get_instance()->_pg_ddl_mgr_thread = std::thread(&PgDDLMgr::run, PgDDLMgr::get_instance());
     }
 
     void

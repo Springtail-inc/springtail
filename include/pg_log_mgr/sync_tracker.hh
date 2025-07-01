@@ -1,7 +1,6 @@
 #include <boost/thread.hpp>
 
-#include <common/service_register.hh>
-#include <common/singleton.hh>
+#include <common/init.hh>
 #include <pg_log_mgr/xid_ready.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <proto/pg_copy_table.pb.h>
@@ -11,7 +10,9 @@ namespace springtail::pg_log_mgr {
      * A structure to track the metadata around a table sync.  Used to determine if individual
      * mutations should be skipped due to an ongoing table sync.
      */
-    class SyncTracker final : public Singleton<SyncTracker> {
+    class SyncTracker final : public Singleton<SyncTracker>,
+                              public AutoRegisterShutdown<SyncTracker, ServiceId::SyncTrackerId>
+    {
     public:
         /**
          * Helper object to return the data about a table swap from check_commit()
@@ -270,24 +271,5 @@ namespace springtail::pg_log_mgr {
         /** PgLogReader waits for copy to start here. */
         DbMap<std::shared_ptr<Wait>> _wait_map;
     };
-
-    class SyncTrackerRunner : public ServiceRunner {
-    public:
-        SyncTrackerRunner() : ServiceRunner("SyncTracker") {}
-
-        ~SyncTrackerRunner() override = default;
-
-        bool start() override
-        {
-            SyncTracker::get_instance();
-            return true;
-        }
-
-        void stop() override
-        {
-            SyncTracker::shutdown();
-        }
-    };
-
-}
+} // springtail::pg_log_mgr
 

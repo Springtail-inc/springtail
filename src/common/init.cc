@@ -62,9 +62,56 @@ bool DaemonRunner::start()
     return true;
 }
 
+class ServiceRegister : public Singleton<ServiceRegister>,
+                        public AutoRegisterShutdown<ServiceRegister, ServiceId::ServiceRegisterId>
+{
+    friend class Singleton<ServiceRegister>;
+
+public:
+    bool start(std::vector<std::unique_ptr<ServiceRunner>> &service_list)
+    {
+        std::move(service_list.begin(), service_list.end(), std::back_inserter(_service_list));
+        auto reverse_iter = _service_list.rend();
+        for (auto iter = _service_list.begin(); iter != _service_list.end(); iter++) {
+            LOG_INFO("Starting service {}", (*iter)->get_name());
+            if (!(*iter)->start()) {
+                LOG_INFO("Service {} failed to start", (*iter)->get_name());
+                // set reverse iterator
+                reverse_iter = std::make_reverse_iterator(iter);
+                break;
+            }
+        }
+        // check reverse iterator
+        if (reverse_iter != _service_list.rend()) {
+            while (reverse_iter != _service_list.rend()) {
+                LOG_INFO("Stopping service {}", (*reverse_iter)->get_name());
+                (*reverse_iter)->stop();
+                ++reverse_iter;
+            }
+            return false;
+        }
+        return true;
+    }
+
+private:
+    ServiceRegister() = default;
+    virtual ~ServiceRegister() override = default;
+
+    std::vector<std::unique_ptr<ServiceRunner>> _service_list;
+
+    void _internal_shutdown() override
+    {
+        for (auto reverse_iter = _service_list.rbegin(); reverse_iter != _service_list.rend();
+                reverse_iter++) {
+            LOG_INFO("Stoping service {}", (*reverse_iter)->get_name());
+            (*reverse_iter)->stop();
+        }
+        _service_list.clear();
+    }
+};
+
 void
-springtail_init(const std::optional<std::vector<std::unique_ptr<ServiceRunner>>> &runners,
-                const bool load_redis,
+springtail_init(const bool load_redis,
                 const std::optional<std::string> &log_filename,
                 const std::optional<uint32_t> &logging_mask)
 {
@@ -76,22 +123,16 @@ springtail_init(const std::optional<std::vector<std::unique_ptr<ServiceRunner>>>
     service_runners.emplace_back(std::make_unique<OpenTelemetryRunner>(log_filename));
     service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesCacheRunner>());
-    service_runners.emplace_back(std::make_unique<CoordinatorRunner>());
-
-    if (runners.has_value()) {
-        std::vector<std::unique_ptr<ServiceRunner>> *non_const_runners = const_cast<std::vector<std::unique_ptr<ServiceRunner>> *>(&runners.value());
-        std::move(non_const_runners->begin(), non_const_runners->end(), std::back_inserter(service_runners));
-    }
 
     if (!ServiceRegister::get_instance()->start(service_runners)) {
         exit(1);
     }
 }
 
-void springtail_init_daemon(const std::optional<std::vector<std::unique_ptr<ServiceRunner>>> &runners,
-                            const std::optional<std::string> &log_filename,
-                            const std::optional<std::string> &daemon_pid,
-                            const std::optional<uint32_t> &logging_mask)
+void
+springtail_init_daemon(const std::optional<std::string> &log_filename,
+                       const std::optional<std::string> &daemon_pid,
+                       const std::optional<uint32_t> &logging_mask)
 {
     std::vector<std::unique_ptr<ServiceRunner>> service_runners;
     service_runners.emplace_back(std::make_unique<DefaultLoggingRunner>());
@@ -106,19 +147,13 @@ void springtail_init_daemon(const std::optional<std::vector<std::unique_ptr<Serv
     service_runners.emplace_back(std::make_unique<PropertiesCacheRunner>());
     service_runners.emplace_back(std::make_unique<CoordinatorRunner>());
 
-    if (runners.has_value()) {
-        std::vector<std::unique_ptr<ServiceRunner>> *non_const_runners = const_cast<std::vector<std::unique_ptr<ServiceRunner>> *>(&runners.value());
-        std::move(non_const_runners->begin(), non_const_runners->end(), std::back_inserter(service_runners));
-    }
-
     if (!ServiceRegister::get_instance()->start(service_runners)) {
         exit(1);
     }
 }
 
 void
-springtail_init_test(const std::optional<std::vector<std::unique_ptr<ServiceRunner>>> &runners,
-                     const std::optional<uint32_t> &logging_mask)
+springtail_init_test(const std::optional<uint32_t> &logging_mask)
 {
     std::vector<std::unique_ptr<ServiceRunner>> service_runners;
     service_runners.emplace_back(std::make_unique<DefaultLoggingRunner>());
@@ -128,11 +163,6 @@ springtail_init_test(const std::optional<std::vector<std::unique_ptr<ServiceRunn
     service_runners.emplace_back(std::make_unique<OpenTelemetryRunner>(std::nullopt));
     service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesCacheRunner>());
-
-    if (runners.has_value()) {
-        std::vector<std::unique_ptr<ServiceRunner>> *non_const_runners = const_cast<std::vector<std::unique_ptr<ServiceRunner>> *>(&runners.value());
-        std::move(non_const_runners->begin(), non_const_runners->end(), std::back_inserter(service_runners));
-    }
 
     if (!ServiceRegister::get_instance()->start(service_runners)) {
         exit(1);
@@ -144,12 +174,6 @@ void springtail_init_custom(std::vector<std::unique_ptr<ServiceRunner>> &runners
     if (!ServiceRegister::get_instance()->start(runners)) {
         exit(1);
     }
-}
-
-void
-springtail_shutdown()
-{
-    ServiceRegister::shutdown();
 }
 
 void
@@ -173,4 +197,116 @@ springtail_daemon_run()
     }
 }
 
-};  // namespace springtail::init
+std::map<ServiceId, std::vector<ServiceId>> dependencies = {
+    {ServiceId::ServiceRegisterId,     {}},
+    {ServiceId::DatabaseMgrId,         {ServiceId::ServiceRegisterId}},
+    {ServiceId::UserMgrId,             {ServiceId::DatabaseMgrId}},
+    {ServiceId::ProxyServerId,         {ServiceId::ServiceRegisterId, ServiceId::UserMgrId}},
+    {ServiceId::XidMgrServerId,        {ServiceId::ServiceRegisterId}},
+    {ServiceId::XidMgrClientId,        {ServiceId::ServiceRegisterId, ServiceId::XidMgrServerId}},
+    {ServiceId::SysTblMgrServerId,     {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::TableMgrId}},
+    {ServiceId::SysTblMgrClientId,     {ServiceId::ServiceRegisterId}},
+    {ServiceId::WriteCacheServerId,    {ServiceId::ServiceRegisterId, ServiceId::SysTblMgrServerId}},
+    {ServiceId::WriteCacheClientId,    {ServiceId::ServiceRegisterId, ServiceId::WriteCacheServerId}},
+    {ServiceId::IOMgrId,               {ServiceId::ServiceRegisterId}},
+    {ServiceId::SchemaMgrId,           {ServiceId::SysTblMgrClientId}},
+    {ServiceId::TableMgrId,            {ServiceId::IOMgrId, ServiceId::SchemaMgrId}},
+    {ServiceId::SyncTrackerId,         {ServiceId::ServiceRegisterId}},
+    {ServiceId::PgFdwMgrId,            {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::TableMgrId}},
+    {ServiceId::PgXidSubscriberMgrId,  {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::SysTblMgrClientId}},
+    {ServiceId::PgDDLMgrId,            {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::TableMgrId}},
+    {ServiceId::PgLogCoordinatorId,    {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::WriteCacheServerId, ServiceId::TableMgrId}}
+};
+
+std::map<ServiceId, std::string> dependencies_names = {
+    {ServiceId::ServiceRegisterId,     "ServiceRegister"},
+    {ServiceId::DatabaseMgrId,         "DatabaseMgr"},
+    {ServiceId::UserMgrId,             "UserMgr"},
+    {ServiceId::ProxyServerId,         "ProxyServer"},
+    {ServiceId::XidMgrServerId,        "XigMgrServer"},
+    {ServiceId::XidMgrClientId,        "XidMgrClient"},
+    {ServiceId::SysTblMgrServerId,     "SysTblMgrServer"},
+    {ServiceId::SysTblMgrClientId,     "SyTblMgrClient"},
+    {ServiceId::WriteCacheServerId,    "WriteCacheServer"},
+    {ServiceId::WriteCacheClientId,    "WriteCacheClient"},
+    {ServiceId::IOMgrId,               "IOMgr"},
+    {ServiceId::SchemaMgrId,           "SchemaMgr"},
+    {ServiceId::TableMgrId,            "TableMgr"},
+    {ServiceId::SyncTrackerId,         "SyncTracker"},
+    {ServiceId::PgFdwMgrId,            "PGFdwMgr"},
+    {ServiceId::PgXidSubscriberMgrId,  "PgXidSubscriberMgr"},
+    {ServiceId::PgDDLMgrId,            "PgDDLMgr"},
+    {ServiceId::PgLogCoordinatorId,    "PgLogCoordinator"}
+};
+
+// TODO: need proper error messages and exceptions, use CHECK()
+std::vector<ServiceId>
+topo_sort()
+{
+    const auto to_index = [](ServiceId id) {
+        return static_cast<uint32_t>(id);
+    };
+    std::vector<bool> visited(to_index(ServiceId::ServiceCountId), false);
+    std::vector<bool> on_stack(to_index(ServiceId::ServiceCountId), false);
+    std::vector<ServiceId> result(to_index(ServiceId::ServiceCountId), ServiceId::ServiceInvalidId);
+    std::size_t pos = to_index(ServiceId::ServiceCountId);
+
+    auto depth_first_sort = [&](auto&& self, ServiceId id) -> void {
+        auto idx = to_index(id);
+        if (visited[idx]) {
+            return;
+        }
+        CHECK(!on_stack[idx]) << "Cycle detected";
+
+        on_stack[idx] = true;
+        CHECK(dependencies.contains(id)) << "Missing service type " << idx;
+
+        for (auto dep : dependencies[id]) {
+            self(self, dep);
+        }
+        on_stack[idx] = false;
+
+        visited[idx] = true;
+        result[--pos] = id;
+    };
+
+    for (std::size_t i = 0; i < to_index(ServiceId::ServiceCountId); ++i) {
+        depth_first_sort(depth_first_sort, static_cast<ServiceId>(i));
+    }
+
+    // validate
+    for (std::size_t i = 0; i < to_index(ServiceId::ServiceCountId); ++i) {
+        CHECK(result[i] != ServiceId::ServiceInvalidId)
+            << "Unvisited service " << dependencies_names[static_cast<ServiceId>(i)];
+    }
+
+    return result;
+}
+
+static std::vector<ServiceId> topo_sorted_services = {};
+
+static std::map<ServiceId, ShutdownFunc> running_services = {};
+
+void
+springtail_register_service(ServiceId service_id, ShutdownFunc fn)
+{
+    if (topo_sorted_services.empty()) {
+        topo_sorted_services = topo_sort();
+    }
+    CHECK(!running_services.contains(service_id));
+    running_services[service_id] = fn;
+}
+
+void
+springtail_shutdown()
+{
+    for (auto service_id : topo_sorted_services) {
+        auto it = running_services.find(service_id);
+        if (it == running_services.end()) {
+            continue;
+        }
+        it->second();
+    }
+}
+
+};  // namespace springtail

@@ -2,8 +2,6 @@
 
 #include <cpptrace/cpptrace.hpp>
 
-#include <common/service_register.hh>
-
 namespace springtail {
     /**
      * Base error class for exceptions.  Uses cpptrace for stack tracing.
@@ -37,18 +35,4 @@ namespace springtail {
         }
     };
 
-    /**
-     * Intialize the exception and backtrace handling.
-     */
-    class ExceptionRunner : public ServiceRunner {
-    public:
-        ExceptionRunner();
-
-        bool start() override;
-
-        void stop() override;
-    private:
-        std::vector<int> _signals;
-    };
-
-}
+} // namespace springtail

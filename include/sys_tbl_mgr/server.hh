@@ -1,40 +1,25 @@
 #pragma once
 
 #include <grpc/grpc_server_manager.hh>
-#include <common/service_register.hh>
+#include <common/init.hh>
 #include <common/singleton.hh>
 
 namespace springtail::sys_tbl_mgr {
 
-class Server final : public Singleton<Server> {
+class Server final : public Singleton<Server>,
+                     public AutoRegisterShutdown<Server, ServiceId::SysTblMgrServerId>
+{
     friend class Singleton<Server>;
-
 public:
-    void startup();
-
-    ~Server() override = default;
+    static void start();
 
 private:
     Server();
+    ~Server() override = default;
 
     GrpcServerManager _grpc_server_manager;
 
     void _internal_shutdown() override;
-};
-
-class SysTblMgrRunner : public ServiceRunner {
-public:
-    SysTblMgrRunner() :
-        ServiceRunner("SysTblMgr") {}
-
-    bool start() override {
-        Server::get_instance()->startup();
-        return true;
-    }
-
-    void stop() override {
-        Server::shutdown();
-    }
 };
 
 }  // namespace springtail::sys_tbl_mgr
