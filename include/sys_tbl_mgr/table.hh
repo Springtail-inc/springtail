@@ -276,19 +276,17 @@ namespace indexer_helpers {
         reference operator*() { 
 
             struct visitor {
-                reference operator()(const Primary& t) {
+                reference operator()(const Primary& t) const {
                     return t.row();
                 }
-                reference operator()(const SecondaryIndexOnly& t) {
+                reference operator()(const SecondaryIndexOnly& t) const {
                     return t.row();
                 }
-                reference operator()(const Secondary& t) {
+                reference operator()(const Secondary& t) const {
                     return t.row();
                 }
-                reference operator()(const std::monostate&) {
+                reference operator() [[noreturn]] (const std::monostate&) const {
                     DCHECK(false);
-                    // the throw is to make compiler happy
-                    throw std::runtime_error("Bad variant state");
                 }
             };
 
@@ -302,19 +300,17 @@ namespace indexer_helpers {
          */
         Iterator& operator++() {
             struct visitor {
-                void operator()(Primary& t) {
+                void operator()(Primary& t) const {
                     t.next();
                 }
-                void operator()(SecondaryIndexOnly& t) {
+                void operator()(SecondaryIndexOnly& t) const {
                     t.next();
                 }
-                void operator()(Secondary& t) {
+                void operator()(Secondary& t) const {
                     t.next();
                 }
-                void operator()(const std::monostate&) {
+                void operator()(const std::monostate&) const {
                     DCHECK(false);
-                    // the throw is to make compiler happy
-                    throw std::runtime_error("Bad variant state");
                 }
             };
             std::visit(visitor{}, _tracker);
@@ -326,19 +322,17 @@ namespace indexer_helpers {
          */
         Iterator& operator--() {
             struct visitor {
-                void operator()(Primary& t) {
+                void operator()(Primary& t) const {
                     t.prev();
                 }
-                void operator()(SecondaryIndexOnly& t) {
+                void operator()(SecondaryIndexOnly& t) const {
                     t.prev();
                 }
-                void operator()(Secondary& t) {
+                void operator()(Secondary& t) const {
                     t.prev();
                 }
-                void operator()(const std::monostate&) {
+                void operator()(const std::monostate&) const {
                     DCHECK(false);
-                    // the throw is to make compiler happy
-                    throw std::runtime_error("Bad variant state");
                 }
             };
             std::visit(visitor{}, _tracker);
@@ -352,19 +346,17 @@ namespace indexer_helpers {
             struct visitor {
                 const Iterator& _b;
                 explicit visitor(const Iterator&b) : _b{b} {}
-                bool operator()(const Primary& t) {
+                bool operator()(const Primary& t) const {
                     return t == std::get<Primary>(_b._tracker);
                 }
-                bool operator()(const SecondaryIndexOnly& t) {
+                bool operator()(const SecondaryIndexOnly& t) const {
                     return t == std::get<SecondaryIndexOnly>(_b._tracker);
                 }
-                bool operator()(const Secondary& t) {
+                bool operator()(const Secondary& t) const {
                     return t == std::get<Secondary>(_b._tracker);
                 }
-                bool operator()(const std::monostate&) {
+                bool operator() [[noreturn]] (const std::monostate&) const {
                     DCHECK(false);
-                    // the throw is to make compiler happy
-                    throw std::runtime_error("Bad variant state");
                 }
             };
             return std::visit<bool>(visitor{b}, a._tracker);
@@ -380,20 +372,17 @@ namespace indexer_helpers {
         */
         uint64_t extent_id() const {
             struct visitor {
-                uint64_t operator()(const Primary& t) {
+                uint64_t operator()(const Primary& t) const {
                     return t._page_i.extent_id();
                 }
-                uint64_t operator()(const SecondaryIndexOnly& t) {
+                uint64_t operator() [[noreturn]] (const SecondaryIndexOnly&) const {
                     DCHECK(false);
-                    throw std::runtime_error("Unsupported for secondary indexes");
                 }
-                uint64_t operator()(const Secondary& t) {
+                uint64_t operator() [[noreturn]] (const Secondary&) const {
                     DCHECK(false);
-                    throw std::runtime_error("Unsupported for secondary indexes");
                 }
-                uint64_t operator()(const std::monostate&) {
+                uint64_t operator() [[noreturn]] (const std::monostate&) const {
                     DCHECK(false);
-                    throw std::runtime_error("Bad variant state");
                 }
             };
             return std::visit<uint64_t>(visitor{}, _tracker);
