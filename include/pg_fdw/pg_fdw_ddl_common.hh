@@ -342,11 +342,6 @@ namespace springtail::pg_fdw {
             auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::Schemas::ID,
                                                         schema_xid);
 
-            auto idx_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::Indexes::ID,
-                                                                schema_xid);
-
-            auto idx_fields = idx_table->extent_schema()->get_fields();
-
             // iterate through it
             auto fields = table->extent_schema()->get_fields();
             for (auto row : (*table)) {
