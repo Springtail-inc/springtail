@@ -48,7 +48,6 @@ namespace springtail::pg_fdw {
         std::string_view set_partition_bound(const std::string_view partition_bound) { return _partition_bound = partition_bound; }
 
     private:
-        uint64_t _xid;
         uint64_t _parent_table_id;
         std::string _parent_namespace_name;
         std::string _parent_table_name;
