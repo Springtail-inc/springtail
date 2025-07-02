@@ -252,8 +252,8 @@ namespace springtail::pg_fdw {
         int rows = conn->ntuples();
         for (int i = 0; i < rows; i++) {
             uint64_t oid = conn->get_int32(i, 0);
-            std::string name = conn->get_string(i, 1);
-            std::string category = conn->get_string(i, 2);
+            std::string name = conn->escape_identifier(conn->get_string(i, 1));
+            std::string category = conn->escape_identifier(conn->get_string(i, 2));
             _type_cache[oid] = std::make_tuple(name, category);
         }
 
@@ -832,6 +832,8 @@ namespace springtail::pg_fdw {
             return std::get<0>(it->second);
         }
 
+        // Unknown type, should never get here
+        DCHECK(false);
         return "UNKNOWN";
     }
 
@@ -899,7 +901,7 @@ namespace springtail::pg_fdw {
             // Create the parent partition tables
             std::vector<std::string> ddl = PgFdwCommon::get_schema_ddl(db_id, xid, SPRINGTAIL_FDW_SERVER_NAME, schema.second,
                                              false, false, {},
-                                             [this, escaped_schema, &user_types](uint32_t pg_type,[[maybe_unused]] uint64_t namespace_id) {
+                                             [this, escaped_schema, &user_types](uint32_t pg_type, [[maybe_unused]] uint64_t namespace_id) {
                                                  return _get_type_name(pg_type, escaped_schema, user_types);
                                              },
                                              [conn](const std::string &name) {

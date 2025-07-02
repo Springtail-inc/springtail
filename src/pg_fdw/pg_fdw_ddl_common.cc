@@ -42,14 +42,14 @@ namespace springtail::pg_fdw {
         if (row_i == table_names_t->end() ||
             fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row) != table_id) {
             LOG_WARN("No table info at xid {}:{}", schema_xid, constant::MAX_LSN);
-            return std::make_pair("", 0);
+            return std::pair<std::string_view, uint64_t>();
         }
 
         // make sure that the table is marked as existing at this XID/LSN
         bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
         if (!exists) {
             LOG_WARN("Table marked non-existant at xid {}:{}", schema_xid, constant::MAX_LSN);
-            return std::make_pair("", 0);
+            return std::pair<std::string_view, uint64_t>();
         }
 
         return std::make_pair(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row),
@@ -134,19 +134,25 @@ namespace springtail::pg_fdw {
 
             auto [tp_it, tp_inserted] = table_partition_map.try_emplace(
                 tid,
-                parent_table_id, partition_key, partition_bound
+                xid, parent_table_id, partition_key, partition_bound
             );
+
+            if (!tp_inserted) {
+                // update if xid is newer
+                if (xid > tp_it->second.xid()) {
+                    // Update the table partition details as well
+                    tp_it->second.set_xid(xid);
+                    tp_it->second.set_parent_table_id(parent_table_id);
+                    tp_it->second.set_partition_key(partition_key);
+                    tp_it->second.set_partition_bound(partition_bound);
+                }
+            }
 
             if (!inserted) {
                 LOG_DEBUG(LOG_FDW, "Table {} already exists in schema {}", table_name, namespace_name);
                 // update if xid is newer
                 if (xid > it->second.xid) {
                     it->second = {tid, xid, table_ns_id};
-
-                    // Update the table partition details as well
-                    tp_it->second.set_parent_table_id(parent_table_id);
-                    tp_it->second.set_partition_key(partition_key);
-                    tp_it->second.set_partition_bound(partition_bound);
                 }
             }
         }
