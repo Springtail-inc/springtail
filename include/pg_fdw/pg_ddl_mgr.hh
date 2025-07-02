@@ -101,11 +101,13 @@ namespace springtail::pg_fdw {
          * @brief Helper to get type name from pg_type OID
          *
          * @param pg_type pg_type OID
+         * @param namespace_id namespace id
          * @param namespace_name namespace name
          * @param user_types map of user types
          * @return type name
          */
         std::string _get_type_name(int32_t pg_type,
+                                   uint64_t namespace_id,
                                    const std::string &namespace_name,
                                    const std::map<uint64_t, std::map<uint64_t,
                                    std::pair<std::string, std::string>>> &user_types);

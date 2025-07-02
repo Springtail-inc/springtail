@@ -811,13 +811,13 @@ namespace springtail::pg_fdw {
 
     std::string
     PgDDLMgr::_get_type_name(int32_t pg_type,
+                             uint64_t namespace_id,
                              const std::string &namespace_name,
                              const std::map<uint64_t, std::map<uint64_t,
                              std::pair<std::string, std::string>>> &user_types)
     {
         if (pg_type >= constant::FIRST_USER_DEFINED_PG_OID) {
-            // this is a user defined type, fully qualify it
-            auto it = user_types.find(pg_type);
+            auto it = user_types.find(namespace_id);
             if (it != user_types.end()) {
                 auto it2 = it->second.find(pg_type);
                 if (it2 != it->second.end()) {
@@ -901,8 +901,8 @@ namespace springtail::pg_fdw {
             // Create the parent partition tables
             std::vector<std::string> ddl = PgFdwCommon::get_schema_ddl(db_id, xid, SPRINGTAIL_FDW_SERVER_NAME, schema.second,
                                              false, false, {},
-                                             [this, escaped_schema, &user_types](uint32_t pg_type, [[maybe_unused]] uint64_t namespace_id) {
-                                                 return _get_type_name(pg_type, escaped_schema, user_types);
+                                             [this, escaped_schema, &user_types](uint32_t pg_type, uint64_t namespace_id) {
+                                                 return _get_type_name(pg_type, namespace_id, escaped_schema, user_types);
                                              },
                                              [conn](const std::string &name) {
                                                  return conn->escape_identifier(name.c_str());

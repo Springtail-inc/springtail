@@ -397,7 +397,6 @@ namespace springtail::pg_fdw {
                 int32_t pg_type(fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(&row));
                 bool nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(&row);
 
-                LOG_INFO("[DEBUG] Adding column {}, type {}, nullable {}", column_name, type_name_resolver(pg_type, namespace_id), nullable);
                 columns.push_back({column_name, type_name_resolver(pg_type, namespace_id), nullable});
             }
 
