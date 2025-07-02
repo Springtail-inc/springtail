@@ -17,19 +17,6 @@ namespace springtail::pg_fdw {
     /** Partition info */
     class PartitionInfo {
     public:
-        PartitionInfo(uint64_t xid,
-                      uint64_t parent_table_id,
-                      std::string parent_namespace_name,
-                      std::string parent_table_name,
-                      std::string partition_key,
-                      std::string partition_bound)
-            : _xid(xid),
-              _parent_table_id(parent_table_id),
-              _parent_namespace_name(std::move(parent_namespace_name)),
-              _parent_table_name(std::move(parent_table_name)),
-              _partition_key(std::move(partition_key)),
-              _partition_bound(std::move(partition_bound)) {}
-
         PartitionInfo(uint64_t parent_table_id,
                       std::string parent_namespace_name,
                       std::string parent_table_name,
@@ -41,23 +28,19 @@ namespace springtail::pg_fdw {
               _partition_key(std::move(partition_key)),
               _partition_bound(std::move(partition_bound)) {}
 
-        PartitionInfo(uint64_t xid,
-                      uint64_t parent_table_id,
+        PartitionInfo(uint64_t parent_table_id,
                       std::string partition_key,
                       std::string partition_bound)
-            : _xid(xid),
-              _parent_table_id(parent_table_id),
+            : _parent_table_id(parent_table_id),
               _partition_key(std::move(partition_key)),
               _partition_bound(std::move(partition_bound)) {}
 
-        uint64_t xid() const { return _xid; }
         uint64_t parent_table_id() const { return _parent_table_id; }
         std::string_view parent_namespace_name() const { return _parent_namespace_name; }
         std::string_view parent_table_name() const { return _parent_table_name; }
         std::string_view partition_key() const { return _partition_key; }
         std::string_view partition_bound() const { return _partition_bound; }
 
-        uint64_t set_xid(uint64_t xid) { return _xid = xid; }
         uint64_t set_parent_table_id(uint64_t parent_table_id) { return _parent_table_id = parent_table_id; }
         std::string_view set_parent_namespace_name(const std::string_view parent_namespace_name) { return _parent_namespace_name = parent_namespace_name; }
         std::string_view set_parent_table_name(const std::string_view parent_table_name) { return _parent_table_name = parent_table_name; }
