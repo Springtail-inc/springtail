@@ -25,3 +25,5 @@
 {"cmd":"insert", "table": "table1", "row": ["2", "two", null]}
 {"cmd":"stream stop"}
 {"cmd":"stream commit"}
+{"cmd":"attach partition","parent_table_id":null,"partition_bound":null,"partition_data":[{"namespace_id":2200,"namespace_name":"public","parent_table_id":2806754,"partition_bound":"FOR VALUES IN ('Sibling')","partition_key":null,"table_id":2806757,"table_name":"family_attach_partition_siblings"}],"partition_key":"LIST (role)","schema":"public","table":"family_attach_partition","table_id":2806754,"xid":6687092}
+{"cmd":"detach partition","parent_table_id":null,"partition_bound":null,"partition_data":[{"namespace_id":2200,"namespace_name":"public","parent_table_id":2806769,"partition_bound":"FOR VALUES IN ('Grandparent')","partition_key":null,"table_id":2806785,"table_name":"family_grandparents"},{"namespace_id":2200,"namespace_name":"public","parent_table_id":2806769,"partition_bound":"FOR VALUES IN ('Sibling')","partition_key":null,"table_id":2806794,"table_name":"family_siblings"}],"partition_key":"LIST (relationship)","schema":"public","table":"family","table_id":2806769,"xid":6687108}

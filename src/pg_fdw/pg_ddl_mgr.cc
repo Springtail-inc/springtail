@@ -41,6 +41,11 @@ namespace springtail::pg_fdw {
     static constexpr char VERIFY_DB_EXISTS[] =
         "SELECT 1 FROM  pg_database WHERE datname = '{}'";
 
+    static constexpr char SYSTEM_TYPES[] =
+        "SELECT oid, typname, typcategory "
+        "FROM pg_type "
+        "WHERE typisdefined = true";
+
     PgDDLMgr::PgDDLMgr() : _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE)
     {
         _cache_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
@@ -240,6 +245,16 @@ namespace springtail::pg_fdw {
             conn->clear();
             conn->exec(fmt::format(CREATE_FDW_USER, username, password));
             conn->clear();
+        }
+
+        // Populate system defined types
+        conn->exec(SYSTEM_TYPES);
+        int rows = conn->ntuples();
+        for (int i = 0; i < rows; i++) {
+            uint64_t oid = conn->get_int32(i, 0);
+            std::string name = conn->escape_identifier(conn->get_string(i, 1));
+            std::string category = conn->escape_identifier(conn->get_string(i, 2));
+            _type_cache[oid] = std::make_tuple(name, category);
         }
 
         // go through each db and drop/create the database on the fdw
@@ -501,6 +516,43 @@ namespace springtail::pg_fdw {
         conn->end_transaction();
     }
 
+    PartitionInfo
+    _get_partition_info(const nlohmann::json &ddl){
+        uint64_t parent_table_id = 0;
+        std::string parent_namespace_name;
+        std::string parent_table_name;
+        std::string partition_key;
+        std::string partition_bound;
+
+        if (ddl.contains("parent_table_id") && !ddl.at("parent_table_id").is_null()) {
+            parent_table_id = ddl.at("parent_table_id").get<uint64_t>();
+        }
+
+        if (ddl.contains("parent_namespace_name") && !ddl.at("parent_namespace_name").is_null()) {
+            parent_namespace_name = ddl.at("parent_namespace_name").get<std::string>();
+        }
+
+        if (ddl.contains("parent_table_name") && !ddl.at("parent_table_name").is_null()) {
+            parent_table_name = ddl.at("parent_table_name").get<std::string>();
+        }
+
+        if (ddl.contains("partition_key") && !ddl.at("partition_key").is_null()) {
+            partition_key = ddl.at("partition_key").get<std::string>();
+        }
+
+        if (ddl.contains("partition_bound") && !ddl.at("partition_bound").is_null()) {
+            partition_bound = ddl.at("partition_bound").get<std::string>();
+        }
+
+        PartitionInfo partition_info(parent_table_id,
+                                     parent_namespace_name,
+                                     parent_table_name,
+                                     partition_key,
+                                     partition_bound);
+
+        return partition_info;
+    }
+
     std::string
     PgDDLMgr::_gen_sql_from_json(LibPqConnectionPtr conn,
                                  const std::string &server_name,
@@ -511,22 +563,45 @@ namespace springtail::pg_fdw {
 
         LOG_DEBUG(LOG_FDW, "DDL JSON: {}", ddl.dump(4));
 
+        PartitionInfo partition_info = _get_partition_info(ddl);
+
+        bool is_regular_table = partition_info.parent_table_id() == 0 && partition_info.partition_key().empty();
+        bool is_leaf_partitioned_table = partition_info.parent_table_id() > 0 && !partition_info.partition_bound().empty() && partition_info.partition_key().empty();
+
+        bool is_regular_table_type = is_regular_table || is_leaf_partitioned_table;
+
         auto const &action = ddl.at("action");
         if (action == "create") { // create table
             // generate the CREATE TABLE statement
-            return _gen_fdw_table_sql(conn, server_name, ddl.at("schema"), ddl.at("table"),
-                                      ddl.at("tid"), ddl.at("columns"));
+            std::vector<PgFdwCommon::ColumnInfo> columns;
+
+            for (const auto &col : ddl.at("columns")) {
+                auto fully_qualified_type_name = fmt::format("{}.{}",
+                                        conn->escape_identifier(col.at("type_namespace").get<std::string>()),
+                                        conn->escape_identifier(col.at("type_name").get<std::string>()));
+                columns.emplace_back(col.at("name"),
+                                     fully_qualified_type_name,
+                                     col.at("nullable"));
+            }
+
+            return PgFdwCommon::_gen_fdw_table_sql(server_name, ddl.at("schema"), ddl.at("table"), ddl.at("tid"), columns,
+                                                   partition_info, is_regular_table_type,
+                                                   [conn](const std::string &name) {
+                                                        return conn->escape_identifier(name.c_str());
+                                                   });
         }
 
         else if (action == "rename") { // rename table
-            std::string rename = fmt::format("ALTER FOREIGN TABLE {}.{} RENAME TO {};",
+            std::string rename = fmt::format("ALTER {} TABLE {}.{} RENAME TO {};",
+                                             is_regular_table_type ? "FOREIGN" : "",
                                              conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
                                              conn->escape_identifier(ddl.at("old_table").get<std::string>()),
                                              conn->escape_identifier(ddl.at("table").get<std::string>()));
 
             // XXX it's not clear to me that we need to support a schema change here?
             if (ddl.at("schema").get<std::string>() != ddl.at("old_schema").get<std::string>()) {
-                return rename + fmt::format("ALTER FOREIGN TABLE {}.{} SET SCHEMA {};",
+                return rename + fmt::format("ALTER {} TABLE {}.{} SET SCHEMA {};",
+                                            is_regular_table_type ? "FOREIGN" : "",
                                             conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
                                             conn->escape_identifier(ddl.at("table").get<std::string>()),
                                             conn->escape_identifier(ddl.at("schema").get<std::string>()));
@@ -536,7 +611,8 @@ namespace springtail::pg_fdw {
         }
 
         else if (action == "drop") {  // drop table
-            return fmt::format("DROP FOREIGN TABLE IF EXISTS {}.{};",
+            return fmt::format("DROP {} TABLE IF EXISTS {}.{};",
+                               is_regular_table_type ? "FOREIGN" : "",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()));
         }
@@ -557,21 +633,23 @@ namespace springtail::pg_fdw {
             }
 
             uint32_t type_oid = col.at("type").get<uint32_t>();
-            // XXX a fix is required to pull type name from the trigger data
-            // see _gen_fdw_table_sql()
-            assert(false);
-            return fmt::format("ALTER FOREIGN TABLE {}.{} ADD COLUMN {} {} {};",
+            std::string type_name;
+            auto it = _type_cache.find(type_oid);
+            if (it != _type_cache.end()) {
+                type_name = std::get<0>(it->second);
+            }
+            return fmt::format("ALTER {} TABLE {}.{} ADD COLUMN {} {} {};",
+                               is_regular_table_type ? "FOREIGN" : "",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(col.at("name").get<std::string>()),
-                               type_map.at(type_oid),
+                               type_name,
                                constraints);
-
-            CHECK(false); // XXX col["type_name"] must be added and checked
         }
 
         else if (action == "col_drop") {  // alter table drop column
-            return fmt::format("ALTER FOREIGN TABLE {}.{} DROP COLUMN {};",
+            return fmt::format("ALTER {} TABLE {}.{} DROP COLUMN {};",
+                               is_regular_table_type ? "FOREIGN" : "",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(ddl.at("column").get<std::string>()));
@@ -579,7 +657,8 @@ namespace springtail::pg_fdw {
 #endif /* ENABLE_SCHEMA_MUTATES */
 
         else if (action == "col_rename") {
-            return fmt::format("ALTER FOREIGN TABLE {}.{} RENAME COLUMN {} TO {};",
+            return fmt::format("ALTER {} TABLE {}.{} RENAME COLUMN {} TO {};",
+                               is_regular_table_type ? "FOREIGN" : "",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(ddl.at("old_name").get<std::string>()),
@@ -632,7 +711,8 @@ namespace springtail::pg_fdw {
             const auto table = conn->escape_identifier(ddl.at("table").get<std::string>());
             const auto old_schema = conn->escape_identifier(ddl.at("old_schema").get<std::string>());
 
-            return fmt::format("ALTER FOREIGN TABLE {}.{} SET SCHEMA {};",
+            return fmt::format("ALTER {} TABLE {}.{} SET SCHEMA {};",
+                               is_regular_table_type ? "FOREIGN" : "",
                                old_schema, table, schema);
         }
         else if (action == "ut_create") {
@@ -681,61 +761,28 @@ namespace springtail::pg_fdw {
 
             // nothing to actually change in the FDW
             return {};
+        } else if (action == "attach_partition") {
+            std::string alter = fmt::format("ALTER TABLE {}.{} ATTACH PARTITION {}.{} {};",
+                                            conn->escape_identifier(ddl.at("schema")),
+                                            conn->escape_identifier(ddl.at("table")),
+                                            conn->escape_identifier(ddl.at("partition_schema")),
+                                            conn->escape_identifier(ddl.at("partition_name")),
+                                            ddl.at("partition_bound").get<std::string>());
+
+            return alter;
+        } else if (action == "detach_partition") {
+            std::string alter = fmt::format("ALTER TABLE {}.{} DETACH PARTITION {}.{};",
+                                            conn->escape_identifier(ddl.at("schema")),
+                                            conn->escape_identifier(ddl.at("table")),
+                                            conn->escape_identifier(ddl.at("partition_schema")),
+                                            conn->escape_identifier(ddl.at("partition_name")));
+
+            return alter;
         }
 
         // can't currently support other kinds of DDL mutations
         LOG_ERROR("Bad DDL statement: {}", action.get<std::string>());
         CHECK(false);
-    }
-
-    std::string
-    PgDDLMgr::_gen_fdw_table_sql(LibPqConnectionPtr conn,
-                                 const std::string &server_name,
-                                 const std::string &schema,
-                                 const std::string &table,
-                                 uint64_t tid,
-                                 const nlohmann::json &columns)
-    {
-        std::string escaped_schema = conn->escape_identifier(schema);
-
-        // no schema name needed
-        std::string create = fmt::format("CREATE FOREIGN TABLE {}.{} (\n",
-                                         escaped_schema,
-                                         conn->escape_identifier(table));
-
-        // iterate over the columns, adding each to the create statement
-        // name, type, is_nullable, default value
-        int i = 0, num_cols = columns.size();
-
-        // iterate over the columns again, adding each to the create statement
-        for (const auto &col : columns) {
-            // check for userdefined type
-            uint32_t type_oid = col.at("type").get<uint32_t>();
-            std::string type_name = col.at("type_name").get<std::string>();
-            std::string type_namespace = col.at("type_namespace").get<std::string>();
-
-            CHECK(!type_name.empty());
-
-            // the constant FirstNormalObjectId is defined in postgres include/access/transam.h
-            if (type_oid >= constant::FIRST_USER_DEFINED_PG_OID) {
-                // this is a user defined type, fully qualify it
-                type_name = fmt::format("{}.{}", conn->escape_identifier(type_namespace),
-                                                 conn->escape_identifier(type_name));
-            }
-
-            std::string column = fmt::format("{} {} {} {}", conn->escape_identifier(col.at("name")),
-                                             type_name, col.at("nullable").get<bool>() ? "" : "NOT NULL",
-                                             (i == num_cols - 1) ? "" : ",");
-
-            i++;
-            create += column;
-        }
-
-        create += fmt::format("\n) SERVER {} OPTIONS (tid '{}');", server_name, tid);
-
-        LOG_DEBUG(LOG_FDW, "Generated SQL: {}", create);
-
-        return create;
     }
 
     void
@@ -760,6 +807,34 @@ namespace springtail::pg_fdw {
         // grant connect to the fdw user
         conn->exec(fmt::format("GRANT CONNECT ON DATABASE {} TO {}", prefixed_name, _fdw_username));
         conn->clear();
+    }
+
+    std::string
+    PgDDLMgr::_get_type_name(int32_t pg_type,
+                             uint64_t namespace_id,
+                             const std::string &namespace_name,
+                             const std::map<uint64_t, std::map<uint64_t,
+                             std::pair<std::string, std::string>>> &user_types)
+    {
+        if (pg_type >= constant::FIRST_USER_DEFINED_PG_OID) {
+            auto it = user_types.find(namespace_id);
+            if (it != user_types.end()) {
+                auto it2 = it->second.find(pg_type);
+                if (it2 != it->second.end()) {
+                    const auto fully_qualified_type_name = fmt::format("{}.{}", namespace_name, it2->second.first);
+                    return fully_qualified_type_name;
+                }
+            }
+        }
+
+        auto it = _type_cache.find(pg_type);
+        if (it != _type_cache.end()) {
+            return std::get<0>(it->second);
+        }
+
+        // Unknown type, should never get here
+        DCHECK(false);
+        return "UNKNOWN";
     }
 
     void
@@ -821,6 +896,22 @@ namespace springtail::pg_fdw {
                     conn->clear();
                 }
                 conn->end_transaction();
+            }
+
+            // Create the parent partition tables
+            std::vector<std::string> ddl = PgFdwCommon::get_schema_ddl(db_id, xid, SPRINGTAIL_FDW_SERVER_NAME, schema.second,
+                                             false, false, {},
+                                             [this, escaped_schema, &user_types](uint32_t pg_type, uint64_t namespace_id) {
+                                                 return _get_type_name(pg_type, namespace_id, escaped_schema, user_types);
+                                             },
+                                             [conn](const std::string &name) {
+                                                 return conn->escape_identifier(name.c_str());
+                                             }, false);
+
+            // Create the partition tables
+            for (const auto &partition_table_sql : ddl) {
+                conn->exec(partition_table_sql);
+                conn->clear();
             }
 
             // import foreign schema

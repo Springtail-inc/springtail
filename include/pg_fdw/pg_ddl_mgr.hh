@@ -16,10 +16,10 @@
 #include <sys_tbl_mgr/table_mgr.hh>
 
 #include <pg_repl/libpq_connection.hh>
+#include <pg_fdw/pg_fdw_ddl_common.hh>
 #include <common/logging.hh>
 
 namespace springtail::pg_fdw {
-
     /**
      * @brief DDL Mgr, applies changes from Redis queue
      * to the FDW tables
@@ -88,6 +88,30 @@ namespace springtail::pg_fdw {
 
         std::map<uint32_t, std::string> _type_map;  ///< map of PG type OIDs to type names
         std::atomic<bool> _is_shutting_down{false}; ///< shutting down flag
+
+        /**
+         * @brief Type cache
+         * Stores the details about the system types
+         *
+         * The key is the pg_type OID and the value is a tuple of the type name and the type category
+         */
+        std::unordered_map<uint32_t, std::tuple<std::string, std::string>> _type_cache;
+
+        /**
+         * @brief Helper to get type name from pg_type OID
+         *
+         * @param pg_type pg_type OID
+         * @param namespace_id namespace id
+         * @param namespace_name namespace name
+         * @param user_types map of user types
+         * @return type name
+         */
+        std::string _get_type_name(int32_t pg_type,
+                                   uint64_t namespace_id,
+                                   const std::string &namespace_name,
+                                   const std::map<uint64_t, std::map<uint64_t,
+                                   std::pair<std::string, std::string>>> &user_types);
+
 
         /** Private constructor */
         PgDDLMgr();
@@ -179,15 +203,6 @@ namespace springtail::pg_fdw {
         _gen_sql_from_json(LibPqConnectionPtr conn,
                            const std::string &server_name,
                            const nlohmann::json &ddl);
-
-        /** Helper to generate sql for FDW foreign table */
-        std::string
-        _gen_fdw_table_sql(LibPqConnectionPtr conn,
-                           const std::string &server_name,
-                           const std::string &schema,
-                           const std::string &table,
-                           uint64_t tid,
-                           const nlohmann::json &columns);
 
         /**
          * @brief Function for creating a replicated database
