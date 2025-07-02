@@ -41,6 +41,7 @@ namespace springtail::pg_fdw {
         std::string_view partition_key() const { return _partition_key; }
         std::string_view partition_bound() const { return _partition_bound; }
 
+        uint64_t set_parent_table_id(uint64_t parent_table_id) { return _parent_table_id = parent_table_id; }
         std::string_view set_parent_namespace_name(const std::string_view parent_namespace_name) { return _parent_namespace_name = parent_namespace_name; }
         std::string_view set_parent_table_name(const std::string_view parent_table_name) { return _parent_table_name = parent_table_name; }
         std::string_view set_partition_key(const std::string_view partition_key) { return _partition_key = partition_key; }

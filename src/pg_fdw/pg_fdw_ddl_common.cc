@@ -132,7 +132,7 @@ namespace springtail::pg_fdw {
                 partition_bound = fields->at(sys_tbl::TableNames::Data::PARTITION_BOUND)->get_text(&row);
             }
 
-            table_partition_map.try_emplace(
+            auto [tp_it, tp_inserted] = table_partition_map.try_emplace(
                 tid,
                 parent_table_id, partition_key, partition_bound
             );
@@ -142,6 +142,11 @@ namespace springtail::pg_fdw {
                 // update if xid is newer
                 if (xid > it->second.xid) {
                     it->second = {tid, xid, table_ns_id};
+
+                    // Update the table partition details as well
+                    tp_it->second.set_parent_table_id(parent_table_id);
+                    tp_it->second.set_partition_key(partition_key);
+                    tp_it->second.set_partition_bound(partition_bound);
                 }
             }
         }

@@ -240,7 +240,7 @@ BEGIN
     INTO table_relname, table_replident, table_persistence, rel_kind, parent_table_id, partition_bound, partition_key;
 
     -- Only during the ALTER command, get the partition details. This is required to handle the partition events
-    IF command_tag = 'ALTER TABLE' AND parent_table_id IS NULL THEN
+    IF command_tag = 'ALTER TABLE' AND partition_key IS NOT NULL THEN
         SELECT __pg_springtail_triggers.springtail_get_partition_data(object_identity) INTO partition_data;
 
         -- Handler for attach and detach partition events
