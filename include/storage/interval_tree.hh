@@ -16,6 +16,7 @@ namespace springtail {
          */
         void insert(T start, T end)
         {
+            std::lock_guard<std::mutex> lock(_mutex);
             if (start >= end) return;
             auto it = intervals.lower_bound(start);
 
@@ -43,6 +44,7 @@ namespace springtail {
          */
         void subtract(T start, T end)
         {
+            std::lock_guard<std::mutex> lock(_mutex);
             if (start >= end) return;
             auto it = intervals.lower_bound(start);
 
@@ -75,6 +77,7 @@ namespace springtail {
          */
         std::vector<std::pair<T, T>> to_vector() const
         {
+            std::lock_guard<std::mutex> lock(_mutex);
             std::vector<std::pair<T, T>> result;
             for (const auto& [start, end] : intervals)
                 result.emplace_back(start, end);
@@ -83,15 +86,18 @@ namespace springtail {
 
         void clear()
         {
+            std::lock_guard<std::mutex> lock(_mutex);
             intervals.clear();
         }
 
         bool empty() const
         {
+            std::lock_guard<std::mutex> lock(_mutex);
             return intervals.empty();
         }
 
     private:
         std::map<T, T> intervals;
+        mutable std::mutex _mutex;
     };
 }
