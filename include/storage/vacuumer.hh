@@ -10,6 +10,8 @@
 
 namespace springtail {
 
+constexpr uint64_t kPunchAlign = 64 * 1024;  // 64KB punch alignment
+
 /**
  * Vacuumer to clear dead extents and table snapshots.
  */
@@ -42,7 +44,7 @@ private:
         uint64_t offset;
         uint64_t size;
     };
-    using HoleList = std::map<uint64_t, std::list<HoleInfo>>;
+    using HoleList = std::map<uint64_t, std::vector<HoleInfo>>;
     using ExtentMap = std::map<std::filesystem::path, HoleList>;
 
     using SnapshotList = std::list<std::filesystem::path>;
@@ -53,8 +55,6 @@ private:
     SnapshotMap _snapshot_map; ///< Maps XID -> list of table snapshot directories
 
     RedisDDL _redis_ddl; ///< Interface to the DDL structures in Redis.
-
-    constexpr uint64_t kPunchAlign = 64 * 1024;  // 64KB punch alignment
 
     // Round a value up to the nearest multiple of `align`
     inline uint64_t align_up(uint64_t val, uint64_t align) {
@@ -73,8 +73,8 @@ private:
      * @param input_extents Aligned extents to punch
      * @return List of successfully punched extents
      */
-    std::vector<HoleInfo> Vacuumer::hole_punch_file(const std::string& file,
-                                                    const std::vector<HoleInfo>& input_extents);
+    std::vector<HoleInfo> hole_punch_file(const std::string& file,
+                                          const std::vector<HoleInfo>& input_extents);
 
     /**
      * @brief Get vacuum-safe XID for a DB

@@ -18,6 +18,7 @@ target_include_directories(springtail_storage
 target_link_libraries(springtail_storage
   PRIVATE lz4::lz4 xxHash::xxhash
   PUBLIC Boost::thread
+         springtail_redis
          springtail_write_cache absl::check)
 
 

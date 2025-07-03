@@ -33,9 +33,9 @@ Vacuumer::expire_snapshot(const std::filesystem::path &table_dir,
     _snapshot_map[xid].emplace_back(table_dir);
 }
 
-std::vector<HoleInfo>
+std::vector<Vacuumer::HoleInfo>
 Vacuumer::hole_punch_file(const std::string& file,
-                          const std::vector<HoleInfo>& input_extents)
+                          const std::vector<Vacuumer::HoleInfo>& input_extents)
 {
     std::vector<HoleInfo> punched;
     int fd = open(file.c_str(), O_RDWR);
@@ -49,7 +49,7 @@ Vacuumer::hole_punch_file(const std::string& file,
         if (ret == 0) {
             punched.emplace_back(aligned_start, aligned_size);
         } else {
-            LOG_ERROR("fallocate() failed: {} -- offset {} len {}: {}", file.c_str(), aligned_start, aligned_size);
+            LOG_ERROR("fallocate() failed: {} -- offset {} len {}", file.c_str(), aligned_start, aligned_size);
         }
     }
 
@@ -57,7 +57,8 @@ Vacuumer::hole_punch_file(const std::string& file,
     return punched;
 }
 
-uint64_t get_vacuum_cutoff_xid(const std::string& file)
+uint64_t
+Vacuumer::get_vacuum_cutoff_xid(const std::string& file)
 {
     // XXX -- Deepak -- just realizing we need to retrieve the target XID for each DB separately
     //                  since the XIDs are independent for each DB.  We may need to separate the
@@ -67,7 +68,8 @@ uint64_t get_vacuum_cutoff_xid(const std::string& file)
     //                  Might not matter if we shift to a more on-disk approach.
 
     // check the progress of the XID at the FDWs
-    uint64_t target_xid = _redis_ddl.min_schema_xid(_db_id);
+    RedisDDL _redis_ddl;
+    uint64_t target_xid = _redis_ddl.min_schema_xid(1);
 
     // XXX -- Deepak -- check the progress of the XID in the indexer
     //                  we can't expire data if the indexer needs it
@@ -85,7 +87,7 @@ Vacuumer::_internal_run()
         // lock while accessing the maps
         std::unique_lock lock(_mutex);
 
-        for (auto& [file, xid_map] : extent_map) {
+        for (auto& [file, xid_map] : _extent_map) {
             uint64_t cutoff_xid = get_vacuum_cutoff_xid(file);  // Get safest XID to vacuum till that point
 
             // Iterate over all xids in sorted order
@@ -103,8 +105,8 @@ Vacuumer::_internal_run()
                     itree.insert(offset, offset + size);
                 }
 
-                std::vector<Extent> merged_extents;    // punchable aligned blocks
-                std::vector<Extent> leftover_extents;  // unaligned fragments to keep
+                std::vector<Vacuumer::HoleInfo> merged_extents;    // punchable aligned blocks
+                std::vector<Vacuumer::HoleInfo> leftover_extents;  // unaligned fragments to keep
 
                 // Step 2: For each merged extent, extract aligned + unaligned regions
                 for (const auto& [start, end] : itree.to_vector()) {
@@ -147,38 +149,38 @@ Vacuumer::_internal_run()
 
 
         // expire snapshots through the min XID
-        while (true) {
-            auto it = _snapshot_map.begin();
+        //while (true) {
+        //    auto it = _snapshot_map.begin();
 
-            // if nothing to expire, stop
-            if (it == _snapshot_map.end()) {
-                break;
-            }
+        //    // if nothing to expire, stop
+        //    if (it == _snapshot_map.end()) {
+        //        break;
+        //    }
 
-            // if everything to expire still in-use, stop
-            if (it->first > target_xid) {
-                break;
-            }
+        //    // if everything to expire still in-use, stop
+        //    if (it->first > cutoff_xid) {
+        //        break;
+        //    }
 
-            // retrieve a list of extents to expire
-            auto snapshot_list = std::move(it->second);
-            _snapshot_map.erase(it);
+        //    // retrieve a list of extents to expire
+        //    auto snapshot_list = std::move(it->second);
+        //    _snapshot_map.erase(it);
 
-            // unlock and expire the extents in the list
-            lock.unlock();
+        //    // unlock and expire the extents in the list
+        //    lock.unlock();
 
-            // clear the table directories associated with the expired snapshots
-            for (auto &dir : snapshot_list) {
-                std::error_code ec;
-                std::filesystem::remove_all(dir, ec);
-                if (ec) {
-                    LOG_ERROR("remove_all() failed: {}", ec.message());
-                }
-            }
+        //    // clear the table directories associated with the expired snapshots
+        //    for (auto &dir : snapshot_list) {
+        //        std::error_code ec;
+        //        std::filesystem::remove_all(dir, ec);
+        //        if (ec) {
+        //            LOG_ERROR("remove_all() failed: {}", ec.message());
+        //        }
+        //    }
 
-            // reacquire the lock before proceeding
-            lock.lock();
-        }
+        //    // reacquire the lock before proceeding
+        //    lock.lock();
+        //}
     }
 }
 
