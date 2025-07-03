@@ -105,7 +105,7 @@ namespace {
             EXPECT_EQ(msg, nullptr);
             count++;
         }
-        EXPECT_EQ(count, 27); // 25 commands + final check for eof
+        EXPECT_EQ(count, 29); // 27 commands + final check for eof
     }
 
     TEST_F(MsgStreamReader_Test, Decode)
@@ -118,7 +118,7 @@ namespace {
         while (!eos) {
             PgMsgPtr msg = reader.read_message(reader.ALL_MESSAGES, eos);
             if (msg == nullptr) {
-                EXPECT_EQ(count, 26);
+                EXPECT_EQ(count, 28);
                 continue;
             }
             nlohmann::json &j = _json_cmds[count];
@@ -165,6 +165,12 @@ namespace {
                 case PgMsgEnum::TRUNCATE:
                     EXPECT_EQ(j["cmd"], "truncate");
                     break;
+                case PgMsgEnum::ATTACH_PARTITION:
+                    EXPECT_EQ(j["cmd"], "attach partition");
+                    break;
+                case PgMsgEnum::DETACH_PARTITION:
+                    EXPECT_EQ(j["cmd"], "detach partition");
+                    break;
                 default:
                     std::cout << "Unknown message type: " << j["cmd"] << std::endl;
                     EXPECT_TRUE(false);
@@ -175,5 +181,3 @@ namespace {
     }
 
 } // namespace
-
-

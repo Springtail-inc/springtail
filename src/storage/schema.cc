@@ -340,6 +340,7 @@ namespace springtail {
                 assert(update.nullable);
                 break;
 
+
             default:
                 // note: we shouldn't see any other update types in the schema history
                 assert(0);
