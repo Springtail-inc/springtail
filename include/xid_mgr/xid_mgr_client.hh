@@ -9,10 +9,9 @@
 
 namespace springtail {
 
-class XidMgrClient : public Singleton<XidMgrClient>,
-                     public AutoRegisterShutdown<XidMgrClient, ServiceId::XidMgrClientId> {
+class XidMgrClient : public Singleton<XidMgrClient>
+{
     friend class Singleton<XidMgrClient>;
-
 public:
     /**
      * @brief Ping the server

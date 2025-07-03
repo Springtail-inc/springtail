@@ -16,8 +16,7 @@
 
 namespace springtail::sys_tbl_mgr {
 
-class Client : public Singleton<Client>,
-               public AutoRegisterShutdown<Client, ServiceId::SysTblMgrClientId>
+class Client : public Singleton<Client>
 {
     friend class Singleton<Client>;
 public:

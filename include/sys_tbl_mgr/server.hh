@@ -6,8 +6,7 @@
 
 namespace springtail::sys_tbl_mgr {
 
-class Server final : public Singleton<Server>,
-                     public AutoRegisterShutdown<Server, ServiceId::SysTblMgrServerId>
+class Server final : public Singleton<Server>
 {
     friend class Singleton<Server>;
 public:

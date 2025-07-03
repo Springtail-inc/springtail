@@ -16,23 +16,25 @@ namespace springtail {
      * upgraded from read to write.  Dirty pages are associated with a target XID.  Once the page is
      * flushed to disk, it's underlying extents are released back to the cache as clean.
      */
-    class StorageCache {
+    class StorageCache : public Singleton<StorageCache>
+    {
+        friend class Singleton<StorageCache>;
     public:
 
         /**
          * @brief get_instance() of singleton StorageCache; create if it doesn't exist.
          * @return instance of StorageCache
          */
-        static StorageCache *get_instance();
+        // static StorageCache *get_instance();
 
         /**
          * @brief Shutdown the StorageCache singleton.
          */
-        static void shutdown();
+        // static void shutdown();
 
     private:
-        static StorageCache *_instance; ///< static instance (singleton)
-        static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
+        // static StorageCache *_instance; ///< static instance (singleton)
+        // static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
 
         /** Constructor.  Uses global properties to configure itself. */
         StorageCache();
@@ -512,7 +514,7 @@ namespace springtail {
              * Helper to read a CLEAN extent into memory.  A callback is provided to be run after
              * the IO to read the extent is complete.
              */
-            CacheExtentPtr _read_extent(const std::filesystem::path& file, 
+            CacheExtentPtr _read_extent(const std::filesystem::path& file,
                     uint64_t extent_id, std::function<void(CacheExtentPtr)> callback);
 
             /**
@@ -687,7 +689,7 @@ namespace springtail {
                     return *this;
                 }
 
-                Iterator &operator+=(difference_type n) { 
+                Iterator &operator+=(difference_type n) {
                     if (_page->extent_count() == 1) {
                         _row += n;
                         return *this;

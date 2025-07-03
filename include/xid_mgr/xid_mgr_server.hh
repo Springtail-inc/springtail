@@ -11,10 +11,9 @@
 
 namespace springtail::xid_mgr {
 
-class XidMgrServer : public SingletonWithThread<XidMgrServer>,
-                     public AutoRegisterShutdown<XidMgrServer, ServiceId::XidMgrServerId>
+class XidMgrServer : public Singleton<XidMgrServer>
 {
-    friend class SingletonWithThread<XidMgrServer>;
+    friend class Singleton<XidMgrServer>;
 
 public:
     /** SYNC interval */

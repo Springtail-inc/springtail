@@ -18,8 +18,7 @@ namespace springtail::pg_fdw {
      * Note: the cache is populated by worker threads. So that the main subscriber
      * isn't blocked.
      */
-    class PgXidSubscriberMgr final : public Singleton<PgXidSubscriberMgr>,
-                                     public AutoRegisterShutdown<PgXidSubscriberMgr, ServiceId::PgXidSubscriberMgrId>
+    class PgXidSubscriberMgr final : public Singleton<PgXidSubscriberMgr>
     {
         friend class Singleton<PgXidSubscriberMgr>;
     public:
@@ -32,7 +31,10 @@ namespace springtail::pg_fdw {
         static void start();
 
     private:
-        PgXidSubscriberMgr() = default;
+        PgXidSubscriberMgr()
+        {
+            springtail_register_service(ServiceId::PgXidSubscriberMgrId, PgXidSubscriberMgr::shutdown);
+        }
         ~PgXidSubscriberMgr();
 
         size_t _cache_size;

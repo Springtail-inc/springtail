@@ -35,6 +35,7 @@ namespace springtail::pg_log_mgr {
 
     PgLogCoordinator::PgLogCoordinator()
     {
+        springtail_register_service(ServiceId::PgLogCoordinatorId, PgLogCoordinator::shutdown);
         _cache_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [this](const std::string &path, const nlohmann::json &new_value) -> void {
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Replicated databases: {}", new_value.dump(4));

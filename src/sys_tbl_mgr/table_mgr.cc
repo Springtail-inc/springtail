@@ -1,4 +1,4 @@
-#include "common/constants.hh"
+#include <common/constants.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
 
@@ -36,6 +36,8 @@ namespace springtail {
 
     TableMgr::TableMgr()
     {
+        springtail_register_service(ServiceId::TableMgrId, TableMgr::shutdown);
+
         // get the base directory for table data
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
         Json::get_to<std::filesystem::path>(json, "table_dir", _table_base);

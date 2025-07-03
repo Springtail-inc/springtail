@@ -15,6 +15,8 @@ namespace springtail {
 
 XidMgrClient::XidMgrClient()
 {
+    springtail_register_service(ServiceId::XidMgrClientId, XidMgrClient::shutdown);
+
     nlohmann::json json = Properties::get(Properties::LOG_MGR_CONFIG);
     nlohmann::json rpc_json;
 

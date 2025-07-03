@@ -62,8 +62,7 @@ bool DaemonRunner::start()
     return true;
 }
 
-class ServiceRegister : public Singleton<ServiceRegister>,
-                        public AutoRegisterShutdown<ServiceRegister, ServiceId::ServiceRegisterId>
+class ServiceRegister : public Singleton<ServiceRegister>
 {
     friend class Singleton<ServiceRegister>;
 
@@ -94,7 +93,10 @@ public:
     }
 
 private:
-    ServiceRegister() = default;
+    ServiceRegister()
+    {
+        springtail_register_service(ServiceId::ServiceRegisterId, ServiceRegister::shutdown);
+    }
     virtual ~ServiceRegister() override = default;
 
     std::vector<std::unique_ptr<ServiceRunner>> _service_list;
@@ -197,7 +199,7 @@ springtail_daemon_run()
     }
 }
 
-std::map<ServiceId, std::vector<ServiceId>> dependencies = {
+static const std::map<ServiceId, std::vector<ServiceId>> dependencies = {
     {ServiceId::ServiceRegisterId,     {}},
     {ServiceId::DatabaseMgrId,         {ServiceId::ServiceRegisterId}},
     {ServiceId::UserMgrId,             {ServiceId::DatabaseMgrId}},
@@ -210,15 +212,16 @@ std::map<ServiceId, std::vector<ServiceId>> dependencies = {
     {ServiceId::WriteCacheClientId,    {ServiceId::ServiceRegisterId, ServiceId::WriteCacheServerId}},
     {ServiceId::IOMgrId,               {ServiceId::ServiceRegisterId}},
     {ServiceId::SchemaMgrId,           {ServiceId::SysTblMgrClientId}},
-    {ServiceId::TableMgrId,            {ServiceId::IOMgrId, ServiceId::SchemaMgrId}},
+    {ServiceId::TableMgrId,            {ServiceId::IOMgrId, ServiceId::SchemaMgrId, ServiceId::StorageCacheId}},
     {ServiceId::SyncTrackerId,         {ServiceId::ServiceRegisterId}},
     {ServiceId::PgFdwMgrId,            {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::TableMgrId}},
     {ServiceId::PgXidSubscriberMgrId,  {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::SysTblMgrClientId}},
     {ServiceId::PgDDLMgrId,            {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::TableMgrId}},
-    {ServiceId::PgLogCoordinatorId,    {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::WriteCacheServerId, ServiceId::TableMgrId}}
+    {ServiceId::PgLogCoordinatorId,    {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::WriteCacheServerId, ServiceId::TableMgrId}},
+    {ServiceId::StorageCacheId,        {ServiceId::IOMgrId}}
 };
 
-std::map<ServiceId, std::string> dependencies_names = {
+static const std::map<ServiceId, std::string> dependencies_names = {
     {ServiceId::ServiceRegisterId,     "ServiceRegister"},
     {ServiceId::DatabaseMgrId,         "DatabaseMgr"},
     {ServiceId::UserMgrId,             "UserMgr"},
@@ -236,7 +239,8 @@ std::map<ServiceId, std::string> dependencies_names = {
     {ServiceId::PgFdwMgrId,            "PGFdwMgr"},
     {ServiceId::PgXidSubscriberMgrId,  "PgXidSubscriberMgr"},
     {ServiceId::PgDDLMgrId,            "PgDDLMgr"},
-    {ServiceId::PgLogCoordinatorId,    "PgLogCoordinator"}
+    {ServiceId::PgLogCoordinatorId,    "PgLogCoordinator"},
+    {ServiceId::StorageCacheId,        "StorageCache"}
 };
 
 std::vector<ServiceId>
@@ -250,7 +254,7 @@ topo_sort()
     std::vector<ServiceId> result(to_index(ServiceId::ServiceCountId), ServiceId::ServiceInvalidId);
     std::size_t pos = to_index(ServiceId::ServiceCountId);
 
-    auto depth_first_sort = [&](auto&& self, ServiceId id) -> void {
+    auto depth_first_sort = [&visited, &on_stack, &result, &pos, &to_index](auto&& self, ServiceId id) -> void {
         auto idx = to_index(id);
         if (visited[idx]) {
             return;
@@ -260,7 +264,7 @@ topo_sort()
         on_stack[idx] = true;
         CHECK(dependencies.contains(id)) << "Missing service type " << idx;
 
-        for (auto dep : dependencies[id]) {
+        for (auto dep : dependencies.at(id)) {
             self(self, dep);
         }
         on_stack[idx] = false;
@@ -276,7 +280,7 @@ topo_sort()
     // validate
     for (std::size_t i = 0; i < to_index(ServiceId::ServiceCountId); ++i) {
         CHECK(result[i] != ServiceId::ServiceInvalidId)
-            << "Unvisited service " << dependencies_names[static_cast<ServiceId>(i)];
+            << "Unvisited service " << dependencies_names.at(static_cast<ServiceId>(i));
     }
 
     return result;
@@ -304,7 +308,8 @@ springtail_shutdown()
         if (it == running_services.end()) {
             continue;
         }
-        it->second(dependencies_names[service_id]);
+        LOG_INFO("Stopping service {}", dependencies_names.at(service_id));
+        it->second();
     }
 }
 

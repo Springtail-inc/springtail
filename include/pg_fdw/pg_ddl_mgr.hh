@@ -21,8 +21,7 @@ namespace springtail::pg_fdw {
      * @brief DDL Mgr, applies changes from Redis queue
      * to the FDW tables
      */
-    class PgDDLMgr final : public Singleton<PgDDLMgr>,
-                           public AutoRegisterShutdown<PgDDLMgr, ServiceId::PgDDLMgrId>
+    class PgDDLMgr final : public Singleton<PgDDLMgr>
     {
             friend class Singleton<PgDDLMgr>;
     public:
@@ -72,6 +71,7 @@ namespace springtail::pg_fdw {
                           const std::string &_password,
                           std::optional<std::string> _hostname);
 
+    protected:
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections
         RedisCache::RedisChangeWatcherPtr _cache_watcher;           ///< redis cache callback object
         std::shared_ptr<common::MultiQueueThreadManager> _thread_manager;   ///< thread manager that processes DDL requests

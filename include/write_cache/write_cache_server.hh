@@ -10,8 +10,7 @@
 
 namespace springtail {
 
-    class WriteCacheServer final : public Singleton<WriteCacheServer>,
-                                   public AutoRegisterShutdown<WriteCacheServer, ServiceId::WriteCacheServerId>
+    class WriteCacheServer final : public Singleton<WriteCacheServer>
     {
         friend class Singleton<WriteCacheServer>;
     public:

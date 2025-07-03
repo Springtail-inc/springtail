@@ -15,8 +15,7 @@ namespace springtail {
     /** Interface for accessing all of the schemas for a specific table.  This includes retrieving
      *  the data schema, primary and secondary index schemas, and data in the write cache -- all at
      *  a specific XID. */
-    class SchemaMgr : public Singleton<SchemaMgr>,
-                      public AutoRegisterShutdown<SchemaMgr, ServiceId::SchemaMgrId>
+    class SchemaMgr : public Singleton<SchemaMgr>
     {
         friend class Singleton<SchemaMgr>;
     public:

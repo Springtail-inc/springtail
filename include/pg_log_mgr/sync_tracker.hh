@@ -10,9 +10,9 @@ namespace springtail::pg_log_mgr {
      * A structure to track the metadata around a table sync.  Used to determine if individual
      * mutations should be skipped due to an ongoing table sync.
      */
-    class SyncTracker final : public Singleton<SyncTracker>,
-                              public AutoRegisterShutdown<SyncTracker, ServiceId::SyncTrackerId>
+    class SyncTracker final : public Singleton<SyncTracker>
     {
+        friend Singleton<SyncTracker>;
     public:
         /**
          * Helper object to return the data about a table swap from check_commit()
@@ -141,6 +141,13 @@ namespace springtail::pg_log_mgr {
          *         table given the pg_xid.
          */
         SkipDetails should_skip(uint64_t db_id, uint64_t table_id, uint32_t pg_xid) const;
+
+    protected:
+        SyncTracker()
+        {
+            springtail_register_service(ServiceId::SyncTrackerId, SyncTracker::shutdown);
+        }
+        virtual ~SyncTracker() override = default;
 
     private:
         /**

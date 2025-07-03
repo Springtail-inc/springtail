@@ -21,8 +21,7 @@
 
 namespace springtail::pg_proxy {
 
-    class ProxyServer : public Singleton<ProxyServer>,
-                        public AutoRegisterShutdown<ProxyServer, ServiceId::ProxyServerId>
+    class ProxyServer : public Singleton<ProxyServer>
     {
         friend class Singleton<ProxyServer>;
     public:
@@ -123,6 +122,11 @@ namespace springtail::pg_proxy {
 
         static void start(bool force_shadow, bool force_primary);
     protected:
+        ProxyServer()
+        {
+            springtail_register_service(ServiceId::ProxyServerId, ProxyServer::shutdown);
+        }
+        virtual ~ProxyServer() override = default;
 
         /** Shutdown server */
         void _internal_shutdown() override;

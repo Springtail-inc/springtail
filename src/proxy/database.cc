@@ -485,6 +485,8 @@ namespace springtail::pg_proxy
         _primary_set(std::make_shared<DatabasePrimarySet>(POOL_SESSIONS_PER_INSTANCE)),
         _replica_set(std::make_shared<DatabaseReplicaSet>(POOL_SESSIONS_PER_INSTANCE))
     {
+        springtail_register_service(ServiceId::DatabaseMgrId, DatabaseMgr::shutdown);
+
         _cache_watcher_db_ids = std::make_shared<RedisCache::RedisChangeWatcher>(
             [this](const std::string &path, const nlohmann::json &new_value) -> void {
                 LOG_DEBUG(LOG_PROXY,"Replicated databases: {}", new_value.dump(4));

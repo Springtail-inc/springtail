@@ -14,8 +14,8 @@ namespace springtail {
  * for daemons to register provide liveness information
  * that is stored in redis and used by the coordinator
  */
-class Coordinator : public SingletonWithThread<Coordinator> {
-    friend class SingletonWithThread<Coordinator>;
+class Coordinator : public Singleton<Coordinator> {
+    friend class Singleton<Coordinator>;
 
 public:
     /**

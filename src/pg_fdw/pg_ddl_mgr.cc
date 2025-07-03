@@ -43,6 +43,8 @@ namespace springtail::pg_fdw {
 
     PgDDLMgr::PgDDLMgr() : _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE)
     {
+        springtail_register_service(ServiceId::PgDDLMgrId, PgDDLMgr::shutdown);
+
         _cache_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [this](const std::string &path, const nlohmann::json &new_value) -> void {
                 LOG_DEBUG(LOG_FDW, "Replicated databases: {}", new_value.dump(4));

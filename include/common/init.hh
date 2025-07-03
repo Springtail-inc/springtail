@@ -206,24 +206,12 @@ enum class ServiceId: int32_t
     PgXidSubscriberMgrId,
     PgDDLMgrId,
     PgLogCoordinatorId,
+    StorageCacheId,
     ServiceCountId
 };
 
-using ShutdownFunc = void(*)(const std::string &name);
+using ShutdownFunc = void(*)();
 
 void springtail_register_service(ServiceId service_id, ShutdownFunc fn);
-
-template <typename T, ServiceId Id>
-class AutoRegisterShutdown {
-protected:
-    AutoRegisterShutdown()
-    {
-        springtail_register_service(Id, &do_shutdown);
-    }
-    static void do_shutdown(const std::string &name) {
-        LOG_INFO("Stopping service {}", name);
-        T::shutdown();
-    }
-};
 
 };  // namespace springtail

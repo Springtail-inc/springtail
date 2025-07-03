@@ -21,6 +21,8 @@ namespace springtail {
 
 WriteCacheClient::WriteCacheClient()
 {
+    springtail_register_service(ServiceId::WriteCacheClientId, WriteCacheClient::shutdown);
+
     nlohmann::json json = Properties::get(Properties::WRITE_CACHE_CONFIG);
     nlohmann::json rpc_json;
 

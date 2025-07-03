@@ -14,8 +14,7 @@
 
 namespace springtail::pg_log_mgr {
 
-    class PgLogCoordinator final : public Singleton<PgLogCoordinator>,
-                                   public AutoRegisterShutdown<PgLogCoordinator, ServiceId::PgLogCoordinatorId>
+    class PgLogCoordinator final : public Singleton<PgLogCoordinator>
     {
     public:
         /**
@@ -27,7 +26,7 @@ namespace springtail::pg_log_mgr {
     private:
         friend class Singleton<PgLogCoordinator>;
         PgLogCoordinator();
-        ~PgLogCoordinator() = default;
+        virtual ~PgLogCoordinator() override = default;
 
         std::mutex _mutex;                         ///< mutex for _log_mgrs map
         std::map<uint64_t, PgLogMgrPtr> _log_mgrs; ///< map of db_id to log mgr
