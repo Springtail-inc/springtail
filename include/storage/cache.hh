@@ -19,25 +19,10 @@ namespace springtail {
     class StorageCache : public Singleton<StorageCache>
     {
         friend class Singleton<StorageCache>;
-    public:
-
-        /**
-         * @brief get_instance() of singleton StorageCache; create if it doesn't exist.
-         * @return instance of StorageCache
-         */
-        // static StorageCache *get_instance();
-
-        /**
-         * @brief Shutdown the StorageCache singleton.
-         */
-        // static void shutdown();
-
     private:
-        // static StorageCache *_instance; ///< static instance (singleton)
-        // static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
-
         /** Constructor.  Uses global properties to configure itself. */
         StorageCache();
+        virtual ~StorageCache() override = default;
 
         // INTERNAL CLASSES
 

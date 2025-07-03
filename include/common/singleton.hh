@@ -72,7 +72,7 @@ namespace springtail {
          *          in the thread.
          *
          */
-         virtual void _internal_run() {}
+        virtual void _internal_run() {}
 
         /**
          * @brief This function is to be called by the derived class to check if the thread
