@@ -1720,7 +1720,7 @@ namespace springtail {
                             // note: perform a copy here to store the constant value
                             auto &&numeric_data = field->get_numeric(tuple->row());
                             auto tmp = (char*)(numeric_data.get());
-                            std::vector<char> value(tmp, tmp + sizeof(numeric::NumericData));
+                            std::vector<char> value(tmp, tmp + numeric_data->varsize());
                             _fields.push_back(std::make_shared<ConstTypeField<
                                     std::shared_ptr<numeric::NumericData>>>(std::move(value)));
                         }

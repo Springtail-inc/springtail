@@ -1777,7 +1777,7 @@ namespace springtail::pg_fdw {
                         // as this data is not owned by this pointer, no need to remove it
                     });
                 auto buf = (char*)(numeric_datum.get());
-                std::vector<char> value(buf, buf + sizeof(numeric::NumericData));
+                std::vector<char> value(buf, buf + numeric_datum->varsize());
 
                 fields->at(idx) = std::make_shared<ConstTypeField<
                         std::shared_ptr<numeric::NumericData>>>(std::move(value));
