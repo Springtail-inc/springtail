@@ -582,7 +582,6 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
         // replace the backing page
         _cache_page = std::move(cache_page);
-
     }
 
     MutableBTree::PagePtr

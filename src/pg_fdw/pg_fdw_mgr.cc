@@ -1776,7 +1776,11 @@ namespace springtail::pg_fdw {
                         // this is shared pointer to the data inside ConstQual
                         // as this data is not owned by this pointer, no need to remove it
                     });
-                fields->at(idx) = std::make_shared<ConstTypeField<std::shared_ptr<numeric::NumericData>>>(numeric_datum);
+                auto buf = (char*)(numeric_datum.get());
+                std::vector<char> value(buf, buf + sizeof(numeric::NumericData));
+
+                fields->at(idx) = std::make_shared<ConstTypeField<
+                        std::shared_ptr<numeric::NumericData>>>(std::move(value));
                 break;
             }
             default:
