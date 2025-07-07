@@ -116,7 +116,7 @@ namespace springtail {
          * @brief Constructor of a new Singleton object can only be accessed by the derived class
          *
          */
-        Singleton(ServiceId service_id = ServiceId::ServiceInvalidId)
+        explicit Singleton(ServiceId service_id = ServiceId::ServiceInvalidId)
         {
             DCHECK(service_id >= ServiceId::ServiceInvalidId && service_id < ServiceId::ServiceCountId);
             if (service_id > ServiceId::ServiceInvalidId) {
