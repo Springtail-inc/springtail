@@ -10,8 +10,6 @@ namespace springtail::sys_tbl_mgr {
 
 Server::Server()
 {
-    springtail_register_service(ServiceId::SysTblMgrServerId, Server::shutdown);
-
     auto json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
     nlohmann::json rpc_json;
 

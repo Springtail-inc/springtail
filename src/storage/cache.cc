@@ -20,8 +20,6 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
 
     StorageCache::StorageCache()
     {
-        springtail_register_service(ServiceId::StorageCacheId, StorageCache::shutdown);
-
         // get the cache size
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
         uint64_t data_size = Json::get_or<uint64_t>(json, "data_cache_size", 16384);

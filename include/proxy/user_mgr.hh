@@ -186,7 +186,7 @@ namespace springtail::pg_proxy {
     /**
      * @brief Cache of user credentials. Queries Redis for creds.
      */
-    class UserMgr final : public Singleton<UserMgr>
+    class UserMgr final : public Singleton<UserMgr, true, ServiceId::UserMgrId>
     {
     public:
         /**
@@ -195,7 +195,7 @@ namespace springtail::pg_proxy {
         static constexpr uint32_t USER_MGR_SLEEP_INTERVAL_SECS = 15;
 
         void stop_thread() override {
-            Singleton<UserMgr>::stop_thread();
+            Singleton<UserMgr, true, ServiceId::UserMgrId>::stop_thread();
             _sleep_cv.notify_all();
         }
 
@@ -217,7 +217,7 @@ namespace springtail::pg_proxy {
         }
 
     private:
-        friend class Singleton<UserMgr>;      ///< the base class should be friend
+        friend class Singleton<UserMgr,true, ServiceId::UserMgrId>;      ///< the base class should be friend
 
         /** The password string types used in the secrets mgr */
         static constexpr const char* PASSWORD_STRING_TEXT = "text";
@@ -229,7 +229,6 @@ namespace springtail::pg_proxy {
          */
         UserMgr()
         {
-            springtail_register_service(ServiceId::UserMgrId, UserMgr::shutdown);
             _init();
         }
 

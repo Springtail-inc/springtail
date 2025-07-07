@@ -21,9 +21,9 @@ namespace springtail::pg_fdw {
      * @brief DDL Mgr, applies changes from Redis queue
      * to the FDW tables
      */
-    class PgDDLMgr final : public Singleton<PgDDLMgr>
+    class PgDDLMgr final : public Singleton<PgDDLMgr, true, ServiceId::PgDDLMgrId>
     {
-            friend class Singleton<PgDDLMgr>;
+            friend class Singleton<PgDDLMgr, true, ServiceId::PgDDLMgrId>;
     public:
         /** Max number of connections to cache */
         static constexpr int MAX_CONNECTION_CACHE_SIZE = 10;

@@ -185,33 +185,4 @@ public:
     }
 };
 
-enum class ServiceId: int32_t
-{
-    ServiceInvalidId = -1,
-    ServiceRegisterId = 0,
-    DatabaseMgrId,
-    UserMgrId,
-    ProxyServerId,
-    XidMgrServerId,
-    XidMgrClientId,
-    SysTblMgrServerId,
-    SysTblMgrClientId,
-    WriteCacheServerId,
-    WriteCacheClientId,
-    IOMgrId,
-    SchemaMgrId,
-    TableMgrId,
-    SyncTrackerId,
-    PgFdwMgrId,         // NOTE: not sure if this is needed
-    PgXidSubscriberMgrId,
-    PgDDLMgrId,
-    PgLogCoordinatorId,
-    StorageCacheId,
-    ServiceCountId
-};
-
-using ShutdownFunc = void(*)();
-
-void springtail_register_service(ServiceId service_id, ShutdownFunc fn);
-
 };  // namespace springtail

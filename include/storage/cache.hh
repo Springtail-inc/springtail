@@ -16,9 +16,9 @@ namespace springtail {
      * upgraded from read to write.  Dirty pages are associated with a target XID.  Once the page is
      * flushed to disk, it's underlying extents are released back to the cache as clean.
      */
-    class StorageCache : public Singleton<StorageCache>
+    class StorageCache : public Singleton<StorageCache, true, ServiceId::StorageCacheId>
     {
-        friend class Singleton<StorageCache>;
+        friend class Singleton<StorageCache, true, ServiceId::StorageCacheId>;
     private:
         /** Constructor.  Uses global properties to configure itself. */
         StorageCache();

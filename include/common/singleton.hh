@@ -7,7 +7,37 @@
 #include <absl/log/check.h>
 
 namespace springtail {
-    template <typename T>
+
+    enum class ServiceId: int32_t
+    {
+        ServiceInvalidId = -1,
+        ServiceRegisterId = 0,
+        DatabaseMgrId,
+        UserMgrId,
+        ProxyServerId,
+        XidMgrServerId,
+        XidMgrClientId,
+        SysTblMgrServerId,
+        SysTblMgrClientId,
+        WriteCacheServerId,
+        WriteCacheClientId,
+        IOMgrId,
+        SchemaMgrId,
+        TableMgrId,
+        SyncTrackerId,
+        PgFdwMgrId,         // NOTE: not sure if this is needed
+        PgXidSubscriberMgrId,
+        PgDDLMgrId,
+        PgLogCoordinatorId,
+        StorageCacheId,
+        ServiceCountId
+    };
+
+    using ShutdownFunc = void(*)();
+
+    void springtail_register_service(ServiceId service_id, ShutdownFunc fn);
+
+    template <typename T, bool SR = false, ServiceId SI = ServiceId::ServiceInvalidId>
     class Singleton {
     public:
         /**
@@ -87,7 +117,14 @@ namespace springtail {
          * @brief Constructor of a new Singleton object can only be accessed by the derived class
          *
          */
-        Singleton() = default;
+        Singleton()
+        {
+            DCHECK((SR && SI > ServiceId::ServiceInvalidId && SI < ServiceId::ServiceCountId)
+                    || (SI == ServiceId::ServiceInvalidId));
+            if (SR) {
+                springtail_register_service(SI, T::shutdown);
+            }
+        }
 
         /**
          * @brief Destructor of the Singleton object can only be accessed by the derived class

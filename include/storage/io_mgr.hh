@@ -23,9 +23,9 @@ namespace springtail {
     /**
      * @brief Singleton IOMgr; used to retrieve IOSysFHs
      */
-    class IOMgr : public Singleton<IOMgr>
+    class IOMgr : public Singleton<IOMgr, true, ServiceId::IOMgrId>
     {
-        friend class Singleton<IOMgr>;
+        friend class Singleton<IOMgr, true, ServiceId::IOMgrId>;
     public:
         /** IO Mode for opening a file; APPEND appends to end of file; WRITE allows overwrite */
         enum IO_MODE { READ, APPEND, WRITE };
@@ -121,7 +121,6 @@ namespace springtail {
          */
         IOMgr()
         {
-            springtail_register_service(ServiceId::IOMgrId, IOMgr::shutdown);
             _init(IOMgr::NUM_THREADS, IOMgr::MAX_FILE_OBJECTS);
         }
 

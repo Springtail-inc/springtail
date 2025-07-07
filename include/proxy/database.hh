@@ -589,9 +589,9 @@ namespace springtail::pg_proxy {
      * redis instance.
      * TODO: Missing addition/removal of replica instances (FDWs) via redis pubsub
      */
-    class DatabaseMgr final : public Singleton<DatabaseMgr>
+    class DatabaseMgr final : public Singleton<DatabaseMgr, true, ServiceId::DatabaseMgrId>
     {
-        friend class Singleton<DatabaseMgr>;
+        friend class Singleton<DatabaseMgr, true, ServiceId::DatabaseMgrId>;
     public:
 
         static constexpr const int POOL_SESSIONS_PER_INSTANCE=5; ///< max sessions per instance

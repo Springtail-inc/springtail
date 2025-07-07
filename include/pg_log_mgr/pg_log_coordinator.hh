@@ -14,7 +14,7 @@
 
 namespace springtail::pg_log_mgr {
 
-    class PgLogCoordinator final : public Singleton<PgLogCoordinator>
+    class PgLogCoordinator final : public Singleton<PgLogCoordinator, true, ServiceId::PgLogCoordinatorId>
     {
     public:
         /**
@@ -24,7 +24,7 @@ namespace springtail::pg_log_mgr {
         void init();
 
     private:
-        friend class Singleton<PgLogCoordinator>;
+        friend class Singleton<PgLogCoordinator, true, ServiceId::PgLogCoordinatorId>;
         PgLogCoordinator();
         virtual ~PgLogCoordinator() override = default;
 

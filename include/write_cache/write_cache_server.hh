@@ -10,9 +10,9 @@
 
 namespace springtail {
 
-    class WriteCacheServer final : public Singleton<WriteCacheServer>
+    class WriteCacheServer final : public Singleton<WriteCacheServer, true, ServiceId::WriteCacheServerId>
     {
-        friend class Singleton<WriteCacheServer>;
+        friend class Singleton<WriteCacheServer, true, ServiceId::WriteCacheServerId>;
     public:
         /**
          * @brief Get the write cache index object
