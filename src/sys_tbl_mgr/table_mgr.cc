@@ -34,7 +34,7 @@ namespace springtail {
         return keys;
     }
 
-    TableMgr::TableMgr()
+    TableMgr::TableMgr() : Singleton<TableMgr>(ServiceId::TableMgrId)
     {
         // get the base directory for table data
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);

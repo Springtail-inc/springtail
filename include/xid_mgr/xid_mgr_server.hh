@@ -11,9 +11,9 @@
 
 namespace springtail::xid_mgr {
 
-class XidMgrServer : public Singleton<XidMgrServer, true, ServiceId::XidMgrServerId>
+class XidMgrServer : public Singleton<XidMgrServer>
 {
-    friend class Singleton<XidMgrServer, true, ServiceId::XidMgrServerId>;
+    friend class Singleton<XidMgrServer>;
 
 public:
     /** SYNC interval */

@@ -27,9 +27,9 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base,
      * to the target XID as part of GC-1.  Then in GC-2 the system tables can be accessed via the
      * read-only Table interfaces using the target XID.
      */
-    class TableMgr : public Singleton<TableMgr, true, ServiceId::TableMgrId>
+    class TableMgr : public Singleton<TableMgr>
     {
-        friend class Singleton<TableMgr, true, ServiceId::TableMgrId>;
+        friend class Singleton<TableMgr>;
     public:
         /**
          * Read the table metadata for the requested table ID.  Note that Table objects's are always

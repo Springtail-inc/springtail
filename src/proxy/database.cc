@@ -481,6 +481,7 @@ namespace springtail::pg_proxy
     /*********** Database Mgr *************/
 
     DatabaseMgr::DatabaseMgr() :
+        Singleton<DatabaseMgr>(ServiceId::DatabaseMgrId),
         _data_sub_thread(1, false),
         _primary_set(std::make_shared<DatabasePrimarySet>(POOL_SESSIONS_PER_INSTANCE)),
         _replica_set(std::make_shared<DatabaseReplicaSet>(POOL_SESSIONS_PER_INSTANCE))

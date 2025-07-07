@@ -62,9 +62,9 @@ bool DaemonRunner::start()
     return true;
 }
 
-class ServiceRegister : public Singleton<ServiceRegister, true, ServiceId::ServiceRegisterId>
+class ServiceRegister : public Singleton<ServiceRegister>
 {
-    friend class Singleton<ServiceRegister, true, ServiceId::ServiceRegisterId>;
+    friend class Singleton<ServiceRegister>;
 
 public:
     bool start(std::vector<std::unique_ptr<ServiceRunner>> &service_list)
@@ -93,7 +93,7 @@ public:
     }
 
 private:
-    ServiceRegister() = default;
+    ServiceRegister() : Singleton<ServiceRegister>(ServiceId::ServiceRegisterId) {}
     virtual ~ServiceRegister() override = default;
 
     std::vector<std::unique_ptr<ServiceRunner>> _service_list;

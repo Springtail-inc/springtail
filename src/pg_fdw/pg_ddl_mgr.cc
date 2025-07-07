@@ -46,7 +46,9 @@ namespace springtail::pg_fdw {
         "FROM pg_type "
         "WHERE typisdefined = true";
 
-    PgDDLMgr::PgDDLMgr() : _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE)
+    PgDDLMgr::PgDDLMgr() :
+        Singleton<PgDDLMgr>(ServiceId::PgDDLMgrId),
+        _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE)
     {
         _cache_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [this](const std::string &path, const nlohmann::json &new_value) -> void {
@@ -76,23 +78,22 @@ namespace springtail::pg_fdw {
     void
     PgDDLMgr::_internal_shutdown()
     {
-        notify_shutdown();
         _pg_ddl_mgr_thread.join();
         std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
         redis_cache->remove_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
     }
 
     void
-    PgDDLMgr::start(const std::string &_username,
-                    const std::string &_password,
-                    std::optional<std::string> _hostname)
+    PgDDLMgr::start(const std::string &username,
+                    const std::string &password,
+                    std::optional<std::string> hostname)
     {
         // start the ddl main thread
         std::string fdw_id = Properties::get_fdw_id();
 
         LOG_DEBUG(LOG_FDW, "Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}",
-                    fdw_id, _username, _password, _hostname.value_or(""));
-        PgDDLMgr::get_instance()->init(fdw_id, _username, _password, _hostname);
+                    fdw_id, username, password, hostname.value_or(""));
+        PgDDLMgr::get_instance()->init(fdw_id, username, password, hostname);
         PgDDLMgr::get_instance()->_pg_ddl_mgr_thread = std::thread(&PgDDLMgr::run, PgDDLMgr::get_instance());
     }
 
@@ -352,7 +353,7 @@ namespace springtail::pg_fdw {
         // move any pending DDLs to the active queue
         redis_ddl.abort_fdw(_fdw_id);
 
-        while (!_is_shutting_down) {
+        while (!_is_shutting_down()) {
             try {
                 // blocking redis call to get next set of DDL statements
                 auto &&ddls_vec = redis_ddl.get_next_ddls(_fdw_id);

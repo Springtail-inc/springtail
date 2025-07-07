@@ -6,9 +6,9 @@
 
 namespace springtail::sys_tbl_mgr {
 
-class Server final : public Singleton<Server, true, ServiceId::SysTblMgrServerId>
+class Server final : public Singleton<Server>
 {
-    friend class Singleton<Server, true, ServiceId::SysTblMgrServerId>;
+    friend class Singleton<Server>;
 public:
     static void start();
 

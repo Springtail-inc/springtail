@@ -21,9 +21,9 @@ namespace springtail::pg_fdw {
      * @brief DDL Mgr, applies changes from Redis queue
      * to the FDW tables
      */
-    class PgDDLMgr final : public Singleton<PgDDLMgr, true, ServiceId::PgDDLMgrId>
+    class PgDDLMgr final : public Singleton<PgDDLMgr>
     {
-            friend class Singleton<PgDDLMgr, true, ServiceId::PgDDLMgrId>;
+            friend class Singleton<PgDDLMgr>;
     public:
         /** Max number of connections to cache */
         static constexpr int MAX_CONNECTION_CACHE_SIZE = 10;
@@ -48,11 +48,6 @@ namespace springtail::pg_fdw {
         void run();
 
         /**
-         * @brief This function notifies DDL manager to exit the main loop
-         */
-        void notify_shutdown() { _is_shutting_down = true; }
-
-        /**
          * @brief Generate enum alter type sql statement
          * It is public due for testing
          * @param escaped_schema schema name
@@ -67,9 +62,9 @@ namespace springtail::pg_fdw {
                                               const nlohmann::json &to,
                                               const LibPqConnectionPtr conn);
 
-        static void start(const std::string &_username,
-                          const std::string &_password,
-                          std::optional<std::string> _hostname);
+        static void start(const std::string &username,
+                          const std::string &password,
+                          std::optional<std::string> hostname);
 
     protected:
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections
@@ -90,7 +85,6 @@ namespace springtail::pg_fdw {
         std::map<uint64_t, uint64_t> _db_xid_map;  ///< map of db id to max schema xid (applied)
 
         std::map<uint32_t, std::string> _type_map;  ///< map of PG type OIDs to type names
-        std::atomic<bool> _is_shutting_down{false}; ///< shutting down flag
 
         std::thread _pg_ddl_mgr_thread;
         /**

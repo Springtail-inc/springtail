@@ -16,9 +16,9 @@
 
 namespace springtail::sys_tbl_mgr {
 
-class Client : public Singleton<Client, true, ServiceId::SysTblMgrClientId>
+class Client : public Singleton<Client>
 {
-    friend class Singleton<Client, true, ServiceId::SysTblMgrClientId>;
+    friend class Singleton<Client>;
 public:
     void ping();
 

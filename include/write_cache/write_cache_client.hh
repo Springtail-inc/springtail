@@ -13,9 +13,9 @@
 
 namespace springtail {
 
-class WriteCacheClient : public Singleton<WriteCacheClient, true, ServiceId::WriteCacheClientId>
+class WriteCacheClient : public Singleton<WriteCacheClient>
 {
-    friend class Singleton<WriteCacheClient, true, ServiceId::WriteCacheClientId>;
+    friend class Singleton<WriteCacheClient>;
 
 public:
     struct WriteCacheExtent {

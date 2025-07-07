@@ -21,9 +21,9 @@
 
 namespace springtail::pg_proxy {
 
-    class ProxyServer : public Singleton<ProxyServer, true, ServiceId::ProxyServerId>
+    class ProxyServer : public Singleton<ProxyServer>
     {
-        friend class Singleton<ProxyServer, true, ServiceId::ProxyServerId>;
+        friend class Singleton<ProxyServer>;
     public:
         enum MODE : int8_t {
             NORMAL=0,   ///< normal mode, read-write splitting
@@ -122,7 +122,7 @@ namespace springtail::pg_proxy {
 
         static void start(bool force_shadow, bool force_primary);
     protected:
-        ProxyServer() = default;
+        ProxyServer() : Singleton<ProxyServer>(ServiceId::ProxyServerId) {}
         virtual ~ProxyServer() override = default;
 
         /** Shutdown server */

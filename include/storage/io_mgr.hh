@@ -23,9 +23,9 @@ namespace springtail {
     /**
      * @brief Singleton IOMgr; used to retrieve IOSysFHs
      */
-    class IOMgr : public Singleton<IOMgr, true, ServiceId::IOMgrId>
+    class IOMgr : public Singleton<IOMgr>
     {
-        friend class Singleton<IOMgr, true, ServiceId::IOMgrId>;
+        friend class Singleton<IOMgr>;
     public:
         /** IO Mode for opening a file; APPEND appends to end of file; WRITE allows overwrite */
         enum IO_MODE { READ, APPEND, WRITE };
@@ -119,7 +119,7 @@ namespace springtail {
          * @param num_threads     Initial number of threads for thread pool (NUM_THREADS)
          * @param max_filehandles Initial size of file handle cache (MAX_FILE_OBJECTS)
          */
-        IOMgr()
+        IOMgr() : Singleton<IOMgr>(ServiceId::IOMgrId)
         {
             _init(IOMgr::NUM_THREADS, IOMgr::MAX_FILE_OBJECTS);
         }

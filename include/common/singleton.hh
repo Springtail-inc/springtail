@@ -37,7 +37,7 @@ namespace springtail {
 
     void springtail_register_service(ServiceId service_id, ShutdownFunc fn);
 
-    template <typename T, bool SR = false, ServiceId SI = ServiceId::ServiceInvalidId>
+    template <typename T>
     class Singleton {
     public:
         /**
@@ -70,17 +70,6 @@ namespace springtail {
         }
 
         /**
-         * @brief Stop the thread
-         *
-         */
-        virtual void stop_thread()
-        {
-            if (_has_thread) {
-                _shutting_down = true;
-            }
-        }
-
-        /**
          * @brief Shutdown function will only perform shutdown once
          *
          */
@@ -90,6 +79,16 @@ namespace springtail {
         }
 
     protected:
+        /**
+         * @brief This function is intended to be provided by the derived class to perform
+         *          whatever cleanup is necessary before the thread is joined.
+         *          For example, if the thread is waiting on a conditional variable,
+         *          this is where you would call notify_all() on this conditional
+         *          variable to get the thread to wake up.
+         *
+         */
+        virtual void _internal_thread_shutdown() {}
+
         /**
          * @brief This function is intended to be provided by the derived class to perform
          *          its own cleanup.
@@ -117,12 +116,11 @@ namespace springtail {
          * @brief Constructor of a new Singleton object can only be accessed by the derived class
          *
          */
-        Singleton()
+        Singleton(ServiceId service_id = ServiceId::ServiceInvalidId)
         {
-            DCHECK((SR && SI > ServiceId::ServiceInvalidId && SI < ServiceId::ServiceCountId)
-                    || (SI == ServiceId::ServiceInvalidId));
-            if (SR) {
-                springtail_register_service(SI, T::shutdown);
+            DCHECK(service_id >= ServiceId::ServiceInvalidId && service_id < ServiceId::ServiceCountId);
+            if (service_id > ServiceId::ServiceInvalidId) {
+                springtail_register_service(service_id, T::shutdown);
             }
         }
 
@@ -167,8 +165,9 @@ namespace springtail {
         static void _shutdown()
         {
             if (_instance != nullptr) {
+                _instance->_shutting_down = true;
                 if (_instance->_has_thread) {
-                    _instance->stop_thread();
+                    _instance->_internal_thread_shutdown();
                     _instance->_thread.join();
                 }
                 _instance->_internal_shutdown();

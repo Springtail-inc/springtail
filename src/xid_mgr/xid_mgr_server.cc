@@ -10,7 +10,8 @@
 
 namespace springtail::xid_mgr {
 
-XidMgrServer::XidMgrServer() {
+XidMgrServer::XidMgrServer() : Singleton<XidMgrServer>(ServiceId::XidMgrServerId)
+{
     nlohmann::json json = Properties::get(Properties::LOG_MGR_CONFIG);
     nlohmann::json rpc_json;
 
