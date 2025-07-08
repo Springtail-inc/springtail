@@ -1,8 +1,7 @@
 #pragma once
 
 #include <common/logging.hh>
-#include <common/service_register.hh>
-#include <common/singleton.hh>
+#include <common/init.hh>
 #include <common/constants.hh>
 
 #include <redis/db_state_change.hh>
@@ -590,16 +589,12 @@ namespace springtail::pg_proxy {
      * redis instance.
      * TODO: Missing addition/removal of replica instances (FDWs) via redis pubsub
      */
-    class DatabaseMgr final : public SingletonWithThread<DatabaseMgr> {
-        friend class SingletonWithThread<DatabaseMgr>;
+    class DatabaseMgr final : public Singleton<DatabaseMgr>
+    {
+        friend class Singleton<DatabaseMgr>;
     public:
 
         static constexpr const int POOL_SESSIONS_PER_INSTANCE=5; ///< max sessions per instance
-
-        /**
-         * @brief Initialization function
-         */
-        void init();
 
         /**
          * @brief Get a name of an arbitrary replicated database for running a user query in UserMgr
@@ -781,6 +776,11 @@ namespace springtail::pg_proxy {
         ~DatabaseMgr() override = default;
 
         /**
+         * @brief Initialization function
+         */
+        void _init();
+
+        /**
          * @brief Database schema and table change handling
          * @param msg - message
          */
@@ -807,25 +807,6 @@ namespace springtail::pg_proxy {
          * @param db_id - database id
          */
         void _remove_replicated_database(uint64_t db_id);
-    };
-
-    class DatabaseMgrRunner : public ServiceRunner {
-    public:
-        DatabaseMgrRunner() : ServiceRunner("DatabaseMgr") {}
-
-        ~DatabaseMgrRunner() override = default;
-
-        bool start() override
-        {
-            DatabaseMgr::get_instance()->init();
-            return true;
-        }
-
-        void stop() override
-        {
-            DatabaseMgr::get_instance()->stop_thread();
-            DatabaseMgr::shutdown();
-        }
     };
 
 } // namespace springtail:pg_proxy

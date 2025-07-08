@@ -426,15 +426,7 @@ namespace springtail::pg_fdw {
         }
 
         if (init) {
-            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-            runners.emplace();
-            runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
-            runners->emplace_back(std::make_unique<GrpcClientRunner<sys_tbl_mgr::Client>>());
-            runners->emplace_back(std::make_unique<IOMgrRunner>());
-            runners->emplace_back(std::make_unique<SchemaMgrRunner>());
-            runners->emplace_back(std::make_unique<TableMgrRunner>());
-
-            springtail_init(runners, false, PG_FDW_LOG_FILE_PREFIX, LOG_FDW);
+            springtail_init(false, PG_FDW_LOG_FILE_PREFIX, LOG_FDW);
         }
 
         LOG_DEBUG(LOG_FDW, "Initializing PgFdwMgr");
@@ -1485,7 +1477,7 @@ namespace springtail::pg_fdw {
                                  const std::string &schema,
                                  const std::string &table,
                                  uint64_t tid,
-                                 std::vector<std::tuple<std::string, std::string, bool>> &columns)
+                                 const std::vector<std::tuple<std::string, std::string, bool>> &columns)
     {
         // no schema name needed
         std::string create = fmt::format("CREATE FOREIGN TABLE {}.{} (\n",
@@ -1539,13 +1531,13 @@ namespace springtail::pg_fdw {
 
     List *
     PgFdwMgr::_import_springtail_catalog(const std::string &server,
-                                         const std::set<std::string> table_set,
+                                         const std::set<std::string, std::less<>> &table_set,
                                          bool exclude, bool limit)
     {
         List        *commands = NIL;
         std::string  sql;
 
-        auto import_catalog = [&]<typename T>(const auto& tab_name) {
+        auto import_catalog = [exclude, limit, &table_set, &server, &commands, &sql]<typename T>(const auto& tab_name) {
             if (!((exclude && table_set.contains(tab_name)) ||
                   (limit && !table_set.contains(tab_name)))) {
                 sql = _gen_fdw_system_table(server, tab_name, T::ID, T::Data::SCHEMA);
@@ -1608,6 +1600,30 @@ namespace springtail::pg_fdw {
         return user_types;
     }
 
+    List* vector_to_string_list(const std::vector<std::string>& vec)
+    {
+        int len = vec.size();
+
+        auto list = (List*) palloc(sizeof(List));
+        if (!list) return nullptr;
+
+        list->type = T_List;
+        list->length = len;
+        list->max_length = len;
+
+        list->elements = (ListCell*) palloc(sizeof(ListCell) * len);
+        if (!list->elements) {
+            pfree(list);
+            return nullptr;
+        }
+
+        for (int i = 0; i < len; ++i) {
+            list->elements[i].ptr_value = pstrdup(vec[i].c_str());
+        }
+
+        return list;
+    }
+
     List *
     PgFdwMgr::fdw_import_foreign_schema(const std::string &server,
                                         const std::string &namespace_name,
@@ -1618,15 +1634,14 @@ namespace springtail::pg_fdw {
                                         uint64_t schema_xid)
     {
         auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
-        List                 *commands = NIL;
-        std::set<std::string> table_set;
+        std::set<std::string, std::less<>> table_set;
 
         // construct list of either excluded or limited tables
         if (exclude || limit) {
             ListCell *lc;
             foreach(lc, table_list) {
                 RangeVar *rv = (RangeVar *)lfirst(lc);
-                table_set.insert(rv->relname);
+                table_set.emplace(rv->relname);
             }
         }
 
@@ -1637,186 +1652,15 @@ namespace springtail::pg_fdw {
             return _import_springtail_catalog(server, table_set, exclude, limit);
         }
 
-        // lookup the namespace_id for the requested schema
-        auto ns_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, schema_xid);
-        auto ns_key = sys_tbl::NamespaceNames::Secondary::key_tuple(namespace_name, schema_xid, constant::MAX_LSN);
-        auto ns_i = ns_table->inverse_lower_bound(ns_key, 1);
+        std::vector<std::string> ddl = PgFdwCommon::get_schema_ddl(db_id, schema_xid, server, namespace_name, exclude, limit, table_set,
+                              [&db_id, &namespace_name, &schema_xid](uint32_t pg_type, uint64_t namespace_id) {
+                                  return _get_type_name(pg_type, _load_user_types(db_id, namespace_name, namespace_id, schema_xid));
+                              },
+                              [](const std::string &name) {
+                                  return quote_identifier(name.c_str());
+                              }, true);
 
-        // verify that the name is present and exists
-        if (ns_i == ns_table->end(1)) {
-            LOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
-                        namespace_name, schema_xid, constant::MAX_LSN);
-            return commands;
-        }
-
-        auto ns_fields = ns_table->extent_schema()->get_fields();
-        auto &&row = *ns_i;
-        if (namespace_name != ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&row)) {
-            LOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
-                        namespace_name, schema_xid, constant::MAX_LSN);
-            return commands;
-        }
-        if (!ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row)) {
-            LOG_WARN("Namespace marked as not-exists {} @ {}:{}",
-                        namespace_name, schema_xid, constant::MAX_LSN);
-            return commands;
-        }
-
-        // record the namespace ID
-        uint64_t namespace_id = ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&row);
-
-        // load the user type map;  primary pg_oid -> type_name
-        auto user_types = _load_user_types(db_id, namespace_name, namespace_id, schema_xid);
-
-        // get the table names table to iterate over
-        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID,
-                                                         schema_xid);
-        // get field array
-        auto fields = table->extent_schema()->get_fields();
-
-        // map from table name -> <table id, xid>
-        std::map<std::string, std::pair<uint64_t,uint64_t>> table_map;
-
-        // iterate over the table names table and populate the table map
-        for (auto row : (*table)) {
-            auto table_ns_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
-
-            // check for schema-namespace match
-            if (table_ns_id != namespace_id) {
-                LOG_DEBUG(LOG_FDW, "Skipping row due to namespace mismatch {}, {}",
-                                    table_ns_id, namespace_id);
-                continue;
-            }
-
-            std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row));
-            // handle limit and exclude
-            if (exclude && table_set.contains(table_name)) {
-                LOG_DEBUG(LOG_FDW, "Excluding table {}.{}", namespace_name, table_name);
-                continue;
-            }
-
-            // XXX should really stop after we have found all tables in limit
-            if (limit && !table_set.contains(table_name)) {
-                LOG_DEBUG(LOG_FDW, "Limit, skipping table {}.{}", namespace_name, table_name);
-                continue;
-            }
-
-            uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
-            uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
-
-            bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
-            if (!exists) {
-                // find table and compare xids, remove if this xid is >= to the one in the map
-                auto entry = table_map.find(table_name);
-                if (entry != table_map.end()) {
-                    if (xid >= entry->second.second) {
-                        // remove this table entry
-                        table_map.erase(entry);
-                    }
-                }
-                LOG_DEBUG(LOG_FDW, "Removed non-existant table {}.{} tid={}, xid={}",
-                                    namespace_name, table_name, tid, xid);
-                continue;
-            }
-
-            LOG_DEBUG(LOG_FDW, "Found table {}.{} tid={}, xid={}", namespace_name, table_name, tid, xid);
-
-            // lookup table in map, if found the xid if it is newer
-            auto entry = table_map.insert({table_name, {tid, xid}});
-            if (entry.second == false) {
-                LOG_DEBUG(LOG_FDW, "Table {} already exists in schema {}", table_name, namespace_name);
-                // update if xid is newer
-                if (xid > entry.first->second.second) {
-                    entry.first->second = {tid, xid};
-                }
-            }
-        }
-
-        // reorganize the table_map to be from tid -> {xid, table}
-        std::map<uint64_t, std::tuple<uint64_t, std::string>> tid_map;
-        for (const auto &[table_name, table_info] : table_map) {
-            tid_map[table_info.first] = {table_info.second, table_name};
-        }
-
-        // Move on to iterating through the schemas table
-
-        // column list: name, type, nullable
-        std::vector<std::tuple<std::string, std::string, bool>> columns;
-
-        uint64_t current_tid=0;
-        std::string current_table;
-
-        // get the schemas table
-        table = TableMgr::get_instance()->get_table(db_id, sys_tbl::Schemas::ID,
-                                                    schema_xid);
-
-        auto idx_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::Indexes::ID,
-                                                             schema_xid);
-
-        auto idx_fields = idx_table->extent_schema()->get_fields();
-
-        // iterate through it
-        fields = table->extent_schema()->get_fields();
-        for (auto row : (*table)) {
-            uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(&row);
-
-            LOG_DEBUG(LOG_FDW, "Found table in schemas table: {}", tid);
-
-            // check if we have moved to next tid
-            if (tid != current_tid) {
-
-                if (!current_table.empty()) {
-                    // dump this table
-                    std::string sql = _gen_fdw_table_sql(server, namespace_name, current_table,
-                                                         current_tid, columns);
-                    commands = lappend(commands, pstrdup(sql.c_str()));
-                }
-
-                // reset state
-                columns.clear();
-                current_table = "";
-
-                // do lookup of new tid in map
-                auto it = tid_map.find(tid);
-                if (it == tid_map.end()) {
-                    // not found skip it
-                    LOG_DEBUG(LOG_FDW, "Table {} not found in table map, skipping", tid);
-                    continue;
-                }
-
-                // update current vars based on this tid and info from tid_map
-                current_tid = tid;
-                current_table = std::get<1>(it->second);
-            }
-
-            std::string column_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(&row));
-            bool exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(&row);
-            if (!exists) {
-                auto it = std::find_if(columns.begin(), columns.end(),
-                [&column_name](const std::tuple<std::string, std::string, bool> &column) {
-                        return std::get<0>(column) == column_name;
-                    });
-                if (it != columns.end()) {
-                    columns.erase(it);
-                }
-                continue;
-            }
-
-            // add column if it exists
-            int32_t pg_type(fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(&row));
-            bool nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(&row);
-
-            columns.push_back({column_name, _get_type_name(pg_type, user_types), nullable});
-        }
-
-        // process last table
-        if (columns.size() > 0) {
-            // dump this table
-            std::string sql = _gen_fdw_table_sql(server, namespace_name, current_table, current_tid, columns);
-            commands = lappend(commands, pstrdup(sql.c_str()));
-        }
-
-        return commands;
+        return vector_to_string_list(ddl);
     }
 
     bool

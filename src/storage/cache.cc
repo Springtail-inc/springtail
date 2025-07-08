@@ -18,34 +18,7 @@ namespace springtail {
 /* Thread-local variable to identify the background flushing thread. */
 thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
 
-    /* static member initialization must happen outside of class */
-    StorageCache* StorageCache::_instance = {nullptr};
-    boost::mutex StorageCache::_instance_mutex;
-
-    StorageCache *
-    StorageCache::get_instance()
-    {
-        boost::unique_lock lock(_instance_mutex);
-
-        if (_instance == nullptr) {
-            _instance = new StorageCache();
-        }
-
-        return _instance;
-    }
-
-    void
-    StorageCache::shutdown()
-    {
-        boost::unique_lock lock(_instance_mutex);
-
-        if (_instance != nullptr) {
-            delete _instance;
-            _instance = nullptr;
-        }
-    }
-
-    StorageCache::StorageCache()
+    StorageCache::StorageCache() : Singleton<StorageCache>(ServiceId::StorageCacheId)
     {
         // get the cache size
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
@@ -1770,7 +1743,7 @@ StorageCache::PageCache::background_cleaner()
         // extract the extent from the clean cache into the dirty cache
         return _extract(extent);
     }
-    
+
     StorageCache::SafeExtent::SafeExtent(const std::filesystem::path &file,
             const ExtentRef &ref,
             bool mark_dirty)

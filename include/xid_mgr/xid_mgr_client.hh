@@ -2,16 +2,16 @@
 
 #include <memory>
 
-#include <common/singleton.hh>
+#include <common/init.hh>
 #include <grpcpp/grpcpp.h>
 #include <proto/xid_manager.grpc.pb.h>
 #include <grpc/grpc_client.hh>
 
 namespace springtail {
 
-class XidMgrClient : public Singleton<XidMgrClient> {
+class XidMgrClient : public Singleton<XidMgrClient>
+{
     friend class Singleton<XidMgrClient>;
-
 public:
     /**
      * @brief Ping the server

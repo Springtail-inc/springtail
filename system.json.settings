@@ -104,7 +104,8 @@
         "use_pg_shadow": true,
         "pool_size_limit": 0,
         "pool_timeout_limit": 0,
-        "pool_expiration_interval_secs": 0
+        "pool_expiration_interval_secs": 0,
+        "user_mgr_sleep_interval_secs": 15
     },
     "org": {
         "NOTE": "this section is for testing only, in production env vars are used",

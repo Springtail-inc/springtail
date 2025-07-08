@@ -126,15 +126,16 @@ namespace springtail::pg_proxy {
     }
 
     void
-    UserMgr::init(uint32_t sleep_interval)
+    UserMgr::_init()
     {
-        _sleep_interval = sleep_interval;
-
         // set the user manager to use pg_shadow or AWS secrets
         nlohmann::json json = Properties::get(Properties::PROXY_CONFIG);
         _use_pg_shadow = Json::get_or<bool>(json, "use_pg_shadow", false);
 
-        LOG_INFO("UserMgr setup to use {}", _use_pg_shadow ? "pg_shadow" : "AWS secrets");
+        _sleep_interval = Json::get_or<uint32_t>(json, "user_mgr_sleep_interval_secs", USER_MGR_SLEEP_INTERVAL_SECS);
+
+        LOG_INFO("UserMgr setup to use {}, user_mgr_sleep_interval_secs = {}",
+                _use_pg_shadow ? "pg_shadow" : "AWS secrets", _sleep_interval);
 
         start_thread();
     }

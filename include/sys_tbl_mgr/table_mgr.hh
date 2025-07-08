@@ -2,7 +2,7 @@
 
 #include <boost/thread.hpp>
 
-#include <common/singleton.hh>
+#include <common/init.hh>
 #include <sys_tbl_mgr/table.hh>
 
 namespace springtail {
@@ -27,7 +27,8 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base,
      * to the target XID as part of GC-1.  Then in GC-2 the system tables can be accessed via the
      * read-only Table interfaces using the target XID.
      */
-    class TableMgr : public Singleton<TableMgr> {
+    class TableMgr : public Singleton<TableMgr>
+    {
         friend class Singleton<TableMgr>;
     public:
         /**
@@ -106,22 +107,4 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base,
         std::filesystem::path _table_base; ///< The base directory for individual table directories.
     };
 
-    class TableMgrRunner : public ServiceRunner {
-    public:
-        TableMgrRunner() : ServiceRunner("TableMgr") {}
-
-        ~TableMgrRunner() override = default;
-
-        bool start() override
-        {
-            TableMgr::get_instance();
-            return true;
-        }
-
-        void stop() override
-        {
-            TableMgr::shutdown();
-        }
-    };
-
-}
+} // springtail

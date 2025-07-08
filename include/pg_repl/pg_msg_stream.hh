@@ -180,6 +180,8 @@ namespace springtail {
         PgMsgPtr _decode_alter_usertype(const PgMsgMessage &message, char *buffer, int len);
         PgMsgPtr _decode_drop_usertype(const PgMsgMessage &message, char *buffer, int len);
         PgMsgPtr _decode_copy_sync(const PgMsgMessage &message, char *buffer, int len);
+        PgMsgPtr _decode_attach_partition(const PgMsgMessage &message, const char *buffer, int len);
+        PgMsgPtr _decode_detach_partition(const PgMsgMessage &message, const char *buffer, int len);
 
         // helpers
         void _decode_schema_columns(const nlohmann::json &json, std::vector<PgMsgSchemaColumn> &columns);

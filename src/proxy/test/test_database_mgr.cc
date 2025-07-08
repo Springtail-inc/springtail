@@ -1,5 +1,3 @@
-#include <memory>
-
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
@@ -19,10 +17,7 @@ namespace {
     protected:
         static void SetUpTestSuite()
         {
-            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-            runners.emplace();
-            runners->emplace_back(std::make_unique<DatabaseMgrRunner>());
-            springtail_init_test(runners);
+            springtail_init_test();
 
             _data_client = RedisMgr::get_instance()->get_client();
 
