@@ -92,7 +92,7 @@ namespace springtail {
             throw TypeError("Getting text type unsupported for this field.");
         }
 
-        virtual const std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const {
+        virtual std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const {
             throw TypeError("Getting numeric type unsupported for this field.");
         }
 
@@ -621,7 +621,7 @@ namespace springtail {
             return e_row->get_text(var_off);
         }
 
-        const std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const override {
+        std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const override {
             // must be numeric type
             DCHECK_EQ(_type, SchemaType::NUMERIC);
 
@@ -835,16 +835,16 @@ namespace springtail {
                 return SchemaType::FLOAT32;
             } else if constexpr(std::is_same_v<T, std::string>) {
                 return SchemaType::TEXT;
-            } else if constexpr(std::is_same_v<T, std::shared_ptr<numeric::NumericData>>) {
-                return SchemaType::NUMERIC;
             } else if constexpr(std::is_same_v<T, std::vector<char>>) {
                 return SchemaType::BINARY;
+            } else {
+                static_assert("bad field type");
             }
 
             throw TypeError();
         }
 
-        bool get_bool(const void *row) const override {
+        bool get_bool(const void *) const override {
             if constexpr(std::is_same_v<T, bool>) {
                 return _value;
             } else {
@@ -852,7 +852,7 @@ namespace springtail {
             }
         }
 
-        int8_t get_int8(const void *row) const override {
+        int8_t get_int8(const void *) const override {
             if constexpr(std::is_same_v<T, int8_t>) {
                 return _value;
             } else {
@@ -860,7 +860,7 @@ namespace springtail {
             }
         }
 
-        uint8_t get_uint8(const void *row) const override {
+        uint8_t get_uint8(const void *) const override {
             if constexpr(std::is_same_v<T, uint8_t>) {
                 return _value;
             } else {
@@ -868,7 +868,7 @@ namespace springtail {
             }
         }
 
-        int16_t get_int16(const void *row) const override {
+        int16_t get_int16(const void *) const override {
             if constexpr(std::is_same_v<T, int16_t>) {
                 return _value;
             } else {
@@ -876,7 +876,7 @@ namespace springtail {
             }
         }
 
-        uint16_t get_uint16(const void *row) const override {
+        uint16_t get_uint16(const void *) const override {
             if constexpr(std::is_same_v<T, uint16_t>) {
                 return _value;
             } else {
@@ -884,7 +884,7 @@ namespace springtail {
             }
         }
 
-        int32_t get_int32(const void *row) const override {
+        int32_t get_int32(const void *) const override {
             if constexpr(std::is_same_v<T, int32_t>) {
                 return _value;
             } else {
@@ -892,7 +892,7 @@ namespace springtail {
             }
         }
 
-        uint32_t get_uint32(const void *row) const override {
+        uint32_t get_uint32(const void *) const override {
             if constexpr(std::is_same_v<T, uint32_t>) {
                 return _value;
             } else {
@@ -900,7 +900,7 @@ namespace springtail {
             }
         }
 
-        int64_t get_int64(const void *row) const override {
+        int64_t get_int64(const void *) const override {
             if constexpr(std::is_same_v<T, int64_t>) {
                 return _value;
             } else {
@@ -908,7 +908,7 @@ namespace springtail {
             }
         }
 
-        uint64_t get_uint64(const void *row) const override {
+        uint64_t get_uint64(const void *) const override {
             if constexpr(std::is_same_v<T, uint64_t>) {
                 return _value;
             } else {
@@ -916,7 +916,7 @@ namespace springtail {
             }
         }
 
-        float get_float32(const void *row) const override {
+        float get_float32(const void *) const override {
             if constexpr(std::is_same_v<T, float>) {
                 return _value;
             } else {
@@ -924,7 +924,7 @@ namespace springtail {
             }
         }
 
-        double get_float64(const void *row) const override {
+        double get_float64(const void *) const override {
             if constexpr(std::is_same_v<T, double>) {
                 return _value;
             } else {
@@ -932,7 +932,7 @@ namespace springtail {
             }
         }
 
-        std::string_view get_text(const void *row) const override {
+        std::string_view get_text(const void *) const override {
             if constexpr(std::is_same_v<T, std::string>) {
                 return _value;
             } else {
@@ -940,15 +940,7 @@ namespace springtail {
             }
         }
 
-        const std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const override {
-            if constexpr(std::is_same_v<T, std::shared_ptr<numeric::NumericData>>) {
-                return _value;
-            } else {
-                throw TypeError();
-            }
-        }
-
-        const std::span<const char> get_binary(const void *row) const override {
+        const std::span<const char> get_binary(const void*) const override {
             if constexpr(std::is_same_v<T, std::vector<char>>) {
                 return _value;
             } else {
@@ -956,6 +948,28 @@ namespace springtail {
             }
         }
     };
+
+    template <>
+    class ConstTypeField<std::shared_ptr<numeric::NumericData>> : public ConstField {
+    public:
+        using value_type = std::shared_ptr<numeric::NumericData>;
+
+        explicit ConstTypeField(std::vector<char> v) 
+            : _value{std::move(v)}
+        {}
+
+        SchemaType get_type() const override {
+            return SchemaType::NUMERIC;
+        }
+
+        value_type get_numeric(const void*) const override {
+            return numeric::make_numeric_from_span(_value);
+        }
+
+    private:
+        std::vector<char> _value;
+    };
+
     template <class T>
     using ConstTypeFieldPtr = std::shared_ptr<ConstTypeField<T>>;
 
@@ -1146,7 +1160,7 @@ namespace springtail {
             }
         }
 
-        const std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const override {
+        std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const override {
             if constexpr(std::is_same_v<T, std::shared_ptr<numeric::NumericData>>) {
                 if (_field->is_null(row)) {
                     LOG_DEBUG(LOG_STORAGE, "---> DefaultValueField: value = {}", _default->to_string());
@@ -1575,7 +1589,7 @@ namespace springtail {
             return std::string_view(col.data.data(), col.data.size());
         }
 
-        const std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const override {
+        std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const override {
             auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
             const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
@@ -1705,9 +1719,10 @@ namespace springtail {
                         {
                             // note: perform a copy here to store the constant value
                             auto &&numeric_data = field->get_numeric(tuple->row());
-                            _fields.push_back(std::make_shared<ConstTypeField<std::shared_ptr<numeric::NumericData>>>(
-                                std::move(numeric_data)
-                            ));
+                            auto tmp = (char*)(numeric_data.get());
+                            std::vector<char> value(tmp, tmp + numeric_data->varsize());
+                            _fields.push_back(std::make_shared<ConstTypeField<
+                                    std::shared_ptr<numeric::NumericData>>>(std::move(value)));
                         }
                         break;
                     case(SchemaType::BINARY):
