@@ -104,7 +104,7 @@ namespace springtail {
         /** Serialize the header. */
         std::vector<char> pack() const
         {
-            std::vector<char> data(25 + field_types.size());
+            std::vector<char> data(29 + field_types.size());
             uint32_t field_count = field_types.size();
 
             std::memcpy(data.data(), &xid, sizeof(uint64_t));

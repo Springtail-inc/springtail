@@ -1572,7 +1572,9 @@ StorageCache::PageCache::background_cleaner()
             // XXX we could do this asynchronously and return a future that completes when the extent ID
             //     becomes available... should be safe to do so since we are already putting the extent
             //     into an exclusive FLUSHING state
-            extent->_extent_id = response.get()->offset;
+            auto&& flush_response = response.get();
+            extent->_extent_id = flush_response->offset;
+            extent->_extent_size = flush_response->next_offset - flush_response->offset;
 
             lock.lock();
             lock.release();
