@@ -7,7 +7,7 @@
 
 namespace springtail {
 
-XidMgrSubscriber::XidMgrSubscriber(std::shared_ptr<grpc::Channel> ch, Callbacks cb) 
+XidMgrSubscriber::XidMgrSubscriber(std::shared_ptr<grpc::Channel> ch, Callbacks cb)
     :_channel{std::move(ch)},
     _cb{std::move(cb)}
 {
@@ -22,7 +22,7 @@ XidMgrSubscriber::XidMgrSubscriber(std::shared_ptr<grpc::Channel> ch, Callbacks 
 
 XidMgrSubscriber::~XidMgrSubscriber()
 {
-    LOG_DEBUG(LOG_XID_MGR, "Deleted");
+    LOG_DEBUG(LOG_XID_MGR, "XidMgrSubscriber::~XidMgrSubscriber: Deleted");
     _stub.reset();
 }
 
@@ -33,7 +33,7 @@ void XidMgrSubscriber::cancel()
 
 void XidMgrSubscriber::OnReadDone(bool ok)
 {
-    LOG_DEBUG(LOG_XID_MGR, "OnDone");
+    LOG_DEBUG(LOG_XID_MGR, "XidMgrSubscriber::OnReadDone");
     if (ok) {
         _cb->push(_push_response.db_id(), _push_response.xid());
         StartRead(&_push_response);
@@ -48,7 +48,7 @@ void XidMgrSubscriber::OnReadDone(bool ok)
 
 void XidMgrSubscriber::OnDone(const grpc::Status& s)
 {
-    LOG_DEBUG(LOG_XID_MGR, "OnDone");
+    LOG_DEBUG(LOG_XID_MGR, "XidMgrSubscriber::OnDone");
     if (_cb.has_value()) {
         _cb->disconnect();
         _cb = {};

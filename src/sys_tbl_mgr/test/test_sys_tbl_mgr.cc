@@ -31,14 +31,8 @@ namespace {
     class SysTblMgr_Test : public testing::Test {
     public:
         static void SetUpTestSuite() {
-            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-            runners.emplace();
-            runners->emplace_back(std::make_unique<IOMgrRunner>());
-
-            auto service_runners = test::get_services(true, true, false);
-            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
-
-            springtail_init_test(runners, LOG_ALL ^ (LOG_CACHE | LOG_STORAGE));
+            springtail_init_test(LOG_ALL ^ (LOG_CACHE | LOG_STORAGE));
+            test::start_services(true, true, false);
 
             // create the public namespace
             auto client = sys_tbl_mgr::Client::get_instance();
@@ -519,7 +513,7 @@ namespace {
         ASSERT_EQ(metadata->stats.row_count, 15);
 
         ASSERT_EQ(cache->size(), 1);
-        auto cached_msg = cache->find(_db, tid, check_xid); 
+        auto cached_msg = cache->find(_db, tid, check_xid);
         ASSERT_TRUE(cached_msg);
 
 
@@ -538,7 +532,7 @@ namespace {
         ASSERT_EQ(metadata->stats.row_count, 30);
 
         ASSERT_EQ(cache->size(), 2);
-        cached_msg = cache->find(_db, tid, check_xid); 
+        cached_msg = cache->find(_db, tid, check_xid);
         ASSERT_TRUE(cached_msg);
 
         schema_meta = _client->get_schema(_db, tid, {check_xid, constant::MAX_LSN});

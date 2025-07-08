@@ -18,7 +18,7 @@
 
 namespace springtail::sys_tbl_mgr {
 
-Client::Client()
+Client::Client() : Singleton<Client>(ServiceId::SysTblMgrClientId)
 {
     nlohmann::json json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
     std::string server = Properties::get_sys_tbl_mgr_hostname();

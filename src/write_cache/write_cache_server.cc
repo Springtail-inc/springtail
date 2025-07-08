@@ -5,7 +5,7 @@
 
 namespace springtail {
 
-WriteCacheServer::WriteCacheServer()
+WriteCacheServer::WriteCacheServer() : Singleton<WriteCacheServer>(ServiceId::WriteCacheServerId)
 {
     auto json = Properties::get(Properties::WRITE_CACHE_CONFIG);
     nlohmann::json rpc_json;
@@ -16,10 +16,11 @@ WriteCacheServer::WriteCacheServer()
 
     _grpc_server_manager.init(rpc_json);
     _grpc_server_manager.addService(WriteCacheService::get_instance());
+    _startup();
 }
 
 void
-WriteCacheServer::startup()
+WriteCacheServer::_startup()
 {
     _grpc_server_manager.startup();
 }

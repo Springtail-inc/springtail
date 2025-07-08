@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <mutex>
-#include <thread>
 #include <unordered_map>
 
 #include <common/redis.hh>
@@ -15,8 +14,8 @@ namespace springtail {
  * for daemons to register provide liveness information
  * that is stored in redis and used by the coordinator
  */
-class Coordinator : public SingletonWithThread<Coordinator> {
-    friend class SingletonWithThread<Coordinator>;
+class Coordinator : public Singleton<Coordinator> {
+    friend class Singleton<Coordinator>;
 
 public:
     /**
@@ -113,23 +112,6 @@ private:
 
     // Map of (type,thread_id) -> atomic timestamp
     std::unordered_map<std::string, std::atomic<uint64_t>> _thread_timestamps;
-};
-
-class CoordinatorRunner : public ServiceRunner {
-public:
-    CoordinatorRunner() : ServiceRunner("Coordinator") {}
-
-    bool start() override
-    {
-        Coordinator::get_instance()->start_thread();
-        return true;
-    }
-
-    void stop() override
-    {
-        Coordinator::get_instance()->stop_thread();
-        Coordinator::shutdown();
-    }
 };
 
 }  // namespace springtail

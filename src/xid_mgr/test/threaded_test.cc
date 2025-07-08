@@ -79,11 +79,8 @@ namespace {
         };
 
         static void SetUpTestSuite() {
-            auto service_runners = test::get_services(true, false, false);
-            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-            runners.emplace();
-            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
-            springtail_init_test(runners);
+            springtail_init_test();
+            test::start_services(true, false, false);
         }
 
         static void TearDownTestSuite() {
