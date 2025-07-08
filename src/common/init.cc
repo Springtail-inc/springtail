@@ -1,4 +1,5 @@
 #include <fstream>
+#include <mutex>
 
 #include <common/init.hh>
 
@@ -287,9 +288,12 @@ static std::vector<ServiceId> topo_sorted_services = {};
 
 static std::map<ServiceId, ShutdownFunc> running_services = {};
 
+static std::mutex running_services_mutex;
+
 void
 springtail_register_service(ServiceId service_id, ShutdownFunc fn)
 {
+    std::unique_lock running_services_lock(running_services_mutex);
     if (topo_sorted_services.empty()) {
         topo_sorted_services = topo_sort();
     }
@@ -300,6 +304,7 @@ springtail_register_service(ServiceId service_id, ShutdownFunc fn)
 void
 springtail_shutdown()
 {
+    std::unique_lock running_services_lock(running_services_mutex);
     for (auto service_id : topo_sorted_services) {
         auto it = running_services.find(service_id);
         if (it == running_services.end()) {
