@@ -10,7 +10,7 @@
 
 namespace springtail {
 
-constexpr uint64_t kPunchAlign = 64 * 1024;  // 64KB punch alignment
+constexpr uint64_t kPunchAlign = 4 * 1024;  // 64KB punch alignment
 
 /**
  * Vacuumer to clear dead extents and table snapshots.
@@ -33,6 +33,9 @@ public:
      */
     void expire_snapshot(const std::filesystem::path &table_dir, uint64_t xid);
 
+    void init();
+
+    void _internal_shutdown();
 protected:
     /**
      * The main loop of the vacuumer.
@@ -56,6 +59,9 @@ private:
 
     RedisDDL _redis_ddl; ///< Interface to the DDL structures in Redis.
 
+    std::thread _vacuumer_thread;           ///< Vacuumer thread
+
+    std::atomic<bool> _shutdown{false};   ///< shutdown flag
     // Round a value up to the nearest multiple of `align`
     inline uint64_t align_up(uint64_t val, uint64_t align) {
         return ((val + align - 1) / align) * align;
@@ -85,4 +91,19 @@ private:
     uint64_t get_vacuum_cutoff_xid(const std::string& file);
 };
 
+class VacuumerRunner : public ServiceRunner {
+    public:
+        VacuumerRunner() : ServiceRunner("Vacuumer") {}
+
+        bool start() override
+        {
+            Vacuumer::get_instance()->init();
+            return true;
+        }
+
+        void stop() override
+        {
+            Vacuumer::shutdown();
+        }
+};
 }

@@ -12,6 +12,7 @@
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_server.hh>
 #include <xid_mgr/xid_mgr_server.hh>
+#include <storage/vacuumer.hh>
 
 using namespace springtail;
 
@@ -49,6 +50,7 @@ int main(int argc, char *argv[])
     runners->emplace_back(std::make_unique<TableMgrRunner>());
     runners->emplace_back(std::make_unique<pg_log_mgr::SyncTrackerRunner>());
     runners->emplace_back(std::make_unique<pg_log_mgr::PgLogCoordinatorRunner>());
+    runners->emplace_back(std::make_unique<VacuumerRunner>());
 
     springtail_init_daemon(runners, "pg_log_mgr", pidfile,
                            LOG_ALL ^ (LOG_PG_REPL | LOG_PG_LOG_MGR_DATA | LOG_STORAGE));

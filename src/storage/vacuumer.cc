@@ -9,6 +9,19 @@
 namespace springtail {
 
 void
+Vacuumer::init()
+{
+    _vacuumer_thread = std::thread(&Vacuumer::_internal_run, this);
+}
+
+void
+Vacuumer::_internal_shutdown()
+{
+    _shutdown = true;
+    _vacuumer_thread.join();
+}
+
+void
 Vacuumer::expire_extent(const std::filesystem::path &file,
                         uint64_t extent_id,
                         uint32_t size,
@@ -80,14 +93,17 @@ Vacuumer::get_vacuum_cutoff_xid(const std::string& file)
 void
 Vacuumer::_internal_run()
 {
-    while (!_is_shutting_down()) {
+    while(!_shutdown) {
         // sleep for 1 second before trying to expire more data
         std::this_thread::sleep_for(std::chrono::seconds(1));
 
         // lock while accessing the maps
         std::unique_lock lock(_mutex);
 
-        for (auto& [file, xid_map] : _extent_map) {
+        for (auto file_it = _extent_map.begin(); file_it != _extent_map.end(); ) {
+            const std::string& file = file_it->first;
+            auto& xid_map = file_it->second;
+            LOG_INFO("PROCESSING FILE FOR VACUUM: {}", file);
             uint64_t cutoff_xid = get_vacuum_cutoff_xid(file);  // Get safest XID to vacuum till that point
 
             // Iterate over all xids in sorted order
@@ -98,6 +114,7 @@ Vacuumer::_internal_run()
                 if (xid >= cutoff_xid) {
                     break;
                 }
+                LOG_INFO("GOT XID for VACUUM: {}", xid);
 
                 // Step 1: Merge all extents into an interval tree
                 IntervalTree<uint64_t> itree;
@@ -132,6 +149,8 @@ Vacuumer::_internal_run()
                 // Step 3: Punch the aligned regions
                 // unlock and expire the extents in the list
                 lock.unlock();
+
+                LOG_INFO("PUNCH HOLE FOR FILE: {}", file);
                 auto punched_extents = hole_punch_file(file, merged_extents);
 
                 // Step 4: If nothing remains, erase this xid; otherwise update it
@@ -140,10 +159,18 @@ Vacuumer::_internal_run()
 
                 if (leftover_extents.empty()) {
                     it = xid_map.erase(it);
+                    LOG_INFO("No left over extents post vacuum for file: {}", file);
                 } else {
                     it->second = std::move(leftover_extents);
                     ++it;
+                    LOG_INFO("Updated left over extents post vacuum for file: {}", file);
                 }
+            }
+            // Clean up file entry if xid_map is now empty
+            if (xid_map.empty()) {
+                file_it = _extent_map.erase(file_it);
+            } else {
+                ++file_it;
             }
         }
 
