@@ -10,8 +10,7 @@ namespace {
     {
         void SetUp() override
         {
-            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-            springtail_init_test(runners, LOG_ALL);
+            springtail_init_test(LOG_ALL);
         }
         void TearDown() override
         {

@@ -94,7 +94,8 @@
     "use_pg_shadow": false,
     "pool_size_limit": 10,
     "pool_timeout_limit": 5,
-    "pool_expiration_interval_secs": 300
+    "pool_expiration_interval_secs": 300,
+    "user_mgr_sleep_interval_secs": 15
   },
   "otel": {
     "enabled": true,

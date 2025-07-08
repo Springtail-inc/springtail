@@ -4,9 +4,6 @@
 
 // springtail includes
 #include <common/init.hh>
-#include <common/properties.hh>
-
-#include <xid_mgr/xid_mgr_client.hh>
 
 using namespace springtail;
 using namespace springtail::pg_fdw;
@@ -69,15 +66,8 @@ int main(int argc, char *argv[])
         }
     }
 
-    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-    runners.emplace();
-    runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
-    runners->emplace_back(std::make_unique<IOMgrRunner>());
-    runners->emplace_back(std::make_unique<SchemaMgrRunner>());
-    runners->emplace_back(std::make_unique<TableMgrRunner>());
-    runners->emplace_back(std::make_unique<PgDDLMgrRunner>(username, password, socket_hostname));
-
-    springtail::springtail_init_daemon(runners, "pg_ddl_mgr", pidfile, LOG_ALL);
+    springtail::springtail_init_daemon("pg_ddl_mgr", pidfile, LOG_ALL);
+    PgDDLMgr::start(username, password, socket_hostname);
     springtail_daemon_run();
 
     springtail::springtail_shutdown();

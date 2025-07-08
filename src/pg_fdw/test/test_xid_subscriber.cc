@@ -1,6 +1,7 @@
 #include <memory>
 #include <gtest/gtest.h>
 
+#include <common/environment.hh>
 #include <common/init.hh>
 #include <common/constants.hh>
 #include <common/json.hh>
@@ -28,14 +29,12 @@ namespace {
     class XidSubscriber_Test : public testing::Test {
     protected:
         static void SetUpTestSuite() {
-            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-            runners.emplace();
-            runners->emplace_back(std::make_unique<IOMgrRunner>());
+            std::string overrides = std::format("sys_tbl_mgr.roots_shm_cache_size={};sys_tbl_mgr.rpc_config.server_worker_threads={}",
+                10*1024, 4);
+            ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
 
-            auto service_runners = test::get_services(true, true, false);
-            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
-
-            springtail_init_test(runners, LOG_ALL ^ LOG_STORAGE);
+            springtail_init_test(LOG_ALL ^ LOG_STORAGE);
+            test::start_services(true, true, false);
 
             sys_tbl_mgr::Client *client = sys_tbl_mgr::Client::get_instance();
 
@@ -67,7 +66,7 @@ namespace {
         auto xid_mgr_server = xid_mgr::XidMgrServer::get_instance();
 
         // this will create shm cache asynchronously
-        PgXidSubscriberMgr s(10*1024, 4);
+        PgXidSubscriberMgr::start();
 
         // this the same cache created by PgXidSubscriber
         std::unique_ptr<sys_tbl_mgr::ShmCache> cache;

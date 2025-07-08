@@ -1,12 +1,27 @@
 #pragma once
 
 #include <common/exception.hh>
-#include <common/open_telemetry.hh>
+#include <common/logging.hh>
 #include <common/properties.hh>
-#include <common/service_register.hh>
 #include <common/coordinator.hh>
 
 namespace springtail {
+
+class ServiceRunner {
+public:
+    explicit ServiceRunner(const std::string &name) : _name(name) {}
+    virtual ~ServiceRunner() = default;
+    virtual bool start()
+    {
+        LOG_INFO("Default start for service {}", _name);
+        return true;
+    }
+    virtual void stop() { LOG_INFO("Default stop for service {}", _name); }
+    const std::string &get_name() const { return _name; };
+
+private:
+    std::string _name;
+};
 
 /**
  * @brief Initialize the springtail system
@@ -17,18 +32,15 @@ namespace springtail {
  * @param logging_mask logging mask override
  */
 
-void springtail_init(const std::optional<std::vector<std::unique_ptr<ServiceRunner>>> &runners = std::nullopt,
-                     const bool load_redis = false,
+void springtail_init(const bool load_redis = false,
                      const std::optional<std::string> &log_filename = std::nullopt,
                      const std::optional<uint32_t> &logging_mask = std::nullopt);
 
-void springtail_init_daemon(const std::optional<std::vector<std::unique_ptr<ServiceRunner>>> &runners = std::nullopt,
-                            const std::optional<std::string> &log_filename = std::nullopt,
+void springtail_init_daemon(const std::optional<std::string> &log_filename = std::nullopt,
                             const std::optional<std::string> &daemon_pid = std::nullopt,
                             const std::optional<uint32_t> &logging_mask = std::nullopt);
 
-void springtail_init_test(const std::optional<std::vector<std::unique_ptr<ServiceRunner>>> &runners = std::nullopt,
-                          const std::optional<uint32_t> &logging_mask = std::nullopt);
+void springtail_init_test(const std::optional<uint32_t> &logging_mask = std::nullopt);
 
 void springtail_init_custom(std::vector<std::unique_ptr<ServiceRunner>> &runners);
 
@@ -39,6 +51,20 @@ void springtail_daemon_run();
  *
  */
 void springtail_shutdown();
+
+/**
+ * Intialize the exception and backtrace handling.
+ */
+class ExceptionRunner : public ServiceRunner {
+public:
+    ExceptionRunner();
+
+    bool start() override;
+
+    void stop() override;
+private:
+    std::vector<int> _signals;
+};
 
 // Daemon init
 class DaemonRunner : public ServiceRunner {
@@ -142,4 +168,21 @@ public:
     void stop() override { RedisMgr::shutdown(); }
 };
 
-};  // namespace springtail::init
+class CoordinatorRunner : public ServiceRunner {
+public:
+    CoordinatorRunner() : ServiceRunner("Coordinator") {}
+
+    bool start() override
+    {
+        Coordinator::get_instance()->start_thread();
+        return true;
+    }
+
+    void stop() override
+    {
+        // Coordinator::get_instance()->stop_thread();
+        Coordinator::shutdown();
+    }
+};
+
+};  // namespace springtail

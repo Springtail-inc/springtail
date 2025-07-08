@@ -481,6 +481,7 @@ namespace springtail::pg_proxy
     /*********** Database Mgr *************/
 
     DatabaseMgr::DatabaseMgr() :
+        Singleton<DatabaseMgr>(ServiceId::DatabaseMgrId),
         _data_sub_thread(1, false),
         _primary_set(std::make_shared<DatabasePrimarySet>(POOL_SESSIONS_PER_INSTANCE)),
         _replica_set(std::make_shared<DatabaseReplicaSet>(POOL_SESSIONS_PER_INSTANCE))
@@ -539,10 +540,11 @@ namespace springtail::pg_proxy
                 iter->second->set_state(state);
             }
         );
+        _init();
     }
 
     void
-    DatabaseMgr::init()
+    DatabaseMgr::_init()
     {
         nlohmann::json json = Properties::get(Properties::PROXY_CONFIG);
         size_t pool_size_limit = Json::get_or<size_t>(json, "pool_size_limit", 0);

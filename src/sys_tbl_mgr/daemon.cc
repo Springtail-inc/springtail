@@ -33,14 +33,8 @@ main(int argc, char *argv[])
         pidfile = "sys_tbl_mgr.pid";
     }
 
-    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-    runners.emplace();
-    runners->emplace_back(std::make_unique<IOMgrRunner>());
-    runners->emplace_back(std::make_unique<SchemaMgrRunner>());
-    runners->emplace_back(std::make_unique<TableMgrRunner>());
-    runners->emplace_back(std::make_unique<sys_tbl_mgr::SysTblMgrRunner>());
-
-    springtail_init_daemon(runners, "sys_tbl_mgr", pidfile, LOG_ALL);
+    springtail_init_daemon("sys_tbl_mgr", pidfile, LOG_ALL);
+    sys_tbl_mgr::Server::start();
     springtail_daemon_run();
 
     springtail_shutdown();

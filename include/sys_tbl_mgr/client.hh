@@ -3,7 +3,7 @@
 #include <memory>
 #include <string>
 
-#include <common/singleton.hh>
+#include <common/init.hh>
 #include <grpc/grpc_client.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <proto/sys_tbl_mgr.pb.h>
@@ -16,7 +16,8 @@
 
 namespace springtail::sys_tbl_mgr {
 
-class Client : public Singleton<Client> {
+class Client : public Singleton<Client>
+{
     friend class Singleton<Client>;
 public:
     void ping();
