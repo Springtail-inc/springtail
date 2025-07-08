@@ -64,7 +64,6 @@ namespace springtail {
 
             // Remove or trim overlapping intervals
             while (it != intervals.end() && it->first < end) {
-                T it_start = it->first;
                 T it_end = it->second;
                 it = intervals.erase(it);
                 if (it_end > end)

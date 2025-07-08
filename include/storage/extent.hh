@@ -93,27 +93,25 @@ namespace springtail {
 
             std::memcpy(&xid, data->data(), sizeof(uint64_t));
             std::memcpy(&prev_offset, data->data() + 8, sizeof(uint64_t));
-            std::memcpy(&prev_size, data->data() + 16, sizeof(uint32_t));
-            std::memcpy(&row_size, data->data() + 20, sizeof(uint32_t));
-            std::memcpy(&field_count, data->data() + 24, sizeof(uint32_t));
+            std::memcpy(&row_size, data->data() + 16, sizeof(uint32_t));
+            std::memcpy(&field_count, data->data() + 20, sizeof(uint32_t));
             field_types.resize(field_count);
-            std::memcpy(field_types.data(), data->data() + 28, field_count);
-            type = ExtentType(*reinterpret_cast<uint8_t *>(data->data() + 28 + field_count));
+            std::memcpy(field_types.data(), data->data() + 24, field_count);
+            type = ExtentType(*reinterpret_cast<uint8_t *>(data->data() + 24 + field_count));
         }
 
         /** Serialize the header. */
         std::vector<char> pack() const
         {
-            std::vector<char> data(29 + field_types.size());
+            std::vector<char> data(25 + field_types.size());
             uint32_t field_count = field_types.size();
 
             std::memcpy(data.data(), &xid, sizeof(uint64_t));
             std::memcpy(data.data() + 8, &prev_offset, sizeof(uint64_t));
-            std::memcpy(data.data() + 16, &prev_size, sizeof(uint32_t));
-            std::memcpy(data.data() + 20, &row_size, sizeof(uint32_t));
-            std::memcpy(data.data() + 24, &field_count, sizeof(uint32_t));
-            std::memcpy(data.data() + 28, field_types.data(), field_count);
-            *reinterpret_cast<uint8_t *>(data.data() + 28 + field_count) =
+            std::memcpy(data.data() + 16, &row_size, sizeof(uint32_t));
+            std::memcpy(data.data() + 20, &field_count, sizeof(uint32_t));
+            std::memcpy(data.data() + 24, field_types.data(), field_count);
+            *reinterpret_cast<uint8_t *>(data.data() + 24 + field_count) =
                 static_cast<uint8_t>(type);
 
             return data;

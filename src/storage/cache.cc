@@ -1566,7 +1566,7 @@ StorageCache::PageCache::background_cleaner()
             // notify the vacuumer of the now-expired extent
             if (extent->header().prev_offset != constant::UNKNOWN_EXTENT) {
                 Vacuumer::get_instance()->expire_extent(extent->_file, extent->header().prev_offset,
-                                                        extent->header().prev_size, extent->header().xid);
+                                                        extent->_extent_size, extent->header().xid);
             }
 
             // XXX we could do this asynchronously and return a future that completes when the extent ID

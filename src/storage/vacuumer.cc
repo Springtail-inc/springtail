@@ -103,77 +103,96 @@ Vacuumer::_internal_run()
         for (auto file_it = _extent_map.begin(); file_it != _extent_map.end(); ) {
             const std::string& file = file_it->first;
             auto& xid_map = file_it->second;
-            LOG_INFO("PROCESSING FILE FOR VACUUM: {}", file);
-            uint64_t cutoff_xid = get_vacuum_cutoff_xid(file);  // Get safest XID to vacuum till that point
+            //uint64_t cutoff_xid = get_vacuum_cutoff_xid(file);  // Get safest XID to vacuum till that point
 
-            // Iterate over all xids in sorted order
-            for (auto it = xid_map.begin(); it != xid_map.end(); ) {
-                uint64_t xid = it->first;
+            // 1. Build a merged interval tree for all xids < cutoff_xid
+            IntervalTree<uint64_t> tree;
+            std::vector<uint64_t> xids_to_process;
 
-                // Stop processing if xid is beyond cutoff
-                if (xid >= cutoff_xid) {
-                    break;
+            for (const auto& [xid, extents] : xid_map) {
+                //if (xid >= cutoff_xid) {
+                //    break;
+                //}
+                for (const auto& [offset, size] : extents) {
+                    tree.insert(offset, offset + size);
                 }
-                LOG_INFO("GOT XID for VACUUM: {}", xid);
+                xids_to_process.push_back(xid);  // store for later cleanup
+            }
 
-                // Step 1: Merge all extents into an interval tree
-                IntervalTree<uint64_t> itree;
-                for (const auto& [offset, size] : it->second) {
-                    itree.insert(offset, offset + size);
-                }
+            if (tree.empty()) {
+                ++file_it;
+                continue;
+            }
 
-                std::vector<Vacuumer::HoleInfo> merged_extents;    // punchable aligned blocks
-                std::vector<Vacuumer::HoleInfo> leftover_extents;  // unaligned fragments to keep
-
-                // Step 2: For each merged extent, extract aligned + unaligned regions
-                for (const auto& [start, end] : itree.to_vector()) {
-                    uint64_t aligned_start = align_up(start, kPunchAlign);
-                    uint64_t aligned_end   = align_down(end, kPunchAlign);
-
-                    // Add aligned portion to punch list
-                    if (aligned_start < aligned_end) {
-                        merged_extents.emplace_back(aligned_start, aligned_end - aligned_start);
-                    }
-
-                    // Preserve prefix before aligned start
-                    if (start < aligned_start) {
-                        leftover_extents.emplace_back(start, aligned_start - start);
-                    }
-
-                    // Preserve suffix after aligned end
-                    if (aligned_end < end) {
-                        leftover_extents.emplace_back(aligned_end, end - aligned_end);
-                    }
-                }
-
-                // Step 3: Punch the aligned regions
-                // unlock and expire the extents in the list
-                lock.unlock();
-
-                LOG_INFO("PUNCH HOLE FOR FILE: {}", file);
-                auto punched_extents = hole_punch_file(file, merged_extents);
-
-                // Step 4: If nothing remains, erase this xid; otherwise update it
-                // reacquire the lock before accessing the extent map
-                lock.lock();
-
-                if (leftover_extents.empty()) {
-                    it = xid_map.erase(it);
-                    LOG_INFO("No left over extents post vacuum for file: {}", file);
-                } else {
-                    it->second = std::move(leftover_extents);
-                    ++it;
-                    LOG_INFO("Updated left over extents post vacuum for file: {}", file);
+            // 2. Identify punchable (aligned) extents only
+            std::vector<Vacuumer::HoleInfo> punchable;
+            for (const auto& [start, end] : tree.to_vector()) {
+                uint64_t aligned_start = align_up(start, kPunchAlign);
+                uint64_t aligned_end = align_down(end, kPunchAlign);
+                if (aligned_start < aligned_end) {
+                    punchable.emplace_back(aligned_start, aligned_end - aligned_start);
                 }
             }
-            // Clean up file entry if xid_map is now empty
+
+            // 3. If nothing is punchable, skip all modification
+            if (punchable.empty()) {
+                ++file_it;
+                continue;
+            }
+
+            // unlock and expire the extents in the list
+            lock.unlock();
+
+            // 3. Punch the aligned extents
+            auto punched_extents = hole_punch_file(file, punchable);
+
+            // reacquire the lock before accessing the extent map
+            lock.lock();
+
+            if (punched_extents.empty()) {
+                ++file_it;
+                continue;
+            }
+
+            // 5. Subtract punched extents from each original XID
+            IntervalTree<uint64_t> punched_tree;
+            for (const auto& [offset, size] : punched_extents) {
+                punched_tree.insert(offset, offset + size);
+            }
+
+            for (uint64_t xid : xids_to_process) {
+                auto it = xid_map.find(xid);
+                if (it == xid_map.end()) {
+                    continue;
+                }
+
+                IntervalTree<uint64_t> original;
+                for (const auto& [offset, size] : it->second) {
+                    original.insert(offset, offset + size);
+                }
+
+                for (const auto& [start, end] : punched_tree.to_vector()) {
+                    original.subtract(start, end);
+                }
+
+                auto remaining = original.to_vector();
+                if (remaining.empty()) {
+                    xid_map.erase(it);
+                } else {
+                    it->second.clear();
+                    for (const auto& [start, end] : remaining) {
+                        it->second.emplace_back(start, end - start);
+                    }
+                }
+            }
+
+            // 6. Cleanup file entry if no xids remain
             if (xid_map.empty()) {
                 file_it = _extent_map.erase(file_it);
             } else {
                 ++file_it;
             }
         }
-
 
         // expire snapshots through the min XID
         //while (true) {
