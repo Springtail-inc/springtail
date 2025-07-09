@@ -7,11 +7,18 @@
 
 #include <common/singleton.hh>
 #include <redis/redis_ddl.hh>
+#include <storage/schema.hh>
+#include <common/properties.hh>
+#include <common/json.hh>
+#include <storage/io_mgr.hh>
+#include <storage/cache.hh>
+#include <storage/extent.hh>
 
 namespace springtail {
 
 constexpr uint64_t kPunchAlign = 4 * 1024;  // 64KB punch alignment
 
+constexpr uint64_t VACUUM_THRESHOLD_SIZE = 20 * 1024;
 /**
  * Vacuumer to clear dead extents and table snapshots.
  */
@@ -35,12 +42,16 @@ public:
 
     void init();
 
+    void commit_expired_extents();
+
     void _internal_shutdown();
+
 protected:
     /**
      * The main loop of the vacuumer.
      */
     void _internal_run();
+
 
 private:
     struct HoleInfo {
@@ -56,6 +67,10 @@ private:
     std::mutex _mutex; ///< Protects the internal maps
     ExtentMap _extent_map; ///< Maps XID -> File -> list of expired extent
     SnapshotMap _snapshot_map; ///< Maps XID -> list of table snapshot directories
+    ExtentSchemaPtr _global_vacuum_schema;
+    ExtentSchemaPtr _vacuum_file_schema;
+    std::filesystem::path _vacuum_data_base; ///< The base directory for vacuum directories
+    std::filesystem::path _global_vacuum_file;
 
     RedisDDL _redis_ddl; ///< Interface to the DDL structures in Redis.
 
@@ -89,6 +104,11 @@ private:
      * @return XID until which extents can be punched
      */
     uint64_t get_vacuum_cutoff_xid(const std::string& file);
+
+    void _truncate_file(const std::filesystem::path &file, uint64_t offset);
+
+    int64_t _get_file_size(const std::filesystem::path& path);
+
 };
 
 class VacuumerRunner : public ServiceRunner {

@@ -12,6 +12,26 @@ void
 Vacuumer::init()
 {
     _vacuumer_thread = std::thread(&Vacuumer::_internal_run, this);
+
+    // get the base directory for table data
+    nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
+    Json::get_to<std::filesystem::path>(json, "vacuum_dir", _vacuum_data_base);
+    _vacuum_data_base = Properties::make_absolute_path(_vacuum_data_base);
+    std::filesystem::create_directories(_vacuum_data_base);
+    _global_vacuum_file = _vacuum_data_base / "0.global";
+
+    std::vector<SchemaColumn> global_vacuum_columns({
+            { "file", 0, SchemaType::TEXT, 0, false, 0 },
+            { "offset", 1, SchemaType::UINT64, 0, false, 1 },
+            { "size", 2, SchemaType::UINT64, 0, false }
+            });
+    _global_vacuum_schema = std::make_shared<ExtentSchema>(global_vacuum_columns);
+
+    std::vector<SchemaColumn> vacuum_file_columns({
+            { "offset", 0, SchemaType::UINT64, 0, false, 0 },
+            { "size", 1, SchemaType::UINT64, 0, false }
+            });
+    _vacuum_file_schema = std::make_shared<ExtentSchema>(vacuum_file_columns);
 }
 
 void
@@ -19,6 +39,36 @@ Vacuumer::_internal_shutdown()
 {
     _shutdown = true;
     _vacuumer_thread.join();
+}
+
+void
+Vacuumer::commit_expired_extents()
+{
+    std::unique_lock lock(_mutex);
+
+    auto handle = IOMgr::get_instance()->open(_global_vacuum_file, IOMgr::IO_MODE::APPEND, true);
+    for (const auto& [file, xid_map] : _extent_map) {
+        for (const auto& [xid, extents] : xid_map) {
+            ExtentHeader header(ExtentType(), xid, _global_vacuum_schema->row_size(), _global_vacuum_schema->field_types());
+            auto extent = std::make_shared<Extent>(std::move(header));
+
+            for (const auto& hole_info: extents) {
+                auto fields = std::make_shared<FieldArray>(4);
+                fields->at(0) = std::make_shared<ConstTypeField<std::string>>(file);
+                fields->at(1) = std::make_shared<ConstTypeField<uint64_t>>(hole_info.offset);
+                fields->at(2) = std::make_shared<ConstTypeField<uint64_t>>(hole_info.size);
+                auto tuple = std::make_shared<FieldTuple>(fields, nullptr);
+
+                // insert the tuple into the extent
+                auto row = extent->append();
+                MutableTuple(_global_vacuum_schema->get_mutable_fields(), &row).assign(std::move(tuple));
+
+            }
+            auto response = extent->async_flush(handle);
+            response.wait();
+        }
+    }
+    _extent_map.clear();
 }
 
 void
@@ -91,6 +141,39 @@ Vacuumer::get_vacuum_cutoff_xid(const std::string& file)
 }
 
 void
+Vacuumer::_truncate_file(const std::filesystem::path &file, uint64_t offset)
+{
+    int fd = ::open(file.c_str(), O_WRONLY);
+    if (fd == -1) {
+        LOG_ERROR("Failed to open file {} for truncation: {}", file, errno);
+        throw;
+    }
+
+    if (::ftruncate(fd, offset) == -1) {
+        LOG_ERROR("Failed to truncate file {} to offset {}: {}", file, offset, errno);
+        ::close(fd);
+        throw;
+    }
+
+    ::close(fd);
+}
+
+int64_t
+Vacuumer::_get_file_size(const std::filesystem::path& path) {
+    try {
+        if (std::filesystem::exists(path) && std::filesystem::is_regular_file(path)) {
+            return static_cast<int64_t>(std::filesystem::file_size(path));
+        } else {
+            LOG_ERROR("Given {} doesn't exist or not a regular file", path);
+            return -1;
+        }
+    } catch (const std::filesystem::filesystem_error& e) {
+        LOG_ERROR("_get_file_size exception: {}", e.what());
+        return -1;
+    }
+}
+
+void
 Vacuumer::_internal_run()
 {
     while(!_shutdown) {
@@ -99,6 +182,32 @@ Vacuumer::_internal_run()
 
         // lock while accessing the maps
         std::unique_lock lock(_mutex);
+
+        bool processing_vacuum_file = false;
+
+        if (_extent_map.empty() && _get_file_size(_global_vacuum_file) > VACUUM_THRESHOLD_SIZE) {
+            auto handle = IOMgr::get_instance()->open(_global_vacuum_file, IOMgr::IO_MODE::READ, true);
+            int start_offset = 0;
+            auto response = handle->read(start_offset);
+
+            auto file_f = _global_vacuum_schema->get_field("file");
+            auto offset_f = _global_vacuum_schema->get_field("offset");
+            auto size_f = _global_vacuum_schema->get_field("size");
+
+            while (!response->data.empty()) {
+                auto extent = std::make_shared<Extent>(response->data);
+                for (auto &row : *extent) {
+                    auto file = file_f->get_text(&row);
+                    auto offset = offset_f->get_uint64(&row);
+                    auto size = size_f->get_uint64(&row);
+                    auto xid = extent->header().xid;
+                    _extent_map[file][xid].emplace_back(offset, size);
+                }
+                start_offset = response->next_offset;
+                response = handle->read(start_offset);
+            }
+            processing_vacuum_file = true;
+        }
 
         for (auto file_it = _extent_map.begin(); file_it != _extent_map.end(); ) {
             const std::string& file = file_it->first;
@@ -141,13 +250,13 @@ Vacuumer::_internal_run()
             }
 
             // unlock and expire the extents in the list
-            lock.unlock();
+            //lock.unlock();
 
             // 3. Punch the aligned extents
             auto punched_extents = hole_punch_file(file, punchable);
 
             // reacquire the lock before accessing the extent map
-            lock.lock();
+            //lock.lock();
 
             if (punched_extents.empty()) {
                 ++file_it;
@@ -194,6 +303,10 @@ Vacuumer::_internal_run()
             }
         }
 
+        if (processing_vacuum_file) {
+            _truncate_file(_global_vacuum_file, 0);
+        }
+
         // expire snapshots through the min XID
         //while (true) {
         //    auto it = _snapshot_map.begin();
@@ -227,6 +340,7 @@ Vacuumer::_internal_run()
         //    // reacquire the lock before proceeding
         //    lock.lock();
         //}
+        lock.unlock();
     }
 }
 

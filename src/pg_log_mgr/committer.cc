@@ -13,6 +13,7 @@
 #include <xid_mgr/xid_mgr_server.hh>
 
 #include <pg_log_mgr/committer.hh>
+#include <storage/vacuumer.hh>
 
 namespace springtail::committer {
 
@@ -271,6 +272,9 @@ namespace springtail::committer {
                 result->notify_tracker(xid);
             }
 
+            Vacuumer::get_instance()->commit_expired_extents();
+
+            LOG_DEBUG(LOG_COMMITTER, "Committed Vacuum: {}@{}", db_id, xid);
             LOG_DEBUG(LOG_COMMITTER, "XID completed: {}@{}", db_id, xid);
         }
 
