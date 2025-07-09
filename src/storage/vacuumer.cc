@@ -53,7 +53,7 @@ Vacuumer::commit_expired_extents()
             auto extent = std::make_shared<Extent>(std::move(header));
 
             for (const auto& hole_info: extents) {
-                auto fields = std::make_shared<FieldArray>(4);
+                auto fields = std::make_shared<FieldArray>(3);
                 fields->at(0) = std::make_shared<ConstTypeField<std::string>>(file);
                 fields->at(1) = std::make_shared<ConstTypeField<uint64_t>>(hole_info.offset);
                 fields->at(2) = std::make_shared<ConstTypeField<uint64_t>>(hole_info.size);
@@ -174,6 +174,61 @@ Vacuumer::_get_file_size(const std::filesystem::path& path) {
 }
 
 void
+Vacuumer::_update_vaccumed_partials_file(
+        const std::filesystem::path &path,
+        std::vector<Vacuumer::HoleInfo> partials)
+{
+    std::filesystem::path partial_file = _vacuum_data_base / std::to_string(std::hash<std::string>{}(path.string()));
+    if (partials.empty()) {
+        if (std::filesystem::exists(partial_file)) {
+            std::filesystem::remove(partial_file);
+        }
+    } else {
+        ExtentHeader header(ExtentType(), constant::LATEST_XID, _vacuum_file_schema->row_size(), _vacuum_file_schema->field_types());
+        auto extent = std::make_shared<Extent>(std::move(header));
+        auto handle = IOMgr::get_instance()->open(partial_file, IOMgr::IO_MODE::WRITE, true);
+
+        for (const auto& hole_info: partials) {
+            auto fields = std::make_shared<FieldArray>(2);
+            fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(hole_info.offset);
+            fields->at(1) = std::make_shared<ConstTypeField<uint64_t>>(hole_info.size);
+            auto tuple = std::make_shared<FieldTuple>(fields, nullptr);
+
+            // insert the tuple into the extent
+            auto row = extent->append();
+            MutableTuple(_vacuum_file_schema->get_mutable_fields(), &row).assign(std::move(tuple));
+        }
+        auto response = extent->async_flush(handle);
+        response.wait();
+    }
+}
+
+std::vector<Vacuumer::HoleInfo>
+Vacuumer::_get_partials_from_file(const std::filesystem::path &path) {
+    std::vector<Vacuumer::HoleInfo> partials;
+    std::filesystem::path partial_file = _vacuum_data_base / std::to_string(std::hash<std::string>{}(path.string()));
+    auto handle = IOMgr::get_instance()->open(partial_file, IOMgr::IO_MODE::READ, true);
+    int start_offset = 0;
+    auto response = handle->read(start_offset);
+
+    auto offset_f = _vacuum_file_schema->get_field("offset");
+    auto size_f = _vacuum_file_schema->get_field("size");
+
+    while (!response->data.empty()) {
+        auto extent = std::make_shared<Extent>(response->data);
+        for (auto &row : *extent) {
+            auto offset = offset_f->get_uint64(&row);
+            auto size = size_f->get_uint64(&row);
+            partials.emplace_back(offset, size);
+        }
+        start_offset = response->next_offset;
+        response = handle->read(start_offset);
+    }
+
+    return partials;
+}
+
+void
 Vacuumer::_internal_run()
 {
     while(!_shutdown) {
@@ -214,88 +269,71 @@ Vacuumer::_internal_run()
             auto& xid_map = file_it->second;
             //uint64_t cutoff_xid = get_vacuum_cutoff_xid(file);  // Get safest XID to vacuum till that point
 
-            // 1. Build a merged interval tree for all xids < cutoff_xid
-            IntervalTree<uint64_t> tree;
+            IntervalTree<uint64_t> itree;
             std::vector<uint64_t> xids_to_process;
 
+            // Step 1: Add leftover partials from previous runs
+            auto partial_extents = _get_partials_from_file(file);
+            for (const auto& hole_info: partial_extents) {
+                itree.insert(hole_info.offset, hole_info.offset + hole_info.size);
+            }
+
+            // Step 2: Collect all extents from xids < cutoff_xid
             for (const auto& [xid, extents] : xid_map) {
                 //if (xid >= cutoff_xid) {
                 //    break;
                 //}
                 for (const auto& [offset, size] : extents) {
-                    tree.insert(offset, offset + size);
+                    itree.insert(offset, offset + size);
                 }
-                xids_to_process.push_back(xid);  // store for later cleanup
+                xids_to_process.push_back(xid);
             }
 
-            if (tree.empty()) {
+            if (itree.empty()) {
                 ++file_it;
                 continue;
             }
 
-            // 2. Identify punchable (aligned) extents only
+            // Step 3: Identify punchable and leftover unaligned regions
             std::vector<Vacuumer::HoleInfo> punchable;
-            for (const auto& [start, end] : tree.to_vector()) {
+            std::vector<Vacuumer::HoleInfo> new_partials;
+
+            for (const auto& [start, end] : itree.to_vector()) {
                 uint64_t aligned_start = align_up(start, kPunchAlign);
                 uint64_t aligned_end = align_down(end, kPunchAlign);
+
                 if (aligned_start < aligned_end) {
                     punchable.emplace_back(aligned_start, aligned_end - aligned_start);
                 }
+                if (start < aligned_start) {
+                    new_partials.emplace_back(start, aligned_start - start);
+                }
+                if (aligned_end < end) {
+                    new_partials.emplace_back(aligned_end, end - aligned_end);
+                }
             }
 
-            // 3. If nothing is punchable, skip all modification
-            if (punchable.empty()) {
-                ++file_it;
-                continue;
-            }
-
-            // unlock and expire the extents in the list
-            //lock.unlock();
-
-            // 3. Punch the aligned extents
+            // Step 4: Punch and detect failures
             auto punched_extents = hole_punch_file(file, punchable);
 
-            // reacquire the lock before accessing the extent map
-            //lock.lock();
+            // XXX: Add a comparator and then uncomment this code
+            //std::set<Vacuumer::HoleInfo> punched_set(punched_extents.begin(), punched_extents.end());
+            //for (const auto& ext : punchable) {
+            //    if (punched_set.find(ext) == punched_set.end()) {
+            //        // Missed punch — add back to partials
+            //        new_partials.emplace_back(ext);
+            //    }
+            //}
 
-            if (punched_extents.empty()) {
-                ++file_it;
-                continue;
-            }
-
-            // 5. Subtract punched extents from each original XID
-            IntervalTree<uint64_t> punched_tree;
-            for (const auto& [offset, size] : punched_extents) {
-                punched_tree.insert(offset, offset + size);
-            }
-
+            // Step 5: Clean up processed XIDs
             for (uint64_t xid : xids_to_process) {
-                auto it = xid_map.find(xid);
-                if (it == xid_map.end()) {
-                    continue;
-                }
-
-                IntervalTree<uint64_t> original;
-                for (const auto& [offset, size] : it->second) {
-                    original.insert(offset, offset + size);
-                }
-
-                for (const auto& [start, end] : punched_tree.to_vector()) {
-                    original.subtract(start, end);
-                }
-
-                auto remaining = original.to_vector();
-                if (remaining.empty()) {
-                    xid_map.erase(it);
-                } else {
-                    it->second.clear();
-                    for (const auto& [start, end] : remaining) {
-                        it->second.emplace_back(start, end - start);
-                    }
-                }
+                xid_map.erase(xid);
             }
 
-            // 6. Cleanup file entry if no xids remain
+            // Step 6: Update _partial_extents with leftovers
+            _update_vaccumed_partials_file(file, new_partials);
+
+            // Step 7: Clean up file entry if all xids are processed
             if (xid_map.empty()) {
                 file_it = _extent_map.erase(file_it);
             } else {

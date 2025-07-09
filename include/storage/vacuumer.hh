@@ -109,6 +109,10 @@ private:
 
     int64_t _get_file_size(const std::filesystem::path& path);
 
+    void _update_vaccumed_partials_file(const std::filesystem::path &file,
+                std::vector<HoleInfo> partials);
+
+    std::vector<HoleInfo> _get_partials_from_file(const std::filesystem::path &file);
 };
 
 class VacuumerRunner : public ServiceRunner {
