@@ -32,6 +32,13 @@ target_link_libraries(sys_tbl_mgr_daemon
 )
 add_dsymutil_command(sys_tbl_mgr_daemon)
 
+# file system validate utility
+add_executable(validate_file_system test/validate_file_system.cc)
+target_include_directories(validate_file_system PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
+target_link_libraries(validate_file_system
+  PUBLIC springtail_sys_tbl_mgr
+)
+add_dsymutil_command(validate_file_system)
 
 ## unit tests
 springtail_unit_test(test_sys_tbl_mgr
@@ -54,3 +61,5 @@ springtail_unit_test(test_shm_cache
 
 # install daemon to install directory
 install(TARGETS sys_tbl_mgr_daemon RUNTIME DESTINATION bin/system)
+# install file system validation utility to install directory
+install(TARGETS validate_file_system RUNTIME DESTINATION bin/system)
