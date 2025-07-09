@@ -283,6 +283,9 @@ namespace springtail::numeric {
         int32_t             _vl_len_;   ///< varlena header (do not touch directly!)
         union NumericChoice _choice;    ///< choice of format
 
+        NumericData(const NumericData&) = delete;
+        NumericData& operator=(const NumericData&) = delete;
+
         /**
          * @brief Allocate numeric data value
          *

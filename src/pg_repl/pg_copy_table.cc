@@ -821,9 +821,11 @@ namespace springtail
 
             case (SchemaType::NUMERIC): {
                 std::string_view tmp(row.data() + pos, length);
-
                 std::shared_ptr<numeric::NumericData> numeric_value = numeric::numeric_receive(tmp.begin(), length, 0);
-                fields->push_back(std::make_shared<ConstTypeField<std::shared_ptr<numeric::NumericData>>>(numeric_value));
+                auto buf = (char*)(numeric_value.get());
+                std::vector<char> value(buf, buf + numeric_value->varsize());
+                fields->push_back(std::make_shared<ConstTypeField<
+                        std::shared_ptr<numeric::NumericData>>>(std::move(value)));
                 pos += length;
                 break;
             }
