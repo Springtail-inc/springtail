@@ -46,6 +46,24 @@ void springtail_init_custom(std::vector<std::unique_ptr<ServiceRunner>> &runners
 
 void springtail_daemon_run();
 
+void springtail_store_argument_internal(ServiceId service_id, const std::string &arg_name, const std::any &value);
+std::any springtail_retreive_argument_internal(ServiceId service_id, const std::string &arg_name);
+
+template<typename T>
+void
+springtail_store_argument(ServiceId service_id, const std::string &arg_name, const T &value)
+{
+    springtail_store_argument_internal(service_id, arg_name, std::any(value));
+}
+
+template<typename T>
+T springtail_retreive_argument(ServiceId service_id, const std::string &arg_name)
+{
+    std::any ret = springtail_retreive_argument_internal(service_id, arg_name);
+    CHECK(ret.type() == typeid(T));
+    return std::any_cast<T>(ret);
+}
+
 /**
  * @brief Services shutdown function
  *
