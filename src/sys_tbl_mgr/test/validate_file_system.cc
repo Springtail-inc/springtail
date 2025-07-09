@@ -81,6 +81,7 @@ main(int argc,
                     TableMetadata table_metadata;
                     table_metadata.roots.push_back(TableRoot{roots_iid, roots_eid});
                     table_metadata.snapshot_xid = roots_sxid;
+                    table_metadata.stats = {};
 
                     std::vector<std::string> empty_primary_key;
                     std::vector<Index> empty_secondary_indexes;
