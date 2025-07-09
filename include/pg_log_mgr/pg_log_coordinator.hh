@@ -4,17 +4,18 @@
 #include <map>
 #include <mutex>
 
-#include <common/service_register.hh>
-#include <common/singleton.hh>
+#include <common/init.hh>
 
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/committer.hh>
 #include <pg_log_mgr/index_reconciliation_queue_manager.hh>
+#include <pg_log_mgr/index_requests_manager.hh>
 #include <pg_repl/index_reconcile_request.hh>
 
 namespace springtail::pg_log_mgr {
 
-    class PgLogCoordinator final : public Singleton<PgLogCoordinator> {
+    class PgLogCoordinator final : public Singleton<PgLogCoordinator>
+    {
     public:
         /**
          * @brief Initialization function
@@ -25,7 +26,7 @@ namespace springtail::pg_log_mgr {
     private:
         friend class Singleton<PgLogCoordinator>;
         PgLogCoordinator();
-        ~PgLogCoordinator() = default;
+        virtual ~PgLogCoordinator() override = default;
 
         std::mutex _mutex;                         ///< mutex for _log_mgrs map
         std::map<uint64_t, PgLogMgrPtr> _log_mgrs; ///< map of db_id to log mgr
@@ -50,6 +51,12 @@ namespace springtail::pg_log_mgr {
         std::shared_ptr<IndexReconciliationQueueManager> _index_reconciliation_queue_mgr;
 
         /**
+         * @brief shared_ptr to the index requests manager to get
+         * index requests (create/drop) for an XID per db
+         */
+        std::shared_ptr<IndexRequestsManager> _index_requests_mgr;
+
+        /**
          * @brief Function for performing shutdown that is called by Singleton
          *
          */
@@ -69,20 +76,4 @@ namespace springtail::pg_log_mgr {
          */
         void _remove_database(uint64_t db_id);
     };
-
-    class PgLogCoordinatorRunner : public ServiceRunner {
-    public:
-        PgLogCoordinatorRunner() : ServiceRunner("PgLogCoordinator") {}
-
-        bool start() override
-        {
-            pg_log_mgr::PgLogCoordinator::get_instance()->init();
-            return true;
-        }
-
-        void stop() override
-        {
-            pg_log_mgr::PgLogCoordinator::shutdown();
-        }
-    };
-}
+} // springtail::pg_log_mgr

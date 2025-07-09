@@ -1,44 +1,14 @@
-#include <bit>
-#include <cstdio>
-#include <cstring>
-#include <cassert>
-#include <vector>
-#include <algorithm>
-
-#include <absl/log/check.h>
-#include <fmt/core.h>
-
 // springtail includes
-#include <common/common.hh>
-#include <pg_repl/pg_common.hh>
-#include <common/redis.hh>
-#include <common/redis_types.hh>
-#include <common/thread_pool.hh>
-#include <common/json.hh>
-#include <common/constants.hh>
-
-#include <redis/redis_containers.hh>
-
 #include <pg_log_mgr/sync_tracker.hh>
 
 #include <pg_repl/exception.hh>
-#include <pg_repl/pg_types.hh>
-#include <pg_repl/pg_copy_table.hh>
-#include <pg_repl/libpq_connection.hh>
-#include <pg_repl/pg_repl_msg.hh>
 
 #include <storage/schema.hh>
 #include <storage/field.hh>
 
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/system_tables.hh>
-#include <sys_tbl_mgr/table.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
-
-#include <xid_mgr/xid_mgr_client.hh>
-
-#include <proto/sys_tbl_mgr.pb.h>
-#include <proto/pg_copy_table.pb.h>
 
 extern "C" {
     #include <postgres.h>
@@ -139,16 +109,19 @@ namespace springtail
     /** copy command, output in binary using utf-8 encoding */
     static constexpr char COPY_QUERY[] = "COPY {}.{} TO STDOUT WITH (FORMAT binary, ENCODING 'UTF-8')";
 
+    /** copy command with primary key */
+    static constexpr char COPY_PKEY_QUERY[] = "COPY (SELECT * FROM {}.{} ORDER BY {}) TO STDOUT WITH (FORMAT binary, ENCODING 'UTF-8')";
+
     /** Get table name, schema name, oid for all tables */
     static constexpr char TABLES_QUERY[] =
         "SELECT relname::text, nspname::text, pg_class.oid::integer, pg_namespace.oid "
         "FROM pg_catalog.pg_class "
         "JOIN pg_catalog.pg_namespace "
         "ON relnamespace=pg_namespace.oid "
-        "WHERE relkind = 'r'  "         // regular tables
-        "AND nspname NOT LIKE 'pg_%' "  // exclude system schemas
+        "WHERE relkind IN ('r','p') "         // regular tables, partitioned tables
+        "AND nspname NOT LIKE 'pg_%' "        // exclude system schemas
         "AND nspname != 'information_schema' "
-        "ORDER BY pg_class.oid";
+        "ORDER BY relkind, pg_class.oid";     // have partitioned tables first
 
     /** Get table name, schema name, oid for all tables in a schema */
     static constexpr char TABLES_SCHEMA_QUERY[] =
@@ -156,9 +129,9 @@ namespace springtail
         "FROM pg_catalog.pg_class "
         "JOIN pg_catalog.pg_namespace "
         "ON relnamespace=pg_namespace.oid "
-        "WHERE relkind = 'r' "          // regular tables
+        "WHERE relkind IN ('r','p') "          // regular tables, partitioned tables
         "AND nspname in ({}) "
-        "ORDER BY pg_class.oid";
+        "ORDER BY relkind, pg_class.oid";      // have partitioned tables first
 
     /** Get table name, schema name, oid for a single table given oid */
     static constexpr char TABLE_QUERY[] =
@@ -166,10 +139,11 @@ namespace springtail
         "FROM pg_catalog.pg_class "
         "JOIN pg_catalog.pg_namespace "
         "ON relnamespace=pg_namespace.oid "
-        "WHERE relkind = 'r'  "         // regular tables
-        "AND nspname NOT LIKE 'pg_%' "  // exclude system schemas
+        "WHERE relkind IN ('r','p') "         // regular tables, partitioned tables
+        "AND nspname NOT LIKE 'pg_%' "        // exclude system schemas
         "AND nspname != 'information_schema' "
-        "AND pg_class.oid::integer in ({}) ";
+        "AND pg_class.oid::integer in ({}) "
+        "ORDER BY relkind, pg_class.oid";     // have partitioned tables first
 
     static constexpr char TABLE_SCHEMA_PAIR_QUERY[] =
         "SELECT "
@@ -183,7 +157,17 @@ namespace springtail
         "JOIN pg_class c ON c.relname = v.table_name "
         "JOIN pg_namespace n ON n.oid = c.relnamespace "
         "    AND n.nspname = v.schema_name "
-        "WHERE c.relkind = 'r'";
+        "WHERE c.relkind IN ('r','p')";
+
+    static constexpr char TABLE_PARTITION_QUERY[] =
+        "SELECT "
+        "    CASE WHEN c.relispartition THEN "
+        "        (SELECT inhparent FROM pg_inherits WHERE inhrelid = c.oid) "
+        "    END as parent_oid, "
+        "    pg_get_expr(c.relpartbound, c.oid, TRUE) as partition_bound, "
+        "    pg_get_partkeydef(c.oid) as partition_key "
+        "FROM pg_class c "
+        "WHERE c.oid = {}";
 
     /**
      * @brief Connect to database
@@ -303,6 +287,24 @@ namespace springtail
         std::string table_name_ptr = _connection.escape_string(table_name);
         std::string schema_name_ptr = _connection.escape_string(schema_name);
 
+        // init schema object
+        _schema.db_name = _db_name;
+        _schema.table_name = table_name;
+        _schema.schema_name = schema_name;
+        _schema.table_oid = table_oid;
+        _schema.schema_oid = schema_oid;
+
+        // get any table partition info
+        _connection.exec(fmt::format(TABLE_PARTITION_QUERY, table_oid));
+        if (_connection.ntuples() > 0) {
+            DCHECK(_connection.nfields() == 3);
+            _schema.parent_oid = _connection.get_int32_optional(0, 0);
+            _schema.partition_bound = _connection.get_string_optional(0, 1);
+            _schema.partition_key = _connection.get_string_optional(0, 2);
+        }
+        _connection.clear();
+
+        // get the table schema (columns)
         _connection.exec(fmt::format(SCHEMA_QUERY, table_oid, schema_name_ptr, table_name_ptr));
 
         if (_connection.ntuples() == 0) {
@@ -319,16 +321,11 @@ namespace springtail
         }
 
         try {
-            _schema.db_name = _db_name;
-            _schema.table_name = table_name;
-            _schema.schema_name = schema_name;
-            _schema.table_oid = table_oid;
-            _schema.schema_oid = schema_oid;
-
             // get columns
             int rows = _connection.ntuples();
             _schema.columns.resize(rows);
 
+            std::set<std::pair<int, std::string>> pkeys;
             for (int i = 0; i < rows; i++) {
                 // add column to schema
                 // PgColumn column;
@@ -370,6 +367,7 @@ namespace springtail
                 if (pkey_pos) {
                     CHECK(is_pkey);
                     column.pkey_position = (*pkey_pos);
+                    pkeys.insert({*pkey_pos, column.name});
                 }
 
                 // type category of 'E' represents enum
@@ -391,6 +389,12 @@ namespace springtail
 
                 _schema.columns[i] = std::move(column);
             }
+
+            // create the set of pkeys in order
+            for (const auto &pkey : pkeys) {
+                _schema.pkeys.push_back(pkey.second);
+            }
+
         } catch (...) {
             _connection.clear();
 
@@ -410,7 +414,22 @@ namespace springtail
         std::string table_name = _connection.escape_identifier(_schema.table_name);
         std::string schema_name = _connection.escape_identifier(_schema.schema_name);
 
-        _connection.exec(fmt::format(COPY_QUERY, schema_name, table_name));
+        if (_schema.pkeys.size() > 0) {
+            // if we have primary keys, use them to order the copy
+            std::string pkey_order;
+            for (const auto &pkey : _schema.pkeys) {
+                if (!pkey_order.empty()) {
+                    pkey_order += ", ";
+                }
+                pkey_order += fmt::format("{}", _connection.escape_identifier(pkey));
+            }
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Copying table {}.{} with primary keys: {}", schema_name, table_name, pkey_order);
+            _connection.exec(fmt::format(COPY_PKEY_QUERY, schema_name, table_name, pkey_order));
+        } else {
+            // no primary keys, just copy the table in storage order
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Copying table {}.{} without primary keys", schema_name, table_name);
+            _connection.exec(fmt::format(COPY_QUERY, schema_name, table_name));
+        }
 
         if (_connection.status() != PGRES_COPY_OUT) {
             LOG_ERROR("Copy command did not receive PGRES_COPY_OUT");
@@ -482,7 +501,7 @@ namespace springtail
                              uint64_t schema_oid,
                              const PgCopyResultPtr &snapshot_details)
     {
-        // set the schema
+        // fetch the schema info for the table; update _schema object
         _set_schema(table_name, schema_name, table_oid, schema_oid);
 
         // validate the columns to see if there are invalid columns
@@ -529,6 +548,21 @@ namespace springtail
         table_info->set_id(table_oid);
         table_info->set_namespace_name(_schema.schema_name);
         table_info->set_name(_schema.table_name);
+
+        // partition info
+        if (_schema.parent_oid.has_value()) {
+            table_info->set_parent_table_id(static_cast<int32_t>(_schema.parent_oid.value()));
+        } else {
+            table_info->set_parent_table_id(constant::INVALID_TABLE);
+        }
+
+        if (_schema.partition_key.has_value()) {
+            table_info->set_partition_key(_schema.partition_key.value());
+        }
+
+        if (_schema.partition_bound.has_value()) {
+            table_info->set_partition_bound(_schema.partition_bound.value());
+        }
 
         for (const auto &col : _schema.columns) {
             auto* column = table_info->add_columns();
@@ -578,44 +612,48 @@ namespace springtail
         pg_log_mgr::SyncTracker::get_instance()->mark_inflight(db_id, _schema.table_oid, xid,
                                                                snapshot_details, schema);
 
-        // start the COPY
-        _prepare_copy();
+        // only do the COPY if there are no partition keys
+        // if there are partition keys, then this is not a leaf table
+        if (!_schema.partition_key.has_value()) {
+            // start the COPY
+            _prepare_copy();
 
-        // get a chunk of data
-        auto data = _get_next_data();
-        if (!data) {
-            throw PgIOError();
-        }
+            // get a chunk of data
+            auto data = _get_next_data();
+            if (!data) {
+                throw PgIOError();
+            }
 
-        // verify the header before processing the rows
-        int32_t ext_length = _verify_copy_header(data->substr(0, 19));
-        size_t pos = 19 + ext_length;
+            // verify the header before processing the rows
+            int32_t ext_length = _verify_copy_header(data->substr(0, 19));
+            size_t pos = 19 + ext_length;
 
-        // scan the rows and populate the table
-        while (true) {
-            if (data->size() == pos) {
-                // release the row data
-                _release_data();
+            // scan the rows and populate the table
+            while (true) {
+                if (data->size() == pos) {
+                    // release the row data
+                    _release_data();
 
-                // try to get more row data
-                pos = 0;
-                data = _get_next_data();
-                if (!data) {
-                    break; // finished with the COPY
+                    // try to get more row data
+                    pos = 0;
+                    data = _get_next_data();
+                    if (!data) {
+                        break; // finished with the COPY
+                    }
+                    continue; // got more data, keep processing
                 }
-                continue; // got more data, keep processing
+
+                auto fields = _parse_row(*data, user_types, pos);
+                if (!fields) {
+                    break; // saw footer, finished with the COPY
+                }
+
+                // construct a tuple from the row
+                auto tuple = std::make_shared<FieldTuple>(fields, nullptr);
+
+                // add the row to the table
+                table->insert(tuple, constant::UNKNOWN_EXTENT);
             }
-
-            auto fields = _parse_row(*data, user_types, pos);
-            if (!fields) {
-                break; // saw footer, finished with the COPY
-            }
-
-            // construct a tuple from the row
-            auto tuple = std::make_shared<FieldTuple>(fields, nullptr);
-
-            // add the row to the table
-            table->insert(tuple, constant::UNKNOWN_EXTENT);
         }
 
         // flush the table data to disk
@@ -777,6 +815,17 @@ namespace springtail
                 auto num = recvint32(row.data() + pos);
                 float f = std::bit_cast<float>(num);
                 fields->push_back(std::make_shared<ConstTypeField<float>>(f));
+                pos += length;
+                break;
+            }
+
+            case (SchemaType::NUMERIC): {
+                std::string_view tmp(row.data() + pos, length);
+                std::shared_ptr<numeric::NumericData> numeric_value = numeric::numeric_receive(tmp.begin(), length, 0);
+                auto buf = (char*)(numeric_value.get());
+                std::vector<char> value(buf, buf + numeric_value->varsize());
+                fields->push_back(std::make_shared<ConstTypeField<
+                        std::shared_ptr<numeric::NumericData>>>(std::move(value)));
                 pos += length;
                 break;
             }
@@ -979,6 +1028,8 @@ namespace springtail
 
                 // add the table oid to the result
                 result->add_table(info);
+
+                // reset schema object for next table
                 copy_table._reset_schema();
 
             } catch (PgTableNotFoundError &e) {

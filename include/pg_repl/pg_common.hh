@@ -18,6 +18,7 @@ namespace springtail
         BOOLEAN, // bool
         FLOAT64, // float8
         FLOAT32, // float4
+        NUMERIC, // numeric data type
         BINARY // all other types
     };
 

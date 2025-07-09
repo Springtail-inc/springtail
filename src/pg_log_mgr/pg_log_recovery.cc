@@ -18,13 +18,19 @@ PgLogRecovery::repair_logs()
     std::filesystem::create_directories(_repl_path);
     std::filesystem::create_directories(_xact_path);
 
-    auto latest_log =
+    _latest_log =
         fs::find_latest_modified_file(_repl_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
-    if (latest_log) {
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Found latest log file: {}", *latest_log);
-        lsn = PgMsgStreamReader::scan_log(*latest_log, true);
-    } else {
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Did not find any files in directory: {}", _repl_path.string());
+    CHECK(_latest_log);
+
+    while (_latest_log && lsn == INVALID_LSN) {
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Found latest log file: {}", *_latest_log);
+        lsn = PgMsgStreamReader::scan_log(*_latest_log, true);
+
+        if (lsn == INVALID_LSN) {
+            // didn't find a latest completed LSN in the file, so remove this file and keep going back
+            std::filesystem::remove(*_latest_log);
+            _latest_log = fs::find_latest_modified_file(_repl_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
+        }
     }
 
     return lsn;
@@ -119,26 +125,21 @@ PgLogRecovery::_skip_committed()
             break;
         }
         // check if there are more messages in the replication log
-        bool eob = false, eos = false;
-        auto msg = _repl_reader.read_message(filter, eos, eob);
+        bool eos = false;
+        auto msg = _repl_reader.read_message(filter, eos);
         if (msg != nullptr) {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Found message {}, eob {}, eos {}", static_cast<int>(msg->msg_type), eob, eos);
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Found message {}, eos {}", static_cast<int>(msg->msg_type), eos);
             done = _process_msg(msg, xact_reader, cur_pgxid);
         } else {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Skipping message in repl log; offset {}, eob {}, eos {}", _repl_reader.offset(), eob, eos);
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Skipping message in repl log; offset {}, eos {}", _repl_reader.offset(), eos);
         }
 
         // check if we need to move to the next replication log file
         if (!done && eos) {
-            _repl_log =
-                fs::get_next_log_file(*_repl_log, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
-            if (!_repl_log) {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "No next replication log found, last committed xid is not found");
+            bool found_next = _next_repl_log();
+            if (!found_next) {
                 return false;
             }
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Set streaming for file {}", _repl_log.value().string());
-
-            _repl_reader.set_file(*_repl_log);
         }
     }
 
@@ -155,7 +156,7 @@ PgLogRecovery::_process_msg(PgMsgPtr msg,
             // starting point for the scan along with pgxid
         case PgMsgEnum::BEGIN: {
             auto &begin_msg = std::get<PgMsgBegin>(msg->msg);
-            Position p(_repl_reader.header_offset(), *_repl_log);
+            Position p(_repl_reader.message_offset(), *_repl_log);
             _active_map.try_emplace(begin_msg.xid, p);
             cur_pgxid = begin_msg.xid;
             return false;
@@ -163,7 +164,7 @@ PgLogRecovery::_process_msg(PgMsgPtr msg,
         case PgMsgEnum::STREAM_START: {
             auto &start_msg = std::get<PgMsgStreamStart>(msg->msg);
             if (start_msg.first) {
-                Position p(_repl_reader.header_offset(), *_repl_log);
+                Position p(_repl_reader.message_offset(), *_repl_log);
                 _active_map.try_emplace(start_msg.xid, p);
             }
             cur_pgxid = start_msg.xid;
@@ -211,7 +212,7 @@ PgLogRecovery::_process_msg(PgMsgPtr msg,
                     _active_map.erase(pgxid);
                 }
 
-                _final_committed = {_repl_reader.block_end_offset(), *_repl_log};
+                _final_committed = {_repl_reader.offset(), *_repl_log};
                 if (xact_reader.get_xid() == _committed_xid) {
                     LOG_DEBUG(LOG_PG_LOG_MGR, "Found final commit");
                     done = true;
@@ -278,8 +279,8 @@ PgLogRecovery::_replay_active()
         }
 
         // get the next matching message, returns nullptr when there are no more messages in any logs
-        bool eob, eos;
-        auto msg = _repl_reader.read_message(filter, eos, eob);
+        bool eos;
+        auto msg = _repl_reader.read_message(filter, eos);
         if (msg != nullptr) {
             switch (msg->msg_type) {
             case PgMsgEnum::BEGIN: {
@@ -329,15 +330,14 @@ PgLogRecovery::_replay_active()
 
         // check if we need to move to the next file
         if (eos) {
-            _repl_log =
-                fs::get_next_log_file(*_repl_log, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
-            if (_repl_log) {
-                _repl_reader.set_file(*_repl_log);
-                timestamp = fs::extract_timestamp_from_file(_repl_log.value(), PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX).value();
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Replaying active from file {}", _repl_log.value().string());
-            } else {
+            bool found_next = _next_repl_log();
+            if (!found_next) {
                 return false;
             }
+            timestamp = fs::extract_timestamp_from_file(_repl_log.value(),
+                                                        PgLogMgr::LOG_PREFIX_REPL,
+                                                        PgLogMgr::LOG_SUFFIX).value();
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Replaying active from file {}", _repl_log.value().string());
         }
     }
 
@@ -359,8 +359,8 @@ PgLogRecovery::_replay_uncommitted()
     LOG_DEBUG(LOG_PG_LOG_MGR, "Replaying uncommitted from file {}", _repl_log.value().string());
 
     while (_repl_log) {
-        bool eob, eos;
-        auto msg = _repl_reader.read_message(filter, eos, eob);
+        bool eos;
+        auto msg = _repl_reader.read_message(filter, eos);
         if (msg != nullptr) {
             // queue the message for processing
             msg->pg_log_timestamp = timestamp;
@@ -369,15 +369,36 @@ PgLogRecovery::_replay_uncommitted()
 
         // check if we need to move to the next file
         if (eos) {
-            _repl_log =
-                fs::get_next_log_file(*_repl_log, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
-            if (_repl_log) {
-                _repl_reader.set_file(*_repl_log);
+            bool found_next = _next_repl_log();
+            if (found_next) {
                 timestamp = fs::extract_timestamp_from_file(_repl_log.value(), PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX).value();
                 LOG_DEBUG(LOG_PG_LOG_MGR, "Replaying uncommitted from file {}", _repl_log.value().string());
             }
         }
     }
 }
+
+bool
+PgLogRecovery::_next_repl_log()
+{
+    if (_repl_log == _latest_log) {
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Processed the final log file: {} == {}",
+                  _repl_log, *_latest_log);
+        _repl_log = std::nullopt;
+        return false;
+    }
+
+    _repl_log =
+        fs::get_next_log_file(*_repl_log, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
+    if (!_repl_log) {
+        LOG_DEBUG(LOG_PG_LOG_MGR, "No next replication log found");
+        return false;
+    }
+
+    _repl_reader.set_file(*_repl_log);
+    LOG_DEBUG(LOG_PG_LOG_MGR, "Found next log file {}", _repl_log.value().string());
+    return true;
+}
+
 
 }  // namespace springtail::pg_log_mgr

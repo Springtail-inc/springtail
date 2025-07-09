@@ -34,12 +34,12 @@ public:
     /** Creates an index within the system tables. */
     grpc::Status CreateIndex(grpc::ServerContext* context,
                              const proto::IndexRequest* request,
-                             proto::DDLStatement* response) override;
+                             proto::IndexProcessRequest* response) override;
 
     /** Drops an index within the system tables. */
     grpc::Status DropIndex(grpc::ServerContext* context,
                            const proto::DropIndexRequest* request,
-                           proto::DDLStatement* response) override;
+                           proto::IndexProcessRequest* response) override;
 
     /** Set the state of the index within the system tables. */
     grpc::Status SetIndexState(grpc::ServerContext* context,
@@ -102,6 +102,16 @@ public:
     grpc::Status GetUserType(grpc::ServerContext* context,
                              const proto::GetUserTypeRequest* request,
                              proto::GetUserTypeResponse* response) override;
+
+    /** Attaches a partition to a table. */
+    grpc::Status AttachPartition(grpc::ServerContext* context,
+                                 const proto::AttachPartitionRequest* request,
+                                 proto::DDLStatement* response) override;
+
+    /** Detaches a partition from a table. */
+    grpc::Status DetachPartition(grpc::ServerContext* context,
+                                 const proto::DetachPartitionRequest* request,
+                                 proto::DDLStatement* response) override;
 
     /** Updates the roots extents of the indexes of the table as well as the table stats. */
     grpc::Status UpdateRoots(grpc::ServerContext* context,
@@ -176,12 +186,28 @@ private:
         uint64_t namespace_id;  ///< The ID of the schema/namespace of the table.
         std::string name;       ///< The name of the table.
         bool exists;            ///< A flag indicating if the table exists at this point.
+        std::optional<uint64_t> parent_table_id;  ///< The parent table ID for partitioned tables (INVALID_TABLE if not set)
+        std::optional<std::string> partition_key;  ///< The partition key expression for partitioned tables.
+        std::optional<std::string> partition_bound;  ///< The partition bound expression for partitioned tables.
         TableCacheRecord(uint64_t id,
                          uint64_t xid,
                          uint64_t lsn,
                          uint64_t namespace_id,
                          const std::string& name,
-                         bool exists)
+                         bool exists,
+                         std::optional<uint64_t> parent_table_id,
+                         const std::optional<std::string> &partition_key,
+                         const std::optional<std::string> &partition_bound)
+            : id(id), xid(xid), lsn(lsn), namespace_id(namespace_id), name(name), exists(exists),
+              parent_table_id(parent_table_id), partition_key(partition_key), partition_bound(partition_bound)
+        {
+        }
+        TableCacheRecord(uint64_t id,
+            uint64_t xid,
+            uint64_t lsn,
+            uint64_t namespace_id,
+            const std::string& name,
+            bool exists)
             : id(id), xid(xid), lsn(lsn), namespace_id(namespace_id), name(name), exists(exists)
         {
         }
@@ -192,6 +218,7 @@ private:
     /**
      * Retrieve the TableCacheRecord either from the cache or from the system tables if not
      * available.
+     * @param db_id The ID of the database.
      * @param table_id The ID of the table.
      * @param xid The XID/LSN at which we are querying.
      */
@@ -383,11 +410,22 @@ private:
                                    const XidLsn& target_xid);
 
     /**
+     * Helper function to generate the history events for the child partition tables.
+     * @param request The table request for which we are generating the history events.
+     * @param history The history event to be generated.
+     *
+     * @return A vector of ColumnHistory objects containing the history events for the child partition tables.
+     */
+    nlohmann::json _generate_partition_updates(const proto::TableRequest& request,
+                                               const proto::ColumnHistory& history);
+
+    /**
      * Helper function to extract a change entry for a schema by comparing the old and new
      * schemas from before and after the ALTER TABLE statement.
      * @param old_schema The schema before the alteration.
      * @param new_schema The schema after the alteration.
      * @param xid The XID/LSN at which the alteration occurred.
+     * @param ddl The JSON object to which the DDL statement will be added.
      */
     proto::ColumnHistory _generate_update(
         const google::protobuf::RepeatedPtrField<proto::TableColumn>& old_schema,
@@ -492,7 +530,7 @@ private:
     /**
      * Performs a create_index() assuming that the correct locks are already held.
      */
-    nlohmann::json _create_index(const proto::IndexRequest& request);
+    proto::IndexInfo _create_index(const proto::IndexRequest& request);
 
     /**
      * Performs a drop_index() assuming that the correct locks are already held.
@@ -532,6 +570,18 @@ private:
     /** Performs an set_index_state() assuming that the correct locks are already held.
      */
     bool _set_index_state(const proto::SetIndexStateRequest& request);
+
+    /**
+     * @brief Upserts index name entry with the give index info
+     * @param db_id            Database ID
+     * @param index_info       proto::IndexInfo containing the index details
+     * @param xid              XidLsn entry at which index is mutated
+     * @param keys             Index keys
+     * @param is_primary_index Indicates if its primary or secondary index
+     * @return bool indicating the upsert is successful or not
+     */
+    bool _upsert_index_name(uint64_t db_id, const proto::IndexInfo& index_info, const XidLsn& xid,
+            const std::map<uint32_t, uint32_t>& keys, bool is_primary_index=false);
 
     /** Performs an get_index_info() assuming that the correct locks are already held.
      */
@@ -586,6 +636,24 @@ private:
      * Retrieve the current write XID for a db.
      */
     uint64_t _get_write_xid(uint64_t db_id);
+
+    /**
+     * @brief Helper function to extract the modified partition details to either attach or detach the
+     * partition to the parent table.
+     * @param db_id The database ID.
+     * @param xid The XID/LSN at which the alteration occurred.
+     * @param table_id The ID of the parent table.
+     * @param partition_data The partition data.
+     * @param partition_map The partition map.
+     * @param is_attached Whether the partition is being attached or detached.
+     * @return std::vector<uint64_t> The modified partition details.
+     */
+    std::vector<uint64_t> _get_modified_partition_details(uint64_t db_id,
+                                const XidLsn &xid,
+                                uint64_t table_id,
+                                const google::protobuf::RepeatedPtrField<proto::PartitionData> &partition_data,
+                                std::unordered_map<uint64_t, std::pair<std::string, std::string>> *partition_map,
+                                bool is_attached);
 
     /**
      * Set the read and write XIDs.

@@ -354,7 +354,7 @@ def start_replication(props : Properties, build_dir : str) -> None:
         conn = connect_db_instance(props, db_name)
 
         # Create the publication
-        execute_sql(conn, f"CREATE PUBLICATION {quote_ident(pub_name, conn)} FOR ALL TABLES WITH (publish_via_partition_root);")
+        execute_sql(conn, f"CREATE PUBLICATION {quote_ident(pub_name, conn)} FOR ALL TABLES")
 
         # Create the replication slot;
         # NOTE: it the slot name needs to be globally unique
@@ -689,6 +689,11 @@ def start(config_file: str,
         print("\nSpringtail system started successfully.")
 
     else:
+        if do_fdw_install:
+            # install fdw
+            print("\nInstalling foreign data wrapper...")
+            install_fdw(build_dir)
+
         # start postgres
         print("Starting postgres...")
         start_postgres()

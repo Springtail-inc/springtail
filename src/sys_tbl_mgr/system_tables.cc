@@ -19,7 +19,10 @@ const std::vector<SchemaColumn> TableNames::Data::SCHEMA = {
     {"table_id", 3, SchemaType::UINT64, INT8OID, false, 0},
     {"xid", 4, SchemaType::UINT64, INT8OID, false, 1},
     {"lsn", 5, SchemaType::UINT64, INT8OID, false, 2},
-    {"exists", 6, SchemaType::BOOLEAN, BOOLOID, false}};
+    {"exists", 6, SchemaType::BOOLEAN, BOOLOID, false},
+    {"parent_table_id", 7, SchemaType::UINT64, INT8OID, true},
+    {"partition_key", 8, SchemaType::TEXT, TEXTOID, true},
+    {"partition_bound", 9, SchemaType::TEXT, TEXTOID, true}};
 
 const std::vector<SchemaColumn> TableNames::Primary::SCHEMA = {
     {"table_id", 1, SchemaType::UINT64, INT8OID, false},

@@ -32,13 +32,8 @@ namespace {
         // Called once per testsuite.  Create a table and populate it with data
         static void SetUpTestSuite()
         {
-            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-            runners.emplace();
-            runners->emplace_back(std::make_unique<IOMgrRunner>());
-
-            auto service_runners = test::get_services(true, true, true);
-            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
-            springtail_init_test(runners);
+            springtail_init_test();
+            test::start_services(true, true, true);
 
             _db_id = 1;
             _tid = 1000;
@@ -117,21 +112,20 @@ namespace {
             TableMgr::get_instance()->update_roots(_db_id, table_id, data_xid, metadata);
         }
 
-        void _create_index(uint64_t table_id, uint64_t index_id, uint64_t index_xid, std::string index_name, bool process_ddls_in_indexer=true) {
+        void _create_index(uint64_t table_id, uint64_t index_id, uint64_t index_xid, std::string index_name, bool process_requests_in_indexer=true) {
             // Create index at an XID
-            nlohmann::json idx_ddls;
-            auto create_idx_ddl = create_index(_db_id, table_id, index_xid, index_id, index_name,
+            std::list<proto::IndexProcessRequest> index_requests;
+            auto create_idx_request = create_index(_db_id, table_id, index_xid, index_id, index_name,
                     std::vector<PgMsgSchemaColumn>(_columns.end() - 2, _columns.end()), sys_tbl::IndexNames::State::NOT_READY);
-            idx_ddls.push_back(nlohmann::json::parse(create_idx_ddl));
+            index_requests.push_back(std::move(create_idx_request));
 
             // Validate index as NOT_READY
             auto index_info = sys_tbl_mgr::Client::get_instance()->get_index_info(_db_id, index_id, {index_xid, constant::MAX_LSN});
             ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(index_info.state()), sys_tbl::IndexNames::State::NOT_READY);
 
-            // Process Index DDLs
-
-            if (process_ddls_in_indexer) {
-                _indexer->process_ddls(_db_id, index_xid, idx_ddls);
+            // Process Index requests
+            if (process_requests_in_indexer) {
+                _indexer->process_requests(_db_id, index_xid, index_requests);
             }
             sys_tbl_mgr::Client::get_instance()->finalize(_db_id, index_xid);
         }

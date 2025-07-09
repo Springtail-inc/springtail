@@ -1,0 +1,41 @@
+# The Dockerfile for building release packages. No tests, no debug symbols, no extra tools.
+FROM ubuntu:noble
+
+ENV TINI_VERSION=v0.19.0 \
+    ZIC=true \
+    VCPKG_FORCE_SYSTEM_BINARIES=1 \
+    VCPKG_ROOT=/home/dev/external/vcpkg \
+    USER=root
+
+# Install ansible and other dependencies
+RUN apt-get update && apt-get install -y ansible-core
+# Copy over the ansible assets
+COPY docker/ansible/ /var/ansible/
+# Run Ansible playbook to install additional dependencies
+RUN ansible-playbook /var/ansible/playbook.ci.yml --connection=local --inventory localhost, --extra-vars "ansible_python_interpreter=/usr/bin/python3"
+
+WORKDIR /__w/springtail/springtail
+COPY . /__w/springtail/springtail
+RUN rm -rf release/* && \
+    rm -rf debug/* && \
+    rm -rf shared-lib/* && \
+    find . -name "*~" | xargs rm -f && \
+    find . -name "#*" | xargs rm -f
+
+RUN ./vcpkg.sh && \
+    mkdir -p /home/dev/release && \
+    mkdir -p /home/dev/external && \
+    mkdir -p /home/dev/install && \
+    ln -s /home/dev/release release && \
+    ln -s /home/dev/install install && \
+    cmake -B release -S . -DCMAKE_BUILD_TYPE=RelWithDebInfo -DNDEBUG=1 -DVCPKG_INSTALL_OPTIONS="--allow-unsupported" && \
+    cd release && \
+    make -j6 && \
+    cd .. && \
+    pip3 install --break-system-packages -r python/performance/requirements.txt && \
+    rm -rf /__w/springtail/springtail /home/dev/debug/src /home/dev/external/vcpkg/buildtrees /home/dev/external/vcpkg/packages /home/dev/external/vcpkg/downloads 
+
+# Pull back the libpg_query
+RUN cd /home/dev/external && git clone https://github.com/Springtail-inc/libpg_query.git
+
+

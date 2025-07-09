@@ -25,9 +25,6 @@ namespace springtail {
         if (_fp == nullptr) {
             throw Error("Failed to open file: " + _file_name.string());
         }
-        // set the header offset to beginning of file; seek past header
-        _header_offset = 0;
-        ::fseek(_fp, PgMsgStreamHeader::SIZE, SEEK_CUR);
     }
 
     PgMsgLogGen::~PgMsgLogGen()
@@ -160,32 +157,6 @@ namespace springtail {
                 throw Error("Unknown type: " + types[i]);
             }
         }
-    }
-
-    void
-    PgMsgLogGen::_write_header()
-    {
-        // calculate message length
-        int current_offset = ::ftell(_fp);
-        int msg_length = current_offset - _header_offset - PgMsgStreamHeader::SIZE;
-
-        // skip messages of no length, this can happen for the very first message
-        if (msg_length == 0) {
-            return;
-        }
-
-        // seek to header offset
-        ::fseek(_fp, _header_offset, SEEK_SET);
-
-        // write header
-        char buffer[PgMsgStreamHeader::SIZE];
-        PgMsgStreamHeader header(msg_length, _begin_lsn, _lsn, 2);
-        header.encode_header(buffer);
-        _write(buffer, PgMsgStreamHeader::SIZE);
-
-        // mark current offset (old offset) as new header offset; leave room for new header
-        _header_offset = current_offset;
-        ::fseek(_fp, current_offset + PgMsgStreamHeader::SIZE, SEEK_SET);
     }
 
     void
@@ -339,8 +310,6 @@ namespace springtail {
     uint32_t
     PgMsgLogGen::begin()
     {
-        _write_header(); // close previous msg, start new one
-
         _add_start_xact();
 
         _begin_lsn = _lsn;
@@ -370,8 +339,6 @@ namespace springtail {
         _write_uint64(_commit_ts);
 
         _add_end_xact();
-
-        _write_header(); // close previous msg, start new one
 
         // increment xid
         _xid++;
@@ -455,8 +422,6 @@ namespace springtail {
     {
         uint8_t stream_flag = 0;
 
-        _write_header(); // close previous msg, start new one
-
         if (!_in_stream_xact) {
             _add_start_xact(); // add start xact before header
             _add_stream_xact(PgTransaction::TYPE_STREAM_START);
@@ -469,8 +434,6 @@ namespace springtail {
         _write_uint32(_stream_xid);
         _write_uint8(stream_flag);
 
-        _write_header(); // stream ops are in their own message
-
         _is_streaming = true;
 
         _lsn++;
@@ -479,12 +442,8 @@ namespace springtail {
     void
     PgMsgLogGen::stream_stop()
     {
-        _write_header(); // close previous msg, start new one
-
         assert(_is_streaming);
         _write_uint8(pg_msg::MSG_STREAM_STOP);
-
-        _write_header(); // stream ops are in their own message
 
         _is_streaming = false;
 
@@ -494,8 +453,6 @@ namespace springtail {
     void
     PgMsgLogGen::stream_commit()
     {
-        _write_header(); // close previous msg, start new one
-
         assert(_in_stream_xact);
         assert(!_is_streaming);
         uint64_t commit_lsn = _lsn;
@@ -510,8 +467,6 @@ namespace springtail {
 
         std::cout << "stream commit end offset=" << ::ftell(_fp) << std::endl;
 
-        _write_header(); // stream ops are in their own message
-
         _in_stream_xact = false;
 
         _lsn++;
@@ -520,8 +475,6 @@ namespace springtail {
     void
     PgMsgLogGen::stream_abort()
     {
-        _write_header(); // close previous msg, start new one
-
         _add_stream_xact(PgTransaction::TYPE_STREAM_ABORT);
 
         assert(!_in_stream_xact);
@@ -530,9 +483,49 @@ namespace springtail {
         _write_uint32(_stream_xid);
         _write_uint32(_stream_xid); // sub-transaction
 
-        _write_header(); // stream ops are in their own message
-
         _in_stream_xact = false;
+
+        _lsn++;
+    }
+
+    void
+    PgMsgLogGen::attach_partition(const std::string &table_name,
+                                  uint32_t table_id,
+                                  const std::string &schema,
+                                  const std::string &partition_key,
+                                  nlohmann::json partition_data)
+    {
+        nlohmann::json msg;
+
+        msg["cmd"] = "ATTACH PARTITION";
+        msg["table_id"] = table_id;
+        msg["schema"] = schema;
+        msg["partition_data"] = partition_data;
+        msg["partition_key"] = partition_key;
+        msg["table"] = table_name;
+
+        _write_message(pg_msg::MSG_PREFIX_ATTACH_PARTITION, msg);
+
+        _lsn++;
+    }
+
+    void
+    PgMsgLogGen::detach_partition(const std::string &table_name,
+                                  uint32_t table_id,
+                                  const std::string &schema,
+                                  const std::string &partition_key,
+                                  nlohmann::json partition_data)
+    {
+        nlohmann::json msg;
+
+        msg["cmd"] = "DETACH PARTITION";
+        msg["table_id"] = table_id;
+        msg["schema"] = schema;
+        msg["partition_data"] = partition_data;
+        msg["partition_key"] = partition_key;
+        msg["table"] = table_name;
+
+        _write_message(pg_msg::MSG_PREFIX_DETACH_PARTITION, msg);
 
         _lsn++;
     }
@@ -541,7 +534,7 @@ namespace springtail {
     PgMsgLogGen::dump_file(const std::filesystem::path &file_name)
     {
         PgMsgStreamReader reader(file_name);
-        bool eos = false, eob = false;
+        bool eos = false;
 
         int count = 0;
 
@@ -550,7 +543,7 @@ namespace springtail {
                 break;
             }
             count++;
-            PgMsgPtr msg = reader.read_message(reader.ALL_MESSAGES, eos, eob);
+            PgMsgPtr msg = reader.read_message(reader.ALL_MESSAGES, eos);
             if (msg == nullptr) {
                 continue;
             }
@@ -668,6 +661,14 @@ namespace springtail {
         }
         if (cmd == PG_OP_STREAM_ABORT) {
             _parse_stream_abort(json);
+            return;
+        }
+        if (cmd == PG_OP_ATTACH_PARTITION) {
+            _parse_attach_partition(json);
+            return;
+        }
+        if (cmd == PG_OP_DETACH_PARTITION) {
+            _parse_detach_partition(json);
             return;
         }
 
@@ -872,5 +873,17 @@ namespace springtail {
     PgLogGenJson::_parse_stream_abort(const nlohmann::json &json)
     {
         _log_gen.stream_abort();
+    }
+
+    void
+    PgLogGenJson::_parse_attach_partition(const nlohmann::json &json)
+    {
+        _log_gen.attach_partition(json["table"], json["table_id"], json["schema"], json["partition_key"], json["partition_data"]);
+    }
+
+    void
+    PgLogGenJson::_parse_detach_partition(const nlohmann::json &json)
+    {
+        _log_gen.detach_partition(json["table"], json["table_id"], json["schema"], json["partition_key"], json["partition_data"]);
     }
 } // namespace springtail

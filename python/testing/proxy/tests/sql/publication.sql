@@ -1054,30 +1054,30 @@ CREATE TABLE sch1.tbl1 (a int) PARTITION BY RANGE(a);
 CREATE TABLE sch2.tbl1_part1 PARTITION OF sch1.tbl1 FOR VALUES FROM (1) to (10);
 -- Schema publication that does not include the schema that has the parent table
 CREATE PUBLICATION pub FOR TABLES IN SCHEMA sch2 WITH (PUBLISH_VIA_PARTITION_ROOT=1);
-SELECT * FROM pg_publication_tables;
+SELECT * FROM pg_publication_tables ORDER BY pubname, schemaname, tablename;
 
 DROP PUBLICATION pub;
 -- Table publication that does not include the parent table
 CREATE PUBLICATION pub FOR TABLE sch2.tbl1_part1 WITH (PUBLISH_VIA_PARTITION_ROOT=1);
-SELECT * FROM pg_publication_tables;
+SELECT * FROM pg_publication_tables ORDER BY pubname, schemaname, tablename;
 
 -- Table publication that includes both the parent table and the child table
 ALTER PUBLICATION pub ADD TABLE sch1.tbl1;
-SELECT * FROM pg_publication_tables;
+SELECT * FROM pg_publication_tables ORDER BY pubname, schemaname, tablename;
 
 DROP PUBLICATION pub;
 -- Schema publication that does not include the schema that has the parent table
 CREATE PUBLICATION pub FOR TABLES IN SCHEMA sch2 WITH (PUBLISH_VIA_PARTITION_ROOT=0);
-SELECT * FROM pg_publication_tables;
+SELECT * FROM pg_publication_tables ORDER BY pubname, schemaname, tablename;
 
 DROP PUBLICATION pub;
 -- Table publication that does not include the parent table
 CREATE PUBLICATION pub FOR TABLE sch2.tbl1_part1 WITH (PUBLISH_VIA_PARTITION_ROOT=0);
-SELECT * FROM pg_publication_tables;
+SELECT * FROM pg_publication_tables ORDER BY pubname, schemaname, tablename;
 
 -- Table publication that includes both the parent table and the child table
 ALTER PUBLICATION pub ADD TABLE sch1.tbl1;
-SELECT * FROM pg_publication_tables;
+SELECT * FROM pg_publication_tables ORDER BY pubname, schemaname, tablename;
 
 DROP PUBLICATION pub;
 DROP TABLE sch2.tbl1_part1;
@@ -1089,7 +1089,7 @@ CREATE TABLE sch1.tbl1_part2 PARTITION OF sch1.tbl1 FOR VALUES FROM (10) to (20)
 CREATE TABLE sch1.tbl1_part3 (a int) PARTITION BY RANGE(a);
 ALTER TABLE sch1.tbl1 ATTACH PARTITION sch1.tbl1_part3 FOR VALUES FROM (20) to (30);
 CREATE PUBLICATION pub FOR TABLES IN SCHEMA sch1 WITH (PUBLISH_VIA_PARTITION_ROOT=1);
-SELECT * FROM pg_publication_tables;
+SELECT * FROM pg_publication_tables ORDER BY pubname, schemaname, tablename;
 
 RESET client_min_messages;
 DROP PUBLICATION pub;

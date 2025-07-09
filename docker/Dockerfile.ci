@@ -1,4 +1,4 @@
-# The Dockerfile for CI build & tests
+# The Dockerfile for CI build & tests (for GitHub Actions)
 FROM ubuntu:noble
 
 ENV TINI_VERSION=v0.19.0 \
@@ -7,72 +7,20 @@ ENV TINI_VERSION=v0.19.0 \
     VCPKG_ROOT=/home/dev/external/vcpkg \
     USER=root
 
-# Install all system packages and Python dependencies in one layer
-RUN apt-get update && apt-get install -y \
-    lsb-release wget software-properties-common gnupg \
-    build-essential autoconf libelf-dev \
-    bison clang-format pkg-config flex libdw-dev openssh-server \
-    libdwarf-dev binutils-dev linux-libc-dev cmake \
-    git curl zip unzip tar ninja-build python3 libbsd-dev \
-    redis-server postgresql-16 postgresql-contrib-16 jq net-tools \
-    sudo vim ca-certificates gpg emacs-nox gcc-14 g++-14 gdb \
-    python3-pip python3-psycopg2 python3-psutil python3-redis \
-    python3-requests python3-yaml python3-jinja2 python3-lxml \
-    python3-boto3 \
-    && DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get -y install tzdata \
-    && pip3 install --break-system-packages grpcio protobuf opentelemetry-sdk opentelemetry-exporter-otlp-proto-http opentelemetry-api \
-    && apt-get clean autoclean \
-    && apt-get autoremove --yes \
-    && rm -rf /var/lib/{apt,cache,log,dpkg} \
-    && pip cache purge
+# Install ansible and other dependencies
+RUN apt-get update && apt-get install -y ansible-core
+# Copy over the ansible assets
+COPY docker/ansible/ /var/ansible/
+# Run Ansible playbook to install additional dependencies
+RUN ansible-playbook /var/ansible/playbook.base.yml --connection=local --inventory localhost, --extra-vars "ansible_python_interpreter=/usr/bin/python3"
 
-# Configure PostgreSQL
-ARG conf_file=/etc/postgresql/16/main/postgresql.conf
-ARG hba_file=/etc/postgresql/16/main/pg_hba.conf
-ARG redis_conf=/etc/redis/redis.conf
-RUN sed -i -e"s/^#listen_addresses =.*$/listen_addresses = '*'/" $conf_file \
-    && echo "host    all    all    0.0.0.0/0    md5" >> $hba_file \
-    && sed -i -e"s/local[ \t]*all[ \t]*all[ \t]*peer/local all all md5/" $hba_file \
-    && sed -i -e"s/^#log_destination = .*$/log_destination = 'stderr'/" $conf_file \
-    && sed -i -e"s/^#logging_collector = off.*$/logging_collector = on/" $conf_file \
-    && sed -i -e"s/^#log_directory = .*$/log_directory = '\/var\/log\/postgresql'/" $conf_file \
-    && sed -i -e"s/^#log_filename = 'postgresql-\%Y-\%m-\%d_\%H\%M\%S.log'.*$/log_filename = 'postgresql_\%a.log'/" $conf_file \
-    && sed -i -e"s/^#log_file_mode = 0600.*$/log_file_mode = 0644/" $conf_file \
-    && sed -i -e"s/^#log_truncate_on_rotation = off.*$/log_truncate_on_rotation = on/" $conf_file \
-    && sed -i -e"s/^#wal_level = replica.*$/wal_level = logical/" $conf_file \
-    && sed -i -e"s/^#log_min_messages = .*$/log_min_messages = debug1/" $conf_file \
-    && sed -i -e"s/^#max_prepared_transactions = .*$/max_prepared_transactions = 64/" $conf_file \
-    && sed -i -e"s/^#unix_socket_permissions = .*$/unix_socket_permissions = 0777/" $conf_file \
-    && echo "springtail_fdw.config_file_path = '/tmp/springtail/system.json'" >> $conf_file
-
-# Configure Redis and ptrace permissions
-RUN sed -i 's/^notify-keyspace-events ""/notify-keyspace-events "AKE"/' $redis_conf \
-    && sed -i -e "s/kernel.yama.ptrace_scope = 1/kernel.yama.ptrace_scope = 0/" /etc/sysctl.d/10-ptrace.conf \
-    && chmod a+rwx /var/run/postgresql
-
-# Create and configure user
-RUN useradd -m -s /bin/bash dev && \
-    echo "dev:dev" | chpasswd && \
-    adduser dev sudo && \
-    mkdir -p /home/dev/debug && \
-    mkdir -p /home/dev/external && \
-    mkdir -p /home/dev/install \
-    chown dev /home/dev/debug && \
-    chown dev /home/dev/external && \
-    chown dev /home/dev/install && \
-    echo '%sudo ALL=(ALL:ALL) NOPASSWD:ALL' >> /etc/sudoers
-
+# CI container specific setup
 # Configure services and create PostgreSQL user
-RUN systemctl enable postgresql.service \
-    && systemctl enable redis-server.service \
-    && service postgresql start \
-    && sudo -u postgres psql -c "CREATE USER springtail WITH PASSWORD 'springtail' SUPERUSER LOGIN" \
-    && service postgresql stop
+RUN service postgresql start && \
+    sudo -u postgres psql -c "CREATE USER springtail WITH PASSWORD 'springtail' SUPERUSER LOGIN" && \
+    service postgresql stop
 
-# Add tini init system
-ADD https://github.com/krallin/tini/releases/download/v0.19.0/tini-arm64 /tini
-RUN chmod +x /tini
-
+# Copy over the source code and run build
 WORKDIR /__w/springtail/springtail
 COPY . /__w/springtail/springtail
 RUN rm -rf release/* && \

@@ -20,7 +20,7 @@ namespace {
 
     void PrintTo(const CacheSize& cacheSize, std::ostream* os) {
         // Customize the output here as needed
-        if (cacheSize.data_cache_size == 32) {
+        if (cacheSize.data_cache_size < 128) {
             *os << "small_cache";
         } else {
             *os << "large_cache";
@@ -39,11 +39,7 @@ namespace {
                                                 sizes.data_cache_size, sizes.page_cache_size, sizes.btree_cache_size, sizes.max_extent_per_page);
             ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
 
-            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-            runners.emplace();
-            runners->emplace_back(std::make_unique<IOMgrRunner>());
-
-            springtail_init_test(runners, LOG_ALL ^ LOG_STORAGE);
+            springtail_init_test(LOG_ALL ^ LOG_STORAGE);
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({

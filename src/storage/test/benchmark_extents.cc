@@ -43,7 +43,7 @@ public:
           _can_undefined(false),
           _offset(offset)
     { }
-          
+
     SchemaType get_type() const {
         return _type;
     }
@@ -56,7 +56,7 @@ public:
         auto e_row = reinterpret_cast<const Extent::Row *>(row);
         return *reinterpret_cast<const int32_t *>(e_row->data() + _offset);
     }
-    
+
 private:
     SchemaType _type;
 
@@ -157,7 +157,7 @@ main(int argc,
      char **argv)
 {
     benchmark::Initialize(&argc, argv);
-    springtail_init(std::nullopt, false, std::nullopt, LOG_NONE);
+    springtail_init(false, std::nullopt, LOG_NONE);
 
     benchmark::RunSpecifiedBenchmarks();
 

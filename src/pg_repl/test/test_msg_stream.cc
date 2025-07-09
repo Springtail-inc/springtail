@@ -67,14 +67,14 @@ namespace {
 
     TEST_F(MsgStreamReader_Test, SkipBlock)
     {
-        bool eob=false, eos=false;
+        bool eos=false;
 
         PgMsgStreamReader reader(_log_file);
 
         int count = 0;
-        while (!eob) {
+        while (count < 7) {
             // read next message
-            PgMsgPtr msg = reader.read_message({}, eos, eob);
+            PgMsgPtr msg = reader.read_message({}, eos);
             EXPECT_EQ(msg, nullptr);
             count++;
         }
@@ -83,50 +83,42 @@ namespace {
 
     TEST_F(MsgStreamReader_Test, Offset)
     {
-        bool eob=false, eos=false;
+        bool eos=false;
         PgMsgStreamReader reader(_log_file);
 
         // read next message
-        PgMsgPtr msg = reader.read_message({}, eos, eob);
+        PgMsgPtr msg = reader.read_message({}, eos);
         EXPECT_EQ(msg, nullptr);
-        EXPECT_EQ(reader.header_offset(), 0);
-        uint64_t offset = reader.block_end_offset();
-        EXPECT_GT(offset, 28);
-        EXPECT_NE(offset, reader.offset());
-
-        reader.set_file(_log_file, offset);
-        msg = reader.read_message({}, eos, eob);
-        EXPECT_EQ(msg, nullptr);
-        EXPECT_EQ(reader.header_offset(), offset);
+        EXPECT_EQ(reader.message_offset(), 0);
     }
 
     TEST_F(MsgStreamReader_Test, SkipStream)
     {
-        bool eob=false, eos=false;
+        bool eos=false;
 
         PgMsgStreamReader reader(_log_file);
 
         int count = 0;
         while (!eos) {
             // read next message
-            PgMsgPtr msg = reader.read_message({}, eos, eob);
+            PgMsgPtr msg = reader.read_message({}, eos);
             EXPECT_EQ(msg, nullptr);
             count++;
         }
-        EXPECT_EQ(count, 27); // 25 commands + final check for eof
+        EXPECT_EQ(count, 29); // 27 commands + final check for eof
     }
 
     TEST_F(MsgStreamReader_Test, Decode)
     {
-        bool eob=false, eos=false;
+        bool eos=false;
 
         PgMsgStreamReader reader(_log_file);
 
         int count = 0;
         while (!eos) {
-            PgMsgPtr msg = reader.read_message(reader.ALL_MESSAGES, eos, eob);
+            PgMsgPtr msg = reader.read_message(reader.ALL_MESSAGES, eos);
             if (msg == nullptr) {
-                EXPECT_EQ(count, 26);
+                EXPECT_EQ(count, 28);
                 continue;
             }
             nlohmann::json &j = _json_cmds[count];
@@ -173,6 +165,12 @@ namespace {
                 case PgMsgEnum::TRUNCATE:
                     EXPECT_EQ(j["cmd"], "truncate");
                     break;
+                case PgMsgEnum::ATTACH_PARTITION:
+                    EXPECT_EQ(j["cmd"], "attach partition");
+                    break;
+                case PgMsgEnum::DETACH_PARTITION:
+                    EXPECT_EQ(j["cmd"], "detach partition");
+                    break;
                 default:
                     std::cout << "Unknown message type: " << j["cmd"] << std::endl;
                     EXPECT_TRUE(false);
@@ -183,5 +181,3 @@ namespace {
     }
 
 } // namespace
-
-

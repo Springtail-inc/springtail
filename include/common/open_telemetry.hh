@@ -30,14 +30,14 @@ public:
 
     static void flush();
 
-    static inline void
+    inline void
     log(const spdlog::source_loc &loc, const std::string &logger_name, spdlog::level::level_enum lvl, const std::string &formatted_msg)
     {
-        if (!_inited_flag || _shutdown_flag || !(get_instance()->_otel_enabled && get_instance()->_otel_remote)) {
+        if (!_inited_flag || _shutdown_flag || !(_otel_enabled && _otel_remote)) {
             return;
         }
         spdlog::details::log_msg message(loc, logger_name, lvl, formatted_msg);
-        get_instance()->_log(message);
+        _log(message);
     }
 
     /**
@@ -46,7 +46,7 @@ public:
      * @param callback - function called for each key/value pair
      * @return std::unordered_map<std::string, std::string> - map of current key/value pairs for the given scope
      */
-    static void
+    void
     get_context_variables(opentelemetry::nostd::function_ref<bool(opentelemetry::nostd::string_view, opentelemetry::nostd::string_view)> callback);
 
     /**
@@ -55,7 +55,7 @@ public:
      * @param attributes - map of key/value pairs
      * @return std::unique_ptr<opentelemetry::context::Token> - scope token
      */
-    static std::unique_ptr<opentelemetry::context::Token>
+    std::unique_ptr<opentelemetry::context::Token>
     set_context_variables(const std::unordered_map<std::string, std::string>& attributes);
 
     /**
@@ -65,36 +65,34 @@ public:
      * @param attr_value - variable value
      * @return std::unique_ptr<opentelemetry::context::Token> - scope token
      */
-    static std::unique_ptr<opentelemetry::context::Token>
+    std::unique_ptr<opentelemetry::context::Token>
     set_context_variable(const std::string &attr_key, const std::string &attr_value);
 
-    static inline void
-    increment_counter(std::string_view name)
-    {
-        _assert_instance();
-        get_instance()->_increment_counter(name);
-    }
+    /**
+     * @brief Increment a counter
+     * @param name The name of the counter
+     * @param delta The increment
+     */
+    void add_counter(std::string_view name, int delta);
 
-    static inline void
-    add_counter(std::string_view name, int delta)
-    {
-        _assert_instance();
-        get_instance()->_add_counter(name, delta);
-    }
+    /**
+     * @brief Increment a counter
+     * @param name The name of the counter
+     */
+     void increment_counter(std::string_view name);
 
-    static inline void
-    record_histogram(std::string_view name, double value)
-    {
-        _assert_instance();
-        get_instance()->_record_histogram(name, value);
-    }
+     /**
+      * @brief Record a value in the histogram
+      * @param name The name of the histogram
+      * @param value The value to record
+      * @param attributes The attributes to record
+      */
+     void record_histogram(std::string_view name, double value);
 
-    static inline opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer>
-    tracer(const std::string_view& name)
-    {
-        _assert_instance();
-        return get_instance()->_tracer(name);
-    }
+     /**
+     * @brief Retrieve the otel Tracer by name.
+     */
+     opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer(const std::string_view& name);
 
 private:
     OpenTelemetry() = default;      ///< default constructor
@@ -224,32 +222,6 @@ private:
     void _register_histogram(std::string_view name, std::string_view description, std::string_view unit);
 
     void _log(const spdlog::details::log_msg &msg);
-
-    /**
-     * @brief Increment a counter
-     * @param name The name of the counter
-     */
-     void _increment_counter(std::string_view name);
-
-    /**
-     * @brief Increment a counter
-     * @param name The name of the counter
-     * @param delta The increment
-     */
-     void _add_counter(std::string_view name, int delta);
-
-     /**
-      * @brief Record a value in the histogram
-      * @param name The name of the histogram
-      * @param value The value to record
-      * @param attributes The attributes to record
-      */
-     void _record_histogram(std::string_view name, double value);
-
-     /**
-     * @brief Retrieve the otel Tracer by name.
-     */
-     opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> _tracer(const std::string_view& name);
 };
 
     /**
@@ -286,19 +258,19 @@ private:
             // the static assert is just to make sure that the type
             // index is resolved at compile time. It doesn't do anything useful.
             static_assert(get_type_index<NamesTuple, Name>() <= 100000);
-            ++std::get<get_type_index<NamesTuple, Name>()>(_new);
+            ++std::get<get_type_index<NamesTuple, Name>()>(_counters);
         }
 
         template<typename  Name>
         int get() const {
-            return std::get<get_type_index<NamesTuple, Name>()>(_new).load();
+            return std::get<get_type_index<NamesTuple, Name>()>(_counters).load();
         }
     
     private:
         std::unordered_map<std::string, std::string> _attrs;
         int _freq_sec;
         // counter increments
-        std::array<std::atomic<int>, sizeof...(Names)> _new;
+        std::array<std::atomic<int>, sizeof...(Names)> _counters;
 
         std::mutex _m;
         std::condition_variable_any _cv;
@@ -320,10 +292,11 @@ private:
         template <size_t I>
         void update_counters() {
             if constexpr (I < sizeof...(Names)) {
-                auto n = std::get<I>(_new).load();
+                auto n = std::get<I>(_counters).load();
                 if (n) {
-                    open_telemetry::OpenTelemetry::add_counter(std::tuple_element<I, NamesTuple>::type::name(), n);
-                    std::get<I>(_new) = 0;
+                    OpenTelemetry::get_instance()->add_counter(std::tuple_element<I, NamesTuple>::type::name(), n);
+                    // reset the local counter
+                    std::get<I>(_counters) = 0;
                 }
                 update_counters<I+1>();
             }
@@ -334,13 +307,10 @@ private:
                 std::unique_lock g(_m);
                 if (_cv.wait_for(g, st, std::chrono::seconds(_freq_sec), 
                             [st]{ return !st.stop_requested(); }) ) {
-                    auto token = open_telemetry::OpenTelemetry::set_context_variables(_attrs);
-                    update_counters<0>();
                 }
+                auto token = OpenTelemetry::get_instance()->set_context_variables(_attrs);
+                update_counters<0>();
             }
-            // update before exit
-            auto token = open_telemetry::OpenTelemetry::set_context_variables(_attrs);
-            update_counters<0>();
         }
     };
 

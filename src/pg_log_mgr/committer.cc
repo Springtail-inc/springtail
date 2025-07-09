@@ -1,9 +1,6 @@
-#include <opentelemetry/metrics/meter.h>
-#include <opentelemetry/metrics/provider.h>
-
 #include <common/constants.hh>
 #include <common/coordinator.hh>
-#include <common/open_telemetry.hh>
+#include <common/logging.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <proto/pg_copy_table.pb.h>
 #include <redis/db_state_change.hh>
@@ -30,7 +27,7 @@ namespace springtail::committer {
     {
         // perform cleanup for any Committer threads in a previous run
         cleanup();
-        
+
         // use the same worker count for Indexer
         _indexer = std::make_unique<Indexer>(_indexer_worker_count, _index_reconciliation_queue_mgr);
 
@@ -86,7 +83,7 @@ namespace springtail::committer {
                 emplace_result.first->second = timestamp;
             }
 
-            auto token_1 = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
+            auto token_1 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
 
             // handle a TABLE_SYNC_START
             if (result->type() == XidReady::Type::TABLE_SYNC_START) {
@@ -107,7 +104,7 @@ namespace springtail::committer {
                 completed_xid = itr->second;
             }
 
-            auto token_2 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(completed_xid)}});
+            auto token_2 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(completed_xid)}});
             LOG_INFO("Last completed XID: {}@{}", db_id, completed_xid);
 
             // handle a TABLE_SYNC_COMMIT
@@ -123,7 +120,7 @@ namespace springtail::committer {
                 completed_xid = result->swap().xid();
                 nlohmann::json ddls = result->swap().ddls();
 
-                auto token_3 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(completed_xid)}});
+                auto token_3 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(completed_xid)}});
 
                 // pre-commit the DDLs in case there's a failure
                 _redis_ddl.precommit_ddl(db_id, completed_xid, ddls);
@@ -172,7 +169,7 @@ namespace springtail::committer {
                 xid = result->xact().xid();
                 pg_xid = result->xact().pg_xid();
             }
-            auto token_4 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(xid)}});
+            auto token_4 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(xid)}});
             LOG_INFO("Process XID: {}@{}", db_id, xid);
             assert(xid > completed_xid);
 
@@ -210,6 +207,9 @@ namespace springtail::committer {
                     auto entry = std::make_shared<WorkerEntry>(db_id, tid, completed_xid, xid);
                     _worker_queue.push(entry);
                 }
+
+                // update the coordinator
+                Coordinator::mark_alive(keep_alive);
             }
 
             // wait for tables to complete their processing
@@ -218,24 +218,22 @@ namespace springtail::committer {
             LOG_DEBUG(LOG_COMMITTER, "Wait for {} tables to complete", _tid_set.size());
             {
                 boost::unique_lock lock(_mutex);
-                _cv.wait(lock, [this]() { return _tid_set.empty(); });
+                while (!_cv.wait_for(lock, boost::chrono::seconds(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT),
+                                     [this]() { return _tid_set.empty(); })) {
+                    Coordinator::mark_alive(keep_alive); // update the coordinator
+                }
             }
             LOG_DEBUG(LOG_COMMITTER, "All table processing complete for XID {}", xid);
 
-            nlohmann::json index_ddls = _redis_ddl.get_index_ddls_xid(db_id, xid);
+            auto index_requests = _index_requests_mgr->get_index_requests(db_id, xid);
 
             // Trigger index reconciliation for the earliest pending XID
             if (result->type() == XidReady::Type::RECONCILE_INDEX) {
                 _indexer->process_index_reconciliation(db_id, result->reconcile().reconcile_xid(), xid);
             }
 
-            if (!index_ddls.is_null()) {
-                _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
-
-                // process the indexes - create/drop, allowing them to happen in the background
-                _indexer->process_ddls(db_id, xid, index_ddls);
-
-                _redis_ddl.commit_index_ddl(db_id, xid);
+            if (!index_requests.empty()) {
+                _indexer->process_requests(db_id, xid, index_requests);
             }
 
             if (!completed_ddls.is_null()) {
@@ -361,11 +359,12 @@ namespace springtail::committer {
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
 
         // register the thread on startup
-        auto& keep_alive = coordinator->register_thread(daemon_type, worker_id);
+        coordinator->register_thread(daemon_type, worker_id);
 
         // note: also wait on an empty queue to ensure it is drained before shutdown
         while (!_shutdown || !_worker_queue.empty()) {
             // update the coordinator
+            auto &keep_alive = coordinator->find_thread(daemon_type, worker_id);
             Coordinator::mark_alive(keep_alive);
 
             // wait for work on the queue
@@ -381,7 +380,7 @@ namespace springtail::committer {
             }
 
             // process all of the mutations for a given table in a given XID
-            _process_table(entry->db_id, entry->tid, entry->completed_xid, entry->xid);
+            _process_table(entry->db_id, entry->tid, entry->completed_xid, entry->xid, worker_id);
 
             // mark the table processing as complete
             {
@@ -401,8 +400,13 @@ namespace springtail::committer {
     Committer::_process_table(uint64_t db_id,
                               uint64_t tid,
                               uint64_t completed_xid,
-                              uint64_t xid)
+                              uint64_t xid,
+                              const std::string &thread_name)
     {
+        // find the coordinator keep-alive
+        constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
+        auto &keep_alive = Coordinator::get_instance()->find_thread(daemon_type, thread_name);
+
         // construct the mutable table object
         auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, xid, true);
 
@@ -426,11 +430,20 @@ namespace springtail::committer {
 
             // process each extent of ordered mutations
             for (auto wc_extent : extent_list) {
+                // update the coordinator
+                Coordinator::mark_alive(keep_alive);
+
+                // process the extent
                 _process_extent(db_id, tid, table, wc_extent);
             }
         }
         TIME_TRACE_STOP(process_extents_trace);
         TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("process_extents-xid_{}", xid), process_extents_trace);
+
+        // XXX we are doing this because the finalize can take a long time.  What we should do
+        //     instead is update the cache to use async IO so that we can initiate all of the page
+        //     flush requests and then perform the keep-alives while waiting for completion
+        Coordinator::get_instance()->unregister_thread(daemon_type, thread_name);
 
         time_trace::Trace finalize_trace;
         TIME_TRACE_START(finalize_trace);
@@ -439,11 +452,14 @@ namespace springtail::committer {
         TIME_TRACE_STOP(finalize_trace);
         TIME_TRACESET_UPDATE(time_trace::traces, fmt::format("finalize-xid_{}", xid), finalize_trace);
 
+        // XXX see above comment, need to change this
+        Coordinator::get_instance()->register_thread(daemon_type, thread_name);
+
         if (min_commit_ts) {
             // log how long it took to process this table
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - min_commit_ts->to_system_time());
-            open_telemetry::OpenTelemetry::record_histogram(PG_LOG_MGR_BTREE_LATENCIES, duration.count());
+            open_telemetry::OpenTelemetry::get_instance()->record_histogram(PG_LOG_MGR_BTREE_LATENCIES, duration.count());
             LOG_INFO("Processed table {} in {} milliseconds", tid, duration.count());
         }
         // update the system table roots

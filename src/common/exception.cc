@@ -1,7 +1,7 @@
 #include <csignal>
 
 #include <common/exception.hh>
-#include <common/logging.hh>
+#include <common/init.hh>
 
 namespace {
     void

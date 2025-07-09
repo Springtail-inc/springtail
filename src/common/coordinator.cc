@@ -60,6 +60,15 @@ namespace springtail {
         return it->second;
     }
 
+    std::atomic<uint64_t>&
+    Coordinator::find_thread(DaemonType type, const std::string &thread_id)
+    {
+        std::string hkey = fmt::format("{}:{}", enum_to_integral(type), thread_id);
+
+        std::unique_lock lock(_threads_mutex);
+        return _thread_timestamps.at(hkey);
+    }
+
     void
     Coordinator::unregister_thread(DaemonType type, const std::string &thread_id)
     {
