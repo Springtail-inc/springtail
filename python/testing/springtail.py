@@ -377,7 +377,7 @@ def start_replication(props : Properties, build_dir : str) -> None:
         conn = connect_db_instance(props, db_name)
 
         # Create the publication
-        execute_sql(conn, f"CREATE PUBLICATION {quote_ident(pub_name, conn)} FOR ALL TABLES WITH (publish_via_partition_root);")
+        execute_sql(conn, f"CREATE PUBLICATION {quote_ident(pub_name, conn)} FOR ALL TABLES")
 
         # Create the replication slot;
         # NOTE: it the slot name needs to be globally unique
@@ -720,11 +720,6 @@ def start(config_file: str,
         # start postgres
         print("Starting postgres...")
         start_postgres()
-
-        # start replication on db instance
-        print("\nStarting replication on database instance...")
-        check_log_writable(props)
-        start_replication(props, build_dir)
 
 def status() -> None:
     """Function to check the status of the Springtail system."""

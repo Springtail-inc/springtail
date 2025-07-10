@@ -489,6 +489,48 @@ namespace springtail {
     }
 
     void
+    PgMsgLogGen::attach_partition(const std::string &table_name,
+                                  uint32_t table_id,
+                                  const std::string &schema,
+                                  const std::string &partition_key,
+                                  nlohmann::json partition_data)
+    {
+        nlohmann::json msg;
+
+        msg["cmd"] = "ATTACH PARTITION";
+        msg["table_id"] = table_id;
+        msg["schema"] = schema;
+        msg["partition_data"] = partition_data;
+        msg["partition_key"] = partition_key;
+        msg["table"] = table_name;
+
+        _write_message(pg_msg::MSG_PREFIX_ATTACH_PARTITION, msg);
+
+        _lsn++;
+    }
+
+    void
+    PgMsgLogGen::detach_partition(const std::string &table_name,
+                                  uint32_t table_id,
+                                  const std::string &schema,
+                                  const std::string &partition_key,
+                                  nlohmann::json partition_data)
+    {
+        nlohmann::json msg;
+
+        msg["cmd"] = "DETACH PARTITION";
+        msg["table_id"] = table_id;
+        msg["schema"] = schema;
+        msg["partition_data"] = partition_data;
+        msg["partition_key"] = partition_key;
+        msg["table"] = table_name;
+
+        _write_message(pg_msg::MSG_PREFIX_DETACH_PARTITION, msg);
+
+        _lsn++;
+    }
+
+    void
     PgMsgLogGen::dump_file(const std::filesystem::path &file_name)
     {
         PgMsgStreamReader reader(file_name);
@@ -619,6 +661,14 @@ namespace springtail {
         }
         if (cmd == PG_OP_STREAM_ABORT) {
             _parse_stream_abort(json);
+            return;
+        }
+        if (cmd == PG_OP_ATTACH_PARTITION) {
+            _parse_attach_partition(json);
+            return;
+        }
+        if (cmd == PG_OP_DETACH_PARTITION) {
+            _parse_detach_partition(json);
             return;
         }
 
@@ -823,5 +873,17 @@ namespace springtail {
     PgLogGenJson::_parse_stream_abort(const nlohmann::json &json)
     {
         _log_gen.stream_abort();
+    }
+
+    void
+    PgLogGenJson::_parse_attach_partition(const nlohmann::json &json)
+    {
+        _log_gen.attach_partition(json["table"], json["table_id"], json["schema"], json["partition_key"], json["partition_data"]);
+    }
+
+    void
+    PgLogGenJson::_parse_detach_partition(const nlohmann::json &json)
+    {
+        _log_gen.detach_partition(json["table"], json["table_id"], json["schema"], json["partition_key"], json["partition_data"]);
     }
 } // namespace springtail

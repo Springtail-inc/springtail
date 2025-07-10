@@ -48,6 +48,7 @@ def restart_container(container_name: str) -> bool:
 
 
 def stop_daemons(pid_path : str, daemons : List[tuple] = []) -> None:
+    time.sleep(5)
     """Stop the daemons."""
     # Stop the daemons
     if not os.path.exists(pid_path):
@@ -55,23 +56,25 @@ def stop_daemons(pid_path : str, daemons : List[tuple] = []) -> None:
 
     # for each .pid file in the pid_path run kill -2 (SIGINT) on the pid in that file
     for file in os.listdir(pid_path):
+        daemon_name = file.split('.')[0]
         file = os.path.join(pid_path, file)
         if file.endswith(".pid"):
-            print(f"Stopping daemon with pid file: {file}")
             with open(file, 'r') as f:
-                pid = f.read()
+                pid = f.read().strip()
+                print(f"Stopping daemon {daemon_name} with pid: {pid}")
                 try:
-                    run_command('kill', ['-2', pid])
+                    run_command('kill', ['-s', 'TERM', pid])
                 except Exception as e:
                     # most likely the process is already dead
                     pass
                 run_command('rm', [file])
 
     # kill any lingering daemons after waiting a bit
-    retry = 3
+    retry = 20
     while (retry > 0):
         (pids, _) = running_pids(daemons)
-        if pids and len(pids) == 0:
+        print(f"Waiting for daemons with pids: {pids}")
+        if pids is None or len(pids) == 0:
             return
         time.sleep(1)
         retry = retry - 1

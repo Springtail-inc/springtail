@@ -10,7 +10,7 @@
 
 namespace springtail {
 
-    SchemaMgr::SchemaMgr()
+    SchemaMgr::SchemaMgr() : Singleton<SchemaMgr>(ServiceId::SchemaMgrId)
     {
         // note: don't need a valid sql_type for the internal nodes since they aren't exposed
         SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, 0, false);

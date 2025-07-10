@@ -32,8 +32,11 @@ public:
         static constexpr uint32_t XID = 3;
         static constexpr uint32_t LSN = 4;
         static constexpr uint32_t EXISTS = 5;
-        static constexpr uint32_t RLS_ENABLED = 6; // Row Level Security enabled for this table
-        static constexpr uint32_t RLS_FORCED = 7; // Row Level Security force for table owner
+        static constexpr uint32_t PARENT_TABLE_ID = 6; ///< Parent table ID for partitioned tables
+        static constexpr uint32_t PARTITION_KEY = 7;   ///< Partition key expression for partitioned tables
+        static constexpr uint32_t PARTITION_BOUND = 8; ///< Partition bound expression for partitioned tables
+        static constexpr uint32_t RLS_ENABLED = 9; // Row Level Security enabled for this table
+        static constexpr uint32_t RLS_FORCED = 10; // Row Level Security force for table owner
 
         static const std::vector<SchemaColumn> SCHEMA;
 
@@ -42,17 +45,35 @@ public:
                               uint64_t table_id,
                               uint64_t xid,
                               uint64_t lsn,
+                              bool exists,
+                              const std::optional<uint64_t> &parent_table_id,
+                              const std::optional<std::string> &partition_key,
+                              const std::optional<std::string> &partition_bound,
                               bool rls_enabled,
-                              bool rls_forced,
-                              bool exists)
+                              bool rls_forced)
         {
-            auto fields = std::make_shared<FieldArray>(8);
+            auto fields = std::make_shared<FieldArray>(11);
             fields->at(NAMESPACE_ID) = std::make_shared<ConstTypeField<uint64_t>>(namespace_id);
             fields->at(NAME) = std::make_shared<ConstTypeField<std::string>>(name);
             fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
             fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
             fields->at(LSN) = std::make_shared<ConstTypeField<uint64_t>>(lsn);
             fields->at(EXISTS) = std::make_shared<ConstTypeField<bool>>(exists);
+            if (parent_table_id) {
+                fields->at(PARENT_TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(*parent_table_id);
+            } else {
+                fields->at(PARENT_TABLE_ID) = std::make_shared<ConstNullField>(SchemaType::UINT64);
+            }
+            if (partition_key) {
+                fields->at(PARTITION_KEY) = std::make_shared<ConstTypeField<std::string>>(*partition_key);
+            } else {
+                fields->at(PARTITION_KEY) = std::make_shared<ConstNullField>(SchemaType::TEXT);
+            }
+            if (partition_bound) {
+                fields->at(PARTITION_BOUND) = std::make_shared<ConstTypeField<std::string>>(*partition_bound);
+            } else {
+                fields->at(PARTITION_BOUND) = std::make_shared<ConstNullField>(SchemaType::TEXT);
+            }
             fields->at(RLS_ENABLED) = std::make_shared<ConstTypeField<bool>>(rls_enabled);
             fields->at(RLS_FORCED) = std::make_shared<ConstTypeField<bool>>(rls_forced);
             return std::make_shared<FieldTuple>(fields, nullptr);

@@ -15,15 +15,18 @@ set(PG_FDW_SOURCES
     multicorn_util.c
     pg_fdw_mgr.cc
     pg_fdw_mgr_wrap.cc
+    pg_fdw_ddl_common.cc
 )
 
 set(PG_DDL_SOURCES
     pg_ddl_mgr.cc
+    pg_fdw_ddl_common.cc
 )
 
 set(PG_FDW_TEST_SOURCES
     test/mock_pg.c
     pg_fdw_mgr.cc
+    pg_fdw_ddl_common.cc
 )
 
 # For postgres regression tests
@@ -223,7 +226,7 @@ install(FILES
 )
 
 springtail_unit_test(test_pg_ddl_mgr
-    SOURCES test/test_pg_ddl_mgr.cc pg_ddl_mgr.cc
+    SOURCES test/test_pg_ddl_mgr.cc pg_ddl_mgr.cc pg_fdw_ddl_common.cc
     INCLUDES ${PROJECT_SOURCE_DIR}/include ${PostgreSQL_INCLUDE_DIRS}
     LIBS springtail_pg
         springtail_common
@@ -242,6 +245,16 @@ springtail_unit_test(test_field_quals
          ${START_GROUP}
            ${POSTGRES_DEP_LIBS}
          ${END_GROUP}
+         GTest::gtest_main
+)
+
+springtail_unit_test(test_pg_fdw_common
+    SOURCES test/test_pg_fdw_common.cc pg_fdw_ddl_common.cc
+    INCLUDES ${PROJECT_SOURCE_DIR}/include ${PostgreSQL_INCLUDE_DIRS}
+    LIBS springtail_pg
+         springtail_common
+         springtail_test
+         springtail_sys_tbl_mgr
          GTest::gtest_main
 )
 

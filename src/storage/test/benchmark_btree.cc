@@ -147,10 +147,7 @@ BENCHMARK(BM_BTreeInsert)
 int main(int argc, char **argv) {
     benchmark::Initialize(&argc, argv);
 
-    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-    runners.emplace();
-    runners->emplace_back(std::make_unique<IOMgrRunner>());
-    springtail_init(runners, false, std::nullopt, LOG_NONE);
+    springtail_init(false, std::nullopt, LOG_NONE);
 
     benchmark::RunSpecifiedBenchmarks();
 

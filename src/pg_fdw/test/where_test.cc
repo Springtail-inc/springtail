@@ -28,13 +28,8 @@ namespace {
         // Called once per testsuite.  Create a table and populate it with data
         static void SetUpTestSuite()
         {
-            auto service_runners = test::get_services(true, true, true);
-            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-            runners.emplace();
-            runners->emplace_back(std::make_unique<IOMgrRunner>());
-            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
-
-            springtail_init_test(runners);
+            springtail_init_test();
+            test::start_services(true, true, true);
 
             PgFdwMgr::fdw_init(nullptr, false);
 
@@ -526,7 +521,7 @@ namespace {
                 {return a[3] > b[3];});
         _run_scan(nullptr, sorted_data, std::numeric_limits<uint32_t>::max(), sortgroup);
 
-        // now add a qual and sortgroup, we expect it to pick 
+        // now add a qual and sortgroup, we expect it to pick
         // the qual index (col4 = 3) not the sortgroup
         qual_list = _add_qual(_columns[3].position, EQUALS, 3);
         filtered_data = _filter_data(qual_list);

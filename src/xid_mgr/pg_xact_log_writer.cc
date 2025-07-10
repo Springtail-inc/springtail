@@ -1,6 +1,7 @@
 #include <fcntl.h>
 
 #include <common/exception.hh>
+#include <common/logging.hh>
 #include <xid_mgr/pg_xact_log_writer.hh>
 
 namespace springtail::xid_mgr {

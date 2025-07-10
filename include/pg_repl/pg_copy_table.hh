@@ -103,14 +103,17 @@ namespace springtail
         std::string db_name;
         std::string schema_name;
         std::string table_name;
-        std::string xids;                // pg_current_snapshot(); xmin:xmax:xids
-        uint32_t table_oid;
-        uint32_t schema_oid;
+        std::string xids; //< pg_current_snapshot(); xmin:xmax:xids
+        uint64_t table_oid;
+        uint64_t schema_oid;
         bool rls_enabled;
         bool rls_forced;
+        std::optional<uint64_t> parent_oid; //< parent table oid for partitioned tables
+        std::optional<std::string> partition_key; //< partition key expression; partition by...
+        std::optional<std::string> partition_bound; //< partition bound expression; for values...
         std::vector<SchemaColumn> columns;
-        std::vector<std::string> pkeys;  // primary keys as columns
-        std::vector<Index> secondary_keys;  // secondary keys as columns
+        std::vector<std::string> pkeys; //< primary keys as columns
+        std::vector<Index> secondary_keys; //< secondary keys as columns
     };
 
     /**

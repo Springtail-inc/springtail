@@ -13,8 +13,6 @@ namespace {
         static void SetUpTestSuite() {
             std::vector<std::unique_ptr<ServiceRunner>> service_runners;
             service_runners.emplace_back(std::make_unique<ExceptionRunner>());
-            service_runners.emplace_back(std::make_unique<IOMgrRunner>());
-
             springtail_init_custom(service_runners);
         }
 

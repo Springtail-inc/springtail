@@ -22,6 +22,8 @@
 
 #include <xid_mgr/xid_mgr_client.hh>
 
+#include <pg_fdw/pg_fdw_ddl_common.hh>
+
 extern "C" {
     #include <postgres.h>
     #include <nodes/pg_list.h>
@@ -50,7 +52,6 @@ namespace springtail::pg_fdw {
         {}
     };
     using PgFdwSortGroupPtr = std::shared_ptr<PgFdwSortGroup>;
-
 
     /** Internal state used to track table scan */
     struct PgFdwState {
@@ -313,10 +314,10 @@ namespace springtail::pg_fdw {
 
         /** Helper to generate create foreign table sql */
         static std::string _gen_fdw_table_sql(const std::string &server_name,
-            const std::string &schema,
-            const std::string &table,
-            uint64_t tid,
-            std::vector<std::tuple<std::string, std::string, bool>> &columns);
+                                              const std::string &schema,
+                                              const std::string &table,
+                                              uint64_t tid,
+                                              const std::vector<std::tuple<std::string, std::string, bool>> &columns);
 
         /** Helper to generate a system table create foreign table sql */
         static std::string _gen_fdw_system_table(const std::string &server,
@@ -326,7 +327,7 @@ namespace springtail::pg_fdw {
 
         /** Helper to iterate through system tables to generate import command list */
         static List *_import_springtail_catalog(const std::string &server,
-                                                const std::set<std::string> table_set,
+                                                const std::set<std::string, std::less<>> &table_set,
                                                 bool exclude, bool limit);
 
         static void _handle_exception(const Error &e);

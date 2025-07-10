@@ -568,7 +568,7 @@ class TestCase:
 
                 sql = f""" SELECT a.attname AS name,
                                     CASE
-                                        WHEN t.oid = 1560 THEN 1562
+                                        WHEN t.oid = 1560 THEN 1562 --remap bitoid to varbitoid
                                         ELSE t.oid
                                     END AS pg_type,
                                     NOT a.attnotnull AS nullable,
@@ -578,7 +578,7 @@ class TestCase:
                             JOIN pg_type t ON a.atttypid = t.oid
                             JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
                             WHERE n.nspname = '{command["schema"]}' AND c.relname = '{command["table"]}'
-                                    AND c.relkind = 'r'
+                                    AND c.relkind IN ('r','p')
                                     AND a.attnum > 0
                                     AND NOT a.attisdropped
                             ORDER BY a.attnum ASC;"""
@@ -592,6 +592,18 @@ class TestCase:
                             JOIN pg_catalog.pg_namespace n ON (t.relnamespace = n.oid)
                             WHERE n.nspname = '{command["schema"]}' AND t.relname = '{command["table"]}' AND c.contype = 'p';"""
                 results['primary'] = self._execute_sql(cursor, sql, True, txn)
+
+                # retrieve the partition information for the table
+                sql = f"""SELECT
+                            COALESCE(CASE WHEN t.relispartition THEN
+                                (SELECT inhparent FROM pg_inherits WHERE inhrelid = t.oid)
+                            END, 0) as parent_oid,
+                            COALESCE(pg_get_expr(t.relpartbound, t.oid, TRUE), '') as partition_bound,
+                            COALESCE(pg_get_partkeydef(t.oid), '') as partition_key
+                        FROM pg_class t
+                        JOIN pg_catalog.pg_namespace n ON (t.relnamespace = n.oid)
+                        WHERE n.nspname = '{command["schema"]}' AND t.relname = '{command["table"]}';"""
+                results['partition_info'] = self._execute_sql(cursor, sql, True, txn)
 
                 sql = f"""SELECT c.oid as table_id,
                                     i.indexrelid as index_id,
@@ -778,8 +790,8 @@ class TestCase:
 
                 # retrieve the column data
                 with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists",
-                                      "table_names"."name" as table_name,
-                                      "table_names"."rls_enabled", "table_names"."rls_forced"
+                                      "table_names"."name" as table_name, "table_names"."rls_enabled", "table_names"."rls_forced",
+                                      "table_names"."parent_table_id", "table_names"."partition_bound", "table_names"."partition_key"
                                 FROM "__pg_springtail_catalog"."table_names"
                                 JOIN "__pg_springtail_catalog"."namespace_names" ON "namespace_names"."namespace_id" = "table_names"."namespace_id"
                                 WHERE "namespace_names"."name" = '{command["schema"]}' AND "table_names"."name" = '{command["table"]}'
@@ -799,6 +811,13 @@ class TestCase:
                           SELECT table_name, rls_enabled, rls_forced FROM latest_table WHERE exists IS TRUE"""
 
                 results['table_info'] = self._execute_sql(cursor, sql, True, 'replica')
+
+                # retrieve the partition information for the table
+                sql = f"""WITH latest_table AS ({with_sql})
+                          SELECT COALESCE(parent_table_id, 0) AS parent_table_id,
+                                 COALESCE(partition_bound, '') AS partition_bound,
+                                 COALESCE(partition_key, '') AS partition_key FROM latest_table WHERE exists IS TRUE LIMIT 1;"""
+                results['partition_info'] = self._execute_sql(cursor, sql, True, 'replica')
 
                 # retrieve the primary key data
                 with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists"
