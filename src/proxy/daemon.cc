@@ -47,8 +47,14 @@ int main(int argc, char* argv[])
         pidfile = "proxy.pid";
     }
 
+    springtail_store_arguments(ServiceId::ProxyServerId,
+        {
+            {"force_shadow", std::any(force_shadow)},
+            {"force_primary", std::any(force_primary)}
+        });
+
     springtail_init_daemon("proxy", pidfile, LOG_PROXY);
-    ProxyServer::start(force_shadow, force_primary);
+    ProxyServer::start();
     springtail_daemon_run();
 
     springtail_shutdown();
