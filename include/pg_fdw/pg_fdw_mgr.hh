@@ -253,8 +253,6 @@ namespace springtail::pg_fdw {
             _user_type_cache(MAX_USER_TYPE_CACHE)
         {};
 
-        static void shutdown() {};
-
     private:
         /** Delete copy constructor */
         PgFdwMgr(const PgFdwMgr&) = delete;
