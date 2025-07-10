@@ -120,7 +120,7 @@ namespace springtail::pg_proxy {
             _wake_event_loop();
         }
 
-        static void start(bool force_shadow, bool force_primary);
+        static void start();
     protected:
         ProxyServer() : Singleton<ProxyServer>(ServiceId::ProxyServerId) {}
         virtual ~ProxyServer() override = default;

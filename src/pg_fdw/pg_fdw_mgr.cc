@@ -1040,24 +1040,52 @@ namespace springtail::pg_fdw {
             }
         }
 
-        // We don't use secondary indexes for full table scans by default.
-        // Change the default (use_secondary = true) in the function signature
-        // if you need to enable secondary index scans.
-        if (use_secondary) {
-            for (auto const& idx: pg_state->indexes) {
-                if (idx.id == constant::INDEX_PRIMARY) {
-                    // we already checked the primary index
-                    continue;
-                }
-                List* p = check_index(idx, sortgroup);
-                if (p) {
-                    pg_state->sortgroup_index = idx;
-                    return p;
-                }
+        List* sort_list = nullptr;
+
+        for (auto const& idx: pg_state->indexes) {
+            if (idx.id == constant::INDEX_PRIMARY) {
+                // we already checked the primary index
+                continue;
+            }
+            sort_list = check_index(idx, sortgroup);
+            if (sort_list) {
+                pg_state->sortgroup_index = idx;
+                break;
             }
         }
 
-        return {};
+        if (!sort_list) {
+            return {};
+        }
+
+        // We don't use secondary indexes for full table scans by default.
+        // Change the default (use_secondary = true) in the function signature
+        // if you need to enable secondary index scans.
+        if (use_secondary && sort_list) {
+            return sort_list;
+        }
+
+        CHECK(sort_list);
+
+        // let's see if the target columns are part of the found sort index
+        // in what case we'll sort by the secondary index because
+        // the target values are part of the index itself and should be faster
+        // then scan by primary plus merge sort
+        ListCell *lc;
+        foreach(lc, state->target_list) {
+            auto column = (SpringtailTargetColumn *)lfirst(lc);
+
+            // see if the target colum is in the sort index
+            auto it = std::ranges::find_if(pg_state->sortgroup_index->columns,
+                    [&column](const auto& v) {return v.position == column->attnum;});
+
+            if (it == pg_state->sortgroup_index->columns.end()) {
+                pg_state->sortgroup_index = {};
+                return {};
+            }
+        }
+
+        return sort_list;
     }
 
     List *
