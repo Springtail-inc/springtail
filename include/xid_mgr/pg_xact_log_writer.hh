@@ -1,5 +1,7 @@
 #pragma once
 
+#include <absl/log/check.h>
+
 #include <common/filesystem.hh>
 
 namespace springtail::xid_mgr {

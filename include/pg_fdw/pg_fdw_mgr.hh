@@ -22,6 +22,8 @@
 
 #include <xid_mgr/xid_mgr_client.hh>
 
+#include <pg_fdw/pg_fdw_ddl_common.hh>
+
 extern "C" {
     #include <postgres.h>
     #include <nodes/pg_list.h>
@@ -51,7 +53,6 @@ namespace springtail::pg_fdw {
     };
     using PgFdwSortGroupPtr = std::shared_ptr<PgFdwSortGroup>;
 
-
     /** Internal state used to track table scan */
     struct PgFdwState {
         TablePtr table;
@@ -59,6 +60,7 @@ namespace springtail::pg_fdw {
         uint64_t tid;
         uint64_t xid;
         FieldArrayPtr fields = nullptr;       ///< Fields for the columns from the target list
+        bool index_only_scan = false;        ///< indicates that fields are part of the index itself
         FieldArrayPtr qual_fields = nullptr;  ///< Fields for the columns from the qual list
         TableStats stats;                     ///< Table statistics
         int rows_fetched = 0;                 ///< Number of rows fetched
@@ -153,7 +155,7 @@ namespace springtail::pg_fdw {
         /** Begin scan
          * @param state PgFdwState
          * @param num_attrs Number of attributes
--        * @param attrs Array of pg attributes
+         * @param attrs Array of pg attributes
          * @param target_list List of target columns (Value or String)
          * @param qual_list List of predicate clauses (BaseQual)
          * @param sortgroup List of sort group columns (DeparsedSortGroup)
@@ -298,9 +300,6 @@ namespace springtail::pg_fdw {
                                     Oid pg_oid,
                                     int32_t atttypmod);
 
-        /** Helper to convert a numeric datum to binary */
-        std::vector<char> _numeric_datum_to_vector(Datum value);
-
         /** Helper to setup quals and scan iterator in state, called from begin_scan */
         void _init_quals(PgFdwState *state, List *qual_list);
 
@@ -318,7 +317,7 @@ namespace springtail::pg_fdw {
                                               const std::string &schema,
                                               const std::string &table,
                                               uint64_t tid,
-                                              std::vector<std::tuple<std::string, std::string, bool>> &columns);
+                                              const std::vector<std::tuple<std::string, std::string, bool>> &columns);
 
         /** Helper to generate a system table create foreign table sql */
         static std::string _gen_fdw_system_table(const std::string &server,
@@ -328,7 +327,7 @@ namespace springtail::pg_fdw {
 
         /** Helper to iterate through system tables to generate import command list */
         static List *_import_springtail_catalog(const std::string &server,
-                                                const std::set<std::string> table_set,
+                                                const std::set<std::string, std::less<>> &table_set,
                                                 bool exclude, bool limit);
 
         static void _handle_exception(const Error &e);

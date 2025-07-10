@@ -180,6 +180,8 @@ namespace springtail {
         PgMsgPtr _decode_alter_usertype(const PgMsgMessage &message, char *buffer, int len);
         PgMsgPtr _decode_drop_usertype(const PgMsgMessage &message, char *buffer, int len);
         PgMsgPtr _decode_copy_sync(const PgMsgMessage &message, char *buffer, int len);
+        PgMsgPtr _decode_attach_partition(const PgMsgMessage &message, const char *buffer, int len);
+        PgMsgPtr _decode_detach_partition(const PgMsgMessage &message, const char *buffer, int len);
 
         // helpers
         void _decode_schema_columns(const nlohmann::json &json, std::vector<PgMsgSchemaColumn> &columns);
@@ -215,7 +217,7 @@ namespace springtail {
         uint64_t _message_offset = 0;   ///< offset of the message we just read
         uint64_t _current_offset;       ///< current file offset for next read
         uint64_t _end_msg_offset;       ///< ending message offset in end file
-        uint64_t _internal_offset;      ///< internal offset within file, not to be altered by user
+        uint64_t _internal_offset = 0;      ///< internal offset within file, not to be altered by user
 
         int _proto_version;             ///< protocol version of message block (from header)
 

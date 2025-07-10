@@ -47,14 +47,8 @@ namespace {
             _base_dir = std::filesystem::temp_directory_path() / "test_table";
             std::filesystem::remove_all(_base_dir);
 
-            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-            runners.emplace();
-            runners->emplace_back(std::make_unique<IOMgrRunner>());
-
-            auto service_runners = test::get_services(true, true, false);
-            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
-
-            springtail_init_test(runners);
+            springtail_init_test();
+            test::start_services(true, true, false);
 
             auto client = sys_tbl_mgr::Client::get_instance();
 
@@ -992,7 +986,7 @@ namespace {
             ASSERT_GT(value, test_value_down);
         }
 
-        // make sure that that we have enough equal values 
+        // make sure that that we have enough equal values
         // for testing the bounds functions
         ASSERT_GT(equal_count, 1);
 
@@ -1041,6 +1035,34 @@ namespace {
         {
             auto it = table->lower_bound(key_down, 1);
             ASSERT_EQ(it, begin_it);
+        }
+
+        // test simple secondary iterator
+        {
+            auto end_it = table->end(1, true);
+
+            // use the secondary index to iterate over the same set
+            auto k = std::make_shared<ConstTypeField<uint64_t>>(test_value);
+            std::vector<ConstFieldPtr> v({ k });
+            auto key = std::make_shared<ValueTuple>(v);
+
+            auto it = table->lower_bound(key, 1, true);
+            auto idx_schema = table->get_index_schema(1);
+            auto fields = idx_schema->get_fields();
+
+            int count = 0;
+            int equal = 0;
+            for (; it != end_it; ++it) {
+                auto row = *it;
+                auto value = fields->at(0)->get_uint64(&row);
+                if (value == test_value) {
+                    ++equal;
+                }
+                ASSERT_LE(test_value, value);
+                ++count;
+            }
+            ASSERT_EQ(count, set_size);
+            ASSERT_EQ(equal, equal_count);
         }
 
         {

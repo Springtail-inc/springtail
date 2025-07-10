@@ -5,7 +5,6 @@
 #include <grpcpp/security/credentials.h>
 #include <opentelemetry/context/propagation/global_propagator.h>
 #include <opentelemetry/semconv/incubating/rpc_attributes.h>
-#include <opentelemetry/trace/provider.h>
 
 #include <chrono>
 #include <string_view>
@@ -14,7 +13,6 @@
 #include <boost/core/demangle.hpp>
 #include <common/json.hh>
 #include <common/logging.hh>
-#include <common/service_register.hh>
 #include <fmt/format.h>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/security/credentials.h>
@@ -78,7 +76,7 @@ retry_rpc_status(std::string_view service, std::string_view operation, Func&& fu
     namespace context = opentelemetry::context;
     namespace semconv = opentelemetry::semconv;
 
-    auto tracer = open_telemetry::OpenTelemetry::tracer("grpc");
+    auto tracer = open_telemetry::OpenTelemetry::get_instance()->tracer("grpc");
     // Create span for this RPC attempt
     trace::StartSpanOptions options;
     options.kind = trace::SpanKind::kClient;
@@ -156,20 +154,5 @@ std::shared_ptr<grpc::Channel> create_channel(std::string_view service,
                                               const nlohmann::json& rpc_json);
 
 }  // namespace grpc_client
-template <typename T>
-class GrpcClientRunner : public ServiceRunner {
-public:
-    GrpcClientRunner() : ServiceRunner(boost::core::demangle(typeid(T).name())) {}
 
-    bool start() override
-    {
-        T::get_instance();
-        return true;
-    }
-
-    void stop() override
-    {
-        T::shutdown();
-    }
-};
 }  // namespace springtail

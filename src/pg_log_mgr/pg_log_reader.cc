@@ -48,7 +48,7 @@ namespace springtail::pg_log_mgr {
     {
         time_trace::Trace commit_trace;
         TIME_TRACE_START(commit_trace);
-        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
         _span->AddEvent("commit", {{"pg_commit_time", commit_ts.to_unix_ns()}});
 
         // update any changes in the table invalidation state
@@ -105,7 +105,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::abort(PostgresTimestamp abort_ts)
     {
-        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
         _span->AddEvent("aborted", {{"pg_abort_time", abort_ts.to_unix_ns()}});
 
         // drop any batches for all active txns
@@ -121,7 +121,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::abort_subtxn(int32_t pg_xid, PostgresTimestamp abort_ts)
     {
-        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
 
         // Add subtransaction abort event with the provided timestamp
         _span->AddEvent("subtransaction_abort", {
@@ -255,7 +255,7 @@ namespace springtail::pg_log_mgr {
             return;
         }
 
-        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
         auto txn = _get_txn(pg_xid);
 
         // get the Extent containing mutations
@@ -312,7 +312,7 @@ namespace springtail::pg_log_mgr {
                                  int32_t pg_xid,
                                  const PgMsgTruncate &msg)
     {
-        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
 
         // get the current txn
         auto txn = _get_txn(pg_xid);
@@ -454,7 +454,7 @@ namespace springtail::pg_log_mgr {
                                       uint32_t pg_xid_txn,
                                       PgMsgPtr msg)
     {
-        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
 
         // perform the table column validations and update the message accordingly
         if (!_handle_validation(msg)) {
@@ -528,6 +528,12 @@ namespace springtail::pg_log_mgr {
                               pg_xid);
                     return;
                 }
+                break;
+            }
+
+            case PgMsgEnum::ATTACH_PARTITION:
+            case PgMsgEnum::DETACH_PARTITION:
+            {
                 break;
             }
 
@@ -721,8 +727,17 @@ namespace springtail::pg_log_mgr {
 
                 // check for re-sync
                 nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
+
                 if (action.get<std::string>() == "resync") {
                     _mark_table_resync(table_msg.oid, xidlsn, pg_xids);
+                } else if (action.get<std::string>() == "resync_partitions") {
+                    nlohmann::json table_ids = nlohmann::json::parse(ddl_stmt).at("table_ids");
+                    // Mark the parent table for resync
+                    _mark_table_resync(table_msg.oid, xidlsn, pg_xids);
+                    for (auto table_id : table_ids.get<std::vector<uint64_t>>()) {
+                        // Mark the partition table for resync
+                        _mark_table_resync(table_id, xidlsn, pg_xids);
+                    }
                 } else if (action.get<std::string>() != "no_change") {
                     redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 }
@@ -810,6 +825,30 @@ namespace springtail::pg_log_mgr {
                 // process the resync caused by an ALTER_TABLE
                 auto &table_msg = std::get<PgMsgTable>(change->msg);
                 _mark_table_resync(table_msg.oid, xidlsn, pg_xids);
+                break;
+            }
+        case PgMsgEnum::ATTACH_PARTITION:
+            {
+                auto &attach_partition_msg = std::get<PgMsgAttachPartition>(change->msg);
+                LOG_DEBUG(LOG_PG_LOG_MGR, "ATTACH PARTITION: xid={}, pg_xid={}, tid={}", xidlsn.xid,
+                    attach_partition_msg.xid, attach_partition_msg.table_id);
+                std::string &&ddl_stmt = client->attach_partition(_db, xidlsn, attach_partition_msg);
+
+                // Store the DDL statement for the Committer
+                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+
+                break;
+            }
+        case PgMsgEnum::DETACH_PARTITION:
+            {
+                auto &detach_partition_msg = std::get<PgMsgDetachPartition>(change->msg);
+                LOG_DEBUG(LOG_PG_LOG_MGR, "DETACH PARTITION: xid={}, pg_xid={}, tid={}", xidlsn.xid,
+                    detach_partition_msg.xid, detach_partition_msg.table_id);
+                std::string &&ddl_stmt = client->detach_partition(_db, xidlsn, detach_partition_msg);
+
+                // Store the DDL statement for the Committer
+                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+
                 break;
             }
 
@@ -1088,6 +1127,18 @@ namespace springtail::pg_log_mgr {
                 _process_index_reconciliation(idx_reconcile_msg.db_id, idx_reconcile_msg.reconcile_xid);
                 break;
             }
+        case PgMsgEnum::ATTACH_PARTITION:
+            {
+                const auto &partition_msg = std::get<PgMsgAttachPartition>(msg->msg);
+                _process_ddl(std::nullopt, partition_msg.table_id, partition_msg.xid, msg->is_streaming, msg);
+                break;
+            }
+        case PgMsgEnum::DETACH_PARTITION:
+            {
+                const auto &partition_msg = std::get<PgMsgDetachPartition>(msg->msg);
+                _process_ddl(std::nullopt, partition_msg.table_id, partition_msg.xid, msg->is_streaming, msg);
+                break;
+            }
         default:
             LOG_WARN("Unknown message type: {}", static_cast<uint8_t>(msg->msg_type));
             break;
@@ -1236,7 +1287,7 @@ namespace springtail::pg_log_mgr {
             // Record latency between postgres commit time and when we process it
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - postgres_timestamp.to_system_time());
-            open_telemetry::OpenTelemetry::record_histogram(PG_LOG_MGR_LOG_READER_LATENCIES, duration.count());
+            open_telemetry::OpenTelemetry::get_instance()->record_histogram(PG_LOG_MGR_LOG_READER_LATENCIES, duration.count());
             LOG_DEBUG(LOG_PG_LOG_MGR, "Commit processed {} milliseconds after postgres commit",
                       duration.count());
 

@@ -5,8 +5,7 @@
 #include <string>
 #include <vector>
 
-#include <grpc/grpc_client.hh>
-#include <common/singleton.hh>
+#include <common/init.hh>
 #include <common/timestamp.hh>
 #include <google/protobuf/empty.pb.h>
 #include <grpcpp/grpcpp.h>
@@ -14,7 +13,8 @@
 
 namespace springtail {
 
-class WriteCacheClient : public Singleton<WriteCacheClient> {
+class WriteCacheClient : public Singleton<WriteCacheClient>
+{
     friend class Singleton<WriteCacheClient>;
 
 public:

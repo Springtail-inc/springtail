@@ -19,34 +19,7 @@ namespace springtail {
 /* Thread-local variable to identify the background flushing thread. */
 thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
 
-    /* static member initialization must happen outside of class */
-    StorageCache* StorageCache::_instance = {nullptr};
-    boost::mutex StorageCache::_instance_mutex;
-
-    StorageCache *
-    StorageCache::get_instance()
-    {
-        boost::unique_lock lock(_instance_mutex);
-
-        if (_instance == nullptr) {
-            _instance = new StorageCache();
-        }
-
-        return _instance;
-    }
-
-    void
-    StorageCache::shutdown()
-    {
-        boost::unique_lock lock(_instance_mutex);
-
-        if (_instance != nullptr) {
-            delete _instance;
-            _instance = nullptr;
-        }
-    }
-
-    StorageCache::StorageCache()
+    StorageCache::StorageCache() : Singleton<StorageCache>(ServiceId::StorageCacheId)
     {
         // get the cache size
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
@@ -132,7 +105,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     StorageCache::flush(const std::filesystem::path &file)
     {
         auto end_offset = _page_cache->flush_file(file);
-        open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_FLUSH_CALLS);
+        open_telemetry::OpenTelemetry::get_instance()->increment_counter(STORAGE_CACHE_FLUSH_CALLS);
         return end_offset;
     }
 
@@ -140,7 +113,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     StorageCache::drop_for_truncate(const std::filesystem::path &file)
     {
         _page_cache->drop_file(file);
-        open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_DROP_CALLS);
+        open_telemetry::OpenTelemetry::get_instance()->increment_counter(STORAGE_CACHE_DROP_CALLS);
     }
 
 
@@ -246,7 +219,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     {
         boost::unique_lock lock(_mutex);
 
-        open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_FLUSH_CALLS);
+        open_telemetry::OpenTelemetry::get_instance()->increment_counter(STORAGE_CACHE_FLUSH_CALLS);
         const auto start_time = std::chrono::system_clock::now();
 
         //Get the end offset of data file for the table
@@ -329,7 +302,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
         }
 
         auto duration = std::chrono::system_clock::now() - start_time;
-        open_telemetry::OpenTelemetry::record_histogram(STORAGE_CACHE_FLUSH_LATENCIES,
+        open_telemetry::OpenTelemetry::get_instance()->record_histogram(STORAGE_CACHE_FLUSH_LATENCIES,
             std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
 
         // flush list for the file must be empty, so remove it
@@ -344,7 +317,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     {
         boost::unique_lock lock(_mutex);
 
-        open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_DROP_CALLS);
+        open_telemetry::OpenTelemetry::get_instance()->increment_counter(STORAGE_CACHE_DROP_CALLS);
         const auto start_time = std::chrono::system_clock::now();
 
         // go through the dirty page list for the file
@@ -388,7 +361,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
         }
 
         const auto duration = std::chrono::system_clock::now() - start_time;
-        open_telemetry::OpenTelemetry::record_histogram(STORAGE_CACHE_DROP_LATENCIES,
+        open_telemetry::OpenTelemetry::get_instance()->record_histogram(STORAGE_CACHE_DROP_LATENCIES,
             std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
 
         // flush list for the file must be empty, so remove it
@@ -824,16 +797,9 @@ StorageCache::PageCache::background_cleaner()
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
-        // if the page is empty, create an empty extent to back it
-        if (_extents.empty()) {
-            // create an empty extent
-            ExtentHeader header(ExtentType(), _end_xid, schema->row_size(), schema->field_types());
-            auto extent = SafeExtent(_file, std::move(header));
-            _extents.emplace_back( extent.get_ref() );
-
-            // insert the tuple into the extent
-            auto row = (*extent)->append();
-            MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
+        // if the page is empty, do an _append() which handles the empty extent case
+        if (_empty()) {
+            _append(tuple, schema);
             return;
         }
 
@@ -883,6 +849,14 @@ StorageCache::PageCache::background_cleaner()
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
+        // perform the internal append
+        _append(tuple, schema);
+    }
+
+    void
+    StorageCache::Page::_append(TuplePtr tuple,
+                                ExtentSchemaPtr schema)
+    {
         // if the page is empty, create an empty extent to back it
         if (_extents.empty()) {
             // create an empty extent
@@ -1780,7 +1754,7 @@ StorageCache::PageCache::background_cleaner()
         // extract the extent from the clean cache into the dirty cache
         return _extract(extent);
     }
-    
+
     StorageCache::SafeExtent::SafeExtent(const std::filesystem::path &file,
             const ExtentRef &ref,
             bool mark_dirty)

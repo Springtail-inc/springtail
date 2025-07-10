@@ -69,7 +69,6 @@ namespace xid_mgr {
             {}
             ~Notifier() = default;
 
-
             /**
              * This will push the message to the client.
              */

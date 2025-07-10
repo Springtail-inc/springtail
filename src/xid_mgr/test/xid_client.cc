@@ -14,10 +14,7 @@ main(int argc, char **argv)
     uint64_t db_id = 1;
     uint64_t schema_xid = 0;
 
-    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-    runners.emplace();
-    runners->emplace_back(std::make_unique<GrpcClientRunner<XidMgrClient>>());
-    springtail_init(runners);
+    springtail_init();
 
     // parse the arguments
     namespace po = boost::program_options;

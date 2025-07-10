@@ -1,8 +1,3 @@
-#include <string>
-
-#include <fmt/core.h>
-
-#include <storage/exception.hh>
 #include <storage/schema.hh>
 #include <storage/field.hh>
 
@@ -28,6 +23,7 @@ namespace springtail {
 
             case (SchemaType::TEXT):
             case (SchemaType::BINARY):
+            case (SchemaType::NUMERIC):
             case (SchemaType::UINT32):
             case (SchemaType::INT32):
             case (SchemaType::FLOAT32):
@@ -102,6 +98,7 @@ namespace springtail {
 
             case (SchemaType::TEXT):
             case (SchemaType::BINARY):
+            case (SchemaType::NUMERIC):
             case (SchemaType::UINT32):
             case (SchemaType::INT32):
             case (SchemaType::FLOAT32):
@@ -342,6 +339,7 @@ namespace springtail {
                 //       this path
                 assert(update.nullable);
                 break;
+
 
             default:
                 // note: we shouldn't see any other update types in the schema history

@@ -16,26 +16,13 @@ namespace springtail {
      * upgraded from read to write.  Dirty pages are associated with a target XID.  Once the page is
      * flushed to disk, it's underlying extents are released back to the cache as clean.
      */
-    class StorageCache {
-    public:
-
-        /**
-         * @brief get_instance() of singleton StorageCache; create if it doesn't exist.
-         * @return instance of StorageCache
-         */
-        static StorageCache *get_instance();
-
-        /**
-         * @brief Shutdown the StorageCache singleton.
-         */
-        static void shutdown();
-
+    class StorageCache : public Singleton<StorageCache>
+    {
+        friend class Singleton<StorageCache>;
     private:
-        static StorageCache *_instance; ///< static instance (singleton)
-        static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
-
         /** Constructor.  Uses global properties to configure itself. */
         StorageCache();
+        virtual ~StorageCache() override = default;
 
         // INTERNAL CLASSES
 
@@ -518,7 +505,7 @@ namespace springtail {
              * Helper to read a CLEAN extent into memory.  A callback is provided to be run after
              * the IO to read the extent is complete.
              */
-            CacheExtentPtr _read_extent(const std::filesystem::path& file, 
+            CacheExtentPtr _read_extent(const std::filesystem::path& file,
                     uint64_t extent_id, std::function<void(CacheExtentPtr)> callback);
 
             /**
@@ -693,7 +680,7 @@ namespace springtail {
                     return *this;
                 }
 
-                Iterator &operator+=(difference_type n) { 
+                Iterator &operator+=(difference_type n) {
                     if (_page->extent_count() == 1) {
                         _row += n;
                         return *this;
@@ -940,6 +927,11 @@ namespace springtail {
                 SafeExtent extent{ _extents.front().make_safe_extent(_file) };
                 return (*extent)->empty();
             }
+
+            /**
+             * Internal implementation of append.  Page must be locked when called.
+             */
+            void _append(TuplePtr tuple, ExtentSchemaPtr schema);
 
             /**
              * Checks if the provided extent needs to be split and performs the split if needed.

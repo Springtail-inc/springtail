@@ -10,7 +10,8 @@
 
 namespace springtail::xid_mgr {
 
-XidMgrServer::XidMgrServer() {
+XidMgrServer::XidMgrServer() : Singleton<XidMgrServer>(ServiceId::XidMgrServerId)
+{
     nlohmann::json json = Properties::get(Properties::LOG_MGR_CONFIG);
     nlohmann::json rpc_json;
 
@@ -35,10 +36,12 @@ XidMgrServer::XidMgrServer() {
     _grpc_server_manager.addService(_service.get());
 
     _archive_logs = Json::get_or<bool>(json, "archive_logs", false);
+
+    _startup();
 }
 
 void
-XidMgrServer::startup()
+XidMgrServer::_startup()
 {
     start_thread();
     _grpc_server_manager.startup();
@@ -49,6 +52,11 @@ XidMgrServer::_internal_shutdown()
 {
     _service->shutdown();
     _grpc_server_manager.shutdown();
+    if (_cleanup_on_shutdown) {
+        for (const auto &db_pair: _xact_log_data) {
+            cleanup(db_pair.first, std::numeric_limits<uint64_t>::max());
+        }
+    }
     std::unique_lock lock(_mutex);
     _xact_log_data.clear();
 }
@@ -70,7 +78,7 @@ XidMgrServer::_internal_run()
 uint64_t
 XidMgrServer::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
 {
-    auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
+    auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}, {"xid", std::to_string(schema_xid)}});
     std::shared_lock read_lock(_mutex);
     auto db_id_to_log_data = _find_or_add(db_id, read_lock);
     uint64_t xid = db_id_to_log_data->second.get_committed_xid(schema_xid);
@@ -92,7 +100,7 @@ XidMgrServer::record_mapping(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool
 void
 XidMgrServer::_record_xid_change(uint64_t db_id, uint32_t pg_xid, uint64_t xid, bool has_schema_changes, bool real_commit)
 {
-    auto token = open_telemetry::OpenTelemetry::set_context_variables({
+    auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({
         {"db_id", std::to_string(db_id)},
         {"pg_xid", std::to_string(pg_xid)},
         {"xid", std::to_string(xid)}

@@ -119,14 +119,14 @@ GrpcXidMgrService::Notifier::notify(const proto::XidPushResponse& msg)
 void GrpcXidMgrService::Notifier::finish()
 {
     _finish = true;
-    Finish(grpc::Status(grpc::StatusCode::CANCELLED, "Server shutdown"));
+    Finish(grpc::Status(grpc::StatusCode::CANCELLED, "GrpcXidMgrService::Notifier::finish(): Server shutdown"));
 }
 
 void
 GrpcXidMgrService::Notifier::OnWriteDone(bool ok)
 {
     if (!ok) {
-        Finish(grpc::Status(grpc::StatusCode::UNKNOWN, "OnWriteDone failed"));
+        Finish(grpc::Status(grpc::StatusCode::UNKNOWN, "GrpcXidMgrService::Notifier::OnWriteDone failed"));
         return;
     }
     std::scoped_lock<std::mutex> l(_m);
@@ -158,7 +158,7 @@ GrpcXidMgrService::Notifier::OnDone()
 void
 GrpcXidMgrService::Notifier::OnCancel()
 {
-    LOG_DEBUG(LOG_XID_MGR, "OnCancel");
+    LOG_DEBUG(LOG_XID_MGR, "GrpcXidMgrService::Notifier::OnCancel");
     // Will OnDone still be called if OnCancel is called? Yes.
 }
 

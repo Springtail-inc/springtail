@@ -2,7 +2,6 @@
 
 // springtail includes
 #include <common/init.hh>
-#include <common/properties.hh>
 
 #include <pg_log_mgr/committer.hh>
 #include <pg_log_mgr/pg_log_coordinator.hh>
@@ -40,20 +39,9 @@ int main(int argc, char *argv[])
         pidfile = "pg_log_mgr.pid";
     }
 
-    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-    runners.emplace();
-    runners->emplace_back(std::make_unique<IOMgrRunner>());
-    runners->emplace_back(std::make_unique<WriteCacheRunner>());
-    runners->emplace_back(std::make_unique<xid_mgr::XidMgrRunner>());
-    runners->emplace_back(std::make_unique<GrpcClientRunner<sys_tbl_mgr::Client>>());
-    runners->emplace_back(std::make_unique<SchemaMgrRunner>());
-    runners->emplace_back(std::make_unique<TableMgrRunner>());
-    runners->emplace_back(std::make_unique<pg_log_mgr::SyncTrackerRunner>());
-    runners->emplace_back(std::make_unique<pg_log_mgr::PgLogCoordinatorRunner>());
-    runners->emplace_back(std::make_unique<VacuumerRunner>());
-
-    springtail_init_daemon(runners, "pg_log_mgr", pidfile,
+    springtail_init_daemon("pg_log_mgr", pidfile,
                            LOG_ALL ^ (LOG_PG_REPL | LOG_PG_LOG_MGR_DATA | LOG_STORAGE));
+    pg_log_mgr::PgLogCoordinator::get_instance()->init();
 
     springtail_daemon_run();
 

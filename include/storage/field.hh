@@ -1,8 +1,6 @@
 #pragma once
 
-#include <any>
 #include <type_traits>
-#include <cassert>
 #include <bit>
 
 #include <absl/log/check.h>
@@ -10,6 +8,7 @@
 #include <pg_repl/pg_repl_msg.hh>
 
 #include <storage/extent.hh>
+#include <storage/numeric_utils.hh>
 #include <storage/schema_type.hh>
 #include <storage/schema.hh>
 
@@ -93,6 +92,10 @@ namespace springtail {
             throw TypeError("Getting text type unsupported for this field.");
         }
 
+        virtual std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const {
+            throw TypeError("Getting numeric type unsupported for this field.");
+        }
+
         virtual const std::span<const char> get_binary(const void *row) const {
             throw TypeError("Getting binary type unsupported for this field.");
         }
@@ -104,10 +107,10 @@ namespace springtail {
                   bool nulls_last=true) const
         {
             // types must match
-            assert(this->get_type() == rhs->get_type());
+            DCHECK_EQ(this->get_type(), rhs->get_type());
 
             // cannot call less_than() on undefined fields
-            assert(!(this->is_undefined(lhs_row) || rhs->is_undefined(rhs_row)));
+            DCHECK(!(this->is_undefined(lhs_row) || rhs->is_undefined(rhs_row)));
 
             // handle nulls
             if (this->is_null(lhs_row)) {
@@ -160,6 +163,12 @@ namespace springtail {
             case SchemaType::TEXT:
                 return (this->get_text(lhs_row) < rhs->get_text(rhs_row));
 
+            case SchemaType::NUMERIC: {
+                auto lhs_numeric = this->get_numeric(lhs_row);
+                auto rhs_numeric = rhs->get_numeric(rhs_row);
+                return (numeric::NumericData::cmp(lhs_numeric, rhs_numeric) == -1);
+            }
+
             case SchemaType::BINARY: {
                 // retrieve the binary data
                 auto lhval = this->get_binary(lhs_row);
@@ -195,10 +204,10 @@ namespace springtail {
               const void *rhs_row)
         {
             // types must match
-            assert(this->get_type() == rhs->get_type());
+            DCHECK_EQ(this->get_type(), rhs->get_type());
 
             // cannot call equal() on undefined fields
-            assert(!(this->is_undefined(lhs_row) || rhs->is_undefined(rhs_row)));
+            DCHECK(!(this->is_undefined(lhs_row) || rhs->is_undefined(rhs_row)));
 
             // handle nulls
             if (this->is_null(lhs_row)) {
@@ -250,6 +259,12 @@ namespace springtail {
 
             case SchemaType::TEXT:
                 return (this->get_text(lhs_row) == rhs->get_text(rhs_row));
+
+            case SchemaType::NUMERIC: {
+                auto lhs_numeric = this->get_numeric(lhs_row);
+                auto rhs_numeric = rhs->get_numeric(rhs_row);
+                return (numeric::NumericData::cmp(lhs_numeric, rhs_numeric) == 0);
+            }
 
             case SchemaType::BINARY: {
                 auto lhval = this->get_binary(lhs_row);
@@ -338,6 +353,10 @@ namespace springtail {
             throw TypeError("Setting string unsupported for this field.");
         }
 
+        virtual void set_numeric(void *row, const std::shared_ptr<numeric::NumericData> value) {
+            throw TypeError("Setting numeric type unsupported for this field.");
+        }
+
         virtual void set_binary(void *row, const std::span<const char> &val) {
             throw TypeError("Setting binary type unsupported for this field.");
         }
@@ -421,6 +440,10 @@ namespace springtail {
                 this->set_text(lhs, field->get_text(rhs));
                 break;
 
+            case SchemaType::NUMERIC:
+                this->set_numeric(lhs, field->get_numeric(rhs));
+                break;
+
             case SchemaType::BINARY:
                 this->set_binary(lhs, field->get_binary(rhs));
                 break;
@@ -458,7 +481,7 @@ namespace springtail {
         void
         allow_null(uint32_t null_offset, uint8_t null_bit)
         {
-            assert(null_bit < 8);
+            DCHECK(null_bit < 8);
 
             _can_null = true;
             _null_offset = null_offset;
@@ -468,7 +491,7 @@ namespace springtail {
         void
         allow_undefined(uint32_t undefined_offset, uint8_t undefined_bit)
         {
-            assert(undefined_bit < 8);
+            DCHECK(undefined_bit < 8);
 
             _can_undefined = true;
             _undefined_offset = undefined_offset;
@@ -520,7 +543,7 @@ namespace springtail {
         template <typename T>
         inline T get_value(const void* row) const {
             T result;
-            std::memcpy(&result, 
+            std::memcpy(&result,
                     reinterpret_cast<const Extent::Row *>(row)->data() + _offset,
                     sizeof(T));
             return result;
@@ -596,6 +619,17 @@ namespace springtail {
             uint32_t var_off;
             std::memcpy(&var_off, e_row->data() + _offset, sizeof(uint32_t));
             return e_row->get_text(var_off);
+        }
+
+        std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const override {
+            // must be numeric type
+            DCHECK_EQ(_type, SchemaType::NUMERIC);
+
+            auto e_row = reinterpret_cast<const Extent::Row *>(row);
+            uint32_t var_off;
+            std::memcpy(&var_off, e_row->data() + _offset, sizeof(uint32_t));
+            std::span<const char> numeric_data = e_row->get_binary(var_off);
+            return numeric::make_numeric_from_span(numeric_data);
         }
 
         const std::span<const char> get_binary(const void *row) const override {
@@ -675,6 +709,20 @@ namespace springtail {
 
             // store the string into the variable data
             uint32_t offset = e_row->set_text(value);
+
+            // store the offset into the fixed data
+            std::memcpy(e_row->data() + _offset, &offset, sizeof(uint32_t));
+        }
+
+        void set_numeric(void *row, const std::shared_ptr<numeric::NumericData> value) override {
+            DCHECK_EQ(_type, SchemaType::NUMERIC);
+
+            auto e_row = reinterpret_cast<Extent::Row *>(row);
+
+            std::span<const char> numeric_data(reinterpret_cast<const char *>(value.get()), value->varsize());
+
+            // store the numeric into the variable data
+            uint32_t offset = e_row->set_binary(numeric_data);
 
             // store the offset into the fixed data
             std::memcpy(e_row->data() + _offset, &offset, sizeof(uint32_t));
@@ -789,12 +837,14 @@ namespace springtail {
                 return SchemaType::TEXT;
             } else if constexpr(std::is_same_v<T, std::vector<char>>) {
                 return SchemaType::BINARY;
+            } else {
+                static_assert("bad field type");
             }
 
             throw TypeError();
         }
 
-        bool get_bool(const void *row) const override {
+        bool get_bool(const void *) const override {
             if constexpr(std::is_same_v<T, bool>) {
                 return _value;
             } else {
@@ -802,7 +852,7 @@ namespace springtail {
             }
         }
 
-        int8_t get_int8(const void *row) const override {
+        int8_t get_int8(const void *) const override {
             if constexpr(std::is_same_v<T, int8_t>) {
                 return _value;
             } else {
@@ -810,7 +860,7 @@ namespace springtail {
             }
         }
 
-        uint8_t get_uint8(const void *row) const override {
+        uint8_t get_uint8(const void *) const override {
             if constexpr(std::is_same_v<T, uint8_t>) {
                 return _value;
             } else {
@@ -818,7 +868,7 @@ namespace springtail {
             }
         }
 
-        int16_t get_int16(const void *row) const override {
+        int16_t get_int16(const void *) const override {
             if constexpr(std::is_same_v<T, int16_t>) {
                 return _value;
             } else {
@@ -826,7 +876,7 @@ namespace springtail {
             }
         }
 
-        uint16_t get_uint16(const void *row) const override {
+        uint16_t get_uint16(const void *) const override {
             if constexpr(std::is_same_v<T, uint16_t>) {
                 return _value;
             } else {
@@ -834,7 +884,7 @@ namespace springtail {
             }
         }
 
-        int32_t get_int32(const void *row) const override {
+        int32_t get_int32(const void *) const override {
             if constexpr(std::is_same_v<T, int32_t>) {
                 return _value;
             } else {
@@ -842,7 +892,7 @@ namespace springtail {
             }
         }
 
-        uint32_t get_uint32(const void *row) const override {
+        uint32_t get_uint32(const void *) const override {
             if constexpr(std::is_same_v<T, uint32_t>) {
                 return _value;
             } else {
@@ -850,7 +900,7 @@ namespace springtail {
             }
         }
 
-        int64_t get_int64(const void *row) const override {
+        int64_t get_int64(const void *) const override {
             if constexpr(std::is_same_v<T, int64_t>) {
                 return _value;
             } else {
@@ -858,7 +908,7 @@ namespace springtail {
             }
         }
 
-        uint64_t get_uint64(const void *row) const override {
+        uint64_t get_uint64(const void *) const override {
             if constexpr(std::is_same_v<T, uint64_t>) {
                 return _value;
             } else {
@@ -866,7 +916,7 @@ namespace springtail {
             }
         }
 
-        float get_float32(const void *row) const override {
+        float get_float32(const void *) const override {
             if constexpr(std::is_same_v<T, float>) {
                 return _value;
             } else {
@@ -874,7 +924,7 @@ namespace springtail {
             }
         }
 
-        double get_float64(const void *row) const override {
+        double get_float64(const void *) const override {
             if constexpr(std::is_same_v<T, double>) {
                 return _value;
             } else {
@@ -882,7 +932,7 @@ namespace springtail {
             }
         }
 
-        std::string_view get_text(const void *row) const override {
+        std::string_view get_text(const void *) const override {
             if constexpr(std::is_same_v<T, std::string>) {
                 return _value;
             } else {
@@ -890,7 +940,7 @@ namespace springtail {
             }
         }
 
-        const std::span<const char> get_binary(const void *row) const override {
+        const std::span<const char> get_binary(const void*) const override {
             if constexpr(std::is_same_v<T, std::vector<char>>) {
                 return _value;
             } else {
@@ -898,6 +948,28 @@ namespace springtail {
             }
         }
     };
+
+    template <>
+    class ConstTypeField<std::shared_ptr<numeric::NumericData>> : public ConstField {
+    public:
+        using value_type = std::shared_ptr<numeric::NumericData>;
+
+        explicit ConstTypeField(std::vector<char> v) 
+            : _value{std::move(v)}
+        {}
+
+        SchemaType get_type() const override {
+            return SchemaType::NUMERIC;
+        }
+
+        value_type get_numeric(const void*) const override {
+            return numeric::make_numeric_from_span(_value);
+        }
+
+    private:
+        std::vector<char> _value;
+    };
+
     template <class T>
     using ConstTypeFieldPtr = std::shared_ptr<ConstTypeField<T>>;
 
@@ -1088,6 +1160,18 @@ namespace springtail {
             }
         }
 
+        std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const override {
+            if constexpr(std::is_same_v<T, std::shared_ptr<numeric::NumericData>>) {
+                if (_field->is_null(row)) {
+                    LOG_DEBUG(LOG_STORAGE, "---> DefaultValueField: value = {}", _default->to_string());
+                    return _default;
+                }
+                return _field->get_numeric(row);
+            } else {
+                throw TypeError();
+            }
+        }
+
         const std::span<const char> get_binary(const void *row) const override {
             if constexpr(std::is_same_v<T, std::vector<char>>) {
                 if (_field->is_null(row)) {
@@ -1137,7 +1221,7 @@ namespace springtail {
             int size = std::min(this->size(), rhs.size());
 
             for (int i = 0; i < size; i++) {
-                assert(this->field(i)->get_type() == rhs.field(i)->get_type());
+                DCHECK_EQ(this->field(i)->get_type(), rhs.field(i)->get_type());
             }
 
             // XXX switch everything to compare()?
@@ -1155,9 +1239,9 @@ namespace springtail {
         }
 
         bool equal_strict(const Tuple &rhs) const {
-            // check the tuple lengths and types using assert()
+            // check the tuple lengths and types using DCHECK_EQ()
             // we assume correct usage in production
-            assert(this->size() == rhs.size());
+            DCHECK_EQ(this->size(), rhs.size());
             return _equal(rhs, size());
         }
 
@@ -1223,6 +1307,10 @@ namespace springtail {
                     value += fmt::format("{}:", this->field(i)->get_text(this->row()));
                     break;
 
+                case SchemaType::NUMERIC:
+                    value += fmt::format("{}:", this->field(i)->get_numeric(this->row())->to_debug_string());
+                    break;
+
                 case SchemaType::BINARY:
                     value += fmt::format("<binary>:");
                     break;
@@ -1239,9 +1327,9 @@ namespace springtail {
         const void *_row;
 
         bool _equal(const Tuple &rhs, size_t size) const {
-            assert(size);
+            DCHECK(size);
             for (int i = 0; i != size; ++i) {
-                assert(this->field(i)->get_type() == rhs.field(i)->get_type());
+                DCHECK_EQ(this->field(i)->get_type(), rhs.field(i)->get_type());
                 if (!this->field(i)->equal(this->row(), rhs.field(i), rhs.row())) {
                     return false;
                 }
@@ -1412,7 +1500,7 @@ namespace springtail {
             DCHECK_EQ(col.type, 'b');
 
             // boolean should 1 byte
-            assert(col.data.size() == 1);
+            DCHECK_EQ(col.data.size(), 1);
 
             // read in the binary data and convert to a boolean
             return (col.data[0] == 1);
@@ -1426,7 +1514,7 @@ namespace springtail {
             DCHECK_EQ(col.type, 'b');
 
             // int16 should be 2 bytes
-            assert(col.data.size() == 2);
+            DCHECK_EQ(col.data.size(), 2);
 
             // read in the binary data and convert to a 16-bit int
             return recvint16(col.data.data());
@@ -1440,7 +1528,7 @@ namespace springtail {
             DCHECK_EQ(col.type, 'b');
 
             // int32 should be 4 bytes
-            assert(col.data.size() == 4);
+            DCHECK_EQ(col.data.size(), 4);
 
             // read in the binary data and convert to a 32-bit int
             return recvint32(col.data.data());
@@ -1454,7 +1542,7 @@ namespace springtail {
             DCHECK_EQ(col.type, 'b');
 
             // int64 should be 8 bytes
-            assert(col.data.size() == 8);
+            DCHECK_EQ(col.data.size(), 8);
 
             // read in the binary data and convert to a 64-bit int
             return recvint64(col.data.data());
@@ -1468,7 +1556,7 @@ namespace springtail {
             DCHECK_EQ(col.type, 'b');
 
             // float should be 4 bytes
-            assert(col.data.size() == 4);
+            DCHECK_EQ(col.data.size(), 4);
 
             // read in the binary data and convert to a 32-bit float
             int32_t value = recvint32(col.data.data());
@@ -1483,7 +1571,7 @@ namespace springtail {
             DCHECK_EQ(col.type, 'b');
 
             // double should be 8 bytes
-            assert(col.data.size() == 8);
+            DCHECK_EQ(col.data.size(), 8);
 
             // read in the binary data and convert to a 64-bit float
             int64_t value = recvint64(col.data.data());
@@ -1499,6 +1587,16 @@ namespace springtail {
 
             // read in the binary data as a string
             return std::string_view(col.data.data(), col.data.size());
+        }
+
+        std::shared_ptr<numeric::NumericData> get_numeric(const void *row) const override {
+            auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
+            const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
+
+            // XXX we only support binary data for native types
+            DCHECK_EQ(col.type, 'b');
+
+            return numeric::numeric_receive(col.data.begin().base(), col.data.size(), 0);
         }
 
         const std::span<const char> get_binary(const void *row) const override {
@@ -1616,6 +1714,16 @@ namespace springtail {
                         break;
                     case(SchemaType::FLOAT32):
                         _fields.push_back(std::make_shared<ConstTypeField<float>>(field->get_float32(tuple->row())));
+                        break;
+                    case(SchemaType::NUMERIC):
+                        {
+                            // note: perform a copy here to store the constant value
+                            auto &&numeric_data = field->get_numeric(tuple->row());
+                            auto tmp = (char*)(numeric_data.get());
+                            std::vector<char> value(tmp, tmp + numeric_data->varsize());
+                            _fields.push_back(std::make_shared<ConstTypeField<
+                                    std::shared_ptr<numeric::NumericData>>>(std::move(value)));
+                        }
                         break;
                     case(SchemaType::BINARY):
                         {

@@ -59,7 +59,7 @@ int main(int argc, char* argv[])
     }
 
     // init logging/backtrace
-    springtail_init(std::nullopt, false, std::nullopt, LOG_PG_REPL);
+    springtail_init(false, std::nullopt, LOG_PG_REPL);
 
     // create postgres connection
     PgReplConnection pg_conn(port, host, db_name, user_name, password, pub_name, slot_name);

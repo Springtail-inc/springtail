@@ -21,6 +21,7 @@ generate_fields(ExtentPtr extent)
 
             case (SchemaType::TEXT):
             case (SchemaType::BINARY):
+            case (SchemaType::NUMERIC):
             case (SchemaType::UINT32):
             case (SchemaType::INT32):
             case (SchemaType::FLOAT32):
@@ -35,6 +36,7 @@ generate_fields(ExtentPtr extent)
             case (SchemaType::UINT8):
             case (SchemaType::INT8):
                 fixed_width += 1;
+                break;
 
             case (SchemaType::BOOLEAN):
                 break;
@@ -68,6 +70,7 @@ generate_fields(ExtentPtr extent)
 
             case (SchemaType::TEXT):
             case (SchemaType::BINARY):
+            case (SchemaType::NUMERIC):
             case (SchemaType::UINT32):
             case (SchemaType::INT32):
             case (SchemaType::FLOAT32):
@@ -168,6 +171,10 @@ get_type_name(FieldPtr field)
         case (SchemaType::BOOLEAN):
             name = "bool";
             break;
+
+        case (SchemaType::NUMERIC):
+            name = "numeric";
+            break;
     }
 
     if (field->can_be_null()) {
@@ -213,12 +220,8 @@ main(int argc,
         return 1;
     }
 
-    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-    runners.emplace();
-    runners->emplace_back(std::make_unique<IOMgrRunner>());
-
     // no logging
-    springtail_init(runners, false, std::nullopt, LOG_NONE);
+    springtail_init(false, std::nullopt, LOG_NONE);
 
     // open the file
     auto handle = IOMgr::get_instance()->open(argv[1], IOMgr::READ, true);

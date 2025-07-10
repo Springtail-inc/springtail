@@ -172,6 +172,16 @@ namespace springtail
         std::string collation;
     };
 
+    struct PartitionData {
+        std::string table_name;
+        uint64_t table_id;
+        std::string namespace_name;
+        uint64_t namespace_id;
+        std::string partition_bound;
+        std::string partition_key;
+        uint64_t parent_table_id;
+    };
+
     /** Create table/alter table message decoded */
     struct PgMsgTable {
         LSN_t lsn;
@@ -180,6 +190,10 @@ namespace springtail
         std::string namespace_name;
         std::string table;
         std::vector<PgMsgSchemaColumn> columns;
+        uint64_t parent_table_id;
+        std::string partition_bound;
+        std::string partition_key;
+        std::vector<PartitionData> partition_data;
     };
 
     /** Drop table message decoded */
@@ -236,6 +250,26 @@ namespace springtail
         std::string value_json;
     };
 
+    struct PgMsgAttachPartition {
+        LSN_t lsn;
+        int32_t xid;
+        uint64_t table_id;
+        std::string namespace_name;
+        std::string table_name;
+        std::string partition_key;
+        std::vector<PartitionData> partition_data;
+    };
+
+    struct PgMsgDetachPartition {
+        LSN_t lsn;
+        int32_t xid;
+        uint64_t table_id;
+        std::string namespace_name;
+        std::string table_name;
+        std::string partition_key;
+        std::vector<PartitionData> partition_data;
+    };
+
     struct PgMsgCopySync {
         int64_t target_xid;
         int32_t pg_xid;
@@ -259,7 +293,9 @@ namespace springtail
         CREATE_TYPE, DROP_TYPE, ALTER_TYPE,
         // special message generated in the log reader
         RECONCILE_INDEX, // Custom committer notifiers
-        ALTER_RESYNC // generated when an invalid table becomes valid due to an ALTER TABLE
+        ALTER_RESYNC, // generated when an invalid table becomes valid due to an ALTER TABLE
+        ATTACH_PARTITION,
+        DETACH_PARTITION
     };
 
     /**
@@ -292,7 +328,9 @@ namespace springtail
          PgMsgNamespace,
          PgMsgUserType,
          PgMsgCopySync,
-         PgMsgReconcileIndex
+         PgMsgReconcileIndex,
+         PgMsgAttachPartition,
+         PgMsgDetachPartition
         > msg;                 ///< message data
 
         /** timestamp id of the current Postgres log file -- will be zero for internal messages */
@@ -366,6 +404,8 @@ namespace springtail
         static inline constexpr char MSG_PREFIX_CREATE_TYPE[] = "springtail:CREATE TYPE";
         static inline constexpr char MSG_PREFIX_ALTER_TYPE[] = "springtail:ALTER TYPE";
         static inline constexpr char MSG_PREFIX_DROP_TYPE[] = "springtail:DROP TYPE";
+        static inline constexpr char MSG_PREFIX_ATTACH_PARTITION[] = "springtail:ATTACH PARTITION";
+        static inline constexpr char MSG_PREFIX_DETACH_PARTITION[] = "springtail:DETACH PARTITION";
 
         /**
          * @brief convert a message to a printable string

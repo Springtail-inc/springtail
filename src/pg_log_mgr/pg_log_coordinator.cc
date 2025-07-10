@@ -33,7 +33,7 @@ namespace springtail::pg_log_mgr {
         _committer_thread.join();
     }
 
-    PgLogCoordinator::PgLogCoordinator()
+    PgLogCoordinator::PgLogCoordinator() : Singleton<PgLogCoordinator>(ServiceId::PgLogCoordinatorId)
     {
         _cache_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [this](const std::string &path, const nlohmann::json &new_value) -> void {
