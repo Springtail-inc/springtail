@@ -22,7 +22,8 @@ constexpr uint64_t VACUUM_THRESHOLD_SIZE = 20 * 1024;
 /**
  * Vacuumer to clear dead extents and table snapshots.
  */
-class Vacuumer final : public SingletonWithThread<Vacuumer> {
+class Vacuumer final : public Singleton<Vacuumer> {
+        friend class Singleton<Vacuumer>;
 public:
     /**
      * Register an extent to be expired by the vacuumer.
@@ -40,17 +41,25 @@ public:
      */
     void expire_snapshot(const std::filesystem::path &table_dir, uint64_t xid);
 
-    void init();
-
     void commit_expired_extents();
 
-    void _internal_shutdown();
 
 protected:
+    Vacuumer() : Singleton<Vacuumer>(ServiceId::VacuumerId)
+    {
+        _init();
+    }
+
     /**
-     * The main loop of the vacuumer.
+     * @brief Destroy the Vacuumer object
      */
-    void _internal_run();
+    ~Vacuumer() override = default;
+
+    void _init();
+
+    void _internal_run() override;
+
+    void _internal_shutdown() override;
 
 
 private:
@@ -113,21 +122,5 @@ private:
                 std::vector<HoleInfo> partials);
 
     std::vector<HoleInfo> _get_partials_from_file(const std::filesystem::path &file);
-};
-
-class VacuumerRunner : public ServiceRunner {
-    public:
-        VacuumerRunner() : ServiceRunner("Vacuumer") {}
-
-        bool start() override
-        {
-            Vacuumer::get_instance()->init();
-            return true;
-        }
-
-        void stop() override
-        {
-            Vacuumer::shutdown();
-        }
 };
 }

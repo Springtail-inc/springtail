@@ -9,7 +9,7 @@
 namespace springtail {
 
 void
-Vacuumer::init()
+Vacuumer::_init()
 {
     _vacuumer_thread = std::thread(&Vacuumer::_internal_run, this);
 

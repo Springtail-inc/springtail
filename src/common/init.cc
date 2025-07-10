@@ -209,6 +209,7 @@ static const std::map<ServiceId, std::vector<ServiceId>> dependencies = {
     {ServiceId::WriteCacheServerId,    {ServiceId::ServiceRegisterId, ServiceId::SysTblMgrServerId}},
     {ServiceId::WriteCacheClientId,    {ServiceId::ServiceRegisterId, ServiceId::WriteCacheServerId}},
     {ServiceId::IOMgrId,               {ServiceId::ServiceRegisterId}},
+    {ServiceId::VacuumerId,            {ServiceId::ServiceRegisterId}},
     {ServiceId::SchemaMgrId,           {ServiceId::SysTblMgrClientId}},
     {ServiceId::TableMgrId,            {ServiceId::IOMgrId, ServiceId::SchemaMgrId, ServiceId::StorageCacheId}},
     {ServiceId::SyncTrackerId,         {ServiceId::ServiceRegisterId}},
@@ -238,7 +239,8 @@ static const std::map<ServiceId, std::string> dependencies_names = {
     {ServiceId::PgXidSubscriberMgrId,  "PgXidSubscriberMgr"},
     {ServiceId::PgDDLMgrId,            "PgDDLMgr"},
     {ServiceId::PgLogCoordinatorId,    "PgLogCoordinator"},
-    {ServiceId::StorageCacheId,        "StorageCache"}
+    {ServiceId::StorageCacheId,        "StorageCache"},
+    {ServiceId::VacuumerId,            "Vacuumer"}
 };
 
 std::vector<ServiceId>
