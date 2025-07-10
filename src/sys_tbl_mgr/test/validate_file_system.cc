@@ -53,6 +53,24 @@ main(int argc,
             std::cout << fmt::format("\nDB {}:{}: Found table {}.{} tid={}, xid={}",
                     db_id, db_name, table_ns_id, table_name, tid, xid) << std::endl;
 
+            // read table stats table
+            auto table_stats = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableStats::ID, constant::LATEST_XID);
+            auto table_stats_fields = table_stats->extent_schema()->get_fields();
+            auto table_stats_search_key = sys_tbl::TableStats::Primary::key_tuple(tid, constant::LATEST_XID);
+            auto table_stats_iter = table_stats->inverse_lower_bound(table_stats_search_key);
+            if (table_stats_iter != table_stats->end()) {
+                auto &table_stats_row = *table_stats_iter;
+                uint64_t stats_tid = table_stats_fields->at(sys_tbl::TableStats::Data::TABLE_ID)->get_uint64(&table_stats_row);
+                uint64_t stats_xid = table_stats_fields->at(sys_tbl::TableStats::Data::XID)->get_uint64(&table_stats_row);
+                uint64_t row_count = table_stats_fields->at(sys_tbl::TableStats::Data::ROW_COUNT)->get_uint64(&table_stats_row);
+                uint64_t end_offset = table_stats_fields->at(sys_tbl::TableStats::Data::END_OFFSET)->get_uint64(&table_stats_row);
+                std::cout << fmt::format("DB {}:{}: Table {}.{} stats data: tid={}, xid={}, row_count={}, end_offset={}",
+                    db_id, db_name, table_ns_id, table_name, stats_tid, stats_xid,row_count, end_offset) << std::endl;
+            } else {
+                std::cout << fmt::format("DB {}:{}: Table {}.{} stats data: no entry found",
+                    db_id, db_name, table_ns_id, table_name) << std::endl;
+            }
+
             // read table roots table
             auto table_roots = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableRoots::ID, constant::LATEST_XID);
             auto table_roots_fields = table_roots->extent_schema()->get_fields();
