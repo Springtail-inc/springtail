@@ -66,9 +66,12 @@ int main(int argc, char *argv[])
         }
     }
 
-    springtail_store_argument<std::string>(ServiceId::PgDDLMgrId, "username", username);
-    springtail_store_argument<std::string>(ServiceId::PgDDLMgrId, "password", password);
-    springtail_store_argument<std::optional<std::string>>(ServiceId::PgDDLMgrId, "hostname", socket_hostname);
+    springtail_store_arguments(ServiceId::PgDDLMgrId,
+        {
+            {"username", std::any(username)},
+            {"password", std::any(password)},
+            {"hostname", std::any(socket_hostname)}
+        });
 
     springtail_init_daemon("pg_ddl_mgr", pidfile, LOG_ALL);
     PgDDLMgr::start();
