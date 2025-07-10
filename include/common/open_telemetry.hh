@@ -305,9 +305,8 @@ private:
         void task(std::stop_token st) {
             while(!st.stop_requested()) {
                 std::unique_lock g(_m);
-                if (_cv.wait_for(g, st, std::chrono::seconds(_freq_sec), 
-                            [st]{ return !st.stop_requested(); }) ) {
-                }
+                _cv.wait_for(g, st, std::chrono::seconds(_freq_sec), 
+                            [st]{ return st.stop_requested(); });
                 auto token = OpenTelemetry::get_instance()->set_context_variables(_attrs);
                 update_counters<0>();
             }

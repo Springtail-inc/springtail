@@ -96,7 +96,7 @@ main(int argc, char *argv[])
         };
 
         // update counters every second.
-        OTelCounters<Cnt1, Cnt2> cnt({{"async_xid_id", "2"}}, 1);
+        OTelCounters<Cnt1, Cnt2> cnt({{"async_xid_id", "2"}}, 3);
 
         assert(cnt.get<Cnt1>() == 0);
         assert(cnt.get<Cnt2>() == 0);
@@ -107,9 +107,16 @@ main(int argc, char *argv[])
         assert(cnt.get<Cnt1>() == 1);
         assert(cnt.get<Cnt2>() == 2);
 
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+        std::this_thread::sleep_for(std::chrono::seconds(1));
 
-        // wait for 2sec, the counters must be back to 0
+        // the update frequency is 3sec, we waited for 1sec
+        // the counters must stay the same
+        assert(cnt.get<Cnt1>() == 1);
+        assert(cnt.get<Cnt2>() == 2);
+
+        std::this_thread::sleep_for(std::chrono::seconds(3));
+
+        // wait for 3sec more, the counters must be back to 0
         assert(cnt.get<Cnt1>() == 0);
         assert(cnt.get<Cnt2>() == 0);
     }

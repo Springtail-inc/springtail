@@ -22,6 +22,13 @@ extern "C" {
         PgFdwMgr::fdw_init(config_file_path);
     }
 
+    /** Exit call */
+    void
+    fdw_exit()
+    {
+        PgFdwMgr::fdw_exit();
+    }
+
     /** Create state for this table and transaction */
     void *
     fdw_create_state(uint64_t db_id, uint64_t tid, uint64_t pg_xid, uint64_t schema_xid)

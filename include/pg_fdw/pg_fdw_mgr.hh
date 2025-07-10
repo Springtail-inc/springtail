@@ -114,7 +114,7 @@ namespace springtail::pg_fdw {
     using PgFdwStatePtr = std::shared_ptr<PgFdwState>;
 
     /** Singleton manager for handling table scan operations */
-    class PgFdwMgr {
+    class PgFdwMgr : public Singleton<PgFdwMgr> {
     public:
         static constexpr char CATALOG_SCHEMA_NAME[] = SPRINGTAIL_FDW_CATALOG_SCHEMA;  ///< Schema name for catalog tables
         static constexpr char CATALOG_TABLE_NAMES[] = "table_names";      ///< Table name for system table names
@@ -130,17 +130,16 @@ namespace springtail::pg_fdw {
         /** Maximum number of user type definitions to cache */
         static constexpr int MAX_USER_TYPE_CACHE = 100;
 
-        /** Get singleton instance */
-        static PgFdwMgr* get_instance() {
-            assert (_instance != nullptr);
-            return _instance;
-        }
-
         /**
          * Init call, pass in config file path;
          * Ideally, call before first get_instance()
          */
         static void fdw_init(const char *config_file=nullptr, bool init=true);
+
+        /**
+         * Exit the current FDW session.
+         */
+        static void fdw_exit();
 
         /** Create state based on table ID
          * @param tid Table ID
@@ -249,15 +248,17 @@ namespace springtail::pg_fdw {
          */
         static bool check_type_compatibility(const SchemaColumn &column, ConstQualPtr qual);
 
+        PgFdwMgr() :
+            Singleton(ServiceId::PgFdwMgrId),
+            _user_type_cache(MAX_USER_TYPE_CACHE)
+        {};
+
+        static void shutdown() {};
+
     private:
-        /** Delete constructor */
-        PgFdwMgr() : _user_type_cache(MAX_USER_TYPE_CACHE) {};
+        /** Delete copy constructor */
         PgFdwMgr(const PgFdwMgr&) = delete;
         PgFdwMgr& operator=(const PgFdwMgr&) = delete;
-
-        static PgFdwMgr* _instance;        ///< Singleton instance
-        static std::once_flag _init_flag;  ///< Initialization flag
-        static PgFdwMgr* _init();          ///< Initialize singleton
 
         std::shared_mutex _mutex;               ///< Mutex for xid map
         std::map<uint64_t, uint64_t> _xid_map;  ///< Map of pg XID to springtail XID
