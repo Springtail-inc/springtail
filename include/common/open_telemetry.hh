@@ -71,15 +71,9 @@ public:
     /**
      * @brief Increment a counter
      * @param name The name of the counter
-     * @param delta The increment
+     * @param delta The increment delta
      */
-    void add_counter(std::string_view name, int delta);
-
-    /**
-     * @brief Increment a counter
-     * @param name The name of the counter
-     */
-     void increment_counter(std::string_view name);
+     void increment_counter(std::string_view name, int delta=1);
 
      /**
       * @brief Record a value in the histogram
@@ -244,6 +238,10 @@ private:
     {
         using NamesTuple = std::tuple<Names...>;
 
+        /** Constructor.
+         * @param attrs Is a key-value map that is added to the metric OT context.
+         * @param freq Defines the internal thread counter update frequency in sec.
+         */
         OTelCounters(std::unordered_map<std::string, std::string> attrs, int freq_sec)
             :_attrs{std::move(attrs)},
             _freq_sec{freq_sec}
@@ -252,6 +250,8 @@ private:
         }
         OTelCounters(OTelCounters&&) = delete;
 
+        /** Increment the counter by one.
+         */
         template<typename  Name>
         void increment()
         {
@@ -294,7 +294,7 @@ private:
             if constexpr (I < sizeof...(Names)) {
                 auto n = std::get<I>(_counters).load();
                 if (n) {
-                    OpenTelemetry::get_instance()->add_counter(std::tuple_element<I, NamesTuple>::type::name(), n);
+                    OpenTelemetry::get_instance()->increment_counter(std::tuple_element<I, NamesTuple>::type::name(), n);
                     // reset the local counter
                     std::get<I>(_counters) = 0;
                 }

@@ -52,7 +52,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
             target_xid = access_xid;
         }
 
-        _metric_counters->increment<MetricCounter::GetCalls>();
+        _metric_counters->increment<metrics::StorageCache::GetCalls>();
 
         // if the extent ID is UNKNOWN, then we will get an empty page for the file
         if (extent_id == constant::UNKNOWN_EXTENT) {
@@ -107,7 +107,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     StorageCache::flush(const std::filesystem::path &file)
     {
         auto end_offset = _page_cache->flush_file(file);
-        _metric_counters->increment<MetricCounter::FlushCalls>();
+        _metric_counters->increment<metrics::StorageCache::FlushCalls>();
         return end_offset;
     }
 
@@ -115,7 +115,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     StorageCache::drop_for_truncate(const std::filesystem::path &file)
     {
         _page_cache->drop_file(file);
-        _metric_counters->increment<MetricCounter::DropCalls>();
+        _metric_counters->increment<metrics::StorageCache::DropCalls>();
     }
 
 
@@ -134,12 +134,12 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
         // check if the page already exists in the cache for the given target XID
         PagePtr page = _try_get(file, extent_id, target_xid);
         if (page != nullptr) {
-            StorageCache::get_instance()->_metric_counters->increment<MetricCounter::GetCalls>();
+            StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::GetCalls>();
             LOG_DEBUG(LOG_CACHE, "Found in cache");
             return page;
         }
 
-        StorageCache::get_instance()->_metric_counters->increment<MetricCounter::CacheMisses>();
+        StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::CacheMisses>();
 
         // XXX eventually use the access_xid and extent_id to get the proper set of extents to start
         //     from; for now we assume that the single extent_id *is* the full list of extents for
@@ -167,7 +167,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
         LOG_DEBUG(LOG_CACHE, "PUT file {} eid {} s_xid {} e_xid {}",
                             page->_file, page->_extent_id, page->_start_xid, page->_end_xid);
 
-        StorageCache::get_instance()->_metric_counters->increment<MetricCounter::PutCalls>();
+        StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::PutCalls>();
 
         boost::unique_lock lock(_mutex);
 
@@ -212,7 +212,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     {
         boost::unique_lock lock(_mutex);
 
-        StorageCache::get_instance()->_metric_counters->increment<MetricCounter::FlushCalls>();
+        StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::FlushCalls>();
 
         const auto start_time = std::chrono::system_clock::now();
 
@@ -311,7 +311,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     {
         boost::unique_lock lock(_mutex);
 
-        StorageCache::get_instance()->_metric_counters->increment<MetricCounter::DropCalls>();
+        StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::DropCalls>();
 
         const auto start_time = std::chrono::system_clock::now();
 

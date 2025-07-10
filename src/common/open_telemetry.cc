@@ -378,13 +378,7 @@ OpenTelemetry::tracer(const std::string_view& name)
 }
 
 void
-OpenTelemetry::increment_counter(std::string_view name)
-{
-    add_counter(name, 1);
-}
-
-void
-OpenTelemetry::add_counter(std::string_view name, int delta)
+OpenTelemetry::increment_counter(std::string_view name, int delta)
 {
     if (!_otel_enabled) {
         return;

@@ -8,6 +8,7 @@
 #include <common/constants.hh>
 #include <storage/extent.hh>
 #include <storage/field.hh>
+#include "common/open_telemetry.hh"
 
 namespace springtail {
     /**
@@ -1295,43 +1296,12 @@ namespace springtail {
         std::shared_ptr<PageCache> _page_cache;
 
 
-        /**
-         * Storage cache counters.
-         */
-        struct MetricCounter
-        {
-            struct GetCalls {
-                static auto name() {
-                    return STORAGE_CACHE_GET_CALLS;
-                }
-            };
-            struct PutCalls {
-                static auto name() {
-                    return STORAGE_CACHE_PUT_CALLS;
-                }
-            };
-            struct CacheMisses {
-                static auto name() {
-                    return STORAGE_CACHE_GET_CACHE_MISSES;
-                }
-            };
-            struct FlushCalls {
-                static auto name() {
-                    return STORAGE_CACHE_FLUSH_CALLS;
-                }
-            };
-            struct DropCalls {
-                static auto name() {
-                    return STORAGE_CACHE_DROP_CALLS;
-                }
-            };
-        };
-
         using MetricCounters = open_telemetry::OTelCounters<
-            MetricCounter::GetCalls, MetricCounter::PutCalls,
-            MetricCounter::CacheMisses,
-            MetricCounter::FlushCalls,
-            MetricCounter::DropCalls>;
+            metrics::StorageCache::GetCalls,
+            metrics::StorageCache::PutCalls,
+            metrics::StorageCache::CacheMisses,
+            metrics::StorageCache::FlushCalls,
+            metrics::StorageCache::DropCalls>;
 
         std::unique_ptr<MetricCounters> _metric_counters;
     };
