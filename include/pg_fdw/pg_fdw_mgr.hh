@@ -59,6 +59,7 @@ namespace springtail::pg_fdw {
         uint64_t tid;
         uint64_t xid;
         FieldArrayPtr fields = nullptr;       ///< Fields for the columns from the target list
+        bool index_only_scan = false;        ///< indicates that fields are part of the index itself
         FieldArrayPtr qual_fields = nullptr;  ///< Fields for the columns from the qual list
         TableStats stats;                     ///< Table statistics
         int rows_fetched = 0;                 ///< Number of rows fetched
@@ -153,7 +154,7 @@ namespace springtail::pg_fdw {
         /** Begin scan
          * @param state PgFdwState
          * @param num_attrs Number of attributes
--        * @param attrs Array of pg attributes
+         * @param attrs Array of pg attributes
          * @param target_list List of target columns (Value or String)
          * @param qual_list List of predicate clauses (BaseQual)
          * @param sortgroup List of sort group columns (DeparsedSortGroup)
@@ -196,9 +197,10 @@ namespace springtail::pg_fdw {
          *  Called from get_foreign_paths
          * @param state Plan state
          * @param sortgroup List of DeparsedSortGroup
+         * @param use_secondary Make use the secondary indexes to match the sortgroup
          * @return List or sublist of path keys based on sort group
          */
-        List *fdw_can_sort(SpringtailPlanState *state, List *sortgroup);
+        List *fdw_can_sort(SpringtailPlanState *state, List *sortgroup, bool use_secondary = false);
 
         /** Get list of path keys -- indexes
          * @param state Planstate
@@ -297,9 +299,6 @@ namespace springtail::pg_fdw {
                                     Oid pg_oid,
                                     int32_t atttypmod);
 
-        /** Helper to convert a numeric datum to binary */
-        std::vector<char> _numeric_datum_to_vector(Datum value);
-
         /** Helper to setup quals and scan iterator in state, called from begin_scan */
         void _init_quals(PgFdwState *state, List *qual_list);
 
@@ -313,12 +312,10 @@ namespace springtail::pg_fdw {
                                           const std::unordered_map<uint64_t, std::string> &user_types);
 
         /** Helper to generate create foreign table sql */
-        static std::vector<std::string> _gen_fdw_table_sql(const std::string &server_name,
+        static std::string _gen_fdw_table_sql(const std::string &server_name,
             const std::string &schema,
             const std::string &table,
             uint64_t tid,
-            bool rls_enabled,
-            bool rls_read_only,
             std::vector<std::tuple<std::string, std::string, bool>> &columns);
 
         /** Helper to generate a system table create foreign table sql */

@@ -78,7 +78,7 @@ retry_rpc_status(std::string_view service, std::string_view operation, Func&& fu
     namespace context = opentelemetry::context;
     namespace semconv = opentelemetry::semconv;
 
-    auto tracer = open_telemetry::OpenTelemetry::tracer("grpc");
+    auto tracer = open_telemetry::OpenTelemetry::get_instance()->tracer("grpc");
     // Create span for this RPC attempt
     trace::StartSpanOptions options;
     options.kind = trace::SpanKind::kClient;

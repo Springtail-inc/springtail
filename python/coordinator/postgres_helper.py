@@ -97,7 +97,7 @@ class PostgresHelper:
         """
         Create the DDL user.
         """
-        self.ddl_user = 'ddl_user'
+        self.ddl_user = '__springtail_ddl_user'
         self.ddl_password = self._gen_random_string(16)
 
         try:

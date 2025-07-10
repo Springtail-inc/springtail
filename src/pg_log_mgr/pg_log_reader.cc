@@ -17,14 +17,16 @@ namespace springtail::pg_log_mgr {
     PgLogReader::PgLogReader(uint64_t db_id, uint32_t queue_size,
                              const std::filesystem::path &repl_log_path,
                              const CommitterQueuePtr committer_queue,
-                             const bool archive_logs)
+                             const bool archive_logs,
+                             const std::shared_ptr<IndexRequestsManager> &index_requests_mgr)
         : _db_id(db_id),
           // retrieve the most recently committed XID at startup
          _committed_xid(xid_mgr::XidMgrServer::get_instance()->get_committed_xid(db_id, 0)),
           _archive_logs(archive_logs),
           _repl_log_path(repl_log_path),
           _committer_queue(committer_queue),
-          _msg_queue(queue_size)
+          _msg_queue(queue_size),
+          _index_requests_mgr(index_requests_mgr)
     {
         _xid_ts_tracker = std::make_shared<WalProgressTracker>();
 
@@ -46,7 +48,7 @@ namespace springtail::pg_log_mgr {
     {
         time_trace::Trace commit_trace;
         TIME_TRACE_START(commit_trace);
-        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
         _span->AddEvent("commit", {{"pg_commit_time", commit_ts.to_unix_ns()}});
 
         // update any changes in the table invalidation state
@@ -103,7 +105,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::abort(PostgresTimestamp abort_ts)
     {
-        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
         _span->AddEvent("aborted", {{"pg_abort_time", abort_ts.to_unix_ns()}});
 
         // drop any batches for all active txns
@@ -119,7 +121,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::abort_subtxn(int32_t pg_xid, PostgresTimestamp abort_ts)
     {
-        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
 
         // Add subtransaction abort event with the provided timestamp
         _span->AddEvent("subtransaction_abort", {
@@ -253,7 +255,7 @@ namespace springtail::pg_log_mgr {
             return;
         }
 
-        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
         auto txn = _get_txn(pg_xid);
 
         // get the Extent containing mutations
@@ -310,7 +312,7 @@ namespace springtail::pg_log_mgr {
                                  int32_t pg_xid,
                                  const PgMsgTruncate &msg)
     {
-        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
 
         // get the current txn
         auto txn = _get_txn(pg_xid);
@@ -452,7 +454,7 @@ namespace springtail::pg_log_mgr {
                                       uint32_t pg_xid_txn,
                                       PgMsgPtr msg)
     {
-        auto scope = open_telemetry::OpenTelemetry::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
 
         // perform the table column validations and update the message accordingly
         if (!_handle_validation(msg)) {
@@ -683,11 +685,10 @@ namespace springtail::pg_log_mgr {
         // Add a message to skip indexes for this table
         // for the currently building indexes and the ones
         // belonging to this transaction
-        nlohmann::json ddl;
-        RedisDDL redis_ddl;
-        ddl["action"] = "abort_index";
-        ddl["table_id"] = table_oid;
-        redis_ddl.add_index_ddl(_db, xidlsn.xid, ddl.dump());
+        proto::IndexProcessRequest index_request;
+        index_request.set_action("abort_index");
+        index_request.mutable_index()->set_table_id(table_oid);
+        _index_requests_mgr->add_index_request(_db, xidlsn.xid, index_request);
     }
 
     void
@@ -788,20 +789,20 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::CREATE_INDEX:
             {
                 auto &index_msg = std::get<PgMsgIndex>(change->msg);
-                std::string &&ddl_stmt = client->create_index(_db, xidlsn, index_msg,
-                                                              sys_tbl::IndexNames::State::NOT_READY);
+                auto &&create_index_response = client->create_index(_db, xidlsn, index_msg,
+                                                                  sys_tbl::IndexNames::State::NOT_READY);
 
-                // Store the DDL statement for the Committer
-                redis_ddl.add_index_ddl(_db, xidlsn.xid, ddl_stmt);
+                // Store the index process request for the Committer
+                _index_requests_mgr->add_index_request(_db, xidlsn.xid, create_index_response);
                 break;
             }
         case PgMsgEnum::DROP_INDEX:
             {
                 auto &index_msg = std::get<PgMsgDropIndex>(change->msg);
-                std::string &&ddl_stmt = client->drop_index(_db, xidlsn, index_msg);
+                auto &&drop_index_response = client->drop_index(_db, xidlsn, index_msg);
 
-                // Store the DDL statement for the Committer
-                redis_ddl.add_index_ddl(_db, xidlsn.xid, ddl_stmt);
+                // Store the index process request for the Committer
+                _index_requests_mgr->add_index_request(_db, xidlsn.xid, drop_index_response);
                 break;
             }
         case PgMsgEnum::ALTER_RESYNC:
@@ -1185,7 +1186,7 @@ namespace springtail::pg_log_mgr {
         _current_xact = xact;
 
         // prepare a batch for processing
-        _current_batch = std::make_shared<Batch>(_db_id, begin_msg.xid, _committer_queue, _exists_cache);
+        _current_batch = std::make_shared<Batch>(_db_id, begin_msg.xid, _committer_queue, _exists_cache, _index_requests_mgr);
         _batch_map.try_emplace(begin_msg.xid, _current_batch);
         _xid_ts_tracker->add_pg_xid(_current_xact->xid, _pg_log_timestamp);
     }
@@ -1235,7 +1236,7 @@ namespace springtail::pg_log_mgr {
             // Record latency between postgres commit time and when we process it
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - postgres_timestamp.to_system_time());
-            open_telemetry::OpenTelemetry::record_histogram(PG_LOG_MGR_LOG_READER_LATENCIES, duration.count());
+            open_telemetry::OpenTelemetry::get_instance()->record_histogram(PG_LOG_MGR_LOG_READER_LATENCIES, duration.count());
             LOG_DEBUG(LOG_PG_LOG_MGR, "Commit processed {} milliseconds after postgres commit",
                       duration.count());
 
@@ -1268,7 +1269,7 @@ namespace springtail::pg_log_mgr {
         _xact_map.insert({xact->xid, xact});
 
         // prepare a batch for processing
-        _current_batch = std::make_shared<Batch>(_db_id, start_msg.xid, _committer_queue, _exists_cache);
+        _current_batch = std::make_shared<Batch>(_db_id, start_msg.xid, _committer_queue, _exists_cache, _index_requests_mgr);
         _batch_map.try_emplace(start_msg.xid, _current_batch);
         _xid_ts_tracker->add_pg_xid(xact->xid, _pg_log_timestamp);
     }

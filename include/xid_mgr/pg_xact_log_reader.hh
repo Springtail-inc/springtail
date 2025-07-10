@@ -80,12 +80,12 @@ public:
 
     /**
      * @brief Get the current file name
-     * @return std::filesystem::path - the current file name, if any
+     * @return std::filesystem::path
      */
-    std::filesystem::path
+    std::string
     get_current_file() const
     {
-        return _current_file.value_or(std::filesystem::path());
+        return _current_file.has_value() ? _current_file->string() : "";
     }
 
 private:

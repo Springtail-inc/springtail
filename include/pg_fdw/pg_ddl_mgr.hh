@@ -1,7 +1,6 @@
 #pragma once
 
 #include <vector>
-#include <set>
 #include <optional>
 
 #include <nlohmann/json.hpp>
@@ -17,7 +16,7 @@
 #include <sys_tbl_mgr/table_mgr.hh>
 
 #include <pg_repl/libpq_connection.hh>
-#include "common/logging.hh"
+#include <common/logging.hh>
 
 namespace springtail::pg_fdw {
 
@@ -195,7 +194,7 @@ namespace springtail::pg_fdw {
          * @param xid transaction id
          * @return map of schemas <ns_id, schema name>
          */
-        std::map<uint64_t, std::string> _get_schemas(uint64_t db_id, uint64_t xid);
+        std::unordered_map<uint64_t, std::string> _get_schemas(uint64_t db_id, uint64_t xid);
 
         /**
          * @brief Helper to get user defined types from the system tables
@@ -203,7 +202,7 @@ namespace springtail::pg_fdw {
          * @param xid transaction id
          * @return map of namespace id to map of type_id to pair <type_name, value_json>
          */
-        std::map<uint64_t, std::map<uint64_t, std::pair<std::string, std::string>>>
+        std::unordered_map<uint64_t, std::map<uint64_t, std::pair<std::string, std::string>>>
         _get_usertypes(uint64_t db_id, uint64_t xid);
 
         /**
@@ -245,8 +244,21 @@ namespace springtail::pg_fdw {
                              const std::string &db_name);
 
         /**
+         * @brief Function for initializing RLS policies for the tables
+         *        scans table names for RLS enabled tables
+         * @param db_id - database id
+         * @param xid - transaction id (for scanning system table)
+         * @param schemas - map of schema id to schema name
+         * @param conn - connection object
+         */
+        void _init_rls(uint64_t db_id,
+                       uint64_t xid,
+                       const std::unordered_map<uint64_t, std::string> &schemas,
+                       LibPqConnectionPtr conn);
+
+        /**
          * @brief Function for adding a new replicated database
-         * @param db_id - databese id
+         * @param db_id - database id
          */
         void _add_replicated_database(uint64_t db_id,
                                       const std::optional<std::string> &db_name_opt = std::nullopt,

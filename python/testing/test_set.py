@@ -2,7 +2,7 @@ import logging
 from lxml import etree
 import os
 import springtail
-import time
+import traceback
 
 from test_case import TestCase
 
@@ -140,7 +140,7 @@ class TestSet:
         self._apply_replica_full()
 
         # update postgres config to apply props for the test
-        springtail.update_postgres_config(self._test_params)
+        springtail.update_postgres_config(self._test_params, self._props)
 
         # install FDW with Postgres restart
         logging.debug("Installing foreign data wrapper...")
@@ -179,6 +179,7 @@ class TestSet:
 
             except Exception as e:
                 logging.error(f'Error: exception: [{e}] result: {self._tests[test_file].get_result()["result"]}')
+                traceback.print_exc()
                 if self._tests[test_file].get_result()['result'] == 'FAILED':
                     test_failed = True
                 else:
@@ -220,7 +221,7 @@ class TestSet:
         self._remove_databases()
 
         # cleanup custom postgres config
-        springtail.cleanup_postgres_config()
+        springtail.cleanup_postgres_config(self._props)
 
         return not test_failed
 

@@ -64,6 +64,7 @@ SELECT
     (SELECT COUNT(*) FROM table3) AS count_table3;
 
 ## cleanup
+### streaming false
 DROP TABLE IF EXISTS table3;
 DROP TABLE IF EXISTS table2;
 DROP TABLE IF EXISTS table1;

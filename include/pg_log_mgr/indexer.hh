@@ -14,6 +14,7 @@
 #include <pg_repl/index_reconcile_request.hh>
 #include <proto/sys_tbl_mgr.pb.h>
 #include <pg_log_mgr/index_reconciliation_queue_manager.hh>
+#include <pg_log_mgr/index_requests_manager.hh>
 
 namespace springtail::committer {
 
@@ -30,7 +31,7 @@ namespace springtail::committer {
         struct IndexParams {
             uint64_t _db_id;
             uint64_t _xid;
-            nlohmann::json _ddl;
+            proto::IndexProcessRequest _index_request;
             IndexStatus _status = IndexStatus::BUILDING;
 
             /**
@@ -49,7 +50,14 @@ namespace springtail::committer {
         Indexer(const Indexer&) = delete;
         Indexer& operator=(const Indexer&) = delete;
 
-        void process_ddls(uint64_t db_id, uint64_t xid, nlohmann::json const& ddls);
+        /**
+         * @brief Process index requests(create/drop) at an XID
+         * @param db_id          Database ID
+         * @param xid            XID at which index is created/dropped
+         * @param index_requests Index requests (create/drop)
+         *
+         */
+        void process_requests(uint64_t db_id, uint64_t xid, const std::list<proto::IndexProcessRequest> &index_requests);
 
         /**
          * @brief Recover indexes which were not complete (build or drop) during shutdown/crash
@@ -211,6 +219,8 @@ namespace springtail::committer {
          * @param db_id Database ID.
          */
         void _cleanup_for_db(uint64_t db_id);
+
+        std::vector<uint32_t> _get_index_cols(proto::IndexInfo index_info);
 
         /**
          * @brief Helper method to get index ddl for create action

@@ -41,6 +41,10 @@ namespace springtail::pg_fdw {
     static constexpr char VERIFY_DB_EXISTS[] =
         "SELECT 1 FROM  pg_database WHERE datname = '{}'";
 
+    static constexpr char ALTER_TABLE_RLS[] =
+        "ALTER FOREIGN TABLE {}.{} "
+        "  ENABLE ROW LEVEL SECURITY {}";
+
     static constexpr char POLICY_DIFF_SELECT[] =
         "SELECT diff_type, table_name, schema_name, "
         "       policy_oid, policy_name, "
@@ -257,8 +261,14 @@ namespace springtail::pg_fdw {
 
         // iterate through the result set and process the role diffs
         for (int i = 0; i < conn->ntuples(); i++) {
-            std::string diff_type = conn->get_string(i, 0);
+            std::string role = conn->get_string(i, 1);
+            if (role == _fdw_username || role == _username) {
+                // skip the fdw user and ddl mgr user, they are not replicated from primary
+                LOG_DEBUG(LOG_FDW, "Skipping role {} as it is the fdw or ddl mgr user", role);
+                continue;
+            }
             std::string role_name = conn->escape_identifier(conn->get_string(i, 1));
+            std::string diff_type = conn->get_string(i, 0);
             bool rolsuper = conn->get_boolean(i, 2);
             bool rolinherit = conn->get_boolean(i, 3);
             bool rolcanlogin = conn->get_boolean(i, 4);
@@ -486,11 +496,11 @@ namespace springtail::pg_fdw {
         }
     }
 
-    std::map<uint64_t, std::map<uint64_t, std::pair<std::string, std::string>>>
+    std::unordered_map<uint64_t, std::map<uint64_t, std::pair<std::string, std::string>>>
     PgDDLMgr::_get_usertypes(uint64_t db_id, uint64_t xid)
     {
         // namespace id -> type_id -> <type_name, value_json>
-        std::map<uint64_t, std::map<uint64_t, std::pair<std::string, std::string>>> usertype_map;
+        std::unordered_map<uint64_t, std::map<uint64_t, std::pair<std::string, std::string>>> usertype_map;
 
         // iterate through the user types and add them to the map
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::UserTypes::ID, xid);
@@ -527,7 +537,7 @@ namespace springtail::pg_fdw {
         return usertype_map;
     }
 
-    std::map<uint64_t, std::string>
+    std::unordered_map<uint64_t, std::string>
     PgDDLMgr::_get_schemas(uint64_t db_id, uint64_t xid)
     {
         // get the db config and parse out the included schemas
@@ -535,7 +545,7 @@ namespace springtail::pg_fdw {
 
         bool all_schemas = false;
         std::set<std::string> schemas;
-        std::map<uint64_t, std::string> schema_map;
+        std::unordered_map<uint64_t, std::string> schema_map;
 
         // scan through includes
         auto includes = db_config["include"];
@@ -581,6 +591,51 @@ namespace springtail::pg_fdw {
         }
 
         return schema_map;
+    }
+
+    void
+    PgDDLMgr::_init_rls(uint64_t db_id,
+                        uint64_t xid,
+                        const std::unordered_map<uint64_t, std::string> &schema_map,
+                        LibPqConnectionPtr conn)
+    {
+        // Iterate through the TableNames table to look for rls_enabled tables
+        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, xid);
+        auto fields = table->extent_schema()->get_fields();
+
+        for (auto row : (*table)) {
+            // make sure entry exists at this xid
+            bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
+            bool rls_enabled = fields->at(sys_tbl::TableNames::Data::RLS_ENABLED)->get_bool(&row);
+            if (!exists || !rls_enabled) {
+                continue;
+            }
+
+            // get the table name and schema name
+            std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row));
+
+            // get schema name from schema map
+            uint64_t namespace_oid = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
+            DCHECK_NE(namespace_oid, 0) << "Namespace OID should not be 0";
+
+            std::string schema_name;
+            auto it = schema_map.find(namespace_oid);
+            if (it != schema_map.end()) {
+                schema_name = it->second;
+            } else {
+                LOG_WARN("Schema OID {} not found in schema map for table {}.{}",
+                         namespace_oid, schema_name, table_name);
+                DCHECK(it != schema_map.end()) << "Schema OID should be in the schema map";
+                continue; // skip this table if schema is not found
+            }
+
+            bool rls_forced = fields->at(sys_tbl::TableNames::Data::RLS_FORCED)->get_bool(&row);
+
+            // create the RLS policy for the table
+            auto sql = fmt::format(ALTER_TABLE_RLS,
+                conn->escape_identifier(schema_name), conn->escape_identifier(table_name),
+                rls_forced ? ", FORCE ROW LEVEL SECURITY" : "");
+        }
     }
 
     void
@@ -1073,8 +1128,6 @@ namespace springtail::pg_fdw {
                                force_action);
         }
 
-
-
         // can't currently support other kinds of DDL mutations
         LOG_ERROR("Bad DDL statement: {}", action.get<std::string>());
         CHECK(false);
@@ -1135,7 +1188,7 @@ namespace springtail::pg_fdw {
                                const uint64_t db_id,
                                const std::string &db_name)
     {
-        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
+        auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
         LOG_DEBUG(LOG_FDW, "Creating DB ID: {}, DB Name: {}", db_id, db_name);
 
         // drop and create database on fdw
@@ -1159,7 +1212,7 @@ namespace springtail::pg_fdw {
                               const std::string &db_name)
     {
 
-        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
+        auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
         RedisDDL redis_ddl;
 
         uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
@@ -1236,6 +1289,11 @@ namespace springtail::pg_fdw {
                                 escaped_schema));
         conn->clear();
 
+        // initialize the RLS policies for the schemas
+        _init_rls(db_id, xid, schemas, conn);
+
+        _release_fdw_connection(db_id, conn);
+
         // set the schema xid in the map
         std::unique_lock db_lock(_db_mutex);
         _db_xid_map[db_id] = xid;
@@ -1251,7 +1309,8 @@ namespace springtail::pg_fdw {
                                        bool check_exists)
 
     {
-        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
+        auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
+        nlohmann::json db_config = Properties::get_db_config(db_id);
 
         std::string db_name;
         if (!db_name_opt.has_value()) {
@@ -1294,7 +1353,7 @@ namespace springtail::pg_fdw {
     void
     PgDDLMgr::_remove_replicated_database(uint64_t db_id)
     {
-        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
+        auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
         std::shared_lock shared_lock(_db_mutex);
         if (!_db_xid_map.contains(db_id)) {
             return;

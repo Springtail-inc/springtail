@@ -1,44 +1,14 @@
-#include <bit>
-#include <cstdio>
-#include <cstring>
-#include <cassert>
-#include <vector>
-#include <algorithm>
-
-#include <absl/log/check.h>
-#include <fmt/core.h>
-
 // springtail includes
-#include <common/common.hh>
-#include <pg_repl/pg_common.hh>
-#include <common/redis.hh>
-#include <common/redis_types.hh>
-#include <common/thread_pool.hh>
-#include <common/json.hh>
-#include <common/constants.hh>
-
-#include <redis/redis_containers.hh>
-
 #include <pg_log_mgr/sync_tracker.hh>
 
 #include <pg_repl/exception.hh>
-#include <pg_repl/pg_types.hh>
-#include <pg_repl/pg_copy_table.hh>
-#include <pg_repl/libpq_connection.hh>
-#include <pg_repl/pg_repl_msg.hh>
 
 #include <storage/schema.hh>
 #include <storage/field.hh>
 
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/system_tables.hh>
-#include <sys_tbl_mgr/table.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
-
-#include <xid_mgr/xid_mgr_client.hh>
-
-#include <proto/sys_tbl_mgr.pb.h>
-#include <proto/pg_copy_table.pb.h>
 
 extern "C" {
     #include <postgres.h>
@@ -835,6 +805,15 @@ namespace springtail
                 auto num = recvint32(row.data() + pos);
                 float f = std::bit_cast<float>(num);
                 fields->push_back(std::make_shared<ConstTypeField<float>>(f));
+                pos += length;
+                break;
+            }
+
+            case (SchemaType::NUMERIC): {
+                std::string_view tmp(row.data() + pos, length);
+
+                std::shared_ptr<numeric::NumericData> numeric_value = numeric::numeric_receive(tmp.begin(), length, 0);
+                fields->push_back(std::make_shared<ConstTypeField<std::shared_ptr<numeric::NumericData>>>(numeric_value));
                 pos += length;
                 break;
             }

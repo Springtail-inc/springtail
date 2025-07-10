@@ -46,7 +46,8 @@ from sysutils import (
     start_daemons,
     check_daemons_running,
     check_backtrace,
-    extract_backtrace
+    extract_backtrace,
+    restart_container
 )
 
 from linear import Linear
@@ -55,6 +56,8 @@ from linear import Linear
 FDW_SERVER_NAME = 'springtail_fdw_server'
 FDW_WRAPPER = 'springtail_fdw'
 FDW_SYSTEM_CATALOG = '__pg_springtail_catalog'
+
+POSTGRES_CONTAINER = 'pg16' # Postgres primary container name
 
 # List of daemons to start tuple: (name, path, args)
 CORE_DAEMONS = [
@@ -75,9 +78,7 @@ ALL_DAEMONS = CORE_DAEMONS + FDW_DAEMONS + PROXY_DAEMONS
 
 ALL_DAEMONS_NAMES = [name[0] for name in ALL_DAEMONS]
 
-# paths for the postgres config updates
-POSTGRES_CONF_PATH = '/etc/postgresql/16/main/postgresql.conf'
-TMP_POSTGRES_CONF_PATH = '/tmp/postgresql.conf'
+PG_CONFIG_BACKUP_PATH = '/tmp/pg_config_backup.txt'
 
 def get_lib_ext() -> str:
     """Get the library extension for the current platform."""
@@ -216,51 +217,70 @@ def drop_database(props : Properties, db_config: Dict) -> None:
 
     conn.close()
 
+def cleanup_postgres_config(props: Properties) -> bool:
+    try:
+        # Connect to the database ("postgres" database)
+        conn = connect_db_instance(props)
 
-def update_postgres_config(test_params: dict = {}):
-    # cleanup the config to ensure during restarts/crashes we always use the proper config
-    cleanup_postgres_config()
+        with open(PG_CONFIG_BACKUP_PATH, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line or '=' not in line:
+                    continue
+                param, value = line.split('=', 1)
+                param = param.strip()
+                value = value.strip()
 
-    postgres_config = test_params.get('postgres_config', {})
+                # Restore the setting via ALTER SYSTEM
+                escaped_param = quote_ident(param, conn)
+                query = f"ALTER SYSTEM SET {escaped_param} = %s"
+                execute_sql(conn, query, (value,))
 
-    # if there is no override config for test, skip doing anything
-    if not postgres_config:
-        return
+        # Reload configuration
+        result = execute_sql_select(conn, "SELECT pg_reload_conf()")
+        success = result[0][0] if result else False
 
-    logging.info('Perform a local copy of the postgres conf file for modification(s)')
-    # perform a local copy to a /tmp path
-    run_command('cp', [POSTGRES_CONF_PATH, TMP_POSTGRES_CONF_PATH])
+        restart_container(POSTGRES_CONTAINER)
 
-    with open(TMP_POSTGRES_CONF_PATH, 'a') as f:
-        # add the keys with a TEST_REMOVE comment so we can cleanup once the tests are done
-        for key, value in postgres_config.items():
-            f.write(f"{key} = {value} #TEST_REMOVE#")
+        return success
 
-    logging.info('Replacing the postgres conf file with the updated tmp file')
-    run_command('sudo', ['cp', TMP_POSTGRES_CONF_PATH, POSTGRES_CONF_PATH])
+    except Exception as e:
+        return False
 
-def cleanup_postgres_config():
-    if not os.path.exists(TMP_POSTGRES_CONF_PATH):
-        # tmp file not found, so no configs are overridden
-        return
+def update_postgres_config(test_params: Dict[str, str], props: Properties) -> bool:
+    cleanup_postgres_config(props)
 
-    with open(TMP_POSTGRES_CONF_PATH, 'r') as f:
-        lines = f.readlines()
+    # Connect to the database ("postgres" database)
+    conn = connect_db_instance(props)
 
-    filtered_lines = []
-    # filter out the lines that are added as part of the test
-    for line in lines:
-        if "#TEST_REMOVE#" not in line:
-            filtered_lines.append(line)
+    # 1. Query current values
+    original_values = {}
+    for param in test_params:
+        result = execute_sql_select(conn, f"SHOW {param}")
+        if result:
+            original_values[param] = result[0][0]
 
-    with open(TMP_POSTGRES_CONF_PATH, 'w') as f:
-        f.writelines(filtered_lines)
+    # 2. Write original values to a file
+    with open(PG_CONFIG_BACKUP_PATH, "w") as f:
+        for param, value in original_values.items():
+            f.write(f"{param} = {value}\n")
 
-    logging.info('Replacing the postgres conf file')
-    # copy the config file to the postgres conf path
-    run_command('sudo', ['cp', TMP_POSTGRES_CONF_PATH, POSTGRES_CONF_PATH])
-    # remove the tmp file
-    run_command('sudo', ['rm', TMP_POSTGRES_CONF_PATH])
+    # 3. Apply ALTER SYSTEM settings
+    for param, new_value in test_params.items():
+        escaped_param = quote_ident(param, conn)  # defensively quote identifier
+        query = f"ALTER SYSTEM SET {escaped_param} = %s"
+        with conn.cursor() as cursor:
+            cursor.execute(query, [new_value])
+        conn.commit()
+
+    # 4. Reload config
+    result = execute_sql_select(conn, "SELECT pg_reload_conf()")
+    success = result[0][0] if result else False
+
+    restart_container(POSTGRES_CONTAINER)
+
+    return success  # True if reload succeeded, False if not
+
 
 def install_fdw(build_dir : str) -> None:
     """Install the foreign data wrapper extension."""
@@ -372,7 +392,7 @@ def start_replication(props : Properties, build_dir : str) -> None:
 
 def start_fdw_daemons(props : Properties,
                       build_dir : str,
-                      config_file : str = None) -> None:
+                      config_file : Optional[str] = None) -> None:
     """Import the foreign data wrapper schemas."""
     fdw_config = props.get_fdw_config()
     mount_path = props.get_mount_path()
@@ -622,7 +642,7 @@ def restart(props: Properties,
 
 def start(config_file: str,
           build_dir: str,
-          sql_file: str = None,
+          sql_file: Optional[str] = None,
           do_cleanup: bool = True,
           do_init: bool = True,
           postgres_only: bool = False,
@@ -692,9 +712,19 @@ def start(config_file: str,
         print("\nSpringtail system started successfully.")
 
     else:
+        if do_fdw_install:
+            # install fdw
+            print("\nInstalling foreign data wrapper...")
+            install_fdw(build_dir)
+
         # start postgres
         print("Starting postgres...")
         start_postgres()
+
+        # start replication on db instance
+        print("\nStarting replication on database instance...")
+        check_log_writable(props)
+        start_replication(props, build_dir)
 
 def status() -> None:
     """Function to check the status of the Springtail system."""

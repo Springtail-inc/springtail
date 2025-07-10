@@ -60,7 +60,7 @@ public:
 
         // Create the span
         std::string span_name = service_name + "/" + method_name;
-        auto tracer = open_telemetry::OpenTelemetry::tracer("grpc");
+        auto tracer = open_telemetry::OpenTelemetry::get_instance()->tracer("grpc");
 
         span_ = tracer->StartSpan(span_name,
                                   {{semconv::rpc::kRpcSystem, "grpc"},

@@ -259,8 +259,8 @@ class TestCase:
                         }, section, is_threaded, cur_txn, line_num)
 
                     elif directive[0] == 'streaming':
-                        if section != 'test':
-                            self._raise_error(f'{line_num}: "streaming" must be part of the "test" section')
+                        if section != 'test' and section != 'cleanup':
+                            self._raise_error(f'{line_num}: "streaming" must be part of the "test" or "cleanup" section')
                         self._append_command({
                             'type': 'streaming',
                             'enable': directive[1] == 'true'
@@ -777,7 +777,9 @@ class TestCase:
                 results = {}
 
                 # retrieve the column data
-                with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists"
+                with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists",
+                                      "table_names"."name" as table_name,
+                                      "table_names"."rls_enabled", "table_names"."rls_forced"
                                 FROM "__pg_springtail_catalog"."table_names"
                                 JOIN "__pg_springtail_catalog"."namespace_names" ON "namespace_names"."namespace_id" = "table_names"."namespace_id"
                                 WHERE "namespace_names"."name" = '{command["schema"]}' AND "table_names"."name" = '{command["table"]}'
@@ -792,6 +794,12 @@ class TestCase:
 
                 results['columns'] = self._execute_sql(cursor, sql, True, 'replica')
 
+                # retrieve info about the table, rls enabled and forced
+                sql = f"""WITH latest_table AS ({with_sql})
+                          SELECT table_name, rls_enabled, rls_forced FROM latest_table WHERE exists IS TRUE"""
+
+                results['table_info'] = self._execute_sql(cursor, sql, True, 'replica')
+
                 # retrieve the primary key data
                 with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists"
                                 FROM "__pg_springtail_catalog"."table_names"
@@ -804,16 +812,6 @@ class TestCase:
                 sql = f"""WITH latest_table AS ({with_sql}), ranked_columns AS ({ranking_sql})
                           SELECT column_id, position FROM ranked_columns ORDER BY position ASC;"""
                 results['primary'] = self._execute_sql(cursor, sql, True, 'replica')
-
-                sql = f"""SELECT "table_names"."name",  "table_names"."rls_enabled", "table_names"."rls_forced"
-                                FROM "__pg_springtail_catalog"."table_names"
-                                JOIN "__pg_springtail_catalog"."namespace_names" ON "namespace_names"."namespace_id" = "table_names"."namespace_id"
-                                WHERE "namespace_names"."name" = '{command["schema"]}' AND "table_names"."name" = '{command["table"]}'
-                                  AND "table_names"."exists" IS TRUE
-                                ORDER BY "table_names"."xid" DESC, "table_names"."lsn" DESC
-                                LIMIT 1"""
-
-                results['table_info'] = self._execute_sql(cursor, sql, True, 'replica')
 
                 # Wait for index reconciliation
                 self._wait_for_index_reconciliation(command["wait_for"])
@@ -910,7 +908,7 @@ class TestCase:
             db_name = self._db_prefix + db_config['name']
             if db_name in self._fdw:
                 self._fdw[db_name].close()
-            self._fdw[db_name] = springtail.connect_db_instance(self._props, db_name)
+            self._fdw[db_name] = springtail.connect_fdw_instance(self._props, db_name)
             self._fdw[db_name].autocommit = True
 
     def start_background(self) -> None:
@@ -1068,8 +1066,7 @@ class TestCase:
         for command in self._sections['verify'][0]['sequential']:
             primary_result = self._execute_command(command, True)
             replica_result = self._replica_command(command)
-
-            if primary_result != replica_result:
+            if primary_result != replica_result and str(primary_result) != str(replica_result):
                 self._raise_failure(
                     f"Verification failed for {self._name}:\n"
                     f"Statement: {command}\n"

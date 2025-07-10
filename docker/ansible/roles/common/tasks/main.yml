@@ -1,0 +1,66 @@
+- name: Install core packages
+  ansible.builtin.apt:
+    name:
+      - lsb-release
+      - wget
+      - software-properties-common
+      - gnupg
+      - build-essential
+      - autoconf
+      - libelf-dev
+      - bison
+      - clang-format
+      - pkg-config
+      - flex
+      - libdw-dev
+      - openssh-server
+      - libdwarf-dev
+      - binutils-dev
+      - linux-libc-dev
+      - cmake
+      - git
+      - curl
+      - zip
+      - unzip
+      - tar
+      - ninja-build
+      - python3
+      - libbsd-dev
+      - redis-server
+      - postgresql-16
+      - postgresql-contrib-16
+      - sudo
+      - vim
+      - ca-certificates
+      - gpg
+      - emacs-nox
+      - gcc-14
+      - g++-14
+      - gdb
+      - python3-pip
+      - python3-psycopg2
+      - python3-psutil
+      - python3-redis
+      - python3-requests
+      - python3-yaml
+      - python3-jinja2
+      - python3-lxml
+      - python3-boto3
+      - net-tools
+      - jq
+    update_cache: true
+    state: present
+    autoclean: true
+
+- name: Set timezone non-interactively
+  ansible.builtin.apt:
+    name: tzdata
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Allow ptrace by lowering kernel.yama.ptrace_scope
+  ansible.builtin.replace:
+    path: /etc/sysctl.d/10-ptrace.conf
+    regexp: '^kernel.yama.ptrace_scope\s*=\s*1'
+    replace: 'kernel.yama.ptrace_scope = 0'

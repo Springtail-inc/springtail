@@ -1,6 +1,8 @@
 import os
 import shutil
 import time
+import socket
+import http.client
 from typing import Dict, List, Optional
 
 from common import (
@@ -13,6 +15,37 @@ from common import (
 )
 
 POSTGRES = 'postgresql@16'
+
+
+def restart_container(container_name: str) -> bool:
+    """Restart a Docker container using the Docker socket."""
+    docker_sock = "/var/run/docker.sock"
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+
+    try:
+        sock.connect(docker_sock)
+        conn = http.client.HTTPConnection('localhost')
+        conn.sock = sock  # Directly assign the UNIX socket
+
+        path = f"/containers/{container_name}/restart"
+        conn.request("POST", path)
+
+        response = conn.getresponse()
+        status = response.status
+        response.read()  # Read to clean up the socket
+
+        if status == 204:
+            print(f"Restarted container '{container_name}' successfully.")
+            return True
+        else:
+            print(f"Failed to restart container: HTTP {status}")
+            return False
+    except Exception as e:
+        print(f"Error: {e}")
+        return False
+    finally:
+        sock.close()
+
 
 def stop_daemons(pid_path : str, daemons : List[tuple] = []) -> None:
     """Stop the daemons."""
