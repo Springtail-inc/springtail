@@ -120,6 +120,7 @@ namespace springtail::committer {
                 // note: we used to bundle the commit onto the previous XID, but now the XID is guaranteed to be in-order
                 completed_xid = result->swap().xid();
                 nlohmann::json ddls = result->swap().ddls();
+                auto swapped_tids = result->swap().tids();
 
                 auto token_3 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(completed_xid)}});
 
@@ -139,6 +140,12 @@ namespace springtail::committer {
                     if (_has_ddl_precommit) {
                         _redis_ddl.commit_ddl(db_id, completed_xid);
                         _has_ddl_precommit = false;
+                    }
+
+                    for (const auto swapped_tid: swapped_tids) {
+                        // Notify vacuumer to expire old table snapshot
+                        auto _swapped_table_old_dir = TableMgr::get_instance()->get_table_data_dir(db_id, swapped_tid, completed_xid - 1);
+                        Vacuumer::get_instance()->expire_snapshot(db_id, _swapped_table_old_dir, completed_xid);
                     }
                 } else {
                     LOG_DEBUG(LOG_COMMITTER, "Record DDL changes db {} xid {}", db_id, completed_xid);

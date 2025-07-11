@@ -72,6 +72,13 @@ namespace springtail {
                                        *tbl_meta, schema);
     }
 
+    std::filesystem::path
+    TableMgr::get_table_data_dir(uint64_t db_id, uint64_t table_id, uint64_t xid)
+    {
+        auto&& table_meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, table_id, xid);
+        return table_helpers::get_table_dir(_table_base, db_id, table_id, table_meta->snapshot_xid);
+    }
+
     bool
     TableMgr::exists(uint64_t db_id,
                      uint64_t table_id,

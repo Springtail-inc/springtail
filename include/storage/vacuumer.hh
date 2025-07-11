@@ -36,10 +36,11 @@ public:
 
     /**
      * Register a table snapshot to be expired by the vacuumer.
+     * @param db_id Database ID
      * @param file The directory containing the snapshot
      * @param xid The XID at which the snapshot was replaced / dropped
      */
-    void expire_snapshot(const std::filesystem::path &table_dir, uint64_t xid);
+    void expire_snapshot(uint64_t db_id, const std::filesystem::path &table_dir, uint64_t xid);
 
     void commit_expired_extents();
 
@@ -71,7 +72,7 @@ private:
     using ExtentMap = std::map<std::filesystem::path, HoleList>;
 
     using SnapshotList = std::list<std::filesystem::path>;
-    using SnapshotMap = std::map<uint64_t, SnapshotList>;
+    using SnapshotMap = std::map<uint64_t, std::map<uint64_t, SnapshotList>>;
 
     std::mutex _mutex; ///< Protects the internal maps
     ExtentMap _extent_map; ///< Maps XID -> File -> list of expired extent

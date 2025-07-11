@@ -87,13 +87,14 @@ Vacuumer::expire_extent(const std::filesystem::path &file,
 }
 
 void
-Vacuumer::expire_snapshot(const std::filesystem::path &table_dir,
+Vacuumer::expire_snapshot(uint64_t db_id,
+                          const std::filesystem::path &table_dir,
                           uint64_t xid)
 {
     // XXX -- Deepak -- you'll need to call this when we perform the table swap in the committer.
 
     std::unique_lock lock(_mutex);
-    _snapshot_map[xid].emplace_back(table_dir);
+    _snapshot_map[db_id][xid].emplace_back(table_dir);
 }
 
 std::vector<Vacuumer::HoleInfo>
@@ -348,38 +349,57 @@ Vacuumer::_internal_run()
         }
 
         // expire snapshots through the min XID
-        //while (true) {
-        //    auto it = _snapshot_map.begin();
+        for (auto db_it = _snapshot_map.begin(); db_it != _snapshot_map.end(); ) {
+            //uint64_t cutoff_xid = get_vacuum_cutoff_xid(file);  // Get safest XID to vacuum till that point
+            auto& xid_map = db_it->second;
 
-        //    // if nothing to expire, stop
-        //    if (it == _snapshot_map.end()) {
-        //        break;
-        //    }
+            for (auto xid_it = xid_map.begin(); xid_it != xid_map.end(); ) {
+                // if everything to expire still in-use, stop
+                //if (xid_it->first > cutoff_xid) {
+                //    break;
+                //}
+                // retrieve a list of snapshots to expire
+                SnapshotList& dirs = xid_it->second;
 
-        //    // if everything to expire still in-use, stop
-        //    if (it->first > cutoff_xid) {
-        //        break;
-        //    }
+                // unlock and expire the extents in the list
+                lock.unlock();
 
-        //    // retrieve a list of extents to expire
-        //    auto snapshot_list = std::move(it->second);
-        //    _snapshot_map.erase(it);
+                bool all_deleted = true;
 
-        //    // unlock and expire the extents in the list
-        //    lock.unlock();
+                // clear the table directories associated with the expired snapshots
+                for (const auto& dir : dirs) {
+                    std::error_code ec;
 
-        //    // clear the table directories associated with the expired snapshots
-        //    for (auto &dir : snapshot_list) {
-        //        std::error_code ec;
-        //        std::filesystem::remove_all(dir, ec);
-        //        if (ec) {
-        //            LOG_ERROR("remove_all() failed: {}", ec.message());
-        //        }
-        //    }
+                    if (!std::filesystem::exists(dir, ec)) {
+                        continue;  // skip missing dir
+                    }
 
-        //    // reacquire the lock before proceeding
-        //    lock.lock();
-        //}
+                    // recursively delete
+                    std::filesystem::remove_all(dir, ec);
+                    if (ec) {
+                        LOG_ERROR("remove_all() failed: {}", ec.message());
+                        all_deleted = false;
+                    }
+                }
+
+                // reacquire the lock before proceeding
+                lock.lock();
+
+                if (all_deleted) {
+                    dirs.clear();
+                    xid_it = xid_map.erase(xid_it);
+                } else {
+                    ++xid_it;  // skip erasing; keep the entry for next attempt
+                }
+            }
+
+            // If the db entry is now empty, erase it; otherwise advance.
+            if (xid_map.empty()) {
+                db_it = _snapshot_map.erase(db_it);
+            } else {
+                ++db_it;
+            }
+        }
         lock.unlock();
     }
 }
