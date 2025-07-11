@@ -207,22 +207,24 @@ std::vector<Vacuumer::HoleInfo>
 Vacuumer::_get_partials_from_file(const std::filesystem::path &path) {
     std::vector<Vacuumer::HoleInfo> partials;
     std::filesystem::path partial_file = _vacuum_data_base / std::to_string(std::hash<std::string>{}(path.string()));
-    auto handle = IOMgr::get_instance()->open(partial_file, IOMgr::IO_MODE::READ, true);
-    int start_offset = 0;
-    auto response = handle->read(start_offset);
+    if (std::filesystem::exists(partial_file)) {
+        auto handle = IOMgr::get_instance()->open(partial_file, IOMgr::IO_MODE::READ, true);
+        int start_offset = 0;
+        auto response = handle->read(start_offset);
 
-    auto offset_f = _vacuum_file_schema->get_field("offset");
-    auto size_f = _vacuum_file_schema->get_field("size");
+        auto offset_f = _vacuum_file_schema->get_field("offset");
+        auto size_f = _vacuum_file_schema->get_field("size");
 
-    while (!response->data.empty()) {
-        auto extent = std::make_shared<Extent>(response->data);
-        for (auto &row : *extent) {
-            auto offset = offset_f->get_uint64(&row);
-            auto size = size_f->get_uint64(&row);
-            partials.emplace_back(offset, size);
+        while (!response->data.empty()) {
+            auto extent = std::make_shared<Extent>(response->data);
+            for (auto &row : *extent) {
+                auto offset = offset_f->get_uint64(&row);
+                auto size = size_f->get_uint64(&row);
+                partials.emplace_back(offset, size);
+            }
+            start_offset = response->next_offset;
+            response = handle->read(start_offset);
         }
-        start_offset = response->next_offset;
-        response = handle->read(start_offset);
     }
 
     return partials;
