@@ -35,6 +35,7 @@ def restart_container(container_name: str) -> bool:
         response.read()  # Read to clean up the socket
 
         if status == 204:
+            time.sleep(1)  # Give some time for the container to restart
             print(f"Restarted container '{container_name}' successfully.")
             return True
         else:

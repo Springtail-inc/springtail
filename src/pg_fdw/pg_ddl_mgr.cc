@@ -41,6 +41,11 @@ namespace springtail::pg_fdw {
     static constexpr char VERIFY_DB_EXISTS[] =
         "SELECT 1 FROM  pg_database WHERE datname = '{}'";
 
+    static constexpr char SYSTEM_TYPES[] =
+        "SELECT oid, typname, typcategory "
+        "FROM pg_type "
+        "WHERE typisdefined = true";
+
     static constexpr char ALTER_TABLE_RLS[] =
         "ALTER FOREIGN TABLE {}.{} "
         "  ENABLE ROW LEVEL SECURITY {}";
@@ -664,6 +669,22 @@ namespace springtail::pg_fdw {
     {
         // get map of dbs id:name from redis
         auto dbs = Properties::get_databases();
+
+        // connect to the db to setup the replicated dbs, the fdw user and foreign servers
+        LibPqConnectionPtr conn = _get_fdw_connection(std::nullopt, "template1");
+
+        // Populate system defined types
+        conn->exec(SYSTEM_TYPES);
+        int rows = conn->ntuples();
+        for (int i = 0; i < rows; i++) {
+            uint64_t oid = conn->get_int32(i, 0);
+            std::string name = conn->escape_identifier(conn->get_string(i, 1));
+            std::string category = conn->escape_identifier(conn->get_string(i, 2));
+            _type_cache[oid] = std::make_tuple(name, category);
+        }
+        conn->clear();
+        conn->disconnect();
+        LOG_DEBUG(LOG_FDW, "Populated system defined types: {}", _type_cache.size());
 
         // go through each db and drop/create the database on the fdw
         for (const auto &[db_id, db_name] : dbs) {

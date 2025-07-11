@@ -218,9 +218,17 @@ def drop_database(props : Properties, db_config: Dict) -> None:
     conn.close()
 
 def cleanup_postgres_config(props: Properties) -> bool:
+    """
+    Cleanup the PostgreSQL configuration restoring values from the backup file.
+    """
     try:
         # Connect to the database ("postgres" database)
         conn = connect_db_instance(props)
+        needed_cleanup = False
+
+        if not os.path.exists(PG_CONFIG_BACKUP_PATH):
+            # Backup file does not exist, nothing to restore
+            return True
 
         with open(PG_CONFIG_BACKUP_PATH, "r") as f:
             for line in f:
@@ -235,19 +243,31 @@ def cleanup_postgres_config(props: Properties) -> bool:
                 escaped_param = quote_ident(param, conn)
                 query = f"ALTER SYSTEM SET {escaped_param} = %s"
                 execute_sql(conn, query, (value,))
+                needed_cleanup = True
 
-        # Reload configuration
-        result = execute_sql_select(conn, "SELECT pg_reload_conf()")
-        success = result[0][0] if result else False
+        if needed_cleanup:
+            # Reload configuration
+            result = execute_sql_select(conn, "SELECT pg_reload_conf()")
+            success = result[0][0] if result else False
 
-        restart_container(POSTGRES_CONTAINER)
+            # Remove the file after successful reload
+            if success:
+                os.remove(PG_CONFIG_BACKUP_PATH)
+            else:
+                logging.error("Failed to reload PostgreSQL configuration after restoring settings.")
+                return False
 
-        return success
+            restart_container(POSTGRES_CONTAINER)
+
+        return True
 
     except Exception as e:
         return False
 
 def update_postgres_config(test_params: Dict[str, str], props: Properties) -> bool:
+    """
+    Update PostgreSQL configuration parameters using ALTER SYSTEM saving the original values to a file.
+    """
     cleanup_postgres_config(props)
 
     # Connect to the database ("postgres" database)
@@ -508,6 +528,14 @@ def check_config(props : Properties) -> None:
     # Check that the pid path exists; if not try to create it
     makedir(pid_path, '755')
 
+    # Check that the /var/run/docker.sock file exists
+    if not os.path.exists('/var/run/docker.sock'):
+        raise Exception("Docker socket file /var/run/docker.sock does not exist.  Please postgres container is running")
+
+    # Check if the docker socket file is writable
+    if not os.access('/var/run/docker.sock', os.W_OK):
+        run_command('sudo', ['chmod', 'a+w', '/var/run/docker.sock'])
+
 
 def check_log_writable(props : Properties) -> None:
     """Check the log path is writable."""
@@ -521,10 +549,12 @@ def check_log_writable(props : Properties) -> None:
 def fixup_log_perms(props : Properties) -> None:
     """Fix up permissions for the given mount path."""
     # Fix up permissions for the given mount path
-    if is_linux():
-        log_path = props.get_log_path()
-        for log in glob.glob(os.path.join(log_path, '*.log')):
-            run_command('sudo', ['chmod', 'a+r', log])
+    if not is_linux():
+        return
+
+    log_path = props.get_log_path()
+    for log in glob.glob(os.path.join(log_path, '*.log')):
+        run_command('sudo', ['chmod', 'a+r', log])
 
 
 def gen_dump_tarball(props : Properties, build_dir : str) -> str:

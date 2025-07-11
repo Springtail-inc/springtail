@@ -29,7 +29,7 @@ namespace springtail
         "FROM pg_enum e "
         "JOIN pg_type t ON t.oid = e.enumtypid "
         "JOIN pg_namespace n ON n.oid = t.typnamespace "
-        "WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') "
+        "WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', '__pg_springtail_triggers') "
         "{}" // Placeholder for namespace condition
         "GROUP BY t.oid, t.typname, n.nspname, n.oid";
 
@@ -120,7 +120,7 @@ namespace springtail
         "ON relnamespace=pg_namespace.oid "
         "WHERE relkind IN ('r','p') "         // regular tables, partitioned tables
         "AND nspname NOT LIKE 'pg_%' "        // exclude system schemas
-        "AND nspname != 'information_schema' "
+        "AND nspname NOT IN ('information_schema', '__pg_springtail_triggers') "
         "ORDER BY relkind, pg_class.oid";     // have partitioned tables first
 
     /** Get table name, schema name, oid for all tables in a schema */
@@ -141,7 +141,7 @@ namespace springtail
         "ON relnamespace=pg_namespace.oid "
         "WHERE relkind IN ('r','p') "         // regular tables, partitioned tables
         "AND nspname NOT LIKE 'pg_%' "        // exclude system schemas
-        "AND nspname != 'information_schema' "
+        "AND nspname NOT IN ('information_schema', '__pg_springtail_triggers') "
         "AND pg_class.oid::integer in ({}) "
         "ORDER BY relkind, pg_class.oid";     // have partitioned tables first
 

@@ -17,7 +17,9 @@ BEGIN
                                      OR obj.object_type = 'index'
                                      OR obj.object_type = 'schema'
                                      OR obj.object_type = 'type')
-            AND (obj.schema_name IS NULL OR obj.schema_name NOT LIKE 'pg_%') THEN
+            AND (obj.schema_name IS NULL OR
+                 obj.schema_name NOT LIKE 'pg_%')
+            AND obj.schema_name IS DISTINCT FROM '__pg_springtail_triggers' THEN
 
             -- sometimes tg_tag is DROP TABLE even if type is index
             IF obj.object_type = 'table' THEN
@@ -233,6 +235,12 @@ DECLARE
     -- Table details output
     table_info text;
 BEGIN
+    IF schema_name = '__pg_springtail_triggers' THEN
+        -- Ignore the internal schema
+        RAISE NOTICE 'springtail: ignoring internal schema __pg_springtail_triggers';
+        RETURN NULL;
+    END IF;
+
     -- Get the table details from pg_class along with the partition details
     SELECT pg_class.relname, pg_class.relreplident, pg_class.relpersistence, pg_class.relkind,
         pg_class.relrowsecurity, pg_class.relforcerowsecurity,
@@ -244,6 +252,12 @@ BEGIN
     FROM pg_class
     WHERE oid = obj_id
     INTO table_relname, table_replident, table_persistence, rel_kind, rowsecurity, forcerowsecurity, parent_table_id, partition_bound, partition_key;
+
+    IF table_persistence = 't' THEN
+        -- Temporary tables are not supported
+        RAISE NOTICE 'springtail: ignoring temporary table %', table_relname;
+        RETURN NULL;
+    END IF;
 
     -- Only during the ALTER command, get the partition details. This is required to handle the partition events
     IF command_tag = 'ALTER TABLE' AND partition_key IS NOT NULL THEN
@@ -523,8 +537,8 @@ BEGIN
                 'partition_bound', table_info->'partition_bound',
                 'partition_key', table_info->'partition_key',
                 'partition_data', table_info->'partition_data',
-                'rls_enabled', table_info->'rowsecurity'::boolean,
-                'rls_forced', table_info->'forcerowsecurity'::boolean
+                'rls_enabled', table_info->'rowsecurity'
+                'rls_forced', table_info->'forcerowsecurity'
             );
 
         ELSIF obj.command_tag = 'CREATE INDEX' THEN

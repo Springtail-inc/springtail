@@ -73,7 +73,7 @@ int main(int argc, char *argv[])
             {"hostname", std::any(socket_hostname)}
         });
 
-    springtail_init_daemon("pg_ddl_mgr", pidfile, LOG_ALL);
+    springtail_init_daemon("pg_ddl_mgr", pidfile, LOG_ALL ^ (LOG_STORAGE | LOG_CACHE));
     PgDDLMgr::start();
     springtail_daemon_run();
 
