@@ -61,7 +61,6 @@
     },
     "storage": {
         "table_dir": "table",
-        "vacuum_dir": "vacuum",
         "data_cache_size": 16384,
         "page_cache_size": 16384,
         "btree_cache_size": 512,
