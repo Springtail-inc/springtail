@@ -78,9 +78,17 @@ namespace springtail::committer {
          * @param db_id          Database ID
          * @param completed_ddls DDLs processed
          * @param commited_xid   XID at which ddls were processed
-         *
          */
-        void _expire_drops(uint64_t db_id, const nlohmann::json &completed_ddls, uint64_t commited_xid);
+        void _expire_table_drops(uint64_t db_id, const nlohmann::json &completed_ddls, uint64_t commited_xid);
+
+        /**
+         * @brief Expire dropped index paths
+         *
+         * @param db_id          Database ID
+         * @param index_requests Indexes processed
+         * @param commited_xid   XID at which ddls were processed
+         */
+        void _expire_index_drops(uint64_t db_id, std::list<proto::IndexProcessRequest>& index_requests, uint64_t commited_xid);
 
         /**
          * The structure that defines a worker job.

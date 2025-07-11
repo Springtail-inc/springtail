@@ -336,11 +336,12 @@ Service::DropIndex(grpc::ServerContext* context,
 
     XidLsn xid(request->xid(), request->lsn());
 
-    // perform the DROP INDEX
-    _drop_index(xid, request->db_id(), request->index_id(), std::nullopt, sys_tbl::IndexNames::State::BEING_DELETED);
-
     // Create response for the dropped index
     proto::IndexInfo dropped_index;
+
+    // perform the DROP INDEX
+    _drop_index(xid, request->db_id(), request->index_id(), std::nullopt, sys_tbl::IndexNames::State::BEING_DELETED, std::ref(dropped_index));
+
     dropped_index.set_id(request->index_id());
     dropped_index.set_name(request->name());
     dropped_index.set_namespace_name(request->namespace_name());
@@ -440,7 +441,8 @@ Service::_drop_index(const XidLsn& xid,
                      uint64_t db_id,
                      uint64_t index_id,
                      std::optional<uint64_t> tid,
-                     sys_tbl::IndexNames::State index_state)
+                     sys_tbl::IndexNames::State index_state,
+                     std::optional<std::reference_wrapper<proto::IndexInfo>> dropped_index_info_ref)
 {
     assert(index_state == sys_tbl::IndexNames::State::DELETED || index_state == sys_tbl::IndexNames::State::BEING_DELETED);
     auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
@@ -456,6 +458,11 @@ Service::_drop_index(const XidLsn& xid,
         return;
     }
     auto& index_info = std::get<0>(*info);
+
+    // Set table_id in the index info, as the drop index request wont have table ID
+    if (dropped_index_info_ref) {
+        dropped_index_info_ref->get().set_table_id(index_info.table_id());
+    }
 
     auto state = static_cast<sys_tbl::IndexNames::State>(index_info.state());
     if (state == sys_tbl::IndexNames::State::DELETED ||
