@@ -403,7 +403,9 @@ namespace springtail::pg_fdw {
     // called from the PG exit callback
     void PgFdwMgr::fdw_exit()
     {
+        LOG_DEBUG(LOG_FDW, "Shutting down springtail");
         springtail_shutdown();
+        LOG_DEBUG(LOG_FDW, "Shutdown finished");
     }
 
     /* called from PG_init */
