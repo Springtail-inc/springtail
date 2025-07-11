@@ -73,6 +73,16 @@ namespace springtail::committer {
         void _invalidate_systbl_cache(uint64_t db, const nlohmann::json &completed_ddls);
 
         /**
+         * @brief Expire dropped table dirs
+         *
+         * @param db_id          Database ID
+         * @param completed_ddls DDLs processed
+         * @param commited_xid   XID at which ddls were processed
+         *
+         */
+        void _expire_drops(uint64_t db_id, const nlohmann::json &completed_ddls, uint64_t commited_xid);
+
+        /**
          * The structure that defines a worker job.
          */
         struct WorkerEntry {

@@ -266,6 +266,11 @@ namespace springtail::committer {
                     _redis_ddl.commit_ddl(db_id, xid);
                     _has_ddl_precommit = false;
                 }
+
+                // Check and notify vacuumer about dropped table
+                if (!completed_ddls.is_null()) {
+                    _expire_drops(db_id, completed_ddls, xid);
+                }
             } else {
                 // don't commit, but record any DDL changes to the history
                 xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null());
@@ -344,6 +349,21 @@ namespace springtail::committer {
 
         // unregister all parser threads from the previous run
         coordinator->unregister_threads(daemon_type, cleanup_threads);
+    }
+
+    void
+    Committer::_expire_drops(uint64_t db_id, const nlohmann::json &completed_ddls, uint64_t commited_xid)
+    {
+        for (auto& ddl: completed_ddls) {
+            if (ddl.contains("tid") && ddl.contains("action")) {
+                uint64_t tid = ddl["tid"].get<uint64_t>();
+                auto action = ddl["action"].get<std::string>();
+                if (action == "drop") {
+                    auto _dropped_table_dir = TableMgr::get_instance()->get_table_data_dir(db_id, tid, commited_xid - 1);
+                    Vacuumer::get_instance()->expire_snapshot(db_id, _dropped_table_dir, commited_xid);
+                }
+            }
+        }
     }
 
     void
