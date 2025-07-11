@@ -42,10 +42,16 @@ public:
      */
     void expire_snapshot(uint64_t db_id, const std::filesystem::path &table_dir, uint64_t xid);
 
+    /**
+     * @brief Persist expired extents
+     */
     void commit_expired_extents();
 
 
 protected:
+    /**
+     * @brief Constructor, that inits the vacuumer thread
+     */
     Vacuumer() : Singleton<Vacuumer>(ServiceId::VacuumerId)
     {
         _init();
@@ -56,43 +62,75 @@ protected:
      */
     ~Vacuumer() override = default;
 
+    /**
+     * @brief Initializes vacuumer thread
+     */
     void _init();
 
+    /**
+     * @brief Core runner of the vacuum that
+     *        - hole-punches files,
+     *        removes dropped table and index paths
+     */
     void _internal_run() override;
 
+    /**
+     * @brief Graceful shutdown of vacummer thread
+     */
     void _internal_shutdown() override;
 
 
 private:
+    /**
+     * Holds an unit of extent - offset and size
+     */
     struct HoleInfo {
         uint64_t offset;
         uint64_t size;
     };
+
+    /**
+     * Expired extents map
+     * file -> xid -> HoleInfo vector
+     */
     using HoleList = std::map<uint64_t, std::vector<HoleInfo>>;
     using ExtentMap = std::map<std::filesystem::path, HoleList>;
 
+    /**
+     * Expired snapshots map
+     * db_id -> xid -> list of filesystem paths
+     */
     using SnapshotList = std::list<std::filesystem::path>;
     using SnapshotMap = std::map<uint64_t, std::map<uint64_t, SnapshotList>>;
 
     std::mutex _mutex; ///< Protects the internal maps
     ExtentMap _extent_map; ///< Maps XID -> File -> list of expired extent
     SnapshotMap _snapshot_map; ///< Maps XID -> list of table snapshot directories
+
+    /**
+     * Schema to create global and partial vacuum files
+     */
     ExtentSchemaPtr _global_vacuum_schema;
     ExtentSchemaPtr _vacuum_file_schema;
+
     std::filesystem::path _vacuum_data_base; ///< The base directory for vacuum directories
-    std::filesystem::path _global_vacuum_file;
+    std::filesystem::path _global_vacuum_file; ///< Global vacuum file
 
     RedisDDL _redis_ddl; ///< Interface to the DDL structures in Redis.
 
     std::thread _vacuumer_thread;           ///< Vacuumer thread
 
     std::atomic<bool> _shutdown{false};   ///< shutdown flag
-    // Round a value up to the nearest multiple of `align`
+    /**
+     * @brief Round a value up to the nearest multiple of `align`
+     */
     inline uint64_t align_up(uint64_t val, uint64_t align) {
         return ((val + align - 1) / align) * align;
     }
 
-    // Round a value down to the nearest multiple of `align`
+    /**
+     * @brief Round a value down to the nearest multiple of `align`
+     */
     inline uint64_t align_down(uint64_t val, uint64_t align) {
         return (val / align) * align;
     }
@@ -113,15 +151,39 @@ private:
      * @param file File to punch
      * @return XID until which extents can be punched
      */
-    uint64_t get_vacuum_cutoff_xid(const std::string& file);
+    uint64_t _get_vacuum_cutoff_xid(const std::string& file);
 
+    /**
+     * @brief Truncates file from the given offset
+     *
+     * @param file File to truncate
+     * @param offset Offset above which will be truncated
+     */
     void _truncate_file(const std::filesystem::path &file, uint64_t offset);
 
+    /**
+     * @brief Get the size of the given file
+     *
+     * @param file File to get its size
+     * @return File size
+     */
     int64_t _get_file_size(const std::filesystem::path& path);
 
+    /**
+     * @brief Update hole partials to a file hashed by the given file path
+     *
+     * @param file     partials belong to this file
+     * @param partials Hole partials
+     */
     void _update_vaccumed_partials_file(const std::filesystem::path &file,
                 std::vector<HoleInfo> partials);
 
+    /**
+     * brief Get hold partials from the file hashed by the given file path
+     *
+     * @param file     partials belong to this file
+     * @return Partials vector
+     */
     std::vector<HoleInfo> _get_partials_from_file(const std::filesystem::path &file);
 };
 }

@@ -91,8 +91,6 @@ Vacuumer::expire_snapshot(uint64_t db_id,
                           const std::filesystem::path &table_dir,
                           uint64_t xid)
 {
-    // XXX -- Deepak -- you'll need to call this when we perform the table swap in the committer.
-
     std::unique_lock lock(_mutex);
     _snapshot_map[db_id][xid].emplace_back(table_dir);
 }
@@ -122,7 +120,7 @@ Vacuumer::hole_punch_file(const std::string& file,
 }
 
 uint64_t
-Vacuumer::get_vacuum_cutoff_xid(const std::string& file)
+Vacuumer::_get_vacuum_cutoff_xid(const std::string& file)
 {
     // XXX -- Deepak -- just realizing we need to retrieve the target XID for each DB separately
     //                  since the XIDs are independent for each DB.  We may need to separate the
@@ -133,6 +131,10 @@ Vacuumer::get_vacuum_cutoff_xid(const std::string& file)
 
     // check the progress of the XID at the FDWs
     RedisDDL _redis_ddl;
+
+    // XXX: Can get the db_id from the file path, should we allow db_id in the map?
+    // Also need to find minium xid thats safe from FDW perspective
+    // (track inflight queries to take the call)
     uint64_t target_xid = _redis_ddl.min_schema_xid(1);
 
     // XXX -- Deepak -- check the progress of the XID in the indexer
