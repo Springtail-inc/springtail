@@ -317,4 +317,21 @@ springtail_shutdown()
     }
 }
 
+static std::map<ServiceId, std::map<std::string, std::any>> service_arguments;
+
+void springtail_store_argument_internal(ServiceId service_id, const std::string &arg_name, const std::any &value)
+{
+    auto [it, inserted] = service_arguments.try_emplace(service_id, std::map<std::string, std::any>());
+    it->second.try_emplace(arg_name, value);
+}
+
+std::any springtail_retreive_argument_internal(ServiceId service_id, const std::string &arg_name)
+{
+    auto it = service_arguments.find(service_id);
+    CHECK(it != service_arguments.end());
+    auto value_it = it->second.find(arg_name);
+    CHECK(value_it != it->second.end());
+    return value_it->second;
+}
+
 };  // namespace springtail
