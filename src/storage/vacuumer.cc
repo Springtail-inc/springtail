@@ -15,7 +15,22 @@ Vacuumer::_init()
 
     // get the base directory for table data
     nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
-    Json::get_to<std::filesystem::path>(json, "vacuum_dir", _vacuum_data_base);
+
+    nlohmann::json vacuum_config_json;
+    Json::get_to<nlohmann::json>(json, "vacuum_config", vacuum_config_json);
+
+    if (vacuum_config_json.contains("vacuum_global_threshold")) {
+        Json::get_to<uint64_t>(vacuum_config_json, "vacuum_global_threshold", _vacuum_global_threshold);
+    } else {
+        _vacuum_global_threshold = VACUUM_THRESHOLD_SIZE;
+    }
+
+    if (vacuum_config_json.contains("hole_punch_block_size")) {
+        Json::get_to<uint64_t>(vacuum_config_json, "hole_punch_block_size", _hole_punch_block_size);
+    } else {
+        _hole_punch_block_size = HOLE_PUNCH_BLOCK_SIZE;
+    }
+    Json::get_to<std::filesystem::path>(vacuum_config_json, "vacuum_dir", _vacuum_data_base);
     _vacuum_data_base = Properties::make_absolute_path(_vacuum_data_base);
     std::filesystem::create_directories(_vacuum_data_base);
     _global_vacuum_file = _vacuum_data_base / "0.global";
@@ -177,7 +192,7 @@ Vacuumer::_get_file_size(const std::filesystem::path& path) {
 }
 
 void
-Vacuumer::_update_vaccumed_partials_file(
+Vacuumer::_update_vacuumed_partials_file(
         const std::filesystem::path &path,
         std::vector<Vacuumer::HoleInfo> partials)
 {
@@ -245,7 +260,7 @@ Vacuumer::_internal_run()
 
         bool processing_vacuum_file = false;
 
-        if (_extent_map.empty() && _get_file_size(_global_vacuum_file) > VACUUM_THRESHOLD_SIZE) {
+        if (_extent_map.empty() && _get_file_size(_global_vacuum_file) > _vacuum_global_threshold) {
             auto handle = IOMgr::get_instance()->open(_global_vacuum_file, IOMgr::IO_MODE::READ, true);
             int start_offset = 0;
             auto response = handle->read(start_offset);
@@ -304,8 +319,8 @@ Vacuumer::_internal_run()
             std::vector<Vacuumer::HoleInfo> new_partials;
 
             for (const auto& [start, end] : itree.to_vector()) {
-                uint64_t aligned_start = align_up(start, kPunchAlign);
-                uint64_t aligned_end = align_down(end, kPunchAlign);
+                uint64_t aligned_start = align_up(start, _hole_punch_block_size);
+                uint64_t aligned_end = align_down(end, _hole_punch_block_size);
 
                 if (aligned_start < aligned_end) {
                     punchable.emplace_back(aligned_start, aligned_end - aligned_start);
@@ -336,7 +351,7 @@ Vacuumer::_internal_run()
             }
 
             // Step 6: Update _partial_extents with leftovers
-            _update_vaccumed_partials_file(file, new_partials);
+            _update_vacuumed_partials_file(file, new_partials);
 
             // Step 7: Clean up file entry if all xids are processed
             if (xid_map.empty()) {

@@ -16,9 +16,12 @@
 
 namespace springtail {
 
-constexpr uint64_t kPunchAlign = 4 * 1024;  // 64KB punch alignment
-
+/**
+ * Vacuum config defaults
+ */
+constexpr uint64_t HOLE_PUNCH_BLOCK_SIZE = 4 * 1024;
 constexpr uint64_t VACUUM_THRESHOLD_SIZE = 20 * 1024;
+
 /**
  * Vacuumer to clear dead extents and table snapshots.
  */
@@ -88,6 +91,16 @@ private:
         uint64_t offset;
         uint64_t size;
     };
+
+    /**
+     * Hole-punch block size
+     */
+    uint64_t _hole_punch_block_size;
+
+    /**
+     * Global vacuum file threshold above which vacuum runs
+     */
+    uint64_t _vacuum_global_threshold;
 
     /**
      * Expired extents map
@@ -175,7 +188,7 @@ private:
      * @param file     partials belong to this file
      * @param partials Hole partials
      */
-    void _update_vaccumed_partials_file(const std::filesystem::path &file,
+    void _update_vacuumed_partials_file(const std::filesystem::path &file,
                 std::vector<HoleInfo> partials);
 
     /**

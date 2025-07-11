@@ -65,7 +65,12 @@
         "data_cache_size": 16384,
         "page_cache_size": 16384,
         "btree_cache_size": 512,
-        "max_extent_per_page": 16
+        "max_extent_per_page": 16,
+        "vacuum_config": {
+            "vacuum_dir": "vacuum",
+            "vacuum_global_threshold": 10240,
+            "hole_punch_block_size": 4096
+        }
     },
     "log_mgr": {
         "replication_log_path": "repl_logs",
