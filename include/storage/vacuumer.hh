@@ -183,6 +183,14 @@ private:
     int64_t _get_file_size(const std::filesystem::path& path);
 
     /**
+     * @brief Generate file name using the input file name and parent dir
+     *
+     * @param Input file name
+     * @return File name as: "input file's parent_dir _ filename"
+     */
+    std::string _generate_flat_filename(const std::filesystem::path& filepath);
+
+    /**
      * @brief Update hole partials to a file hashed by the given file path
      *
      * @param file     partials belong to this file

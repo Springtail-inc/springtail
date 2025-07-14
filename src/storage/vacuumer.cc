@@ -204,6 +204,14 @@ Vacuumer::_get_file_size(const std::filesystem::path& path) {
     }
 }
 
+std::string
+Vacuumer::_generate_flat_filename(const std::filesystem::path& filepath)
+{
+    std::filesystem::path parent = filepath.parent_path().filename(); // last_dir
+    std::filesystem::path file = filepath.filename();                 // filename
+    return parent.string() + "_" + file.string() + "_partials";
+}
+
 void
 Vacuumer::_update_vacuumed_partials_file(
         const std::filesystem::path &path,
@@ -211,7 +219,8 @@ Vacuumer::_update_vacuumed_partials_file(
 {
     // Lets persist partials on the individual file using individual schema
     // If partials are empty, lets remove the file as the same is cosidered for every vacuum run
-    std::filesystem::path partial_file = _vacuum_data_base / std::to_string(std::hash<std::string>{}(path.string()));
+    std::filesystem::path partial_file = _vacuum_data_base / _generate_flat_filename(path);
+
     if (partials.empty()) {
         if (std::filesystem::exists(partial_file)) {
             std::filesystem::remove(partial_file);
@@ -242,7 +251,7 @@ std::vector<Vacuumer::HoleInfo>
 Vacuumer::_get_partials_from_file(const std::filesystem::path &path) {
     // Lets get the partials for an individual file
     std::vector<Vacuumer::HoleInfo> partials;
-    std::filesystem::path partial_file = _vacuum_data_base / std::to_string(std::hash<std::string>{}(path.string()));
+    std::filesystem::path partial_file = _vacuum_data_base / _generate_flat_filename(path);
 
     // Partial file = Hashed(input_file_path)
     // If it exists, lets get the partials, otherwise empty vector
