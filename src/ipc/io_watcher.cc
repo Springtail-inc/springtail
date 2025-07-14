@@ -1,5 +1,7 @@
 #include <sys/socket.h>
 
+#include <absl/log/check.h>
+
 #include <ipc/io_watcher.hh>
 
 namespace springtail::ipc {

@@ -2,6 +2,8 @@
 
 #include <sys/signalfd.h>
 
+#include <vector>
+
 #include <ipc/watcher.hh>
 
 namespace springtail::ipc {

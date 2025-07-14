@@ -1,6 +1,8 @@
 #include <sys/pidfd.h>
 #include <sys/syscall.h>
 
+#include <absl/log/check.h>
+
 #include <ipc/pid_watcher.hh>
 
 namespace springtail::ipc {

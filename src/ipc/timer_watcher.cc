@@ -1,5 +1,7 @@
 #include <sys/timerfd.h>
 
+#include <absl/log/check.h>
+
 #include <ipc/timer_watcher.hh>
 
 namespace springtail::ipc {

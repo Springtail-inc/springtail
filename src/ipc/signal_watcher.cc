@@ -1,5 +1,7 @@
 #include <signal.h>
 
+#include <absl/log/check.h>
+
 #include <ipc/signal_watcher.hh>
 
 namespace springtail::ipc {

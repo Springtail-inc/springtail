@@ -2,7 +2,8 @@
 
 #include <sys/epoll.h>
 
-#include <absl/log/check.h>
+#include <atomic>
+#include <memory>
 
 namespace springtail::ipc {
     class EventWatcher;
@@ -20,7 +21,7 @@ namespace springtail::ipc {
         ~EventLoop() noexcept;
 
     private:
-        struct epoll_event *_received_events;
+        std::unique_ptr<struct epoll_event []> _received_events;
         int _max_events;
         int _timeout;
         int _fd{-1};
