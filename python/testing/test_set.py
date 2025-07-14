@@ -61,9 +61,12 @@ class TestSet:
                 self._tests[test_file] = TestCase(os.path.join(directory, test_file), self._build_dir, self._test_params)
                 self._tests[test_file].parse_file()
 
-                # if only a subset of test cases was requsted, limit them here
+                # if only a subset of test cases was requested, limit them here
                 if test_files and test_file not in test_files:
                     logging.warning(f'skipping test file {test_file} -- not in the requested tests')
+                    self._tests[test_file].skip()
+                elif self._tests[test_file].is_disabled():
+                    logging.warning(f'skipping test file {test_file} -- test is disabled')
                     self._tests[test_file].skip()
                 else:
                     self._test_files.append(test_file)
@@ -179,12 +182,11 @@ class TestSet:
 
             except Exception as e:
                 logging.error(f'Error: exception: [{e}] result: {self._tests[test_file].get_result()["result"]}')
-                traceback.print_exc()
                 if self._tests[test_file].get_result()['result'] == 'FAILED':
                     test_failed = True
                 else:
-                    logging.info(f'Skipping the test: {test_file}')
-                    self._tests[test_file].skip()
+                    traceback.print_exc()
+                    raise e
 
             # save the logs
             self._tests[test_file].stop_capture()

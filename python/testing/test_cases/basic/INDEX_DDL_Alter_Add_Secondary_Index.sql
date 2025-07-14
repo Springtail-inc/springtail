@@ -20,6 +20,5 @@ CREATE INDEX idx_col7 ON secondary_index_create (col7);
 ### schema_check public secondary_index_create
 
 ## cleanup
--- DROP TABLE IF EXISTS secondary_index_create;
-SELECT 1;
+DROP TABLE IF EXISTS secondary_index_create;
 

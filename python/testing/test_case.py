@@ -48,7 +48,8 @@ class TestCase:
             'default_txn': 'default',
             'query_timeout': 5,
             'live_startup': None,
-            'poll_interval': 0.001
+            'poll_interval': 0.001,
+            'disable_test': False
         }
 
         self._added_databases = []
@@ -82,6 +83,10 @@ class TestCase:
 
     def get_added_databases(self) -> list:
         return self._added_databases
+
+    def is_disabled(self) -> bool:
+        """Check if the test is disabled."""
+        return self._metadata['disable_test']
 
     def _setup_default_fdw(self) -> None:
         if len(self._fdw) == 0:
@@ -342,6 +347,12 @@ class TestCase:
                             'role_name': directive[1],
                             'wait_for': int(directive[2]) if len(directive) > 2 else self._metadata['sync_timeout']
                         }, section, is_threaded, cur_txn, line_num)
+
+                    elif directive[0] == 'disable_test':
+                        if section != 'metadata':
+                            self._raise_error(f'{line_num}: "disable_test" must be specified in the "metadata" section')
+                        self._metadata['disable_test'] = True
+                        return
 
                     elif directive[0] == 'autocommit':
                         if section != 'metadata':

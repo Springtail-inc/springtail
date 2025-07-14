@@ -1647,7 +1647,7 @@ Service::DetachPartition(grpc::ServerContext* context,
             std::make_shared<TableCacheRecord>(detached_table_id, request->xid(), request->lsn(),
                                                table_info->namespace_id, table_info->name,
                                                std::nullopt, partition_key, std::nullopt,
-                                               table_info->rls_enabled, table_info->rls_forced, false);
+                                               table_info->rls_enabled, table_info->rls_forced, true);
         _set_table_info(request->db_id(), updated_table_info);
 
         // get the namespace info
