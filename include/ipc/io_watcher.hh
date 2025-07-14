@@ -22,6 +22,12 @@ namespace springtail::ipc {
         };
 
         IOEventWatcher() noexcept;
+
+        IOEventWatcher(const IOEventWatcher&) = delete;
+        IOEventWatcher& operator=(const IOEventWatcher&) = delete;
+        IOEventWatcher(IOEventWatcher&&) = delete;
+        IOEventWatcher& operator=(IOEventWatcher&&) = delete;
+
         virtual ~IOEventWatcher() noexcept;
         void set_fd(int fd, bool owns_fd = false) noexcept;
 

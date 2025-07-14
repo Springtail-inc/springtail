@@ -13,6 +13,11 @@ namespace springtail::ipc {
         explicit SignalEventWatcher(sigset_t mask) noexcept;
         explicit SignalEventWatcher(const std::vector<int> &signal_list) noexcept;
 
+        SignalEventWatcher(const SignalEventWatcher&) = delete;
+        SignalEventWatcher& operator=(const SignalEventWatcher&) = delete;
+        SignalEventWatcher(SignalEventWatcher&&) = delete;
+        SignalEventWatcher& operator=(SignalEventWatcher&&) = delete;
+
         virtual void on_signal(const struct signalfd_siginfo &signal) noexcept = 0;
 
         virtual void start(std::shared_ptr<EventLoop> loop) noexcept override;

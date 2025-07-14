@@ -20,6 +20,11 @@ namespace springtail::ipc {
         // using the same clock_id as the timer
         TimerWatcher(int clock_id, uint64_t first_timeout, uint64_t interval, bool absolute = false, bool cancel_on_set = false);
 
+        TimerWatcher(const TimerWatcher&) = delete;
+        TimerWatcher& operator=(const TimerWatcher&) = delete;
+        TimerWatcher(TimerWatcher&&) = delete;
+        TimerWatcher& operator=(TimerWatcher&&) = delete;
+
         void set_next_timeout(uint64_t timeout);
         virtual void start(std::shared_ptr<EventLoop> loop) noexcept override;
         virtual void stop() noexcept override;
@@ -48,6 +53,12 @@ namespace springtail::ipc {
         {
             _name = "OneTimeTimerWatcher";
         }
+
+        OneTimeTimerWatcher(const OneTimeTimerWatcher&) = delete;
+        OneTimeTimerWatcher& operator=(const OneTimeTimerWatcher&) = delete;
+        OneTimeTimerWatcher(OneTimeTimerWatcher&&) = delete;
+        OneTimeTimerWatcher& operator=(OneTimeTimerWatcher&&) = delete;
+
         virtual ~OneTimeTimerWatcher() noexcept = default;
     };
 
@@ -58,6 +69,12 @@ namespace springtail::ipc {
         {
             _name = "PeriodicTimerWatcher";
         }
+
+        PeriodicTimerWatcher(const PeriodicTimerWatcher&) = delete;
+        PeriodicTimerWatcher& operator=(const PeriodicTimerWatcher&) = delete;
+        PeriodicTimerWatcher(PeriodicTimerWatcher&&) = delete;
+        PeriodicTimerWatcher& operator=(PeriodicTimerWatcher&&) = delete;
+
         virtual ~PeriodicTimerWatcher() noexcept = default;
     };
 } // springtail::ipc

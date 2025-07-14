@@ -9,6 +9,11 @@ namespace springtail::ipc {
         explicit EventWatcher(const std::string &name) noexcept;
         virtual ~EventWatcher() noexcept;
 
+        EventWatcher(const EventWatcher&) = delete;
+        EventWatcher& operator=(const EventWatcher&) = delete;
+        EventWatcher(EventWatcher&&) = delete;
+        EventWatcher& operator=(EventWatcher&&) = delete;
+
         virtual void start(std::shared_ptr<EventLoop> loop) noexcept;
         virtual void stop() noexcept;
         virtual void restart() noexcept;

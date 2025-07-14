@@ -9,6 +9,11 @@ namespace springtail::ipc {
         explicit PidEventWatcher(pid_t process_id) noexcept;
         virtual ~PidEventWatcher() noexcept = default;
 
+        PidEventWatcher(const PidEventWatcher&) = delete;
+        PidEventWatcher& operator=(const PidEventWatcher&) = delete;
+        PidEventWatcher(PidEventWatcher&&) = delete;
+        PidEventWatcher& operator=(PidEventWatcher&&) = delete;
+
         virtual void on_process_event() noexcept = 0;
 
         virtual void start(std::shared_ptr<EventLoop> loop) noexcept override;
