@@ -13,7 +13,7 @@ Vacuumer::_init()
 {
     _vacuumer_thread = std::thread(&Vacuumer::_internal_run, this);
 
-    // get the base directory for table data
+    // get the configs for vacuum - size threshold, block size and base dir
     nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
 
     nlohmann::json vacuum_config_json;
@@ -35,6 +35,8 @@ Vacuumer::_init()
     std::filesystem::create_directories(_vacuum_data_base);
     _global_vacuum_file = _vacuum_data_base / "0.global";
 
+    // Define schema for persisting expired extents
+    // Global vacuum schema
     std::vector<SchemaColumn> global_vacuum_columns({
             { "file", 0, SchemaType::TEXT, 0, false, 0 },
             { "offset", 1, SchemaType::UINT64, 0, false, 1 },
@@ -42,6 +44,7 @@ Vacuumer::_init()
             });
     _global_vacuum_schema = std::make_shared<ExtentSchema>(global_vacuum_columns);
 
+    // individual vacuum file schema
     std::vector<SchemaColumn> vacuum_file_columns({
             { "offset", 0, SchemaType::UINT64, 0, false, 0 },
             { "size", 1, SchemaType::UINT64, 0, false }
@@ -52,6 +55,7 @@ Vacuumer::_init()
 void
 Vacuumer::_internal_shutdown()
 {
+    // Set flag and wait for the thread to join
     _shutdown = true;
     _vacuumer_thread.join();
 }
@@ -61,12 +65,16 @@ Vacuumer::commit_expired_extents()
 {
     std::unique_lock lock(_mutex);
 
+    // Lets persist expired extents
     auto handle = IOMgr::get_instance()->open(_global_vacuum_file, IOMgr::IO_MODE::APPEND, true);
     for (const auto& [file, xid_map] : _extent_map) {
         for (const auto& [xid, extents] : xid_map) {
+
+            // Create header with XID of the expired extent(s)
             ExtentHeader header(ExtentType(), xid, _global_vacuum_schema->row_size(), _global_vacuum_schema->field_types());
             auto extent = std::make_shared<Extent>(std::move(header));
 
+            // Write the extents using the global vacuum schema
             for (const auto& hole_info: extents) {
                 auto fields = std::make_shared<FieldArray>(3);
                 fields->at(0) = std::make_shared<ConstTypeField<std::string>>(file);
@@ -83,6 +91,7 @@ Vacuumer::commit_expired_extents()
             response.wait();
         }
     }
+    // Clear the memory to allow further extents to come-in
     _extent_map.clear();
 }
 
@@ -114,6 +123,7 @@ std::vector<Vacuumer::HoleInfo>
 Vacuumer::hole_punch_file(const std::string& file,
                           const std::vector<Vacuumer::HoleInfo>& input_extents)
 {
+    // Before punching, check if the file is operable
     std::vector<HoleInfo> punched;
     int fd = open(file.c_str(), O_RDWR);
     if (fd < 0) {
@@ -121,6 +131,7 @@ Vacuumer::hole_punch_file(const std::string& file,
         return punched;
     }
 
+    // Hole_punch on the expired blocks
     for (const auto& [aligned_start, aligned_size] : input_extents) {
         int ret = fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, aligned_start, aligned_size);
         if (ret == 0) {
@@ -178,6 +189,8 @@ Vacuumer::_truncate_file(const std::filesystem::path &file, uint64_t offset)
 
 int64_t
 Vacuumer::_get_file_size(const std::filesystem::path& path) {
+    // Check if its regular file and get the size
+    // otherwise return -1
     try {
         if (std::filesystem::exists(path) && std::filesystem::is_regular_file(path)) {
             return static_cast<int64_t>(std::filesystem::file_size(path));
@@ -196,16 +209,20 @@ Vacuumer::_update_vacuumed_partials_file(
         const std::filesystem::path &path,
         std::vector<Vacuumer::HoleInfo> partials)
 {
+    // Lets persist partials on the individual file using individual schema
+    // If partials are empty, lets remove the file as the same is cosidered for every vacuum run
     std::filesystem::path partial_file = _vacuum_data_base / std::to_string(std::hash<std::string>{}(path.string()));
     if (partials.empty()) {
         if (std::filesystem::exists(partial_file)) {
             std::filesystem::remove(partial_file);
         }
     } else {
+        // Create header with max XID as we dont rely on individual XID for partial
         ExtentHeader header(ExtentType(), constant::LATEST_XID, _vacuum_file_schema->row_size(), _vacuum_file_schema->field_types());
         auto extent = std::make_shared<Extent>(std::move(header));
         auto handle = IOMgr::get_instance()->open(partial_file, IOMgr::IO_MODE::WRITE, true);
 
+        // Write the partials using individual file schema
         for (const auto& hole_info: partials) {
             auto fields = std::make_shared<FieldArray>(2);
             fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(hole_info.offset);
@@ -223,8 +240,12 @@ Vacuumer::_update_vacuumed_partials_file(
 
 std::vector<Vacuumer::HoleInfo>
 Vacuumer::_get_partials_from_file(const std::filesystem::path &path) {
+    // Lets get the partials for an individual file
     std::vector<Vacuumer::HoleInfo> partials;
     std::filesystem::path partial_file = _vacuum_data_base / std::to_string(std::hash<std::string>{}(path.string()));
+
+    // Partial file = Hashed(input_file_path)
+    // If it exists, lets get the partials, otherwise empty vector
     if (std::filesystem::exists(partial_file)) {
         auto handle = IOMgr::get_instance()->open(partial_file, IOMgr::IO_MODE::READ, true);
         int start_offset = 0;
@@ -260,6 +281,7 @@ Vacuumer::_internal_run()
 
         bool processing_vacuum_file = false;
 
+        // Lets read from global vacuum file if no expired extents is memory (that got written to the global file)
         if (_extent_map.empty() && _get_file_size(_global_vacuum_file) > _vacuum_global_threshold) {
             auto handle = IOMgr::get_instance()->open(_global_vacuum_file, IOMgr::IO_MODE::READ, true);
             int start_offset = 0;
