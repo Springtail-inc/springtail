@@ -48,6 +48,7 @@ namespace springtail {
         static T *get_instance()
         {
             std::call_once(_init_flag, _init);
+            assert(_instance);
             return _instance;
         }
 

@@ -252,6 +252,7 @@ namespace springtail::pg_fdw {
             Singleton(ServiceId::PgFdwMgrId),
             _user_type_cache(MAX_USER_TYPE_CACHE)
         {};
+        ~PgFdwMgr();
 
     private:
         /** Delete copy constructor */

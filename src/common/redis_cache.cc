@@ -43,10 +43,8 @@ RedisCache::RedisCache(bool config_db)
 
 RedisCache::~RedisCache()
 {
-    LOG_DEBUG(LOG_ALL, "Stopping subscriber thread {}", _id);
     _shutdown = true;
     _subscriber_thread.join();
-    LOG_DEBUG(LOG_ALL, "Joined subscriber thread {}", _id);
     _subscriber->punsubscribe(_subscribe_pattern);
 }
 
@@ -324,7 +322,6 @@ void
 RedisCache::_run()
 {
     _id = std::this_thread::get_id();
-    LOG_DEBUG(LOG_ALL, "Started RedisCache subscriber thread {}", _id);
     while (!_shutdown) {
         try {
             // consume from subscriber, timeout is set above
@@ -333,11 +330,9 @@ RedisCache::_run()
             // timeout, check for shutdown
             continue;
         } catch (const sw::redis::Error &e) {
-            LOG_ERROR("Error consuming from redis: {} on thread {}\n", e.what(), _id);
             break;
         }
     }
-    LOG_DEBUG(LOG_ALL, "Ended RedisCache subscriber thread {}", _id);
 }
 
 void

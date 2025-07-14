@@ -20,8 +20,15 @@ namespace springtail {
 /* Thread-local variable to identify the background flushing thread. */
 thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
 
+    StorageCache::~StorageCache()
+    {
+        LOG_INFO("StorageCache delete");
+    }
+
     StorageCache::StorageCache() : Singleton<StorageCache>(ServiceId::StorageCacheId)
     {
+        LOG_INFO("StorageCache create");
+
         // get the cache size
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
         uint64_t data_size = Json::get_or<uint64_t>(json, "data_cache_size", 16384);

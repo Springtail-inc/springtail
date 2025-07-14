@@ -23,7 +23,7 @@ namespace springtail {
     private:
         /** Constructor.  Uses global properties to configure itself. */
         StorageCache();
-        virtual ~StorageCache() override = default;
+        virtual ~StorageCache() override;
 
         // INTERNAL CLASSES
 

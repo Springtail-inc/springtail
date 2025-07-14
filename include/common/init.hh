@@ -16,7 +16,8 @@ public:
         LOG_INFO("Default start for service {}", _name);
         return true;
     }
-    virtual void stop() { LOG_INFO("Default stop for service {}", _name); }
+    virtual void stop() { }
+//        LOG_INFO("Default stop for service {}", _name); }
     const std::string &get_name() const { return _name; };
 
 private:
