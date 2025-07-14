@@ -34,7 +34,7 @@ namespace springtail::ipc {
             if (_pending_event_pos > -1) {
                 _loop->remove_pending(_pending_event_pos);
             }
-            stop();
+            EventWatcher::stop();
         }
         if (_fd > -1) {
             ::close(_fd);

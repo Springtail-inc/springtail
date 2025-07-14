@@ -27,11 +27,9 @@ namespace springtail::pg_fdw {
         public:
             explicit FdwPidWatcher(pid_t pid) : ipc::PidEventWatcher(pid) {}
 
-            // use move constructor and operator
-            FdwPidWatcher(FdwPidWatcher&&) noexcept = default;
-            FdwPidWatcher& operator=(FdwPidWatcher&&) noexcept = default;
+            FdwPidWatcher(FdwPidWatcher&&) noexcept = delete;
+            FdwPidWatcher& operator=(FdwPidWatcher&&) noexcept = delete;
 
-            // remove copy constructors and operators
             FdwPidWatcher(const FdwPidWatcher&) = delete;
             FdwPidWatcher& operator=(const FdwPidWatcher&) = delete;
 
@@ -45,6 +43,13 @@ namespace springtail::pg_fdw {
         {
         public:
             RedisUpdateTimer() : ipc::PeriodicTimerWatcher(CLOCK_MONOTONIC, REDIS_UPDATE_INTERVAL_MSEC) {}
+
+            RedisUpdateTimer(RedisUpdateTimer&&) noexcept = delete;
+            RedisUpdateTimer& operator=(RedisUpdateTimer&&) noexcept = delete;
+
+            RedisUpdateTimer(const RedisUpdateTimer&) = delete;
+            RedisUpdateTimer& operator=(const RedisUpdateTimer&) = delete;
+
             virtual void on_timeout(uint64_t timeout_count) noexcept
             {
                 PgXidCollector::get_instance()->update_and_clean();
@@ -55,6 +60,13 @@ namespace springtail::pg_fdw {
         {
         public:
             TermSignalWatcher() : ipc::SignalEventWatcher(std::vector<int>{SIGINT, SIGTERM, SIGQUIT, SIGUSR1, SIGUSR2}) {}
+
+            TermSignalWatcher(TermSignalWatcher&&) noexcept = delete;
+            TermSignalWatcher& operator=(TermSignalWatcher&&) noexcept = delete;
+
+            TermSignalWatcher(const TermSignalWatcher&) = delete;
+            TermSignalWatcher& operator=(const TermSignalWatcher&) = delete;
+
             virtual void on_signal(const struct signalfd_siginfo &signal) noexcept
             {
                 LOG_INFO("Received signal: {}, Description: ", signal.ssi_signo, strsignal(signal.ssi_signo));
@@ -107,6 +119,12 @@ namespace springtail::pg_fdw {
                     _msgs_hdr[i].msg_hdr.msg_controllen = CONTROL_MSG_LEN;
                 }
             }
+
+            UnixSocketWatcher(UnixSocketWatcher&&) noexcept = delete;
+            UnixSocketWatcher& operator=(UnixSocketWatcher&&) noexcept = delete;
+
+            UnixSocketWatcher(const UnixSocketWatcher&) = delete;
+            UnixSocketWatcher& operator=(const UnixSocketWatcher&) = delete;
 
             virtual void on_io_event(EpollEventType event) noexcept override
             {

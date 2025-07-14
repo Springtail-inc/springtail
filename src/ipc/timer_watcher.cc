@@ -85,7 +85,7 @@ namespace springtail::ipc {
 
     TimerWatcher::~TimerWatcher() noexcept
     {
-        stop();
+        TimerWatcher::stop();
     }
 
     void TimerWatcher::_set_timeout() noexcept
