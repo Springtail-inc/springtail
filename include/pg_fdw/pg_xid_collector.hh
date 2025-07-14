@@ -25,7 +25,7 @@ namespace springtail::pg_fdw {
         class FdwPidWatcher : public ipc::PidEventWatcher
         {
         public:
-            FdwPidWatcher(pid_t pid) : ipc::PidEventWatcher(pid) {}
+            explicit FdwPidWatcher(pid_t pid) : ipc::PidEventWatcher(pid) {}
 
             // use move constructor and operator
             FdwPidWatcher(FdwPidWatcher&&) noexcept = default;
@@ -69,9 +69,8 @@ namespace springtail::pg_fdw {
             static constexpr size_t     MSG_SIZE = sizeof(PgXidCollectorMsg);
             static constexpr size_t     CONTROL_MSG_LEN = CMSG_SPACE(sizeof(struct ucred));
 
-            UnixSocketWatcher(const std::string_view &socket_name) : ipc::IOEventWatcher()
+            explicit UnixSocketWatcher(const std::string_view &socket_name) : ipc::IOEventWatcher()
             {
-
                 _fd = ::socket(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
                 PCHECK(_fd != -1) << "Failed to create UNIX domain socket";
 
@@ -113,7 +112,7 @@ namespace springtail::pg_fdw {
             {
                 CHECK(event == EpollEventRead) << "Received invalid event";
 
-                int rc = ::recvmmsg(_fd, _msgs_hdr, MAX_MSG_COUNT, 0, NULL);
+                int rc = ::recvmmsg(_fd, _msgs_hdr, MAX_MSG_COUNT, 0, nullptr);
                 PCHECK(rc > -1 || (errno == EWOULDBLOCK || errno == EAGAIN)) << "Unexpected error for recvmmsg() call";
                 for (int i = 0; i < rc; ++i) {
                     int len = _msgs_hdr[i].msg_len;

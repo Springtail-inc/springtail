@@ -31,7 +31,7 @@ namespace springtail::ipc {
     void SignalEventWatcher::start(std::shared_ptr<EventLoop> loop) noexcept
     {
         if (_fd == -1) {
-            PCHECK(sigprocmask(SIG_BLOCK, &_signal_mask, NULL) == 0) << "Call to sigprocmask() failed";
+            PCHECK(sigprocmask(SIG_BLOCK, &_signal_mask, nullptr) == 0) << "Call to sigprocmask() failed";
             _fd = signalfd(-1, &_signal_mask, (SFD_NONBLOCK | SFD_CLOEXEC));
             PCHECK(_fd !=  -1) <<  "Call to signalfd() failed";
         }
@@ -53,7 +53,7 @@ namespace springtail::ipc {
 
     SignalEventWatcher::~SignalEventWatcher() noexcept
     {
-        PCHECK(sigprocmask(SIG_UNBLOCK, &_signal_mask, NULL) != -1) <<  "Call to sigprocmask() failed";
+        PCHECK(sigprocmask(SIG_UNBLOCK, &_signal_mask, nullptr) != -1) <<  "Call to sigprocmask() failed";
     }
 
 } // springtail::ipc
