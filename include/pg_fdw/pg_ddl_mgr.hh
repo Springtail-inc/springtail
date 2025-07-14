@@ -30,7 +30,7 @@ namespace springtail::pg_fdw {
         /** Max number of threads in the thread manager pool */
         static constexpr int MAX_THREAD_POOL_SIZE = 4;
         /** Sync thread check interval in seconds */
-        static constexpr int SYNC_INTERVAL_SECONDS = 30;
+        static constexpr int SYNC_INTERVAL_SECONDS = 15;
 
         /**
          * Start the main thread
