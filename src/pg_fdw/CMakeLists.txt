@@ -29,6 +29,10 @@ set(PG_FDW_TEST_SOURCES
     pg_fdw_ddl_common.cc
 )
 
+set(PG_XID_COLLECTOR_CLIENT_SOURCES
+    pg_xid_collector_client.cc
+)
+
 # For postgres regression tests
 add_library(regress SHARED regress.c)
 target_include_directories(regress
@@ -50,6 +54,14 @@ add_library(springtail_test_fdw OBJECT ${PG_FDW_TEST_SOURCES})
 target_include_directories(springtail_test_fdw
     PUBLIC ${PROJECT_SOURCE_DIR}/include
     PRIVATE ${PostgreSQL_INCLUDE_DIRS}
+)
+
+add_library(springtail_xid_collector_client OBJECT ${PG_XID_COLLECTOR_CLIENT_SOURCES})
+target_include_directories(springtail_xid_collector_client
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+)
+target_link_libraries(springtail_xid_collector_client
+    springtail_common
 )
 
 if(${LINUX})
@@ -127,6 +139,17 @@ target_link_libraries(pg_xid_subscriber_daemon
 )
 add_dsymutil_command(pg_xid_subscriber_daemon)
 
+add_executable(pg_xid_collector_daemon pg_xid_collector_daemon.cc pg_xid_collector.cc)
+target_include_directories(pg_xid_collector_daemon
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+)
+target_link_libraries(pg_xid_collector_daemon
+    PRIVATE springtail_common
+    PRIVATE springtail_ipc
+    PRIVATE Boost::program_options
+)
+add_dsymutil_command(pg_xid_collector_daemon)
+
 # Extract transitive dependencies of libraryC
 get_target_property(POSTGRES_DEP_LIBS PostgreSQL::PostgreSQL INTERFACE_LINK_LIBRARIES)
 
@@ -134,6 +157,16 @@ add_executable(dump_table test/dump_table.cc)
 target_include_directories(dump_table
      PUBLIC ${PROJECT_SOURCE_DIR}/include
      PRIVATE ${PostgreSQL_INCLUDE_DIRS}
+)
+
+add_executable(xid_collector_client test/xid_collector_client.cc)
+target_include_directories(xid_collector_client
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+)
+target_link_libraries(xid_collector_client
+    PRIVATE springtail_common
+    PRIVATE springtail_xid_collector_client
+    PRIVATE Boost::program_options
 )
 
 if (${LINUX})
@@ -208,6 +241,11 @@ install(TARGETS
 
 install(TARGETS
     pg_xid_subscriber_daemon
+    RUNTIME DESTINATION bin/system
+)
+
+install(TARGETS
+    pg_xid_collector_daemon
     RUNTIME DESTINATION bin/system
 )
 

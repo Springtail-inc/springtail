@@ -1,6 +1,8 @@
 #include <fstream>
 #include <mutex>
 
+#include <google/protobuf/stubs/common.h>
+
 #include <common/init.hh>
 
 using namespace springtail;
@@ -313,6 +315,10 @@ springtail_shutdown()
         LOG_INFO("Stopping service {}", dependencies_names.at(service_id));
         it->second();
     }
+    // NOTE: This final cleanup step can't be done by a runner because a runner will require logging
+    //      Alternatively, it can be added to DefaultLoggingRunner::stop() or
+    //      to Logger::shutdown() function. It is here for now, but there other alternatives.
+    google::protobuf::ShutdownProtobufLibrary();
 }
 
 static std::map<ServiceId, std::map<std::string, std::any>> service_arguments;

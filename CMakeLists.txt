@@ -111,6 +111,7 @@ set(MODULES
   benchmarks
   common
   grpc
+  ipc
   redis
   storage
   pg_repl
