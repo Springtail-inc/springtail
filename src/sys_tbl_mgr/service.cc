@@ -732,6 +732,9 @@ Service::AlterTable(grpc::ServerContext* context,
 
     } else if (table_info->rls_enabled != request->table().rls_enabled()) {
         // if the RLS flags are changed, update the table_names table
+        LOG_INFO("RLS enabled changed for table {}@{}:{} {} -> {}",
+                  request->db_id(), request->xid(), request->table().id(),
+                  table_info->rls_enabled, request->table().rls_enabled());
         _set_table_info(request->db_id(), new_info);
 
         // set the DDL statement
@@ -771,6 +774,9 @@ Service::AlterTable(grpc::ServerContext* context,
         _set_primary_index(request->db_id(), ns_info->id, request->table().id(),
                     request->table().name(), request->table().namespace_name(), xid);
     }
+
+    LOG_DEBUG(LOG_SCHEMA, "Alter table {}@{}:{} action: {}", request->db_id(), request->xid(),
+                            request->table().id(), ddl["action"].get<std::string>());
 
     response->set_statement(nlohmann::to_string(ddl));
     span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
@@ -3133,6 +3139,9 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
         newMap[column.position()] = &column;
     }
 
+    LOG_DEBUG(LOG_SCHEMA, "Comparing schemas for update: old size = {}, new size = {}",
+                            oldMap.size(), newMap.size());
+
     // Check for removals: any column in oldMap that's missing in newMap
     for (const auto& [pos, old_col] : oldMap) {
         if (newMap.find(pos) == newMap.end()) {
@@ -3245,6 +3254,10 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
     // No change detected
     ddl["action"] = "no_change";
     update.set_update_type(static_cast<int8_t>(SchemaUpdateType::NO_CHANGE));
+
+    LOG_DEBUG(LOG_SCHEMA, "No schema change detected for table @{}:{}",
+                            xid.xid, xid.lsn);
+
     return update;
 }
 }  // namespace springtail::sys_tbl_mgr

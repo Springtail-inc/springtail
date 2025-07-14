@@ -537,7 +537,7 @@ BEGIN
                 'partition_bound', table_info->'partition_bound',
                 'partition_key', table_info->'partition_key',
                 'partition_data', table_info->'partition_data',
-                'rls_enabled', table_info->'rowsecurity'
+                'rls_enabled', table_info->'rowsecurity',
                 'rls_forced', table_info->'forcerowsecurity'
             );
 

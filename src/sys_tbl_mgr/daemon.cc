@@ -33,7 +33,7 @@ main(int argc, char *argv[])
         pidfile = "sys_tbl_mgr.pid";
     }
 
-    springtail_init_daemon("sys_tbl_mgr", pidfile, LOG_ALL);
+    springtail_init_daemon("sys_tbl_mgr", pidfile, LOG_ALL ^ (LOG_CACHE | LOG_STORAGE));
     sys_tbl_mgr::Server::start();
     springtail_daemon_run();
 

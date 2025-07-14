@@ -1207,6 +1207,43 @@ namespace springtail::pg_fdw {
 
             // nothing to actually change in the FDW
             return {};
+        } else if (action == "attach_partition") {
+            std::string alter = fmt::format("ALTER TABLE {}.{} ATTACH PARTITION {}.{} {};",
+                                            conn->escape_identifier(ddl.at("schema")),
+                                            conn->escape_identifier(ddl.at("table")),
+                                            conn->escape_identifier(ddl.at("partition_schema")),
+                                            conn->escape_identifier(ddl.at("partition_name")),
+                                            ddl.at("partition_bound").get<std::string>());
+
+            return alter;
+        } else if (action == "detach_partition") {
+            std::string alter = fmt::format("ALTER TABLE {}.{} DETACH PARTITION {}.{};",
+                                            conn->escape_identifier(ddl.at("schema")),
+                                            conn->escape_identifier(ddl.at("table")),
+                                            conn->escape_identifier(ddl.at("partition_schema")),
+                                            conn->escape_identifier(ddl.at("partition_name")));
+
+            return alter;
+        } else if (action == "set_rls_enabled") {
+            LOG_DEBUG(LOG_FDW, "Setting RLS enabled with JSON: {}", ddl.dump());
+            const auto schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
+            const auto table = conn->escape_identifier(ddl.at("table").get<std::string>());
+            bool rls_enabled = ddl.at("rls_enabled").get<bool>();
+
+            return fmt::format("ALTER {} TABLE {}.{} {} ROW LEVEL SECURITY;",
+                               is_regular_table_type ? "FOREIGN" : "",
+                               schema, table,
+                               rls_enabled ? "ENABLE" : "DISABLE");
+        } else if (action == "set_rls_forced") {
+            LOG_DEBUG(LOG_FDW, "Setting RLS forced with JSON: {}", ddl.dump());
+            const auto schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
+            const auto table = conn->escape_identifier(ddl.at("table").get<std::string>());
+            bool rls_forced = ddl.at("rls_forced").get<bool>();
+
+            return fmt::format("ALTER {} TABLE {}.{} {} ROW LEVEL SECURITY;",
+                               is_regular_table_type ? "FOREIGN" : "",
+                               schema, table,
+                               rls_forced ? "FORCE" : "NO FORCE");
         }
 
         // can't currently support other kinds of DDL mutations

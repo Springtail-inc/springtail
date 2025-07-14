@@ -202,7 +202,8 @@ private:
                          bool rls_enabled,
                          bool rls_forced,
                          bool exists)
-            : id(id), xid(xid), lsn(lsn), namespace_id(namespace_id), name(name), exists(exists),
+            : id(id), xid(xid), lsn(lsn), namespace_id(namespace_id), name(name),
+              rls_enabled(rls_enabled), rls_forced(rls_forced), exists(exists),
               parent_table_id(parent_table_id), partition_key(partition_key), partition_bound(partition_bound)
         {
         }
