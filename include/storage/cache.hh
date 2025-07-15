@@ -1100,6 +1100,7 @@ namespace springtail {
             ~PageCache()
             {
                 _shutdown_cleaner = true;
+                _cleaner_cond.notify_all();
                 _cleaner_thread.join();
             }
 
