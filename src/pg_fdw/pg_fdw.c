@@ -10,6 +10,7 @@
 #include "foreign/foreign.h"
 #include "nodes/pg_list.h"
 #include "utils/guc.h"
+#include "storage/ipc.h"
 
 PG_MODULE_MAGIC;
 
@@ -107,7 +108,11 @@ fdw_xact_callback(XactEvent event, void *arg)
     }
 }
 
-
+static void my_session_exit_callback(int code, Datum arg)
+{
+    // Cleanup logic here
+    fdw_exit();
+}
 
 /* Register the transaction callback */
 void
@@ -139,6 +144,8 @@ _PG_init(void)
 
     // Initialize the FDW; springtail_init()
     fdw_init(fdw_config_file_path);
+
+    on_proc_exit(my_session_exit_callback, (Datum) 0);
 }
 
 /*
