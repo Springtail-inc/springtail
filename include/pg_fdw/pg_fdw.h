@@ -19,6 +19,9 @@ PgFdwMgr* get_fdw_mgr();
 /** Init call, pass in config file path */
 void fdw_init(const char *config_file);
 
+/** Exit call */
+void fdw_exit();
+
 /** Create state */
 void *fdw_create_state(uint64_t db_id, uint64_t tid, uint64_t pg_xid, uint64_t schema_xid);
 

@@ -1,6 +1,8 @@
 #include <common/init.hh>
 #include <common/logging.hh>
 #include <common/open_telemetry.hh>
+#include <assert.h>
+#include <thread>
 
 using namespace springtail;
 using namespace springtail::logging;
@@ -77,6 +79,48 @@ main(int argc, char *argv[])
         }
         OpenTelemetry::get_instance()->increment_counter(XID_MGR_COMMIT_XID_CALLS);
     }
+
+    // asynchronous counters
+    {
+        struct Cnt1 {
+            static auto name() {
+                static char name[] = "Counter1";
+                return name;
+            }
+        };
+        struct Cnt2 {
+            static auto name() {
+                static char name[] = "Counter2";
+                return name;
+            }
+        };
+
+        // update counters every second.
+        OTelCounters<Cnt1, Cnt2> cnt({{"async_xid_id", "2"}}, 3);
+
+        assert(cnt.get<Cnt1>() == 0);
+        assert(cnt.get<Cnt2>() == 0);
+        cnt.increment<Cnt1>();
+        cnt.increment<Cnt2>();
+        cnt.increment<Cnt2>();
+
+        assert(cnt.get<Cnt1>() == 1);
+        assert(cnt.get<Cnt2>() == 2);
+
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+
+        // the update frequency is 3sec, we waited for 1sec
+        // the counters must stay the same
+        assert(cnt.get<Cnt1>() == 1);
+        assert(cnt.get<Cnt2>() == 2);
+
+        std::this_thread::sleep_for(std::chrono::seconds(3));
+
+        // wait for 3sec more, the counters must be back to 0
+        assert(cnt.get<Cnt1>() == 0);
+        assert(cnt.get<Cnt2>() == 0);
+    }
+
 
     // test tracers, spans, and scopes
     {
