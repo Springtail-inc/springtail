@@ -29,7 +29,12 @@ public:
     void init(std::string_view component_name);
 
     static void flush();
-    static bool has_instance() { return _has_instance(); }
+    static void shutdown_instance()
+    {
+        if (_has_instance()) {
+            shutdown();
+        }
+    }
 
     inline void
     log(const spdlog::source_loc &loc, const std::string &logger_name, spdlog::level::level_enum lvl, const std::string &formatted_msg)
