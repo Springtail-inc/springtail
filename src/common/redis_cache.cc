@@ -43,9 +43,13 @@ RedisCache::RedisCache(bool config_db)
 
 RedisCache::~RedisCache()
 {
+    //TODO: uncomment when SPR-882 is resolved 
+    //LOG_DEBUG(LOG_ALL, "Stopping subscriber thread {}", _id);
     _shutdown = true;
     _subscriber_thread.join();
     _subscriber->punsubscribe(_subscribe_pattern);
+    //TODO: uncomment when SPR-882 is resolved 
+    //LOG_DEBUG(LOG_ALL, "Joined subscriber thread {}", _id);
 }
 
 static std::map<sw::redis::Subscriber::MsgType, std::string> msg_type_to_str = {
@@ -63,7 +67,8 @@ static std::map<sw::redis::Subscriber::MsgType, std::string> msg_type_to_str = {
 
 void RedisCache::_process_meta(sw::redis::Subscriber::MsgType type, sw::redis::OptionalString channel, long long num)
 {
-    LOG_DEBUG(LOG_ALL, "received meta notification: message type: {}; channel: {}; num = {}", msg_type_to_str[type], channel, num);
+    //TODO: uncomment when SPR-882 is resolved 
+    //LOG_DEBUG(LOG_ALL, "received meta notification: message type: {}; channel: {}; num = {}", msg_type_to_str[type], channel, num);
     if (!_init_finished) {
         if (type == sw::redis::Subscriber::MsgType::PSUBSCRIBE &&
                     channel.has_value() && channel.value() == _subscribe_pattern) {
@@ -78,7 +83,9 @@ RedisCache::_process_notification(const std::string &pattern, const std::string 
 {
     // msg contains action performed on the data: hset, hdel, sadd, etc.
     // channel will contain the key that fits the pattern, it needs to be extracted
-    LOG_DEBUG(LOG_ALL, "received notification: pattern: {}; channel: {}; msg = {}", pattern, channel, msg);
+
+    //TODO: uncomment when SPR-882 is resolved 
+    //LOG_DEBUG(LOG_ALL, "received notification: pattern: {}; channel: {}; msg = {}", pattern, channel, msg);
 
     // extract the key from the notification
     std::string key;
@@ -98,7 +105,8 @@ RedisCache::_process_notification(const std::string &pattern, const std::string 
     RedisType new_key_type;
     tie(new_key_value, new_key_type) = _read_key_value(key);
 
-    LOG_DEBUG(LOG_ALL, "key: {}, new_value: {}", key, new_key_value.dump(4));
+    //TODO: uncomment when SPR-882 is resolved 
+    //LOG_DEBUG(LOG_ALL, "key: {}, new_value: {}", key, new_key_value.dump(4));
 
     // get the diff and update storage
     nlohmann::json key_value_diff = nullptr;
@@ -122,7 +130,8 @@ RedisCache::_process_notification(const std::string &pattern, const std::string 
 void
 RedisCache::_process_diff(const nlohmann::json &diff, const std::string &top_level_path, std::unique_lock<std::shared_mutex> &storage_lock)
 {
-    LOG_DEBUG(LOG_ALL, "key_value_diff: {}", diff.dump(4));
+    //TODO: uncomment when SPR-882 is resolved 
+    //LOG_DEBUG(LOG_ALL, "key_value_diff: {}", diff.dump(4));
     std::string prefix = "/" + std::to_string(_instance_id) + ":";
     // lock callback storage
     std::shared_lock callback_lock(_callback_mutex);
@@ -322,6 +331,8 @@ void
 RedisCache::_run()
 {
     _id = std::this_thread::get_id();
+    //TODO: uncomment when SPR-882 is resolved 
+    //LOG_DEBUG(LOG_ALL, "Started RedisCache subscriber thread {}", _id);
     while (!_shutdown) {
         try {
             // consume from subscriber, timeout is set above
@@ -330,6 +341,7 @@ RedisCache::_run()
             // timeout, check for shutdown
             continue;
         } catch (const sw::redis::Error &e) {
+            LOG_ERROR("Error consuming from redis: {} on thread {}\n", e.what(), _id);
             break;
         }
     }
@@ -339,7 +351,8 @@ void
 RedisCache::dump()
 {
     std::shared_lock lock(_storage_mutex);
-    LOG_INFO("{}", _storage.dump(4));
+    //TODO: uncomment when SPR-882 is resolved 
+    //LOG_INFO("{}", _storage.dump(4));
 }
 
 nlohmann::json
@@ -467,10 +480,12 @@ RedisCache::add_callback(const std::string &path, const RedisCacheChangeCallback
     if (!path.empty()) {
         // do not add leading "/" because we are going to use it as a delimiter
         std::string json_path = std::to_string(_instance_id) + ":" + path;
-        LOG_DEBUG(LOG_ALL, "adding callback for json_path = {}", json_path);
+        //TODO: uncomment when SPR-882 is resolved 
+        //LOG_DEBUG(LOG_ALL, "adding callback for json_path = {}", json_path);
         common::split_string("/", json_path, json_path_queue);
     } else {
-        LOG_DEBUG(LOG_ALL, "adding callback for empty json_path");
+        //TODO: uncomment when SPR-882 is resolved 
+        //LOG_DEBUG(LOG_ALL, "adding callback for empty json_path");
     }
 
     std::unique_lock lock(_callback_mutex);
@@ -484,10 +499,12 @@ RedisCache::remove_callback(const std::string &path, const RedisCacheChangeCallb
     if (!path.empty()) {
         // do not add leading "/" because we are going to use it as a delimiter
         std::string json_path = std::to_string(_instance_id) + ":" + path;
-        LOG_DEBUG(LOG_ALL, "removing callback for json_path = {}", json_path);
+        //TODO: uncomment when SPR-882 is resolved 
+        //LOG_DEBUG(LOG_ALL, "removing callback for json_path = {}", json_path);
         common::split_string("/", json_path, json_path_queue);
     } else {
-        LOG_DEBUG(LOG_ALL, "removing callback for empty json_path");
+        //TODO: uncomment when SPR-882 is resolved 
+        //LOG_DEBUG(LOG_ALL, "removing callback for empty json_path");
     }
 
     std::unique_lock lock(_callback_mutex);
