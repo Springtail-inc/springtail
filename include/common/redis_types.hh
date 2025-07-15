@@ -138,4 +138,11 @@ namespace springtail::redis {
      * key: <table_oid>, value: <json>
      */
     static constexpr char HASH_INVALID_TABLES[] = "{}:hash:invalid_tables";
+
+    /**
+     * Hash of min XIDs per fdw:db_id for a given db_instance_id
+     * args: <db_instance_id>
+     * key: <fdw_id>:<db_id>, value: <min xid>
+     */
+     static constexpr char HASH_MIN_XID[] = "{}:fdw_min_xids";
 }

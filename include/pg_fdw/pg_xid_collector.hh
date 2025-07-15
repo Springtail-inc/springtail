@@ -3,6 +3,7 @@
 #include <signal.h>
 #include <sys/socket.h>
 
+#include <common/concurrent_queue.hh>
 #include <common/init.hh>
 
 #include <ipc/io_watcher.hh>
@@ -172,10 +173,13 @@ namespace springtail::pg_fdw {
         PgXidCollector() noexcept;
         virtual ~PgXidCollector() noexcept override;
 
+        virtual void _internal_shutdown() override;
+        void _thread_run();
+
         std::shared_ptr<ipc::EventLoop> _loop;
         std::map<pid_t, std::shared_ptr<FdwPidWatcher>> _active_fdws;
         std::map<pid_t, std::shared_ptr<FdwPidWatcher>> _dead_fdws;
-        // mapping from database id to a pair of fdw process id and xid it uses
+        // mapping from database id to a map of fdw process id and xid it uses
         std::map<uint64_t, std::map<pid_t, uint64_t>> _db_pid_to_xid;
         std::map<pid_t, std::pair<uint64_t, uint64_t>> _pid_to_db_xid;
 
@@ -183,8 +187,15 @@ namespace springtail::pg_fdw {
         RedisUpdateTimer _redis_update_timer;
         TermSignalWatcher _term_signal_watcher;
         std::unique_ptr<UnixSocketWatcher> _unix_socket_watcher;
+
+        using MinXidMsg = std::vector<std::pair<std::string, std::string>>;
+        using MinXidsMsgPtr = std::shared_ptr<MinXidMsg>;
+
+        std::thread _msg_queue_thread;
+        ConcurrentQueue<MinXidMsg> _msg_queue;
         std::string _fdw_id;
         std::string _socket_name;
+        std::string _redis_hash_name;
     };
 
 } // springtail::pg_fdw
