@@ -81,6 +81,8 @@ namespace {
         create_msg.parent_table_id = 0;
         create_msg.partition_key = "";
         create_msg.partition_bound = "";
+        create_msg.rls_enabled = false;
+        create_msg.rls_forced = false;
         create_msg.columns.emplace_back("col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 0, 0, false, true);
         create_msg.columns.emplace_back("col2", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 1, 0, true, false);
 
@@ -96,6 +98,8 @@ namespace {
         alter_msg.parent_table_id = 0;
         alter_msg.partition_key = "";
         alter_msg.partition_bound = "";
+        alter_msg.rls_enabled = false;
+        alter_msg.rls_forced = false;
         alter_msg.columns.emplace_back("col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 0, 0, false, true);
         alter_msg.columns.emplace_back("colnew", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 1, 0, true, false);
 
@@ -122,6 +126,8 @@ namespace {
         create_parent_table_msg.parent_table_id = 0;
         create_parent_table_msg.partition_key = "BY LIST (role)";
         create_parent_table_msg.partition_bound = "";
+        create_parent_table_msg.rls_enabled = false;
+        create_parent_table_msg.rls_forced = false;
         create_parent_table_msg.columns.emplace_back("id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true);
         create_parent_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
         create_parent_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
@@ -137,6 +143,8 @@ namespace {
         create_child_table_msg.parent_table_id = 100000;
         create_child_table_msg.partition_key = "";
         create_child_table_msg.partition_bound = "FOR VALUES IN ('Sibling')";
+        create_child_table_msg.rls_enabled = false;
+        create_child_table_msg.rls_forced = false;
         create_child_table_msg.columns.emplace_back("id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true);
         create_child_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
         create_child_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
@@ -155,6 +163,8 @@ namespace {
         create_parent_alter_table_msg.parent_table_id = 0;
         create_parent_alter_table_msg.partition_key = "BY LIST (role)";
         create_parent_alter_table_msg.partition_bound = "";
+        create_parent_alter_table_msg.rls_enabled = false;
+        create_parent_alter_table_msg.rls_forced = false;
         create_parent_alter_table_msg.columns.emplace_back("id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true);
         create_parent_alter_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
         create_parent_alter_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
@@ -170,6 +180,8 @@ namespace {
         create_child_alter_table_msg.parent_table_id = 100000;
         create_child_alter_table_msg.partition_key = "";
         create_child_alter_table_msg.partition_bound = "FOR VALUES IN ('Sibling')";
+        create_child_alter_table_msg.rls_enabled = false;
+        create_child_alter_table_msg.rls_forced = false;
         create_child_alter_table_msg.columns.emplace_back("id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true);
         create_child_alter_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
         create_child_alter_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
@@ -185,6 +197,8 @@ namespace {
         alter_parent_alter_table_msg.parent_table_id = 0;
         alter_parent_alter_table_msg.partition_key = "BY LIST (role)";
         alter_parent_alter_table_msg.partition_bound = "";
+        alter_parent_alter_table_msg.rls_enabled = false;
+        alter_parent_alter_table_msg.rls_forced = false;
         alter_parent_alter_table_msg.columns.emplace_back("id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true);
         alter_parent_alter_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
         alter_parent_alter_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
@@ -204,6 +218,8 @@ namespace {
         create_parent_attach_table_msg.parent_table_id = 0;
         create_parent_attach_table_msg.partition_key = "BY LIST (role)";
         create_parent_attach_table_msg.partition_bound = "";
+        create_parent_attach_table_msg.rls_enabled = false;
+        create_parent_attach_table_msg.rls_forced = false;
         create_parent_attach_table_msg.columns.emplace_back("id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true);
         create_parent_attach_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
         create_parent_attach_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
@@ -219,6 +235,8 @@ namespace {
         create_child_attach_table_msg.parent_table_id = 0;
         create_child_attach_table_msg.partition_key = "";
         create_child_attach_table_msg.partition_bound = "";
+        create_child_attach_table_msg.rls_enabled = false;
+        create_child_attach_table_msg.rls_forced = false;
         create_child_attach_table_msg.columns.emplace_back("id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true);
         create_child_attach_table_msg.columns.emplace_back("name", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 0, 0, false, true);
         create_child_attach_table_msg.columns.emplace_back("role", static_cast<uint8_t>(SchemaType::TEXT), 0, std::nullopt, 1, 0, true, false);
@@ -256,42 +274,168 @@ namespace {
         auto fields = table->extent_schema()->get_fields();
         auto row_i = table->begin();
 
-        auto tuple_row = sys_tbl::TableNames::Data::tuple(90000, "x", 100000, 2, 2, true, 0, "", "");
+        auto tuple_row = sys_tbl::TableNames::Data::tuple(90000, "x", 100000, 2, 2, true, 0, "", "", false, false);
         auto table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "x", 100000, 4, 4, false, std::nullopt, std::nullopt, std::nullopt);
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "x", 100000, 4, 4, false, std::nullopt, std::nullopt, std::nullopt, false, false);
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "parent_partition_table", 100000, 5, 5, true, 0, "BY LIST (role)", "");
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "parent_partition_table", 100000, 5, 5, true, 0, "BY LIST (role)", "", false, false);
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "parent_partition_alter_table", 100000, 7, 7, true, 0, "BY LIST (role)", "");
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "parent_partition_alter_table", 100000, 7, 7, true, 0, "BY LIST (role)", "", false, false);
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "child_partition_table", 100001, 6, 6, true, 100000, "", "FOR VALUES IN ('Sibling')");
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "child_partition_table", 100001, 6, 6, true, 100000, "", "FOR VALUES IN ('Sibling')", false, false);
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "child_partition_alter_table", 100001, 8, 8, true, 100000, "", "FOR VALUES IN ('Sibling')");
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "child_partition_alter_table", 100001, 8, 8, true, 100000, "", "FOR VALUES IN ('Sibling')", false, false);
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "parent_partition_attach_table", 400000, 11, 11, true, 0, "BY LIST (role)", "");
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "parent_partition_attach_table", 400000, 11, 11, true, 0, "BY LIST (role)", "", false, false);
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "child_partition_attach_table", 500001, 14, 14, true, 400000, "", "FOR VALUES IN ('Sibling')");
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "child_partition_attach_table", 500001, 14, 14, true, 400000, "", "FOR VALUES IN ('Sibling')", false, false);
+        table_row = std::make_shared<FieldTuple>(fields, &*row_i);
+        _compare_tuples(tuple_row, table_row);
+
+        ++row_i;
+        ASSERT_TRUE(row_i == table->end());
+    }
+
+    TEST_F(TableMgr_Test, RlsEnabledAndForcedFlags) {
+        uint64_t db_id = 2;
+
+        // Create a schema
+        PgMsgNamespace ns_msg;
+        ns_msg.lsn = 1;
+        ns_msg.xid = 1;
+        ns_msg.oid = 91000;
+        ns_msg.name = "public";
+        sys_tbl_mgr::Client::get_instance()->create_namespace(db_id, {1, 1}, ns_msg);
+
+        // Create a table with RLS enabled and forced
+        PgMsgTable create_msg;
+        create_msg.lsn = 2;
+        create_msg.xid = 2;
+        create_msg.oid = 110000;
+        create_msg.namespace_name = "public";
+        create_msg.table = "rls_table";
+        create_msg.parent_table_id = 0;
+        create_msg.partition_key = "";
+        create_msg.partition_bound = "";
+        create_msg.columns.emplace_back("id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true);
+        create_msg.rls_enabled = true;
+        create_msg.rls_forced = true;
+
+        TableMgr::get_instance()->create_table(db_id, {2, 2}, create_msg);
+        TableMgr::get_instance()->finalize_metadata(db_id, 2);
+
+        _print_table(db_id, 2);
+
+        // Alter the table to disable RLS enabled and forced
+        PgMsgTable alter_msg;
+        alter_msg.lsn = 3;
+        alter_msg.xid = 3;
+        alter_msg.oid = 110000;
+        alter_msg.namespace_name = "public";
+        alter_msg.table = "rls_table";
+        alter_msg.parent_table_id = 0;
+        alter_msg.partition_key = "";
+        alter_msg.partition_bound = "";
+        alter_msg.columns.emplace_back("id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true);
+        alter_msg.rls_enabled = false;
+        alter_msg.rls_forced = false;
+
+        TableMgr::get_instance()->alter_table(db_id, {3, 3}, alter_msg);
+        TableMgr::get_instance()->finalize_metadata(db_id, 3);
+
+        _print_table(db_id, 3);
+
+        // Alter the table to enable only rls_enabled
+        PgMsgTable alter_msg2;
+        alter_msg2.lsn = 4;
+        alter_msg2.xid = 4;
+        alter_msg2.oid = 110000;
+        alter_msg2.namespace_name = "public";
+        alter_msg2.table = "rls_table";
+        alter_msg2.parent_table_id = 0;
+        alter_msg2.partition_key = "";
+        alter_msg2.partition_bound = "";
+        alter_msg2.columns.emplace_back("id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true);
+        alter_msg2.rls_enabled = true;
+        alter_msg2.rls_forced = false;
+
+        TableMgr::get_instance()->alter_table(db_id, {4, 4}, alter_msg2);
+        TableMgr::get_instance()->finalize_metadata(db_id, 4);
+
+        _print_table(db_id, 4);
+
+        // Alter the table to enable only rls_forced
+        PgMsgTable alter_msg3;
+        alter_msg3.lsn = 5;
+        alter_msg3.xid = 5;
+        alter_msg3.oid = 110000;
+        alter_msg3.namespace_name = "public";
+        alter_msg3.table = "rls_table";
+        alter_msg3.parent_table_id = 0;
+        alter_msg3.partition_key = "";
+        alter_msg3.partition_bound = "";
+        alter_msg3.columns.emplace_back("id", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 0, 0, false, true);
+        alter_msg3.rls_enabled = false;
+        alter_msg3.rls_forced = true;
+
+        TableMgr::get_instance()->alter_table(db_id, {5, 5}, alter_msg3);
+        TableMgr::get_instance()->finalize_metadata(db_id, 5);
+
+        _print_table(db_id, 5);
+
+        // Verify RLS flags are set
+        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, 5);
+        auto fields = table->extent_schema()->get_fields();
+        auto row_i = table->begin();
+
+        auto tuple_row = sys_tbl::TableNames::Data::tuple(
+            91000, "rls_table", 110000, 2, 2, true, 0, "", "", true, true
+        );
+        auto table_row = std::make_shared<FieldTuple>(fields, &*row_i);
+        _compare_tuples(tuple_row, table_row);
+
+        // Verify RLS flags are now disabled
+        ++row_i;
+        tuple_row = sys_tbl::TableNames::Data::tuple(
+            91000, "rls_table", 110000, 3, 3, true, 0, "", "", false, false
+        );
+        table_row = std::make_shared<FieldTuple>(fields, &*row_i);
+        _compare_tuples(tuple_row, table_row);
+
+        // Verify only rls_enabled is set
+        ++row_i;
+        tuple_row = sys_tbl::TableNames::Data::tuple(
+            91000, "rls_table", 110000, 4, 4, true, 0, "", "", true, false
+        );
+        table_row = std::make_shared<FieldTuple>(fields, &*row_i);
+        _compare_tuples(tuple_row, table_row);
+
+        // Verify only rls_forced is set
+        ++row_i;
+        tuple_row = sys_tbl::TableNames::Data::tuple(
+            91000, "rls_table", 110000, 5, 5, true, 0, "", "", false, true
+        );
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
