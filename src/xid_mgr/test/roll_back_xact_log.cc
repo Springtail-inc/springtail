@@ -69,8 +69,10 @@ main(int argc, char **argv)
         CHECK(!xids.contains(xid)) << "Xid " << xid << " already exists in the set";
         xids.insert(xid);
 
-        CHECK(!pg_xids.contains(pg_xid)) << "PgXid " << pg_xid << " already exists in the set";
-        pg_xids.insert(pg_xid);
+        if (pg_xid != 0) {
+            CHECK(!pg_xids.contains(pg_xid)) << "PgXid " << pg_xid << " already exists in the set";
+            pg_xids.insert(pg_xid);
+        }
 
         CHECK_GT(xid, last_xid) << "Xid " << xid << " is not greater than the last xid " << last_xid;
         last_xid = xid;

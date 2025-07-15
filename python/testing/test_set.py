@@ -181,10 +181,11 @@ class TestSet:
                 self._tests[test_file].verify()
 
             except Exception as e:
-                logging.error(f'Error: exception: [{e}] result: {self._tests[test_file].get_result()["result"]}')
+                logging.error(f'Error running test: {test_file}')
                 if self._tests[test_file].get_result()['result'] == 'FAILED':
                     test_failed = True
                 else:
+                    logging.error(f'Error: exception: [{e}] result: {self._tests[test_file].get_result()["result"]}')
                     traceback.print_exc()
                     raise e
 
