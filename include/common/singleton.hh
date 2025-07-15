@@ -79,17 +79,6 @@ namespace springtail {
             std::call_once(_shutdown_flag, _shutdown);
         }
 
-        /**
-         * @brief Verify that a singleton instance was created
-         *
-         * @return true
-         * @return false
-         */
-        static bool has_instance()
-        {
-            return _instance != nullptr;
-        }
-
     protected:
         /**
          * @brief This function is intended to be provided by the derived class to perform
@@ -150,6 +139,17 @@ namespace springtail {
         {
             CHECK_NE(_instance, nullptr);
         }
+
+        /**
+         * @brief Verify that a singleton instance was created
+         *
+         * @return true
+         * @return false
+         */
+         static bool _has_instance()
+         {
+             return _instance != nullptr;
+         }
 
     private:
         static inline T* _instance = nullptr;             ///< derived class instance

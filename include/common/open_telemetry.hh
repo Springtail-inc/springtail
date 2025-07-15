@@ -29,6 +29,7 @@ public:
     void init(std::string_view component_name);
 
     static void flush();
+    static bool has_instance() { return _has_instance(); }
 
     inline void
     log(const spdlog::source_loc &loc, const std::string &logger_name, spdlog::level::level_enum lvl, const std::string &formatted_msg)
@@ -234,7 +235,7 @@ private:
     * counters.increment<MyCnt2>();
     */
     template <typename... Names>
-    struct OTelCounters 
+    struct OTelCounters
     {
         using NamesTuple = std::tuple<Names...>;
 
@@ -265,7 +266,7 @@ private:
         int get() const {
             return std::get<get_type_index<NamesTuple, Name>()>(_counters).load();
         }
-    
+
     private:
         std::unordered_map<std::string, std::string> _attrs;
         int _freq_sec;
@@ -305,7 +306,7 @@ private:
         void task(std::stop_token st) {
             while(!st.stop_requested()) {
                 std::unique_lock g(_m);
-                _cv.wait_for(g, st, std::chrono::seconds(_freq_sec), 
+                _cv.wait_for(g, st, std::chrono::seconds(_freq_sec),
                             [st]{ return st.stop_requested(); });
                 auto token = OpenTelemetry::get_instance()->set_context_variables(_attrs);
                 update_counters<0>();
