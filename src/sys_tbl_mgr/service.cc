@@ -8,6 +8,7 @@
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/service.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
+#include <storage/vacuumer.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 
 namespace springtail::sys_tbl_mgr {
@@ -1107,6 +1108,9 @@ Service::Finalize(grpc::ServerContext* context,
     _clear_roots_info(request->db_id());
     _clear_schema_info(request->db_id());
     _clear_namespace_info(request->db_id());
+
+    // Commit expired extents in Vacuumer
+    Vacuumer::get_instance()->commit_expired_extents(request->xid());
 
     span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;

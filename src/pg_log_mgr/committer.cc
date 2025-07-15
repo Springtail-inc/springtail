@@ -257,16 +257,6 @@ namespace springtail::committer {
                 //       index root offsets are written to disk
                 sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
 
-                // commit the completed XID
-                xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null());
-
-                // push completed DDL changes to the FDWs
-                if (_has_ddl_precommit) {
-                    LOG_DEBUG(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, xid);
-                    _redis_ddl.commit_ddl(db_id, xid);
-                    _has_ddl_precommit = false;
-                }
-
                 // Check and notify vacuumer about dropped tables
                 if (!completed_ddls.is_null()) {
                     _expire_table_drops(db_id, completed_ddls, xid);
@@ -275,6 +265,19 @@ namespace springtail::committer {
                 // Check and notify vacuumer about dropped indexes
                 if (!index_requests.empty()) {
                     _expire_index_drops(db_id, index_requests, xid);
+                }
+
+                // Sync expired extents on the XID with vacuum
+                Vacuumer::get_instance()->commit_expired_extents(xid);
+
+                // commit the completed XID
+                xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null());
+
+                // push completed DDL changes to the FDWs
+                if (_has_ddl_precommit) {
+                    LOG_DEBUG(LOG_COMMITTER, "Commit DDL changes db {} xid {}", db_id, xid);
+                    _redis_ddl.commit_ddl(db_id, xid);
+                    _has_ddl_precommit = false;
                 }
 
             } else {

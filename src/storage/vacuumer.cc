@@ -64,6 +64,64 @@ Vacuumer::_internal_shutdown()
 }
 
 void
+Vacuumer::commit_expired_extents(uint64_t committed_xid)
+{
+    std::unique_lock lock(_mutex);
+    _commit_expired_extents(_extent_map, committed_xid);
+}
+
+void
+Vacuumer::_commit_expired_extents(ExtentMap& expired_extents_map, uint64_t committed_xid)
+{
+    // Lets persist expired extents
+    auto handle = IOMgr::get_instance()->open(_global_vacuum_file, IOMgr::IO_MODE::APPEND, true);
+
+    // iterate files
+    for (auto file_it = expired_extents_map.begin(); file_it != expired_extents_map.end(); )
+    {
+        auto& xid_map = file_it->second;          // ordered map< uint64_t, Extents >
+        auto  xid_it  = xid_map.begin();
+
+        // iterate xids for this file
+        while (xid_it != xid_map.end())
+        {
+            // Process only till committed XID
+            if (xid_it->first > committed_xid) {
+                break;
+            }
+
+            // Create header with XID of the expired extent(s)
+            ExtentHeader header(ExtentType(), xid_it->first, _global_vacuum_schema->row_size(), _global_vacuum_schema->field_types());
+            auto extent = std::make_shared<Extent>(std::move(header));
+
+            // Write the extents using the global vacuum schema
+            for (const auto& hole_info: xid_it->second) {
+                auto fields = std::make_shared<FieldArray>(3);
+                fields->at(0) = std::make_shared<ConstTypeField<std::string>>(file_it->first);
+                fields->at(1) = std::make_shared<ConstTypeField<uint64_t>>(hole_info.offset);
+                fields->at(2) = std::make_shared<ConstTypeField<uint64_t>>(hole_info.size);
+                auto tuple = std::make_shared<FieldTuple>(fields, nullptr);
+
+                // insert the tuple into the extent
+                auto row = extent->append();
+                MutableTuple(_global_vacuum_schema->get_mutable_fields(), &row).assign(std::move(tuple));
+            }
+            auto response = extent->async_flush(handle);
+            response.wait();
+
+            xid_it = xid_map.erase(xid_it);       // erase and advance in one step
+        }
+
+        // if everything for this file was committed, remove the file entry too
+        if (xid_map.empty()) {
+            file_it = expired_extents_map.erase(file_it);
+        } else {
+            ++file_it;
+        }
+    }
+}
+
+void
 Vacuumer::_update_global_vacuum_file(const ExtentMap& expired_extents_map)
 {
     // Lets persist expired extents
@@ -111,25 +169,7 @@ Vacuumer::expire_extent(const std::filesystem::path &file,
     //                  each XID?
 
     std::unique_lock lock(_mutex);
-    // Lets persist expired extent
-    auto handle = IOMgr::get_instance()->open(_global_vacuum_file, IOMgr::IO_MODE::APPEND, true);
-
-    // Create header with XID of the expired extent(s)
-    ExtentHeader header(ExtentType(), xid, _global_vacuum_schema->row_size(), _global_vacuum_schema->field_types());
-    auto extent = std::make_shared<Extent>(std::move(header));
-
-    // Write the extent using the global vacuum schema
-    auto fields = std::make_shared<FieldArray>(3);
-    fields->at(0) = std::make_shared<ConstTypeField<std::string>>(file);
-    fields->at(1) = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
-    fields->at(2) = std::make_shared<ConstTypeField<uint64_t>>(size);
-    auto tuple = std::make_shared<FieldTuple>(fields, nullptr);
-
-    // insert the tuple into the extent
-    auto row = extent->append();
-    MutableTuple(_global_vacuum_schema->get_mutable_fields(), &row).assign(std::move(tuple));
-    auto response = extent->async_flush(handle);
-    response.wait();
+    _extent_map[file][xid].emplace_back(extent_id, size);
 }
 
 void

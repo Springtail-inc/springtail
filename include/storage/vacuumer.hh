@@ -45,6 +45,14 @@ public:
      */
     void expire_snapshot(uint64_t db_id, const std::filesystem::path &table_dir, uint64_t xid);
 
+    /**
+     * @brief Persist expired extents upto committed_xid
+     *
+     * @param committed_xid XID upto which expired extents will
+     *        be written to the disk
+     */
+    void commit_expired_extents(uint64_t committed_xid);
+
 protected:
     /**
      * @brief Constructor, that inits the vacuumer thread
@@ -111,6 +119,7 @@ private:
     using SnapshotMap = std::map<uint64_t, std::map<uint64_t, SnapshotList>>;
 
     std::mutex _mutex; ///< Protects the internal maps
+    ExtentMap _extent_map; ///< Maps File -> XID -> list of expired extent
     SnapshotMap _snapshot_map; ///< Maps XID -> list of table snapshot directories
 
     /**
@@ -202,7 +211,12 @@ private:
     std::vector<HoleInfo> _get_partials_from_file(const std::filesystem::path &file);
 
     /**
-     * @brief Updates global vacuum file with the given extents map
+     * @brief Appends expired extents upto committed XID to disk
+     */
+    void _commit_expired_extents(ExtentMap& expired_extents_map, uint64_t committed_xid);
+
+    /**
+     * @brief Overwrites global vacuum file with the given extents map
      *
      * @param expired_extents_map  Expired extents map to be written
      */
