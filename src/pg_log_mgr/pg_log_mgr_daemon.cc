@@ -23,6 +23,8 @@ int main(int argc, char *argv[])
     desc.add_options()("help,h", "Help message.");
     desc.add_options()("daemonize", "Start the server as a daemon");
 
+    std::string vaccumer_namespace = "pg_log_mgr";
+
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
 
@@ -39,6 +41,10 @@ int main(int argc, char *argv[])
         pidfile = "pg_log_mgr.pid";
     }
 
+    springtail_store_arguments(ServiceId::VacuumerId,
+        {
+            {"vacuum_global_ns", std::any(vaccumer_namespace)}
+        });
     springtail_init_daemon("pg_log_mgr", pidfile,
                            LOG_ALL ^ (LOG_PG_REPL | LOG_PG_LOG_MGR_DATA | LOG_STORAGE));
     pg_log_mgr::PgLogCoordinator::get_instance()->init();

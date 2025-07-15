@@ -13,6 +13,8 @@ Vacuumer::_init()
 {
     _vacuumer_thread = std::thread(&Vacuumer::_internal_run, this);
 
+    std::string vacuum_global_namespace = springtail_retreive_argument<std::string>(ServiceId::VacuumerId, "vacuum_global_ns");
+
     // get the configs for vacuum - size threshold, block size and base dir
     nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
 
@@ -31,7 +33,7 @@ Vacuumer::_init()
         _hole_punch_block_size = HOLE_PUNCH_BLOCK_SIZE;
     }
     Json::get_to<std::filesystem::path>(vacuum_config_json, "vacuum_dir", _vacuum_data_base);
-    _vacuum_data_base = Properties::make_absolute_path(_vacuum_data_base);
+    _vacuum_data_base = Properties::make_absolute_path(_vacuum_data_base) / vacuum_global_namespace;
     std::filesystem::create_directories(_vacuum_data_base);
     _global_vacuum_file = _vacuum_data_base / "0.global";
 
