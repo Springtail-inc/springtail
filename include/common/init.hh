@@ -161,7 +161,11 @@ class DefaultLoggingRunner : public ServiceRunner {
 public:
     DefaultLoggingRunner() : ServiceRunner("Default Logging") {}
 
-    void stop() override { logging::Logger::get_instance()->shutdown(); }
+    void stop() override
+    {
+        open_telemetry::OpenTelemetry::shutdown();
+        logging::Logger::get_instance()->shutdown();
+    }
 };
 
 // Open Telemetry init
@@ -174,8 +178,6 @@ public:
         open_telemetry::OpenTelemetry::get_instance()->init(_name.value_or(""));
         return true;
     }
-
-    void stop() override { open_telemetry::OpenTelemetry::shutdown(); }
 
 private:
     const std::optional<std::string> &_name;
