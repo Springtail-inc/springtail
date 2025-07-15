@@ -45,12 +45,6 @@ public:
      */
     void expire_snapshot(uint64_t db_id, const std::filesystem::path &table_dir, uint64_t xid);
 
-    /**
-     * @brief Persist expired extents
-     */
-    void commit_expired_extents();
-
-
 protected:
     /**
      * @brief Constructor, that inits the vacuumer thread
@@ -117,7 +111,6 @@ private:
     using SnapshotMap = std::map<uint64_t, std::map<uint64_t, SnapshotList>>;
 
     std::mutex _mutex; ///< Protects the internal maps
-    ExtentMap _extent_map; ///< Maps XID -> File -> list of expired extent
     SnapshotMap _snapshot_map; ///< Maps XID -> list of table snapshot directories
 
     /**
@@ -128,6 +121,7 @@ private:
 
     std::filesystem::path _vacuum_data_base; ///< The base directory for vacuum directories
     std::filesystem::path _global_vacuum_file; ///< Global vacuum file
+    std::filesystem::path _global_vacuum_runfile; ///< Global vacuum file for current run
 
     RedisDDL _redis_ddl; ///< Interface to the DDL structures in Redis.
 
@@ -200,11 +194,18 @@ private:
                 std::vector<HoleInfo> partials);
 
     /**
-     * brief Get hold partials from the file hashed by the given file path
+     * @brief Get hold partials from the file hashed by the given file path
      *
      * @param file     partials belong to this file
      * @return Partials vector
      */
     std::vector<HoleInfo> _get_partials_from_file(const std::filesystem::path &file);
+
+    /**
+     * @brief Updates global vacuum file with the given extents map
+     *
+     * @param expired_extents_map  Expired extents map to be written
+     */
+    void _update_global_vacuum_file(const ExtentMap& expired_extents_map);
 };
 }

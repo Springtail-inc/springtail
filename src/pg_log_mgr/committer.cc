@@ -287,9 +287,6 @@ namespace springtail::committer {
                 result->notify_tracker(xid);
             }
 
-            Vacuumer::get_instance()->commit_expired_extents();
-
-            LOG_DEBUG(LOG_COMMITTER, "Committed Vacuum: {}@{}", db_id, xid);
             LOG_DEBUG(LOG_COMMITTER, "XID completed: {}@{}", db_id, xid);
         }
 
