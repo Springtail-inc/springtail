@@ -274,7 +274,7 @@ namespace {
         auto fields = table->extent_schema()->get_fields();
         auto row_i = table->begin();
 
-        auto tuple_row = sys_tbl::TableNames::Data::tuple(90000, "x", 100000, 2, 2, true, 0, "", "", false, false);
+        auto tuple_row = sys_tbl::TableNames::Data::tuple(90000, "x", 100000, 2, 2, true, std::nullopt, std::nullopt, std::nullopt, false, false);
         auto table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
@@ -284,32 +284,32 @@ namespace {
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "parent_partition_table", 100000, 5, 5, true, 0, "BY LIST (role)", "", false, false);
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "parent_partition_table", 100000, 5, 5, true, std::nullopt, "BY LIST (role)", std::nullopt, false, false);
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "parent_partition_alter_table", 100000, 7, 7, true, 0, "BY LIST (role)", "", false, false);
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "parent_partition_alter_table", 100000, 7, 7, true, std::nullopt, "BY LIST (role)", std::nullopt, false, false);
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "child_partition_table", 100001, 6, 6, true, 100000, "", "FOR VALUES IN ('Sibling')", false, false);
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "child_partition_table", 100001, 6, 6, true, 100000, std::nullopt, "FOR VALUES IN ('Sibling')", false, false);
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "child_partition_alter_table", 100001, 8, 8, true, 100000, "", "FOR VALUES IN ('Sibling')", false, false);
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "child_partition_alter_table", 100001, 8, 8, true, 100000, std::nullopt, "FOR VALUES IN ('Sibling')", false, false);
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "parent_partition_attach_table", 400000, 11, 11, true, 0, "BY LIST (role)", "", false, false);
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "parent_partition_attach_table", 400000, 11, 11, true, std::nullopt, "BY LIST (role)", std::nullopt, false, false);
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
         ++row_i;++row_i;
-        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "child_partition_attach_table", 500001, 14, 14, true, 400000, "", "FOR VALUES IN ('Sibling')", false, false);
+        tuple_row = sys_tbl::TableNames::Data::tuple(90000, "child_partition_attach_table", 500001, 14, 14, true, 400000, std::nullopt, "FOR VALUES IN ('Sibling')", false, false);
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
 
@@ -410,7 +410,7 @@ namespace {
         auto row_i = table->begin();
 
         auto tuple_row = sys_tbl::TableNames::Data::tuple(
-            91000, "rls_table", 110000, 2, 2, true, 0, "", "", true, true
+            91000, "rls_table", 110000, 2, 2, true, std::nullopt, std::nullopt, std::nullopt, true, true
         );
         auto table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
@@ -418,7 +418,7 @@ namespace {
         // Verify RLS flags are now disabled
         ++row_i;
         tuple_row = sys_tbl::TableNames::Data::tuple(
-            91000, "rls_table", 110000, 3, 3, true, 0, "", "", false, false
+            91000, "rls_table", 110000, 3, 3, true, std::nullopt, std::nullopt, std::nullopt, false, false
         );
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
@@ -426,7 +426,7 @@ namespace {
         // Verify only rls_enabled is set
         ++row_i;
         tuple_row = sys_tbl::TableNames::Data::tuple(
-            91000, "rls_table", 110000, 4, 4, true, 0, "", "", true, false
+            91000, "rls_table", 110000, 4, 4, true, std::nullopt, std::nullopt, std::nullopt, true, false
         );
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);
@@ -434,7 +434,7 @@ namespace {
         // Verify only rls_forced is set
         ++row_i;
         tuple_row = sys_tbl::TableNames::Data::tuple(
-            91000, "rls_table", 110000, 5, 5, true, 0, "", "", false, true
+            91000, "rls_table", 110000, 5, 5, true, std::nullopt, std::nullopt, std::nullopt, false, true
         );
         table_row = std::make_shared<FieldTuple>(fields, &*row_i);
         _compare_tuples(tuple_row, table_row);

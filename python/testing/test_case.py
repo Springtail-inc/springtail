@@ -595,6 +595,18 @@ class TestCase:
                             ORDER BY a.attnum ASC;"""
                 results['columns'] = self._execute_sql(cursor, sql, True, txn)
 
+                # retrieve the partition information for the table
+                sql = f"""SELECT
+                            CASE WHEN t.relispartition THEN
+                                (SELECT inhparent FROM pg_inherits WHERE inhrelid = t.oid)
+                            END as parent_oid,
+                            pg_get_expr(t.relpartbound, t.oid, TRUE) as partition_bound,
+                            pg_get_partkeydef(t.oid) as partition_key
+                        FROM pg_class t
+                        JOIN pg_catalog.pg_namespace n ON (t.relnamespace = n.oid)
+                        WHERE n.nspname = '{command["schema"]}' AND t.relname = '{command["table"]}';"""
+                results['partition_info'] = self._execute_sql(cursor, sql, True, txn)
+
                 # retrieve the primary index information for the table
                 sql = f"""SELECT unnest(conkey) AS column_id,
                                     generate_subscripts(conkey, 1) - 1 AS position
@@ -603,18 +615,6 @@ class TestCase:
                             JOIN pg_catalog.pg_namespace n ON (t.relnamespace = n.oid)
                             WHERE n.nspname = '{command["schema"]}' AND t.relname = '{command["table"]}' AND c.contype = 'p';"""
                 results['primary'] = self._execute_sql(cursor, sql, True, txn)
-
-                # retrieve the partition information for the table
-                sql = f"""SELECT
-                            COALESCE(CASE WHEN t.relispartition THEN
-                                (SELECT inhparent FROM pg_inherits WHERE inhrelid = t.oid)
-                            END, 0) as parent_oid,
-                            COALESCE(pg_get_expr(t.relpartbound, t.oid, TRUE), '') as partition_bound,
-                            COALESCE(pg_get_partkeydef(t.oid), '') as partition_key
-                        FROM pg_class t
-                        JOIN pg_catalog.pg_namespace n ON (t.relnamespace = n.oid)
-                        WHERE n.nspname = '{command["schema"]}' AND t.relname = '{command["table"]}';"""
-                results['partition_info'] = self._execute_sql(cursor, sql, True, txn)
 
                 sql = f"""SELECT c.oid as table_id,
                                     i.indexrelid as index_id,
@@ -825,9 +825,9 @@ class TestCase:
 
                 # retrieve the partition information for the table
                 sql = f"""WITH latest_table AS ({with_sql})
-                          SELECT COALESCE(parent_table_id, 0) AS parent_table_id,
-                                 COALESCE(partition_bound, '') AS partition_bound,
-                                 COALESCE(partition_key, '') AS partition_key FROM latest_table WHERE exists IS TRUE LIMIT 1;"""
+                          SELECT parent_table_id AS parent_table_id,
+                                 partition_bound AS partition_bound,
+                                 partition_key AS partition_key FROM latest_table WHERE exists IS TRUE LIMIT 1;"""
                 results['partition_info'] = self._execute_sql(cursor, sql, True, 'replica')
 
                 # retrieve the primary key data
