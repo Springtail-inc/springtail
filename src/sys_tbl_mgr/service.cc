@@ -1110,7 +1110,7 @@ Service::Finalize(grpc::ServerContext* context,
     _clear_namespace_info(request->db_id());
 
     // Commit expired extents in Vacuumer
-    Vacuumer::get_instance()->commit_expired_extents(request->xid());
+    Vacuumer::get_instance()->commit_expired_extents(request->db_id(), request->xid());
 
     span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;

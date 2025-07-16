@@ -268,7 +268,7 @@ namespace springtail::committer {
                 }
 
                 // Sync expired extents on the XID with vacuum
-                Vacuumer::get_instance()->commit_expired_extents(xid);
+                Vacuumer::get_instance()->commit_expired_extents(db_id, xid);
 
                 // commit the completed XID
                 xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null());

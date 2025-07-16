@@ -11,8 +11,11 @@ namespace springtail {
 void
 Vacuumer::_init()
 {
+    // Core thread of the vacuumer
     _vacuumer_thread = std::thread(&Vacuumer::_internal_run, this);
 
+    // Get the namespace for the vacuumer
+    // as it can run in different daemons
     std::string vacuum_global_namespace = springtail_retreive_argument<std::string>(ServiceId::VacuumerId, "vacuum_global_ns");
 
     // get the configs for vacuum - size threshold, block size and base dir
@@ -21,20 +24,26 @@ Vacuumer::_init()
     nlohmann::json vacuum_config_json;
     Json::get_to<nlohmann::json>(json, "vacuum_config", vacuum_config_json);
 
+    // Global vacuum size threshold to trigger vacuum
     if (vacuum_config_json.contains("vacuum_global_threshold")) {
         Json::get_to<uint64_t>(vacuum_config_json, "vacuum_global_threshold", _vacuum_global_threshold);
     } else {
         _vacuum_global_threshold = VACUUM_THRESHOLD_SIZE;
     }
 
+    // Block size to hole-punch
     if (vacuum_config_json.contains("hole_punch_block_size")) {
         Json::get_to<uint64_t>(vacuum_config_json, "hole_punch_block_size", _hole_punch_block_size);
     } else {
         _hole_punch_block_size = HOLE_PUNCH_BLOCK_SIZE;
     }
+
+    // Vacuum base dir
     Json::get_to<std::filesystem::path>(vacuum_config_json, "vacuum_dir", _vacuum_data_base);
     _vacuum_data_base = Properties::make_absolute_path(_vacuum_data_base) / vacuum_global_namespace;
     std::filesystem::create_directories(_vacuum_data_base);
+
+    // Global vacuum base and run files
     _global_vacuum_file = _vacuum_data_base / "0.global";
     _global_vacuum_runfile = _vacuum_data_base / "0.global.run";
 
@@ -42,8 +51,9 @@ Vacuumer::_init()
     // Global vacuum schema
     std::vector<SchemaColumn> global_vacuum_columns({
             { "file", 0, SchemaType::TEXT, 0, false, 0 },
-            { "offset", 1, SchemaType::UINT64, 0, false, 1 },
-            { "size", 2, SchemaType::UINT64, 0, false }
+            { "offset", 1, SchemaType::UINT64, 0, false, 1},
+            { "size", 2, SchemaType::UINT64, 0, false},
+            { "file_dropped", 3, SchemaType::BOOLEAN, 0, false}
             });
     _global_vacuum_schema = std::make_shared<ExtentSchema>(global_vacuum_columns);
 
@@ -64,90 +74,197 @@ Vacuumer::_internal_shutdown()
 }
 
 void
-Vacuumer::commit_expired_extents(uint64_t committed_xid)
+Vacuumer::commit_expired_extents(uint64_t db_id, uint64_t committed_xid)
 {
     std::unique_lock lock(_mutex);
-    _commit_expired_extents(_extent_map, committed_xid);
-}
 
-void
-Vacuumer::_commit_expired_extents(ExtentMap& expired_extents_map, uint64_t committed_xid)
-{
     // Lets persist expired extents
     auto handle = IOMgr::get_instance()->open(_global_vacuum_file, IOMgr::IO_MODE::APPEND, true);
 
-    // iterate files
-    for (auto file_it = expired_extents_map.begin(); file_it != expired_extents_map.end(); )
-    {
-        auto& xid_map = file_it->second;          // ordered map< uint64_t, Extents >
-        auto  xid_it  = xid_map.begin();
-
-        // iterate xids for this file
-        while (xid_it != xid_map.end())
+    if (!_extent_map.empty()) {
+        // iterate files
+        for (auto file_it = _extent_map.begin(); file_it != _extent_map.end(); )
         {
-            // Process only till committed XID
-            if (xid_it->first > committed_xid) {
-                break;
+            // ordered map< uint64_t, Extents >
+            auto& xid_map = file_it->second;
+            auto  xid_it  = xid_map.begin();
+
+            // iterate xids for this file
+            while (xid_it != xid_map.end())
+            {
+                // Process only till committed XID
+                if (xid_it->first > committed_xid) {
+                    break;
+                }
+
+                // Create extent with hole list
+                auto extent = _create_extent_using_hole_list(xid_it->first, file_it->first, xid_it->second);
+
+                // Lets get the dropped snapshots at this XID
+                // and add to the same extent
+                auto snapshot_db_entry = _snapshot_map.find(db_id);
+                if (snapshot_db_entry != _snapshot_map.end()) {
+                    auto& snapshot_xid_map = snapshot_db_entry->second;
+
+                    auto snapshot_xid_entry = snapshot_xid_map.find(xid_it->first);
+                    if (snapshot_xid_entry != snapshot_xid_map.end()) {
+                        SnapshotList& snapshot_list = snapshot_xid_entry->second;
+                        _upsert_extent_using_snapshot_list(xid_it->first, snapshot_list, extent);
+                    }
+                }
+
+                // Flush to disk
+                auto response = extent->async_flush(handle);
+                response.wait();
+
+                // erase and advance in one step
+                xid_it = xid_map.erase(xid_it);
             }
 
-            // Create header with XID of the expired extent(s)
-            ExtentHeader header(ExtentType(), xid_it->first, _global_vacuum_schema->row_size(), _global_vacuum_schema->field_types());
-            auto extent = std::make_shared<Extent>(std::move(header));
-
-            // Write the extents using the global vacuum schema
-            for (const auto& hole_info: xid_it->second) {
-                auto fields = std::make_shared<FieldArray>(3);
-                fields->at(0) = std::make_shared<ConstTypeField<std::string>>(file_it->first);
-                fields->at(1) = std::make_shared<ConstTypeField<uint64_t>>(hole_info.offset);
-                fields->at(2) = std::make_shared<ConstTypeField<uint64_t>>(hole_info.size);
-                auto tuple = std::make_shared<FieldTuple>(fields, nullptr);
-
-                // insert the tuple into the extent
-                auto row = extent->append();
-                MutableTuple(_global_vacuum_schema->get_mutable_fields(), &row).assign(std::move(tuple));
+            // if everything for this file was committed, remove the file entry too
+            if (xid_map.empty()) {
+                file_it = _extent_map.erase(file_it);
+            } else {
+                ++file_it;
             }
-            auto response = extent->async_flush(handle);
-            response.wait();
-
-            xid_it = xid_map.erase(xid_it);       // erase and advance in one step
         }
+    } else {
+        // If only drop happened at an XID, there is a possibility
+        // that only snapshot map will have details assuming
+        // all records up to XID-1 are flushed to disk
+        auto snapshot_db_entry = _snapshot_map.find(db_id);
+        if (snapshot_db_entry != _snapshot_map.end()) {
+            auto& snapshot_xid_map = snapshot_db_entry->second;
+            auto snapshot_xid_entry = snapshot_xid_map.begin();
 
-        // if everything for this file was committed, remove the file entry too
-        if (xid_map.empty()) {
-            file_it = expired_extents_map.erase(file_it);
-        } else {
-            ++file_it;
+            // Flush only the snapshot deletion up to the committed XID
+            while (snapshot_xid_entry != snapshot_xid_map.end()) {
+                if (snapshot_xid_entry->first > committed_xid) {
+                    break;
+                }
+                SnapshotList& snapshot_list = snapshot_xid_entry->second;
+
+                // Create extent with snapshot deletion records
+                auto extent = _upsert_extent_using_snapshot_list(snapshot_xid_entry->first, snapshot_list);
+
+                // Flush to disk
+                auto response = extent->async_flush(handle);
+                response.wait();
+
+                // Erase and advance
+                snapshot_xid_entry = snapshot_xid_map.erase(snapshot_xid_entry);
+            }
         }
     }
 }
 
+std::shared_ptr<Extent>
+Vacuumer::_create_empty_extent_with_header(uint64_t xid)
+{
+    // Create extent header with XID
+    // and return empty extent
+    ExtentHeader header(ExtentType(), xid, _global_vacuum_schema->row_size(), _global_vacuum_schema->field_types());
+    auto extent = std::make_shared<Extent>(std::move(header));
+    return extent;
+}
+
+std::shared_ptr<Extent>
+Vacuumer::_create_extent_using_hole_list(uint64_t xid, const std::filesystem::path& file, std::vector<HoleInfo> hole_list)
+{
+    auto extent = _create_empty_extent_with_header(xid);
+
+    // Write the extents using the global vacuum schema
+    for (const auto& hole_info: hole_list) {
+        auto fields = std::make_shared<FieldArray>(4);
+        fields->at(0) = std::make_shared<ConstTypeField<std::string>>(file);
+        fields->at(1) = std::make_shared<ConstTypeField<uint64_t>>(hole_info.offset);
+        fields->at(2) = std::make_shared<ConstTypeField<uint64_t>>(hole_info.size);
+        fields->at(3) = std::make_shared<ConstTypeField<bool>>(false);
+
+        auto tuple = std::make_shared<FieldTuple>(fields, nullptr);
+
+        // insert the tuple into the extent
+        auto row = extent->append();
+        MutableTuple(_global_vacuum_schema->get_mutable_fields(), &row).assign(std::move(tuple));
+    }
+    return extent;
+}
+
+std::shared_ptr<Extent>
+Vacuumer::_upsert_extent_using_snapshot_list(uint64_t xid, SnapshotList snapshot_list, std::shared_ptr<Extent> extent)
+{
+    // If extent was not passed, lets create new extent
+    if (extent == nullptr) {
+        extent = _create_empty_extent_with_header(xid);
+    }
+
+    // Write the snapshot deletion details using the global vacuum schema
+    for (const auto& snapshot_path : snapshot_list) {
+        auto fields = std::make_shared<FieldArray>(4);
+        fields->at(0) = std::make_shared<ConstTypeField<std::string>>(snapshot_path);
+        fields->at(1) = std::make_shared<ConstTypeField<uint64_t>>(0);
+        fields->at(2) = std::make_shared<ConstTypeField<uint64_t>>(0);
+        fields->at(3) = std::make_shared<ConstTypeField<bool>>(true);
+        auto tuple = std::make_shared<FieldTuple>(fields, nullptr);
+
+        // insert the tuple into the extent
+        auto row = extent->append();
+        MutableTuple(_global_vacuum_schema->get_mutable_fields(), &row).assign(std::move(tuple));
+    }
+
+    return extent;
+}
+
+
 void
-Vacuumer::_update_global_vacuum_file(const ExtentMap& expired_extents_map)
+Vacuumer::_update_global_vacuum_file(const ExtentMap& expired_extents_map,
+                                     const SnapshotMap& expired_snapshots_map)
 {
     // Lets persist expired extents
     auto handle = IOMgr::get_instance()->open(_global_vacuum_runfile, IOMgr::IO_MODE::APPEND, true);
-    for (const auto& [file, xid_map] : expired_extents_map) {
-        for (const auto& [xid, extents] : xid_map) {
 
-            // Create header with XID of the expired extent(s)
-            ExtentHeader header(ExtentType(), xid, _global_vacuum_schema->row_size(), _global_vacuum_schema->field_types());
-            auto extent = std::make_shared<Extent>(std::move(header));
-
-            // Write the extents using the global vacuum schema
-            for (const auto& hole_info: extents) {
-                auto fields = std::make_shared<FieldArray>(3);
-                fields->at(0) = std::make_shared<ConstTypeField<std::string>>(file);
-                fields->at(1) = std::make_shared<ConstTypeField<uint64_t>>(hole_info.offset);
-                fields->at(2) = std::make_shared<ConstTypeField<uint64_t>>(hole_info.size);
-                auto tuple = std::make_shared<FieldTuple>(fields, nullptr);
-
-                // insert the tuple into the extent
-                auto row = extent->append();
-                MutableTuple(_global_vacuum_schema->get_mutable_fields(), &row).assign(std::move(tuple));
-
+    if (!expired_extents_map.empty()) {
+        for (const auto& [file, xid_map] : expired_extents_map) {
+            // If the file was removed as part of table deletion
+            // skip maintaining in the global vacuum log
+            if (!std::filesystem::exists(file)) {
+                continue;
             }
-            auto response = extent->async_flush(handle);
-            response.wait();
+            for (const auto& [xid, extents] : xid_map) {
+
+                // Create extent with hole list
+                auto extent = _create_extent_using_hole_list(xid, file, extents);
+
+                // Lets get the dropped snapshots at this XID
+                auto db_id = _get_db_id_from_path(file);
+                auto snapshot_db_entry = expired_snapshots_map.find(db_id);
+                if (snapshot_db_entry != expired_snapshots_map.end()) {
+                    auto& snapshot_xid_map = snapshot_db_entry->second;
+                    auto snapshot_xid_entry = snapshot_xid_map.find(xid);
+
+                    // Update above extent with snapshot deletion list
+                    if (snapshot_xid_entry != snapshot_xid_map.end()) {
+                        auto& snapshot_list = snapshot_xid_entry->second;
+
+                        _upsert_extent_using_snapshot_list(xid, snapshot_list, extent);
+                    }
+                }
+
+                // Flush to disk
+                auto response = extent->async_flush(handle);
+                response.wait();
+            }
+        }
+    } else {
+        // If only snapshot deletion is pending after a vacuum run
+        for (const auto& [snapshot_db_id, snapshot_xid_map] : expired_snapshots_map) {
+            for (const auto& [snapshot_xid, snapshot_list] : snapshot_xid_map) {
+
+                // Create extent with snapshot deletion list and flush to disk
+                auto extent = _upsert_extent_using_snapshot_list(snapshot_xid, snapshot_list);
+                auto response = extent->async_flush(handle);
+                response.wait();
+            }
         }
     }
 
@@ -269,9 +386,33 @@ Vacuumer::_get_file_size(const std::filesystem::path& path) {
 std::string
 Vacuumer::_generate_flat_filename(const std::filesystem::path& filepath)
 {
-    std::filesystem::path parent = filepath.parent_path().filename(); // last_dir
-    std::filesystem::path file = filepath.filename();                 // filename
+    // Construct the file name in a flat fashion of the form:
+    // table_dir_name_filename_partials
+    // Eg: 1030830-0_0.idx_partials
+    std::filesystem::path parent = filepath.parent_path().filename();
+    std::filesystem::path file = filepath.filename();
     return parent.string() + "_" + file.string() + "_partials";
+}
+
+uint64_t
+Vacuumer::_get_db_id_from_path(const std::filesystem::path& path,
+                               const std::string& keyword)
+{
+    for (auto it = path.begin(); it != path.end(); ++it) {
+        if (*it == keyword) {
+            auto next = std::next(it);
+            if (next != path.end()) {
+                try {
+                    return static_cast<uint64_t>(std::stoull(next->string()));
+                } catch (...) {
+                    return std::numeric_limits<uint64_t>::max();
+                }
+            } else {
+                return std::numeric_limits<uint64_t>::max();
+            }
+        }
+    }
+    return std::numeric_limits<uint64_t>::max();
 }
 
 void
@@ -360,9 +501,13 @@ Vacuumer::_internal_run()
         std::unique_lock lock(_mutex);
 
         ExtentMap expired_extents_map;
+        SnapshotMap expired_snapshots_map;
 
         // Lets read from global vacuum file if no expired extents is memory (that got written to the global file)
+
         if (_get_file_size(_global_vacuum_file) > _vacuum_global_threshold) {
+
+            /* --------------------------------- Populate maps from global vacuum log -------------------------- */
             auto handle = IOMgr::get_instance()->open(_global_vacuum_file, IOMgr::IO_MODE::READ, true);
             int start_offset = 0;
             auto response = handle->read(start_offset);
@@ -370,19 +515,31 @@ Vacuumer::_internal_run()
             auto file_f = _global_vacuum_schema->get_field("file");
             auto offset_f = _global_vacuum_schema->get_field("offset");
             auto size_f = _global_vacuum_schema->get_field("size");
+            auto file_dropped_f = _global_vacuum_schema->get_field("file_dropped");
 
             while (!response->data.empty()) {
                 auto extent = std::make_shared<Extent>(response->data);
                 for (auto &row : *extent) {
+                    auto file_dropped = file_dropped_f->get_bool(&row);
                     auto file = file_f->get_text(&row);
-                    auto offset = offset_f->get_uint64(&row);
-                    auto size = size_f->get_uint64(&row);
                     auto xid = extent->header().xid;
-                    expired_extents_map[file][xid].emplace_back(offset, size);
+                    // Add to snapshot_map to process outside hole-punch if the file is dropped,
+                    // otherwise add to extents map
+                    if (file_dropped) {
+                        auto db_id = _get_db_id_from_path(file);
+                        expired_snapshots_map[db_id][xid].emplace_back(file);
+                    } else {
+                        auto offset = offset_f->get_uint64(&row);
+                        auto size = size_f->get_uint64(&row);
+                        expired_extents_map[file][xid].emplace_back(offset, size);
+                    }
                 }
                 start_offset = response->next_offset;
                 response = handle->read(start_offset);
             }
+            /* ----------------------------------End of reading global vacuum log ------------------------------ */
+
+            /* --------------------------------- Hole punch flow ----------------------------------------------- */
             for (auto file_it = expired_extents_map.begin(); file_it != expired_extents_map.end(); ) {
                 const std::string& file = file_it->first;
                 auto& xid_map = file_it->second;
@@ -459,66 +616,67 @@ Vacuumer::_internal_run()
                     ++file_it;
                 }
             }
+            /* -------------- End of Hole punch flow ------------------------------------------------------------*/
 
-            if (expired_extents_map.empty()) {
+            /* --------------- Snapshot deletion flow -----------------------------------------------------------*/
+            // expire snapshots through the min XID
+            for (auto db_it = expired_snapshots_map.begin(); db_it != expired_snapshots_map.end(); ) {
+                //uint64_t cutoff_xid = get_vacuum_cutoff_xid(file);  // Get safest XID to vacuum till that point
+                auto& xid_map = db_it->second;
+
+                for (auto xid_it = xid_map.begin(); xid_it != xid_map.end(); ) {
+                    // if everything to expire still in-use, stop
+                    //if (xid_it->first > cutoff_xid) {
+                    //    break;
+                    //}
+                    // retrieve a list of snapshots to expire
+                    SnapshotList& dirs = xid_it->second;
+
+                    bool all_deleted = true;
+
+                    // clear the table directories associated with the expired snapshots
+                    for (const auto& dir : dirs) {
+                        std::error_code ec;
+
+                        if (!std::filesystem::exists(dir, ec)) {
+                            continue;  // skip missing dir
+                        }
+
+                        // recursively delete
+                        std::filesystem::remove_all(dir, ec);
+                        if (ec) {
+                            LOG_ERROR("remove_all() failed: {}", ec.message());
+                            all_deleted = false;
+                        }
+                    }
+
+                    if (all_deleted) {
+                        dirs.clear();
+                        xid_it = xid_map.erase(xid_it);
+                    } else {
+                        ++xid_it;  // skip erasing; keep the entry for next attempt
+                    }
+                }
+
+                // If the db entry is now empty, erase it; otherwise advance.
+                if (xid_map.empty()) {
+                    db_it = expired_snapshots_map.erase(db_it);
+                } else {
+                    ++db_it;
+                }
+            }
+            /*------------- End of snapshot deletion flow ---------------------------------------------------*/
+
+
+            // Rotate Global vacuum log
+            // Truncate if everything is processed,
+            // otherwise overwritted global log with remaining records
+            if (expired_extents_map.empty() && expired_snapshots_map.empty()) {
                 _truncate_file(_global_vacuum_file, 0);
             } else {
-                _update_global_vacuum_file(expired_extents_map);
-            }
-        }
-
-
-        // expire snapshots through the min XID
-        for (auto db_it = _snapshot_map.begin(); db_it != _snapshot_map.end(); ) {
-            //uint64_t cutoff_xid = get_vacuum_cutoff_xid(file);  // Get safest XID to vacuum till that point
-            auto& xid_map = db_it->second;
-
-            for (auto xid_it = xid_map.begin(); xid_it != xid_map.end(); ) {
-                // if everything to expire still in-use, stop
-                //if (xid_it->first > cutoff_xid) {
-                //    break;
-                //}
-                // retrieve a list of snapshots to expire
-                SnapshotList& dirs = xid_it->second;
-
-                // unlock and expire the extents in the list
-                lock.unlock();
-
-                bool all_deleted = true;
-
-                // clear the table directories associated with the expired snapshots
-                for (const auto& dir : dirs) {
-                    std::error_code ec;
-
-                    if (!std::filesystem::exists(dir, ec)) {
-                        continue;  // skip missing dir
-                    }
-
-                    // recursively delete
-                    std::filesystem::remove_all(dir, ec);
-                    if (ec) {
-                        LOG_ERROR("remove_all() failed: {}", ec.message());
-                        all_deleted = false;
-                    }
-                }
-
-                // reacquire the lock before proceeding
-                lock.lock();
-
-                if (all_deleted) {
-                    dirs.clear();
-                    xid_it = xid_map.erase(xid_it);
-                } else {
-                    ++xid_it;  // skip erasing; keep the entry for next attempt
-                }
+                _update_global_vacuum_file(expired_extents_map, expired_snapshots_map);
             }
 
-            // If the db entry is now empty, erase it; otherwise advance.
-            if (xid_map.empty()) {
-                db_it = _snapshot_map.erase(db_it);
-            } else {
-                ++db_it;
-            }
         }
         lock.unlock();
     }

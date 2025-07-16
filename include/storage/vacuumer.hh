@@ -48,10 +48,11 @@ public:
     /**
      * @brief Persist expired extents upto committed_xid
      *
+     * @param db_id Database ID
      * @param committed_xid XID upto which expired extents will
      *        be written to the disk
      */
-    void commit_expired_extents(uint64_t committed_xid);
+    void commit_expired_extents(uint64_t db_id, uint64_t committed_xid);
 
 protected:
     /**
@@ -186,6 +187,18 @@ private:
     int64_t _get_file_size(const std::filesystem::path& path);
 
     /**
+     * @brief Returns db_id following a keyword in a filesystem path.
+     *
+     * Searches for the given keyword (default: "table") in the path and returns
+     * the next component as a uint64_t. Returns UINT64_MAX if not found or invalid.
+     *
+     * @param path     Filesystem path to search.
+     * @param keyword  Keyword to look for (default is "table").
+     * @return db_id after the keyword, or UINT64_MAX on failure.
+     */
+    uint64_t _get_db_id_from_path(const std::filesystem::path& path,
+                                 const std::string& keyword = "table");
+    /**
      * @brief Generate file name using the input file name and parent dir
      *
      * @param Input file name
@@ -211,15 +224,42 @@ private:
     std::vector<HoleInfo> _get_partials_from_file(const std::filesystem::path &file);
 
     /**
-     * @brief Appends expired extents upto committed XID to disk
-     */
-    void _commit_expired_extents(ExtentMap& expired_extents_map, uint64_t committed_xid);
-
-    /**
      * @brief Overwrites global vacuum file with the given extents map
      *
-     * @param expired_extents_map  Expired extents map to be written
+     * @param expired_extents_map   Expired extents map to be written
+     * @param expired_snapshots_map Expired snapshots map to be written
      */
-    void _update_global_vacuum_file(const ExtentMap& expired_extents_map);
+    void _update_global_vacuum_file(const ExtentMap& expired_extents_map, const SnapshotMap& expired_snapshots_map);
+
+    /**
+     * @brief Create empty extent with xid in the header
+     *
+     * @param xid XID to be added in the extent header
+     * @return shared_ptr<Extent>
+     */
+    std::shared_ptr<Extent> _create_empty_extent_with_header(uint64_t xid);
+
+    /*
+     * @brief Create extent and populate hole list
+     *
+     * @param xid       XID to be added in the extent header
+     * @param file      File for which extents to be hole-punched
+     * @param hole_list extents to be hole-punched, to be added in the extent
+     *
+     * @return shared_ptr<Extent>
+     */
+    std::shared_ptr<Extent> _create_extent_using_hole_list(uint64_t xid, const std::filesystem::path& file, std::vector<HoleInfo> hole_list);
+
+    /*
+     * @brief Create extent and populate snapshot deletion list
+     *
+     * @param xid           XID to be added in the extent header
+     * @param snapshot_list snpshot deletion list to be added to the extent
+     * @param extent        Extent if present, will be used to add the snapshot details
+     *
+     * @return shared_ptr<Extent>
+     */
+    std::shared_ptr<Extent> _upsert_extent_using_snapshot_list(uint64_t xid, SnapshotList snapshot_list, std::shared_ptr<Extent> extent=nullptr);
+
 };
 }
