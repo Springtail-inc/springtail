@@ -26,9 +26,8 @@ namespace springtail::pg_fdw {
     PgXidCollectorClient::send_data(uint64_t db_id, uint64_t xid)
     {
         pid_t process_id = getpid();
-        _msg.db_id = db_id;
-        _msg.xid = xid;
-        ssize_t rc = ::sendto(_fd, (void *)&_msg, sizeof(_msg), 0, (struct sockaddr *)&_addr, _addrlen);
+        PgXidCollectorMsg msg = {db_id, xid};
+        ssize_t rc = ::sendto(_fd, (void *)&msg, sizeof(msg), 0, (struct sockaddr *)&_addr, _addrlen);
         if (rc < 0) {
             PCHECK(errno == ECONNREFUSED) << "Failed with unexpected error code";
             LOG_ERROR("Failed to send a message to the server: db_id = {}, xid = {}", db_id, xid);
