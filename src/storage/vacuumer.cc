@@ -6,6 +6,8 @@
 #include <storage/vacuumer.hh>
 #include <storage/interval_tree.hh>
 
+#include <xid_mgr/xid_mgr_server.hh>
+
 namespace springtail {
 
 void
@@ -40,7 +42,7 @@ Vacuumer::_init()
     _vacuum_data_base = Properties::make_absolute_path(_vacuum_data_base) / vacuum_global_namespace;
     std::filesystem::create_directories(_vacuum_data_base);
 
-    // Global vacuum base and run files
+    // Global vacuum base and runfiles
     _global_vacuum_file = _vacuum_data_base / "0.global";
     _global_vacuum_runfile = _vacuum_data_base / "0.global.run";
 
@@ -399,7 +401,7 @@ Vacuumer::_generate_flat_filename(const std::filesystem::path& filepath)
     // Eg: 1030830-0_0.idx_partials
     std::filesystem::path parent = filepath.parent_path().filename();
     std::filesystem::path file = filepath.filename();
-    return parent.string() + "_" + file.string() + "_partials";
+    return parent.string() + "_" + file.string() + PARTIAL_FILE_SUFFIX;
 }
 
 uint64_t
@@ -499,8 +501,136 @@ Vacuumer::_get_partials_from_file(const std::filesystem::path &path) {
 }
 
 void
+Vacuumer::_recover_global_vacuum_file()
+{
+    // Map: db_id -> last_committed_xid
+    std::map<uint64_t, uint64_t> committed_xid_map;
+
+    // Read from global vacuum, write on runfile
+    auto handle = IOMgr::get_instance()->open(_global_vacuum_file, IOMgr::IO_MODE::READ, true);
+    auto runhandle = IOMgr::get_instance()->open(_global_vacuum_runfile, IOMgr::IO_MODE::WRITE, true);
+
+    int start_offset = 0;
+    auto response = handle->read(start_offset);
+    auto file_f = _global_vacuum_schema->get_field("file");
+
+    while (!response->data.empty()) {
+
+        // Get extent by extent, get XID and check if its <= last_committed_xid
+        // if so, copy that to runfile
+        auto extent = std::make_shared<Extent>(response->data);
+        CHECK_GT(extent->row_count(), 0);
+
+        auto xid = extent->header().xid;
+
+        // Since different extent can have different DB records
+        // get the db_id from the file path in the extent record
+        auto i = extent->begin();
+        auto &&row = *i;
+        auto file = file_f->get_text(&row);
+        auto db_id = _get_db_id_from_path(file);
+
+        CHECK_GT(db_id, 0);
+
+        // Get the last_committed_xid from the cache
+        // else get from XID server and cache it
+        auto db_it = committed_xid_map.find(db_id);
+        uint64_t last_committed_xid;
+        if (db_it != committed_xid_map.end()) {
+            last_committed_xid = db_it->second;
+        } else {
+            last_committed_xid = xid_mgr::XidMgrServer::get_instance()->get_committed_xid(db_id, 0);
+            committed_xid_map[db_id] = last_committed_xid;
+        }
+
+        /* skip writing to runfile if xid > last_committed_xid */
+        if (xid <= last_committed_xid) {
+            // Flush to runfile
+            auto write_response = extent->async_flush(runhandle);
+            write_response.wait();
+        }
+
+        // Move to the next extent
+        start_offset = response->next_offset;
+        response = handle->read(start_offset);
+    }
+
+    // Move runfile on to the global file
+    if (std::filesystem::exists(_global_vacuum_runfile)) {
+        std::filesystem::rename(_global_vacuum_runfile, _global_vacuum_file);
+    }
+}
+
+void
+Vacuumer::_run_recovery()
+{
+    /* ----------------------------------------------------------------------
+     * Various failure points and recovery noted below:
+     *
+     * State A: Empty state:
+     *   Global: Empty
+     *   Partials: Empty
+     * Recovery:
+     *   None
+     *
+     * State B: Partial run 1:
+     *   Global: Not-empty, Runfile present
+     *   Partials: No partials file
+     * Recovery:
+     *   Move global runfile to global file
+     *   Truncate global records with XID > committed_xid
+     *
+     * State C: Partial run 2:
+     *   Global: Not-empty, No runfile
+     *   Partials: partials runfile present
+     * Recovery:
+     *   Remove partials runfile
+     *   Truncate global records with XID > committed_xid
+     *
+     * State D: Start/End of run:
+     *   Global: Not-empty, no runfile present
+     *   Partials: Not-empty, no runfile present
+     * Recovery:
+     *   Truncate global records with XID > committed_xid
+    ----------------------------------------------------------------------*/
+
+    std::unique_lock lock(_mutex);
+    LOG_INFO("Vacuum Recovery started");
+
+    auto global_runfile_exists = std::filesystem::exists(_global_vacuum_runfile);
+    auto global_file_exists = std::filesystem::exists(_global_vacuum_file);
+
+    // State B
+    if (global_runfile_exists) {
+        std::filesystem::rename(_global_vacuum_runfile, _global_vacuum_file);
+    }
+
+    // State C: Remove any partials file
+    for (const auto& entry : std::filesystem::directory_iterator(_vacuum_data_base)) {
+        if (entry.is_regular_file()) {
+            const std::string filename = entry.path().filename().string();
+            if (filename.ends_with(PARTIAL_FILE_SUFFIX)) {
+                LOG_INFO("Removing {}", entry.path());
+                std::filesystem::remove(entry.path());
+            }
+        }
+    }
+
+    //State: B / C / D: Recover global vacuum file upto committed_xid
+    if (global_file_exists) {
+        _recover_global_vacuum_file();
+    }
+
+    LOG_INFO("Vacuum Recovery completed");
+}
+
+
+void
 Vacuumer::_internal_run()
 {
+    // Run recovery for first time
+    _run_recovery();
+
     while(!_shutdown) {
         // sleep for 1 second before trying to expire more data
         std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -681,7 +811,7 @@ Vacuumer::_internal_run()
             /*------------- End of snapshot deletion flow ---------------------------------------------------*/
 
 
-            // Rotate Global vacuum log
+            /*------------- Rotate Global vacuum log -------------------------------------------------------- */
             // Truncate if everything is processed,
             // otherwise overwritted global log with remaining records
             if (expired_extents_map.empty() && expired_snapshots_map.empty()) {
@@ -689,6 +819,7 @@ Vacuumer::_internal_run()
             } else {
                 _update_global_vacuum_file(expired_extents_map, expired_snapshots_map);
             }
+            /*------------- End of log rotation ------------------------------------------------------------- */
 
         }
         lock.unlock();

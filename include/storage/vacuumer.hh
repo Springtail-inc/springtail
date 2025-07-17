@@ -21,6 +21,7 @@ namespace springtail {
  */
 constexpr uint64_t HOLE_PUNCH_BLOCK_SIZE = 4 * 1024;
 constexpr uint64_t VACUUM_THRESHOLD_SIZE = 20 * 1024;
+constexpr std::string PARTIAL_FILE_SUFFIX = "_partials";
 
 /**
  * Vacuumer to clear dead extents and table snapshots.
@@ -285,5 +286,14 @@ private:
      */
     std::shared_ptr<Extent> _upsert_extent_using_snapshot_list(uint64_t xid, SnapshotList snapshot_list, std::shared_ptr<Extent> extent=nullptr);
 
+    /**
+     * @brief Recovery - to restore state to the last committed XID
+     */
+    void _run_recovery();
+
+    /**
+     * @brief Recover global vacuum file upto last committed XID
+     */
+    void _recover_global_vacuum_file();
 };
 }
