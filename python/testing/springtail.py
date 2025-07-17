@@ -561,8 +561,8 @@ def current_xid(props: Properties, db_id: int) -> int:
 
 def restart(props: Properties,
             build_dir: str,
-            db_id: int = None,
-            start_xid: int = None,
+            db_id: Optional[int] = None,
+            start_xid: Optional[int] = None,
             unarchive_logs: bool = False) -> None:
     # Stop the daemons
     print("\nStopping daemons...")
