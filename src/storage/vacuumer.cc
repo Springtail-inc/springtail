@@ -11,9 +11,6 @@ namespace springtail {
 void
 Vacuumer::_init()
 {
-    // Core thread of the vacuumer
-    _vacuumer_thread = std::thread(&Vacuumer::_internal_run, this);
-
     // Get the namespace for the vacuumer
     // as it can run in different daemons
     std::string vacuum_global_namespace = springtail_retreive_argument<std::string>(ServiceId::VacuumerId, "vacuum_global_ns");
@@ -63,6 +60,14 @@ Vacuumer::_init()
             { "size", 1, SchemaType::UINT64, 0, false }
             });
     _vacuum_file_schema = std::make_shared<ExtentSchema>(vacuum_file_columns);
+
+    // Vacuum enabled - true/false
+    Json::get_to<bool>(vacuum_config_json, "enabled", _vacuum_start_enabled);
+
+    if (_vacuum_start_enabled) {
+        // Core thread of the vacuumer
+        _vacuumer_thread = std::thread(&Vacuumer::_internal_run, this);
+    }
 }
 
 void
@@ -70,7 +75,10 @@ Vacuumer::_internal_shutdown()
 {
     // Set flag and wait for the thread to join
     _shutdown = true;
-    _vacuumer_thread.join();
+
+    if (_vacuum_start_enabled) {
+        _vacuumer_thread.join();
+    }
 }
 
 void
@@ -496,6 +504,11 @@ Vacuumer::_internal_run()
     while(!_shutdown) {
         // sleep for 1 second before trying to expire more data
         std::this_thread::sleep_for(std::chrono::seconds(1));
+
+        if (!_vacuum_run_enabled) {
+            // Vacuum turned off for run
+            continue;
+        }
 
         // lock while accessing the maps
         std::unique_lock lock(_mutex);

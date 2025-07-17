@@ -54,6 +54,20 @@ public:
      */
     void commit_expired_extents(uint64_t db_id, uint64_t committed_xid);
 
+    /**
+     * @brief Enable vacuum run
+     */
+    void enable_vacuum_run() {
+        _vacuum_run_enabled = true;
+    }
+
+    /**
+     * @brief Disable vacuum run
+     */
+    void disable_vacuum_run() {
+        _vacuum_run_enabled = false;
+    }
+
 protected:
     /**
      * @brief Constructor, that inits the vacuumer thread
@@ -104,6 +118,16 @@ private:
      * Global vacuum file threshold above which vacuum runs
      */
     uint64_t _vacuum_global_threshold;
+
+    /**
+     * Flag to start vacuum while booting
+     */
+    bool _vacuum_start_enabled = false;
+
+    /**
+     * Flag to control vacuum run
+     */
+    bool _vacuum_run_enabled = true;
 
     /**
      * Expired extents map
