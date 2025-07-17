@@ -104,6 +104,7 @@ private:
     {
         for (auto reverse_iter = _service_list.rbegin(); reverse_iter != _service_list.rend();
                 reverse_iter++) {
+            LOG_INFO("Stopping service {}", (*reverse_iter)->get_name());
             (*reverse_iter)->stop();
         }
         _service_list.clear();
