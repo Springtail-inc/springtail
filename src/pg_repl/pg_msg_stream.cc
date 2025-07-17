@@ -24,12 +24,20 @@ extern "C" {
 }
 
 namespace springtail {
+    PgMsgStreamReader::PgMsgStreamReader(std::vector<std::string> include_schemas)
+        :_included_schemas{std::move(include_schemas)}
+    {
+        std::ranges::sort(_included_schemas);
+    }
 
     PgMsgStreamReader::PgMsgStreamReader(const std::filesystem::path &start_file,
+                                         std::vector<std::string> included_schemas,
                                          uint64_t start_offset,
                                          uint64_t end_offset)
-        : _current_path(start_file), _current_offset(start_offset), _end_msg_offset(end_offset)
+        : _current_path(start_file), _included_schemas(std::move(included_schemas)),
+        _current_offset(start_offset), _end_msg_offset(end_offset)
     {
+        std::ranges::sort(_included_schemas);
         _open_file(start_file, start_offset);
     }
 
@@ -1320,7 +1328,7 @@ namespace springtail {
     }
 
     uint64_t
-    PgMsgStreamReader::scan_log(const std::filesystem::path &file, bool truncate)
+    PgMsgStreamReader::scan_log(const std::filesystem::path &file, const std::vector<std::string>& include_schemas, bool truncate)
     {
         // updated logic:
         // 1) scan for BEGIN/COMMIT records
@@ -1332,7 +1340,7 @@ namespace springtail {
         uint64_t end_lsn = INVALID_LSN;
         uint64_t offset = 0;
 
-        PgMsgStreamReader reader(file);
+        PgMsgStreamReader reader(file, include_schemas);
         do {
             auto msg = reader.read_message(filter);
 

@@ -396,6 +396,19 @@ namespace springtail {
         return db_ids;
     }
 
+    std::vector<std::string>
+    Properties::get_include_schemas(uint64_t db_id)
+    {
+        std::vector<std::string> include_schemas;
+
+        auto db_config = Properties::get_db_config(db_id);
+        auto include_json = db_config["include"];
+        if (include_json.contains("schemas") && include_json["schemas"].is_array()) {
+            include_schemas = include_json["schemas"];
+        }
+        return include_schemas;
+    }
+
     nlohmann::json
     Properties::_get_db_config(uint64_t db_id)
     {

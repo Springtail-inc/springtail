@@ -533,7 +533,7 @@ namespace springtail {
     void
     PgMsgLogGen::dump_file(const std::filesystem::path &file_name)
     {
-        PgMsgStreamReader reader(file_name);
+        PgMsgStreamReader reader(file_name, {});
         bool eos = false;
 
         int count = 0;

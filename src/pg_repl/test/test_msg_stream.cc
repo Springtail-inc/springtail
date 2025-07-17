@@ -69,7 +69,7 @@ namespace {
     {
         bool eos=false;
 
-        PgMsgStreamReader reader(_log_file);
+        PgMsgStreamReader reader(_log_file, {});
 
         int count = 0;
         while (count < 7) {
@@ -84,7 +84,7 @@ namespace {
     TEST_F(MsgStreamReader_Test, Offset)
     {
         bool eos=false;
-        PgMsgStreamReader reader(_log_file);
+        PgMsgStreamReader reader(_log_file, {});
 
         // read next message
         PgMsgPtr msg = reader.read_message({}, eos);
@@ -96,7 +96,7 @@ namespace {
     {
         bool eos=false;
 
-        PgMsgStreamReader reader(_log_file);
+        PgMsgStreamReader reader(_log_file, {});
 
         int count = 0;
         while (!eos) {
@@ -112,7 +112,7 @@ namespace {
     {
         bool eos=false;
 
-        PgMsgStreamReader reader(_log_file);
+        PgMsgStreamReader reader(_log_file, {});
 
         int count = 0;
         while (!eos) {

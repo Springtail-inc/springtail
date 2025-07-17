@@ -1,3 +1,4 @@
+#include <memory>
 #include <common/filesystem.hh>
 #include <common/logging.hh>
 #include <common/open_telemetry.hh>
@@ -894,8 +895,11 @@ namespace springtail::pg_log_mgr {
                              uint64_t start_offset,
                              int num_messages)
     {
+        DCHECK(!_reader);
+
         // init stream reader
-        _reader.set_file(path, start_offset);
+        _reader = std::make_unique<PgMsgStreamReader>(path,
+                Properties::get_include_schemas(_db_id), start_offset);
 
         static std::vector<char> filter = {
             pg_msg::MSG_BEGIN,
@@ -917,7 +921,7 @@ namespace springtail::pg_log_mgr {
         bool eos = false; // end of stream
         while (num_messages != 0 && !eos) {
             // read next message
-            PgMsgPtr msg = _reader.read_message(filter, eos);
+            PgMsgPtr msg = _reader->read_message(filter, eos);
             if (msg != nullptr) {
                 msg->pg_log_timestamp = timestamp;
 
