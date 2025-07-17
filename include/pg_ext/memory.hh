@@ -6,7 +6,7 @@
 #include <map>
 #include <absl/container/flat_hash_map.h>
 
-#include <pg_ext/export.hh>
+#include "export.hh"
 
 //// EXPORTED INTERFACES
 
@@ -80,7 +80,7 @@ private:
         MemoryBlock& operator=(const MemoryBlock&) = delete;
 
         // Allow moving
-        MemoryBlock(MemoryBlock&& other) noexcept 
+        MemoryBlock(MemoryBlock&& other) noexcept
             : memory(other.memory), size(other.size), pos(other.pos) {
             other.memory = nullptr;
             other.size = 0;
@@ -176,4 +176,4 @@ bool operator!=(const PGAllocator<T>&, const PGAllocator<U>&) noexcept {
     return false;
 }
 
-} // namespace pgext 
+} // namespace pgext
