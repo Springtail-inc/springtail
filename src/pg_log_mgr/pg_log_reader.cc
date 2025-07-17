@@ -25,6 +25,7 @@ namespace springtail::pg_log_mgr {
          _committed_xid(xid_mgr::XidMgrServer::get_instance()->get_committed_xid(db_id, 0)),
           _archive_logs(archive_logs),
           _repl_log_path(repl_log_path),
+          _reader(Properties::get_include_schemas(db_id)),
           _committer_queue(committer_queue),
           _msg_queue(queue_size),
           _index_requests_mgr(index_requests_mgr)
@@ -895,11 +896,8 @@ namespace springtail::pg_log_mgr {
                              uint64_t start_offset,
                              int num_messages)
     {
-        DCHECK(!_reader);
-
         // init stream reader
-        _reader = std::make_unique<PgMsgStreamReader>(path,
-                Properties::get_include_schemas(_db_id), start_offset);
+        _reader.set_file(path, start_offset);
 
         static std::vector<char> filter = {
             pg_msg::MSG_BEGIN,
@@ -921,7 +919,7 @@ namespace springtail::pg_log_mgr {
         bool eos = false; // end of stream
         while (num_messages != 0 && !eos) {
             // read next message
-            PgMsgPtr msg = _reader->read_message(filter, eos);
+            PgMsgPtr msg = _reader.read_message(filter, eos);
             if (msg != nullptr) {
                 msg->pg_log_timestamp = timestamp;
 

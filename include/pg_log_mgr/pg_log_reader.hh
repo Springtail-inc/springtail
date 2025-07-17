@@ -361,7 +361,7 @@ namespace springtail::pg_log_mgr {
         bool _archive_logs{false};     ///< This flag indicates that the reader should archive old logs instead of removing them
         std::filesystem::path _current_path; ///< current log file path
         std::filesystem::path _repl_log_path;   ///< Path for Postgres logs storage directory
-        std::unique_ptr<PgMsgStreamReader> _reader;     ///< msg stream reader for log file
+        PgMsgStreamReader _reader;     ///< msg stream reader for log file
         CommitterQueuePtr _committer_queue;  ///< shared queue for committer
         PgTransactionPtr _current_xact;      ///< current transaction
         std::map<uint32_t, PgTransactionPtr> _xact_map; ///< in progress xact map for streams

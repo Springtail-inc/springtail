@@ -956,6 +956,8 @@ namespace springtail {
         table_msg.lsn = message.lsn;
         json["table"].get_to(table_msg.table);
         json["schema"].get_to(table_msg.namespace_name);
+        DCHECK(json.contains("schema_id"));
+        json["schema_id"].get_to(table_msg.namespace_id);
         json["oid"].get_to(table_msg.oid);
         if (!json["parent_table_id"].is_null()) {
             json["parent_table_id"].get_to(table_msg.parent_table_id);

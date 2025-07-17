@@ -309,7 +309,7 @@ BEGIN
     -- Form the JSON containing the table information including column details, partition info etc
     table_info = json_build_object(
         'table_name', table_relname,
-        'table_namespace_id', table_namespace_id,
+        'table_namespace_id', table_namespace_id::bigint,
         'partition_bound', partition_bound,
         'partition_key', partition_key,
         'partition_data', partition_data,
@@ -373,6 +373,7 @@ BEGIN
             'oid', obj.objid::bigint,
             'obj', obj.object_type,
             'schema', obj.schema_name,
+            'schema_id', table_info->'table_namespace_id',
             'table', table_info->'table_name',
             'columns', table_info->'columns',
             'parent_table_id', table_info->'parent_table_id',
@@ -509,6 +510,7 @@ BEGIN
                 'oid', obj.objid::bigint,
                 'obj', obj.object_type,
                 'schema', obj.schema_name,
+                'schema_id', table_info->'table_namespace_id',
                 'table', table_info->'table_name',
                 'columns', table_info->'columns',
                 'parent_table_id', table_info->'parent_table_id',

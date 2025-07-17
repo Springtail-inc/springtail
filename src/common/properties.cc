@@ -406,6 +406,10 @@ namespace springtail {
         if (include_json.contains("schemas") && include_json["schemas"].is_array()) {
             include_schemas = include_json["schemas"];
         }
+        if (std::ranges::find(include_schemas, "*") != include_schemas.end()) {
+            // empty means include all schemas
+            return {};
+        }
         return include_schemas;
     }
 
