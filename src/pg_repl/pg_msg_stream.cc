@@ -27,6 +27,7 @@ namespace springtail {
     PgMsgStreamReader::PgMsgStreamReader(std::vector<std::string> include_schemas)
         :_included_schemas{std::move(include_schemas)}
     {
+        // for faster binary search
         std::ranges::sort(_included_schemas);
     }
 
@@ -37,6 +38,7 @@ namespace springtail {
         : _current_path(start_file), _included_schemas(std::move(included_schemas)),
         _current_offset(start_offset), _end_msg_offset(end_offset)
     {
+        // for faster binary search
         std::ranges::sort(_included_schemas);
         _open_file(start_file, start_offset);
     }
@@ -869,6 +871,12 @@ namespace springtail {
         json["oid"].get_to(msg.oid);
         json["schema"].get_to(msg.namespace_name);
         json["table_name"].get_to(msg.table_name);
+
+        if (!_included_schemas.empty() && !std::ranges::binary_search(_included_schemas, msg.namespace_name)) {
+            LOG_INFO("Create index skipped: {} {}\n", msg.table_name, msg.namespace_name);
+            return {};
+        }
+
         json["table_oid"].get_to(msg.table_oid);
         json["is_unique"].get_to(msg.is_unique);
         json["identity"].get_to(msg.index);
@@ -956,8 +964,16 @@ namespace springtail {
         table_msg.lsn = message.lsn;
         json["table"].get_to(table_msg.table);
         json["schema"].get_to(table_msg.namespace_name);
+
+        //check include schemas
+        if (!_included_schemas.empty() && !std::ranges::binary_search(_included_schemas, table_msg.namespace_name)) {
+            LOG_INFO("Create table skipped: {} {}\n", table_msg.table, table_msg.namespace_name);
+            return {};
+        }
+
         DCHECK(json.contains("schema_id"));
         json["schema_id"].get_to(table_msg.namespace_id);
+
         json["oid"].get_to(table_msg.oid);
         if (!json["parent_table_id"].is_null()) {
             json["parent_table_id"].get_to(table_msg.parent_table_id);
@@ -1015,12 +1031,19 @@ namespace springtail {
             CHECK_EQ(object_type, "table");
             return nullptr;
         }
-
+    
         drop_table_msg.xid = message.xid; // only valid in streaming mode
         drop_table_msg.lsn = message.lsn;
 
         json["oid"].get_to(drop_table_msg.oid);
         json["schema"].get_to(drop_table_msg.namespace_name);
+
+        //check include schemas
+        if (!_included_schemas.empty() && !std::ranges::binary_search(_included_schemas, drop_table_msg.namespace_name)) {
+            LOG_INFO("Drop table skipped: {} {}\n", drop_table_msg.table, drop_table_msg.namespace_name);
+            return {};
+        }
+
         json["name"].get_to(drop_table_msg.table);
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_TABLE);
@@ -1053,6 +1076,12 @@ namespace springtail {
         json["oid"].get_to(ns_msg.oid);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded create/alter namespace: json: {}", json.dump());
+
+        //check include schemas
+        if (!_included_schemas.empty() && !std::ranges::binary_search(_included_schemas, ns_msg.name)) {
+            LOG_INFO("Create namespace skipped: {}\n", ns_msg.name);
+            return {};
+        }
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_NAMESPACE);
         msg->msg.emplace<PgMsgNamespace>(ns_msg);
@@ -1098,6 +1127,12 @@ namespace springtail {
         json["name"].get_to(ns_msg.name);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded drop namespace: json: {}", json.dump());
+
+        //check include schemas
+        if (!_included_schemas.empty() && !std::ranges::binary_search(_included_schemas, ns_msg.name)) {
+            LOG_INFO("Drop namespace skipped: {}\n", ns_msg.name);
+            return {};
+        }
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_NAMESPACE);
         msg->msg.emplace<PgMsgNamespace>(ns_msg);

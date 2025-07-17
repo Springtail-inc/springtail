@@ -235,8 +235,8 @@ namespace springtail
 
     struct PgMsgNamespace {
         LSN_t lsn;
-        uint32_t oid;
-        int32_t xid; // pg xid; proto vers 2+ only if streaming
+        uint64_t oid;
+        uint64_t xid; // pg xid; proto vers 2+ only if streaming
         std::string name;
     };
 

@@ -231,6 +231,7 @@ namespace springtail {
         msg["oid"] = table_id;
         msg["obj"] = "table";
         msg["schema"] = "public";
+        msg["schema_id"] = 20000;
         msg["columns"] = _gen_table_schema(table_id, columns);
         msg["table"] = table_name;
 
@@ -248,6 +249,7 @@ namespace springtail {
         msg["oid"] = table_id;
         msg["obj"] = "table";
         msg["schema"] = "public";
+        msg["schema_id"] = 20000;
         msg["columns"] = _gen_table_schema(table_id, columns);
         msg["table"] = _table_id_to_name[table_id];
 

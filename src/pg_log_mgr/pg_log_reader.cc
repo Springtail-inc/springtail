@@ -1,4 +1,5 @@
 #include <memory>
+#include <thread>
 #include <common/filesystem.hh>
 #include <common/logging.hh>
 #include <common/open_telemetry.hh>
@@ -711,10 +712,21 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::CREATE_TABLE:
             {
                 auto &table_msg = std::get<PgMsgTable>(change->msg);
-                LOG_DEBUG(LOG_PG_LOG_MGR, "CREATE TABLE: xid={}, pg_xid={}, tid={}", xidlsn.xid,
-                          table_msg.xid, table_msg.oid);
+                LOG_DEBUG(LOG_PG_LOG_MGR, "CREATE TABLE: xid={}, pg_xid={}, tid={}, namespace={}", xidlsn.xid,
+                          table_msg.xid, table_msg.oid, table_msg.namespace_name);
 
-                std::string &&ddl_stmt = client->create_table(_db, xidlsn, table_msg);
+                PgMsgNamespace namespace_msg{xidlsn.lsn, table_msg.namespace_id, xidlsn.xid, table_msg.namespace_name};
+
+                // make sure that the namespace is created
+                std::string &&ddl_stmt = client->create_namespace(_db, xidlsn, namespace_msg);
+                nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
+
+                if (action.get<std::string>() != "no_change") {
+                    LOG_INFO("Table namespace created: {} {} {}", table_msg.table, table_msg.namespace_name, table_msg.namespace_id);
+                    redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                }
+
+                ddl_stmt = client->create_table(_db, xidlsn, table_msg);
                 redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 _exists_cache->insert(_db, table_msg.oid, true);
                 break;
