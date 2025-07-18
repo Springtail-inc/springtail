@@ -335,27 +335,16 @@ Vacuumer::hole_punch_file(const std::string& file,
 }
 
 uint64_t
-Vacuumer::_get_vacuum_cutoff_xid(const std::string& file)
+Vacuumer::_get_vacuum_cutoff_xid(uint64_t db_id)
 {
-    // XXX -- Deepak -- just realizing we need to retrieve the target XID for each DB separately
-    //                  since the XIDs are independent for each DB.  We may need to separate the
-    //                  individual tracking of the files per db and then use the information in
-    //                  the file path to determine which DB XID is appropriate for it, meaning
-    //                  we'll need to switch up the map structures to index on file first.
-    //                  Might not matter if we shift to a more on-disk approach.
-
-    // check the progress of the XID at the FDWs
     RedisDDL _redis_ddl;
 
-    // XXX: Can get the db_id from the file path, should we allow db_id in the map?
-    // Also need to find minium xid thats safe from FDW perspective
-    // (track inflight queries to take the call)
-    uint64_t target_xid = _redis_ddl.min_schema_xid(1);
+    // Cutoff XID for Vacuum = Minimum XID from (fdw, last_committed, index-build/drop)
+    uint64_t min_fdw_xid = _redis_ddl.min_fdw_xid(db_id);
+    uint64_t last_committed_xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
+    uint64_t min_index_xid = _redis_ddl.min_index_xid(db_id);
 
-    // XXX -- Deepak -- check the progress of the XID in the indexer
-    //                  we can't expire data if the indexer needs it
-
-    return target_xid;
+    return std::min({min_fdw_xid, last_committed_xid, min_index_xid});
 }
 
 void
@@ -687,7 +676,8 @@ Vacuumer::_internal_run()
             for (auto file_it = expired_extents_map.begin(); file_it != expired_extents_map.end(); ) {
                 const std::string& file = file_it->first;
                 auto& xid_map = file_it->second;
-                //uint64_t cutoff_xid = get_vacuum_cutoff_xid(file);  // Get safest XID to vacuum till that point
+                auto db_id = _get_db_id_from_path(file);
+                auto cutoff_xid = _get_vacuum_cutoff_xid(db_id);  // Get safest XID to vacuum till that point
 
                 IntervalTree<uint64_t> itree;
                 std::vector<uint64_t> xids_to_process;
@@ -700,9 +690,9 @@ Vacuumer::_internal_run()
 
                 // Step 2: Collect all extents from xids < cutoff_xid
                 for (const auto& [xid, extents] : xid_map) {
-                    //if (xid >= cutoff_xid) {
-                    //    break;
-                    //}
+                    if (xid >= cutoff_xid) {
+                        break;
+                    }
                     for (const auto& [offset, size] : extents) {
                         itree.insert(offset, offset + size);
                     }
@@ -765,14 +755,14 @@ Vacuumer::_internal_run()
             /* --------------- Snapshot deletion flow -----------------------------------------------------------*/
             // expire snapshots through the min XID
             for (auto db_it = expired_snapshots_map.begin(); db_it != expired_snapshots_map.end(); ) {
-                //uint64_t cutoff_xid = get_vacuum_cutoff_xid(file);  // Get safest XID to vacuum till that point
+                uint64_t cutoff_xid = _get_vacuum_cutoff_xid(db_it->first);  // Get safest XID to vacuum till that point
                 auto& xid_map = db_it->second;
 
                 for (auto xid_it = xid_map.begin(); xid_it != xid_map.end(); ) {
                     // if everything to expire still in-use, stop
-                    //if (xid_it->first > cutoff_xid) {
-                    //    break;
-                    //}
+                    if (xid_it->first >= cutoff_xid) {
+                        break;
+                    }
                     // retrieve a list of snapshots to expire
                     SnapshotList& dirs = xid_it->second;
 

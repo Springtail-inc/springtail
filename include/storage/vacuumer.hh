@@ -190,10 +190,10 @@ private:
     /**
      * @brief Get vacuum-safe XID for a DB
      *
-     * @param file File to punch
-     * @return XID until which extents can be punched
+     * @param db_id Database ID
+     * @return XID until which vacuum can run
      */
-    uint64_t _get_vacuum_cutoff_xid(const std::string& file);
+    uint64_t _get_vacuum_cutoff_xid(uint64_t db_id);
 
     /**
      * @brief Truncates file from the given offset
