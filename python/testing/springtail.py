@@ -614,6 +614,7 @@ def current_xid(props: Properties, db_id: int) -> int:
 
 def restart(props: Properties,
             build_dir: str,
+            db_id: Optional[int] = None,
             start_xid: Optional[int] = None,
             unarchive_logs: bool = False) -> None:
     # Stop the daemons
@@ -644,12 +645,12 @@ def restart(props: Properties,
                 xact_db_path = os.path.join(xact_path, db_dir)
                 move_files(os.path.join(xact_db_path, 'archive'), xact_db_path)
 
-    if start_xid is not None:
+    if db_id is not None and start_xid is not None:
         # roll start_xid back
         ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
         log_file = "/tmp/roll_back_" + str(ts) + ".log"
-        print(f"Running command: roll_back_xact_log; rolling back to xid: {start_xid}, output log: {log_file}")
-        run_command(os.path.join(build_dir, 'src/xid_mgr/roll_back_xact_log'), ['-p', xact_path, '-d', '1', '-a', 'true', '-x', str(start_xid)], log_file)
+        print(f"Running command: roll_back_xact_log; rolling back database {db_id} to xid: {start_xid}, output log: {log_file}")
+        run_command(os.path.join(build_dir, 'src/xid_mgr/roll_back_xact_log'), ['-p', xact_path, '-d', str(db_id), '-a', 'true', '-x', str(start_xid)], log_file)
 
     # start daemons with XID if specified
     print("\nStarting daemons...")

@@ -466,6 +466,14 @@ class TestCase:
             self._raise_failure(f'Unknown error: {e}')
 
 
+    def _get_db_id(self, db_name: str) -> Optional[int]:
+        """Get database id from the configuration for the given database name."""
+        configs = self._props.get_db_configs()
+        for item in configs:
+            if item['name'] == db_name:
+                return int(item['id'])
+        return None
+
     def _execute_command(self, command: dict, do_fetch: bool = False) -> Optional[dict]:
         """Execute a sql command or test directive.  When executing a
         SQL statement, will use the "txn" key to determine which
@@ -482,9 +490,11 @@ class TestCase:
 
         if command['type'] == 'recovery_point':
             # check the current XID and store it as a recovery point using the provided name
-            db_id = int(self._props.get_db_configs()[0]['id'])
+            txn = command['txn']
+            current_db = self._connections[txn]['current_db']
+            db_id = self._get_db_id(current_db)
             current_xid = springtail.current_xid(self._props, db_id)
-            self._recovery_points[command['name']] = current_xid
+            self._recovery_points[command['name']] = (db_id, current_xid)
 
         if command['type'] == 'force_recovery':
             # confirm we have a recorded recovery point
@@ -492,12 +502,12 @@ class TestCase:
                 self._raise_error(f'Tried to recover to undefined recovery point: {command["name"]}')
 
             # check the current XID and revert to an earlier target XID
-            target_xid = self._recovery_points[command['name']]
-            logging.debug(f'Force recovery to {target_xid}')
+            (target_db_id, target_xid) = self._recovery_points[command['name']]
+            logging.debug(f'Force recovery to database: {target_db_id}, xid: {target_xid}')
 
             # restart Springtail at the target XID
             springtail.restart(self._props, self._build_dir,
-                               start_xid=target_xid, unarchive_logs=True)
+                               db_id=target_db_id, start_xid=target_xid, unarchive_logs=True)
 
             # reconnect to the replica database
             self._cleanup_fdw_connections()
@@ -508,7 +518,7 @@ class TestCase:
         if command['type'] == 'restart':
             # restart Springtail at the target XID
             springtail.restart(self._props, self._build_dir,
-                               start_xid=None, unarchive_logs=True)
+                               db_id=None, start_xid=None, unarchive_logs=True)
 
             # reconnect to the replica database
             self._cleanup_fdw_connections()

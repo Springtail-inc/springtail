@@ -163,7 +163,7 @@ public:
 
     void stop() override
     {
-        open_telemetry::OpenTelemetry::shutdown();
+        open_telemetry::OpenTelemetry::shutdown_instance();
         logging::Logger::get_instance()->shutdown();
     }
 };
