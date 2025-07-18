@@ -20,7 +20,7 @@ target_link_libraries(springtail_storage
   PRIVATE lz4::lz4 xxHash::xxhash
   PUBLIC Boost::thread
          springtail_redis
-         springtail_xid_mgr
+         springtail_xid_mgr_client
          springtail_write_cache absl::check)
 
 

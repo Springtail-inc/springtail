@@ -6,7 +6,7 @@
 #include <storage/vacuumer.hh>
 #include <storage/interval_tree.hh>
 
-#include <xid_mgr/xid_mgr_server.hh>
+#include <xid_mgr/xid_mgr_client.hh>
 
 namespace springtail {
 
@@ -539,7 +539,7 @@ Vacuumer::_recover_global_vacuum_file()
         if (db_it != committed_xid_map.end()) {
             last_committed_xid = db_it->second;
         } else {
-            last_committed_xid = xid_mgr::XidMgrServer::get_instance()->get_committed_xid(db_id, 0);
+            last_committed_xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
             committed_xid_map[db_id] = last_committed_xid;
         }
 
@@ -575,7 +575,7 @@ Vacuumer::_run_recovery()
      *
      * State B: Partial run 1:
      *   Global: Not-empty, Runfile present
-     *   Partials: No partials file
+     *   Partials: No partials runfile
      * Recovery:
      *   Move global runfile to global file
      *   Truncate global records with XID > committed_xid
@@ -605,11 +605,11 @@ Vacuumer::_run_recovery()
         std::filesystem::rename(_global_vacuum_runfile, _global_vacuum_file);
     }
 
-    // State C: Remove any partials file
+    // State C: Remove any partials runfile
     for (const auto& entry : std::filesystem::directory_iterator(_vacuum_data_base)) {
         if (entry.is_regular_file()) {
             const std::string filename = entry.path().filename().string();
-            if (filename.ends_with(PARTIAL_FILE_SUFFIX)) {
+            if (filename.ends_with(PARTIAL_FILE_SUFFIX + ".run")) {
                 LOG_INFO("Removing {}", entry.path());
                 std::filesystem::remove(entry.path());
             }
@@ -649,6 +649,7 @@ Vacuumer::_internal_run()
         // Lets read from global vacuum file if no expired extents is memory (that got written to the global file)
 
         if (_get_file_size(_global_vacuum_file) > _vacuum_global_threshold) {
+            LOG_INFO("Running vacuum as the global log crossed threshold");
 
             /* --------------------------------- Populate maps from global vacuum log -------------------------- */
             auto handle = IOMgr::get_instance()->open(_global_vacuum_file, IOMgr::IO_MODE::READ, true);
@@ -821,6 +822,7 @@ Vacuumer::_internal_run()
             }
             /*------------- End of log rotation ------------------------------------------------------------- */
 
+            LOG_INFO("Vacuum completed");
         }
         lock.unlock();
     }
