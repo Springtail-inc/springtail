@@ -1,5 +1,6 @@
 #include <pg_ext/string.hh>
 #include <cctype>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -7,26 +8,44 @@
 #include <cwchar>
 
 char *lowerstr(const char *str) {
-    size_t len = strlen(str);
-    char *result = static_cast<char*>(malloc(len + 1));
-    if (!result) return NULL;
+    if (!str) return nullptr;
 
-    for (size_t i = 0; i < len; ++i)
-        result[i] = tolower((unsigned char)str[i]);
+    size_t len = std::strlen(str);
+    char *result = (char *)std::malloc(len + 1);
+    if (!result) return nullptr;
+
+    for (size_t i = 0; i < len; i++) {
+        result[i] = std::tolower((unsigned char)str[i]);
+    }
+
     result[len] = '\0';
-
     return result;
 }
 
 char *lowerstr_with_len(const char *str, int len) {
-    char *result = static_cast<char*>(malloc(len + 1));
-    if (!result) return NULL;
+    if (!str || len <= 0) return nullptr;
 
-    for (int i = 0; i < len; ++i)
-        result[i] = tolower((unsigned char)str[i]);
+    char *result = (char *)std::malloc(len + 1);
+    if (!result) return nullptr;
+
+    for (int i = 0; i < len; i++) {
+        result[i] = std::tolower((unsigned char)str[i]);
+    }
+
     result[len] = '\0';
-
     return result;
+}
+
+int pg_mblen(const char *mbstr) {
+    unsigned char c = (unsigned char)*mbstr;
+
+    if (c < 0x80) return 1;
+    else if ((c & 0xE0) == 0xC0) return 2;
+    else if ((c & 0xF0) == 0xE0) return 3;
+    else if ((c & 0xF8) == 0xF0) return 4;
+
+    // Invalid UTF-8 lead byte
+    return 1;
 }
 
 int pg_snprintf(char *str, size_t count, const char *fmt, ...) {
@@ -41,29 +60,72 @@ int pg_database_encoding_max_length(void) {
     return 4;
 }
 
-int pg_mblen(const char *mbstr) {
-    return mblen(mbstr, MB_CUR_MAX);
-}
+int pg_mb2wchar_with_len(const char *from, wchar_t *to, int len) {
+    int count = 0;
+    const unsigned char *s = (const unsigned char *)from;
 
-int pg_mb2wchar_with_len(const char *mbstr, wchar_t *wstr, int len) {
-    int wlen = 0;
-    while (len > 0) {
-        wchar_t wc;
-        int clen = mbtowc(&wc, mbstr, len);
-        if (clen == -1)
-            return -1; // error
-        if (wlen >= MB_CUR_MAX)
-            return -1; // too many characters
-        wstr[wlen] = wc;
-        wlen++;
+    while (len > 0 && *s) {
+        int mblen = pg_mblen((const char *)s);
+        if (mblen > len) break; // prevent buffer overrun
+
+        uint32_t wc = 0;
+        if (mblen == 1) {
+            wc = s[0];
+        } else if (mblen == 2) {
+            wc = ((s[0] & 0x1F) << 6) | (s[1] & 0x3F);
+        } else if (mblen == 3) {
+            wc = ((s[0] & 0x0F) << 12) | ((s[1] & 0x3F) << 6) | (s[2] & 0x3F);
+        } else if (mblen == 4) {
+            wc = ((s[0] & 0x07) << 18) |
+                 ((s[1] & 0x3F) << 12) |
+                 ((s[2] & 0x3F) << 6) |
+                 (s[3] & 0x3F);
+        }
+
+        to[count++] = wc;
+        s += mblen;
+        len -= mblen;
     }
-    return wlen;
+
+    return count;
 }
 
+int pg_wchar2mb_with_len(const wchar_t *from, char *to, int len) {
+    int bytes_written = 0;
+
+    for (int i = 0; i < len; i++) {
+        uint32_t wc = from[i];
+        if (wc <= 0x7F) {
+            *to++ = (char)wc;
+            bytes_written += 1;
+        } else if (wc <= 0x7FF) {
+            *to++ = 0xC0 | ((wc >> 6) & 0x1F);
+            *to++ = 0x80 | (wc & 0x3F);
+            bytes_written += 2;
+        } else if (wc <= 0xFFFF) {
+            *to++ = 0xE0 | ((wc >> 12) & 0x0F);
+            *to++ = 0x80 | ((wc >> 6) & 0x3F);
+            *to++ = 0x80 | (wc & 0x3F);
+            bytes_written += 3;
+        } else if (wc <= 0x10FFFF) {
+            *to++ = 0xF0 | ((wc >> 18) & 0x07);
+            *to++ = 0x80 | ((wc >> 12) & 0x3F);
+            *to++ = 0x80 | ((wc >> 6) & 0x3F);
+            *to++ = 0x80 | (wc & 0x3F);
+            bytes_written += 4;
+        }
+        // else: invalid, ignore or insert replacement char
+    }
+
+    return bytes_written;
+}
+
+// STUBBED
 void *pg_detoast_datum(const void *toast_datum) {
     return (void *)toast_datum;
 }
 
+// STUBBED
 void *pg_detoast_datum_packed(const void *toast_datum) {
     return (void *)toast_datum;
 }

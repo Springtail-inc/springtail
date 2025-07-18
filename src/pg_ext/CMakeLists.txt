@@ -7,12 +7,14 @@ set(LIB_PGEXT_SOURCES
     guc.cc
     string.cc
     list.cc
+    hash.cc
+    regex.cc
 )
 
 # Create the library
 add_library(pgext SHARED ${LIB_PGEXT_SOURCES})
 target_include_directories(pgext
-    PRIVATE ${CMAKE_SOURCE_DIR}/include
+    PUBLIC ${CMAKE_SOURCE_DIR}/include
 )
 target_link_libraries(pgext
     PRIVATE absl::check
