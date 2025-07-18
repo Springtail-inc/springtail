@@ -15,6 +15,7 @@
 
 #include <pg_repl/libpq_connection.hh>
 #include <pg_fdw/pg_fdw_ddl_common.hh>
+#include <pg_fdw/exception.hh>
 
 namespace springtail::pg_fdw {
     /**
@@ -31,6 +32,7 @@ namespace springtail::pg_fdw {
         static constexpr int MAX_THREAD_POOL_SIZE = 4;
         /** Sync thread check interval in seconds */
         static constexpr int SYNC_INTERVAL_SECONDS = 15;
+
 
         /**
          * Start the main thread
@@ -70,12 +72,14 @@ namespace springtail::pg_fdw {
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections
         std::mutex _fdw_conn_cache_mutex;  ///< mutex for fdw connection cache
 
-        RedisCache::RedisChangeWatcherPtr _cache_watcher;           ///< redis cache callback object
+        RedisCache::RedisChangeWatcherPtr _cache_watcher;                   ///< redis cache callback object
         std::shared_ptr<common::MultiQueueThreadManager> _thread_manager;   ///< thread manager that processes DDL requests
 
-        std::thread _sync_thread;              ///< thread for syncing policies and roles
+        std::thread _sync_thread;                   ///< thread for syncing policies and roles
         std::condition_variable _sync_shutdown_cv;  ///< condition variable for shutdown notification
         std::mutex _sync_shutdown_mutex;            ///< mutex for shutdown notification
+
+        std::mutex _pending_ddl_mutex;              ///< mutex for pending DDL statements
 
         std::string _fdw_id;                       ///< FDW ID
 
@@ -138,19 +142,16 @@ namespace springtail::pg_fdw {
         void _sync_thread_func();
 
         /** Helper to sync policies for a database */
-        void _policy_sync_database(LibPqConnectionPtr conn, std::vector<std::string> &sql_commands);
+        void _policy_sync_database(LibPqConnectionPtr conn, LibPqConnectionPtr fdw_conn, uint64_t db_id);
 
         /** Helper to sync roles for a database */
-        void _roles_sync_database(LibPqConnectionPtr conn, std::vector<std::string> &sql_commands);
+        void _roles_sync_database(LibPqConnectionPtr conn, LibPqConnectionPtr fdw_conn, uint64_t db_id);
 
         /** Helper to sync role members for a database */
-        void _role_member_sync_database(LibPqConnectionPtr conn, std::vector<std::string> &sql_commands);
+        void _role_member_sync_database(LibPqConnectionPtr conn, LibPqConnectionPtr fdw_conn, uint64_t db_id);
 
         /** Helper to sync table ownership */
-        void _table_owner_sync_database(LibPqConnectionPtr conn, uint64_t db_id, const std::string &db_name);
-
-        /** Helper to apply SQL commands */
-        void _apply_sql_commands(uint64_t db_id, const std::string &db_name, const std::vector<std::string> &sql_commands);
+        void _table_owner_sync_database(LibPqConnectionPtr conn, LibPqConnectionPtr fdw_conn, uint64_t db_id);
 
         /**
          * Method to get the create schema query
@@ -224,12 +225,11 @@ namespace springtail::pg_fdw {
          * @param conn LibPqConnectionPtr connection
          * @param server_name fdw server name
          * @param ddl json object containing ddl
-         * @param schemas set of schemas to update (output)
          * @return std::string sql statement
          */
         std::string _gen_sql_from_json(LibPqConnectionPtr conn,
-                           const std::string &server_name,
-                           const nlohmann::json &ddl);
+                                       const std::string &server_name,
+                                       const nlohmann::json &ddl);
 
         /**
          * @brief Function for creating a replicated database
@@ -277,6 +277,35 @@ namespace springtail::pg_fdw {
          */
         void _remove_replicated_database(uint64_t db_id);
 
+
+        /**
+         * @brief Function for executing a SQL command within a savepoint
+         * @param fdw_conn connection to the FDW database
+         * @param primary_conn connection to the primary database
+         * @param savepoint_name name of the savepoint to use
+         * @param sql SQL command to execute
+         * @param rollback_sql SQL command to rollback in case of failure
+         * @return true if successful
+         * @return false if failed; rollback_sql is executed and savepoint is rolled back
+         */
+        bool _execute_in_savepoint(LibPqConnectionPtr fdw_conn,
+                                LibPqConnectionPtr primary_conn,
+                                const std::string &savepoint_name,
+                                const std::string &sql,
+                                const std::string &rollback_sql);
+
+        /**
+         * @brief Check if a table exists in the FDW database
+         * @param fdw_conn connection to the FDW database
+         * @param schema_name name of the schema
+         * @param table_name name of the table
+         * @param table_oid OID of the table
+         * @return true if the table exists, false otherwise
+         */
+        bool _check_table_exists(LibPqConnectionPtr fdw_conn,
+                                 const std::string &schema_name,
+                                 const std::string &table_name,
+                                 uint32_t table_oid);
     };
 
 } // springtail::pg_fdw

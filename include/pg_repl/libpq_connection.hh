@@ -8,7 +8,6 @@ namespace springtail {
     class LibPqConnection {
 
     public:
-
         static constexpr int MAX_RETRY_COUNT = 5;  ///< max retry count for connection
         static constexpr int RETRY_SLEEP_SECS = 2; ///< initial sleep time in sec between retries
 
@@ -22,13 +21,32 @@ namespace springtail {
         // Class 02 — No Data (e.g. UPDATE/DELETE affected 0 rows)
         static constexpr const char* SQL_NO_DATA                   = "02000";
 
+        // Class 3F — Invalid Schema Name
+        static constexpr const char* SQL_INVALID_SCHEMA_NAME       = "3F000";
+
         // Class 42 — Syntax or Access Rule Violation
         static constexpr const char* SQL_SYNTAX_ERROR              = "42601";
+        static constexpr const char* SQL_UNDEFINED_OBJECT          = "42704"; // Used by role doesn't exist
         static constexpr const char* SQL_UNDEFINED_TABLE           = "42P01";
         static constexpr const char* SQL_UNDEFINED_COLUMN          = "42703";
         static constexpr const char* SQL_DUPLICATE_COLUMN          = "42701";
+        static constexpr const char* SQL_DUPLICATE_OBJECT          = "42710"; // Used by role already exists
         static constexpr const char* SQL_DUPLICATE_TABLE           = "42P07";
         static constexpr const char* SQL_INSUFFICIENT_PRIVILEGE    = "42501";
+
+        // RAII wrapper around PGresult to ensure it is cleared
+        // when the LibPqResult object is destroyed
+        struct LibPqResult {
+            PGresult *result = nullptr;
+
+            ~LibPqResult() {
+                if (result != nullptr) {
+                    PQclear(result);
+                    result = nullptr;
+                }
+            }
+        };
+        using LibPqResultPtr = std::shared_ptr<LibPqResult>;
 
         LibPqConnection() {};
 
@@ -90,13 +108,14 @@ namespace springtail {
 
         /**
          * @brief Get error message from connection; should not be freed
-         * @return std::string of error message from underlying connection; should not be freed
+         * @return std::string of error message from underlying connection; should not be freed; empty if no error
          */
         std::string error_message();
 
         /**
          * @brief Get error message from last query result
          * @return std::string of error message from last query result; if none then return connection error_message()
+         *         empty if no error
          */
         std::string result_error_message();
 
@@ -128,12 +147,27 @@ namespace springtail {
         void end_transaction();
 
         /**
-         * @brief Execute libpq query helper; sets result internally
-         * @param connection libpq connection
-         * @param cmd SQL command
-         * @return true if result is successful; false otherwise; check result separately
+         * @brief Rollback transaction
          */
-        bool exec_no_throw(const std::string &cmd);
+        void rollback_transaction();
+
+        /**
+         * @brief Set a savepoint in the current transaction
+         * @param name name of the savepoint
+         */
+        void savepoint(const std::string &name);
+
+        /**
+         * @brief Release a savepoint in the current transaction
+         * @param name name of the savepoint
+         */
+        void release_savepoint(const std::string &name);
+
+        /**
+         * @brief Rollback to a savepoint in the current transaction
+         * @param name name of the savepoint
+         */
+        void rollback_savepoint(const std::string &name);
 
         /**
          * @brief Execute libpq query helper; sets result internally
@@ -141,7 +175,15 @@ namespace springtail {
          * @param cmd SQL command
          * @return true if result is successful; false otherwise; check result separately
          */
-        bool exec_no_throw(const char *cmd);
+        bool exec_no_throw(const std::string &cmd, bool use_savepoint = true);
+
+        /**
+         * @brief Execute libpq query helper; sets result internally
+         * @param connection libpq connection
+         * @param cmd SQL command
+         * @return true if result is successful; false otherwise; check result separately
+         */
+        bool exec_no_throw(const char *cmd, bool use_savepoint = true);
 
         /**
          * @brief Execute libpq query helper; sets result internally
@@ -163,9 +205,10 @@ namespace springtail {
 
         /**
          * @brief Get sql state from last query result
-         * @return sql state string; empty if no result
+         * @return sql state string; "00000" for success; see constants above for common values
+         *         see https://www.postgresql.org/docs/current/errcodes-appendix.html for all values
          */
-        std::string get_sql_state();
+        std::optional<std::string> get_sql_state();
 
         /**
          * @brief Retreive an int32 column value from a query result
@@ -211,7 +254,6 @@ namespace springtail {
          * @return string value for row/col; optional is false if string is null
          */
         std::optional<std::string> get_string_optional(int row, int col);
-
 
         /**
          * @brief Retreive a string column value from a query result; maps NULL to empty string
@@ -363,8 +405,8 @@ namespace springtail {
         /** Internal libpq connection */
         PGconn *_connection = nullptr;
 
-        /** Result pointer from last query */
-        PGresult *_result = nullptr;
+        /** Result pointer from last query; RAII wrapper */
+        LibPqResultPtr _result = nullptr;
 
         /** Indicates if connection is in a transaction or not */
         bool _in_transaction = false;
@@ -374,6 +416,9 @@ namespace springtail {
 
         /** Copy buffer pointer */
         char *_buffer = nullptr;
+
+        /** Counter for savepoints generated internally */
+        uint64_t _savepoint_ctr = 0;
 
         /** Simple version of escape identifier */
         static std::string _escape_identifier(const char *str);

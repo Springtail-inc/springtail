@@ -11,4 +11,20 @@ namespace springtail::pg_fdw {
             : Error(error)
         { }
     };
+
+    class DDLError : public Error {
+    public:
+        DDLError() { }
+        explicit DDLError(const std::string &error)
+            : Error(error)
+        { }
+    };
+
+    class DDLSqlSyncError : public DDLError {
+    public:
+        DDLSqlSyncError() { }
+        explicit DDLSqlSyncError(const std::string &error)
+            : DDLError(error)
+        { }
+    };
 }

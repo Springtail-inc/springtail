@@ -43,6 +43,29 @@ BEGIN
 END;
 $$;
 
+DROP FUNCTION IF EXISTS __pg_springtail_triggers.policy_remove;
+/**
+ * This function removes the policy snapshot history for a given fdw_id and policy_oid.
+ * If fdw_id_var is NULL, it removes all entries for that policy_oid across all fdw_ids.
+ */
+CREATE OR REPLACE FUNCTION __pg_springtail_triggers.policy_remove(fdw_id_var TEXT, policy_oid_var OID)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO __pg_springtail_triggers
+AS $$
+BEGIN
+    IF fdw_id_var IS NULL THEN
+        -- Throw an error if fdw_id_var is NULL, as we cannot remove entries without a specific fdw_id
+        RAISE EXCEPTION 'fdw_id_var cannot be NULL. Please provide a valid fdw_id.';
+    ELSE
+        -- Remove the specific entry for the given fdw_id and policy_oid
+        DELETE FROM __pg_springtail_triggers.policy_snapshot_history
+        WHERE fdw_id = fdw_id_var AND policy_oid = policy_oid_var;
+    END IF;
+END;
+$$;
+
 /** Drop the function if it exists to allow easy re-creation during development */
 DROP FUNCTION IF EXISTS __pg_springtail_triggers.policy_diff;
 

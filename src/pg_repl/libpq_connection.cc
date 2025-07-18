@@ -31,6 +31,9 @@ namespace springtail {
     /** end xact */
     static const char *END_QUERY = "END";
 
+    /** rollback xact */
+    static const char *ROLLBACK_QUERY = "ROLLBACK";
+
     /**
      * @brief Start a transaction
      */
@@ -47,11 +50,64 @@ namespace springtail {
      */
     void LibPqConnection::end_transaction()
     {
+        if (!_in_transaction) {
+            LOG_WARN("Cannot end transaction: not in a transaction");
+            return;
+        }
+
         exec(END_QUERY);
         clear();
         _in_transaction = false;
     }
 
+    void LibPqConnection::rollback_transaction()
+    {
+        if (!_in_transaction) {
+            LOG_WARN("Cannot rollback transaction: not in a transaction");
+            return;
+        }
+
+        exec(ROLLBACK_QUERY);
+        clear();
+        _in_transaction = false;
+    }
+
+
+    void LibPqConnection::savepoint(const std::string &name)
+    {
+        if (!_in_transaction) {
+            LOG_WARN("Cannot create savepoint: not in a transaction");
+            return;
+        }
+
+        std::string cmd = fmt::format("SAVEPOINT {}", name);
+        exec(cmd);
+        clear();
+    }
+
+    void LibPqConnection::release_savepoint(const std::string &name)
+    {
+        if (!_in_transaction) {
+            LOG_WARN("Cannot release savepoint: not in a transaction");
+            return;
+        }
+
+        std::string cmd = fmt::format("RELEASE SAVEPOINT {}", name);
+        exec(cmd);
+        clear();
+    }
+
+    void LibPqConnection::rollback_savepoint(const std::string &name)
+    {
+        if (!_in_transaction) {
+            LOG_WARN("Cannot rollback savepoint: not in a transaction");
+            return;
+        }
+
+        std::string cmd = fmt::format("ROLLBACK TO SAVEPOINT {}", name);
+        exec(cmd);
+        clear();
+    }
 
     /**
      * @brief Clear result if result exists (frees underlying resources)
@@ -61,7 +117,6 @@ namespace springtail {
         if (_result == nullptr) {
             return;
         }
-        PQclear(_result);
         _result = nullptr;
     }
 
@@ -74,7 +129,7 @@ namespace springtail {
         if (_result == nullptr) {
             return 0;
         }
-        return PQntuples(_result);
+        return PQntuples(_result->result);
     }
 
     /**
@@ -86,7 +141,7 @@ namespace springtail {
         if (_result == nullptr) {
             return 0;
         }
-        return PQbinaryTuples(_result);
+        return PQbinaryTuples(_result->result);
     }
 
     /**
@@ -98,7 +153,7 @@ namespace springtail {
         if (_result == nullptr) {
             return 0;
         }
-        return PQnfields(_result);
+        return PQnfields(_result->result);
     }
 
     /**
@@ -115,7 +170,7 @@ namespace springtail {
         clear();
 
         int res = PQgetCopyData(_connection, &_buffer, (async ? 1 : 0));
-        _result = PQgetResult(_connection);
+        _result = std::make_shared<LibPqResult>(PQgetResult(_connection));
 
         return res;
     }
@@ -150,7 +205,7 @@ namespace springtail {
         if (_result == nullptr) {
             throw PgNoResultError();
         }
-        return PQresultStatus(_result);
+        return PQresultStatus(_result->result);
     }
 
 
@@ -174,35 +229,49 @@ namespace springtail {
             return error_message();
         }
 
-        char *err = PQresultErrorMessage(_result);
+        char *err = PQresultErrorMessage(_result->result);
         if (err == nullptr) {
             return error_message();
         }
         return std::string(err);
     }
 
-    bool LibPqConnection::exec_no_throw(const std::string &cmd)
+    bool LibPqConnection::exec_no_throw(const std::string &cmd, bool use_savepoint)
     {
-        return exec_no_throw(cmd.c_str());
+        return exec_no_throw(cmd.c_str(), use_savepoint);
     }
 
-    bool LibPqConnection::exec_no_throw(const char *cmd)
+    bool LibPqConnection::exec_no_throw(const char *cmd, bool use_savepoint)
     {
-        clear();
-
         if (_connection == nullptr) {
             return false;
         }
 
-        CHECK_EQ(_is_replication, false);
+        // if we are in a transaction, create a savepoint
+        // so that we can rollback to it if the command fails
+        std::string savepoint_name;
+        if (_in_transaction && use_savepoint) {
+            savepoint_name = fmt::format("savepoint_{}", _savepoint_ctr++);
+            savepoint(savepoint_name);
+        }
 
         LOG_DEBUG(LOG_PG_REPL, "Executing query: {}", cmd);
-        _result = PQexec(_connection, cmd);
+        _result = std::make_shared<LibPqResult>(PQexec(_connection, cmd));
 
-         if (PQresultStatus(_result) != PGRES_COMMAND_OK &&
-             PQresultStatus(_result) != PGRES_TUPLES_OK &&
-             PQresultStatus(_result) != PGRES_COPY_OUT) {
+        auto status = PQresultStatus(_result->result);
+        if (status != PGRES_COMMAND_OK && status != PGRES_TUPLES_OK && status != PGRES_COPY_OUT) {
+            if (!savepoint_name.empty()) {
+                // rollback to savepoint if in transaction
+                LOG_DEBUG(LOG_PG_REPL, "Rolling back to savepoint: {}", savepoint_name);
+                rollback_savepoint(savepoint_name);
+            }
             return false; // error executing query
+        }
+
+        // release savepoint if we created one
+        if (!savepoint_name.empty()) {
+            LOG_DEBUG(LOG_PG_REPL, "Releasing savepoint: {}", savepoint_name);
+            release_savepoint(savepoint_name);
         }
 
         return true;
@@ -227,26 +296,30 @@ namespace springtail {
             throw PgNotConnectedError();
         }
 
-        if (exec_no_throw(cmd) == false) {
-            std::string error_message = fmt::format("msg={}, status={}", PQerrorMessage(_connection), PQresultErrorMessage(_result));
+        if (exec_no_throw(cmd, false) == false) {
+            std::string error_message = fmt::format("msg={}, status={}", PQerrorMessage(_connection), PQresultErrorMessage(_result->result));
             LOG_ERROR("Error executing query: {}", error_message);
-            PQclear(_result);
             throw PgQueryError();
         }
     }
 
-    std::string LibPqConnection::get_sql_state()
+    std::optional<std::string> LibPqConnection::get_sql_state()
     {
         if (_result == nullptr) {
-            return {};
+            return std::nullopt;
         }
 
-        const char *state = PQresultErrorField(_result, PG_DIAG_SQLSTATE);
+        const char *state = PQresultErrorField(_result->result, PG_DIAG_SQLSTATE);
         if (state == nullptr) {
             throw PgQueryError();
         }
 
-        return std::string(state);
+        std::string state_str{state};
+        if (state_str.empty() || state_str == SQL_SUCCESSFUL_COMPLETION) {
+            return std::nullopt;
+        }
+
+        return state_str;
     }
 
     /**
@@ -260,7 +333,7 @@ namespace springtail {
      */
     int32_t LibPqConnection::get_int32(int row, int col)
     {
-        char *value = PQgetvalue(_result, row, col);
+        char *value = get_value(row, col);
         if (value == nullptr) {
             throw PgQueryError();
         }
@@ -276,7 +349,7 @@ namespace springtail {
     std::optional<int32_t>
     LibPqConnection::get_int32_optional(int row, int col)
     {
-        if (PQgetisnull(_result, row, col)) {
+        if (PQgetisnull(_result->result, row, col)) {
             return {};
         }
         return get_int32(row, col);
@@ -284,7 +357,7 @@ namespace springtail {
 
     int64_t LibPqConnection::get_int64(int row, int col)
     {
-        char *value = PQgetvalue(_result, row, col);
+        char *value = get_value(row, col);
         if (value == nullptr) {
             throw PgQueryError();
         }
@@ -299,7 +372,7 @@ namespace springtail {
 
     float LibPqConnection::get_float(int row, int col)
     {
-        char *value = PQgetvalue(_result, row, col);
+        char *value = get_value(row, col);
         if (value == nullptr) {
             throw PgQueryError();
         }
@@ -321,7 +394,7 @@ namespace springtail {
      */
     std::string LibPqConnection::get_string(int row, int col)
     {
-        char *value = PQgetvalue(_result, row, col);
+        char *value = get_value(row, col);
         if (value == nullptr) {
             throw PgQueryError();
         }
@@ -338,12 +411,12 @@ namespace springtail {
      */
     std::optional<std::string> LibPqConnection::get_string_optional(int row, int col)
     {
-        char *value = PQgetvalue(_result, row, col);
+        char *value = get_value(row, col);
         if (value == nullptr) {
             throw PgQueryError();
         }
         // PQgetvalue maps NULL to empty string, so need to explicitly check
-        if (value[0] == '\0' && PQgetisnull(_result, row, col)) {
+        if (value[0] == '\0' && PQgetisnull(_result->result, row, col)) {
             // string is actually null
             return {};
         }
@@ -362,7 +435,7 @@ namespace springtail {
      */
     bool LibPqConnection::get_boolean(int row, int col)
     {
-        char *value = PQgetvalue(_result, row, col);
+        char *value = get_value(row, col);
         if (value == nullptr) {
             throw PgQueryError();
         }
@@ -384,7 +457,7 @@ namespace springtail {
      */
     char LibPqConnection::get_char(int row, int col)
     {
-        char *value = PQgetvalue(_result, row, col);
+        char *value = get_value(row, col);
         if (value == nullptr) {
             throw PgQueryError();
         }
@@ -847,7 +920,7 @@ namespace springtail {
         if (_result == nullptr) {
             return nullptr;
         }
-        return PQgetvalue(_result, row, col);
+        return get_value(row, col);
     }
 
 
@@ -877,7 +950,7 @@ namespace springtail {
         if (_result == nullptr) {
             return 0;
         }
-        return PQgetlength(_result, row, col);
+        return PQgetlength(_result->result, row, col);
     }
 
 
@@ -908,7 +981,7 @@ namespace springtail {
         clear();
 
         int res = PQputCopyEnd(_connection, errormsg);
-        _result = PQgetResult(_connection);
+        _result = std::make_shared<LibPqResult>(PQgetResult(_connection));
         return res;
     }
 
@@ -926,7 +999,7 @@ namespace springtail {
         clear();
 
         int res = PQendcopy(_connection);
-        _result = PQgetResult(_connection);
+        _result = std::make_shared<LibPqResult>(PQgetResult(_connection));
         return res;
     }
 
@@ -938,7 +1011,7 @@ namespace springtail {
     bool
     LibPqConnection::fetch_result()
     {
-        _result = PQgetResult(_connection);
+        _result = std::make_shared<LibPqResult>(PQgetResult(_connection));
         return (_result != nullptr);
     }
 

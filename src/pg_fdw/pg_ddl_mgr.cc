@@ -52,8 +52,8 @@ namespace springtail::pg_fdw {
 
     static constexpr char POLICY_DIFF_SELECT[] =
         "SELECT diff_type, table_name, schema_name, "
-        "       policy_oid, policy_name, "
-        "       policy_permissive, policy_roles, policy_qual "
+        "       policy_oid, policy_name, policy_name_old, "
+        "       policy_permissive, policy_roles, policy_qual, table_oid "
         "FROM __pg_springtail_triggers.policy_diff('{}');";
 
     static constexpr char ROLE_DIFF_SELECT[] =
@@ -69,6 +69,24 @@ namespace springtail::pg_fdw {
         "SELECT diff_type, table_name, schema_name, "
         "       role_owner_name, table_oid "
         "FROM __pg_springtail_triggers.table_owner_diff('{}');";
+
+    static constexpr char LOOKUP_TABLE_SELECT[] =
+        "SELECT c.oid, c.relkind "
+        "FROM pg_class c "
+        "JOIN pg_namespace n ON c.relnamespace = n.oid "
+        "WHERE n.nspname = '{}' AND c.relname = '{}'";
+
+    static constexpr char VERIFY_FT_TABLE_ID[] =
+        "SELECT 1 "
+        "FROM pg_foreign_table ft "
+        "JOIN pg_foreign_server fs ON ft.ftserver = fs.oid "
+        "WHERE ft.ftrelid = {} "
+        "  AND EXISTS ( "
+        "    SELECT 1 "
+        "    FROM unnest(fs.srvoptions) AS opt "
+        "WHERE opt = format('tid=%s', {}::text)";
+
+
 
     PgDDLMgr::PgDDLMgr() : _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE)
     {
@@ -193,37 +211,92 @@ namespace springtail::pg_fdw {
         _sync_thread = std::thread(&PgDDLMgr::_sync_thread_func, this);
     }
 
+    bool
+    PgDDLMgr::_execute_in_savepoint(LibPqConnectionPtr fdw_conn,
+                                    LibPqConnectionPtr primary_conn,
+                                    const std::string &savepoint_name,
+                                    const std::string &sql,
+                                    const std::string &rollback_sql)
+    {
+        // execute the SQL
+        if (fdw_conn->exec_no_throw(sql, false)) {
+            return true; // success
+        }
+
+        // rollback the savepoint on fdw
+        fdw_conn->rollback_savepoint(savepoint_name);
+
+        // execute rollback SQL on primary
+        primary_conn->exec(rollback_sql);
+
+        return false;
+    }
+
+    bool
+    PgDDLMgr::_check_table_exists(LibPqConnectionPtr fdw_conn,
+                                  const std::string &schema_name,
+                                  const std::string &table_name,
+                                  uint32_t table_oid)
+    {
+        // check if the table exists in the fdw database
+        fdw_conn->exec(fmt::format(LOOKUP_TABLE_SELECT, fdw_conn->escape_string(schema_name), fdw_conn->escape_string(table_name)));
+        if (fdw_conn->ntuples() == 0) {
+            LOG_ERROR("Table {}.{} with OID {} does not exist in the FDW database",
+                      schema_name, table_name, table_oid);
+            return false;
+        }
+
+        // verify the table OID matches
+        uint32_t fdw_table_oid = fdw_conn->get_int32(0, 0);
+        char relkind = fdw_conn->get_char(0, 1);
+
+        if (relkind == 'f') {
+            // foreign table; check table_oid against server options
+            fdw_conn->exec(fmt::format(VERIFY_FT_TABLE_ID, fdw_table_oid, table_oid));
+            if (fdw_conn->ntuples() == 0) {
+                LOG_ERROR("Foreign table with OID {} does not exist in the FDW database", table_oid);
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     void
     PgDDLMgr::_policy_sync_database(LibPqConnectionPtr conn,
-                                    std::vector<std::string> &sql_commands)
+                                    LibPqConnectionPtr fdw_conn,
+                                    uint64_t db_id)
     {
         // execute on primary
         conn->exec(fmt::format(POLICY_DIFF_SELECT, _fdw_id));
 
         if (conn->ntuples() == 0) {
-            conn->clear();
             return;
         }
+
+        std::string sql;
 
         // iterate through the result set and process the policy diffs
         for (int i = 0; i < conn->ntuples(); i++) {
             std::string diff_type = conn->get_string(i, 0);
-            std::string table_name = conn->escape_identifier(conn->get_string(i, 1));
-            std::string schema_name = conn->escape_identifier(conn->get_string(i, 2));
-            std::string policy_name = conn->escape_identifier(conn->get_string(i, 3));
-            auto policy_name_old = conn->get_string_optional(i, 4);
+            std::string table_name_nesc = conn->get_string(i, 1);
+            std::string table_name = conn->escape_identifier(table_name_nesc);
+            std::string schema_name_nesc = conn->get_string(i, 2);
+            std::string schema_name = conn->escape_identifier(schema_name_nesc);
+            uint32_t policy_oid = conn->get_int32(i, 3);
+            std::string policy_name = conn->escape_identifier(conn->get_string(i, 4));
 
             if (diff_type == "REMOVED") {
-                sql_commands.push_back(
-                    fmt::format("DROP POLICY IF EXISTS {} ON {}.{}",
-                                policy_name, schema_name, table_name));
+                fdw_conn->exec(fmt::format("DROP POLICY IF EXISTS {} ON {}.{}",
+                                           policy_name, schema_name, table_name));
                 continue;
             }
 
             // these are only valid for ADDED and MODIFIED diffs
-            bool policy_permissive = conn->get_boolean(i, 5);
-            std::string policy_roles = conn->get_string(i, 6);
-            std::string policy_qual = conn->get_string(i, 7);
+            bool policy_permissive = conn->get_boolean(i, 6);
+            std::string policy_roles = conn->get_string(i, 7);
+            std::string policy_qual = conn->get_string(i, 8);
+            uint32_t table_oid = conn->get_int32(i, 9);
 
             // convert roles to {} from json array string
             nlohmann::json roles_json = nlohmann::json::parse(policy_roles);
@@ -233,36 +306,46 @@ namespace springtail::pg_fdw {
             }
             policy_roles = fmt::format("{}", common::join_string(", ", roles));
 
-            if (diff_type == "ADDED") {
-                sql_commands.push_back(
-                    fmt::format("DROP POLICY IF EXISTS {} ON {}.{}",
-                                policy_name, schema_name, table_name));
-
-                // create the new policy
-                sql_commands.push_back(
-                    fmt::format("CREATE POLICY {} ON {}.{} "
-                                "AS {} "
-                                "FOR SELECT TO {} "
-                                "USING ({})",
-                                policy_name, schema_name, table_name, policy_permissive ? "PERMISSIVE" : "RESTRICTIVE",
-                                policy_roles, policy_qual));
-                continue;
-            }
-
-            if (diff_type == "MODIFIED") {
-                // if the policy name has changed, we need to drop the old one
-                if (policy_name_old.has_value() && policy_name_old.value() != policy_name) {
-                    sql_commands.push_back(
-                        fmt::format("ALTER POLICY {} ON {}.{} RENAME TO {}",
-                                    policy_name_old.value(), schema_name, table_name, policy_name));
+            auto rollback_sql = fmt::format("SELECT __pg_springtail_triggers.policy_remove({}, {})",
+                                            _fdw_id, policy_oid);
+            /*
+             * Check if the table associated with the policy exist, if not we remove
+             * the policy from the sync and skip creating it.
+             * Always drop and recreate the policy, as it is easier to manage
+             */
+            if (diff_type == "ADDED" || diff_type == "MODIFIED") {
+                // verify tid exists
+                if (!_check_table_exists(fdw_conn, schema_name_nesc, table_name_nesc, table_oid)) {
+                    // table does not exist; remove entry from sync
+                    conn->exec(rollback_sql);
+                    continue;
                 }
-                // modify the existing policy
-                // XXX if roles/qual hasn't changed, we don't need to do anything
-                sql_commands.push_back(
-                    fmt::format("ALTER POLICY {} ON {}.{} "
-                                "FOR SELECT TO {} USING ({})",
-                                policy_name, schema_name, table_name,
-                                policy_roles, policy_qual));
+
+                auto savepoint_name = "ddl_policy_sync";
+                fdw_conn->savepoint(savepoint_name);
+
+                // easier to drop and recreate the policy
+                sql = fmt::format("DROP POLICY IF EXISTS {} ON {}.{}",
+                                  policy_name, schema_name, table_name);
+                if (!_execute_in_savepoint(fdw_conn, conn, savepoint_name, sql, rollback_sql)) {
+                    continue;
+                }
+
+                // create the new policy -- this could fail if the table doesn't exist yet
+                sql = fmt::format("CREATE POLICY {} ON {}.{} "
+                                  "AS {} "
+                                  "FOR SELECT TO {} "
+                                  "USING ({})",
+                                  policy_name, schema_name, table_name, policy_permissive ? "PERMISSIVE" : "RESTRICTIVE",
+                                  policy_roles, policy_qual);
+                if (!_execute_in_savepoint(fdw_conn, conn, savepoint_name, sql, rollback_sql)) {
+                    continue;
+                }
+
+                // release the savepoint
+                fdw_conn->release_savepoint(savepoint_name);
+
+                continue;
             }
         }
         conn->clear();
@@ -270,7 +353,8 @@ namespace springtail::pg_fdw {
 
     void
     PgDDLMgr::_roles_sync_database(LibPqConnectionPtr conn,
-                                   std::vector<std::string> &sql_commands)
+                                   LibPqConnectionPtr fdw_conn,
+                                   uint64_t db_id)
     {
         // execute on primary
         conn->exec(fmt::format(ROLE_DIFF_SELECT, _fdw_id));
@@ -298,50 +382,63 @@ namespace springtail::pg_fdw {
             bool rolconfig_changed = conn->get_boolean(i, 7);
 
             if (diff_type == "REMOVED") {
-                sql_commands.push_back(fmt::format("DROP ROLE IF EXISTS {}", role_name));
+                fdw_conn->exec(fmt::format("DROP ROLE IF EXISTS {}", role_name));
                 continue;
             }
 
             if (diff_type == "ADDED") {
                 // create a new user with password, even if nologin is set
                 // in case it changes later, we can control with LOGIN/NOLOGIN
-                sql_commands.push_back(fmt::format(CREATE_USER, role_name, _fdw_password));
+                if (!fdw_conn->exec_no_throw(fmt::format(CREATE_USER, role_name, _fdw_password))) {
+                    auto sql_state = fdw_conn->get_sql_state();
+                    if (sql_state.has_value() && sql_state.value() == LibPqConnection::SQL_DUPLICATE_OBJECT) {
+                        // user already exists, we can skip this
+                        LOG_DEBUG(LOG_FDW, "Role {} already exists, skipping creation", role_name);
+                    } else {
+                        // some other error, log it
+                        LOG_ERROR("Failed to create role {}: {}", role_name, fdw_conn->result_error_message());
+                        throw DDLSqlSyncError(fmt::format("Failed to create role {}: {}", role_name, fdw_conn->result_error_message()));
+                    }
+                }
                 // fall through
             }
 
             if (diff_type == "MODIFIED" || diff_type == "ADDED") {
                 // modify the existing role
-                sql_commands.push_back(
+                fdw_conn->exec(
                     fmt::format("ALTER ROLE {} WITH {} {} {}",
                                 role_name,
                                 (rolsuper || rolbypassrls) ? "BYPASSRLS" : "NOBYPASSRLS",
                                 rolinherit ? "INHERIT" : "NOINHERIT",
                                 rolcanlogin ? "LOGIN" : "NOLOGIN"));
 
-                if (rolconfig_changed) {
-                    // if the role config has changed, we need to set it
-                    if (!rolconfig.has_value() || rolconfig.value().empty()) {
-                        sql_commands.push_back(fmt::format("ALTER ROLE {} RESET ALL", role_name));
-                    } else {
-                        // stored as json text array
-                        nlohmann::json config_json = nlohmann::json::parse(rolconfig.value());
-                        DCHECK(config_json.is_array()) << "Role config must be a JSON array";
+                if (!rolconfig_changed) {
+                    continue; // no config changes, skip
+                }
+                // if the role config has changed, we need to set it
+                if (!rolconfig.has_value() || rolconfig.value().empty()) {
+                    fdw_conn->exec(fmt::format("ALTER ROLE {} RESET ALL", role_name));
+                } else {
+                    // stored as json text array
+                    nlohmann::json config_json = nlohmann::json::parse(rolconfig.value());
+                    DCHECK(config_json.is_array()) << "Role config must be a JSON array";
 
-                        // iterate through the config and set each one
-                        for (const auto &config : config_json.items()) {
-                            std::string config_str = config.value().get<std::string>();
-                            sql_commands.push_back(fmt::format("ALTER ROLE {} SET {}", role_name, config_str));
-                        }
+                    // iterate through the config and set each one
+                    for (const auto &config : config_json.items()) {
+                        std::string config_str = config.value().get<std::string>();
+                        fdw_conn->exec(fmt::format("ALTER ROLE {} SET {}", role_name, config_str));
                     }
                 }
             }
         }
+
         conn->clear();
     }
 
     void
     PgDDLMgr::_role_member_sync_database(LibPqConnectionPtr conn,
-                                         std::vector<std::string> &sql_commands)
+                                         LibPqConnectionPtr fdw_conn,
+                                         uint64_t db_id)
     {
         // execute on primary
         conn->exec(fmt::format(ROLE_MEMBER_DIFF_SELECT, _fdw_id));
@@ -360,12 +457,12 @@ namespace springtail::pg_fdw {
             DCHECK_NE(diff_type, "MODIFIED") << "Role member diffs should not be modified";
 
             if (diff_type == "REMOVED") {
-                sql_commands.push_back(fmt::format("REVOKE {} FROM {}", member_name, role_name));
+                fdw_conn->exec(fmt::format("REVOKE {} FROM {}", member_name, role_name));
                 continue;
             }
 
             if (diff_type == "ADDED") {
-                sql_commands.push_back(fmt::format("GRANT {} TO {}", member_name, role_name));
+                fdw_conn->exec(fmt::format("GRANT {} TO {}", member_name, role_name));
                 continue;
             }
         }
@@ -373,7 +470,9 @@ namespace springtail::pg_fdw {
     }
 
     void
-    PgDDLMgr::_table_owner_sync_database(LibPqConnectionPtr conn, uint64_t db_id, const std::string &db_name)
+    PgDDLMgr::_table_owner_sync_database(LibPqConnectionPtr conn,
+                                         LibPqConnectionPtr fdw_conn,
+                                         uint64_t db_id)
     {
         // execute on primary
         conn->exec(fmt::format(TABLE_OWNER_DIFF_SELECT, _fdw_id));
@@ -389,8 +488,10 @@ namespace springtail::pg_fdw {
         // iterate through the result set and process the table owner diffs
         for (int i = 0; i < conn->ntuples(); i++) {
             std::string diff_type = conn->get_string(i, 0);
-            std::string table_name = conn->escape_identifier(conn->get_string(i, 1));
-            std::string schema_name = conn->escape_identifier(conn->get_string(i, 2));
+            std::string table_name_nesc = conn->get_string(i, 1);
+            std::string table_name = conn->escape_identifier(table_name_nesc);
+            std::string schema_name_nesc = conn->get_string(i, 2);
+            std::string schema_name = conn->escape_identifier(schema_name_nesc);
             std::string role_owner_name = conn->escape_identifier(conn->get_string(i, 3));
             uint32_t table_oid = conn->get_int32(i, 4);
 
@@ -399,65 +500,32 @@ namespace springtail::pg_fdw {
                 continue;
             }
 
+            auto rollback_sql = fmt::format("SELECT __pg_springtail_triggers.table_owner_remove({}, {})",
+                                            _fdw_id, table_oid);
+
             if (diff_type == "ADDED" || diff_type == "MODIFIED") {
-                sql_commands.push_back(
-                    std::make_pair(fmt::format("ALTER FOREIGN TABLE {}.{} OWNER TO {}",
-                                               schema_name, table_name, role_owner_name), table_oid));
+                // verify tid exists
+                if (!_check_table_exists(fdw_conn, schema_name_nesc, table_name_nesc, table_oid)) {
+                    // table does not exist; remove entry from sync
+                    conn->exec(rollback_sql);
+                    continue;
+                }
+
+                auto savepoint_name = "ddl_table_owner_sync";
+                fdw_conn->savepoint(savepoint_name);
+
+                if (!_execute_in_savepoint(fdw_conn, conn, savepoint_name,
+                                      fmt::format("ALTER FOREIGN TABLE {}.{} OWNER TO {}",
+                                                  schema_name, table_name, role_owner_name),
+                                      rollback_sql)) {
+                    continue;
+                }
+
+                // release the savepoint
+                fdw_conn->release_savepoint(savepoint_name);
             }
         }
         conn->clear();
-
-        if (sql_commands.empty()) {
-            return;
-        }
-
-        // get the connection for the database
-        auto fdw_conn = _get_fdw_connection(db_id, db_name);
-        if (!fdw_conn) {
-            throw Error("Failed to get connection for database " + std::to_string(db_id));
-        }
-
-        // apply the sql commands, it is possible some of these may fail if the table does not exist
-        for (const auto &[sql, table_oid] : sql_commands) {
-            LOG_DEBUG(LOG_FDW, "Applying SQL command: {}", sql);
-            if (!fdw_conn->exec_no_throw(sql)) {
-                LOG_WARN("Failed to apply SQL command: {}", sql);
-                // if the command fails, we remove the table so that it will trigger as being re-added
-                // on the next sync.
-                DCHECK_EQ(fdw_conn->get_sql_state(), LibPqConnection::SQL_UNDEFINED_TABLE)
-                    << "Unexpected SQLSTATE: " << fdw_conn->get_sql_state();
-                conn->exec(fmt::format("SELECT __pg_springtail_triggers.table_owner_remove('{}', {})",
-                                        _fdw_id, table_oid));
-                conn->clear();
-            }
-            fdw_conn->clear();
-        }
-
-        // release the connection back to the cache
-        _release_fdw_connection(db_id, fdw_conn);
-    }
-
-    void
-    PgDDLMgr::_apply_sql_commands(uint64_t db_id, const std::string &db_name,
-                                  const std::vector<std::string> &sql_commands)
-    {
-        if (sql_commands.empty()) {
-            return;
-        }
-
-        // get the connection for the database
-        auto conn = _get_fdw_connection(db_id, db_name);
-        if (!conn) {
-            throw Error("Failed to get connection for database " + std::to_string(db_id));
-        }
-
-        // apply each sql command
-        for (const auto &sql : sql_commands) {
-            LOG_DEBUG(LOG_FDW, "Applying SQL command: {}", sql);
-            conn->exec(sql);
-        }
-
-        _release_fdw_connection(db_id, conn);
     }
 
     void
@@ -482,22 +550,38 @@ namespace springtail::pg_fdw {
 
                     // connect to the primary database
                     conn->connect(host, db_name, user, password, port, false);
+                    conn->start_transaction();
 
-                    // sync user roles for this database
-                    _roles_sync_database(conn, sql_commands);
+                    auto fdw_conn = _get_fdw_connection(db_id, db_name);
+                    fdw_conn->start_transaction();
 
-                    // sync role members for this database
-                    _role_member_sync_database(conn, sql_commands);
+                    // these operations perform on the fdw connection as well as the primary
+                    // if there is an error, we rollback both transactions
+                    try {
+                        // sync user roles for this database
+                        _roles_sync_database(conn, fdw_conn, db_id);
 
-                    // sync policies for this database
-                    _policy_sync_database(conn, sql_commands);
+                        // sync role members for this database
+                        _role_member_sync_database(conn, fdw_conn, db_id);
 
-                    // apply the sql commands to the database
-                    _apply_sql_commands(db_id, db_name, sql_commands);
+                        // sync policies for this database
+                        _policy_sync_database(conn, fdw_conn, db_id);
 
-                    // sync table owners for this database
-                    _table_owner_sync_database(conn, db_id, db_name);
+                        // sync table owners for this database
+                        _table_owner_sync_database(conn, fdw_conn, db_id);
 
+                        // commit the transaction for both connections
+                        fdw_conn->end_transaction();
+                        conn->end_transaction();
+                    } catch (const std::exception &e) {
+                        LOG_ERROR("Error applying SQL commands for database {}: {}", db_name, e.what());
+                        // on error we should drop the primary fdw policy table and try resyncing from scratch
+                        fdw_conn->rollback_transaction();
+                        conn->rollback_transaction();
+                    }
+
+                    // disconnect from both connections
+                    _release_fdw_connection(db_id, fdw_conn);
                     conn->disconnect();
                 }
             } catch (const std::exception &e) {
@@ -1249,6 +1333,8 @@ namespace springtail::pg_fdw {
         // can't currently support other kinds of DDL mutations
         LOG_ERROR("Bad DDL statement: {}", action.get<std::string>());
         CHECK(false);
+
+        return {};
     }
 
     void
