@@ -399,24 +399,23 @@ namespace springtail::pg_fdw {
 using namespace springtail;
 
 namespace springtail::pg_fdw {
+    PgFdwMgr::~PgFdwMgr() {
+        LOG_INFO("PgFdwMgr delete");
+    }
 
-    PgFdwMgr* PgFdwMgr::_instance {nullptr};
-
-    std::once_flag PgFdwMgr::_init_flag;
-
-    // TODO: convert this class to singleton
-    PgFdwMgr*
-    PgFdwMgr::_init()
+    // called from the PG exit callback
+    void PgFdwMgr::fdw_exit()
     {
-        elog(INFO, "Initializing PgFdwMgr");
-        _instance = new PgFdwMgr();
-        return _instance;
+        LOG_DEBUG(LOG_FDW, "Shutting down springtail");
+        springtail_shutdown();
     }
 
     /* called from PG_init */
     void
     PgFdwMgr::fdw_init(const char *config_file, bool init)
     {
+        LOG_DEBUG(LOG_FDW, "Initializing PgFdwMgr");
+
         if (config_file != nullptr && strlen(config_file) > 0) {
             // set env variables based on redis config
             // we don't reload redis config here, just set the env variables
@@ -428,14 +427,7 @@ namespace springtail::pg_fdw {
         if (init) {
             springtail_init(false, PG_FDW_LOG_FILE_PREFIX, LOG_FDW);
         }
-
-        LOG_DEBUG(LOG_FDW, "Initializing PgFdwMgr");
-
-        // initialize the singleton
-        std::call_once(_init_flag, _init);
     }
-
-
 
     std::shared_ptr<sys_tbl_mgr::ShmCache>
     PgFdwMgr::_try_create_cache()

@@ -49,6 +49,7 @@ namespace springtail {
         static T *get_instance()
         {
             std::call_once(_init_flag, _init);
+            assert(_instance);
             return _instance;
         }
 
@@ -139,6 +140,17 @@ namespace springtail {
         {
             CHECK_NE(_instance, nullptr);
         }
+
+        /**
+         * @brief Verify that a singleton instance was created
+         *
+         * @return true
+         * @return false
+         */
+         static bool _has_instance()
+         {
+             return _instance != nullptr;
+         }
 
     private:
         static inline T* _instance = nullptr;             ///< derived class instance

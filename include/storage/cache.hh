@@ -8,6 +8,7 @@
 #include <common/constants.hh>
 #include <storage/extent.hh>
 #include <storage/field.hh>
+#include "common/open_telemetry.hh"
 
 namespace springtail {
     /**
@@ -22,7 +23,7 @@ namespace springtail {
     private:
         /** Constructor.  Uses global properties to configure itself. */
         StorageCache();
-        virtual ~StorageCache() override = default;
+        virtual ~StorageCache() override;
 
         // INTERNAL CLASSES
 
@@ -1300,5 +1301,15 @@ namespace springtail {
          * The lookup map for Page objects.
          */
         std::shared_ptr<PageCache> _page_cache;
+
+
+        using MetricCounters = open_telemetry::OTelCounters<
+            metrics::StorageCache::GetCalls,
+            metrics::StorageCache::PutCalls,
+            metrics::StorageCache::CacheMisses,
+            metrics::StorageCache::FlushCalls,
+            metrics::StorageCache::DropCalls>;
+
+        std::unique_ptr<MetricCounters> _metric_counters;
     };
 }

@@ -4,6 +4,8 @@
 #include <absl/log/log.h>
 #include <absl/log/check.h>
 #include <functional>
+#include <memory>
+#include <unordered_map>
 
 #include <common/json.hh>
 #include <common/open_telemetry.hh>
@@ -19,8 +21,15 @@ namespace springtail {
 /* Thread-local variable to identify the background flushing thread. */
 thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
 
+    StorageCache::~StorageCache()
+    {
+        LOG_INFO("StorageCache delete");
+    }
+
     StorageCache::StorageCache() : Singleton<StorageCache>(ServiceId::StorageCacheId)
     {
+        LOG_INFO("StorageCache create");
+
         // get the cache size
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
         uint64_t data_size = Json::get_or<uint64_t>(json, "data_cache_size", 16384);
@@ -28,6 +37,10 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
 
         _data_cache = std::make_shared<DataCache>(data_size);
         _page_cache = std::make_shared<PageCache>(page_size);
+
+        int metrics_update_freq = Json::get_or<int>(json, "metrics_update_freq_sec", 10);
+        _metric_counters = std::make_unique<MetricCounters>(
+                std::unordered_map<std::string, std::string>{}, metrics_update_freq);
     }
 
     StorageCache::SafePagePtr
@@ -38,8 +51,6 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
                       bool do_rollforward,
                       SafePagePtr::FlushCb flush_cb )
     {
-        //TODO: SPR-796
-        //auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(target_xid)}});
         LOG_DEBUG(LOG_CACHE, "GET file {} eid {} xid {} txid {}",
                             file, extent_id, access_xid, target_xid);
 
@@ -49,8 +60,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
             target_xid = access_xid;
         }
 
-        //TODO: SPR-796
-        //open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_GET_CALLS);
+        _metric_counters->increment<metrics::StorageCache::GetCalls>();
 
         // if the extent ID is UNKNOWN, then we will get an empty page for the file
         if (extent_id == constant::UNKNOWN_EXTENT) {
@@ -105,7 +115,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     StorageCache::flush(const std::filesystem::path &file)
     {
         auto end_offset = _page_cache->flush_file(file);
-        open_telemetry::OpenTelemetry::get_instance()->increment_counter(STORAGE_CACHE_FLUSH_CALLS);
+        _metric_counters->increment<metrics::StorageCache::FlushCalls>();
         return end_offset;
     }
 
@@ -113,7 +123,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     StorageCache::drop_for_truncate(const std::filesystem::path &file)
     {
         _page_cache->drop_file(file);
-        open_telemetry::OpenTelemetry::get_instance()->increment_counter(STORAGE_CACHE_DROP_CALLS);
+        _metric_counters->increment<metrics::StorageCache::DropCalls>();
     }
 
 
@@ -125,9 +135,6 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     {
         DCHECK(extent_id != constant::UNKNOWN_EXTENT);
 
-        //TODO: SPR-796
-        //auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(target_xid)}});
-
         LOG_DEBUG(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, access_xid, target_xid);
 
         boost::unique_lock lock(_mutex);
@@ -135,14 +142,12 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
         // check if the page already exists in the cache for the given target XID
         PagePtr page = _try_get(file, extent_id, target_xid);
         if (page != nullptr) {
-            //TODO: SPR-796
-            //open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_GET_CALLS);
+            StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::GetCalls>();
             LOG_DEBUG(LOG_CACHE, "Found in cache");
             return page;
         }
 
-        //TODO: SPR-796
-        //open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_GET_CACHE_MISSES);
+        StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::CacheMisses>();
 
         // XXX eventually use the access_xid and extent_id to get the proper set of extents to start
         //     from; for now we assume that the single extent_id *is* the full list of extents for
@@ -167,14 +172,10 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     StorageCache::PageCache::put(PagePtr page,
                                  std::function<bool(std::shared_ptr<Page>)> flush_callback)
     {
-        //TODO: SPR-796
-        //auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(page->_end_xid)}});
-
         LOG_DEBUG(LOG_CACHE, "PUT file {} eid {} s_xid {} e_xid {}",
                             page->_file, page->_extent_id, page->_start_xid, page->_end_xid);
 
-        //TODO: SPR-796
-        //open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_PUT_CALLS);
+        StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::PutCalls>();
 
         boost::unique_lock lock(_mutex);
 
@@ -219,7 +220,8 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     {
         boost::unique_lock lock(_mutex);
 
-        open_telemetry::OpenTelemetry::get_instance()->increment_counter(STORAGE_CACHE_FLUSH_CALLS);
+        StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::FlushCalls>();
+
         const auto start_time = std::chrono::system_clock::now();
 
         //Get the end offset of data file for the table
@@ -317,7 +319,8 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     {
         boost::unique_lock lock(_mutex);
 
-        open_telemetry::OpenTelemetry::get_instance()->increment_counter(STORAGE_CACHE_DROP_CALLS);
+        StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::DropCalls>();
+
         const auto start_time = std::chrono::system_clock::now();
 
         // go through the dirty page list for the file

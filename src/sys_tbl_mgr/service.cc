@@ -530,12 +530,12 @@ Service::_create_table(const proto::TableRequest& request)
     ddl["columns"] = nlohmann::json::array();
 
     // partition info
-    std::optional<uint64_t> parent_table_id = constant::INVALID_TABLE;
-    if (request.table().has_parent_table_id()) {
+    std::optional<uint64_t> parent_table_id = std::nullopt;
+    if (request.table().has_parent_table_id() && request.table().parent_table_id() != constant::INVALID_TABLE) {
         parent_table_id = request.table().parent_table_id();
         ddl["parent_table_id"] = parent_table_id.value();
         auto parent_table_info = _get_table_info(request.db_id(), parent_table_id.value(), xid);
-        if (parent_table_id.value() != constant::INVALID_TABLE) {
+        if (parent_table_id.has_value()) {
             if (parent_table_info == nullptr) {
                 LOG_ERROR("Parent table not found: {}@{} - {}", request.db_id(), xid.xid, parent_table_id.value());
             } else {
@@ -551,14 +551,14 @@ Service::_create_table(const proto::TableRequest& request)
 
     // partition key -- this is a parent table; either root or intermediate
     std::optional<std::string> partition_key = std::nullopt;
-    if (request.table().has_partition_key()) {
+    if (request.table().has_partition_key() && !request.table().partition_key().empty()) {
         partition_key = request.table().partition_key();
         ddl["partition_key"] = partition_key.value();
     }
 
     // this is a partitioned table, it is a leaf if partition_key is empty
     std::optional<std::string> partition_bound = std::nullopt;
-    if (request.table().has_partition_bound()) {
+    if (request.table().has_partition_bound() && !request.table().partition_bound().empty()) {
         partition_bound = request.table().partition_bound();
         ddl["partition_bound"] = partition_bound.value();
     }
@@ -666,16 +666,13 @@ Service::AlterTable(grpc::ServerContext* context,
     std::optional<uint64_t> parent_table_id = std::nullopt;
     std::optional<std::string> partition_key = std::nullopt;
     std::optional<std::string> partition_bound = std::nullopt;
-    if (request->table().has_parent_table_id()) {
+    if (request->table().has_parent_table_id() && request->table().parent_table_id() != constant::INVALID_TABLE) {
         parent_table_id = request->table().parent_table_id();
-        if (parent_table_id.value() == constant::INVALID_TABLE) {
-            parent_table_id = std::nullopt;
-        }
     }
-    if (request->table().has_partition_key()) {
+    if (request->table().has_partition_key() && !request->table().partition_key().empty()) {
         partition_key = request->table().partition_key();
     }
-    if (request->table().has_partition_bound()) {
+    if (request->table().has_partition_bound() && !request->table().partition_bound().empty()) {
         partition_bound = request->table().partition_bound();
     }
 
@@ -1562,7 +1559,12 @@ Service::AttachPartition(grpc::ServerContext* context,
 
         // update the system table
         partition_bound = partition_map[attached_table_id].first;
-        partition_key = partition_map[attached_table_id].second;
+
+        // update the partition key
+        if ( !partition_map[attached_table_id].second.empty() ) {
+            partition_key = partition_map[attached_table_id].second;
+        }
+
         auto updated_table_info =
             std::make_shared<TableCacheRecord>(attached_table_id, request->xid(), request->lsn(),
                                                table_info->namespace_id, table_info->name, true,
@@ -1909,15 +1911,15 @@ Service::_get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     info->name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row);
     info->exists = exists;
 
-    uint64_t parent_table_id = constant::INVALID_TABLE;
+    std::optional<uint64_t> parent_table_id = std::nullopt;
     if (!fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->is_null(&row)) {
         parent_table_id = fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->get_uint64(&row);
     }
-    std::string partition_key;
+    std::optional<std::string> partition_key = std::nullopt;
     if (!fields->at(sys_tbl::TableNames::Data::PARTITION_KEY)->is_null(&row)) {
         partition_key = fields->at(sys_tbl::TableNames::Data::PARTITION_KEY)->get_text(&row);
     }
-    std::string partition_bound;
+    std::optional<std::string> partition_bound = std::nullopt;
     if (!fields->at(sys_tbl::TableNames::Data::PARTITION_BOUND)->is_null(&row)) {
         partition_bound = fields->at(sys_tbl::TableNames::Data::PARTITION_BOUND)->get_text(&row);
     }

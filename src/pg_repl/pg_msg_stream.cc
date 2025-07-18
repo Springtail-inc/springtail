@@ -910,12 +910,14 @@ namespace springtail {
     PartitionData
     _decode_partition_data(const nlohmann::json &partition_data){
         PartitionData data;
-        data.partition_bound = partition_data["partition_bound"];
         data.table_id = partition_data["table_id"];
         data.namespace_id = partition_data["namespace_id"];
         data.table_name = partition_data["table_name"];
         if (partition_data.contains("partition_key") && !partition_data["partition_key"].is_null()) {
             data.partition_key = partition_data["partition_key"];
+        }
+        if (partition_data.contains("partition_bound") && !partition_data["partition_bound"].is_null()) {
+            data.partition_bound = partition_data["partition_bound"];
         }
         data.parent_table_id = partition_data["parent_table_id"];
         return data;
