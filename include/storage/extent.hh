@@ -70,7 +70,6 @@ namespace springtail {
         std::vector<uint8_t> field_types;
 
         uint64_t prev_offset; ///< The location of the previous extent that this extent is overwriting.  Set to UNKNOWN_EXTENT for new extents.
-        uint32_t prev_size; ///< The on-disk size in bytes of the previous extent.  Used for vacuuming.
 
         /** Constructor for uncommitted extents.*/
         ExtentHeader(ExtentType type,
@@ -82,8 +81,7 @@ namespace springtail {
               xid(xid),
               row_size(row_size),
               field_types(types),
-              prev_offset(prev_offset),
-              prev_size(0)
+              prev_offset(prev_offset)
         { }
 
         /** Constructor that deserializes the header. */

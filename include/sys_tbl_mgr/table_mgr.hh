@@ -87,7 +87,7 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base,
         void finalize_metadata(uint64_t db_id, uint64_t xid);
 
         /**
-         * @brief Get table dir
+         * @brief Get table data dir for a table_id
          *
          * @param db_id    Database ID
          * @param table_id Table ID

@@ -144,6 +144,8 @@ namespace springtail::committer {
 
                     for (const auto swapped_tid: swapped_tids) {
                         // Notify vacuumer to expire old table snapshot
+                        // Send completed_xid - 1 to get the previous old snapshot dir
+                        // and then expire that at the completed_xid
                         auto swapped_table_old_dir = TableMgr::get_instance()->get_table_data_dir(db_id, swapped_tid, completed_xid - 1);
                         Vacuumer::get_instance()->expire_snapshot(db_id, swapped_table_old_dir, completed_xid);
                     }
@@ -358,30 +360,30 @@ namespace springtail::committer {
     }
 
     void
-    Committer::_expire_index_drops(uint64_t db_id, std::list<proto::IndexProcessRequest>& index_requests, uint64_t commited_xid)
+    Committer::_expire_index_drops(uint64_t db_id, std::list<proto::IndexProcessRequest>& index_requests, uint64_t committed_xid)
     {
         for (auto const& index_request: index_requests) {
             auto action = index_request.action();
             if (action == "drop_index") {
                 auto tid = index_request.index().table_id();
                 auto index_id = index_request.index().id();
-                auto _dropped_index_table_dir = TableMgr::get_instance()->get_table_data_dir(db_id, tid, commited_xid - 1);
+                auto _dropped_index_table_dir = TableMgr::get_instance()->get_table_data_dir(db_id, tid, committed_xid - 1);
                 auto index_file_path = _dropped_index_table_dir / fmt::format(constant::INDEX_FILE, index_id);
-                Vacuumer::get_instance()->expire_snapshot(db_id, index_file_path, commited_xid);
+                Vacuumer::get_instance()->expire_snapshot(db_id, index_file_path, committed_xid);
             }
         }
     }
 
     void
-    Committer::_expire_table_drops(uint64_t db_id, const nlohmann::json &completed_ddls, uint64_t commited_xid)
+    Committer::_expire_table_drops(uint64_t db_id, const nlohmann::json &completed_ddls, uint64_t committed_xid)
     {
         for (auto& ddl: completed_ddls) {
             if (ddl.contains("tid") && ddl.contains("action")) {
                 uint64_t tid = ddl["tid"].get<uint64_t>();
                 auto action = ddl["action"].get<std::string>();
                 if (action == "drop") {
-                    auto dropped_table_dir = TableMgr::get_instance()->get_table_data_dir(db_id, tid, commited_xid - 1);
-                    Vacuumer::get_instance()->expire_snapshot(db_id, dropped_table_dir, commited_xid);
+                    auto dropped_table_dir = TableMgr::get_instance()->get_table_data_dir(db_id, tid, committed_xid - 1);
+                    Vacuumer::get_instance()->expire_snapshot(db_id, dropped_table_dir, committed_xid);
                 }
             }
         }

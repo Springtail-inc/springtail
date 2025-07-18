@@ -1529,8 +1529,8 @@ StorageCache::PageCache::background_cleaner()
         extent->_state = CacheExtent::State::FLUSHING;
         extent->_flush_cv = std::make_shared<boost::condition_variable>();
 
-        // record the on-disk size of the originating extent
-        extent->header().prev_size = extent->_extent_size;
+        // On-disk size of the originating extent
+        uint64_t prev_extent_size = extent->_extent_size;
 
         // perform the flush
         {
@@ -1543,7 +1543,7 @@ StorageCache::PageCache::background_cleaner()
             // notify the vacuumer of the now-expired extent
             if (extent->header().prev_offset != constant::UNKNOWN_EXTENT) {
                 Vacuumer::get_instance()->expire_extent(extent->_file, extent->header().prev_offset,
-                                                        extent->_extent_size, extent->header().xid);
+                                                        prev_extent_size, extent->header().xid);
             }
 
             // XXX we could do this asynchronously and return a future that completes when the extent ID
