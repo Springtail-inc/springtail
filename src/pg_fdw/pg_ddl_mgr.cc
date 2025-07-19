@@ -50,41 +50,54 @@ namespace springtail::pg_fdw {
         "ALTER FOREIGN TABLE {}.{} "
         "  ENABLE ROW LEVEL SECURITY {}";
 
+    /** Calls primary function to get diff of policy changes; see policy.sql */
     static constexpr char POLICY_DIFF_SELECT[] =
         "SELECT diff_type, table_name, schema_name, "
         "       policy_oid, policy_name, policy_name_old, "
         "       policy_permissive, policy_roles, policy_qual, table_oid "
         "FROM __pg_springtail_triggers.policy_diff('{}');";
 
+    /** Calls primary function to get diff of role changes; see roles.sql */
     static constexpr char ROLE_DIFF_SELECT[] =
         "SELECT diff_type, rolname, rolsuper, "
         "    rolinherit, rolcanlogin, rolbypassrls, rolconfig, rolconfig_changed "
         "FROM __pg_springtail_triggers.role_diff('{}');";
 
+    /** Calls primary function to get diff of role member changes; see role_members.sql */
     static constexpr char ROLE_MEMBER_DIFF_SELECT[] =
         "SELECT diff_type, role_name, member_name "
         "FROM __pg_springtail_triggers.role_member_diff('{}');";
 
+    /** Calls primary function to get diff of table owner changes; see table_owners.sql */
     static constexpr char TABLE_OWNER_DIFF_SELECT[] =
         "SELECT diff_type, table_name, schema_name, "
         "       role_owner_name, table_oid "
         "FROM __pg_springtail_triggers.table_owner_diff('{}');";
 
-    static constexpr char LOOKUP_TABLE_SELECT[] =
-        "SELECT c.oid, c.relkind "
+    /**
+     * Query to check if a table exists given:
+     * primary table oid, schema name and table name.
+     * This query will return 1 if the table exists,
+     * NULL if it does not exist.
+     * For foreign tables, it will check if the
+     * foreign table options contain the tid option that matches
+     * the primary table oid.
+     */
+    static constexpr char TABLE_EXISTS_SELECT[] =
+        "SELECT "
+        "  CASE "
+        "    WHEN c.relkind = 'f' THEN ("
+        "      SELECT 1 FROM unnest(ft.ftoptions) AS opt "
+        "      WHERE opt = format('tid=%s', '{}') LIMIT 1"
+        "    ) "
+        "    WHEN c.relkind IN ('r', 'p') THEN 1 "
+        "    ELSE NULL "
+        "  END AS exists "
         "FROM pg_class c "
         "JOIN pg_namespace n ON c.relnamespace = n.oid "
+        "LEFT JOIN pg_foreign_table ft ON ft.ftrelid = c.oid "
+        "LEFT JOIN pg_foreign_server fs ON ft.ftserver = fs.oid "
         "WHERE n.nspname = '{}' AND c.relname = '{}'";
-
-    static constexpr char VERIFY_FT_TABLE_ID[] =
-        "SELECT 1 "
-        "FROM pg_foreign_table ft "
-        "JOIN pg_foreign_server fs ON ft.ftserver = fs.oid "
-        "WHERE ft.ftrelid = {} "
-        "  AND EXISTS ( "
-        "    SELECT 1 "
-        "    FROM unnest(fs.srvoptions) AS opt "
-        "WHERE opt = format('tid=%s', {}::text)";
 
 
 
@@ -223,6 +236,8 @@ namespace springtail::pg_fdw {
             return true; // success
         }
 
+        LOG_ERROR("Failed to execute SQL in savepoint: error: sql_state: {}, msg: {}", fdw_conn->get_sql_state(), fdw_conn->result_error_message());
+
         // rollback the savepoint on fdw
         fdw_conn->rollback_savepoint(savepoint_name);
 
@@ -239,24 +254,14 @@ namespace springtail::pg_fdw {
                                   uint32_t table_oid)
     {
         // check if the table exists in the fdw database
-        fdw_conn->exec(fmt::format(LOOKUP_TABLE_SELECT, fdw_conn->escape_string(schema_name), fdw_conn->escape_string(table_name)));
+        fdw_conn->exec(fmt::format(TABLE_EXISTS_SELECT, table_oid,
+                                   fdw_conn->escape_string(schema_name),
+                                   fdw_conn->escape_string(table_name)));
+
         if (fdw_conn->ntuples() == 0) {
             LOG_ERROR("Table {}.{} with OID {} does not exist in the FDW database",
                       schema_name, table_name, table_oid);
             return false;
-        }
-
-        // verify the table OID matches
-        uint32_t fdw_table_oid = fdw_conn->get_int32(0, 0);
-        char relkind = fdw_conn->get_char(0, 1);
-
-        if (relkind == 'f') {
-            // foreign table; check table_oid against server options
-            fdw_conn->exec(fmt::format(VERIFY_FT_TABLE_ID, fdw_table_oid, table_oid));
-            if (fdw_conn->ntuples() == 0) {
-                LOG_ERROR("Foreign table with OID {} does not exist in the FDW database", table_oid);
-                return false;
-            }
         }
 
         return true;
@@ -306,7 +311,7 @@ namespace springtail::pg_fdw {
             }
             policy_roles = fmt::format("{}", common::join_string(", ", roles));
 
-            auto rollback_sql = fmt::format("SELECT __pg_springtail_triggers.policy_remove({}, {})",
+            auto rollback_sql = fmt::format("SELECT __pg_springtail_triggers.policy_remove('{}', {})",
                                             _fdw_id, policy_oid);
             /*
              * Check if the table associated with the policy exist, if not we remove
@@ -500,7 +505,7 @@ namespace springtail::pg_fdw {
                 continue;
             }
 
-            auto rollback_sql = fmt::format("SELECT __pg_springtail_triggers.table_owner_remove({}, {})",
+            auto rollback_sql = fmt::format("SELECT __pg_springtail_triggers.table_owner_remove('{}', {})",
                                             _fdw_id, table_oid);
 
             if (diff_type == "ADDED" || diff_type == "MODIFIED") {

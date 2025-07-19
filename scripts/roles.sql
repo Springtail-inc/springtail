@@ -75,6 +75,7 @@ AS $$
 DECLARE
     v_current_snapshot_time TIMESTAMPTZ := clock_timestamp();
     v_last_snapshot_time TIMESTAMPTZ;
+    rec RECORD;
 BEGIN
     -- 1. Create a temporary table for the current snapshot of roles
     DROP TABLE IF EXISTS __pg_springtail_current_role_snapshot;
@@ -176,21 +177,21 @@ BEGIN
     FROM
         __pg_springtail_current_role_snapshot AS cur
     FULL OUTER JOIN
-        __pg_springtail_triggers.role_snapshot_history AS prev ON (cur.role_oid = prev.role_oid)
+        __pg_springtail_triggers.role_snapshot_history AS prev
+            ON (cur.role_oid = prev.role_oid AND prev.fdw_id = fdw_id_var)
     WHERE
-        prev.fdw_id = fdw_id_var
-        AND (
-            cur.role_oid IS NULL -- Role was removed
-            OR prev.role_oid IS NULL -- Role was added
-            OR (
-                cur.rolsuper IS DISTINCT FROM prev.rolsuper OR
-                cur.rolinherit IS DISTINCT FROM prev.rolinherit OR
-                cur.rolcanlogin IS DISTINCT FROM prev.rolcanlogin OR
-                cur.rolbypassrls IS DISTINCT FROM prev.rolbypassrls OR
-                cur.rolname IS DISTINCT FROM prev.rolname OR
-                cur.rolconfig IS DISTINCT FROM prev.rolconfig
-            )
-        );
+        cur.role_oid IS NULL -- Role was removed
+        OR prev.role_oid IS NULL -- Role was added
+        OR (
+            cur.rolsuper IS DISTINCT FROM prev.rolsuper OR
+            cur.rolinherit IS DISTINCT FROM prev.rolinherit OR
+            cur.rolcanlogin IS DISTINCT FROM prev.rolcanlogin OR
+            cur.rolbypassrls IS DISTINCT FROM prev.rolbypassrls OR
+            cur.rolname IS DISTINCT FROM prev.rolname OR
+            cur.rolconfig IS DISTINCT FROM prev.rolconfig
+        )
+    ORDER BY COALESCE(cur.role_oid, prev.role_oid);
+
 
     -- 5. Update the history table with the current snapshot
     DELETE FROM role_snapshot_history

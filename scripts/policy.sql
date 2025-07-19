@@ -139,7 +139,8 @@ BEGIN
     JOIN -- Use INNER JOIN here as we only care about tables with actual policies
         pg_policy AS po ON po.polrelid = c.oid
     JOIN
-        pg_policies AS p ON p.schemaname = n.nspname AND p.tablename = c.relname AND p.policyname = po.polname
+        pg_policies AS p
+        ON (p.schemaname = n.nspname AND p.tablename = c.relname AND p.policyname = po.polname)
     WHERE
         c.relkind = 'r' -- Regular tables
         AND polcmd IN ('r', '*') -- Only consider policies that are applicable for SELECT or all commands
@@ -206,17 +207,18 @@ BEGIN
     FROM
         __pg_springtail_current_policy_snapshot AS cur
     FULL OUTER JOIN
-        __pg_springtail_triggers.policy_snapshot_history AS prev ON (cur.policy_oid = prev.policy_oid)
+        __pg_springtail_triggers.policy_snapshot_history AS prev
+        ON (cur.policy_oid = prev.policy_oid AND prev.fdw_id = fdw_id_var)
     WHERE
-        prev.fdw_id = fdw_id_var
-        AND (cur.policy_oid IS NULL -- Policy was removed
-            OR prev.policy_oid IS NULL -- Policy was added
-            OR ( -- Policy was modified
-                cur.policy_permissive IS DISTINCT FROM prev.policy_permissive OR
-                cur.policy_roles IS DISTINCT FROM prev.policy_roles OR
-                cur.policy_qual IS DISTINCT FROM prev.policy_qual OR
-                cur.policy_name IS DISTINCT FROM prev.policy_name -- Policy name might change even if OID is same, though rare for RLS
-        ));
+        cur.policy_oid IS NULL -- Policy was removed
+        OR prev.policy_oid IS NULL -- Policy was added
+        OR ( -- Policy was modified
+            cur.policy_permissive IS DISTINCT FROM prev.policy_permissive OR
+            cur.policy_roles IS DISTINCT FROM prev.policy_roles OR
+            cur.policy_qual IS DISTINCT FROM prev.policy_qual OR
+            cur.policy_name IS DISTINCT FROM prev.policy_name -- Policy name might change even if OID is same, though rare for RLS
+        )
+        ORDER BY COALESCE(cur.policy_oid, prev.policy_oid);
 
     -- 5. Update the history table with the current snapshot
     -- First, delete the old snapshot(s) to maintain only the latest

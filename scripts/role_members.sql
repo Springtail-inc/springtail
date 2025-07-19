@@ -155,13 +155,11 @@ BEGIN
         __pg_springtail_current_role_member_snapshot AS cur
     FULL OUTER JOIN
         __pg_springtail_triggers.role_member_snapshot_history AS prev
-        ON cur.role_oid = prev.role_oid AND cur.member_oid = prev.member_oid
+        ON (cur.role_oid = prev.role_oid AND cur.member_oid = prev.member_oid AND prev.fdw_id = fdw_id_var)
     WHERE
-        prev.fdw_id = fdw_id_var
-        AND (
-            cur.role_oid IS NULL -- Membership was removed
-            OR prev.role_oid IS NULL -- Membership was added
-        );
+        cur.role_oid IS NULL -- Membership was removed
+        OR prev.role_oid IS NULL -- Membership was added
+    ORDER BY COALESCE(cur.role_oid, prev.role_oid), COALESCE(cur.member_oid, prev.member_oid);
 
     -- 5. Update the history table with the current snapshot
     DELETE FROM role_member_snapshot_history

@@ -261,9 +261,11 @@ namespace springtail {
         auto status = PQresultStatus(_result->result);
         if (status != PGRES_COMMAND_OK && status != PGRES_TUPLES_OK && status != PGRES_COPY_OUT) {
             if (!savepoint_name.empty()) {
+                auto old_result = _result; // keep the result for logging
                 // rollback to savepoint if in transaction
-                LOG_DEBUG(LOG_PG_REPL, "Rolling back to savepoint: {}", savepoint_name);
+                LOG_DEBUG(LOG_PG_REPL, "Rolling back to savepoint: {}, error on exec: {}", savepoint_name, result_error_message());
                 rollback_savepoint(savepoint_name);
+                _result = old_result; // restore the result for logging
             }
             return false; // error executing query
         }
@@ -920,7 +922,7 @@ namespace springtail {
         if (_result == nullptr) {
             return nullptr;
         }
-        return get_value(row, col);
+        return PQgetvalue(_result->result, row, col);
     }
 
 
