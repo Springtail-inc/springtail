@@ -9,6 +9,9 @@ set(LIB_PGEXT_SOURCES
     list.cc
     hash.cc
     regex.cc
+    bit.cc
+    fmgr.cc
+    sort.cc
 )
 
 # Create the library
