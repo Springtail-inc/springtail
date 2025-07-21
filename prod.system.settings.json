@@ -61,6 +61,12 @@
     "page_cache_size": 16384,
     "btree_cache_size": 512,
     "max_extent_per_page": 16,
+    "vacuum_config": {
+        "enabled": false,
+        "vacuum_dir": "vacuum",
+        "vacuum_global_threshold": 100240,
+        "hole_punch_block_size": 4096
+    },
     "metrics_update_freq_sec": 10
   },
   "log_mgr": {
