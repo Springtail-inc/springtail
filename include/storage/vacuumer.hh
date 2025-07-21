@@ -157,6 +157,7 @@ private:
     std::filesystem::path _vacuum_data_base; ///< The base directory for vacuum directories
     std::filesystem::path _global_vacuum_file; ///< Global vacuum file
     std::filesystem::path _global_vacuum_runfile; ///< Global vacuum file for current run
+    std::string _global_vacuum_runfile_name_suffix = ".global.run"; ///< Partial file to be created dynamically
 
     RedisDDL _redis_ddl; ///< Interface to the DDL structures in Redis.
 

@@ -80,6 +80,7 @@ Vacuumer::_internal_shutdown()
 
     if (_vacuum_start_enabled) {
         _vacuumer_thread.join();
+        LOG_INFO("Vacuumer thread joined");
     }
 }
 
@@ -231,10 +232,15 @@ Vacuumer::_update_global_vacuum_file(const ExtentMap& expired_extents_map,
                                      const SnapshotMap& expired_snapshots_map)
 {
     // Lets persist expired extents
-    auto handle = IOMgr::get_instance()->open(_global_vacuum_runfile, IOMgr::IO_MODE::APPEND, true);
+    // Creating unique runfile everytime to make sure we get new handle everytime
+    auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+    auto global_vacuum_runfile = _vacuum_data_base / fmt::format("{}{}", timestamp, _global_vacuum_runfile_name_suffix);
+    auto handle = IOMgr::get_instance()->open(global_vacuum_runfile, IOMgr::IO_MODE::WRITE, true);
 
     if (!expired_extents_map.empty()) {
         for (const auto& [file, xid_map] : expired_extents_map) {
+
             // If the file was removed as part of table deletion
             // skip maintaining in the global vacuum log
             if (!std::filesystem::exists(file)) {
@@ -279,8 +285,8 @@ Vacuumer::_update_global_vacuum_file(const ExtentMap& expired_extents_map,
     }
 
     // Move runfile on to the global file
-    if (std::filesystem::exists(_global_vacuum_runfile)) {
-        std::filesystem::rename(_global_vacuum_runfile, _global_vacuum_file);
+    if (std::filesystem::exists(global_vacuum_runfile)) {
+        std::filesystem::rename(global_vacuum_runfile, _global_vacuum_file);
     }
 }
 
@@ -429,7 +435,10 @@ Vacuumer::_update_vacuumed_partials_file(
             std::filesystem::remove(partial_file);
         }
     } else {
-        std::string partial_runfilename = partial_filename + ".run";
+        // Creating unique runfile everytime to make sure we get new handle everytime
+        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+        std::string partial_runfilename = fmt::format("{}.{}.run", timestamp, partial_filename);
         std::filesystem::path partial_runfile = _vacuum_data_base / partial_runfilename;
 
         // Create header with max XID as we dont rely on individual XID for partial
@@ -586,12 +595,24 @@ Vacuumer::_run_recovery()
     std::unique_lock lock(_mutex);
     LOG_INFO("Vacuum Recovery started");
 
-    auto global_runfile_exists = std::filesystem::exists(_global_vacuum_runfile);
+    auto global_runfile_exists = false;
+    std::filesystem::path global_vacuum_runfile;
     auto global_file_exists = std::filesystem::exists(_global_vacuum_file);
+
+    for (const auto& entry : std::filesystem::directory_iterator(_vacuum_data_base)) {
+        if (entry.is_regular_file()) {
+            const std::string filename = entry.path().filename().string();
+            if (filename.ends_with(".global.run")) {
+                global_runfile_exists = true;
+                global_vacuum_runfile = entry;
+                break;
+            }
+        }
+    }
 
     // State B
     if (global_runfile_exists) {
-        std::filesystem::rename(_global_vacuum_runfile, _global_vacuum_file);
+        std::filesystem::rename(global_vacuum_runfile, _global_vacuum_file);
     }
 
     // State C: Remove any partials runfile
