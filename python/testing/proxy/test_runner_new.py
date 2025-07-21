@@ -99,7 +99,7 @@ class Test:
         run_command('sudo', ['cp', libregress_so, self._regress_lib_path])
 
         logging.debug('Starting the fdw instance')
-        springtail.install_fdw(self._build_dir)
+        springtail.install_fdw(self._props, self._build_dir)
 
         logging.debug('Set up regression database')
         self.setup_regress_db()
@@ -287,7 +287,7 @@ class Test:
     def run_diff(self, dir1, dir2, output_file) -> bool:
         """
         Compare two directories and write differences to output file
-        
+
         Args:
             dir1 (str): Path to first directory
             dir2 (str): Path to second directory

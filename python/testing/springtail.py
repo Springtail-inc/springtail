@@ -149,6 +149,30 @@ def connect_proxy(props : Properties, db_name : str ='postgres') -> psycopg2.ext
 
     return conn
 
+def cleanup_db_users(props : Properties, is_fdw: bool) -> None:
+    """Cleanup the database users."""
+    conn = None
+
+    if is_fdw:
+        conn = connect_fdw_instance(props)
+        user = props.get_fdw_config()['fdw_user']
+    else:
+        conn = connect_db_instance(props)
+        user = props.get_db_instance_config()['replication_user']
+
+    # Get users excluding super users and the fdw/replication user
+    users = execute_sql_select(conn,
+                               f"""SELECT rolname
+                                  FROM pg_roles
+                                  WHERE rolname <> %s AND
+                                  rolsuper IS FALSE AND
+                                  rolname NOT LIKE 'pg_%%';""", user)
+    for row in users:
+        user_name = row[0]
+        execute_sql(conn, f"DROP ROLE IF EXISTS {quote_ident(user_name, conn)};")
+        logging.info(f"Dropped user {user_name}")
+
+
 def cleanup_db_instance(props : Properties) -> None:
     """Cleanup the database instance.
        Drop and recreate the db and execute cleanup SQL statements.
@@ -157,6 +181,8 @@ def cleanup_db_instance(props : Properties) -> None:
         start_postgres()
     for db_config in props.get_db_configs():
         cleanup_database(props, db_config)
+
+    cleanup_db_users(props, False)
 
 
 def cleanup_database(props : Properties, db_config: Dict) -> None:
@@ -302,7 +328,7 @@ def update_postgres_config(test_params: Dict[str, str], props: Properties) -> bo
     return success  # True if reload succeeded, False if not
 
 
-def install_fdw(build_dir : str) -> None:
+def install_fdw(props : Properties, build_dir : str) -> None:
     """Install the foreign data wrapper extension."""
     # Get the share and lib directories
     share_dir = run_command('pg_config', ['--sharedir'])
@@ -360,6 +386,9 @@ def install_fdw(build_dir : str) -> None:
     # start postgres
     print("Starting postgres...")
     start_postgres()
+
+    # cleanup fdw users
+    cleanup_db_users(props, True)
 
 
 def _install_triggers(conn: psycopg2.extensions.connection, build_dir: str) -> None:
@@ -718,7 +747,7 @@ def start(config_file: str,
         if do_fdw_install:
             # install fdw
             print("\nInstalling foreign data wrapper...")
-            install_fdw(build_dir)
+            install_fdw(props, build_dir)
 
         # start replication on db instance
         print("\nStarting replication on database instance...")
@@ -746,7 +775,7 @@ def start(config_file: str,
         if do_fdw_install:
             # install fdw
             print("\nInstalling foreign data wrapper...")
-            install_fdw(build_dir)
+            install_fdw(props, build_dir)
 
         # start postgres
         print("Starting postgres...")

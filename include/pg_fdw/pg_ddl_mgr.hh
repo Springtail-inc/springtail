@@ -139,7 +139,7 @@ namespace springtail::pg_fdw {
                                       const nlohmann::json &new_value);
 
         /** Sync thread; sync policy changes, roles, role memberships etc to FDW */
-        void _sync_thread_func();
+        void _sync_thread_func(int sync_interval_seconds);
 
         /** Helper to sync policies for a database */
         void _policy_sync_database(LibPqConnectionPtr conn, LibPqConnectionPtr fdw_conn, uint64_t db_id);

@@ -146,7 +146,8 @@
             "host": "localhost",
             "port": 5432,
             "fdw_user": "springtail",
-            "db_prefix": "replica_"
+            "db_prefix": "replica_",
+            "sync_seconds": 4
         }
     },
     "otel": {

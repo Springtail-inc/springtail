@@ -215,13 +215,15 @@ namespace springtail::pg_fdw {
         std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
         redis_cache->add_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
 
+        int sync_interval_secs = Json::get_or(fdw_config, "sync_seconds", SYNC_INTERVAL_SECONDS);
+
         _init_fdw();
 
         _thread_manager = std::make_shared<common::MultiQueueThreadManager>(MAX_THREAD_POOL_SIZE);
         _thread_manager->start();
 
         // create a new thread to run the policy and role sync
-        _sync_thread = std::thread(&PgDDLMgr::_sync_thread_func, this);
+        _sync_thread = std::thread(&PgDDLMgr::_sync_thread_func, this, sync_interval_secs);
     }
 
     bool
@@ -534,7 +536,7 @@ namespace springtail::pg_fdw {
     }
 
     void
-    PgDDLMgr::_sync_thread_func()
+    PgDDLMgr::_sync_thread_func(int sync_interval_secs)
     {
         std::string host;
         int port;
@@ -594,12 +596,12 @@ namespace springtail::pg_fdw {
                 // on error we should drop the primary fdw policy table and try resyncing from scratch
             }
 
-            // sleep for POLICY_SYNC_INTERVAL_SECONDS
+            // sleep for sync_interval_secs
             auto lock = std::unique_lock<std::mutex>(_sync_shutdown_mutex);
             if (!_is_shutting_down()) {
                 _sync_shutdown_cv.wait_for(
                     lock,
-                    std::chrono::seconds(SYNC_INTERVAL_SECONDS)
+                    std::chrono::seconds(sync_interval_secs)
                 );
             }
         }

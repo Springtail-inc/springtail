@@ -285,6 +285,19 @@ class TestCase:
                             'wait_for': int(directive[3]) if len(directive) > 3 else self._metadata['sync_timeout']
                         }, section, is_threaded, cur_txn, line_num)
 
+                    elif directive[0] == 'policy_sync':
+                        if section not in ('test', 'verify'):
+                            self._raise_error(f'{line_num}: "policy_sync" must be part of the "test" or "verify" section')
+
+                        if len(directive) < 1:
+                            self._raise_error(f'{line_num}: "policy_sync" must specify a policy name')
+
+                        self._append_command({
+                            'type': 'policy_sync',
+                            'policy_name': directive[1],
+                            'wait_for': int(directive[2]) if len(directive) > 2 else self._metadata['sync_timeout']
+                        }, section, is_threaded, cur_txn, line_num)
+
                     elif directive[0] == 'policy_check':
                         if section != 'verify':
                             self._raise_error(f'{line_num}: "policy_check" must be part of the "verify" section')
@@ -295,7 +308,8 @@ class TestCase:
                             'type': 'policy_check',
                             'schema': directive[1],
                             'table': directive[2],
-                            'policy_name': directive[3]
+                            'policy_name': directive[3],
+                            'wait_for': int(directive[4]) if len(directive) > 4 else self._metadata['sync_timeout']
                         }, section, is_threaded, cur_txn, line_num)
 
                     # Usage - table_exists <schema> <table> <replica_exists>
@@ -670,21 +684,24 @@ class TestCase:
 
                 return results
 
+            elif command['type'] == 'policy_sync':
+                return None
+
             elif command['type'] == 'policy_check':
                 results = {}
 
                 # get the policies for the table
-                sql = f"""SELECT p.polname AS name,
-                                 p.polpermissive AS permissive,
-                                 p.polcmd AS command,
-                                 p.polroles AS roles,
-                                 pg_get_expr(p.polqual, p.polrelid) AS qual,
-                                 pg_get_expr(p.polwithcheck, p.polrelid) AS with_check
-                          FROM pg_policy p
-                          JOIN pg_class c ON c.oid = p.polrelid
-                          JOIN pg_namespace n ON n.oid = c.relnamespace
-                          WHERE n.nspname = '{command["schema"]}' AND c.relname = '{command["table"]}'
-                            AND p.polname = '{command["policy_name"]}';"""
+                sql = f"""SELECT p.policyname AS name,
+                                 p.schemaname AS schema,
+                                 p.tablename AS table,
+                                 p.permissive AS permissive,
+                                 p.cmd AS command,
+                                 p.roles AS roles,
+                                 p.qual AS qual,
+                                 p.with_check AS with_check
+                          FROM pg_policies p
+                          WHERE p.schemaname = '{command["schema"]}' AND p.tablename = '{command["table"]}'
+                            AND p.policyname = '{command["policy_name"]}';"""
                 results['policies'] = self._execute_sql(cursor, sql, True, txn)
 
                 return results
@@ -724,6 +741,18 @@ class TestCase:
             common.wait_for_replica_condition(self._fdw[self._replica_name], query, (True,), timeout=wait_for)
         except Exception as e:
             self._raise_failure(f'Role {role_name} not found in replica within {wait_for}s.')
+
+    def _wait_for_policy(self, policy_name: str, wait_for: int) -> None:
+        query = f"""
+            SELECT EXISTS (
+                SELECT 1 FROM pg_policy WHERE polname = '{policy_name}'
+            );
+        """
+
+        try:
+            common.wait_for_replica_condition(self._fdw[self._replica_name], query, (True,), timeout=wait_for)
+        except Exception as e:
+            self._raise_failure(f'Policy {policy_name} not found in replica within {wait_for}s.')
 
 
     def _get_ranking_sql(self, is_index_query: bool = False) -> str:
@@ -877,22 +906,29 @@ class TestCase:
 
                 return results
 
+            elif command['type'] == 'policy_sync':
+                self._wait_for_policy(command["policy_name"], command["wait_for"])
+                return None
+
             elif command['type'] == 'policy_check':
                 results = {}
 
+                if command["wait_for"] > 0:
+                    self._wait_for_policy(command["policy_name"], command["wait_for"])
+
                 # get the policies for the table
-                sql = f"""SELECT p.polname AS name,
-                                 p.polpermissive AS permissive,
-                                 p.polcmd AS command,
-                                 p.polroles AS roles,
-                                 pg_get_expr(p.polqual, p.polrelid) AS qual,
-                                 pg_get_expr(p.polwithcheck, p.polrelid) AS with_check
-                          FROM pg_policy p
-                          JOIN pg_class c ON c.oid = p.polrelid
-                          JOIN pg_namespace n ON n.oid = c.relnamespace
-                          WHERE n.nspname = '{command["schema"]}' AND c.relname = '{command["table"]}'
-                            AND p.polname = '{command["policy_name"]}';"""
-                results['policies'] = self._execute_sql(cursor, sql, True, txn)
+                sql = f"""SELECT p.policyname AS name,
+                                 p.schemaname AS schema,
+                                 p.tablename AS table,
+                                 p.permissive AS permissive,
+                                 p.cmd AS command,
+                                 p.roles AS roles,
+                                 p.qual AS qual,
+                                 p.with_check AS with_check
+                          FROM pg_policies p
+                          WHERE p.schemaname = '{command["schema"]}' AND p.tablename = '{command["table"]}'
+                            AND p.policyname = '{command["policy_name"]}';"""
+                results['policies'] = self._execute_sql(cursor, sql, True, 'replica')
 
                 return results
 

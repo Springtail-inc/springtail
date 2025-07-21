@@ -147,7 +147,7 @@ class TestSet:
 
         # install FDW with Postgres restart
         logging.debug("Installing foreign data wrapper...")
-        springtail.install_fdw(self._build_dir)
+        springtail.install_fdw(self._props, self._build_dir)
 
         # start background mutations
         self._config.start_background()
