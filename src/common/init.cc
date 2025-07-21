@@ -164,6 +164,15 @@ springtail_init_test(const std::optional<uint32_t> &logging_mask)
     service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesCacheRunner>());
 
+    // Setup singleton args
+    //
+    // Vacuum
+    std::string vaccumer_namespace = "test_vacuum";
+    springtail_store_arguments(ServiceId::VacuumerId,
+            {
+            {"vacuum_global_ns", std::any(vaccumer_namespace)}
+            });
+
     if (!ServiceRegister::get_instance()->start(service_runners)) {
         exit(1);
     }
