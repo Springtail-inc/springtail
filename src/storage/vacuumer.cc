@@ -353,13 +353,13 @@ Vacuumer::_truncate_file(const std::filesystem::path &file, uint64_t offset)
     int fd = ::open(file.c_str(), O_WRONLY);
     if (fd == -1) {
         LOG_ERROR("Failed to open file {} for truncation: {}", file, errno);
-        throw;
+        throw std::runtime_error(fmt::format("Failed to open file {} for truncation: {}", file, errno));
     }
 
     if (::ftruncate(fd, offset) == -1) {
         LOG_ERROR("Failed to truncate file {} to offset {}: {}", file, offset, errno);
         ::close(fd);
-        throw;
+        throw std::runtime_error(fmt::format("Failed to truncate file {} to offset {}: {}", file, offset, errno));
     }
 
     ::close(fd);
