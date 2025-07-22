@@ -39,6 +39,13 @@ namespace springtail {
         struct LibPqResult {
             PGresult *result = nullptr;
 
+            explicit LibPqResult(PGresult *res) : result(res) {}
+            LibPqResult(const LibPqResult &) = delete; // prevent copying
+            LibPqResult &operator=(const LibPqResult &) = delete; // prevent assignment
+            LibPqResult(LibPqResult &&other) noexcept : result(other.result) {
+                other.result = nullptr; // transfer ownership
+            }
+
             ~LibPqResult() {
                 if (result != nullptr) {
                     PQclear(result);

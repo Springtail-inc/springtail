@@ -149,32 +149,27 @@ def connect_proxy(props : Properties, db_name : str ='postgres') -> psycopg2.ext
 
     return conn
 
-def cleanup_db_users(props : Properties, is_fdw: bool) -> None:
+def cleanup_db_users(props : Properties) -> None:
     """Cleanup the database users."""
-    conn = None
+    conn = connect_db_instance(props)
+    user = props.get_db_instance_config()['replication_user']
 
-    if is_fdw:
-        conn = connect_fdw_instance(props)
-        user = props.get_fdw_config()['fdw_user']
-    else:
-        conn = connect_db_instance(props)
-        user = props.get_db_instance_config()['replication_user']
+    sql = f"""SELECT rolname
+              FROM pg_roles
+              WHERE rolname <> %s AND
+              rolname NOT IN (SELECT DISTINCT rolname FROM pg_roles JOIN pg_database ON pg_roles.oid = datdba) AND
+              rolname NOT LIKE 'pg_%%';"""
 
     # Get users excluding super users and the fdw/replication user
-    users = execute_sql_select(conn,
-                               f"""SELECT rolname
-                                  FROM pg_roles
-                                  WHERE rolname <> %s AND
-                                  rolsuper IS FALSE AND
-                                  rolname NOT LIKE 'pg_%%';""", user)
+    users = execute_sql_select(conn, sql, user)
+
     for row in users:
         user_name = row[0]
         execute_sql(conn, f"DROP ROLE IF EXISTS {quote_ident(user_name, conn)};")
         logging.info(f"Dropped user {user_name}")
 
-
 def cleanup_db_instance(props : Properties) -> None:
-    """Cleanup the database instance.
+    """Cleanup the primary database instance.
        Drop and recreate the db and execute cleanup SQL statements.
     """
     if not check_postgres_running():
@@ -182,8 +177,8 @@ def cleanup_db_instance(props : Properties) -> None:
     for db_config in props.get_db_configs():
         cleanup_database(props, db_config)
 
-    cleanup_db_users(props, False)
-
+    # cleanup users
+    cleanup_db_users(props)
 
 def cleanup_database(props : Properties, db_config: Dict) -> None:
     drop_database(props, db_config)
@@ -387,9 +382,6 @@ def install_fdw(props : Properties, build_dir : str) -> None:
     print("Starting postgres...")
     start_postgres()
 
-    # cleanup fdw users
-    cleanup_db_users(props, True)
-
 
 def _install_triggers(conn: psycopg2.extensions.connection, build_dir: str) -> None:
     """Install the triggers in the database using an existing connection."""
@@ -482,6 +474,7 @@ def start_fdw_daemons(props : Properties,
             daemons.append((d[0], d[1], s + f',-u,{fdw_config["fdw_user"]},-p,{fdw_config["password"]}'))
         else:
             daemons.append(d)
+
     start_daemons(build_dir, daemons)
 
 

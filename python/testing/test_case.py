@@ -674,13 +674,12 @@ class TestCase:
             elif command['type'] == 'role_exists':
                 results = {}
 
-                    # check the role flags
-                sql = f"""SELECT rolcanlogin, rolinherit, (rolsuper or rolbypassrls) as rolbypassrls,
+                # check the role flags
+                sql = f"""SELECT rolname, rolcanlogin, rolinherit, (rolsuper or rolbypassrls) as rolbypassrls,
                                  to_json(rolconfig)::text as rolconfig
                           FROM pg_roles WHERE rolname = '{command["role_name"]}';"""
-                sql_result = self._execute_sql(cursor, sql, True, txn)
 
-                results['role'] = sql_result[0] if sql_result else None
+                results['role'] = self._execute_sql(cursor, sql, True, txn)
 
                 return results
 
@@ -895,14 +894,14 @@ class TestCase:
             elif command['type'] == 'role_exists':
                 results = {}
 
-                self._wait_for_role(command["role_name"], command["wait_for"])
+                if command["wait_for"] > 0:
+                    self._wait_for_role(command["role_name"], command["wait_for"])
 
                 # check the role flags
-                sql = f"""SELECT rolcanlogin, rolinherit, rolbypassrls, to_json(rolconfig)::text as rolconfig
+                sql = f"""SELECT rolname, rolcanlogin, rolinherit, rolbypassrls, to_json(rolconfig)::text as rolconfig
                           FROM pg_roles WHERE rolname = '{command["role_name"]}';"""
-                sql_result = self._execute_sql(cursor, sql, True, 'replica')
 
-                results['role'] = sql_result[0] if sql_result else None
+                results['role'] = self._execute_sql(cursor, sql, True, 'replica')
 
                 return results
 

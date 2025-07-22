@@ -22,17 +22,17 @@
 namespace springtail {
 
     /** SQL command to set serach path */
-    static const char *ALWAYS_SECURE_SEARCH_PATH_SQL =
+    static constexpr char ALWAYS_SECURE_SEARCH_PATH_SQL[] =
         "SELECT pg_catalog.set_config('search_path', '', false);";
 
     /** start the xact in repeatable read isolation, creates a snapshot at xact start */
-    static const char *BEGIN_QUERY = "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ";
+    static constexpr char BEGIN_QUERY[] = "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ";
 
-    /** end xact */
-    static const char *END_QUERY = "END";
+    /** end/commit xact */
+    static constexpr char END_QUERY[] = "END";
 
     /** rollback xact */
-    static const char *ROLLBACK_QUERY = "ROLLBACK";
+    static constexpr char ROLLBACK_QUERY[] = "ROLLBACK";
 
     /**
      * @brief Start a transaction

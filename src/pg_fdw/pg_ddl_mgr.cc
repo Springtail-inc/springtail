@@ -74,6 +74,22 @@ namespace springtail::pg_fdw {
         "       role_owner_name, table_oid "
         "FROM __pg_springtail_triggers.table_owner_diff('{}');";
 
+    /** Drops roles that aren't system or FDW roles */
+    static constexpr char DROP_ROLES[] =
+        "DO $$ "
+        "DECLARE "
+        "  r RECORD; "
+        "BEGIN "
+        "  FOR r IN (SELECT rolname "
+        "            FROM pg_roles "
+        "            WHERE rolname NOT LIKE 'pg_%' AND "
+        "                  rolname NOT IN ('{}', '{}') AND "
+        "                  rolname NOT IN (SELECT DISTINCT rolname FROM pg_roles JOIN pg_database ON pg_roles.oid = datdba) "
+        "           ) LOOP "
+        "    EXECUTE format('DROP ROLE IF EXISTS %s', r.rolname); "
+        "  END LOOP; "
+        "END $$;";
+
     /**
      * Query to check if a table exists given:
      * primary table oid, schema name and table name.
@@ -781,6 +797,15 @@ namespace springtail::pg_fdw {
         for (const auto &[db_id, db_name] : dbs) {
             _add_replicated_database(db_id, db_name, false);
         }
+
+        // drop other roles that are not fdw or ddl mgr user
+        // must be done after databases are dropped to remove dependencies
+        conn = _get_fdw_connection(std::nullopt, "template1");
+
+        // get all roles except the fdw and ddl mgr user
+        conn->exec(fmt::format(DROP_ROLES, _fdw_username, _username));
+        conn->clear();
+        conn->disconnect();
     }
 
     std::string
@@ -1526,28 +1551,41 @@ namespace springtail::pg_fdw {
             db_name = db_name_opt.value();
         }
 
+        LibPqConnectionPtr conn = nullptr;
         if (check_exists) {
             // check if the database already exists in the fdw
-            std::shared_lock shared_lock(_db_mutex);
-            if (_db_xid_map.contains(db_id)) {
-                LOG_DEBUG(LOG_FDW, "Database {} already exists in the fdw", db_name);
-                return;
+            // flag is set if coming from redis callback for adding db
+            {
+                std::shared_lock shared_lock(_db_mutex);
+                if (_db_xid_map.contains(db_id)) {
+                    LOG_DEBUG(LOG_FDW, "Database {} already exists in the fdw", db_name);
+                    return;
+                }
             }
-        }
 
-        // verify that the database does not exist before trying to add it
-        LibPqConnectionPtr conn = _get_fdw_connection(std::nullopt, "postgres");
-        if (check_exists) {
+            // looks like it exists in xid map, so get a connection and really check
+            conn = _get_fdw_connection(std::nullopt, "postgres");
             std::string prefixed_name = conn->escape_string(_db_prefix + db_name);
             conn->exec(fmt::format(VERIFY_DB_EXISTS, prefixed_name));
             if (conn->ntuples() > 0) {
+                // it really does exist return
                 conn->disconnect();
                 return;
             }
             conn->clear();
+
+            {
+                // remove from xid map
+                std::unique_lock unique_lock(_db_mutex);
+                _db_xid_map.erase(db_id);
+            }
         }
 
-        // add database
+        if (!conn) {
+            conn = _get_fdw_connection(std::nullopt, "postgres");
+        }
+
+        // drop/add database
         _create_database(conn, db_id, db_name);
         conn->disconnect();
 
