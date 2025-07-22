@@ -16,6 +16,8 @@
 
 #include <test/services.hh>
 #include <test/ddl_helpers.hh>
+#include <storage/vacuumer.hh>
+#include <xid_mgr/xid_mgr_server.hh>
 
 using namespace springtail;
 using namespace springtail::committer;
@@ -24,9 +26,9 @@ using namespace springtail::test::ddl_helpers;
 namespace {
 
     /**
-     * Framework for Indexer testing.
+     * Framework for Vacuumer testing.
      */
-    class Indexer_Test : public testing::Test {
+    class Vacuumer_Test : public testing::Test {
     protected:
 
         // Called once per testsuite.  Create a table and populate it with data
@@ -58,11 +60,13 @@ namespace {
             _index_reconciliation_queue_mgr = std::make_shared<springtail::pg_log_mgr::IndexReconciliationQueueManager>();
             _index_reconciliation_queue_mgr->add_queue(_db_id);
             _indexer = std::make_unique<Indexer>(1, _index_reconciliation_queue_mgr);
-            std::string vaccumer_namespace = "test_indexer_vacuum";
+
+            std::string vaccumer_namespace = "test_vacuumer_vacuum";
             springtail_store_arguments(ServiceId::VacuumerId,
                     {
                     {"vacuum_global_ns", std::any(vaccumer_namespace)}
                     });
+
         }
 
         static void TearDownTestSuite() {
@@ -115,6 +119,7 @@ namespace {
             // finalize the table and update roots
             auto &&metadata = mtable->finalize();
             TableMgr::get_instance()->update_roots(_db_id, table_id, data_xid, metadata);
+            sys_tbl_mgr::Client::get_instance()->finalize(_db_id, data_xid);
         }
 
         void _create_index(uint64_t table_id, uint64_t index_id, uint64_t index_xid, std::string index_name, bool process_requests_in_indexer=true) {
@@ -160,33 +165,26 @@ namespace {
             ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(index_info.state()), sys_tbl::IndexNames::State::READY);
         }
 
+        uint64_t _get_block_count(const std::filesystem::path& path) {
+            struct stat st;
+            if (::stat(path.c_str(), &st) == 0) {
+                return static_cast<uint64_t>(st.st_blocks);  // st_blocks is in 512-byte blocks
+            }
+            return 0;
+        }
+
     };
 
-    TEST_F(Indexer_Test, Test_EmptyReconcile)
-    {
-        uint64_t table_id = _tid++;
-        uint64_t index_id = _secondary_index_id + 1;
-        uint64_t table_xid = access_xid++;
-        uint64_t index_xid = access_xid++;
-
-        // Create table
-        create_table(_db_id, table_id, table_xid, "test_indexer_table1", _columns);
-
-        // Create index
-        _create_index(table_id, index_id, index_xid, "idx_test_indexer_1");
-
-        // Trigger index reconcilation at reconcile_xid
-        uint64_t reconcile_xid = access_xid++;
-        _process_index_and_validate(index_id, index_xid, reconcile_xid);
-    }
-
-    TEST_F(Indexer_Test, Test_ReconcileAfterInserts)
+    TEST_F(Vacuumer_Test, Test_VacuumSecondaryIndex)
     {
         uint64_t table_id = _tid++;
         uint64_t index_id = _secondary_index_id + 2;
         uint64_t table_xid = access_xid++;
         uint64_t index_xid = access_xid++;
         uint64_t data_xid = access_xid++;
+
+        // Disable vacuum run
+        Vacuumer::get_instance()->disable_vacuum_run();
 
         // Create table
         create_table(_db_id, table_id, table_xid, "test_indexer_table2", _columns);
@@ -195,122 +193,34 @@ namespace {
         _create_index(table_id, index_id, index_xid, "idx_test_indexer_2");
 
         // Populate table
-        _populate_table_with_data(table_id, table_xid, data_xid, 100000, 5);
+        _populate_table_with_data(table_id, table_xid, data_xid, 30000, 5);
 
         // Trigger index reconcilation at reconcile_xid
         uint64_t reconcile_xid = access_xid++;
         _process_index_and_validate(index_id, index_xid, reconcile_xid);
-    }
 
-    TEST_F(Indexer_Test, Test_ReconcileAlongInserts)
-    {
-        uint64_t table_id = _tid++;
-        uint64_t index_id = _secondary_index_id + 3;
-        uint64_t table_xid = access_xid++;
-        uint64_t data_xid1 = access_xid++;
-        uint64_t index_xid = access_xid++;
+        // Get the table file paths
+        auto table_dir = TableMgr::get_instance()->get_table_data_dir(_db_id, table_id, access_xid);
+
         uint64_t data_xid2 = access_xid++;
+        _populate_table_with_data(table_id, index_xid, data_xid2, 1000, 5, 300001);
 
-        // Create table
-        create_table(_db_id, table_id, table_xid, "test_indexer_table3", _columns);
+        Vacuumer::get_instance()->commit_expired_extents(_db_id, constant::LATEST_XID);
 
-        int num_rows = 2000;
-        // Populate table
-        _populate_table_with_data(table_id, table_xid, data_xid1, num_rows, 5);
+        xid_mgr::XidMgrServer::get_instance()->commit_xid(_db_id, 0, data_xid2, true);
 
-        // Create index
-        _create_index(table_id, index_id, index_xid, "idx_test_indexer_3");
+        // Get the blocks count pre-vacuum
+        auto index_file = table_dir / fmt::format(constant::INDEX_FILE, index_id);
+        auto current_size1 = _get_block_count(index_file);
 
-        // Populate table
-        _populate_table_with_data(table_id, index_xid, data_xid2, num_rows, 5, num_rows + 1);
+        Vacuumer::get_instance()->run_vacuum_once();
 
-        // Trigger index reconcilation at reconcile_xid
-        uint64_t reconcile_xid = access_xid++;
-        _process_index_and_validate(index_id, index_xid, reconcile_xid);
-    }
+        // Get the blocks count post-vacuum
+        auto current_size2 = _get_block_count(index_file);
 
-    TEST_F(Indexer_Test, Test_IndexInSchema)
-    {
-        uint64_t table_id = _tid++;
-        uint64_t index_id1 = _secondary_index_id + 4;
-        uint64_t index_id2 = _secondary_index_id + 5;
-        uint64_t table_xid = access_xid++;
-        uint64_t index_xid1 = access_xid++;
-        uint64_t index_xid2 = access_xid++;
-        uint64_t reconcile_xid1 = access_xid++;
-        uint64_t data_xid1 = access_xid++;
-        uint64_t reconcile_xid2 = access_xid++;
+        // Some blocks should be vacuumed
+        ASSERT_GT(current_size1, current_size2);
 
-        // Create table
-        create_table(_db_id, table_id, table_xid, "test_indexer_table4", _columns);
-
-        // Create index
-        _create_index(table_id, index_id1, index_xid1, "idx_test_indexer_4");
-
-        // Trigger index reconcilation at reconcile_xid
-        _process_index_and_validate(index_id1, index_xid1, reconcile_xid1);
-
-        // Create index with older xid
-        _create_index(table_id, index_id2, index_xid2, "idx_test_indexer_5");
-
-        // Check if are still seeing the first index in the schema
-        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(_db_id, table_id, XidLsn{data_xid1});
-        auto it = std::ranges::find_if(meta->indexes,
-                [&](auto const& v) { return index_id1 == v.id; });
-        ASSERT_TRUE(it != meta->indexes.end());
-        ASSERT_EQ(it->state, 1);
-
-        int num_rows = 20;
-        // Populate table with newer xid
-        _populate_table_with_data(table_id, table_xid, data_xid1, num_rows, 5);
-
-        // Trigger index reconcilation at reconcile_xid
-        _process_index_and_validate(index_id2, index_xid2, reconcile_xid2);
-
-        meta = sys_tbl_mgr::Client::get_instance()->get_schema(_db_id, table_id, XidLsn{reconcile_xid2});
-        it = std::ranges::find_if(meta->indexes,
-                [&](auto const& v) { return index_id1 == v.id; });
-        ASSERT_TRUE(it != meta->indexes.end());
-        ASSERT_EQ(it->state, 1);
-
-        it = std::ranges::find_if(meta->indexes,
-                [&](auto const& v) { return index_id2 == v.id; });
-        ASSERT_TRUE(it != meta->indexes.end());
-        ASSERT_EQ(it->state, 1);
-    }
-
-    TEST_F(Indexer_Test, Test_IndexRecovery)
-    {
-        uint64_t table_id = _tid++;
-        uint64_t index_id1 = _secondary_index_id + 6;
-        uint64_t table_xid = access_xid++;
-        uint64_t index_xid1 = access_xid++;
-        uint64_t reconcile_xid1 = access_xid++;
-        uint64_t data_xid1 = access_xid++;
-
-        // Create table
-        create_table(_db_id, table_id, table_xid, "test_indexer_table5", _columns);
-
-        // Create index
-        _create_index(table_id, index_id1, index_xid1, "idx_test_indexer_5", false);
-
-        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(_db_id, table_id, XidLsn{data_xid1});
-        auto it = std::ranges::find_if(meta->indexes,
-                [&](auto const& v) { return index_id1 == v.id; });
-        ASSERT_TRUE(it != meta->indexes.end());
-        ASSERT_EQ(it->state, 0);
-
-        // Recover indexes
-        _indexer->recover_indexes(_db_id);
-
-        // Trigger index reconcilation at reconcile_xid
-        _process_index_and_validate(index_id1, index_xid1, reconcile_xid1);
-
-        meta = sys_tbl_mgr::Client::get_instance()->get_schema(_db_id, table_id, XidLsn{data_xid1});
-        it = std::ranges::find_if(meta->indexes,
-                [&](auto const& v) { return index_id1 == v.id; });
-        ASSERT_TRUE(it != meta->indexes.end());
-        ASSERT_EQ(it->state, 1);
     }
 
 } // namespace

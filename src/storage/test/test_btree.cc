@@ -64,6 +64,11 @@ namespace {
                 auto &&field = _fields->at(i);
                 _csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
             }
+            std::string vaccumer_namespace = "test_btree_vacuum";
+            springtail_store_arguments(ServiceId::VacuumerId,
+                    {
+                    {"vacuum_global_ns", std::any(vaccumer_namespace)}
+                    });
         }
 
         void TearDown() override {

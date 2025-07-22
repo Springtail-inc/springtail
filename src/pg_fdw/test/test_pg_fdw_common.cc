@@ -86,6 +86,11 @@ protected:
         springtail_init_test();
         test::start_services(true, true, false);
 
+        std::string vaccumer_namespace = "test_pg_fdw_common_vacuum";
+        springtail_store_arguments(ServiceId::VacuumerId,
+                {
+                {"vacuum_global_ns", std::any(vaccumer_namespace)}
+                });
         create_table_data(1);
     }
     static void TearDownTestSuite() {

@@ -97,6 +97,11 @@ namespace {
             }
 
             _primary_keys = std::vector<std::string>({"name"});
+            std::string vaccumer_namespace = "test_table_vacuum";
+            springtail_store_arguments(ServiceId::VacuumerId,
+                    {
+                    {"vacuum_global_ns", std::any(vaccumer_namespace)}
+                    });
         }
 
         ExtentSchemaPtr _schema;

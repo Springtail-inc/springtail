@@ -58,6 +58,12 @@ springtail_unit_test(test_pg_log_indexer
   LIBS springtail_pglog springtail_test springtail_sys_tbl_mgr GTest::gtest_main
 )
 
+springtail_unit_test(test_pg_log_vacuumer
+  SOURCES test/test_vacuumer.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_pglog springtail_test springtail_sys_tbl_mgr GTest::gtest_main
+)
+
 # dump_repl_log
 add_executable(dump_repl_log test/dump_repl_log.cc)
 target_include_directories(dump_repl_log

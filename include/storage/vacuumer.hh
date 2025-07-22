@@ -69,6 +69,11 @@ public:
         _vacuum_run_enabled = false;
     }
 
+    /**
+     * @brief Run vacuum once, primarily called from test
+     */
+    void run_vacuum_once();
+
 protected:
     /**
      * @brief Constructor, that inits the vacuumer thread
@@ -296,5 +301,10 @@ private:
      * @brief Recover global vacuum file upto last committed XID
      */
     void _recover_global_vacuum_file();
+
+    /**
+     * @brief Run vacuum once
+     */
+    void _do_vacuum_run();
 };
 }

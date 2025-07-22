@@ -69,6 +69,7 @@ Vacuumer::_init()
     if (_vacuum_start_enabled) {
         // Core thread of the vacuumer
         _vacuumer_thread = std::thread(&Vacuumer::_internal_run, this);
+        LOG_INFO("Vacuumer thread started");
     }
 }
 
@@ -504,9 +505,13 @@ Vacuumer::_recover_global_vacuum_file()
     // Map: db_id -> last_committed_xid
     std::map<uint64_t, uint64_t> committed_xid_map;
 
+    auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+    auto global_vacuum_runfile = _vacuum_data_base / fmt::format("{}{}", timestamp, _global_vacuum_runfile_name_suffix);
+
     // Read from global vacuum, write on runfile
     auto handle = IOMgr::get_instance()->open(_global_vacuum_file, IOMgr::IO_MODE::READ, true);
-    auto runhandle = IOMgr::get_instance()->open(_global_vacuum_runfile, IOMgr::IO_MODE::WRITE, true);
+    auto runhandle = IOMgr::get_instance()->open(global_vacuum_runfile, IOMgr::IO_MODE::WRITE, true);
 
     int start_offset = 0;
     auto response = handle->read(start_offset);
@@ -554,8 +559,8 @@ Vacuumer::_recover_global_vacuum_file()
     }
 
     // Move runfile on to the global file
-    if (std::filesystem::exists(_global_vacuum_runfile)) {
-        std::filesystem::rename(_global_vacuum_runfile, _global_vacuum_file);
+    if (std::filesystem::exists(global_vacuum_runfile)) {
+        std::filesystem::rename(global_vacuum_runfile, _global_vacuum_file);
     }
 }
 
@@ -634,6 +639,202 @@ Vacuumer::_run_recovery()
     LOG_INFO("Vacuum Recovery completed");
 }
 
+void
+Vacuumer::run_vacuum_once()
+{
+    _do_vacuum_run();
+}
+
+void
+Vacuumer::_do_vacuum_run()
+{
+    // lock while accessing the maps
+    std::unique_lock lock(_mutex);
+
+    ExtentMap expired_extents_map;
+    SnapshotMap expired_snapshots_map;
+
+    // Lets read from global vacuum file if no expired extents is memory (that got written to the global file)
+
+    if (_get_file_size(_global_vacuum_file) > _vacuum_global_threshold) {
+        LOG_INFO("Running vacuum as the global log crossed threshold: {}", _global_vacuum_file);
+
+        /* --------------------------------- Populate maps from global vacuum log -------------------------- */
+        auto handle = IOMgr::get_instance()->open(_global_vacuum_file, IOMgr::IO_MODE::READ, true);
+        int start_offset = 0;
+        auto response = handle->read(start_offset);
+
+        auto file_f = _global_vacuum_schema->get_field("file");
+        auto offset_f = _global_vacuum_schema->get_field("offset");
+        auto size_f = _global_vacuum_schema->get_field("size");
+        auto file_dropped_f = _global_vacuum_schema->get_field("file_dropped");
+
+        while (!response->data.empty()) {
+            auto extent = std::make_shared<Extent>(response->data);
+            for (auto &row : *extent) {
+                auto file_dropped = file_dropped_f->get_bool(&row);
+                auto file = file_f->get_text(&row);
+                auto xid = extent->header().xid;
+                // Add to snapshot_map to process outside hole-punch if the file is dropped,
+                // otherwise add to extents map
+                if (file_dropped) {
+                    auto db_id = _get_db_id_from_path(file);
+                    expired_snapshots_map[db_id][xid].emplace_back(file);
+                } else {
+                    auto offset = offset_f->get_uint64(&row);
+                    auto size = size_f->get_uint64(&row);
+                    expired_extents_map[file][xid].emplace_back(offset, size);
+                }
+            }
+            start_offset = response->next_offset;
+            response = handle->read(start_offset);
+        }
+        /* ----------------------------------End of reading global vacuum log ------------------------------ */
+
+        /* --------------------------------- Hole punch flow ----------------------------------------------- */
+        for (auto file_it = expired_extents_map.begin(); file_it != expired_extents_map.end(); ) {
+            const std::string& file = file_it->first;
+            auto& xid_map = file_it->second;
+            auto db_id = _get_db_id_from_path(file);
+            auto cutoff_xid = _get_vacuum_cutoff_xid(db_id);  // Get safest XID to vacuum till that point
+
+            IntervalTree<uint64_t> itree;
+            std::vector<uint64_t> xids_to_process;
+
+            // Step 1: Add leftover partials from previous runs
+            auto partial_extents = _get_partials_from_file(file);
+            for (const auto& hole_info: partial_extents) {
+                itree.insert(hole_info.offset, hole_info.offset + hole_info.size);
+            }
+
+            // Step 2: Collect all extents from xids < cutoff_xid
+            for (const auto& [xid, extents] : xid_map) {
+                if (xid >= cutoff_xid) {
+                    break;
+                }
+                for (const auto& [offset, size] : extents) {
+                    itree.insert(offset, offset + size);
+                }
+                xids_to_process.push_back(xid);
+            }
+
+            if (itree.empty()) {
+                ++file_it;
+                continue;
+            }
+
+            // Step 3: Identify punchable and leftover unaligned regions
+            std::vector<Vacuumer::HoleInfo> punchable;
+            std::vector<Vacuumer::HoleInfo> new_partials;
+
+            for (const auto& [start, end] : itree.to_vector()) {
+                uint64_t aligned_start = align_up(start, _hole_punch_block_size);
+                uint64_t aligned_end = align_down(end, _hole_punch_block_size);
+
+                if (aligned_start < aligned_end) {
+                    punchable.emplace_back(aligned_start, aligned_end - aligned_start);
+                }
+                if (start < aligned_start) {
+                    new_partials.emplace_back(start, aligned_start - start);
+                }
+                if (aligned_end < end) {
+                    new_partials.emplace_back(aligned_end, end - aligned_end);
+                }
+            }
+
+            // Step 4: Punch and detect failures
+            auto punched_extents = hole_punch_file(file, punchable);
+
+            // XXX: Add a comparator and then uncomment this code
+            //std::set<Vacuumer::HoleInfo> punched_set(punched_extents.begin(), punched_extents.end());
+            //for (const auto& ext : punchable) {
+            //    if (punched_set.find(ext) == punched_set.end()) {
+            //        // Missed punch — add back to partials
+            //        new_partials.emplace_back(ext);
+            //    }
+            //}
+
+            // Step 5: Clean up processed XIDs
+            for (uint64_t xid : xids_to_process) {
+                xid_map.erase(xid);
+            }
+
+            // Step 6: Update _partial_extents with leftovers
+            _update_vacuumed_partials_file(file, new_partials);
+
+            // Step 7: Clean up file entry if all xids are processed
+            if (xid_map.empty()) {
+                file_it = expired_extents_map.erase(file_it);
+            } else {
+                ++file_it;
+            }
+        }
+        /* -------------- End of Hole punch flow ------------------------------------------------------------*/
+
+        /* --------------- Snapshot deletion flow -----------------------------------------------------------*/
+        // expire snapshots through the min XID
+        for (auto db_it = expired_snapshots_map.begin(); db_it != expired_snapshots_map.end(); ) {
+            uint64_t cutoff_xid = _get_vacuum_cutoff_xid(db_it->first);  // Get safest XID to vacuum till that point
+            auto& xid_map = db_it->second;
+
+            for (auto xid_it = xid_map.begin(); xid_it != xid_map.end(); ) {
+                // if everything to expire still in-use, stop
+                if (xid_it->first >= cutoff_xid) {
+                    break;
+                }
+                // retrieve a list of snapshots to expire
+                SnapshotList& dirs = xid_it->second;
+
+                bool all_deleted = true;
+
+                // clear the table directories associated with the expired snapshots
+                for (const auto& dir : dirs) {
+                    std::error_code ec;
+
+                    if (!std::filesystem::exists(dir, ec)) {
+                        continue;  // skip missing dir
+                    }
+
+                    // recursively delete
+                    std::filesystem::remove_all(dir, ec);
+                    if (ec) {
+                        LOG_ERROR("remove_all() failed: {}", ec.message());
+                        all_deleted = false;
+                    }
+                }
+
+                if (all_deleted) {
+                    dirs.clear();
+                    xid_it = xid_map.erase(xid_it);
+                } else {
+                    ++xid_it;  // skip erasing; keep the entry for next attempt
+                }
+            }
+
+            // If the db entry is now empty, erase it; otherwise advance.
+            if (xid_map.empty()) {
+                db_it = expired_snapshots_map.erase(db_it);
+            } else {
+                ++db_it;
+            }
+        }
+        /*------------- End of snapshot deletion flow ---------------------------------------------------*/
+
+
+        /*------------- Rotate Global vacuum log -------------------------------------------------------- */
+        // Truncate if everything is processed,
+        // otherwise overwritted global log with remaining records
+        if (expired_extents_map.empty() && expired_snapshots_map.empty()) {
+            _truncate_file(_global_vacuum_file, 0);
+        } else {
+            _update_global_vacuum_file(expired_extents_map, expired_snapshots_map);
+        }
+        /*------------- End of log rotation ------------------------------------------------------------- */
+
+        LOG_INFO("Vacuum completed");
+    }
+    lock.unlock();
+}
 
 void
 Vacuumer::_internal_run()
@@ -650,192 +851,9 @@ Vacuumer::_internal_run()
             continue;
         }
 
-        // lock while accessing the maps
-        std::unique_lock lock(_mutex);
+        // Run vacuum once
+        _do_vacuum_run();
 
-        ExtentMap expired_extents_map;
-        SnapshotMap expired_snapshots_map;
-
-        // Lets read from global vacuum file if no expired extents is memory (that got written to the global file)
-
-        if (_get_file_size(_global_vacuum_file) > _vacuum_global_threshold) {
-            LOG_INFO("Running vacuum as the global log crossed threshold");
-
-            /* --------------------------------- Populate maps from global vacuum log -------------------------- */
-            auto handle = IOMgr::get_instance()->open(_global_vacuum_file, IOMgr::IO_MODE::READ, true);
-            int start_offset = 0;
-            auto response = handle->read(start_offset);
-
-            auto file_f = _global_vacuum_schema->get_field("file");
-            auto offset_f = _global_vacuum_schema->get_field("offset");
-            auto size_f = _global_vacuum_schema->get_field("size");
-            auto file_dropped_f = _global_vacuum_schema->get_field("file_dropped");
-
-            while (!response->data.empty()) {
-                auto extent = std::make_shared<Extent>(response->data);
-                for (auto &row : *extent) {
-                    auto file_dropped = file_dropped_f->get_bool(&row);
-                    auto file = file_f->get_text(&row);
-                    auto xid = extent->header().xid;
-                    // Add to snapshot_map to process outside hole-punch if the file is dropped,
-                    // otherwise add to extents map
-                    if (file_dropped) {
-                        auto db_id = _get_db_id_from_path(file);
-                        expired_snapshots_map[db_id][xid].emplace_back(file);
-                    } else {
-                        auto offset = offset_f->get_uint64(&row);
-                        auto size = size_f->get_uint64(&row);
-                        expired_extents_map[file][xid].emplace_back(offset, size);
-                    }
-                }
-                start_offset = response->next_offset;
-                response = handle->read(start_offset);
-            }
-            /* ----------------------------------End of reading global vacuum log ------------------------------ */
-
-            /* --------------------------------- Hole punch flow ----------------------------------------------- */
-            for (auto file_it = expired_extents_map.begin(); file_it != expired_extents_map.end(); ) {
-                const std::string& file = file_it->first;
-                auto& xid_map = file_it->second;
-                auto db_id = _get_db_id_from_path(file);
-                auto cutoff_xid = _get_vacuum_cutoff_xid(db_id);  // Get safest XID to vacuum till that point
-
-                IntervalTree<uint64_t> itree;
-                std::vector<uint64_t> xids_to_process;
-
-                // Step 1: Add leftover partials from previous runs
-                auto partial_extents = _get_partials_from_file(file);
-                for (const auto& hole_info: partial_extents) {
-                    itree.insert(hole_info.offset, hole_info.offset + hole_info.size);
-                }
-
-                // Step 2: Collect all extents from xids < cutoff_xid
-                for (const auto& [xid, extents] : xid_map) {
-                    if (xid >= cutoff_xid) {
-                        break;
-                    }
-                    for (const auto& [offset, size] : extents) {
-                        itree.insert(offset, offset + size);
-                    }
-                    xids_to_process.push_back(xid);
-                }
-
-                if (itree.empty()) {
-                    ++file_it;
-                    continue;
-                }
-
-                // Step 3: Identify punchable and leftover unaligned regions
-                std::vector<Vacuumer::HoleInfo> punchable;
-                std::vector<Vacuumer::HoleInfo> new_partials;
-
-                for (const auto& [start, end] : itree.to_vector()) {
-                    uint64_t aligned_start = align_up(start, _hole_punch_block_size);
-                    uint64_t aligned_end = align_down(end, _hole_punch_block_size);
-
-                    if (aligned_start < aligned_end) {
-                        punchable.emplace_back(aligned_start, aligned_end - aligned_start);
-                    }
-                    if (start < aligned_start) {
-                        new_partials.emplace_back(start, aligned_start - start);
-                    }
-                    if (aligned_end < end) {
-                        new_partials.emplace_back(aligned_end, end - aligned_end);
-                    }
-                }
-
-                // Step 4: Punch and detect failures
-                auto punched_extents = hole_punch_file(file, punchable);
-
-                // XXX: Add a comparator and then uncomment this code
-                //std::set<Vacuumer::HoleInfo> punched_set(punched_extents.begin(), punched_extents.end());
-                //for (const auto& ext : punchable) {
-                //    if (punched_set.find(ext) == punched_set.end()) {
-                //        // Missed punch — add back to partials
-                //        new_partials.emplace_back(ext);
-                //    }
-                //}
-
-                // Step 5: Clean up processed XIDs
-                for (uint64_t xid : xids_to_process) {
-                    xid_map.erase(xid);
-                }
-
-                // Step 6: Update _partial_extents with leftovers
-                _update_vacuumed_partials_file(file, new_partials);
-
-                // Step 7: Clean up file entry if all xids are processed
-                if (xid_map.empty()) {
-                    file_it = expired_extents_map.erase(file_it);
-                } else {
-                    ++file_it;
-                }
-            }
-            /* -------------- End of Hole punch flow ------------------------------------------------------------*/
-
-            /* --------------- Snapshot deletion flow -----------------------------------------------------------*/
-            // expire snapshots through the min XID
-            for (auto db_it = expired_snapshots_map.begin(); db_it != expired_snapshots_map.end(); ) {
-                uint64_t cutoff_xid = _get_vacuum_cutoff_xid(db_it->first);  // Get safest XID to vacuum till that point
-                auto& xid_map = db_it->second;
-
-                for (auto xid_it = xid_map.begin(); xid_it != xid_map.end(); ) {
-                    // if everything to expire still in-use, stop
-                    if (xid_it->first >= cutoff_xid) {
-                        break;
-                    }
-                    // retrieve a list of snapshots to expire
-                    SnapshotList& dirs = xid_it->second;
-
-                    bool all_deleted = true;
-
-                    // clear the table directories associated with the expired snapshots
-                    for (const auto& dir : dirs) {
-                        std::error_code ec;
-
-                        if (!std::filesystem::exists(dir, ec)) {
-                            continue;  // skip missing dir
-                        }
-
-                        // recursively delete
-                        std::filesystem::remove_all(dir, ec);
-                        if (ec) {
-                            LOG_ERROR("remove_all() failed: {}", ec.message());
-                            all_deleted = false;
-                        }
-                    }
-
-                    if (all_deleted) {
-                        dirs.clear();
-                        xid_it = xid_map.erase(xid_it);
-                    } else {
-                        ++xid_it;  // skip erasing; keep the entry for next attempt
-                    }
-                }
-
-                // If the db entry is now empty, erase it; otherwise advance.
-                if (xid_map.empty()) {
-                    db_it = expired_snapshots_map.erase(db_it);
-                } else {
-                    ++db_it;
-                }
-            }
-            /*------------- End of snapshot deletion flow ---------------------------------------------------*/
-
-
-            /*------------- Rotate Global vacuum log -------------------------------------------------------- */
-            // Truncate if everything is processed,
-            // otherwise overwritted global log with remaining records
-            if (expired_extents_map.empty() && expired_snapshots_map.empty()) {
-                _truncate_file(_global_vacuum_file, 0);
-            } else {
-                _update_global_vacuum_file(expired_extents_map, expired_snapshots_map);
-            }
-            /*------------- End of log rotation ------------------------------------------------------------- */
-
-            LOG_INFO("Vacuum completed");
-        }
-        lock.unlock();
     }
 }
 
