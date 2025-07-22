@@ -347,17 +347,17 @@ class TestCase:
                             'replica_exists': directive[4] == 'true'
                         }, section, is_threaded, cur_txn, line_num)
 
-                    # Usage - role_exists <role_name>
-                    # Ex: ### role_exists public test_init true
+                    # Usage - role_check <role_name>
+                    # Ex: ### role_check public test_init true
                     # Determines if a specific role is present in the replica, also checks role flags
-                    elif directive[0] == 'role_exists':
+                    elif directive[0] == 'role_check':
                         if section != 'verify':
-                            self._raise_error(f'{line_num}: "role_exists" must be part of the "verify" section')
+                            self._raise_error(f'{line_num}: "role_check" must be part of the "verify" section')
                         if len(directive) < 2:
-                            self._raise_error(f'{line_num}: "role_exists" must specify a role_name value')
+                            self._raise_error(f'{line_num}: "role_check" must specify a role_name value')
 
                         self._append_command({
-                            'type': 'role_exists',
+                            'type': 'role_check',
                             'role_name': directive[1],
                             'wait_for': int(directive[2]) if len(directive) > 2 else self._metadata['sync_timeout']
                         }, section, is_threaded, cur_txn, line_num)
@@ -671,7 +671,7 @@ class TestCase:
                 self._connections[txn]['current_db'] = command['database_name']
                 return None
 
-            elif command['type'] == 'role_exists':
+            elif command['type'] == 'role_check':
                 results = {}
 
                 # check the role flags
@@ -680,6 +680,15 @@ class TestCase:
                           FROM pg_roles WHERE rolname = '{command["role_name"]}';"""
 
                 results['role'] = self._execute_sql(cursor, sql, True, txn)
+
+                # check if role is member of any other roles
+                # exclude pg_read_all_data role as it is assigned all roles in fdw
+                sql = f"""SELECT r.rolname AS role_name
+                          FROM pg_auth_members am
+                          JOIN pg_roles r ON am.roleid = r.oid
+                          JOIN pg_roles m ON am.member = m.oid
+                          WHERE m.rolname = '{command["role_name"]}' AND r.rolname <> 'pg_read_all_data';"""
+                results['role_membership'] = self._execute_sql(cursor, sql, True, txn)
 
                 return results
 
@@ -891,7 +900,7 @@ class TestCase:
 
                 return results
 
-            elif command['type'] == 'role_exists':
+            elif command['type'] == 'role_check':
                 results = {}
 
                 if command["wait_for"] > 0:
@@ -902,6 +911,15 @@ class TestCase:
                           FROM pg_roles WHERE rolname = '{command["role_name"]}';"""
 
                 results['role'] = self._execute_sql(cursor, sql, True, 'replica')
+
+                # check if role is member of any other roles
+                sql = f"""SELECT r.rolname AS role_name
+                          FROM pg_auth_members am
+                          JOIN pg_roles r ON am.roleid = r.oid
+                          JOIN pg_roles m ON am.member = m.oid
+                          WHERE m.rolname = '{command["role_name"]}' AND r.rolname <> 'pg_read_all_data';"""
+
+                results['role_membership'] = self._execute_sql(cursor, sql, True, txn)
 
                 return results
 

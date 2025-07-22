@@ -42,9 +42,9 @@ ALTER POLICY read_own_documents
 CREATE ROLE sync_point_role;
 
 ## verify
-### role_exists sync_point_role
-### role_exists alice
-### role_exists joe
+### role_check sync_point_role
+### role_check alice
+### role_check joe
 ### policy_check public documents read_own_documents
 ### schema_check public documents
 

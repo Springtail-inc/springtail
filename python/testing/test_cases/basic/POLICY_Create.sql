@@ -1,6 +1,7 @@
 ## test
 DROP POLICY IF EXISTS read_own_documents ON documents;
 DROP ROLE IF EXISTS alice;
+DROP ROLE IF EXISTS test_member_role;
 
 -- Create test table
 CREATE TABLE documents (
@@ -16,7 +17,6 @@ INSERT INTO documents (content, owner) VALUES
 ('Doc 3', 'alice'),
 ('Doc 4', 'charlie');
 
--- Create test user
 CREATE ROLE alice LOGIN;
 
 -- Enable row-level security on the table
@@ -30,7 +30,7 @@ CREATE POLICY read_own_documents
     USING (owner = current_user);
 
 ## verify
-### role_exists alice
+### role_check alice
 ### policy_check public documents read_own_documents
 ### schema_check public documents
 

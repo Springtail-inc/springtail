@@ -480,12 +480,12 @@ namespace springtail::pg_fdw {
             DCHECK_NE(diff_type, "MODIFIED") << "Role member diffs should not be modified";
 
             if (diff_type == "REMOVED") {
-                fdw_conn->exec(fmt::format("REVOKE {} FROM {}", member_name, role_name));
+                fdw_conn->exec(fmt::format("REVOKE {} FROM {}", role_name, member_name));
                 continue;
             }
 
             if (diff_type == "ADDED") {
-                fdw_conn->exec(fmt::format("GRANT {} TO {}", member_name, role_name));
+                fdw_conn->exec(fmt::format("GRANT {} TO {}", role_name, member_name));
                 continue;
             }
         }
@@ -965,6 +965,8 @@ namespace springtail::pg_fdw {
         // check if we have a connection in the cache
         LibPqConnectionPtr conn = nullptr;
 
+        DCHECK_NE(db_name, "replica_springtail") << "Database name should not be replica_springtail";
+
         if (!db_id_opt.has_value()) {
             conn = std::make_shared<LibPqConnection>();
             conn->connect(_hostname, db_name, _username, _password, _port, false);
@@ -979,7 +981,7 @@ namespace springtail::pg_fdw {
         // check if the connection is still valid
         if (conn != nullptr) {
             if (conn->is_connected()) {
-                LOG_DEBUG(LOG_FDW, "Reusing connection for db_id: {}", db_id);
+                LOG_DEBUG(LOG_FDW, "Reusing connection for db_id: {}, db_name: {}", db_id, db_name);
                 // evict the connection from the cache with no callback
                 // this is so that it can be used and no-one else will try to use it
                 _fdw_conn_cache.evict(db_id, true);
@@ -988,7 +990,7 @@ namespace springtail::pg_fdw {
             _fdw_conn_cache.evict(db_id);
         }
 
-        LOG_DEBUG(LOG_FDW, "Establishing connection for db_id: {}", db_id);
+        LOG_DEBUG(LOG_FDW, "Establishing connection for db_id: {}, db_name: {}", db_id, db_name);
 
         // use libpq to connect to the database
         conn = std::make_shared<LibPqConnection>();
@@ -1024,7 +1026,7 @@ namespace springtail::pg_fdw {
     {
         // get the database name for the db_id; XXX should see if we can swtich to OID
         std::string db_name = Properties::get_db_name(db_id);
-        LibPqConnectionPtr conn = _get_fdw_connection(db_id, _db_prefix + db_name);
+        LibPqConnectionPtr conn = _get_fdw_connection(db_id, db_name);
 
         try {
             // generate a DDL statement for each JSON in the transaction
