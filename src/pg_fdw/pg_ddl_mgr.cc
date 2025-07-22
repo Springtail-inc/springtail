@@ -1,5 +1,6 @@
 #include <common/counter.hh>
 #include <common/common.hh>
+#include <common/coordinator.hh>
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/open_telemetry.hh>
@@ -24,6 +25,9 @@
 #include <pg_fdw/constants.hh>
 
 namespace springtail::pg_fdw {
+
+    /** Coordinator worker ID for sync thread */
+    static constexpr char DDL_SYNC_WORKER_ID[] = "DDL_MGR_SYNC:{}";
 
     /** Get a list of all non-system schema names */
     static constexpr char SCHEMA_SELECT[] =
@@ -559,8 +563,15 @@ namespace springtail::pg_fdw {
         std::string user;
         std::string password;
 
+        std::string coordinator_id = fmt::format(DDL_SYNC_WORKER_ID, _fdw_id);
+        auto coordinator = Coordinator::get_instance();
+        auto& keep_alive = coordinator->register_thread(Coordinator::DaemonType::DDL_MGR, coordinator_id);
+
         // run the sync thread every 10 seconds
         while (!_is_shutting_down()) {
+            // mark keep alive with coordinator
+            Coordinator::mark_alive(keep_alive);
+
             try {
                 // get primary db connection
                 Properties::get_primary_db_config(host, port, user, password);
@@ -572,6 +583,7 @@ namespace springtail::pg_fdw {
                     std::vector<std::string> sql_commands;
 
                     // connect to the primary database
+                    // TODO: retry connection on failure SPR-896
                     conn->connect(host, db_name, user, password, port, false);
                     conn->start_transaction();
 
