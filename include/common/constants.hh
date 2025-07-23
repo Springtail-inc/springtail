@@ -11,6 +11,9 @@ namespace springtail::constant {
     /** Represents the most recent XID available. */
     static constexpr uint64_t LATEST_XID = std::numeric_limits<uint64_t>::max();
 
+    /** Invalid XID value */
+    static constexpr uint64_t INVALID_XID = 0;
+
     /** Represents the most recent LSN available. */
     static constexpr uint64_t MAX_LSN = std::numeric_limits<uint64_t>::max();
 

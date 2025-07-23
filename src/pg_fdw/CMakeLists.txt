@@ -21,6 +21,7 @@ set(PG_FDW_SOURCES
 set(PG_DDL_SOURCES
     pg_ddl_mgr.cc
     pg_fdw_ddl_common.cc
+    pg_xid_collector.cc
 )
 
 set(PG_FDW_TEST_SOURCES
@@ -89,6 +90,7 @@ target_link_libraries(springtail_pg_fdw
     PRIVATE springtail_storage
     PRIVATE springtail_xid_mgr_client
     PRIVATE springtail_sys_tbl_mgr
+    PRIVATE springtail_xid_collector_client
 )
 
 target_link_libraries(springtail_pg_ddl
@@ -139,16 +141,6 @@ target_link_libraries(pg_xid_subscriber_daemon
 )
 add_dsymutil_command(pg_xid_subscriber_daemon)
 
-add_executable(pg_xid_collector_daemon pg_xid_collector_daemon.cc pg_xid_collector.cc)
-target_include_directories(pg_xid_collector_daemon
-    PUBLIC ${PROJECT_SOURCE_DIR}/include
-)
-target_link_libraries(pg_xid_collector_daemon
-    PRIVATE springtail_common
-    PRIVATE Boost::program_options
-)
-add_dsymutil_command(pg_xid_collector_daemon)
-
 # Extract transitive dependencies of libraryC
 get_target_property(POSTGRES_DEP_LIBS PostgreSQL::PostgreSQL INTERFACE_LINK_LIBRARIES)
 
@@ -183,6 +175,7 @@ target_link_libraries(dump_table
      PRIVATE springtail_storage
      PRIVATE springtail_sys_tbl_mgr
      PRIVATE springtail_xid_mgr
+     PRIVATE springtail_xid_collector_client
      PRIVATE Boost::program_options
      PRIVATE ${START_GROUP}
          ${POSTGRES_DEP_LIBS}
@@ -240,11 +233,6 @@ install(TARGETS
 
 install(TARGETS
     pg_xid_subscriber_daemon
-    RUNTIME DESTINATION bin/system
-)
-
-install(TARGETS
-    pg_xid_collector_daemon
     RUNTIME DESTINATION bin/system
 )
 

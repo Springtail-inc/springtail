@@ -11,6 +11,8 @@
 #include "nodes/pg_list.h"
 #include "utils/guc.h"
 #include "storage/ipc.h"
+#include "miscadmin.h"
+#include "commands/dbcommands.h"
 
 PG_MODULE_MAGIC;
 
@@ -108,7 +110,7 @@ fdw_xact_callback(XactEvent event, void *arg)
     }
 }
 
-static void my_session_exit_callback(int code, Datum arg)
+static void springtail_session_exit_callback(int code, Datum arg)
 {
     // Cleanup logic here
     fdw_exit();
@@ -118,6 +120,8 @@ static void my_session_exit_callback(int code, Datum arg)
 void
 _PG_init(void)
 {
+    elog(LOG, "_PG_init(): initializing FDW");
+
     // Register the transaction commit/rollback callback
     RegisterXactCallback(fdw_xact_callback, NULL);
 
@@ -135,17 +139,41 @@ _PG_init(void)
         NULL
     );
 
+    bool ddl_connection = false;
+    DefineCustomBoolVariable(
+        "springtail_fdw.ddl_connection",
+        "Indicates if connection belongs to DDL Manager.",
+        NULL,
+        &ddl_connection,
+        false,
+        PGC_SUSET,
+        0,
+        NULL,
+        NULL,
+        NULL
+    );
+
     // Ensure the configuration is loaded
     if (!fdw_config_file_path || strlen(fdw_config_file_path) == 0) {
         fdw_config_file_path = GetConfigOptionByName("springtail_fdw.config_file_path", NULL, false);
     }
 
-    elog(INFO, "FDW configuration file path: %s", fdw_config_file_path);
+    elog(LOG, "FDW configuration file path: %s", fdw_config_file_path);
+
+    if (!OidIsValid(MyDatabaseId))
+    {
+        elog(PANIC, "Fatal error: MyDatabaseId is not valid, aborting process");
+    }
+    const char *db_name = get_database_name(MyDatabaseId);
+    elog(LOG, "Database oid %u, database name %s", MyDatabaseId, db_name);
 
     // Initialize the FDW; springtail_init()
     fdw_init(fdw_config_file_path);
+    fdw_start(db_name, ddl_connection);
 
-    on_proc_exit(my_session_exit_callback, (Datum) 0);
+    pfree((void *)(db_name));
+
+    on_proc_exit(springtail_session_exit_callback, (Datum) 0);
 }
 
 /*
@@ -302,7 +330,6 @@ springtail_GetForeignRelSize(PlannerInfo *root,
 
     // Get the foreign server OID
     Oid serverid = ft->serverid;
-    ForeignServer *server = GetForeignServer(serverid);
 
     // get the schema xid and db_id from the foreign server options
     uint64_t schema_xid;
@@ -508,7 +535,6 @@ springtail_ImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
     }
 
     // get foreign server and iterate through its options
-    server = GetForeignServer(serverOid);
     ListCell   *lc;
 
     // Iterate over the options to find the db_id, db_name and schema_xid

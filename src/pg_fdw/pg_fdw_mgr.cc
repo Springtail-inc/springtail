@@ -403,8 +403,80 @@ namespace springtail::pg_fdw {
         LOG_INFO("PgFdwMgr delete");
     }
 
+    void
+    PgFdwMgr::init(const char *db_name, bool ddl_connection)
+    {
+        std::string db_name_string(db_name);
+
+        uint64_t instance_id = Properties::get_db_instance_id();
+        _fdw_id = Properties::get_fdw_id();
+        nlohmann::json fdw_config;
+        fdw_config = Properties::get_fdw_config(_fdw_id);
+        if (fdw_config.contains("db_prefix")) {
+            // if the FDW is using a prefix, prepend it
+            std::string db_prefix = fdw_config.at("db_prefix").get<std::string>();
+            if (db_name_string.starts_with(db_prefix)) {
+                db_name_string = db_name_string.substr(db_prefix.length());
+            }
+        }
+
+        _ddl_connection = ddl_connection;
+        _db_id = Properties::get_db_id(db_name_string);
+
+        LOG_INFO("FDW process stated for database id: {}, ddl_connection: {}", _db_id, _ddl_connection);
+
+        if (!_ddl_connection) {
+            RedisClientPtr client = RedisMgr::get_instance()->get_client();
+            std::string set_name = fmt::format(redis::SET_FDW_PID, instance_id);
+            pid_t process_id = getpid();
+            std::string set_value = fmt::format("{}:{}:{}", _fdw_id, _db_id, process_id);
+            CHECK(client->sadd(set_name, set_value) == 1);
+        }
+
+        // NOTE: first call to XidMgrClient needs to be done on the main thread to prevent occasional
+        //      deadlock during shutdown for short-lived FDW processes.
+        (void)XidMgrClient::get_instance();
+        start_thread();
+        LOG_INFO("FDW process finished initialization");
+    }
+
+    void
+    PgFdwMgr::_internal_run()
+    {
+        if (_ddl_connection) {
+            return;
+        }
+        while (!_is_shutting_down()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(THREAD_SLEEP_INTERVAL_MSEC));
+            if (_in_transaction) {
+                    continue;
+            }
+
+            std::optional<uint64_t> cached_xid;
+            std::shared_lock<std::shared_mutex> rd_lock(_mutex);
+            if (_roots_cache) {
+                cached_xid = _roots_cache->get_committed_xid(_db_id);
+            }
+            rd_lock.unlock();
+
+            uint64_t xid = constant::INVALID_XID;
+            if (!cached_xid.has_value() || cached_xid.value() != _schema_xid) {
+                xid = XidMgrClient::get_instance()->get_committed_xid(_db_id, constant::LATEST_XID);
+                LOG_DEBUG(LOG_FDW, "XidMgrClient returned xid = {}", xid);
+            } else {
+                xid = cached_xid.value();
+                LOG_DEBUG(LOG_FDW, "Cached xid returned xid = {}", xid);
+            }
+            if (xid > _last_xid) {
+                _last_xid = xid;
+                _xid_collector_client.send_data(_db_id, xid);
+            }
+        }
+    }
+
     // called from the PG exit callback
-    void PgFdwMgr::fdw_exit()
+    void
+    PgFdwMgr::fdw_exit()
     {
         LOG_DEBUG(LOG_FDW, "Shutting down springtail");
         springtail_shutdown();
@@ -469,7 +541,6 @@ namespace springtail::pg_fdw {
         // if doesn't exist, get a new xid from xid_mgr and add to map
         std::shared_lock<std::shared_mutex> rd_lock(_mutex);
 
-
         if (!_roots_cache) {
             rd_lock.unlock();
             _roots_cache = _try_create_cache();
@@ -518,6 +589,13 @@ namespace springtail::pg_fdw {
             xid = it->second;
             rd_lock.unlock();
         }
+        if (!_ddl_connection) {
+            CHECK(xid >= _last_xid) << "New XID is smaller than the last known one";
+            if (xid > _last_xid) {
+                _last_xid = xid;
+                _xid_collector_client.send_data(db_id, xid);
+            }
+        }
 
         LOG_DEBUG(LOG_FDW, "fdw_create_state: db_id: {}, tid: {}, xid: {}, pg_xid: {}, schema_xid: {}",
                             db_id, tid, xid, pg_xid, schema_xid);
@@ -525,6 +603,7 @@ namespace springtail::pg_fdw {
         TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid);
         PgFdwState *state = new PgFdwState{table, db_id, tid, xid};
 
+        _in_transaction = true;
         return state;
     }
 
@@ -1225,6 +1304,7 @@ namespace springtail::pg_fdw {
         // remove transaction ID mapping on a commit or rollback
         LOG_DEBUG(LOG_FDW, "fdw_commit_rollback: pg_xid: {}, commit: {}", pg_xid, commit);
         _xid_map.erase(pg_xid);
+        _in_transaction = false;
     }
 
     std::vector<std::pair<std::string, std::string>>

@@ -235,7 +235,7 @@ static const std::map<ServiceId, std::string> dependencies_names = {
     {ServiceId::SchemaMgrId,           "SchemaMgr"},
     {ServiceId::TableMgrId,            "TableMgr"},
     {ServiceId::SyncTrackerId,         "SyncTracker"},
-    {ServiceId::PgFdwMgrId,            "PGFdwMgr"},
+    {ServiceId::PgFdwMgrId,            "PgFdwMgr"},
     {ServiceId::PgXidSubscriberMgrId,  "PgXidSubscriberMgr"},
     {ServiceId::PgDDLMgrId,            "PgDDLMgr"},
     {ServiceId::PgLogCoordinatorId,    "PgLogCoordinator"},
@@ -306,12 +306,14 @@ springtail_register_service(ServiceId service_id, ShutdownFunc fn)
 void
 springtail_shutdown()
 {
+    LOG_INFO("Shutdown services");
     std::unique_lock running_services_lock(running_services_mutex);
     for (auto service_id : topo_sorted_services) {
         auto it = running_services.find(service_id);
         if (it == running_services.end()) {
             continue;
         }
+        LOG_INFO("Shuting down service {}", dependencies_names.at(service_id));
         it->second();
     }
     // NOTE: This final cleanup step can't be done by a runner because a runner will require logging

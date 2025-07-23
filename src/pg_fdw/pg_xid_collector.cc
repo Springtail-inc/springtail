@@ -15,15 +15,17 @@ namespace springtail::pg_fdw {
     {
         uint64_t db_instance_id = Properties::get_db_instance_id();
         _redis_hash_name = fmt::format(redis::HASH_MIN_XID, db_instance_id);
+        _redis_pid_set_name = fmt::format(redis::SET_FDW_PID, db_instance_id);
         _fdw_id = Properties::get_fdw_id();
         nlohmann::json fdw_config;
         fdw_config = Properties::get_fdw_config(_fdw_id);
         _socket_name = Json::get_or<std::string_view>(fdw_config, "collector_socket", DEFAULT_SOCKET_NAME);
 
-        _redis_thread = std::jthread(&PgXidCollector::_redis_thread_run, this);
+        _redis_thread = std::thread(&PgXidCollector::_redis_thread_run, this);
     }
 
-    void PgXidCollector::_internal_run()
+    void
+    PgXidCollector::_internal_run()
     {
         // create event loop
         int epoll_fd = ::epoll_create1(0);
@@ -117,7 +119,7 @@ namespace springtail::pg_fdw {
                                 pid_event_storage.insert(std::make_pair(cred->pid, process_data));
                                 LOG_DEBUG(LOG_FDW, "FDW process {} added, new process count {}", cred->pid, pid_event_storage.size());
                             }
-                            on_update(cred->pid, msg->db_id, msg->xid);
+                            _on_update(cred->pid, msg->db_id, msg->xid);
                         }
                     } else {
                         // this is pid
@@ -128,7 +130,7 @@ namespace springtail::pg_fdw {
                         int process_fd = process_data->fd;
                         PCHECK(::epoll_ctl(epoll_fd, EPOLL_CTL_DEL, process_fd, nullptr) != -1) << "Failed to remove process fd";
                         ::close(process_fd);
-                        on_fdw_death(pid);
+                        _on_fdw_death(pid);
                         LOG_DEBUG(LOG_FDW, "FDW process {} died, remaining process count {}", pid, pid_event_storage.size());
                     }
                 }
@@ -155,62 +157,96 @@ namespace springtail::pg_fdw {
         ::close(epoll_fd);
     }
 
-    void PgXidCollector::on_update(pid_t process_id, uint64_t db_id, uint64_t xid) noexcept
+    void
+    PgXidCollector::_cleanup_process(std::map<pid_t, std::pair<uint64_t, uint64_t>>::iterator it)
+    {
+        // Find db_id and xid the process used
+        const auto [old_db_id, old_xid] = it->second;
+
+        auto db_it = _db_id_to_xid_to_count.find(old_db_id);
+        CHECK(db_it != _db_id_to_xid_to_count.end());
+
+        auto& xid_map = db_it->second;
+        auto xid_it = xid_map.find(old_xid);
+        CHECK(xid_it != xid_map.end());
+        CHECK(xid_it->second > 0);
+
+        --(xid_it->second);
+        LOG_DEBUG(LOG_FDW,
+            "Removing process data: process {}, db_id {}, xid {}, remaining xid count {}",
+            it->first, old_db_id, old_xid, xid_it->second);
+
+        if (xid_it->second == 0) {
+            xid_map.erase(xid_it);
+        }
+    }
+
+    void
+    PgXidCollector::_on_update(pid_t process_id, uint64_t db_id, uint64_t xid) noexcept
     {
         LOG_DEBUG(LOG_FDW, "Updating xid: process {}, db_id {}, xid {}", process_id, db_id, xid);
         std::unique_lock lock(_data_mutex);
-        if (_pid_to_db_id_xid.contains(process_id)) {
-            auto [old_db_id, old_xid] = _pid_to_db_id_xid[process_id];
-            uint64_t count = _db_id_to_xid_to_count[old_db_id][old_xid];
-            CHECK(count > 0);
-            --count;
-            if (count != 0) {
-                _db_id_to_xid_to_count[old_db_id][old_xid] = count;
-            } else {
-                _db_id_to_xid_to_count[old_db_id].erase(old_xid);
+
+        // Handle old xid if process already exists
+        auto it = _pid_to_db_id_xid.find(process_id);
+        if (it != _pid_to_db_id_xid.end()) {
+            // if nothing changed, return
+            if (it->second.first == db_id && it->second.second == xid) {
+                return;
             }
+            _cleanup_process(it);
+        } else {
+            _new_pids.push_back(std::make_pair(process_id, db_id));
         }
+
+        // Update pid → (db_id, xid)
         _pid_to_db_id_xid.insert_or_assign(process_id, std::make_pair(db_id, xid));
 
-        if (!_db_id_to_xid_to_count.contains(db_id)) {
-            _db_id_to_xid_to_count.insert(std::make_pair(db_id, std::map<uint64_t, uint64_t>()));
+        // Increment counter for new xid
+        auto& xid_map = _db_id_to_xid_to_count[db_id];
+        ++xid_map[xid];
+        lock.unlock();
+        if (xid == constant::INVALID_XID) {
+            _redis_cv.notify_all();
         }
-        if (!_db_id_to_xid_to_count[db_id].contains(xid)) {
-            _db_id_to_xid_to_count[db_id].insert(std::make_pair(xid, 0));
-        }
-        uint64_t count = _db_id_to_xid_to_count[db_id][xid];
-        count++;
-        _db_id_to_xid_to_count[db_id][xid] = count;
     }
 
-    void PgXidCollector::on_fdw_death(pid_t pid) noexcept
+    void
+    PgXidCollector::_on_fdw_death(pid_t pid) noexcept
     {
+        LOG_DEBUG(LOG_FDW, "Process death: process {}", pid);
         std::unique_lock lock(_data_mutex);
-        CHECK(_pid_to_db_id_xid.contains(pid));
-        auto [old_db_id, old_xid] = _pid_to_db_id_xid[pid];
-        uint64_t count = _db_id_to_xid_to_count[old_db_id][old_xid];
-        CHECK(count > 0);
-        count--;
-        LOG_DEBUG(LOG_FDW, "Removing process data: process {}, db_id {}, xid {}, remaining xid count {}",
-            pid, old_db_id, old_xid, count);
-        if (count != 0) {
-            _db_id_to_xid_to_count[old_db_id][old_xid] = count;
-        } else {
-            _db_id_to_xid_to_count[old_db_id].erase(old_xid);
-        }
-        _pid_to_db_id_xid.erase(pid);
+
+        auto pid_it = _pid_to_db_id_xid.find(pid);
+        CHECK(pid_it != _pid_to_db_id_xid.end());
+
+        _cleanup_process(pid_it);
+
+        _pid_to_db_id_xid.erase(pid_it);
     }
 
-    void PgXidCollector::_redis_thread_run(std::stop_token st)
+    void
+    PgXidCollector::_internal_shutdown()
+    {
+        _redis_cv.notify_all();
+        _redis_thread.join();
+    }
+
+    void
+    PgXidCollector::_redis_thread_run()
     {
         std::chrono::milliseconds dur(REDIS_UPDATE_INTERVAL_MSEC);
-        std::condition_variable_any cv;
-        std::mutex m;
-        while(!st.stop_requested()) {
+
+        while(!_is_shutting_down()) {
             std::vector<std::pair<std::string, std::string>> db_xid_list;
+            std::vector<std::string> new_pid_list;
+
+            LOG_DEBUG(LOG_FDW, "Redis data refresh; process count {}",  _pid_to_db_id_xid.size());
+
+            // we will try to spend as little time as possible in the critical section
+            std::shared_lock data_lock(_data_mutex);
 
             // collect min xids per database
-            std::shared_lock data_lock(_data_mutex);
             for (auto &[db_id, xid_map]: _db_id_to_xid_to_count) {
                 uint64_t xid = constant::LATEST_XID;
                 if (!xid_map.empty()) {
@@ -221,18 +257,27 @@ namespace springtail::pg_fdw {
                 db_xid_list.push_back(std::make_pair(key, value));
                 LOG_DEBUG( LOG_FDW,"Updating redis with key: {}, value: {}", key, value);
             }
+
+            // move everything to a temporary set
+            for (auto &[process_id, db_id]: _new_pids) {
+                std::string value = fmt::format("{}:{}:{}", _fdw_id, db_id, process_id);
+                new_pid_list.push_back(value);
+            }
+            _new_pids.clear();
+
             data_lock.unlock();
 
             // send data to redis
+            RedisClientPtr client = RedisMgr::get_instance()->get_client();
             if (!db_xid_list.empty()) {
-                RedisClientPtr client = RedisMgr::get_instance()->get_client();
                 client->hmset(_redis_hash_name, db_xid_list.begin(), db_xid_list.end());
             }
-
-            std::unique_lock<std::mutex> lock(m);
-            if (cv.wait_for(lock, dur, [&st] { return st.stop_requested(); })) {
-                break;
+            if (!new_pid_list.empty()) {
+                CHECK(client->srem(_redis_pid_set_name, new_pid_list.begin(), new_pid_list.end()) == new_pid_list.size());
             }
+
+            data_lock.lock();
+            _redis_cv.wait_for(data_lock, dur);
         }
     }
 } // springtail::pg_fdw

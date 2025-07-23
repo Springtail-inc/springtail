@@ -1,6 +1,7 @@
 #include <boost/program_options.hpp>
 
 #include <common/init.hh>
+#include <common/redis_types.hh>
 
 #include <pg_fdw/pg_xid_collector_client.hh>
 
@@ -40,10 +41,20 @@ main(int argc, char *argv[])
 
     std::jthread client_thread([&](std::stop_token st) {
         PgXidCollectorClient client;
+        RedisClientPtr redis_client = RedisMgr::get_instance()->get_client();
+
         std::mt19937 gen(std::random_device{}());
 
         // Uniform in [min_db_id, max_db_id]
         std::uniform_int_distribution<int> uniform_dist(min_db_id, max_db_id);
+
+        // get random database id
+        int db_id = uniform_dist(gen);
+
+        uint64_t db_instance_id = Properties::get_db_instance_id();
+        std::string key = fmt::format(redis::SET_FDW_PID, db_instance_id);
+        std::string value = fmt::format("{}:{}:{}", Properties::get_fdw_id(), db_id, getpid());
+        CHECK(redis_client->sadd(key, value) == 1);
 
         // Skewed bell-shaped in [min_sleep_interval, max_sleep_interval], skewed toward max_sleep_interval
         double mean = min_sleep_interval + (max_sleep_interval - min_sleep_interval) * 0.005;
@@ -53,8 +64,6 @@ main(int argc, char *argv[])
 
         while (!st.stop_requested()) {
             // do work here
-            // get random database id
-            int db_id = uniform_dist(gen);
 
             // get random sleep interval that simulates random transaction duration
             uint64_t sleep_interval;
@@ -67,6 +76,9 @@ main(int argc, char *argv[])
             LOG_INFO("Sleep for {} milliseconds", sleep_interval);
             std::this_thread::sleep_for(std::chrono::milliseconds(sleep_interval));
             current_xid++;
+
+            // get another db_id
+            db_id = uniform_dist(gen);
         }
     });
 
