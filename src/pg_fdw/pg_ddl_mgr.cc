@@ -84,10 +84,11 @@ namespace springtail::pg_fdw {
     }
 
     void
-    PgDDLMgr::start(const std::string &username,
-                    const std::string &password,
-                    std::optional<std::string> hostname)
+    PgDDLMgr::start()
     {
+        std::string username = springtail_retreive_argument<std::string>(ServiceId::PgDDLMgrId, "username");
+        std::string password = springtail_retreive_argument<std::string>(ServiceId::PgDDLMgrId, "password");
+        std::optional<std::string> hostname = springtail_retreive_argument<std::optional<std::string>>(ServiceId::PgDDLMgrId, "hostname");
         // start the ddl main thread
         std::string fdw_id = Properties::get_fdw_id();
 

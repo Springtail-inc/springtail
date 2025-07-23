@@ -399,24 +399,23 @@ namespace springtail::pg_fdw {
 using namespace springtail;
 
 namespace springtail::pg_fdw {
+    PgFdwMgr::~PgFdwMgr() {
+        LOG_INFO("PgFdwMgr delete");
+    }
 
-    PgFdwMgr* PgFdwMgr::_instance {nullptr};
-
-    std::once_flag PgFdwMgr::_init_flag;
-
-    // TODO: convert this class to singleton
-    PgFdwMgr*
-    PgFdwMgr::_init()
+    // called from the PG exit callback
+    void PgFdwMgr::fdw_exit()
     {
-        elog(INFO, "Initializing PgFdwMgr");
-        _instance = new PgFdwMgr();
-        return _instance;
+        LOG_DEBUG(LOG_FDW, "Shutting down springtail");
+        springtail_shutdown();
     }
 
     /* called from PG_init */
     void
     PgFdwMgr::fdw_init(const char *config_file, bool init)
     {
+        LOG_DEBUG(LOG_FDW, "Initializing PgFdwMgr");
+
         if (config_file != nullptr && strlen(config_file) > 0) {
             // set env variables based on redis config
             // we don't reload redis config here, just set the env variables
@@ -428,14 +427,7 @@ namespace springtail::pg_fdw {
         if (init) {
             springtail_init(false, PG_FDW_LOG_FILE_PREFIX, LOG_FDW);
         }
-
-        LOG_DEBUG(LOG_FDW, "Initializing PgFdwMgr");
-
-        // initialize the singleton
-        std::call_once(_init_flag, _init);
     }
-
-
 
     std::shared_ptr<sys_tbl_mgr::ShmCache>
     PgFdwMgr::_try_create_cache()
@@ -1052,24 +1044,52 @@ namespace springtail::pg_fdw {
             }
         }
 
-        // We don't use secondary indexes for full table scans by default.
-        // Change the default (use_secondary = true) in the function signature
-        // if you need to enable secondary index scans.
-        if (use_secondary) {
-            for (auto const& idx: pg_state->indexes) {
-                if (idx.id == constant::INDEX_PRIMARY) {
-                    // we already checked the primary index
-                    continue;
-                }
-                List* p = check_index(idx, sortgroup);
-                if (p) {
-                    pg_state->sortgroup_index = idx;
-                    return p;
-                }
+        List* sort_list = nullptr;
+
+        for (auto const& idx: pg_state->indexes) {
+            if (idx.id == constant::INDEX_PRIMARY) {
+                // we already checked the primary index
+                continue;
+            }
+            sort_list = check_index(idx, sortgroup);
+            if (sort_list) {
+                pg_state->sortgroup_index = idx;
+                break;
             }
         }
 
-        return {};
+        if (!sort_list) {
+            return {};
+        }
+
+        // We don't use secondary indexes for full table scans by default.
+        // Change the default (use_secondary = true) in the function signature
+        // if you need to enable secondary index scans.
+        if (use_secondary && sort_list) {
+            return sort_list;
+        }
+
+        CHECK(sort_list);
+
+        // let's see if the target columns are part of the found sort index
+        // in what case we'll sort by the secondary index because
+        // the target values are part of the index itself and should be faster
+        // then scan by primary plus merge sort
+        ListCell *lc;
+        foreach(lc, state->target_list) {
+            auto column = (SpringtailTargetColumn *)lfirst(lc);
+
+            // see if the target colum is in the sort index
+            auto it = std::ranges::find_if(pg_state->sortgroup_index->columns,
+                    [&column](const auto& v) {return v.position == column->attnum;});
+
+            if (it == pg_state->sortgroup_index->columns.end()) {
+                pg_state->sortgroup_index = {};
+                return {};
+            }
+        }
+
+        return sort_list;
     }
 
     List *

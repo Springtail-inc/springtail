@@ -62,9 +62,7 @@ namespace springtail::pg_fdw {
                                               const nlohmann::json &to,
                                               const LibPqConnectionPtr conn);
 
-        static void start(const std::string &username,
-                          const std::string &password,
-                          std::optional<std::string> hostname);
+        static void start();
 
     protected:
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections

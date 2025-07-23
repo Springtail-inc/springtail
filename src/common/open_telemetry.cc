@@ -378,7 +378,7 @@ OpenTelemetry::tracer(const std::string_view& name)
 }
 
 void
-OpenTelemetry::increment_counter(std::string_view name)
+OpenTelemetry::increment_counter(std::string_view name, int delta)
 {
     if (!_otel_enabled) {
         return;
@@ -392,7 +392,7 @@ OpenTelemetry::increment_counter(std::string_view name)
     auto attributes_view = opentelemetry::common::KeyValueIterableView<decltype(attributes)>{attributes};
     auto counter = _counters[name];
     if(counter){
-        counter->Add(1, attributes_view, opentelemetry::context::RuntimeContext::GetCurrent());
+        counter->Add(delta, attributes_view, opentelemetry::context::RuntimeContext::GetCurrent());
     } else {
         LOG_ERROR("Counter '{}' not found", name);
     }

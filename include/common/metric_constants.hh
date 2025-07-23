@@ -87,5 +87,39 @@ namespace springtail {
             {PG_LOG_MGR_LOG_READER_LATENCIES, "Latency between when Postgres committed the transaction and when we process it in the log reader"},
             {PG_LOG_MGR_BTREE_LATENCIES, "Latency between postgres commit and btree write completion"}
         };
+
+
+
+        /**
+         * Storage cache counters.
+         */
+        struct StorageCache
+        {
+            struct GetCalls {
+                static auto name() {
+                    return STORAGE_CACHE_GET_CALLS;
+                }
+            };
+            struct PutCalls {
+                static auto name() {
+                    return STORAGE_CACHE_PUT_CALLS;
+                }
+            };
+            struct CacheMisses {
+                static auto name() {
+                    return STORAGE_CACHE_GET_CACHE_MISSES;
+                }
+            };
+            struct FlushCalls {
+                static auto name() {
+                    return STORAGE_CACHE_FLUSH_CALLS;
+                }
+            };
+            struct DropCalls {
+                static auto name() {
+                    return STORAGE_CACHE_DROP_CALLS;
+                }
+            };
+        };
     }
 }
