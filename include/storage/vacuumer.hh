@@ -74,6 +74,16 @@ public:
      */
     void run_vacuum_once();
 
+    /**
+     * @brief Set global threshold for vacuum to process
+     *        used mainly from the tests
+     *
+     * @param size Global vacuum file size threshold
+     */
+    void set_global_vacuum_threshold(uint64_t size) {
+        _vacuum_global_threshold = size;
+    }
+
 protected:
     /**
      * @brief Constructor, that inits the vacuumer thread

@@ -1257,11 +1257,8 @@ namespace {
 
         Vacuumer::get_instance()->commit_expired_extents(1, target_xid);
 
-        std::cout << "\n" <<  client->get_committed_xid(1, 0) << "\n";
-        std::cout << "\n" <<  client->get_committed_xid(1, 0) << "\n";
-        std::cout << "\n" <<  client->get_committed_xid(1, 0) << "\n";
-        std::cout << "\n" <<  client->get_committed_xid(1, 0) << "\n";
-        // Run vacuum
+        // Set global threshold as small and run vacuum
+        Vacuumer::get_instance()->set_global_vacuum_threshold(10);
         Vacuumer::get_instance()->run_vacuum_once();
 
         auto size_post_vacuum = _get_block_count(table_file);

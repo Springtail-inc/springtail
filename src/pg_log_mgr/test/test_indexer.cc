@@ -325,7 +325,7 @@ namespace {
     TEST_F(Indexer_Test, Test_VacuumSecondaryIndex)
     {
         uint64_t table_id = _tid++;
-        uint64_t index_id = _secondary_index_id + 2;
+        uint64_t index_id = _secondary_index_id + 7;
         uint64_t table_xid = access_xid++;
         uint64_t index_xid = access_xid++;
         uint64_t data_xid = access_xid++;
@@ -334,10 +334,10 @@ namespace {
         Vacuumer::get_instance()->disable_vacuum_run();
 
         // Create table
-        create_table(_db_id, table_id, table_xid, "test_indexer_table2", _columns);
+        create_table(_db_id, table_id, table_xid, "test_indexer_table6", _columns);
 
         // Create index
-        _create_index(table_id, index_id, index_xid, "idx_test_indexer_2");
+        _create_index(table_id, index_id, index_xid, "idx_test_indexer_6");
 
         // Populate table
         _populate_table_with_data(table_id, table_xid, data_xid, 30000, 5);
@@ -360,6 +360,8 @@ namespace {
         auto index_file = table_dir / fmt::format(constant::INDEX_FILE, index_id);
         auto current_size1 = _get_block_count(index_file);
 
+        // Set global threshold as small and run vacuum
+        Vacuumer::get_instance()->set_global_vacuum_threshold(10);
         Vacuumer::get_instance()->run_vacuum_once();
 
         // Get the blocks count post-vacuum
