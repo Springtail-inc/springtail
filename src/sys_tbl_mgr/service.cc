@@ -526,8 +526,8 @@ Service::_create_table(const proto::TableRequest& request)
     if (request.table().has_parent_table_id() && request.table().parent_table_id() != constant::INVALID_TABLE) {
         parent_table_id = request.table().parent_table_id();
         ddl["parent_table_id"] = parent_table_id.value();
-        auto parent_table_info = _get_table_info(request.db_id(), parent_table_id.value(), xid);
         if (parent_table_id.has_value()) {
+            auto parent_table_info = _get_table_info(request.db_id(), parent_table_id.value(), xid);
             if (parent_table_info == nullptr) {
                 LOG_ERROR("Parent table not found: {}@{} - {}", request.db_id(), xid.xid, parent_table_id.value());
             } else {
@@ -1441,6 +1441,7 @@ Service::_get_modified_partition_details(uint64_t db_id,
     for (auto row : (*table)) {
         auto tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
         auto parent_table_id = fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->get_uint64(&row);
+        auto name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row);
 
         // make sure that the table is marked as existing at this XID/LSN
         bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
@@ -1450,35 +1451,37 @@ Service::_get_modified_partition_details(uint64_t db_id,
         }
 
         if (parent_table_id == table_id) {
+            LOG_INFO("Adding disk table {}:{} to system_table_ids", tid, name);
             system_table_ids.insert(tid);
         }
     }
 
-    std::unordered_set<uint64_t> cached_system_table_ids;
-    // Validate the system table ids from disk and verify from cache
+    // Validate the system table ids from cache
     // Only add the tables that have the right table parent table id
-    for (const auto &tid : system_table_ids) {
-        auto table_info = _get_table_info(db_id, tid, xid);
-        if (table_info != nullptr && table_info->parent_table_id == table_id) {
-            // Cache updated with the table information and parent table id matches
-            cached_system_table_ids.insert(tid);
+    for (const auto& table_id_pair : _table_cache[db_id]) {
+        const auto& [latest_key, latest_table_ptr] = *table_id_pair.second.begin();
+
+        // Add the table id to the system_table_ids set if the parent table id matches the current table id
+        // Remove the table id from the system_table_ids set if the cache doesn't have the table info
+        if (latest_table_ptr->parent_table_id == table_id) {
+            LOG_INFO("Adding cached table {}:{} to system_table_ids", table_id_pair.first, latest_table_ptr->name);
+            system_table_ids.insert(table_id_pair.first);
+        } else {
+            LOG_INFO("Removing table {}:{} from system_table_ids", table_id_pair.first, latest_table_ptr->name);
+            system_table_ids.erase(table_id_pair.first);
         }
     }
 
     // Parse the requested table ids
     std::unordered_set<uint64_t> table_ids;
     for ( const auto &part_data : partition_data ) {
-        auto table_info = _get_table_info(db_id, part_data.table_id(), xid);
-        // Populated the cache system table information from the partition data
-        if (table_info != nullptr && table_info->parent_table_id == table_id) {
-            cached_system_table_ids.insert(part_data.table_id());
-        }
         // Validate the partition data parent table id to match the current table_id
         if (part_data.parent_table_id() != table_id) {
             LOG_WARN("Parent table id {} does not match the current table id {}",
                 part_data.parent_table_id(), table_id);
             continue;
         }
+        LOG_INFO("Adding partition table {}:{} to table_ids", part_data.table_id(), part_data.table_name());
         table_ids.insert(part_data.table_id());
         if (partition_map != nullptr) {
             partition_map->insert(std::make_pair(
@@ -1496,13 +1499,13 @@ Service::_get_modified_partition_details(uint64_t db_id,
     if ( is_attached ) {
         // Get the difference in order to identify the attached partition
         for (const auto& tid : table_ids) {
-            if (!cached_system_table_ids.contains(tid)) {
+            if (!system_table_ids.contains(tid)) {
                 result.push_back(tid);
             }
         }
     } else {
         // Get the difference in order to identify the detached partition
-        for (const auto& tid : cached_system_table_ids) {
+        for (const auto& tid : system_table_ids) {
             if (!table_ids.contains(tid)) {
                 result.push_back(tid);
             }
