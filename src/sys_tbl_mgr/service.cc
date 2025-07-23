@@ -1443,7 +1443,6 @@ Service::_get_modified_partition_details(uint64_t db_id,
     for (auto row : (*table)) {
         auto tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
         auto parent_table_id = fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->get_uint64(&row);
-        auto name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row);
 
         // make sure that the table is marked as existing at this XID/LSN
         bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
@@ -1453,7 +1452,7 @@ Service::_get_modified_partition_details(uint64_t db_id,
         }
 
         if (parent_table_id == table_id) {
-            LOG_INFO("Adding disk table {}:{} to system_table_ids", tid, name);
+            LOG_DEBUG(LOG_SCHEMA, "Adding disk table {} to system_table_ids", tid);
             system_table_ids.insert(tid);
         }
     }
@@ -1466,10 +1465,10 @@ Service::_get_modified_partition_details(uint64_t db_id,
         // Add the table id to the system_table_ids set if the parent table id matches the current table id
         // Remove the table id from the system_table_ids set if the cache doesn't have the table info
         if (latest_table_ptr->parent_table_id == table_id) {
-            LOG_INFO("Adding cached table {}:{} to system_table_ids", table_id_pair.first, latest_table_ptr->name);
+            LOG_DEBUG(LOG_SCHEMA, "Adding cached table {}:{} to system_table_ids", table_id_pair.first, latest_table_ptr->name);
             system_table_ids.insert(table_id_pair.first);
         } else {
-            LOG_INFO("Removing table {}:{} from system_table_ids", table_id_pair.first, latest_table_ptr->name);
+            LOG_DEBUG(LOG_SCHEMA, "Removing table {}:{} from system_table_ids", table_id_pair.first, latest_table_ptr->name);
             system_table_ids.erase(table_id_pair.first);
         }
     }
@@ -1483,7 +1482,7 @@ Service::_get_modified_partition_details(uint64_t db_id,
                 part_data.parent_table_id(), table_id);
             continue;
         }
-        LOG_INFO("Adding partition table {}:{} to table_ids", part_data.table_id(), part_data.table_name());
+        LOG_DEBUG(LOG_SCHEMA, "Adding partition table {}:{} to table_ids", part_data.table_id(), part_data.table_name());
         table_ids.insert(part_data.table_id());
         if (partition_map != nullptr) {
             partition_map->insert(std::make_pair(
