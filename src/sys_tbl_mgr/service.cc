@@ -1430,10 +1430,12 @@ Service::_get_modified_partition_details(uint64_t db_id,
                                          std::unordered_map<uint64_t, std::pair<std::string, std::string>> *partition_map,
                                          bool is_attached)
 {
-    auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID,
-        xid.xid);
-    // get field array
-    auto fields = table->extent_schema()->get_fields();
+    auto table = _get_system_table(db_id, sys_tbl::TableNames::ID);
+    auto schema = table->extent_schema();
+    auto fields = schema->get_fields();
+
+    // Mutex for the table cache
+    boost::shared_lock lock(_mutex);
 
     std::unordered_set<uint64_t> system_table_ids;
 
