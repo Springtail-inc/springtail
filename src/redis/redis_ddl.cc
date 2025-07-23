@@ -322,11 +322,10 @@ namespace springtail {
         std::string suffix = ":" + db_id;
 
         for (const auto& [field, value] : values) {
-            if (field.ends_with(suffix)) {
-                uint64_t xid = std::stoll(value);
-                if (xid < min_xid) {
-                    min_xid = xid;
-                }
+            DCHECK(field.ends_with(suffix));
+            uint64_t xid = std::stoll(value);
+            if (xid < min_xid) {
+                min_xid = xid;
             }
         }
 
