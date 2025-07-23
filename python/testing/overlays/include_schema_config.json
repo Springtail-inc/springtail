@@ -1,0 +1,9 @@
+{
+    "databases": {
+        "1": {
+            "include": {
+                "schemas": ["test_schema", "public"]
+            }
+        }
+    }
+}

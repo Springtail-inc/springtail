@@ -917,6 +917,11 @@ namespace springtail {
         json["oid"].get_to(msg.oid);
         json["identity"].get_to(msg.index);
 
+        if (!_included_schemas.empty() && !std::ranges::binary_search(_included_schemas, msg.namespace_name)) {
+            LOG_INFO("Create index skipped: {} {}\n", msg.oid, msg.namespace_name);
+            return {};
+        }
+
         PgMsgPtr decoded_msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_INDEX);
         decoded_msg->msg.emplace<PgMsgDropIndex>(msg);
 
