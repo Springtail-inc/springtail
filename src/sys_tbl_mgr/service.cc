@@ -1437,23 +1437,28 @@ Service::_get_modified_partition_details(uint64_t db_id,
     // Mutex for the table cache
     boost::shared_lock lock(_mutex);
 
-    std::unordered_set<uint64_t> system_table_ids;
+    std::unordered_map<uint64_t, uint64_t> system_table_ids;
 
     // Iterate the table_names table and find the child tables who has the parent_table_id as the current_table_id
     for (auto row : (*table)) {
         auto tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
         auto parent_table_id = fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->get_uint64(&row);
+        auto table_xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
 
         // make sure that the table is marked as existing at this XID/LSN
         bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
         if (!exists) {
-            LOG_WARN("Table {} marked non-existant at xid {}:{}", table_id, xid.xid, xid.lsn);
+            LOG_WARN("Table {} marked non-existant at xid {}:{}", tid, xid.xid, xid.lsn);
             continue;
         }
 
+        if ( system_table_ids.contains(tid) && system_table_ids[tid] < table_xid) {
+            // Remove the existing entry if the XID is less than the current processing XID
+            system_table_ids.erase(tid);
+        }
         if (parent_table_id == table_id) {
-            LOG_DEBUG(LOG_SCHEMA, "Adding disk table {} to system_table_ids", tid);
-            system_table_ids.insert(tid);
+            LOG_DEBUG(LOG_SCHEMA, "Adding disk table {}:{} to system_table_ids", tid, fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row));
+            system_table_ids.try_emplace(tid, table_xid);
         }
     }
 
@@ -1466,7 +1471,7 @@ Service::_get_modified_partition_details(uint64_t db_id,
         // Remove the table id from the system_table_ids set if the cache doesn't have the table info
         if (latest_table_ptr->parent_table_id == table_id) {
             LOG_DEBUG(LOG_SCHEMA, "Adding cached table {}:{} to system_table_ids", table_id_pair.first, latest_table_ptr->name);
-            system_table_ids.insert(table_id_pair.first);
+            system_table_ids.try_emplace(table_id_pair.first, latest_table_ptr->xid);
         } else {
             LOG_DEBUG(LOG_SCHEMA, "Removing table {}:{} from system_table_ids", table_id_pair.first, latest_table_ptr->name);
             system_table_ids.erase(table_id_pair.first);
@@ -1507,8 +1512,8 @@ Service::_get_modified_partition_details(uint64_t db_id,
     } else {
         // Get the difference in order to identify the detached partition
         for (const auto& tid : system_table_ids) {
-            if (!table_ids.contains(tid)) {
-                result.push_back(tid);
+            if (!table_ids.contains(tid.first)) {
+                result.push_back(tid.first);
             }
         }
     }
