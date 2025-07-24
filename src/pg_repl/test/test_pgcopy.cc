@@ -41,11 +41,6 @@ namespace {
             client->create_namespace(1, XidLsn(target_xid, 0), ns_msg);
 
             xid_server->commit_xid(1, 1, target_xid, false);
-            std::string vaccumer_namespace = "test_pg_copy_table_vacuum";
-            springtail_store_arguments(ServiceId::VacuumerId,
-                    {
-                    {"vacuum_global_ns", std::any(vaccumer_namespace)}
-                    });
         }
 
         static void TearDownTestSuite() {

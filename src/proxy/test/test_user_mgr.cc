@@ -32,12 +32,6 @@ namespace {
 
             springtail_init_test();
 
-            std::string vaccumer_namespace = "test_user_mgr_vacuum";
-            springtail_store_arguments(ServiceId::VacuumerId,
-                    {
-                    {"vacuum_global_ns", std::any(vaccumer_namespace)}
-                    });
-
             pg_proxy::UserMgr::get_instance();
             std::string host, user, password;
             int port;

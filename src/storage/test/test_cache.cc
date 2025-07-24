@@ -7,6 +7,7 @@
 #include <storage/csv_field.hh>
 
 #include <sys_tbl_mgr/table_mgr.hh>
+#include <test/services.hh>
 
 using namespace springtail;
 
@@ -40,6 +41,7 @@ namespace {
             ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
 
             springtail_init_test(LOG_ALL ^ LOG_STORAGE);
+            test::start_services(true, true, false);
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({
@@ -60,11 +62,6 @@ namespace {
             _base_dir = std::filesystem::temp_directory_path() / "test_cache";
             std::filesystem::remove_all(_base_dir);
             std::filesystem::create_directories(_base_dir);
-            std::string vaccumer_namespace = "test_cache_vacuum";
-            springtail_store_arguments(ServiceId::VacuumerId,
-                    {
-                    {"vacuum_global_ns", std::any(vaccumer_namespace)}
-                    });
 
         }
 

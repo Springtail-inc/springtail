@@ -26,12 +26,6 @@ namespace {
         static void SetUpTestSuite() {
             springtail_init_test();
             test::start_services(true, true, false);
-            std::string vaccumer_namespace = "test_tablemgr_vacuum";
-            springtail_store_arguments(ServiceId::VacuumerId,
-                    {
-                    {"vacuum_global_ns", std::any(vaccumer_namespace)}
-                    });
-
         }
         static void TearDownTestSuite() {
             springtail_shutdown();

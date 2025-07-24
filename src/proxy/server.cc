@@ -654,8 +654,8 @@ namespace springtail::pg_proxy {
     void
     ProxyServer::start()
     {
-        bool force_shadow = springtail_retreive_argument<bool>(ServiceId::ProxyServerId, "force_shadow");
-        bool force_primary = springtail_retreive_argument<bool>(ServiceId::ProxyServerId, "force_primary");
+        bool force_shadow = springtail_retreive_argument<bool>(ServiceId::ProxyServerId, "force_shadow").value();
+        bool force_primary = springtail_retreive_argument<bool>(ServiceId::ProxyServerId, "force_primary").value();
 
         nlohmann::json json = Properties::get(Properties::PROXY_CONFIG);
         int num_threads = Json::get_or<int>(json, "threads", 4);

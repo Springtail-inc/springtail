@@ -15,7 +15,8 @@ Vacuumer::_init()
 {
     // Get the namespace for the vacuumer
     // as it can run in different daemons
-    std::string vacuum_global_namespace = springtail_retreive_argument<std::string>(ServiceId::VacuumerId, "vacuum_global_ns");
+    std::string vacuum_global_namespace = springtail_retreive_argument<std::string>(
+            ServiceId::VacuumerId, "vacuum_global_ns", false).value_or("default_vacuum");
 
     // get the configs for vacuum - size threshold, block size and base dir
     nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);

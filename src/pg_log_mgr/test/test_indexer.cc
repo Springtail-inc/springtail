@@ -60,11 +60,6 @@ namespace {
             _index_reconciliation_queue_mgr = std::make_shared<springtail::pg_log_mgr::IndexReconciliationQueueManager>();
             _index_reconciliation_queue_mgr->add_queue(_db_id);
             _indexer = std::make_unique<Indexer>(1, _index_reconciliation_queue_mgr);
-            std::string vaccumer_namespace = "test_indexer_vacuum";
-            springtail_store_arguments(ServiceId::VacuumerId,
-                    {
-                    {"vacuum_global_ns", std::any(vaccumer_namespace)}
-                    });
         }
 
         static void TearDownTestSuite() {

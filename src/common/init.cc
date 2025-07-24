@@ -329,13 +329,23 @@ void springtail_store_argument_internal(ServiceId service_id, const std::string 
     it->second.try_emplace(arg_name, value);
 }
 
-std::any springtail_retreive_argument_internal(ServiceId service_id, const std::string &arg_name)
+std::optional<std::any> springtail_retreive_argument_internal(ServiceId service_id, const std::string &arg_name, bool is_required)
 {
-    auto it = service_arguments.find(service_id);
-    CHECK(it != service_arguments.end());
-    auto value_it = it->second.find(arg_name);
-    CHECK(value_it != it->second.end());
-    return value_it->second;
+    auto service_it = service_arguments.find(service_id);
+    if (service_it == service_arguments.end()) {
+        CHECK(!is_required);
+        return std::nullopt;
+    }
+
+    auto& args = service_it->second;
+    auto arg_it = args.find(arg_name);
+
+    if (arg_it == args.end()) {
+        CHECK(!is_required);
+        return std::nullopt;
+    }
+
+    return arg_it->second;
 }
 
 };  // namespace springtail

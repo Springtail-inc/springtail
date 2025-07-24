@@ -30,11 +30,6 @@ namespace {
         {
             springtail_init_test();
             test::start_services(true, true, true);
-            std::string vaccumer_namespace = "test_fdw_where_vacuum";
-            springtail_store_arguments(ServiceId::VacuumerId,
-                    {
-                    {"vacuum_global_ns", std::any(vaccumer_namespace)}
-                    });
 
             PgFdwMgr::fdw_init(nullptr, false);
 
