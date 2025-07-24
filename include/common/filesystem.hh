@@ -315,7 +315,7 @@ namespace springtail {
         get_block_count(const std::filesystem::path& path) {
             struct stat st;
             if (::stat(path.c_str(), &st) == 0) {
-                return static_cast<uint64_t>(st.st_blocks);  // st_blocks is in 512-byte blocks
+                return static_cast<uint64_t>(st.st_blocks);
             }
             return 0;
         }
