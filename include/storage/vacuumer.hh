@@ -1,10 +1,10 @@
 #pragma once
 
-#include <filesystem>
 #include <list>
 #include <map>
 #include <thread>
 
+#include <common/filesystem.hh>
 #include <common/singleton.hh>
 #include <redis/redis_ddl.hh>
 #include <storage/schema.hh>
@@ -210,22 +210,6 @@ private:
      * @return XID until which vacuum can run
      */
     uint64_t _get_vacuum_cutoff_xid(uint64_t db_id);
-
-    /**
-     * @brief Truncates file from the given offset
-     *
-     * @param file File to truncate
-     * @param offset Offset above which will be truncated
-     */
-    void _truncate_file(const std::filesystem::path &file, uint64_t offset);
-
-    /**
-     * @brief Get the size of the given file
-     *
-     * @param file File to get its size
-     * @return File size
-     */
-    int64_t _get_file_size(const std::filesystem::path& path);
 
     /**
      * @brief Returns db_id following a keyword in a filesystem path.

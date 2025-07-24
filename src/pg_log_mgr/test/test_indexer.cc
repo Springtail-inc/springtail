@@ -4,6 +4,7 @@
 #include <common/init.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
+#include <common/filesystem.hh>
 
 #include <pg_log_mgr/index_reconciliation_queue_manager.hh>
 #include <pg_log_mgr/indexer.hh>
@@ -157,13 +158,6 @@ namespace {
             ASSERT_EQ(static_cast<sys_tbl::IndexNames::State>(index_info.state()), sys_tbl::IndexNames::State::READY);
         }
 
-        uint64_t _get_block_count(const std::filesystem::path& path) {
-            struct stat st;
-            if (::stat(path.c_str(), &st) == 0) {
-                return static_cast<uint64_t>(st.st_blocks);  // st_blocks is in 512-byte blocks
-            }
-            return 0;
-        }
     };
 
     TEST_F(Indexer_Test, Test_EmptyReconcile)
@@ -353,17 +347,17 @@ namespace {
 
         // Get the blocks count pre-vacuum
         auto index_file = table_dir / fmt::format(constant::INDEX_FILE, index_id);
-        auto current_size1 = _get_block_count(index_file);
+        auto size_pre_vacuum = fs::get_block_count(index_file);
 
         // Set global threshold as small and run vacuum
         Vacuumer::get_instance()->set_global_vacuum_threshold(10);
         Vacuumer::get_instance()->run_vacuum_once();
 
         // Get the blocks count post-vacuum
-        auto current_size2 = _get_block_count(index_file);
+        auto size_post_vacuum = fs::get_block_count(index_file);
 
         // Some blocks should be vacuumed
-        ASSERT_GT(current_size1, current_size2);
+        ASSERT_GT(size_pre_vacuum, size_post_vacuum);
 
     }
 

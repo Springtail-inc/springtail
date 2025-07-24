@@ -6,6 +6,7 @@
 #include <common/environment.hh>
 #include <common/object_cache.hh>
 #include <common/threaded_test.hh>
+#include <common/filesystem.hh>
 
 #include <storage/csv_field.hh>
 #include <storage/vacuumer.hh>
@@ -208,14 +209,6 @@ namespace {
                 // insert data to the tree
                 mtable->insert(std::make_shared<FieldTuple>(_csv_fields, &r), constant::UNKNOWN_EXTENT);
             }
-        }
-
-        uint64_t _get_block_count(const std::filesystem::path& path) {
-            struct stat st;
-            if (::stat(path.c_str(), &st) == 0) {
-                return static_cast<uint64_t>(st.st_blocks);  // st_blocks is in 512-byte blocks
-            }
-            return 0;
         }
 
         /**
@@ -1251,7 +1244,7 @@ namespace {
 
         auto table_dir = table_helpers::get_table_dir(_base_dir, 1, table_id, 1);
         auto table_file = table_dir / fmt::format(constant::DATA_FILE);
-        auto size_pre_vacuum = _get_block_count(table_file);
+        auto size_pre_vacuum = fs::get_block_count(table_file);
 
         Vacuumer::get_instance()->commit_expired_extents(1, target_xid);
 
@@ -1259,7 +1252,7 @@ namespace {
         Vacuumer::get_instance()->set_global_vacuum_threshold(10);
         Vacuumer::get_instance()->run_vacuum_once();
 
-        auto size_post_vacuum = _get_block_count(table_file);
+        auto size_post_vacuum = fs::get_block_count(table_file);
 
         ASSERT_GT(size_pre_vacuum, size_post_vacuum);
     }

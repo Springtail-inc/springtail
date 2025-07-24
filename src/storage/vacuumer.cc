@@ -355,41 +355,6 @@ Vacuumer::_get_vacuum_cutoff_xid(uint64_t db_id)
     return std::min({min_fdw_xid, last_committed_xid, min_index_xid});
 }
 
-void
-Vacuumer::_truncate_file(const std::filesystem::path &file, uint64_t offset)
-{
-    int fd = ::open(file.c_str(), O_WRONLY);
-    if (fd == -1) {
-        LOG_ERROR("Failed to open file {} for truncation: {}", file, errno);
-        throw std::runtime_error(fmt::format("Failed to open file {} for truncation: {}", file, errno));
-    }
-
-    if (::ftruncate(fd, offset) == -1) {
-        LOG_ERROR("Failed to truncate file {} to offset {}: {}", file, offset, errno);
-        ::close(fd);
-        throw std::runtime_error(fmt::format("Failed to truncate file {} to offset {}: {}", file, offset, errno));
-    }
-
-    ::close(fd);
-}
-
-int64_t
-Vacuumer::_get_file_size(const std::filesystem::path& path) {
-    // Check if its regular file and get the size
-    // otherwise return -1
-    try {
-        if (std::filesystem::exists(path) && std::filesystem::is_regular_file(path)) {
-            return static_cast<int64_t>(std::filesystem::file_size(path));
-        } else {
-            LOG_ERROR("Given {} doesn't exist or not a regular file", path);
-            return -1;
-        }
-    } catch (const std::filesystem::filesystem_error& e) {
-        LOG_ERROR("_get_file_size exception: {}", e.what());
-        return -1;
-    }
-}
-
 std::string
 Vacuumer::_generate_flat_filename(const std::filesystem::path& filepath)
 {
@@ -657,7 +622,7 @@ Vacuumer::_do_vacuum_run()
 
     // Lets read from global vacuum file if no expired extents is memory (that got written to the global file)
 
-    if (_get_file_size(_global_vacuum_file) > _vacuum_global_threshold) {
+    if (fs::get_file_size(_global_vacuum_file) > _vacuum_global_threshold) {
         LOG_INFO("Running vacuum as the global log crossed threshold: {}", _global_vacuum_file);
 
         /* --------------------------------- Populate maps from global vacuum log -------------------------- */
@@ -826,7 +791,7 @@ Vacuumer::_do_vacuum_run()
         // Truncate if everything is processed,
         // otherwise overwritted global log with remaining records
         if (expired_extents_map.empty() && expired_snapshots_map.empty()) {
-            _truncate_file(_global_vacuum_file, 0);
+            fs::truncate_file(_global_vacuum_file, 0);
         } else {
             _update_global_vacuum_file(expired_extents_map, expired_snapshots_map);
         }
