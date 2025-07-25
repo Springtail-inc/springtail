@@ -40,6 +40,14 @@ target_link_libraries(validate_file_system
 )
 add_dsymutil_command(validate_file_system)
 
+# file system check utility
+add_executable(file_system_check test/file_system_check.cc)
+target_include_directories(file_system_check PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
+target_link_libraries(file_system_check
+  PUBLIC springtail_sys_tbl_mgr
+)
+add_dsymutil_command(file_system_check)
+
 ## unit tests
 springtail_unit_test(test_sys_tbl_mgr
   SOURCES test/test_sys_tbl_mgr.cc

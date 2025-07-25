@@ -90,7 +90,7 @@ main(int argc,
                     if (roots_eid == constant::UNKNOWN_EXTENT) {
                         continue;
                     }
-                    std::cout << fmt::format("DB {}:{}: Table {}.{} roots data: tid={}, iid={}, xid={}, eid={}, sxid={}",
+                    std::cout << fmt::format("\nDB {}:{}: Table {}.{} roots data: tid={}, iid={}, xid={}, eid={}, sxid={}",
                         db_id, db_name, table_ns_id, table_name, roots_tid, roots_iid, roots_xid, roots_eid, roots_sxid) << std::endl;
                     std::cout << fmt::format("File path: {}/{}/{}-{}/raw",
                         table_base.string(), db_id, roots_tid, roots_sxid) << std::endl;
@@ -110,12 +110,12 @@ main(int argc,
                     while (true) {
                         auto data_table_extent = data_table->read_extent_from_disk(roots_eid);
                         if (data_table_extent.first == nullptr && data_table_extent.second == 0) {
-                            std::cout << fmt::format("DB {}:{}: Table {}.{}, Extent {}: empty",
+                            std::cout << fmt::format("\nDB {}:{}: Table {}.{}, Extent {}: empty",
                                 db_id, db_name, table_ns_id, table_name, roots_eid) << std::endl;
                             break;
                         } else {
                             auto table_extent = data_table_extent.first;
-                            std::cout << fmt::format("DB {}:{}: Table {}.{}, Extent {}: not empty, next offset={}",
+                            std::cout << fmt::format("\nDB {}:{}: Table {}.{}, Extent {}: not empty, next offset={}",
                                 db_id, db_name, table_ns_id, table_name, roots_eid, data_table_extent.second) << std::endl;
                             if (table_extent->empty()) {
                                 std::cout << fmt::format("DB {}:{}: Table {}.{}, Extent {}: empty extent",
@@ -133,7 +133,7 @@ main(int argc,
                 } else if (roots_tid > tid) {
                     break;
                 } else {
-                    std::cout << fmt::format("DB {}:{}: Table {}.{} roots data: tid={}, iid={}, xid={}, eid={}, sxid={}",
+                    std::cout << fmt::format("--> Should not happen: DB {}:{}: Table {}.{} roots data: tid={}, iid={}, xid={}, eid={}, sxid={}",
                         db_id, db_name, table_ns_id, table_name, roots_tid, roots_iid, roots_xid, roots_eid, roots_sxid) << std::endl;
                 }
             }
