@@ -28,14 +28,14 @@ Vacuumer::_init()
     if (vacuum_config_json.contains("global_file_size_threshold")) {
         Json::get_to<uint64_t>(vacuum_config_json, "global_file_size_threshold", _global_file_size_threshold);
     } else {
-        _global_file_size_threshold = GLOBAL_FILE_SIZE_THRESHOLD;
+        _global_file_size_threshold = VacuumConfig::GLOBAL_FILE_SIZE_THRESHOLD;
     }
 
     // Block size to hole-punch
     if (vacuum_config_json.contains("hole_punch_block_size")) {
         Json::get_to<uint64_t>(vacuum_config_json, "hole_punch_block_size", _hole_punch_block_size);
     } else {
-        _hole_punch_block_size = HOLE_PUNCH_BLOCK_SIZE;
+        _hole_punch_block_size = VacuumConfig::HOLE_PUNCH_BLOCK_SIZE;
     }
 
     // Vacuum base dir
@@ -43,9 +43,8 @@ Vacuumer::_init()
     _vacuum_data_base = Properties::make_absolute_path(_vacuum_data_base) / vacuum_global_namespace;
     std::filesystem::create_directories(_vacuum_data_base);
 
-    // Global vacuum base and runfiles
-    _global_vacuum_file = _vacuum_data_base / "0.global";
-    _global_vacuum_runfile = _vacuum_data_base / "0.global.run";
+    // Global vacuum file
+    _global_vacuum_file = _vacuum_data_base / fmt::format("{}{}", 0, VacuumConfig::GLOBAL_FILE_SUFFIX);
 
     // Define schema for persisting expired extents
     // Global vacuum schema
@@ -237,7 +236,7 @@ Vacuumer::_update_global_vacuum_file(const ExtentMap& expired_extents_map,
     // Creating unique runfile everytime to make sure we get new handle everytime
     auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
-    auto global_vacuum_runfile = _vacuum_data_base / fmt::format("{}{}", timestamp, _global_vacuum_runfile_name_suffix);
+    auto global_vacuum_runfile = _vacuum_data_base / fmt::format("{}{}", timestamp, VacuumConfig::GLOBAL_RUNFILE_SUFFIX);
     auto handle = IOMgr::get_instance()->open(global_vacuum_runfile, IOMgr::IO_MODE::WRITE, true);
 
     if (!expired_extents_map.empty()) {
@@ -357,7 +356,7 @@ Vacuumer::_generate_flat_filename(const std::filesystem::path& filepath)
     // Eg: 1030830-0_0.idx_partials
     std::filesystem::path parent = filepath.parent_path().filename();
     std::filesystem::path file = filepath.filename();
-    return parent.string() + "_" + file.string() + PARTIAL_FILE_SUFFIX;
+    return parent.string() + "_" + file.string() + VacuumConfig::PARTIAL_FILE_SUFFIX;
 }
 
 uint64_t
@@ -467,7 +466,7 @@ Vacuumer::_recover_global_vacuum_file()
 
     auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
-    auto global_vacuum_runfile = _vacuum_data_base / fmt::format("{}{}", timestamp, _global_vacuum_runfile_name_suffix);
+    auto global_vacuum_runfile = _vacuum_data_base / fmt::format("{}{}", timestamp, VacuumConfig::GLOBAL_RUNFILE_SUFFIX);
 
     // Read from global vacuum, write on runfile
     auto handle = IOMgr::get_instance()->open(_global_vacuum_file, IOMgr::IO_MODE::READ, true);
@@ -567,7 +566,7 @@ Vacuumer::_run_recovery()
     for (const auto& entry : std::filesystem::directory_iterator(_vacuum_data_base)) {
         if (entry.is_regular_file()) {
             const std::string filename = entry.path().filename().string();
-            if (filename.ends_with(".global.run")) {
+            if (filename.ends_with(VacuumConfig::GLOBAL_RUNFILE_SUFFIX)) {
                 global_runfile_exists = true;
                 global_vacuum_runfile = entry;
                 break;
@@ -584,7 +583,7 @@ Vacuumer::_run_recovery()
     for (const auto& entry : std::filesystem::directory_iterator(_vacuum_data_base)) {
         if (entry.is_regular_file()) {
             const std::string filename = entry.path().filename().string();
-            if (filename.ends_with(PARTIAL_FILE_SUFFIX + ".run")) {
+            if (filename.ends_with(VacuumConfig::PARTIAL_RUNFILE_SUFFIX)) {
                 LOG_INFO("Removing {}", entry.path());
                 std::filesystem::remove(entry.path());
             }

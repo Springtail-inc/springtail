@@ -19,9 +19,16 @@ namespace springtail {
 /**
  * Vacuum config defaults
  */
-constexpr uint64_t HOLE_PUNCH_BLOCK_SIZE = 4 * 1024;
-constexpr uint64_t GLOBAL_FILE_SIZE_THRESHOLD = 20 * 1024;
-constexpr std::string PARTIAL_FILE_SUFFIX = "_partials";
+    namespace VacuumConfig {
+        constexpr uint64_t HOLE_PUNCH_BLOCK_SIZE = 4 * 1024;
+        constexpr uint64_t GLOBAL_FILE_SIZE_THRESHOLD = 20 * 1024;
+
+        constexpr char GLOBAL_FILE_SUFFIX[] = ".global.vcm";
+        constexpr char GLOBAL_RUNFILE_SUFFIX[] = ".global.vcm.run";
+
+        constexpr char PARTIAL_FILE_SUFFIX[] = "_partials.vcm";
+        constexpr char PARTIAL_RUNFILE_SUFFIX[] = "_partials.vcm.run";
+    }
 
 /**
  * Vacuumer to clear dead extents and table snapshots.
@@ -172,7 +179,6 @@ private:
     std::filesystem::path _vacuum_data_base; ///< The base directory for vacuum directories
     std::filesystem::path _global_vacuum_file; ///< Global vacuum file
     std::filesystem::path _global_vacuum_runfile; ///< Global vacuum file for current run
-    std::string _global_vacuum_runfile_name_suffix = ".global.run"; ///< Partial file to be created dynamically
 
     RedisDDL _redis_ddl; ///< Interface to the DDL structures in Redis.
 
