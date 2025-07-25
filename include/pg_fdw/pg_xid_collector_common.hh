@@ -12,8 +12,8 @@ namespace springtail::pg_fdw {
      *
      */
     struct __attribute__((packed)) PgXidCollectorMsg {
-        uint64_t db_id;     /// database id
-        uint64_t xid;       /// transaction id
+        uint64_t db_id;     ///< database id
+        uint64_t xid;       ///< transaction id
     };
 
 } // springtail::pg_fdw

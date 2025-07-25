@@ -164,7 +164,7 @@ _PG_init(void)
     {
         elog(PANIC, "Fatal error: MyDatabaseId is not valid, aborting process");
     }
-    const char *db_name = get_database_name(MyDatabaseId);
+    char *db_name = get_database_name(MyDatabaseId);
     elog(LOG, "Database oid %u, database name %s", MyDatabaseId, db_name);
 
     // Initialize the FDW; springtail_init()

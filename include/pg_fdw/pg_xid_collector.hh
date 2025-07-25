@@ -77,6 +77,12 @@ namespace springtail::pg_fdw {
         void _cleanup_process(std::map<pid_t, std::pair<uint64_t, uint64_t>>::iterator it);
 
         /**
+         * @brief Cleanup all data stored in redis for the curred FDW.
+         *
+         */
+        void _cleanup_redis_data();
+
+        /**
          * @brief Internal FDW process data used by the main loop.
          *
          */
