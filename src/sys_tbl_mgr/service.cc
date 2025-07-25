@@ -526,8 +526,8 @@ Service::_create_table(const proto::TableRequest& request)
     if (request.table().has_parent_table_id() && request.table().parent_table_id() != constant::INVALID_TABLE) {
         parent_table_id = request.table().parent_table_id();
         ddl["parent_table_id"] = parent_table_id.value();
-        auto parent_table_info = _get_table_info(request.db_id(), parent_table_id.value(), xid);
         if (parent_table_id.has_value()) {
+            auto parent_table_info = _get_table_info(request.db_id(), parent_table_id.value(), xid);
             if (parent_table_info == nullptr) {
                 LOG_ERROR("Parent table not found: {}@{} - {}", request.db_id(), xid.xid, parent_table_id.value());
             } else {
@@ -1440,55 +1440,64 @@ Service::_get_modified_partition_details(uint64_t db_id,
                                          std::unordered_map<uint64_t, std::pair<std::string, std::string>> *partition_map,
                                          bool is_attached)
 {
-    auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID,
-        xid.xid);
-    // get field array
-    auto fields = table->extent_schema()->get_fields();
+    auto table = _get_system_table(db_id, sys_tbl::TableNames::ID);
+    auto schema = table->extent_schema();
+    auto fields = schema->get_fields();
 
-    std::unordered_set<uint64_t> system_table_ids;
+    // Mutex for the table cache
+    boost::shared_lock lock(_mutex);
+
+    std::unordered_map<uint64_t, uint64_t> system_table_ids;
 
     // Iterate the table_names table and find the child tables who has the parent_table_id as the current_table_id
     for (auto row : (*table)) {
         auto tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
         auto parent_table_id = fields->at(sys_tbl::TableNames::Data::PARENT_TABLE_ID)->get_uint64(&row);
+        auto table_xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
 
         // make sure that the table is marked as existing at this XID/LSN
         bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
         if (!exists) {
-            LOG_WARN("Table {} marked non-existant at xid {}:{}", table_id, xid.xid, xid.lsn);
+            LOG_WARN("Table {} marked non-existant at xid {}:{}", tid, xid.xid, xid.lsn);
             continue;
         }
 
+        if ( system_table_ids.contains(tid) && system_table_ids[tid] < table_xid) {
+            // Remove the existing entry if the XID is less than the current processing XID
+            system_table_ids.erase(tid);
+        }
         if (parent_table_id == table_id) {
-            system_table_ids.insert(tid);
+            LOG_DEBUG(LOG_SCHEMA, "Adding disk table {}:{} to system_table_ids", tid, fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row));
+            system_table_ids.try_emplace(tid, table_xid);
         }
     }
 
-    std::unordered_set<uint64_t> cached_system_table_ids;
-    // Validate the system table ids from disk and verify from cache
+    // Validate the system table ids from cache
     // Only add the tables that have the right table parent table id
-    for (const auto &tid : system_table_ids) {
-        auto table_info = _get_table_info(db_id, tid, xid);
-        if (table_info != nullptr && table_info->parent_table_id == table_id) {
-            // Cache updated with the table information and parent table id matches
-            cached_system_table_ids.insert(tid);
+    for (const auto& table_id_pair : _table_cache[db_id]) {
+        const auto& [latest_key, latest_table_ptr] = *table_id_pair.second.begin();
+
+        // Add the table id to the system_table_ids set if the parent table id matches the current table id
+        // Remove the table id from the system_table_ids set if the cache doesn't have the table info
+        if (latest_table_ptr->parent_table_id == table_id) {
+            LOG_DEBUG(LOG_SCHEMA, "Adding cached table {}:{} to system_table_ids", table_id_pair.first, latest_table_ptr->name);
+            system_table_ids.try_emplace(table_id_pair.first, latest_table_ptr->xid);
+        } else {
+            LOG_DEBUG(LOG_SCHEMA, "Removing table {}:{} from system_table_ids", table_id_pair.first, latest_table_ptr->name);
+            system_table_ids.erase(table_id_pair.first);
         }
     }
 
     // Parse the requested table ids
     std::unordered_set<uint64_t> table_ids;
     for ( const auto &part_data : partition_data ) {
-        auto table_info = _get_table_info(db_id, part_data.table_id(), xid);
-        // Populated the cache system table information from the partition data
-        if (table_info != nullptr && table_info->parent_table_id == table_id) {
-            cached_system_table_ids.insert(part_data.table_id());
-        }
         // Validate the partition data parent table id to match the current table_id
         if (part_data.parent_table_id() != table_id) {
             LOG_WARN("Parent table id {} does not match the current table id {}",
                 part_data.parent_table_id(), table_id);
             continue;
         }
+        LOG_DEBUG(LOG_SCHEMA, "Adding partition table {}:{} to table_ids", part_data.table_id(), part_data.table_name());
         table_ids.insert(part_data.table_id());
         if (partition_map != nullptr) {
             partition_map->insert(std::make_pair(
@@ -1506,15 +1515,15 @@ Service::_get_modified_partition_details(uint64_t db_id,
     if ( is_attached ) {
         // Get the difference in order to identify the attached partition
         for (const auto& tid : table_ids) {
-            if (!cached_system_table_ids.contains(tid)) {
+            if (!system_table_ids.contains(tid)) {
                 result.push_back(tid);
             }
         }
     } else {
         // Get the difference in order to identify the detached partition
-        for (const auto& tid : cached_system_table_ids) {
-            if (!table_ids.contains(tid)) {
-                result.push_back(tid);
+        for (const auto& tid : system_table_ids) {
+            if (!table_ids.contains(tid.first)) {
+                result.push_back(tid.first);
             }
         }
     }
