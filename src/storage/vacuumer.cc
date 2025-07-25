@@ -25,10 +25,10 @@ Vacuumer::_init()
     Json::get_to<nlohmann::json>(json, "vacuum_config", vacuum_config_json);
 
     // Global vacuum size threshold to trigger vacuum
-    if (vacuum_config_json.contains("vacuum_global_threshold")) {
-        Json::get_to<uint64_t>(vacuum_config_json, "vacuum_global_threshold", _vacuum_global_threshold);
+    if (vacuum_config_json.contains("global_file_size_threshold")) {
+        Json::get_to<uint64_t>(vacuum_config_json, "global_file_size_threshold", _global_file_size_threshold);
     } else {
-        _vacuum_global_threshold = VACUUM_THRESHOLD_SIZE;
+        _global_file_size_threshold = GLOBAL_FILE_SIZE_THRESHOLD;
     }
 
     // Block size to hole-punch
@@ -298,11 +298,6 @@ Vacuumer::expire_extent(const std::filesystem::path &file,
                         uint32_t size,
                         uint64_t xid)
 {
-    // XXX -- Deepak -- we should page these to disk for later processing on a per-file basis, but
-    //                  continue to keep an in-memory record of mutated files so that we can know
-    //                  what to vacuum.  The bookkeeping for that might just be the files mutated at
-    //                  each XID?
-
     std::unique_lock lock(_mutex);
     _extent_map[file][xid].emplace_back(extent_id, size);
 }
@@ -321,25 +316,24 @@ Vacuumer::hole_punch_file(const std::string& file,
                           const std::vector<Vacuumer::HoleInfo>& input_extents)
 {
     // Before punching, check if the file is operable
-    std::vector<HoleInfo> punched;
+    std::vector<HoleInfo> not_punched;
     int fd = open(file.c_str(), O_RDWR);
     if (fd < 0) {
         LOG_ERROR("Unable to open file for vacuuming: {}", file.c_str());
-        return punched;
+        return not_punched;
     }
 
     // Hole_punch on the expired blocks
     for (const auto& [aligned_start, aligned_size] : input_extents) {
         int ret = fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, aligned_start, aligned_size);
-        if (ret == 0) {
-            punched.emplace_back(aligned_start, aligned_size);
-        } else {
+        if (ret != 0) {
             LOG_ERROR("fallocate() failed: {} -- offset {} len {}", file.c_str(), aligned_start, aligned_size);
+            not_punched.emplace_back(aligned_start, aligned_size);
         }
     }
 
     close(fd);
-    return punched;
+    return not_punched;
 }
 
 uint64_t
@@ -622,7 +616,7 @@ Vacuumer::_do_vacuum_run()
 
     // Lets read from global vacuum file if no expired extents is memory (that got written to the global file)
 
-    if (fs::get_file_size(_global_vacuum_file) > _vacuum_global_threshold) {
+    if (fs::get_file_size(_global_vacuum_file) > _global_file_size_threshold) {
         LOG_INFO("Running vacuum as the global log crossed threshold: {}", _global_vacuum_file);
 
         /* --------------------------------- Populate maps from global vacuum log -------------------------- */
@@ -709,16 +703,13 @@ Vacuumer::_do_vacuum_run()
             }
 
             // Step 4: Punch and detect failures
-            auto punched_extents = hole_punch_file(file, punchable);
+            auto not_punched_extents = hole_punch_file(file, punchable);
 
-            // XXX: Add a comparator and then uncomment this code
-            //std::set<Vacuumer::HoleInfo> punched_set(punched_extents.begin(), punched_extents.end());
-            //for (const auto& ext : punchable) {
-            //    if (punched_set.find(ext) == punched_set.end()) {
-            //        // Missed punch — add back to partials
-            //        new_partials.emplace_back(ext);
-            //    }
-            //}
+            // Insert failed extents back to the partials
+            // so that it will be attempted in the next run
+            new_partials.insert(new_partials.end(),
+                    not_punched_extents.begin(),
+                    not_punched_extents.end());
 
             // Step 5: Clean up processed XIDs
             for (uint64_t xid : xids_to_process) {

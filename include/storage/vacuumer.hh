@@ -20,7 +20,7 @@ namespace springtail {
  * Vacuum config defaults
  */
 constexpr uint64_t HOLE_PUNCH_BLOCK_SIZE = 4 * 1024;
-constexpr uint64_t VACUUM_THRESHOLD_SIZE = 20 * 1024;
+constexpr uint64_t GLOBAL_FILE_SIZE_THRESHOLD = 20 * 1024;
 constexpr std::string PARTIAL_FILE_SUFFIX = "_partials";
 
 /**
@@ -81,7 +81,7 @@ public:
      * @param size Global vacuum file size threshold
      */
     void set_global_vacuum_threshold(uint64_t size) {
-        _vacuum_global_threshold = size;
+        _global_file_size_threshold = size;
     }
 
 protected:
@@ -133,7 +133,7 @@ private:
     /**
      * Global vacuum file threshold above which vacuum runs
      */
-    uint64_t _vacuum_global_threshold;
+    uint64_t _global_file_size_threshold;
 
     /**
      * Flag to start vacuum while booting
@@ -198,7 +198,7 @@ private:
      *
      * @param file File to punch.
      * @param input_extents Aligned extents to punch
-     * @return List of successfully punched extents
+     * @return List of extents which is not punched
      */
     std::vector<HoleInfo> hole_punch_file(const std::string& file,
                                           const std::vector<HoleInfo>& input_extents);
