@@ -9,9 +9,12 @@ set(LIB_PGEXT_SOURCES
     list.cc
     hash.cc
     regex.cc
+    array.cc
     bit.cc
     fmgr.cc
     sort.cc
+    crc.cc
+    reloptions.cc
 )
 
 # Create the library
@@ -21,6 +24,7 @@ target_include_directories(pgext
 )
 target_link_libraries(pgext
     PRIVATE absl::check
+    PRIVATE absl::flat_hash_map
 )
 target_link_options(pgext PRIVATE -Wl,--exclude-libs,ALL) # prevent exports that aren't explicitly part of this library
 

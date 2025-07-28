@@ -1,8 +1,8 @@
 #include <cstdarg>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
-#include <common/logging.hh>
 #include <pg_ext/error.hh>
 
 // Global variables for error state
@@ -18,27 +18,31 @@ void ProcessInterrupts() {
     if (InterruptPending) {
         InterruptPending = false;
         // Handle interrupt - in this case we'll just log it
-        LOG_WARN("Process interrupt received");
+        fprintf(stderr, "Process interrupt received\n");
     }
 }
 
-bool errstart(int elevel, const char *filename, int lineno, const char *funcname, const char *domain) {
+bool errstart(int elevel, const char *domain) {
     // Reset error state
     current_elevel = elevel;
     current_sqlcode = 0;
     current_error_message[0] = '\0';
     error_in_progress = true;
 
-    // Log the error start with source location
-    LOG_DEBUG(springtail::LOG_COMMON, "Error started at {}:{} in {} (domain: {})", 
-              filename, lineno, funcname, domain ? domain : "none");
+    // if (!filename) filename = "<null>";
+    // if (!funcname || (uintptr_t)funcname < 4096) funcname = "<invalid>";
+    // if (!domain) domain = "<null>";
 
+    // Log the error start with source location
+    // fprintf(stderr, "Error started at %s:%d in %s (domain: %s)\n", filename, lineno, funcname, domain ? domain : "none");
+
+    fprintf(stderr, "Error started at (domain: %s)\n", domain ? domain : "none");
     return true;
 }
 
-bool errstart_cold(int elevel, const char *filename, int lineno, const char *funcname, const char *domain) {
+bool errstart_cold(int elevel, const char *domain) {
     // Cold path error start - same as regular errstart but optimized for cold path
-    return errstart(elevel, filename, lineno, funcname, domain);
+    return errstart(elevel, domain);
 }
 
 void errfinish(int dummy, ...) {
@@ -54,30 +58,30 @@ void errfinish(int dummy, ...) {
             case 14: // DEBUG3
             case 13: // DEBUG2
             case 12: // DEBUG1
-                LOG_DEBUG(springtail::LOG_COMMON, "{}", current_error_message);
+                fprintf(stderr, "%s", current_error_message);
                 break;
             case 10: // LOG
-                LOG_INFO("{}", current_error_message);
+                fprintf(stderr, "%s", current_error_message);
                 break;
             case 11: // COMMERROR
             case 8:  // WARNING
-                LOG_WARN("{}", current_error_message);
+                fprintf(stderr, "%s", current_error_message);
                 break;
             case 7:  // NOTICE
-                LOG_INFO("{}", current_error_message);
+                fprintf(stderr, "%s", current_error_message);
                 break;
             case 6:  // INFO
-                LOG_INFO("{}", current_error_message);
+                fprintf(stderr, "%s", current_error_message);
                 break;
             case 5:  // ERROR
-                LOG_ERROR("{}", current_error_message);
+                fprintf(stderr, "%s", current_error_message);
                 break;
             case 4:  // FATAL
             case 3:  // PANIC
-                LOG_CRITICAL("{}", current_error_message);
+                fprintf(stderr, "%s", current_error_message);
                 break;
             default:
-                LOG_INFO("{}", current_error_message);
+                fprintf(stderr, "%s", current_error_message);
         }
     }
 
@@ -119,4 +123,3 @@ int errmsg_internal(const char *fmt, ...) {
 
     return 0;
 }
-

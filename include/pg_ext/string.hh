@@ -1,7 +1,8 @@
 #pragma once
 
 #include <cstddef>
-#include "export.hh"
+#include <pg_ext/export.hh>
+#include <pg_ext/memory.hh>
 
 //// EXPORTED INTERFACES
 
@@ -11,5 +12,5 @@ extern "C" PGEXT_API int pg_snprintf(char *str, size_t count, const char *fmt, .
 extern "C" PGEXT_API int pg_database_encoding_max_length(void);
 extern "C" PGEXT_API int pg_mblen(const char *mbstr);
 extern "C" PGEXT_API int pg_mb2wchar_with_len(const char *mbstr, wchar_t *wstr, int len);
-extern "C" PGEXT_API void *pg_detoast_datum(const void *toast_datum);
-extern "C" PGEXT_API void *pg_detoast_datum_packed(const void *toast_datum);
+extern "C" PGEXT_API int pg_wchar2mb_with_len(const wchar_t *wstr, char *mbstr, int len);
+extern "C" PGEXT_API int t_isalnum(int c);

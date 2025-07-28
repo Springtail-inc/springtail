@@ -57,6 +57,7 @@ int pg_snprintf(char *str, size_t count, const char *fmt, ...) {
 }
 
 int pg_database_encoding_max_length(void) {
+    std::cout << "pg_database_encoding_max_length() called" << std::endl;
     return 4;
 }
 
@@ -120,12 +121,6 @@ int pg_wchar2mb_with_len(const wchar_t *from, char *to, int len) {
     return bytes_written;
 }
 
-// STUBBED
-void *pg_detoast_datum(const void *toast_datum) {
-    return (void *)toast_datum;
-}
-
-// STUBBED
-void *pg_detoast_datum_packed(const void *toast_datum) {
-    return (void *)toast_datum;
+int t_isalnum(int c) {
+    return std::isalnum(c);
 }

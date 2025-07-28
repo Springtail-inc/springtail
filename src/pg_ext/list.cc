@@ -19,9 +19,11 @@ static List *allocate_list(NodeTag type, int initial_capacity) {
     return list;
 }
 
-List *list_make1_impl(void *datum) {
-    List *list = allocate_list(T_Invalid, LIST_INITIAL_ALLOC);
-    if (!list) return nullptr;
+List *list_make1_impl(List *list, void *datum) {
+    if (!list) {
+        list = allocate_list(T_Invalid, LIST_INITIAL_ALLOC);
+        if (!list) return nullptr;
+    }
 
     list->elements[0].ptr_value = datum;
     list->length = 1;
@@ -31,7 +33,7 @@ List *list_make1_impl(void *datum) {
 
 List *lappend(List *list, void *datum) {
     if (!list) {
-        return list_make1_impl(datum);
+        return list_make1_impl(list, datum);
     }
 
     // Resize if needed

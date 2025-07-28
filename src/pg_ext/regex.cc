@@ -47,7 +47,7 @@ int pg_reg_getnumoutarcs(const regex_t *regex, regstate_t state) {
     return count;
 }
 
-const regex_arc_t *pg_reg_getoutarcs(const regex_t *regex, regstate_t state) {
+const regex_arc_t *pg_reg_getoutarcs(const regex_t *regex, regstate_t state, int *arcs) {
     if (!regex) return nullptr;
     static std::vector<regex_arc_t> filtered;
     filtered.clear();
@@ -55,15 +55,19 @@ const regex_arc_t *pg_reg_getoutarcs(const regex_t *regex, regstate_t state) {
         if (arc.from == state)
             filtered.push_back(arc);
     }
-    return filtered.data();  // pointer to static
+    *arcs = filtered.size();
+    return filtered.data();
 }
 
-int pg_reg_getnumcharacters(const regex_t *regex) {
-    return regex ? regex->colors.size() : 0;
+int pg_reg_getnumcharacters(const regex_t *regex, int arc) {
+    if (!regex) return 0;
+    return regex->colors.size();
 }
 
-const regcolor_t *pg_reg_getcharacters(const regex_t *regex) {
-    return regex ? regex->colors.data() : nullptr;
+const regcolor_t *pg_reg_getcharacters(const regex_t *regex, int arc, int *chars) {
+    if (!regex) return nullptr;
+    *chars = regex->colors.size();
+    return regex->colors.data();
 }
 
 int pg_reg_getnumcolors(const regex_t *regex) {

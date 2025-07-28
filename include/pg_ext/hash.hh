@@ -43,8 +43,8 @@ typedef struct HASH_SEQ_STATUS {
 } HASH_SEQ_STATUS;
 
 //// EXPORTED INTERFACES
-extern "C" HTAB *hash_create(const char *tabname, int nelem, const HASHCTL *info);
-extern "C" void *hash_search(HTAB *htab, const void *key, HASHACTION action, bool *found);
-extern "C" void hash_seq_init(HASH_SEQ_STATUS *status, HTAB *htab);
-extern "C" void *hash_seq_search(HASH_SEQ_STATUS *status);
-extern "C" long hash_get_num_entries(HTAB *htab);
+extern "C" PGEXT_API HTAB *hash_create(const char *tabname, int nelem, const HASHCTL *info);
+extern "C" PGEXT_API void *hash_search(HTAB *htab, const void *key, HASHACTION action, bool *found);
+extern "C" PGEXT_API void hash_seq_init(HASH_SEQ_STATUS *status, HTAB *htab);
+extern "C" PGEXT_API void *hash_seq_search(HASH_SEQ_STATUS *status);
+extern "C" PGEXT_API long hash_get_num_entries(HTAB *htab);

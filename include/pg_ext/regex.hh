@@ -1,6 +1,6 @@
 #pragma once
 
-#include "export.hh"
+#include <pg_ext/export.hh>
 #include <vector>
 #include <string>
 
@@ -29,7 +29,7 @@ extern "C" PGEXT_API regstate_t pg_reg_getinitialstate(const regex_t *regex);
 extern "C" PGEXT_API regstate_t pg_reg_getfinalstate(const regex_t *regex);
 extern "C" PGEXT_API const regex_arc_t *pg_reg_getoutarcs(const regex_t *regex, int state, int *arcs);
 extern "C" PGEXT_API int pg_reg_getnumoutarcs(const regex_t *regex, int state);
-extern "C" PGEXT_API const regcolor_t pg_reg_getcharacters(const regex_t *regex, int arc, int *chars);
+extern "C" PGEXT_API const regcolor_t *pg_reg_getcharacters(const regex_t *regex, int arc, int *chars);
 extern "C" PGEXT_API int pg_reg_getnumcharacters(const regex_t *regex, int arc);
 extern "C" PGEXT_API int pg_reg_getnumcolors(const regex_t *regex);
 extern "C" PGEXT_API bool pg_reg_colorisbegin(const regex_t *regex, int color);

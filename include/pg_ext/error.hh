@@ -8,14 +8,8 @@ extern "C" PGEXT_API void ProcessInterrupts();
 
 
 extern "C" PGEXT_API bool errstart(int elevel,
-                                   const char *filename,
-                                   int lineno,
-                                   const char *funcname,
                                    const char *domain);
 extern "C" PGEXT_API bool errstart_cold(int elevel,
-                                        const char *filename,
-                                        int lineno,
-                                        const char *funcname,
                                         const char *domain);
 extern "C" PGEXT_API void errfinish(int dummy, ...);
 extern "C" PGEXT_API int errcode(int sqlerrcode);
