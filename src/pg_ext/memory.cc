@@ -27,7 +27,7 @@ MemoryContext::_alloc_large(size_t size)
 {
     auto block = std::make_unique<MemoryBlock>(size);
     block->pos = size; // Mark as fully used
-    
+
     char* memory = block->memory;
     _large_allocs[memory] = std::move(block);
     return memory;
@@ -200,6 +200,7 @@ MemoryContextDelete(void *context)
 void*
 palloc(size_t size)
 {
+    std::cout << "Allocating " << size << " bytes" << std::endl;
     auto ctx = static_cast<pgext::MemoryContext*>(CurrentMemoryContext);
     CHECK(ctx != nullptr);
     return ctx->alloc(size);
@@ -208,6 +209,7 @@ palloc(size_t size)
 void*
 palloc0(size_t size)
 {
+    std::cout << "PAlloc0 -> Allocating " << size << " bytes" << std::endl;
     auto ptr = palloc(size);
     if (ptr != nullptr) {
         std::memset(ptr, 0, size);
@@ -228,4 +230,3 @@ pfree(void *ptr)
     // Try to free the pointer, if not found do nothing
     ctx->free(ptr);
 }
-

@@ -54,10 +54,7 @@ pg_detoast_datum(struct varlena *datum)
         return nullptr;
     }
     std::cout << "datum is not null" << std::endl;
-	// if (VARATT_IS_EXTENDED(datum))
-	// 	return detoast_attr(datum);
-	// else
-		return datum;
+    return datum;
 }
 
 struct varlena *
@@ -69,10 +66,7 @@ pg_detoast_datum_packed(struct varlena *datum)
         return nullptr;
     }
     std::cout << "datum is not null" << std::endl;
-	// if (VARATT_IS_COMPRESSED(datum) || VARATT_IS_EXTERNAL(datum))
-	// 	return detoast_attr(datum);
-	// else
-		return datum;
+    return datum;
 }
 
 void getTypeOutputInfo(Oid type, Oid *funcOid, bool *typIsVarlena){

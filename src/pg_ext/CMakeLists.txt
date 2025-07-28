@@ -33,3 +33,21 @@ set_target_properties(pgext PROPERTIES
   CXX_VISIBILITY_PRESET hidden
   VISIBILITY_INLINES_HIDDEN ON
 )
+
+# ──────────────────────────────────────────────────────────────
+# Add test_runner executable
+# ──────────────────────────────────────────────────────────────
+
+# Adjust path if test_runner.cc is elsewhere
+add_executable(test_runner test_runner.cc)
+
+# Link the executable against your shim lib and libdl for dlsym
+target_link_libraries(test_runner
+    PRIVATE pgext
+    PRIVATE dl
+    PRIVATE absl::flat_hash_map
+)
+
+target_include_directories(test_runner
+    PRIVATE ${CMAKE_SOURCE_DIR}/include
+)

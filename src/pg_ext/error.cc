@@ -1,5 +1,4 @@
 #include <cstdarg>
-#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
@@ -29,14 +28,7 @@ bool errstart(int elevel, const char *domain) {
     current_error_message[0] = '\0';
     error_in_progress = true;
 
-    // if (!filename) filename = "<null>";
-    // if (!funcname || (uintptr_t)funcname < 4096) funcname = "<invalid>";
-    // if (!domain) domain = "<null>";
-
-    // Log the error start with source location
-    // fprintf(stderr, "Error started at %s:%d in %s (domain: %s)\n", filename, lineno, funcname, domain ? domain : "none");
-
-    fprintf(stderr, "Error started at (domain: %s)\n", domain ? domain : "none");
+    fprintf(stderr, "\nError started at (domain: %s)", domain ? domain : "none");
     return true;
 }
 

@@ -6,7 +6,10 @@
 #include <map>
 #include <absl/container/flat_hash_map.h>
 
-#include "export.hh"
+#include <pg_ext/export.hh>
+
+
+#define MaxAllocSize	((Size) 0x3fffffff) /* 1 gigabyte - 1 */
 
 //// EXPORTED INTERFACES
 
