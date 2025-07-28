@@ -306,13 +306,35 @@ namespace springtail {
     uint64_t
     RedisDDL::min_fdw_xid(uint64_t db_id)
     {
-        std::string key = fmt::format(redis::HASH_MIN_XID, Properties::get_db_instance_id());
+        /*---------------- Check if FDW is starting up for the DB ---------------------------------*/
+        std::string fdw_pid_key = fmt::format(redis::SET_FDW_PID, Properties::get_db_instance_id());
+        const std::string token = ":" + std::to_string(db_id) + ":";
+        uint64_t cursor = 0;
+
+        do {
+            std::vector<std::string> batch;
+            cursor = _redis->sscan(fdw_pid_key, cursor, "*", 100, std::back_inserter(batch));
+
+            // Check if there is any entry with {}:db_id:{}, if so, return min_xid as 0
+            for (const auto& val : batch) {
+                if (val.find(token) != std::string::npos) {
+                    return 0;
+                }
+            }
+
+        } while (cursor != 0);
+
+        /*---------------- End of FDW startup check ----------------------------------------------*/
+
+        /*---------------- Get min XID across FDWs for DB ----------------------------------------*/
+
+        std::string fdw_xid_key = fmt::format(redis::HASH_MIN_XID, Properties::get_db_instance_id());
         std::map<std::string, std::string> values;
         std::string match = "*:" + db_id;
 
-        auto cursor = 0;
+        cursor = 0;
         while (true) {
-            cursor = _redis->hscan(key, cursor, match, 100, std::inserter(values, values.begin()));
+            cursor = _redis->hscan(fdw_xid_key, cursor, match, 100, std::inserter(values, values.begin()));
             if (cursor == 0) {
                 break;
             }
@@ -330,6 +352,7 @@ namespace springtail {
         }
 
         return min_xid;
+        /*---------------- End of min fdw XID retrieval ------------------------------------------*/
     }
 
     void

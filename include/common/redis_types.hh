@@ -147,6 +147,13 @@ namespace springtail::redis {
     static constexpr char HASH_MIN_XID[] = "{}:fdw_min_xids";
 
     /**
+     * Set of new FDW processes that have not started quering the database yet
+     * args: <db_instance_id>
+     * key: <fdw_id>:<db_id>:<pid>
+     */
+    static constexpr char SET_FDW_PID[] = "{}:fdw_pids";
+
+    /**
      * Set holding index XIDs for each db id
      * args: <db_instance_id>, <db_id>
      * value: xid
