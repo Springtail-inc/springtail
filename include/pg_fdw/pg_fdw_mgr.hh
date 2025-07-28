@@ -281,6 +281,7 @@ namespace springtail::pg_fdw {
 
         std::atomic<uint64_t> _schema_xid; ///< The most recently seen schema XID
 
+        std::shared_mutex _rc_mutex;    ///< roots cache mutex
         std::shared_ptr<sys_tbl_mgr::ShmCache> _roots_cache; ///< An IPC cache shared by pg_xid_subscriber_daemon
 
         LruObjectCache<int32_t, UserType> _user_type_cache; ///< cache of user types
@@ -297,6 +298,8 @@ namespace springtail::pg_fdw {
          *
          */
         virtual void _internal_run();
+
+        uint64_t update_last_xid();
 
         /**
          * @brief Lookup enum user type from cache based on oid and index
@@ -394,6 +397,6 @@ namespace springtail::pg_fdw {
         _get_index_quals(const PgFdwState *state, Index const& idx, List const* qual_list);
 
         /** Helper to create an IPC cache for table roots */
-        std::shared_ptr<sys_tbl_mgr::ShmCache> _try_create_cache();
+        void _try_create_cache();
     };
 } // namespace springtail::pg_fdw

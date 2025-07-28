@@ -37,21 +37,25 @@ namespace springtail::pg_fdw {
         do {
             cursor = client->sscan(_redis_pid_set_name, cursor, pattern, std::back_inserter(set_data));
         } while(cursor != 0);
-        client->srem(_redis_pid_set_name, set_data.begin(), set_data.end());
+        if (set_data.size() != 0) {
+            client->srem(_redis_pid_set_name, set_data.begin(), set_data.end());
+        }
 
         std::map<std::string, std::string> hash_data;
         do {
             cursor = client->hscan(_redis_hash_name, cursor, pattern, std::inserter(hash_data, hash_data.begin()));
         } while (cursor != 0);
-        std::vector<std::string> hash_keys;
-        hash_keys.reserve(hash_data.size());
+        if (hash_data.size() != 0) {
+            std::vector<std::string> hash_keys;
+            hash_keys.reserve(hash_data.size());
 
-        std::transform(hash_data.begin(), hash_data.end(), std::back_inserter(hash_keys),
-            [](const auto& pair) {
-            return pair.first;
-        });
+            std::transform(hash_data.begin(), hash_data.end(), std::back_inserter(hash_keys),
+                [](const auto& pair) {
+                return pair.first;
+            });
 
-        client->hdel(_redis_hash_name, hash_keys.begin(), hash_keys.end());
+            client->hdel(_redis_hash_name, hash_keys.begin(), hash_keys.end());
+        }
     }
 
     void

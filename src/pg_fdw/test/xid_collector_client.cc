@@ -51,10 +51,7 @@ main(int argc, char *argv[])
         // get random database id
         int db_id = uniform_dist(gen);
 
-        uint64_t db_instance_id = Properties::get_db_instance_id();
-        std::string key = fmt::format(redis::SET_FDW_PID, db_instance_id);
-        std::string value = fmt::format("{}:{}:{}", Properties::get_fdw_id(), db_id, getpid());
-        CHECK(redis_client->sadd(key, value) == 1);
+        client.init(db_id);
 
         // Skewed bell-shaped in [min_sleep_interval, max_sleep_interval], skewed toward max_sleep_interval
         double mean = min_sleep_interval + (max_sleep_interval - min_sleep_interval) * 0.005;
