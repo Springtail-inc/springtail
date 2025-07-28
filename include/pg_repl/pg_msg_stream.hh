@@ -141,6 +141,14 @@ namespace springtail {
                 const std::vector<std::string>& include_schemas, bool truncate=false);
 
         void set_streaming() { _streaming = true; }
+
+        /**
+         * Get a list of included schemas or empty if any schema is included.
+         */
+        const std::vector<std::string>& included_schemas() const {
+            return _included_schemas;
+        }
+
     protected:
         // Proto V1; message lengths if fixed length; excludes first byte for opcode
         static inline constexpr int LEN_BEGIN    = (8 + 8 + 4);

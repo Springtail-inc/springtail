@@ -23,4 +23,5 @@ DROP TABLE schema_not_included.ddl_create_drop;
 ### table_exists test_schema ddl_create_drop false
 
 ## cleanup
-SELECT 1;
+DROP SCHEMA IF EXISTS test_schema CASCADE;
+DROP SCHEMA IF EXISTS schema_not_included CASCADE;
