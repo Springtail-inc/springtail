@@ -220,6 +220,7 @@ jobs:
 
       - name: Setup interactive ssh session
         uses: Warpbuilds/action-debugger@v1.3
+        if: success() || failure()
         with:
           limit-access-to-actor: true
 
