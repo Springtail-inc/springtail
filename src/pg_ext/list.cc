@@ -98,3 +98,14 @@ void list_free(List *list) {
 
     std::free(list);
 }
+
+List *list_delete_nth_cell(List *list, int n) {
+    if (!list || n < 0 || n >= list->length) return list;
+
+    for (int i = n; i < list->length - 1; ++i) {
+        list->elements[i] = list->elements[i + 1];
+    }
+    list->length--;
+
+    return list;
+}

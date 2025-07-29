@@ -42,3 +42,4 @@ extern "C" PGEXT_API List *list_concat(List *list1, List *list2);
 extern "C" PGEXT_API List *list_delete_cell(List *list, ListCell *cell);
 extern "C" PGEXT_API void list_free(List *list);
 extern "C" PGEXT_API List *list_make1_impl(List *list, void *datum);
+extern "C" PGEXT_API List *list_delete_nth_cell(List *list, int n);

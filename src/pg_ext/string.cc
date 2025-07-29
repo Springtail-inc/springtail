@@ -37,6 +37,35 @@ char *lowerstr_with_len(const char *str, int len) {
     return result;
 }
 
+char *upperstr(const char *str) {
+    if (!str) return nullptr;
+
+    size_t len = std::strlen(str);
+    char *result = (char *)std::malloc(len + 1);
+    if (!result) return nullptr;
+
+    for (size_t i = 0; i < len; i++) {
+        result[i] = std::toupper((unsigned char)str[i]);
+    }
+
+    result[len] = '\0';
+    return result;
+}
+
+char *upperstr_with_len(const char *str, int len) {
+    if (!str || len <= 0) return nullptr;
+
+    char *result = (char *)std::malloc(len + 1);
+    if (!result) return nullptr;
+
+    for (int i = 0; i < len; i++) {
+        result[i] = std::toupper((unsigned char)str[i]);
+    }
+
+    result[len] = '\0';
+    return result;
+}
+
 int pg_mblen(const char *mbstr) {
     unsigned char c = (unsigned char)*mbstr;
 
@@ -58,7 +87,6 @@ int pg_snprintf(char *str, size_t count, const char *fmt, ...) {
 }
 
 int pg_database_encoding_max_length(void) {
-    std::cout << "pg_database_encoding_max_length() called" << std::endl;
     return 4;
 }
 
@@ -122,6 +150,16 @@ int pg_wchar2mb_with_len(const wchar_t *from, char *to, int len) {
     return bytes_written;
 }
 
-int t_isalnum(int c) {
-    return std::isalnum(c);
+int
+t_isalnum(const char *ptr)
+{
+    return std::isalnum(*ptr);
+}
+
+char *str_tolower(const char *buff, size_t nbytes, Oid collid) {
+    return lowerstr_with_len(buff, nbytes);
+}
+
+char *str_toupper(const char *buff, size_t nbytes, Oid collid) {
+    return upperstr_with_len(buff, nbytes);
 }

@@ -115,3 +115,20 @@ int errmsg_internal(const char *fmt, ...) {
 
     return 0;
 }
+
+int
+pg_fprintf(FILE *stream, const char *fmt,...)
+{
+	va_list		args;
+
+	va_start(args, fmt);
+	vsnprintf(current_error_message, sizeof(current_error_message), fmt, args);
+	va_end(args);
+	return 0;
+}
+
+
+bool GetDefaultCharSignedness(void) {
+    // XXX Stubbed for now
+    return true;
+}

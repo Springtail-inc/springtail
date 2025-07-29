@@ -200,7 +200,6 @@ MemoryContextDelete(void *context)
 void*
 palloc(size_t size)
 {
-    std::cout << "Allocating " << size << " bytes" << std::endl;
     auto ctx = static_cast<pgext::MemoryContext*>(CurrentMemoryContext);
     CHECK(ctx != nullptr);
     return ctx->alloc(size);
@@ -209,7 +208,6 @@ palloc(size_t size)
 void*
 palloc0(size_t size)
 {
-    std::cout << "PAlloc0 -> Allocating " << size << " bytes" << std::endl;
     auto ptr = palloc(size);
     if (ptr != nullptr) {
         std::memset(ptr, 0, size);

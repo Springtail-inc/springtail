@@ -48,24 +48,18 @@ bool has_fn_opclass_options(FmgrInfo *fcinfo)
 struct varlena *
 pg_detoast_datum(struct varlena *datum)
 {
-    std::cout << "Inside pg_detoast_datum" << std::endl;
     if (!datum){
-        std::cout << "datum is null" << std::endl;
         return nullptr;
     }
-    std::cout << "datum is not null" << std::endl;
     return datum;
 }
 
 struct varlena *
 pg_detoast_datum_packed(struct varlena *datum)
 {
-    std::cout << "Inside pg_detoast_datum_packed" << std::endl;
     if (!datum){
-        std::cout << "datum is null" << std::endl;
         return nullptr;
     }
-    std::cout << "datum is not null" << std::endl;
     return datum;
 }
 
