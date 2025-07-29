@@ -2,11 +2,11 @@
 CREATE SCHEMA IF NOT EXISTS test_schema;
 CREATE SCHEMA IF NOT EXISTS schema_not_included;
 
-CREATE TABLE IF NOT EXISTS ddl_create (id SERIAL PRIMARY KEY, value TEXT);
-CREATE TABLE IF NOT EXISTS test_schema.ddl_create (id SERIAL PRIMARY KEY, value TEXT);
-CREATE TABLE IF NOT EXISTS test_schema.ddl_create_drop (id SERIAL PRIMARY KEY, value TEXT);
-CREATE TABLE IF NOT EXISTS schema_not_included.ddl_create (id SERIAL PRIMARY KEY, value TEXT);
-CREATE TABLE IF NOT EXISTS schema_not_included.ddl_create_drop (id SERIAL PRIMARY KEY, value TEXT);
+CREATE TABLE ddl_create (id SERIAL PRIMARY KEY, value TEXT);
+CREATE TABLE test_schema.ddl_create (id SERIAL PRIMARY KEY, value TEXT);
+CREATE TABLE test_schema.ddl_create_drop (id SERIAL PRIMARY KEY, value TEXT);
+CREATE TABLE schema_not_included.ddl_create (id SERIAL PRIMARY KEY, value TEXT);
+CREATE TABLE schema_not_included.ddl_create_drop (id SERIAL PRIMARY KEY, value TEXT);
 
 CREATE INDEX idx_value ON schema_not_included.ddl_create(value);
 DROP INDEX schema_not_included.idx_value;
