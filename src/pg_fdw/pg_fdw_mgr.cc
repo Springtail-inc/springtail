@@ -447,6 +447,7 @@ namespace springtail::pg_fdw {
                     continue;
             }
 
+            LOG_DEBUG(LOG_FDW, "Obtaining adn sending data to xid collector");
             _try_create_cache();
             uint64_t xid = update_last_xid();
             if (xid > _last_xid) {
@@ -573,6 +574,7 @@ namespace springtail::pg_fdw {
 
         if (!_ddl_connection) {
             while (xid < _last_xid) {
+                LOG_DEBUG(LOG_FDW, "Trying to get valid xid, current xid = {}, _last_xid = {}", xid, _last_xid);
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 xid = update_last_xid();
             }
