@@ -717,7 +717,7 @@ namespace springtail::pg_log_mgr {
                 LOG_DEBUG(LOG_PG_LOG_MGR, "CREATE TABLE: xid={}, pg_xid={}, tid={}, namespace={}", xidlsn.xid,
                           table_msg.xid, table_msg.oid, table_msg.namespace_name);
 
-                PgMsgNamespace namespace_msg{xidlsn.lsn, table_msg.namespace_id, xidlsn.xid, table_msg.namespace_name};
+                PgMsgNamespace namespace_msg{table_msg.lsn, table_msg.namespace_id, table_msg.xid, table_msg.namespace_name};
 
                 // make sure that the namespace is created
                 std::string &&ddl_stmt = client->create_namespace(_db, xidlsn, namespace_msg);
