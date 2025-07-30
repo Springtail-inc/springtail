@@ -331,7 +331,10 @@ namespace springtail::pg_fdw {
                 client->hmset(_redis_hash_name, db_xid_list.begin(), db_xid_list.end());
             }
             if (!new_pid_list.empty()) {
-                CHECK(client->srem(_redis_pid_set_name, new_pid_list.begin(), new_pid_list.end()) == new_pid_list.size());
+                // NOTE: we are not checking here if correct number of process entries got deleted
+                //      if the system got restarted, while FDW processes stayed up, then new process ids
+                //      might not have an entry there as it was deleted by the previous run
+                client->srem(_redis_pid_set_name, new_pid_list.begin(), new_pid_list.end());
             }
 
             data_lock.lock();

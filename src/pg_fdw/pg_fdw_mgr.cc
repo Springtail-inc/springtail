@@ -448,7 +448,7 @@ namespace springtail::pg_fdw {
             }
 
             LOG_DEBUG(LOG_FDW, "Obtaining adn sending data to xid collector");
-            _try_create_cache();
+            // _try_create_cache();
             uint64_t xid = update_last_xid();
             if (xid > _last_xid) {
                 _last_xid = xid;
