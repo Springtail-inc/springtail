@@ -229,8 +229,8 @@ Vacuumer::_upsert_extent_using_snapshot_list(uint64_t xid, SnapshotList snapshot
 
 
 void
-Vacuumer::_update_global_vacuum_file(const ExtentMap& expired_extents_map,
-                                     const SnapshotMap& expired_snapshots_map)
+Vacuumer::_update_global_vacuum_file(ExtentMap& expired_extents_map,
+                                     SnapshotMap& expired_snapshots_map)
 {
     // Lets persist expired extents
     // Creating unique runfile everytime to make sure we get new handle everytime
@@ -264,6 +264,8 @@ Vacuumer::_update_global_vacuum_file(const ExtentMap& expired_extents_map,
                         auto& snapshot_list = snapshot_xid_entry->second;
 
                         _upsert_extent_using_snapshot_list(xid, snapshot_list, extent);
+
+                        snapshot_xid_map.erase(snapshot_xid_entry);
                     }
                 }
 
@@ -272,16 +274,16 @@ Vacuumer::_update_global_vacuum_file(const ExtentMap& expired_extents_map,
                 response.wait();
             }
         }
-    } else {
-        // If only snapshot deletion is pending after a vacuum run
-        for (const auto& [snapshot_db_id, snapshot_xid_map] : expired_snapshots_map) {
-            for (const auto& [snapshot_xid, snapshot_list] : snapshot_xid_map) {
+    }
 
-                // Create extent with snapshot deletion list and flush to disk
-                auto extent = _upsert_extent_using_snapshot_list(snapshot_xid, snapshot_list);
-                auto response = extent->async_flush(handle);
-                response.wait();
-            }
+    // Process pending snapshot deletion entries
+    for (const auto& [snapshot_db_id, snapshot_xid_map] : expired_snapshots_map) {
+        for (const auto& [snapshot_xid, snapshot_list] : snapshot_xid_map) {
+
+            // Create extent with snapshot deletion list and flush to disk
+            auto extent = _upsert_extent_using_snapshot_list(snapshot_xid, snapshot_list);
+            auto response = extent->async_flush(handle);
+            response.wait();
         }
     }
 

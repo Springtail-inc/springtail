@@ -260,7 +260,7 @@ private:
      * @param expired_extents_map   Expired extents map to be written
      * @param expired_snapshots_map Expired snapshots map to be written
      */
-    void _update_global_vacuum_file(const ExtentMap& expired_extents_map, const SnapshotMap& expired_snapshots_map);
+    void _update_global_vacuum_file(ExtentMap& expired_extents_map, SnapshotMap& expired_snapshots_map);
 
     /**
      * @brief Create empty extent with xid in the header
