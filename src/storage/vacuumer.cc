@@ -384,6 +384,26 @@ Vacuumer::_get_db_id_from_path(const std::filesystem::path& path,
 }
 
 void
+Vacuumer::_cleanup_partial_files(const std::filesystem::path &path, bool is_directory)
+{
+    // If its table dir, delete all its partials
+    // else delete only its partial file eg: index deletion case
+    if (is_directory) {
+        auto last_dir = path.filename().string();
+        auto pattern_prefix = last_dir + "_";
+        for (const auto& entry : std::filesystem::directory_iterator(_vacuum_data_base)) {
+            const auto& filename = entry.path().filename().string();
+            if (filename.starts_with(pattern_prefix) && filename.ends_with(VacuumConfig::PARTIAL_FILE_SUFFIX)) {
+                std::filesystem::remove(_vacuum_data_base / filename);
+            }
+        }
+    } else {
+        auto partial_filename = _generate_flat_filename(path);
+        std::filesystem::remove(_vacuum_data_base / partial_filename);
+    }
+}
+
+void
 Vacuumer::_update_vacuumed_partials_file(
         const std::filesystem::path &path,
         std::vector<Vacuumer::HoleInfo> partials)
@@ -755,10 +775,13 @@ Vacuumer::_do_vacuum_run()
                     }
 
                     // recursively delete
+                    bool is_directory = std::filesystem::is_directory(dir);
                     std::filesystem::remove_all(dir, ec);
                     if (ec) {
                         LOG_ERROR("remove_all() failed: {}", ec.message());
                         all_deleted = false;
+                    } else {
+                        _cleanup_partial_files(dir, is_directory);
                     }
                 }
 

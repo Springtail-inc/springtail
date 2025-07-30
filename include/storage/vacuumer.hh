@@ -306,5 +306,13 @@ private:
      * @brief Run vacuum once
      */
     void _do_vacuum_run();
+
+    /**
+     * @brief Cleanup partial files when the source files are dropped
+     * @param path         Path for which partials to be dropped
+     * @param is_directory Indicates if the path was dir or file
+     *                     (since this method will be called after deleting the path)
+     */
+    void _cleanup_partial_files(const std::filesystem::path &path, bool is_directory);
 };
 }
