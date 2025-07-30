@@ -127,15 +127,6 @@ namespace springtail {
         uint64_t min_fdw_xid(uint64_t db_id);
 
         /**
-         * @brief Returns the minimum XID at which schema changes
-         *        are pending at the FDW(s)
-         *
-         * @param db_id Database ID
-         * @return minimum XID
-         */
-        uint64_t min_fdw_pending_schema_xid(uint64_t db_id);
-
-        /**
          * @brief Insert index XID in the tracker
          *
          * @param db_id Database ID
