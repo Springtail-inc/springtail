@@ -228,7 +228,7 @@ static const std::map<ServiceId, std::string> dependencies_names = {
     {ServiceId::XidMgrServerId,        "XigMgrServer"},
     {ServiceId::XidMgrClientId,        "XidMgrClient"},
     {ServiceId::SysTblMgrServerId,     "SysTblMgrServer"},
-    {ServiceId::SysTblMgrClientId,     "SyTblMgrClient"},
+    {ServiceId::SysTblMgrClientId,     "SysTblMgrClient"},
     {ServiceId::WriteCacheServerId,    "WriteCacheServer"},
     {ServiceId::WriteCacheClientId,    "WriteCacheClient"},
     {ServiceId::IOMgrId,               "IOMgr"},

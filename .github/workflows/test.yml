@@ -218,12 +218,6 @@ jobs:
             exit 1
           fi
 
-      - name: Setup interactive ssh session
-        uses: Warpbuilds/action-debugger@v1.3
-        if: success() || failure()
-        with:
-          limit-access-to-actor: true
-
       - name: Integration Test Report
         uses: dorny/test-reporter@v1
         if: success() || failure()                         # run this step even if previous step failed

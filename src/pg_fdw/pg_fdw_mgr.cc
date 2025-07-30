@@ -422,7 +422,7 @@ namespace springtail::pg_fdw {
         _ddl_connection = ddl_connection;
         _db_id = Properties::get_db_id(db_name_string);
 
-        LOG_INFO("FDW process stated for database id: {}, ddl_connection: {}", _db_id, _ddl_connection);
+        LOG_INFO("FDW process started for database id: {}, ddl_connection: {}", _db_id, _ddl_connection);
 
         if (!_ddl_connection) {
             _xid_collector_client.init(_db_id);
@@ -460,6 +460,9 @@ namespace springtail::pg_fdw {
     uint64_t
     PgFdwMgr::update_last_xid()
     {
+        uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(_db_id, _schema_xid);
+        LOG_DEBUG(LOG_FDW, "XidMgrClient returned xid = {}", xid);
+        /*
         std::optional<uint64_t> cached_xid;
         {
             std::shared_lock<std::shared_mutex> rc_lock(_rc_mutex);
@@ -476,6 +479,7 @@ namespace springtail::pg_fdw {
             xid = cached_xid.value();
             LOG_DEBUG(LOG_FDW, "Cached xid returned xid = {}", xid);
         }
+        */
         return xid;
     }
 
