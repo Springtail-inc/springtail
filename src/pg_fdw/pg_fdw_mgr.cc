@@ -448,8 +448,12 @@ namespace springtail::pg_fdw {
             }
 
             LOG_DEBUG(LOG_FDW, "Obtaining adn sending data to xid collector");
+            // TODO: running this function from the thread resulted in a crash
+            //      find out why this is happening and determine if it should be called
+            //      from the thread to begin with. Maybe a better place would be to call
+            //      it once from init() function.
             // _try_create_cache();
-            uint64_t xid = update_last_xid();
+            uint64_t xid = _update_last_xid(constant::LATEST_XID);
             if (xid > _last_xid) {
                 _last_xid = xid;
                 _xid_collector_client.send_data(_db_id, xid);
@@ -458,10 +462,12 @@ namespace springtail::pg_fdw {
     }
 
     uint64_t
-    PgFdwMgr::update_last_xid()
+    PgFdwMgr::_update_last_xid(uint64_t schema_xid)
     {
-        uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(_db_id, _schema_xid);
+        uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(_db_id, schema_xid);
         LOG_DEBUG(LOG_FDW, "XidMgrClient returned xid = {}", xid);
+
+        // TODO: fix _root_cache so that we can acquire correct xid
         /*
         std::optional<uint64_t> cached_xid;
         {
@@ -473,7 +479,7 @@ namespace springtail::pg_fdw {
 
         uint64_t xid = constant::INVALID_XID;
         if (!cached_xid.has_value() || cached_xid.value() < _schema_xid) {
-            xid = XidMgrClient::get_instance()->get_committed_xid(_db_id, _schema_xid);
+            xid = XidMgrClient::get_instance()->get_committed_xid(_db_id, schema_xid);
             LOG_DEBUG(LOG_FDW, "XidMgrClient returned xid = {}", xid);
         } else {
             xid = cached_xid.value();
@@ -567,7 +573,7 @@ namespace springtail::pg_fdw {
         if (it == _xid_map.end()) {
             rd_lock.unlock();
 
-            xid = update_last_xid();
+            xid = _update_last_xid(schema_xid);
 
             std::unique_lock<std::shared_mutex> lock(_mutex);
             _xid_map[pg_xid] = xid;
@@ -580,7 +586,7 @@ namespace springtail::pg_fdw {
             while (xid < _last_xid) {
                 LOG_DEBUG(LOG_FDW, "Trying to get valid xid, current xid = {}, _last_xid = {}", xid, _last_xid);
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                xid = update_last_xid();
+                xid = _update_last_xid(schema_xid);
             }
             if (xid > _last_xid) {
                 _last_xid = xid;

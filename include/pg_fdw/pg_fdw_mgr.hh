@@ -299,8 +299,6 @@ namespace springtail::pg_fdw {
          */
         virtual void _internal_run();
 
-        uint64_t update_last_xid();
-
         /**
          * @brief Lookup enum user type from cache based on oid and index
          * @param db_id db_id of the database
@@ -398,5 +396,8 @@ namespace springtail::pg_fdw {
 
         /** Helper to create an IPC cache for table roots */
         void _try_create_cache();
+
+        /** Helper function to get the last xid */
+        uint64_t _update_last_xid(uint64_t schema_xid);
     };
 } // namespace springtail::pg_fdw
