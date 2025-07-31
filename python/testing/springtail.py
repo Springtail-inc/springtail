@@ -807,14 +807,13 @@ def stop_with_properties(props: Properties, do_cleanup: bool = False) -> None:
     stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
 
     if do_cleanup:
-        # Clear file system data
-        print("\nClearing file system data...")
-        cleanup_filesystem(props)
-
         # Cleanup db instance
         print("\nCleaning up database instance...")
         cleanup_db_instance(props)
 
+        # Clear file system data
+        print("\nClearing file system data...")
+        cleanup_filesystem(props)
 
 def check_logs(config_file: str) -> List[str]:
     """Check the logs for errors."""

@@ -1,7 +1,4 @@
-
--- Now includes rolconfig from pg_roles
--- Omit roles that are system-defined and omit members of those roles
-
+-- This script defines the schema and functions for managing role snapshots
 CREATE SCHEMA IF NOT EXISTS __pg_springtail_triggers;
 
 DROP TABLE IF EXISTS __pg_springtail_triggers.role_snapshot_history;

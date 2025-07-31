@@ -5,6 +5,7 @@
 #include <sys_tbl_mgr/table.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_client.hh>
+#include <storage/vacuumer.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
 
@@ -783,6 +784,9 @@ namespace indexer_helpers {
 
         // update the roots and stats
         sys_tbl_mgr::Client::get_instance()->update_roots(_db_id, _id, _target_xid, metadata);
+
+        // Smart vacuum
+        Vacuumer::get_instance()->expire_extent(_data_file, 0, std::filesystem::file_size(_data_file), _target_xid);
     }
 
     StorageCache::SafePagePtr

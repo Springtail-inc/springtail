@@ -18,6 +18,8 @@ main(int argc, char *argv[])
     desc.add_options()("help,h", "Help message.");
     desc.add_options()("daemonize", "Start the server as a daemon");
 
+    std::string vaccumer_namespace = "sys_tbl_mgr";
+
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
 
@@ -33,8 +35,14 @@ main(int argc, char *argv[])
         pidfile = "sys_tbl_mgr.pid";
     }
 
+    springtail_store_arguments(ServiceId::VacuumerId,
+        {
+            {"vacuum_global_ns", std::any(vaccumer_namespace)}
+        });
     springtail_init_daemon("sys_tbl_mgr", pidfile, LOG_ALL ^ (LOG_CACHE | LOG_STORAGE));
+
     sys_tbl_mgr::Server::start();
+
     springtail_daemon_run();
 
     springtail_shutdown();

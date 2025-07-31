@@ -23,6 +23,7 @@
 #include <pg_fdw/pg_ddl_mgr.hh>
 
 #include <pg_fdw/constants.hh>
+#include <pg_fdw/pg_xid_collector.hh>
 
 namespace springtail::pg_fdw {
 
@@ -129,6 +130,7 @@ namespace springtail::pg_fdw {
                 _on_database_ids_changed(path, new_value);
             }
         );
+        PgXidCollector::get_instance()->start_thread();
     }
 
     void PgDDLMgr::_on_database_ids_changed(const std::string &path,
@@ -173,14 +175,15 @@ namespace springtail::pg_fdw {
         // join with threads
         _pg_ddl_mgr_thread.join();
         _sync_thread.join();
+        PgXidCollector::shutdown();
     }
 
     void
     PgDDLMgr::start()
     {
-        std::string username = springtail_retreive_argument<std::string>(ServiceId::PgDDLMgrId, "username");
-        std::string password = springtail_retreive_argument<std::string>(ServiceId::PgDDLMgrId, "password");
-        std::optional<std::string> hostname = springtail_retreive_argument<std::optional<std::string>>(ServiceId::PgDDLMgrId, "hostname");
+        std::string username = springtail_retreive_argument<std::string>(ServiceId::PgDDLMgrId, "username").value();
+        std::string password = springtail_retreive_argument<std::string>(ServiceId::PgDDLMgrId, "password").value();
+        std::optional<std::string> hostname = springtail_retreive_argument<std::optional<std::string>>(ServiceId::PgDDLMgrId, "hostname").value();
         // start the ddl main thread
         std::string fdw_id = Properties::get_fdw_id();
 
@@ -244,6 +247,7 @@ namespace springtail::pg_fdw {
 
         // create a new thread to run the policy and role sync
         _sync_thread = std::thread(&PgDDLMgr::_sync_thread_func, this, sync_interval_secs);
+        LOG_INFO("PgDDLMgr::init() done");
     }
 
     bool
@@ -977,8 +981,6 @@ namespace springtail::pg_fdw {
         // check if we have a connection in the cache
         LibPqConnectionPtr conn = nullptr;
 
-        DCHECK_NE(db_name, "replica_springtail") << "Database name should not be replica_springtail";
-
         if (!db_id_opt.has_value()) {
             conn = std::make_shared<LibPqConnection>();
             conn->connect(_hostname, db_name, _username, _password, _port, false);
@@ -1005,8 +1007,9 @@ namespace springtail::pg_fdw {
         LOG_DEBUG(LOG_FDW, "Establishing connection for db_id: {}, db_name: {}", db_id, db_name);
 
         // use libpq to connect to the database
+        std::vector<std::pair<std::string, std::string>> options = {{"springtail_fdw.ddl_connection", "on"}};
         conn = std::make_shared<LibPqConnection>();
-        conn->connect(_hostname, _db_prefix + db_name, _username, _password, _port, false);
+        conn->connect(_hostname, _db_prefix + db_name, _username, _password, _port, false, options);
 
         // the connection should be released back to the cache
         return conn;

@@ -555,7 +555,8 @@ private:
                      uint64_t db_id,
                      uint64_t index_id,
                      std::optional<uint64_t> tid = std::nullopt,
-                     sys_tbl::IndexNames::State index_state = sys_tbl::IndexNames::State::DELETED);
+                     sys_tbl::IndexNames::State index_state = sys_tbl::IndexNames::State::DELETED,
+                     std::optional<std::reference_wrapper<proto::IndexInfo>> dropped_index_info_ref = std::nullopt);
 
     /**
      * Performs a create_table() assuming that the correct locks are already held.
