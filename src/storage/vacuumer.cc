@@ -229,8 +229,8 @@ Vacuumer::_upsert_extent_using_snapshot_list(uint64_t xid, SnapshotList snapshot
 
 
 void
-Vacuumer::_update_global_vacuum_file(const ExtentMap& expired_extents_map,
-                                     const SnapshotMap& expired_snapshots_map)
+Vacuumer::_update_global_vacuum_file(ExtentMap& expired_extents_map,
+                                     SnapshotMap& expired_snapshots_map)
 {
     // Lets persist expired extents
     // Creating unique runfile everytime to make sure we get new handle everytime
@@ -264,6 +264,8 @@ Vacuumer::_update_global_vacuum_file(const ExtentMap& expired_extents_map,
                         auto& snapshot_list = snapshot_xid_entry->second;
 
                         _upsert_extent_using_snapshot_list(xid, snapshot_list, extent);
+
+                        snapshot_xid_map.erase(snapshot_xid_entry);
                     }
                 }
 
@@ -272,16 +274,16 @@ Vacuumer::_update_global_vacuum_file(const ExtentMap& expired_extents_map,
                 response.wait();
             }
         }
-    } else {
-        // If only snapshot deletion is pending after a vacuum run
-        for (const auto& [snapshot_db_id, snapshot_xid_map] : expired_snapshots_map) {
-            for (const auto& [snapshot_xid, snapshot_list] : snapshot_xid_map) {
+    }
 
-                // Create extent with snapshot deletion list and flush to disk
-                auto extent = _upsert_extent_using_snapshot_list(snapshot_xid, snapshot_list);
-                auto response = extent->async_flush(handle);
-                response.wait();
-            }
+    // Process pending snapshot deletion entries
+    for (const auto& [snapshot_db_id, snapshot_xid_map] : expired_snapshots_map) {
+        for (const auto& [snapshot_xid, snapshot_list] : snapshot_xid_map) {
+
+            // Create extent with snapshot deletion list and flush to disk
+            auto extent = _upsert_extent_using_snapshot_list(snapshot_xid, snapshot_list);
+            auto response = extent->async_flush(handle);
+            response.wait();
         }
     }
 
@@ -378,6 +380,26 @@ Vacuumer::_get_db_id_from_path(const std::filesystem::path& path,
         }
     }
     return std::numeric_limits<uint64_t>::max();
+}
+
+void
+Vacuumer::_cleanup_partial_files(const std::filesystem::path &path, bool is_directory)
+{
+    // If its table dir, delete all its partials
+    // else delete only its partial file eg: index deletion case
+    if (is_directory) {
+        auto last_dir = path.filename().string();
+        auto pattern_prefix = last_dir + "_";
+        for (const auto& entry : std::filesystem::directory_iterator(_vacuum_data_base)) {
+            const auto& filename = entry.path().filename().string();
+            if (filename.starts_with(pattern_prefix) && filename.ends_with(VacuumConfig::PARTIAL_FILE_SUFFIX)) {
+                std::filesystem::remove(_vacuum_data_base / filename);
+            }
+        }
+    } else {
+        auto partial_filename = _generate_flat_filename(path);
+        std::filesystem::remove(_vacuum_data_base / partial_filename);
+    }
 }
 
 void
@@ -752,10 +774,13 @@ Vacuumer::_do_vacuum_run()
                     }
 
                     // recursively delete
+                    bool is_directory = std::filesystem::is_directory(dir);
                     std::filesystem::remove_all(dir, ec);
                     if (ec) {
                         LOG_ERROR("remove_all() failed: {}", ec.message());
                         all_deleted = false;
+                    } else {
+                        _cleanup_partial_files(dir, is_directory);
                     }
                 }
 
