@@ -330,7 +330,7 @@ namespace springtail {
 
         std::string fdw_xid_key = fmt::format(redis::HASH_MIN_XID, Properties::get_db_instance_id());
         std::map<std::string, std::string> values;
-        std::string match = "*:" + db_id;
+        std::string match = fmt::format("*:{}", db_id);
 
         cursor = 0;
         while (true) {
