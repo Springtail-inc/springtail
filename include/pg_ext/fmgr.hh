@@ -5,6 +5,42 @@
 #include <pg_ext/export.hh>
 #include <pg_ext/memory.hh>
 
+
+#define VARHDRSZ_LONG  4
+#define VARHDRSZ_SHORT 1
+
+static inline int VARATT_IS_1B(const void *p) {
+    return ((*(const unsigned char*)p) & 0x80) != 0;
+}
+
+static inline int32_t VARSIZE_ANY(const void *p) {
+    if (VARATT_IS_1B(p)) {
+        return (int32_t)((*(const unsigned char*)p) & 0x7F) + VARHDRSZ_SHORT;
+    } else {
+        int32_t len;
+        std::memcpy(&len, p, 4);
+        return len;
+    }
+}
+
+static inline int32_t VARSIZE_ANY_EXHDR(const void *p) {
+    if (VARATT_IS_1B(p)) {
+        return (int32_t)((*(const unsigned char*)p) & 0x7F);
+    } else {
+        int32_t len;
+        std::memcpy(&len, p, 4);
+        return len - VARHDRSZ_LONG;
+    }
+}
+
+static inline char* VARDATA_ANY(void *p) {
+    return (char*)p + (VARATT_IS_1B(p) ? VARHDRSZ_SHORT : VARHDRSZ_LONG);
+}
+static inline const char* VARDATA_ANY_CONST(const void *p) {
+    return (const char*)p + (VARATT_IS_1B(p) ? VARHDRSZ_SHORT : VARHDRSZ_LONG);
+}
+
+
 // Collation is often just a 4-byte OID in Postgres
 typedef uint32_t Oid;
 typedef uintptr_t Datum;

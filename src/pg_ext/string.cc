@@ -9,56 +9,76 @@
 #include <cwchar>
 
 char *lowerstr(const char *str) {
-    if (!str) return nullptr;
+    return lowerstr_with_len(str, std::strlen(str));
+}
 
-    size_t len = std::strlen(str);
-    char *result = (char *)std::malloc(len + 1);
-    if (!result) return nullptr;
-
-    for (size_t i = 0; i < len; i++) {
-        result[i] = std::tolower((unsigned char)str[i]);
-    }
-
-    result[len] = '\0';
-    return result;
+static inline unsigned char tolower_ascii(unsigned char c)
+{
+    if (c >= 'A' && c <= 'Z') return (unsigned char)(c + 32);
+    return c;
 }
 
 char *lowerstr_with_len(const char *str, int len) {
-    if (!str || len <= 0) return nullptr;
+    fprintf(stderr, "[shim] lowerstr_with_len in=%p len=%d\n", (void*)str, len);
 
-    char *result = (char *)std::malloc(len + 1);
-    if (!result) return nullptr;
-
-    for (int i = 0; i < len; i++) {
-        result[i] = std::tolower((unsigned char)str[i]);
+    if (!str || len <= 0) {
+        char *empty = (char *)palloc(1);
+        if (empty) empty[0] = '\0';
+        return empty;
     }
 
-    result[len] = '\0';
-    return result;
+    char *buf = (char *)palloc((size_t)len + 1);  // +1 for null terminator
+    if (!buf) return NULL;
+
+    int i = 0, o = 0;
+
+    while (i < len) {
+        int m = pg_mblen(str + i);
+
+        // Ensure we don’t overread beyond len
+        if (m <= 0 || i + m > len) {
+            m = 1;
+        }
+
+        if (m == 1) {
+            // ASCII character — lowercase it
+            unsigned char c = (unsigned char)str[i];
+            buf[o++] = (char)tolower_ascii(c);
+        } else {
+            // Multibyte sequence — copy as-is
+            memcpy(buf + o, str + i, m);
+            o += m;
+        }
+
+        i += m;
+    }
+
+    buf[o] = '\0';
+
+    // Print full transformed output (safe logging)
+    fprintf(stderr, "[shim] lowerstr_with_len out=%p len=%d bytes:", (void *)buf, o);
+    for (int j = 0; j < o; j++) {
+        fprintf(stderr, " %02X", (unsigned char)buf[j]);
+    }
+    fprintf(stderr, "  ascii:'%.*s'\n", o, buf);
+
+    return buf;
 }
 
+
 char *upperstr(const char *str) {
-    if (!str) return nullptr;
-
-    size_t len = std::strlen(str);
-    char *result = (char *)std::malloc(len + 1);
-    if (!result) return nullptr;
-
-    for (size_t i = 0; i < len; i++) {
-        result[i] = std::toupper((unsigned char)str[i]);
-    }
-
-    result[len] = '\0';
-    return result;
+    return upperstr_with_len(str, std::strlen(str));
 }
 
 char *upperstr_with_len(const char *str, int len) {
-    if (!str || len <= 0) return nullptr;
+    if (!str || len <= 0) {
+        return nullptr;
+    }
 
-    char *result = (char *)std::malloc(len + 1);
+    char *result = (char *)palloc(len + 1);
     if (!result) return nullptr;
 
-    for (int i = 0; i < len; i++) {
+    for (size_t i = 0; i < len; i++) {
         result[i] = std::toupper((unsigned char)str[i]);
     }
 
@@ -67,15 +87,19 @@ char *upperstr_with_len(const char *str, int len) {
 }
 
 int pg_mblen(const char *mbstr) {
-    unsigned char c = (unsigned char)*mbstr;
+    if (!mbstr) return 0;
+    const unsigned char lead = *(const unsigned char*)mbstr;
+    int len = (lead < 0x80) ? 1
+            : ((lead & 0xE0) == 0xC0) ? 2
+            : ((lead & 0xF0) == 0xE0) ? 3
+            : ((lead & 0xF8) == 0xF0) ? 4
+            : 1;
 
-    if (c < 0x80) return 1;
-    else if ((c & 0xE0) == 0xC0) return 2;
-    else if ((c & 0xF0) == 0xE0) return 3;
-    else if ((c & 0xF8) == 0xF0) return 4;
-
-    // Invalid UTF-8 lead byte
-    return 1;
+    fprintf(stderr, "[shim] pg_mblen mbstr=%p lead=0x%02X ascii='%c' -> %d\n",
+            (const void*)mbstr, lead,
+            (lead >= 32 && lead < 127) ? (char)lead : '.',
+            len);
+    return len;
 }
 
 int pg_snprintf(char *str, size_t count, const char *fmt, ...) {
@@ -150,10 +174,42 @@ int pg_wchar2mb_with_len(const wchar_t *from, char *to, int len) {
     return bytes_written;
 }
 
-int
-t_isalnum(const char *ptr)
+int pg_mbstrlen_with_len(const char *mbstr, int len)
 {
-    return std::isalnum(*ptr);
+    if (!mbstr || len <= 0) return 0;
+    int i = 0, chars = 0;
+    while (i < len) {
+        int m = pg_mblen(mbstr + i);
+        if (m <= 0) m = 1;
+        if (i + m > len) break;   // don't step past end
+        i += m;
+        chars++;
+    }
+    return chars;
+}
+
+int t_isalnum(const char *ptr) {
+    if (!ptr || !*ptr) return 0;
+    fprintf(stderr, "[shim] t_isalnum ptr=%p '%.*s'\n", (void*)ptr, pg_mbstrlen_with_len(ptr, 10), ptr);
+    return t_isalpha(ptr) || t_isdigit(ptr);
+}
+
+int t_isspace(const char *p) {
+    if (!p || !*p) return 0;
+    unsigned char c = (unsigned char)*p;
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+}
+
+int t_isdigit(const char *p) {
+    if (!p || !*p) return 0;
+    unsigned char c = (unsigned char)*p;
+    return c >= '0' && c <= '9';
+}
+
+int t_isalpha(const char *p) {
+    if (!p || !*p) return 0;
+    unsigned char c = (unsigned char)*p;
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
 }
 
 char *str_tolower(const char *buff, size_t nbytes, Oid collid) {

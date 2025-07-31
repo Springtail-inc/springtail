@@ -57,9 +57,6 @@ pg_detoast_datum(struct varlena *datum)
 struct varlena *
 pg_detoast_datum_packed(struct varlena *datum)
 {
-    if (!datum){
-        return nullptr;
-    }
     return datum;
 }
 

@@ -200,6 +200,7 @@ MemoryContextDelete(void *context)
 void*
 palloc(size_t size)
 {
+    std::cout << "palloc(" << size << ")" << std::endl;
     auto ctx = static_cast<pgext::MemoryContext*>(CurrentMemoryContext);
     CHECK(ctx != nullptr);
     return ctx->alloc(size);
@@ -218,6 +219,7 @@ palloc0(size_t size)
 void
 pfree(void *ptr)
 {
+    std::cout << "pfree(" << ptr << ")" << std::endl;
     if (ptr == nullptr) {
         return;
     }
