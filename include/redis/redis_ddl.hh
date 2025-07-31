@@ -118,6 +118,38 @@ namespace springtail {
          */
         uint64_t min_schema_xid(uint64_t db_id);
 
+        /**
+         * @brief Returns the minimum XID which is inflight in FDW for a DB
+         *
+         * @param db_id Database ID
+         * @return minimum XID
+         */
+        uint64_t min_fdw_xid(uint64_t db_id);
+
+        /**
+         * @brief Insert index XID in the tracker
+         *
+         * @param db_id Database ID
+         * @param xid   Index XID
+         */
+        void insert_index_xid(uint64_t db_id, uint64_t xid);
+
+        /**
+         * @brief Remove index XID from the tracker
+         *
+         * @param db_id Database ID
+         * @param xid   Index XID
+         */
+        void remove_index_xid(uint64_t db_id, uint64_t xid);
+
+        /**
+         * @brief Get minimum index XID from the tracker for the db
+         *
+         * @param db_id Database ID
+         * @return minimum index XID
+         */
+        uint64_t min_index_xid(uint64_t db_id);
+
     private:
         std::shared_ptr<RedisClient> _redis;
     };

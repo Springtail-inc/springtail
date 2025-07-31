@@ -1,6 +1,6 @@
 # source files
 set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc io_file.cc io_request.cc btree.cc mutable_btree.cc cache.cc
-                    numeric_utils.cc)
+                    numeric_utils.cc vacuumer.cc)
 
 find_package(lz4 REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
@@ -19,6 +19,8 @@ target_include_directories(springtail_storage
 target_link_libraries(springtail_storage
   PRIVATE lz4::lz4 xxHash::xxhash
   PUBLIC Boost::thread
+         springtail_redis
+         springtail_xid_mgr_client
          springtail_write_cache absl::check)
 
 
@@ -109,7 +111,7 @@ springtail_unit_test(test_cache
   SOURCES test/test_cache.cc
   INCLUDES ${CMAKE_SOURCE_DIR}/include
   LINK_OPTIONS "--coverage"
-  LIBS springtail_storage GTest::gtest_main unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB}
+  LIBS springtail_storage springtail_test GTest::gtest_main unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB}
   WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test
 )
 

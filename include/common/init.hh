@@ -49,7 +49,7 @@ void springtail_init_custom(std::vector<std::unique_ptr<ServiceRunner>> &runners
 void springtail_daemon_run();
 
 void springtail_store_argument_internal(ServiceId service_id, const std::string &arg_name, const std::any &value);
-std::any springtail_retreive_argument_internal(ServiceId service_id, const std::string &arg_name);
+std::optional<std::any> springtail_retreive_argument_internal(ServiceId service_id, const std::string &arg_name, bool is_required=true);
 
 template<typename T> void
 springtail_store_argument(ServiceId service_id, const std::string &arg_name, const T &value)
@@ -57,10 +57,14 @@ springtail_store_argument(ServiceId service_id, const std::string &arg_name, con
     springtail_store_argument_internal(service_id, arg_name, std::any(value));
 }
 
-template<typename T> T
-springtail_retreive_argument(ServiceId service_id, const std::string &arg_name)
+template<typename T> std::optional<T>
+springtail_retreive_argument(ServiceId service_id, const std::string &arg_name, bool is_required=true)
 {
-    std::any ret = springtail_retreive_argument_internal(service_id, arg_name);
+    auto ret_opt = springtail_retreive_argument_internal(service_id, arg_name, is_required);
+    if (!ret_opt) {
+        return std::nullopt;
+    }
+    auto ret = ret_opt.value();
     CHECK(ret.type() == typeid(T));
     return std::any_cast<T>(ret);
 }

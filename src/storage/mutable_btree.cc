@@ -2,6 +2,7 @@
 #include <common/json.hh>
 #include <common/properties.hh>
 #include <storage/mutable_btree.hh>
+#include <storage/vacuumer.hh>
 
 namespace springtail {
 
@@ -187,6 +188,9 @@ namespace springtail {
 
         // clear the root
         _remove_root();
+
+        // Smart vacuum
+        Vacuumer::get_instance()->expire_extent(_file, 0, std::filesystem::file_size(_file), _xid);
     }
 
     uint64_t

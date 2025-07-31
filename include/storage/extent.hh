@@ -69,16 +69,19 @@ namespace springtail {
             the bottom 7 bits indicate the type. */
         std::vector<uint8_t> field_types;
 
-        uint64_t prev_offset; ///< The location of the previous extent that this extent is overwriting.  Set to zero for new extents.
-
+        uint64_t prev_offset; ///< The location of the previous extent that this extent is overwriting.  Set to UNKNOWN_EXTENT for new extents.
 
         /** Constructor for uncommitted extents.*/
-        ExtentHeader(ExtentType type, uint64_t xid, uint32_t row_size, const std::vector<uint8_t> &types, uint64_t prev = 0)
+        ExtentHeader(ExtentType type,
+                     uint64_t xid,
+                     uint32_t row_size,
+                     const std::vector<uint8_t> &types,
+                     uint64_t prev_offset = constant::UNKNOWN_EXTENT)
             : type(type),
               xid(xid),
               row_size(row_size),
               field_types(types),
-              prev_offset(prev)
+              prev_offset(prev_offset)
         { }
 
         /** Constructor that deserializes the header. */
@@ -270,7 +273,7 @@ namespace springtail {
                uint64_t xid,
                uint32_t row_size,
                std::vector<uint8_t> types)
-            : _header(type, xid, row_size, types)
+            : _header(type, xid, row_size, types, constant::UNKNOWN_EXTENT)
         {
             // empty extent
             _fixed_data = std::make_shared<std::vector<char>>();

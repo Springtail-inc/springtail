@@ -30,6 +30,7 @@ namespace springtail {
         PgDDLMgrId,
         PgLogCoordinatorId,
         StorageCacheId,
+        VacuumerId,
         ServiceCountId
     };
 
