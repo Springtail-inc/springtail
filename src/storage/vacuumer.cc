@@ -714,12 +714,14 @@ Vacuumer::_do_vacuum_run()
 
                 if (aligned_start < aligned_end) {
                     punchable.emplace_back(aligned_start, aligned_end - aligned_start);
-                }
-                if (start < aligned_start) {
-                    new_partials.emplace_back(start, aligned_start - start);
-                }
-                if (aligned_end < end) {
-                    new_partials.emplace_back(aligned_end, end - aligned_end);
+                    if (start < aligned_start) {
+                        new_partials.emplace_back(start, aligned_start - start);
+                    }
+                    if (aligned_end < end) {
+                        new_partials.emplace_back(aligned_end, end - aligned_end);
+                    }
+                } else {
+                    new_partials.emplace_back(start, end - start);
                 }
             }
 
