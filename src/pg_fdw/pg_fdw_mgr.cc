@@ -453,7 +453,7 @@ namespace springtail::pg_fdw {
             //      from the thread to begin with. Maybe a better place would be to call
             //      it once from init() function.
             // _try_create_cache();
-            uint64_t xid = _update_last_xid(_schema_xid);
+            uint64_t xid = _update_last_xid(constant::LATEST_XID);
             if (xid > _last_xid) {
                 _last_xid = xid;
                 _xid_collector_client.send_data(_db_id, xid);
