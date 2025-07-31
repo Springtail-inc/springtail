@@ -345,7 +345,7 @@ namespace springtail {
 
         for (const auto& [field, value] : values) {
             DCHECK(field.ends_with(suffix));
-            uint64_t xid = std::stoll(value);
+            uint64_t xid = std::stoull(value);
             if (xid < min_xid) {
                 min_xid = xid;
             }
