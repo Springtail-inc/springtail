@@ -441,19 +441,33 @@ namespace springtail::pg_fdw {
         if (_ddl_connection) {
             return;
         }
+
+        RedisDDL redis_ddl;
         while (!_is_shutting_down()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(THREAD_SLEEP_INTERVAL_MSEC));
             if (_in_transaction) {
                     continue;
             }
 
-            LOG_DEBUG(LOG_FDW, "Obtaining adn sending data to xid collector");
+            // read latest schema xid from redis
+            uint64_t schema_xid = redis_ddl.get_schema_xid(_fdw_id, _db_id);
+            if (schema_xid == 0) {
+                schema_xid = _schema_xid;
+            } else {
+                CHECK(schema_xid >= _schema_xid);
+                if (schema_xid > _schema_xid) {
+                    _schema_xid = schema_xid;
+                    sys_tbl_mgr::Client::get_instance()->invalidate_db(_db_id, XidLsn(schema_xid));
+                }
+            }
+
+            LOG_DEBUG(LOG_FDW, "Obtaining and sending data to xid collector for schema xid: {}", schema_xid);
             // TODO: running this function from the thread resulted in a crash
             //      find out why this is happening and determine if it should be called
             //      from the thread to begin with. Maybe a better place would be to call
             //      it once from init() function.
             // _try_create_cache();
-            uint64_t xid = _update_last_xid(_schema_xid);
+            uint64_t xid = _update_last_xid(schema_xid);
             if (xid > _last_xid) {
                 _last_xid = xid;
                 _xid_collector_client.send_data(_db_id, xid);

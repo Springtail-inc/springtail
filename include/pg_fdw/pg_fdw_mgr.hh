@@ -279,7 +279,7 @@ namespace springtail::pg_fdw {
         std::shared_mutex _mutex;               ///< Mutex for xid map
         std::map<uint64_t, uint64_t> _xid_map;  ///< Map of pg XID to springtail XID
 
-        std::atomic<uint64_t> _schema_xid; ///< The most recently seen schema XID
+        std::atomic<uint64_t> _schema_xid{0}; ///< The most recently seen schema XID
 
         std::shared_mutex _rc_mutex;    ///< roots cache mutex
         std::shared_ptr<sys_tbl_mgr::ShmCache> _roots_cache; ///< An IPC cache shared by pg_xid_subscriber_daemon

@@ -274,6 +274,21 @@ namespace springtail {
     }
 
     uint64_t
+    RedisDDL::get_schema_xid(const std::string &fdw_id, uint64_t db_id)
+    {
+        // update the hash entry for the FDW with the latest schema XID
+        std::string key = fmt::format(redis::HASH_DDL_FDW, Properties::get_db_instance_id());
+        // read latest schema xid from redis
+        uint64_t schema_xid = 0;
+        std::string redis_key = fmt::format("{}:{}", fdw_id, db_id);
+        std::optional<std::string> schema_xid_value = _redis->hget(key, redis_key);
+        if (schema_xid_value.has_value()) {
+            schema_xid = std::stoull(schema_xid_value.value());
+        }
+        return schema_xid;
+    }
+
+    uint64_t
     RedisDDL::min_schema_xid(uint64_t db_id)
     {
         std::string key = fmt::format(redis::HASH_DDL_FDW, Properties::get_db_instance_id());
