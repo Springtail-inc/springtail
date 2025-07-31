@@ -288,6 +288,7 @@ namespace springtail::pg_fdw {
 
         PgXidCollectorClient _xid_collector_client;    ///< xid collector client
         std::string _fdw_id;                           ///< fdw id
+        std::mutex _xid_update_mutex;                  ///< mutex for updating xid
         uint64_t _db_id;                               ///< database id
         std::atomic<uint64_t> _last_xid{0};         ///< last known xid
         std::atomic<bool> _in_transaction{false};   ///< in transaction flag, when set disables background thread

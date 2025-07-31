@@ -468,6 +468,7 @@ namespace springtail::pg_fdw {
             //      it once from init() function.
             // _try_create_cache();
             uint64_t xid = _update_last_xid(schema_xid);
+            std::unique_lock xid_lock(_xid_update_mutex);
             if (xid > _last_xid) {
                 _last_xid = xid;
                 _xid_collector_client.send_data(_db_id, xid);
@@ -602,6 +603,7 @@ namespace springtail::pg_fdw {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 xid = _update_last_xid(schema_xid);
             }
+            std::unique_lock xid_lock(_xid_update_mutex);
             if (xid > _last_xid) {
                 _last_xid = xid;
                 _xid_collector_client.send_data(db_id, xid);
