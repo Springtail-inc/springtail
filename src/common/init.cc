@@ -104,6 +104,7 @@ private:
     {
         for (auto reverse_iter = _service_list.rbegin(); reverse_iter != _service_list.rend();
                 reverse_iter++) {
+            LOG_INFO("Stopping service {}", (*reverse_iter)->get_name());
             (*reverse_iter)->stop();
         }
         _service_list.clear();
@@ -228,14 +229,14 @@ static const std::map<ServiceId, std::string> dependencies_names = {
     {ServiceId::XidMgrServerId,        "XigMgrServer"},
     {ServiceId::XidMgrClientId,        "XidMgrClient"},
     {ServiceId::SysTblMgrServerId,     "SysTblMgrServer"},
-    {ServiceId::SysTblMgrClientId,     "SyTblMgrClient"},
+    {ServiceId::SysTblMgrClientId,     "SysTblMgrClient"},
     {ServiceId::WriteCacheServerId,    "WriteCacheServer"},
     {ServiceId::WriteCacheClientId,    "WriteCacheClient"},
     {ServiceId::IOMgrId,               "IOMgr"},
     {ServiceId::SchemaMgrId,           "SchemaMgr"},
     {ServiceId::TableMgrId,            "TableMgr"},
     {ServiceId::SyncTrackerId,         "SyncTracker"},
-    {ServiceId::PgFdwMgrId,            "PGFdwMgr"},
+    {ServiceId::PgFdwMgrId,            "PgFdwMgr"},
     {ServiceId::PgXidSubscriberMgrId,  "PgXidSubscriberMgr"},
     {ServiceId::PgDDLMgrId,            "PgDDLMgr"},
     {ServiceId::PgLogCoordinatorId,    "PgLogCoordinator"},
@@ -307,12 +308,14 @@ springtail_register_service(ServiceId service_id, ShutdownFunc fn)
 void
 springtail_shutdown()
 {
+    LOG_INFO("Shutdown services");
     std::unique_lock running_services_lock(running_services_mutex);
     for (auto service_id : topo_sorted_services) {
         auto it = running_services.find(service_id);
         if (it == running_services.end()) {
             continue;
         }
+        LOG_INFO("Shuting down service {}", dependencies_names.at(service_id));
         it->second();
     }
     // NOTE: This final cleanup step can't be done by a runner because a runner will require logging

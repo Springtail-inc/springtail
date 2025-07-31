@@ -22,6 +22,7 @@
 #include <pg_fdw/pg_ddl_mgr.hh>
 
 #include <pg_fdw/constants.hh>
+#include <pg_fdw/pg_xid_collector.hh>
 
 namespace springtail::pg_fdw {
 
@@ -73,6 +74,7 @@ namespace springtail::pg_fdw {
                 }
             }
         );
+        PgXidCollector::get_instance()->start_thread();
     }
 
     void
@@ -81,6 +83,7 @@ namespace springtail::pg_fdw {
         _pg_ddl_mgr_thread.join();
         std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
         redis_cache->remove_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
+        PgXidCollector::shutdown();
     }
 
     void
@@ -148,6 +151,8 @@ namespace springtail::pg_fdw {
 
         _thread_manager = std::make_shared<common::MultiQueueThreadManager>(MAX_THREAD_POOL_SIZE);
         _thread_manager->start();
+
+        LOG_INFO("PgDDLMgr::init() done");
     }
 
     std::map<uint64_t, std::map<uint64_t, std::pair<std::string, std::string>>>
@@ -288,6 +293,7 @@ namespace springtail::pg_fdw {
         for (const auto &[db_id, db_name] : dbs) {
             _create_schemas(conn, db_id, db_name);
         }
+        LOG_INFO("PgDDLMgr::_init_fdw() done");
     }
 
     std::string
@@ -468,8 +474,9 @@ namespace springtail::pg_fdw {
         LOG_DEBUG(LOG_FDW, "Establishing connection for db_id: {}", db_id);
 
         // use libpq to connect to the database
+        std::vector<std::pair<std::string, std::string>> options = {{"springtail_fdw.ddl_connection", "on"}};
         conn = std::make_shared<LibPqConnection>();
-        conn->connect(_hostname, db_name, _username, _password, _port, false);
+        conn->connect(_hostname, db_name, _username, _password, _port, false, options);
 
         // save the connection in the cache
         _fdw_conn_cache.insert(db_id, conn);
