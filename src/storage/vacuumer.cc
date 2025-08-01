@@ -160,9 +160,8 @@ Vacuumer::commit_expired_extents(uint64_t db_id, uint64_t committed_xid)
             }
         }
     }
-    // If only drop happened at an XID, there is a possibility
-    // that only snapshot map will have details assuming
-    // all records up to XID-1 are flushed to disk
+    // If only drop happened at an XID, that wont be associated with XID in extents map,
+    // so needs to be processed separately
     auto snapshot_db_entry = _snapshot_map.find(db_id);
     if (snapshot_db_entry != _snapshot_map.end()) {
         auto& snapshot_xid_map = snapshot_db_entry->second;
