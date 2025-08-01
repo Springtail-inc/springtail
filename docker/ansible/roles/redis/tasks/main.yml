@@ -1,8 +1,12 @@
 - name: Enable Redis keyspace notifications
   ansible.builtin.lineinfile:
     path: /etc/redis/redis.conf
-    regexp: '^notify-keyspace-events'
+    regexp: '^(#\s*)?notify-keyspace-events\s+.*'
     line: 'notify-keyspace-events "AKE"'
+    state: present           # default, but explicit is nice
+    backrefs: yes            # replaces the matched line instead of adding another
+    create: yes              # in case the file is missing
+    backup: yes
 
 - name: Enable and start Redis
   ansible.builtin.service:
