@@ -104,6 +104,16 @@ namespace springtail {
         void update_schema_xid(const std::string &fdw_id, uint64_t db_id, uint64_t schema_xid);
 
         /**
+         * Used by FDW to retrieve the most recent schema XID for the database
+         * @brief Get the schema xid object
+         *
+         * @param fdw_id The ID of the FDW we are updating.
+         * @param db_id The ID of the database instance we are updating.
+         * @return uint64_t - the most recent schema XID
+         */
+        uint64_t get_schema_xid(const std::string &fdw_id, uint64_t db_id);
+
+        /**
          * Used by the FDW to commit the record without updating the schema XID.
          * This is used when the FDW already has the change applied and needs to remove
          * it from the queue.

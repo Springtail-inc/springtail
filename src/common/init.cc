@@ -1,3 +1,5 @@
+#include <fcntl.h>
+
 #include <fstream>
 #include <mutex>
 
@@ -49,6 +51,15 @@ bool DaemonRunner::start()
 
         // ignore hang-up
         std::signal(SIGHUP, SIG_IGN);
+
+        // Instead of closing, redirect to /dev/null
+        int null_fd = open("/dev/null", O_RDWR);
+        if (null_fd != -1) {
+            dup2(null_fd, 0);  // stdin
+            dup2(null_fd, 1);  // stdout
+            dup2(null_fd, 2);  // stderr
+            if (null_fd > 2) close(null_fd);
+        }
     } else {
         // ensure the pid directory exists
         std::filesystem::path pid_dir(pid_filename);
