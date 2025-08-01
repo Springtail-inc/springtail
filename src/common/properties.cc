@@ -13,23 +13,6 @@
 #include <common/logging.hh>
 #include <common/common.hh>
 
-namespace {
-    void patch_json(nlohmann::json& out, const nlohmann::json& in) 
-    {
-        for (auto it = in.begin(); it != in.end(); ++it) {
-            if (it->is_object()) {
-                auto oit = out.find(it.key());
-                if (oit == out.end()) {
-                    out[it.key()] = *it;
-                } else {
-                    patch_json(*oit, *it);
-                }
-            } else {
-                out[it.key()] = *it;
-            }
-        }
-    }
-}
 namespace springtail {
 
     nlohmann::json
@@ -178,7 +161,7 @@ namespace springtail {
             std::stringstream ss(patch);
             nlohmann::json override_json;
             ss >> override_json;
-            patch_json(system_json, override_json);
+            system_json.merge_patch(override_json);
         }
 
         // Extract system config
