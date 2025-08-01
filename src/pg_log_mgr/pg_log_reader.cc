@@ -1461,6 +1461,6 @@ namespace springtail::pg_log_mgr {
         // record the schema change into the batch
         // note: the current XID is only used to determine table existence
         _current_batch->schema_change(this->get_current_xid(), table_oid, oid, pg_xid, pg_xid_txn,
-                msg, _reader.included_schemas());
+                msg, Properties::get_include_schemas(_db_id));
     }
 } // namespace springtail::pg_log_mgr

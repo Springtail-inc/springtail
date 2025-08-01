@@ -1165,7 +1165,7 @@ namespace springtail {
         CHECK_EQ(usertype_msg.type, 'E');
 
         //check include schemas
-        if (!_included_schemas.empty() && !std::ranges::binary_search(_included_schemas, usertype_msg.namespace_name)) {
+        if (!_is_schema_included(usertype_msg.namespace_name)) {
             LOG_INFO("Create user type skipped: {}\n", usertype_msg.namespace_name);
             return {};
         }
@@ -1217,7 +1217,7 @@ namespace springtail {
         json["schema"].get_to(usertype_msg.namespace_name);
 
         //check include schemas
-        if (!_included_schemas.empty() && !std::ranges::binary_search(_included_schemas, usertype_msg.namespace_name)) {
+        if (!_is_schema_included(usertype_msg.namespace_name)) {
             LOG_INFO("Create user type skipped: {}\n", usertype_msg.namespace_name);
             return {};
         }
