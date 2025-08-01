@@ -1,4 +1,5 @@
 #include <storage/cache.hh>
+#include <storage/vacuumer.hh>
 
 #include <absl/log/log.h>
 #include <absl/log/check.h>
@@ -1469,8 +1470,6 @@ StorageCache::PageCache::background_cleaner()
         CacheExtentPtr extent = nullptr;
 
         while (extent == nullptr) {
-
-
             // search for the requested extent
             const auto cache_i = _clean_cache.find(key);
             if (cache_i != _clean_cache.end()) {
@@ -1530,6 +1529,9 @@ StorageCache::PageCache::background_cleaner()
         extent->_state = CacheExtent::State::FLUSHING;
         extent->_flush_cv = std::make_shared<boost::condition_variable>();
 
+        // On-disk size of the originating extent
+        uint64_t prev_extent_size = extent->_extent_size;
+
         // perform the flush
         {
             boost::unique_lock lock(_mutex, boost::adopt_lock);
@@ -1538,10 +1540,18 @@ StorageCache::PageCache::background_cleaner()
             auto handle = IOMgr::get_instance()->open(extent->_file, IOMgr::IO_MODE::APPEND, true);
             auto response = extent->async_flush(handle);
 
+            // notify the vacuumer of the now-expired extent
+            if (extent->header().prev_offset != constant::UNKNOWN_EXTENT) {
+                Vacuumer::get_instance()->expire_extent(extent->_file, extent->header().prev_offset,
+                                                        prev_extent_size, extent->header().xid);
+            }
+
             // XXX we could do this asynchronously and return a future that completes when the extent ID
             //     becomes available... should be safe to do so since we are already putting the extent
             //     into an exclusive FLUSHING state
-            extent->_extent_id = response.get()->offset;
+            auto&& flush_response = response.get();
+            extent->_extent_id = flush_response->offset;
+            extent->_extent_size = flush_response->next_offset - flush_response->offset;
 
             lock.lock();
             lock.release();
@@ -1666,7 +1676,8 @@ StorageCache::PageCache::background_cleaner()
         // read the extent
         auto handle = IOMgr::get_instance()->open(file, IOMgr::READ, true);
         auto response = handle->read(extent_id);
-        auto extent = std::make_shared<CacheExtent>(response->data, file, extent_id);
+        auto extent = std::make_shared<CacheExtent>(response->data, file, extent_id,
+                                                    response->next_offset - response->offset);
 
         // reacquire the lock once IO complete
         lock.lock();

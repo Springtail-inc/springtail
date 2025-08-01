@@ -70,10 +70,12 @@ namespace springtail {
         public:
             CacheExtent(const std::vector<std::shared_ptr<std::vector<char>>> &data,
                         const std::filesystem::path &file,
-                        uint64_t extent_id)
+                        uint64_t extent_id,
+                        uint32_t extent_size)
                 : Extent(data),
                   _file(file),
                   _extent_id(extent_id),
+                  _extent_size(extent_size),
                   _use_count(1),
                   _state(State::CLEAN),
                   _cache_id(0)
@@ -84,6 +86,7 @@ namespace springtail {
                 : Extent(header),
                   _file(file),
                   _extent_id(constant::UNKNOWN_EXTENT),
+                  _extent_size(0), // no original extent
                   _use_count(1),
                   _state(State::DIRTY),
                   _cache_id(0)
@@ -95,7 +98,8 @@ namespace springtail {
             CacheExtent(const CacheExtent &extent)
                 : Extent(extent),
                   _file(extent._file),
-                  _extent_id(constant::UNKNOWN_EXTENT),
+                  _extent_id(constant::UNKNOWN_EXTENT), // extent now has no on-disk location
+                  _extent_size(extent._extent_size), // maintain the original size
                   _use_count(1),
                   _state(State::DIRTY),
                   _cache_id(0)
@@ -108,6 +112,7 @@ namespace springtail {
                 : Extent(std::move(other)),
                   _file(original._file),
                   _extent_id(constant::UNKNOWN_EXTENT),
+                  _extent_size(original._extent_size), // maintain the original size
                   _use_count(1),
                   _state(State::DIRTY),
                   _cache_id(0)
@@ -141,6 +146,7 @@ namespace springtail {
         private:
             std::filesystem::path _file; ///< The file containing this extent.
             uint64_t _extent_id; ///< The extent_id of this extent.
+            uint32_t _extent_size; ///< The original size of the extent on-disk.  Used for vacuuming.
 
             // note: the following are only used by the DataCache and are protected by it's mutex
 

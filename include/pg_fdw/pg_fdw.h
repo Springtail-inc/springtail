@@ -19,6 +19,9 @@ PgFdwMgr* get_fdw_mgr();
 /** Init call, pass in config file path */
 void fdw_init(const char *config_file);
 
+/** Start call, pass database name and ddl connection flag */
+void fdw_start(const char *db_name, bool ddl_connection);
+
 /** Exit call */
 void fdw_exit();
 
