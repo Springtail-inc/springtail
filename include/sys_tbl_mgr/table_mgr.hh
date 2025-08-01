@@ -86,6 +86,16 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base,
          */
         void finalize_metadata(uint64_t db_id, uint64_t xid);
 
+        /**
+         * @brief Get table data dir for a table_id
+         *
+         * @param db_id    Database ID
+         * @param table_id Table ID
+         * @param xid      XID for which table data file is located
+         * @return Table data dir path
+         */
+        std::filesystem::path get_table_data_dir(uint64_t db_id, uint64_t table_id, uint64_t xid);
+
     private:
         /**
          * @brief Construct a new TableMgr object

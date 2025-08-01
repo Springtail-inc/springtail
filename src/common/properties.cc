@@ -13,6 +13,23 @@
 #include <common/logging.hh>
 #include <common/common.hh>
 
+namespace {
+    void patch_json(nlohmann::json& out, const nlohmann::json& in) 
+    {
+        for (auto it = in.begin(); it != in.end(); ++it) {
+            if (it->is_object()) {
+                auto oit = out.find(it.key());
+                if (oit == out.end()) {
+                    out[it.key()] = *it;
+                } else {
+                    patch_json(*oit, *it);
+                }
+            } else {
+                out[it.key()] = *it;
+            }
+        }
+    }
+}
 namespace springtail {
 
     nlohmann::json
@@ -154,6 +171,15 @@ namespace springtail {
         std::ifstream file(config_file);
         nlohmann::json system_json;
         file >> system_json;
+
+        // patch the config
+        const char *patch = std::getenv(environment::ENV_OVERRIDE_JSON);
+        if (patch) {
+            std::stringstream ss(patch);
+            nlohmann::json override_json;
+            ss >> override_json;
+            patch_json(system_json, override_json);
+        }
 
         // Extract system config
         _json[LOGGING_CONFIG] = system_json["logging"];
@@ -454,6 +480,18 @@ namespace springtail {
         CHECK(db_config.contains("name"));
 
         return db_config["name"];
+    }
+
+    uint64_t
+    Properties::_get_db_id(const std::string &db_name)
+    {
+        std::map<uint64_t, std::string> dbs = _get_databases();
+        for (auto &[dbs_id, dbs_name]: dbs) {
+            if (dbs_name == db_name) {
+                return dbs_id;
+            }
+        }
+        CHECK(false) << "Could not find database name " << db_name;
     }
 
     std::vector<std::string>
