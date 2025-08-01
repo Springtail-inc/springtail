@@ -451,6 +451,7 @@ namespace springtail::pg_fdw {
 
             // read latest schema xid from redis
             uint64_t schema_xid = redis_ddl.get_schema_xid(_fdw_id, _db_id);
+            std::unique_lock xid_lock(_xid_update_mutex);
             if (schema_xid == 0) {
                 schema_xid = _schema_xid;
             } else {
@@ -468,7 +469,6 @@ namespace springtail::pg_fdw {
             //      it once from init() function.
             // _try_create_cache();
             uint64_t xid = _update_last_xid(schema_xid);
-            std::unique_lock xid_lock(_xid_update_mutex);
             if (xid > _last_xid) {
                 _last_xid = xid;
                 _xid_collector_client.send_data(_db_id, xid);
@@ -572,14 +572,17 @@ namespace springtail::pg_fdw {
         DCHECK(db_id == _db_id);
         uint64_t xid; // springtail xid
 
-        // check if the schema_xid has progressed, if so, invalidate the schema cache
-        const uint64_t prev_schema_xid = _schema_xid.exchange(schema_xid);
-        if (prev_schema_xid < schema_xid) {
-            sys_tbl_mgr::Client::get_instance()->invalidate_db(db_id, XidLsn(schema_xid));
-        }
-
         // try to use the cache
         _try_create_cache();
+
+        std::unique_lock xid_lock(_xid_update_mutex);
+
+        // check if the schema_xid has progressed, if so, invalidate the schema cache
+        DCHECK(schema_xid >= _schema_xid);
+        if (schema_xid > _schema_xid) {
+            _schema_xid = schema_xid;
+            sys_tbl_mgr::Client::get_instance()->invalidate_db(db_id, XidLsn(schema_xid));
+        }
 
         // lookup pg_xid in xid_map;
         // if doesn't exist, get a new xid from xid_mgr and add to map
@@ -603,12 +606,13 @@ namespace springtail::pg_fdw {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 xid = _update_last_xid(schema_xid);
             }
-            std::unique_lock xid_lock(_xid_update_mutex);
             if (xid > _last_xid) {
                 _last_xid = xid;
                 _xid_collector_client.send_data(db_id, xid);
             }
         }
+
+        xid_lock.unlock();
 
         LOG_DEBUG(LOG_FDW, "fdw_create_state: db_id: {}, tid: {}, xid: {}, pg_xid: {}, schema_xid: {}",
                             db_id, tid, xid, pg_xid, schema_xid);
