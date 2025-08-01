@@ -7,6 +7,7 @@
 #include <common/init.hh>
 #include <common/logging.hh>
 #include <common/exception.hh>
+#include <common/environment.hh>
 
 #include <pg_repl/pg_msg_log_gen.hh>
 #include <pg_repl/pg_repl_msg.hh>
@@ -21,6 +22,35 @@ namespace {
         static constexpr char const * const LOG_FILE = "/tmp/test_log_reader.log";
         static void SetUpTestSuite()
         {
+            // Add two fake databeses with custom include.schemas config
+            std::string js = 
+            "{ "
+            "\"db_instances\": {"
+                "\"1234\": {"
+                    "\"database_ids\": [\"1\", \"2\", \"3\"]"
+                "}"
+            "},"
+            "\"databases\": "
+                "{\"2\": {\"name\": \"springtail\","
+                    "\"replication_slot\": \"springtail_slot\","
+                    "\"publication_name\": \"springtail_pub\","
+                    "\"include\": {"
+                        "\"schemas\": [\"test\"]}},"
+                "\"3\": {\"name\": \"springtail\","
+                    "\"replication_slot\": \"springtail_slot\","
+                    "\"publication_name\": \"springtail_pub\","
+                    "\"include\": {"
+                        "\"schemas\": [\"public\"]}}"
+                "}"
+            "}";
+
+            ::setenv(environment::ENV_OVERRIDE_JSON, js.c_str(), 1);
+            //auto ts = ::getenv(environment::ENV_OVERRIDE_JSON);
+            //assert(ts);
+
+            // don't load this into redis
+            //::setenv(environment::LOAD_OVERRIDE, "false", 1);
+
             // code here will execute just before the test ensues
             springtail_init_test();
         }
@@ -69,7 +99,7 @@ namespace {
     {
         bool eos=false;
 
-        PgMsgStreamReader reader(_log_file, {});
+        PgMsgStreamReader reader({}, _log_file);
 
         int count = 0;
         while (count < 7) {
@@ -84,7 +114,7 @@ namespace {
     TEST_F(MsgStreamReader_Test, Offset)
     {
         bool eos=false;
-        PgMsgStreamReader reader(_log_file, {});
+        PgMsgStreamReader reader({}, _log_file);
 
         // read next message
         PgMsgPtr msg = reader.read_message({}, eos);
@@ -96,7 +126,7 @@ namespace {
     {
         bool eos=false;
 
-        PgMsgStreamReader reader(_log_file, {});
+        PgMsgStreamReader reader({}, _log_file);
 
         int count = 0;
         while (!eos) {
@@ -112,12 +142,13 @@ namespace {
     {
         bool eos=false;
 
-        PgMsgStreamReader reader(_log_file, {});
+        PgMsgStreamReader reader(1, _log_file);
+
         // ignore create/drop/alter/create index for any namespace but "test"
-        PgMsgStreamReader ns_reader(_log_file, {"test"});
+        PgMsgStreamReader ns_reader(2, _log_file);
 
         // public namespace is hardcoded in the test json
-        PgMsgStreamReader pub_reader(_log_file, {"public"});
+        PgMsgStreamReader pub_reader(3, _log_file);
 
         int count = 0;
         while (!eos) {

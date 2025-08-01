@@ -26,7 +26,7 @@ namespace springtail::pg_log_mgr {
          _committed_xid(xid_mgr::XidMgrServer::get_instance()->get_committed_xid(db_id, 0)),
           _archive_logs(archive_logs),
           _repl_log_path(repl_log_path),
-          _reader(Properties::get_include_schemas(db_id)),
+          _reader(_db_id),
           _committer_queue(committer_queue),
           _msg_queue(queue_size),
           _index_requests_mgr(index_requests_mgr)

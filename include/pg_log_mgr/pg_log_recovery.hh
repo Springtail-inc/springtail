@@ -18,7 +18,7 @@ public:
           _repl_path(repl_path),
           _xact_path(xact_path),
           _committed_xid(committed_xid),
-          _repl_reader(Properties::get_include_schemas(db_id)),
+          _repl_reader(_db_id),
           _pg_log_reader(log_reader)
     {
         LOG_DEBUG(LOG_PG_LOG_MGR, "Starting recovery with last committed xid = {}", _committed_xid);

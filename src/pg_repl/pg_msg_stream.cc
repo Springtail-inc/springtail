@@ -24,22 +24,19 @@ extern "C" {
 }
 
 namespace springtail {
-    PgMsgStreamReader::PgMsgStreamReader(std::vector<std::string> include_schemas)
-        :_included_schemas{std::move(include_schemas)}
-    {
-        // for faster binary search
-        std::ranges::sort(_included_schemas);
-    }
+    PgMsgStreamReader::PgMsgStreamReader(uint64_t db_id)
+        :_db_id{db_id}
+    {}
 
-    PgMsgStreamReader::PgMsgStreamReader(const std::filesystem::path &start_file,
-                                         std::vector<std::string> included_schemas,
-                                         uint64_t start_offset,
-                                         uint64_t end_offset)
-        : _current_path(start_file), _included_schemas(std::move(included_schemas)),
+    PgMsgStreamReader::PgMsgStreamReader(std::optional<uint64_t> db_id, 
+            const std::filesystem::path &start_file,
+            uint64_t start_offset,
+            uint64_t end_offset)
+        : _db_id(db_id),
+        _current_path(start_file),
         _current_offset(start_offset), _end_msg_offset(end_offset)
     {
         // for faster binary search
-        std::ranges::sort(_included_schemas);
         _open_file(start_file, start_offset);
     }
 
@@ -872,7 +869,7 @@ namespace springtail {
         json["schema"].get_to(msg.namespace_name);
         json["table_name"].get_to(msg.table_name);
 
-        if (!_included_schemas.empty() && !std::ranges::binary_search(_included_schemas, msg.namespace_name)) {
+        if (!_is_schema_included(msg.namespace_name)) {
             LOG_INFO("Create index skipped: {} {}\n", msg.table_name, msg.namespace_name);
             return {};
         }
@@ -917,7 +914,7 @@ namespace springtail {
         json["oid"].get_to(msg.oid);
         json["identity"].get_to(msg.index);
 
-        if (!_included_schemas.empty() && !std::ranges::binary_search(_included_schemas, msg.namespace_name)) {
+        if (!_is_schema_included(msg.namespace_name)) {
             LOG_INFO("Create index skipped: {} {}\n", msg.oid, msg.namespace_name);
             return {};
         }
@@ -971,7 +968,7 @@ namespace springtail {
         json["schema"].get_to(table_msg.namespace_name);
 
         //check include schemas
-        if (!_included_schemas.empty() && !std::ranges::binary_search(_included_schemas, table_msg.namespace_name)) {
+        if (!_is_schema_included(table_msg.namespace_name)) {
             LOG_INFO("Create table skipped: {} {}\n", table_msg.table, table_msg.namespace_name);
             return {};
         }
@@ -1044,7 +1041,7 @@ namespace springtail {
         json["schema"].get_to(drop_table_msg.namespace_name);
 
         //check include schemas
-        if (!_included_schemas.empty() && !std::ranges::binary_search(_included_schemas, drop_table_msg.namespace_name)) {
+        if (!_is_schema_included(drop_table_msg.namespace_name)) {
             LOG_INFO("Drop table skipped: {} {}\n", drop_table_msg.table, drop_table_msg.namespace_name);
             return {};
         }
@@ -1083,7 +1080,7 @@ namespace springtail {
         LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded create/alter namespace: json: {}", json.dump());
 
         //check include schemas
-        if (!_included_schemas.empty() && !std::ranges::binary_search(_included_schemas, ns_msg.name)) {
+        if (!_is_schema_included(ns_msg.name)) {
             LOG_INFO("Create namespace skipped: {}\n", ns_msg.name);
             return {};
         }
@@ -1134,7 +1131,7 @@ namespace springtail {
         LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded drop namespace: json: {}", json.dump());
 
         //check include schemas
-        if (!_included_schemas.empty() && !std::ranges::binary_search(_included_schemas, ns_msg.name)) {
+        if (!_is_schema_included(ns_msg.name)) {
             LOG_INFO("Drop namespace skipped: {}\n", ns_msg.name);
             return {};
         }
@@ -1370,7 +1367,7 @@ namespace springtail {
     }
 
     uint64_t
-    PgMsgStreamReader::scan_log(const std::filesystem::path &file, const std::vector<std::string>& include_schemas, bool truncate)
+    PgMsgStreamReader::scan_log(uint64_t db_id, const std::filesystem::path &file, bool truncate)
     {
         // updated logic:
         // 1) scan for BEGIN/COMMIT records
@@ -1382,7 +1379,7 @@ namespace springtail {
         uint64_t end_lsn = INVALID_LSN;
         uint64_t offset = 0;
 
-        PgMsgStreamReader reader(file, include_schemas);
+        PgMsgStreamReader reader(db_id, file);
         do {
             auto msg = reader.read_message(filter);
 
@@ -1418,6 +1415,16 @@ namespace springtail {
         // truncate to the end of the last-seen commit
         _truncate_file(file, offset);
         return end_lsn;
+    }
+
+    bool PgMsgStreamReader::_is_schema_included(const std::string& schema)
+    {
+        if (!_db_id.has_value()) {
+            return true;
+        }
+        auto included_schemas = Properties::get_include_schemas(*_db_id);
+        return included_schemas.empty() ||
+           std::ranges::find(included_schemas, schema) != included_schemas.end();
     }
 
     void

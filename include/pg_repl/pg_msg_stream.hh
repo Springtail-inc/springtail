@@ -64,18 +64,17 @@ namespace springtail {
         /** Filter for all message types */
         const std::vector<char> ALL_MESSAGES = {'B', 'C', 'R', 'I', 'U', 'D', 'T',
                                                 'O', 'M', 'Y', 'S', 'E', 'c', 'A'};
-        explicit PgMsgStreamReader(std::vector<std::string> include_schemas);
+        explicit PgMsgStreamReader(uint64_t db_id);
         PgMsgStreamReader(const PgMsgStreamReader&) = delete;
         PgMsgStreamReader& operator=(const PgMsgStreamReader&) = delete;
         /**
          * @brief Construct a new Pg Msg Stream Reader object
+         * @param db_id The database id
          * @param start_file file to start reading from
-         * @param include_schemas Only tables from the list will be handled. If the list is empty
-         *                        all schemas are included.
          * @param start_offset offset to start reading from (0 = beginning of file)
          * @param end_offset offset to stop reading at (-1 = end of file)
          */
-        PgMsgStreamReader(const std::filesystem::path &start_file, std::vector<std::string> include_schemas,
+        PgMsgStreamReader(std::optional<uint64_t> db_id, const std::filesystem::path &start_file,
                           uint64_t start_offset=0, uint64_t end_offset=-1);
 
         /**
@@ -137,8 +136,9 @@ namespace springtail {
          * @param truncate if true truncate file to end of last message if eof reached prematurely
          * @return uint64_t end LSN of last message
          */
-        static uint64_t scan_log(const std::filesystem::path &file, 
-                const std::vector<std::string>& include_schemas, bool truncate=false);
+        static uint64_t scan_log(uint64_t db_id,
+                const std::filesystem::path &file, 
+                bool truncate=false);
 
         void set_streaming() { _streaming = true; }
     protected:
@@ -213,11 +213,11 @@ namespace springtail {
         void _skip_stream_abort();
 
     private:
+        std::optional<uint64_t> _db_id;
+
         std::fstream _stream;                ///< current file stream
 
         std::filesystem::path _current_path; ///< current file path
-
-        std::vector<std::string> _included_schemas; ///< included schemas 
 
         uint64_t _message_offset = 0;   ///< offset of the message we just read
         uint64_t _current_offset;       ///< current file offset for next read
@@ -235,6 +235,8 @@ namespace springtail {
                 throw PgMessageEOFError();
             }
         }
+
+        bool _is_schema_included(const std::string& schema);
 
         /** Helper to seek stream based on current offset */
         void _seek_stream() {

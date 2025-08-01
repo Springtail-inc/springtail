@@ -39,7 +39,7 @@ int main(int argc, char* argv[])
     // init logging/backtrace
     springtail_init(false, std::nullopt, LOG_PG_REPL);
 
-    uint64_t last_lsn = PgMsgStreamReader::scan_log(file, {});
+    uint64_t last_lsn = PgMsgStreamReader::scan_log({}, file);
 
     std::cout << "Found Last LSN: " << last_lsn << std::endl;
     springtail_shutdown();
