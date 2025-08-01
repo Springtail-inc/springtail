@@ -97,6 +97,12 @@ Vacuumer::commit_expired_extents(uint64_t db_id, uint64_t committed_xid)
         // iterate files
         for (auto file_it = _extent_map.begin(); file_it != _extent_map.end(); )
         {
+            // Process only committing db's entires
+            if (_get_db_id_from_path(file_it->first) != db_id) {
+                ++file_it;
+                continue;
+            }
+
             // ordered map< uint64_t, Extents >
             auto& xid_map = file_it->second;
             auto  xid_it  = xid_map.begin();
@@ -114,6 +120,7 @@ Vacuumer::commit_expired_extents(uint64_t db_id, uint64_t committed_xid)
 
                 // Lets get the dropped snapshots at this XID
                 // and add to the same extent
+                bool snapshot_entries_found = false;
                 auto snapshot_db_entry = _snapshot_map.find(db_id);
                 if (snapshot_db_entry != _snapshot_map.end()) {
                     auto& snapshot_xid_map = snapshot_db_entry->second;
@@ -122,6 +129,7 @@ Vacuumer::commit_expired_extents(uint64_t db_id, uint64_t committed_xid)
                     if (snapshot_xid_entry != snapshot_xid_map.end()) {
                         SnapshotList& snapshot_list = snapshot_xid_entry->second;
                         _upsert_extent_using_snapshot_list(xid_it->first, snapshot_list, extent);
+                        snapshot_entries_found = true;
                     }
                 }
 
@@ -129,7 +137,18 @@ Vacuumer::commit_expired_extents(uint64_t db_id, uint64_t committed_xid)
                 auto response = extent->async_flush(handle);
                 response.wait();
 
-                // erase and advance in one step
+                // Erase entries from snapshots if picked
+                if (snapshot_entries_found) {
+                    snapshot_db_entry = _snapshot_map.find(db_id);
+                    CHECK(snapshot_db_entry != _snapshot_map.end());
+                    auto& snapshot_xid_map = snapshot_db_entry->second;
+                    CHECK(snapshot_xid_map.size() > 0);
+                    auto snapshot_xid_entry = snapshot_xid_map.find(xid_it->first);
+                    CHECK(snapshot_xid_entry != snapshot_xid_map.end());
+                    snapshot_xid_map.erase(snapshot_xid_entry);
+                }
+
+                // Erase from extents map and advance in one step
                 xid_it = xid_map.erase(xid_it);
             }
 
@@ -140,32 +159,31 @@ Vacuumer::commit_expired_extents(uint64_t db_id, uint64_t committed_xid)
                 ++file_it;
             }
         }
-    } else {
-        // If only drop happened at an XID, there is a possibility
-        // that only snapshot map will have details assuming
-        // all records up to XID-1 are flushed to disk
-        auto snapshot_db_entry = _snapshot_map.find(db_id);
-        if (snapshot_db_entry != _snapshot_map.end()) {
-            auto& snapshot_xid_map = snapshot_db_entry->second;
-            auto snapshot_xid_entry = snapshot_xid_map.begin();
+    }
+    // If only drop happened at an XID, there is a possibility
+    // that only snapshot map will have details assuming
+    // all records up to XID-1 are flushed to disk
+    auto snapshot_db_entry = _snapshot_map.find(db_id);
+    if (snapshot_db_entry != _snapshot_map.end()) {
+        auto& snapshot_xid_map = snapshot_db_entry->second;
+        auto snapshot_xid_entry = snapshot_xid_map.begin();
 
-            // Flush only the snapshot deletion up to the committed XID
-            while (snapshot_xid_entry != snapshot_xid_map.end()) {
-                if (snapshot_xid_entry->first > committed_xid) {
-                    break;
-                }
-                SnapshotList& snapshot_list = snapshot_xid_entry->second;
-
-                // Create extent with snapshot deletion records
-                auto extent = _upsert_extent_using_snapshot_list(snapshot_xid_entry->first, snapshot_list);
-
-                // Flush to disk
-                auto response = extent->async_flush(handle);
-                response.wait();
-
-                // Erase and advance
-                snapshot_xid_entry = snapshot_xid_map.erase(snapshot_xid_entry);
+        // Flush only the snapshot deletion up to the committed XID
+        while (snapshot_xid_entry != snapshot_xid_map.end()) {
+            if (snapshot_xid_entry->first > committed_xid) {
+                break;
             }
+            SnapshotList& snapshot_list = snapshot_xid_entry->second;
+
+            // Create extent with snapshot deletion records
+            auto extent = _upsert_extent_using_snapshot_list(snapshot_xid_entry->first, snapshot_list);
+
+            // Flush to disk
+            auto response = extent->async_flush(handle);
+            response.wait();
+
+            // Erase and advance
+            snapshot_xid_entry = snapshot_xid_map.erase(snapshot_xid_entry);
         }
     }
 }
