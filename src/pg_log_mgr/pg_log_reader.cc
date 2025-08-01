@@ -385,7 +385,7 @@ namespace springtail::pg_log_mgr {
     }
 
     bool
-    PgLogReader::Batch::_handle_validation(PgMsgPtr msg)
+    PgLogReader::Batch::_handle_validation(PgMsgPtr msg, const std::vector<std::string>& include_schemas)
     {
         // check for DROP_TABLE to clear any existing invalidation
         if (msg->msg_type == PgMsgEnum::DROP_TABLE) {
@@ -402,7 +402,8 @@ namespace springtail::pg_log_mgr {
 
         // check if the table contains invalid columns -- if so we need to ignore this table
         auto invalid_columns =
-            TableValidator::get_instance()->validate_columns<PgMsgSchemaColumn>(table_msg.columns);
+            TableValidator::get_instance()->validate_columns<PgMsgSchemaColumn>(table_msg.columns,
+                    include_schemas);
 
         if (invalid_columns.size() > 0) {
             // mark the table as invalid in this batch
@@ -455,12 +456,13 @@ namespace springtail::pg_log_mgr {
                                       int32_t oid,
                                       uint32_t pg_xid,
                                       uint32_t pg_xid_txn,
-                                      PgMsgPtr msg)
+                                      PgMsgPtr msg,
+                                      const std::vector<std::string>& include_schemas)
     {
         auto scope = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader")->WithActiveSpan(_span);
 
         // perform the table column validations and update the message accordingly
-        if (!_handle_validation(msg)) {
+        if (!_handle_validation(msg, include_schemas)) {
             LOG_DEBUG(LOG_PG_LOG_MGR, "Skip CREATE_TABLE due to invalid table: tid={} pg_xid={}\n", oid, pg_xid);
             return;
         }
@@ -1458,6 +1460,7 @@ namespace springtail::pg_log_mgr {
 
         // record the schema change into the batch
         // note: the current XID is only used to determine table existence
-        _current_batch->schema_change(this->get_current_xid(), table_oid, oid, pg_xid, pg_xid_txn, msg);
+        _current_batch->schema_change(this->get_current_xid(), table_oid, oid, pg_xid, pg_xid_txn,
+                msg, Properties::get_include_schemas(_db_id));
     }
 } // namespace springtail::pg_log_mgr

@@ -1164,6 +1164,12 @@ namespace springtail {
 
         CHECK_EQ(usertype_msg.type, 'E');
 
+        //check include schemas
+        if (!_is_schema_included(usertype_msg.namespace_name)) {
+            LOG_INFO("Create user type skipped: {}\n", usertype_msg.namespace_name);
+            return {};
+        }
+
         LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded create/alter usertype: json: {}", json.dump());
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_TYPE);
@@ -1209,6 +1215,12 @@ namespace springtail {
         json["oid"].get_to(usertype_msg.oid);
         json["name"].get_to(usertype_msg.name);
         json["schema"].get_to(usertype_msg.namespace_name);
+
+        //check include schemas
+        if (!_is_schema_included(usertype_msg.namespace_name)) {
+            LOG_INFO("Create user type skipped: {}\n", usertype_msg.namespace_name);
+            return {};
+        }
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded drop usertype: json: {}", json.dump());
 

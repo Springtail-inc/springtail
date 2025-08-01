@@ -141,6 +141,7 @@ namespace springtail {
                 bool truncate=false);
 
         void set_streaming() { _streaming = true; }
+
     protected:
         // Proto V1; message lengths if fixed length; excludes first byte for opcode
         static inline constexpr int LEN_BEGIN    = (8 + 8 + 4);
