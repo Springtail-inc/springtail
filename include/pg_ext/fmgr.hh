@@ -5,40 +5,50 @@
 #include <pg_ext/export.hh>
 #include <pg_ext/memory.hh>
 
+// VARATT START
+#define FLEXIBLE_ARRAY_MEMBER
 
-#define VARHDRSZ_LONG  4
-#define VARHDRSZ_SHORT 1
+typedef union
+{
+	struct
+	{
+		uint32_t		va_header;
+		char		va_data[FLEXIBLE_ARRAY_MEMBER];
+	}			va_4byte;
+} varattrib_4b;
 
-static inline int VARATT_IS_1B(const void *p) {
-    return ((*(const unsigned char*)p) & 0x80) != 0;
-}
+typedef struct
+{
+	uint8_t		va_header;
+	char		va_data[FLEXIBLE_ARRAY_MEMBER];
+} varattrib_1b;
 
-static inline int32_t VARSIZE_ANY(const void *p) {
-    if (VARATT_IS_1B(p)) {
-        return (int32_t)((*(const unsigned char*)p) & 0x7F) + VARHDRSZ_SHORT;
-    } else {
-        int32_t len;
-        std::memcpy(&len, p, 4);
-        return len;
-    }
-}
+#define VARDATA_4B(PTR)		(((varattrib_4b *) (PTR))->va_4byte.va_data)
+#define VARDATA_1B(PTR)		(((varattrib_1b *) (PTR))->va_data)
+#define VARATT_IS_1B(PTR) \
+	((((varattrib_1b *) (PTR))->va_header & 0x80) == 0x80)
 
-static inline int32_t VARSIZE_ANY_EXHDR(const void *p) {
-    if (VARATT_IS_1B(p)) {
-        return (int32_t)((*(const unsigned char*)p) & 0x7F);
-    } else {
-        int32_t len;
-        std::memcpy(&len, p, 4);
-        return len - VARHDRSZ_LONG;
-    }
-}
+#define VARSIZE_4B(PTR) \
+	(((varattrib_4b *) (PTR))->va_4byte.va_header & 0x3FFFFFFF)
+#define VARSIZE_1B(PTR) \
+	(((varattrib_1b *) (PTR))->va_header & 0x7F)
 
-static inline char* VARDATA_ANY(void *p) {
-    return (char*)p + (VARATT_IS_1B(p) ? VARHDRSZ_SHORT : VARHDRSZ_LONG);
-}
-static inline const char* VARDATA_ANY_CONST(const void *p) {
-    return (const char*)p + (VARATT_IS_1B(p) ? VARHDRSZ_SHORT : VARHDRSZ_LONG);
-}
+#define VARDATA_ANY(PTR) \
+	 (VARATT_IS_1B(PTR) ? VARDATA_1B(PTR) : VARDATA_4B(PTR))
+
+#define VARSIZE_ANY(PTR) \
+	VARATT_IS_1B(PTR) ? VARSIZE_1B(PTR) : \
+	  VARSIZE_4B(PTR)
+#define VARHDRSZ ((uint32_t) sizeof(uint32_t))
+#define VARHDRSZ_SHORT (offsetof(varattrib_1b, va_data))
+
+#define VARSIZE_ANY_EXHDR(PTR) \
+	(VARATT_IS_1B(PTR) ? VARSIZE_1B(PTR)-VARHDRSZ_SHORT : \
+	  VARSIZE_4B(PTR)-VARHDRSZ)
+#define SET_VARSIZE_1B(PTR,len) \
+	(((varattrib_1b *) (PTR))->va_header = (((uint8_t) (len)) << 1) | 0x01)
+
+// VARATT END
 
 
 // Collation is often just a 4-byte OID in Postgres
@@ -133,11 +143,6 @@ struct FunctionCallInfoData
 	} while (0)
 
 #define FunctionCallInvoke(fcinfo)	((* (fcinfo)->flinfo->fn_addr) (fcinfo))
-
-// TOAST
-#define VARATT_IS_EXTENDED(PTR)
-#define VARATT_IS_4B_U(PTR) \
-	((((varattrib_1b *) (PTR))->va_header & 0xC0) == 0x00)
 
 // Function interfaces
 extern "C" PGEXT_API Datum DirectFunctionCall2(PGFunction func, Datum arg1, Datum arg2);

@@ -19,8 +19,6 @@ static inline unsigned char tolower_ascii(unsigned char c)
 }
 
 char *lowerstr_with_len(const char *str, int len) {
-    fprintf(stderr, "[shim] lowerstr_with_len in=%p len=%d\n", (void*)str, len);
-
     if (!str || len <= 0) {
         char *empty = (char *)palloc(1);
         if (empty) empty[0] = '\0';
@@ -55,13 +53,6 @@ char *lowerstr_with_len(const char *str, int len) {
 
     buf[o] = '\0';
 
-    // Print full transformed output (safe logging)
-    fprintf(stderr, "[shim] lowerstr_with_len out=%p len=%d bytes:", (void *)buf, o);
-    for (int j = 0; j < o; j++) {
-        fprintf(stderr, " %02X", (unsigned char)buf[j]);
-    }
-    fprintf(stderr, "  ascii:'%.*s'\n", o, buf);
-
     return buf;
 }
 
@@ -87,7 +78,6 @@ char *upperstr_with_len(const char *str, int len) {
 }
 
 int pg_mblen(const char *mbstr) {
-    if (!mbstr) return 0;
     const unsigned char lead = *(const unsigned char*)mbstr;
     int len = (lead < 0x80) ? 1
             : ((lead & 0xE0) == 0xC0) ? 2
@@ -95,10 +85,6 @@ int pg_mblen(const char *mbstr) {
             : ((lead & 0xF8) == 0xF0) ? 4
             : 1;
 
-    fprintf(stderr, "[shim] pg_mblen mbstr=%p lead=0x%02X ascii='%c' -> %d\n",
-            (const void*)mbstr, lead,
-            (lead >= 32 && lead < 127) ? (char)lead : '.',
-            len);
     return len;
 }
 
@@ -190,7 +176,6 @@ int pg_mbstrlen_with_len(const char *mbstr, int len)
 
 int t_isalnum(const char *ptr) {
     if (!ptr || !*ptr) return 0;
-    fprintf(stderr, "[shim] t_isalnum ptr=%p '%.*s'\n", (void*)ptr, pg_mbstrlen_with_len(ptr, 10), ptr);
     return t_isalpha(ptr) || t_isdigit(ptr);
 }
 
