@@ -21,12 +21,17 @@ set(PG_FDW_SOURCES
 set(PG_DDL_SOURCES
     pg_ddl_mgr.cc
     pg_fdw_ddl_common.cc
+    pg_xid_collector.cc
 )
 
 set(PG_FDW_TEST_SOURCES
     test/mock_pg.c
     pg_fdw_mgr.cc
     pg_fdw_ddl_common.cc
+)
+
+set(PG_XID_COLLECTOR_CLIENT_SOURCES
+    pg_xid_collector_client.cc
 )
 
 # For postgres regression tests
@@ -50,6 +55,14 @@ add_library(springtail_test_fdw OBJECT ${PG_FDW_TEST_SOURCES})
 target_include_directories(springtail_test_fdw
     PUBLIC ${PROJECT_SOURCE_DIR}/include
     PRIVATE ${PostgreSQL_INCLUDE_DIRS}
+)
+
+add_library(springtail_xid_collector_client OBJECT ${PG_XID_COLLECTOR_CLIENT_SOURCES})
+target_include_directories(springtail_xid_collector_client
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+)
+target_link_libraries(springtail_xid_collector_client
+    springtail_common
 )
 
 if(${LINUX})
@@ -77,6 +90,7 @@ target_link_libraries(springtail_pg_fdw
     PRIVATE springtail_storage
     PRIVATE springtail_xid_mgr_client
     PRIVATE springtail_sys_tbl_mgr
+    PRIVATE springtail_xid_collector_client
 )
 
 target_link_libraries(springtail_pg_ddl
@@ -94,6 +108,7 @@ target_link_libraries(springtail_test_fdw
     springtail_common
     springtail_xid_mgr
     springtail_sys_tbl_mgr
+    springtail_xid_collector_client
     PRIVATE Boost::thread
     nlohmann_json::nlohmann_json
     gRPC::grpc++
@@ -136,6 +151,16 @@ target_include_directories(dump_table
      PRIVATE ${PostgreSQL_INCLUDE_DIRS}
 )
 
+add_executable(xid_collector_client test/xid_collector_client.cc)
+target_include_directories(xid_collector_client
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+)
+target_link_libraries(xid_collector_client
+    PRIVATE springtail_common
+    PRIVATE springtail_xid_collector_client
+    PRIVATE Boost::program_options
+)
+
 if (${LINUX})
 set(START_GROUP "-Wl,--start-group")
 set(END_GROUP "-Wl,--end-group")
@@ -146,6 +171,7 @@ endif()
 
 target_link_libraries(dump_table
      PRIVATE springtail_test_fdw
+     PRIVATE springtail_xid_collector_client
      PRIVATE springtail_pg
      PRIVATE springtail_common
      PRIVATE springtail_storage
@@ -178,6 +204,7 @@ springtail_unit_test(test_where
   SOURCES test/where_test.cc
   INCLUDES ${PROJECT_SOURCE_DIR}/include ${PostgreSQL_INCLUDE_DIRS}
   LIBS springtail_test_fdw
+       springtail_xid_collector_client
        springtail_pg
        springtail_common
        springtail_test
@@ -226,7 +253,7 @@ install(FILES
 )
 
 springtail_unit_test(test_pg_ddl_mgr
-    SOURCES test/test_pg_ddl_mgr.cc pg_ddl_mgr.cc pg_fdw_ddl_common.cc
+    SOURCES test/test_pg_ddl_mgr.cc pg_ddl_mgr.cc pg_fdw_ddl_common.cc pg_xid_collector.cc
     INCLUDES ${PROJECT_SOURCE_DIR}/include ${PostgreSQL_INCLUDE_DIRS}
     LIBS springtail_pg
         springtail_common
@@ -239,6 +266,7 @@ springtail_unit_test(test_field_quals
     SOURCES test/test_field_quals.cc
     INCLUDES ${PROJECT_SOURCE_DIR}/include ${PostgreSQL_INCLUDE_DIRS}
     LIBS springtail_test_fdw
+         springtail_xid_collector_client
          springtail_pg
          springtail_common
          springtail_test

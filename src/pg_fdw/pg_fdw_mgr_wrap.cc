@@ -9,7 +9,7 @@ extern "C" {
     typedef struct List List;
 
     /** Get PgFdwMgr singleton */
-    PgFdwMgr *
+    static inline PgFdwMgr *
     get_fdw_mgr()
     {
         return PgFdwMgr::get_instance();
@@ -20,6 +20,12 @@ extern "C" {
     fdw_init(const char *config_file_path)
     {
         PgFdwMgr::fdw_init(config_file_path);
+    }
+
+    void
+    fdw_start(const char *db_name, bool ddl_connection)
+    {
+        PgFdwMgr::get_instance()->init(db_name, ddl_connection);
     }
 
     /** Exit call */
@@ -110,7 +116,7 @@ extern "C" {
         get_fdw_mgr()->fdw_commit_rollback(pg_xid, commit);
     }
 
-    void 
+    void
     fdw_explain_scan(ForeignScanState *node, ExplainState *es)
     {
         const PgFdwState* state = static_cast<PgFdwState*>(node->fdw_state);

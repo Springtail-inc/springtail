@@ -37,3 +37,4 @@
       max_prepared_transactions = 64
       unix_socket_permissions = 0777
       springtail_fdw.config_file_path = '/tmp/springtail/system.json'
+      springtail_fdw.ddl_connection = off

@@ -435,7 +435,8 @@ namespace springtail {
                                   const std::string &db_user,
                                   const std::string &db_pass,
                                   const int db_port,
-                                  const bool replication)
+                                  const bool replication,
+                                  const std::optional<std::vector<std::pair<std::string, std::string>>> &options)
     {
         if (_connection != nullptr) {
             throw PgAlreadyConnectedError();
@@ -478,12 +479,19 @@ namespace springtail {
                 host = escape_string(db_host);
             }
 
+            std::string options_str;
+            if (options.has_value() && !options.value().empty()) {
+                for (auto &item: options.value()) {
+                    options_str += " -c " + item.first + "=" + item.second;
+                }
+            }
+
             // generate connection string
             std::string conninfo = fmt::format("{}='{}' port={} dbname='{}' user='{}' \
                 password='{}' {}client_encoding={} \
-                options='-c datestyle=ISO -c intervalstyle=postgres -c extra_float_digits=3'",
+                options='-c datestyle=ISO -c intervalstyle=postgres -c extra_float_digits=3{}'",
                 hosttype, host, db_port, name, user, pass,
-                (replication ? "replication=database ": ""), encoding);
+                (replication ? "replication=database ": ""), encoding, options_str);
 
             LOG_DEBUG(LOG_PG_REPL, "Attempting to connect: {}", conninfo);
 
@@ -493,9 +501,9 @@ namespace springtail {
                 // mask out password for logs
                 std::string conninfo = fmt::format("{}='{}' port={} dbname='{}' user='{}' \
                     password='****' {}client_encoding={} \
-                    options='-c datestyle=ISO -c intervalstyle=postgres -c extra_float_digits=3'",
+                    options='-c datestyle=ISO -c intervalstyle=postgres -c extra_float_digits=3{}'",
                     hosttype, host, db_port, name, user,
-                    (replication ? "replication=database ": ""), encoding);
+                    (replication ? "replication=database ": ""), encoding, options_str);
 
                 LOG_ERROR("Error connecting: conninfo: {}, msg: {}", conninfo, PQerrorMessage(connection));
                 PQfinish(connection);
