@@ -482,6 +482,18 @@ namespace springtail {
         return db_config["name"];
     }
 
+    uint64_t
+    Properties::_get_db_id(const std::string &db_name)
+    {
+        std::map<uint64_t, std::string> dbs = _get_databases();
+        for (auto &[dbs_id, dbs_name]: dbs) {
+            if (dbs_name == db_name) {
+                return dbs_id;
+            }
+        }
+        CHECK(false) << "Could not find database name " << db_name;
+    }
+
     std::vector<std::string>
     Properties::_get_fdw_ids()
     {

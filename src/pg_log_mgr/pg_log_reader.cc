@@ -1175,6 +1175,7 @@ namespace springtail::pg_log_mgr {
             // for operations at the SysTblMgr
             auto client = sys_tbl_mgr::Client::get_instance();
             nlohmann::json ddls = nlohmann::json::array({});
+            std::vector<uint64_t> table_ids;
 
             // issue the updates to the system tables
             for (auto &entry : swap->table_info()) {
@@ -1218,12 +1219,13 @@ namespace springtail::pg_log_mgr {
                 auto ddl = nlohmann::json::parse(ddl_str);
                 assert(ddl.is_array());
                 ddls.insert(ddls.end(), ddl.begin(), ddl.end());
+                table_ids.emplace_back(static_cast<uint64_t>(entry->table_id));
             }
             LOG_INFO("Swapped synced tables: {}@{}", db_id, xid);
 
             auto xid_msg = std::make_shared<committer::XidReady>
                 (swap->type(), swap->db(), _pg_log_timestamp,
-                 committer::XidReady::SwapMsg(xid, std::move(ddls)));
+                 committer::XidReady::SwapMsg(xid, std::move(ddls), std::move(table_ids)));
 
             // issue the swap/commit at the GC-2 prior to processing this xid
             LOG_DEBUG(LOG_PG_LOG_MGR, "Issue COMMIT/SWAP message to committer on {} @ {}, type {}",

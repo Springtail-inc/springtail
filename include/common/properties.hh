@@ -118,6 +118,11 @@ namespace springtail {
             return get_instance()->_get_db_name(db_id);
         }
 
+        /** Helper to get database id from Redis for db name */
+        static inline uint64_t get_db_id(const std::string &db_name) {
+            return get_instance()->_get_db_id(db_name);
+        }
+
         /** Helper to get set of FDW ids from Redis */
         static inline std::vector<std::string> get_fdw_ids() {
             return get_instance()->_get_fdw_ids();
@@ -313,6 +318,14 @@ namespace springtail {
         std::string _get_db_name(uint64_t db_id);
 
         /**
+         * @brief Internal get database id for a given database name
+         *
+         * @param db_name- database name
+         * @return uint64_t
+         */
+        uint64_t _get_db_id(const std::string &db_name);
+
+         /**
          * @brief Internal get fdw ids
          *
          * @return std::vector<std::string>
