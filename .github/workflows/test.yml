@@ -71,6 +71,13 @@ jobs:
           mkdir -p $(dirname $fdw_config_file_path)
           cp system.json.settings $fdw_config_file_path
 
+      - uses: hoverkraft-tech/compose-action@v2.3.0
+        with:
+          compose-file: "./docker/docker-compose.yml"
+          services: |
+            postgres
+          services-log-level: "info"
+
       - name: Build
         run: |
           ln -s /home/dev/external external
