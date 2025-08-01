@@ -45,6 +45,8 @@ typedef struct
 #define VARSIZE_ANY_EXHDR(PTR) \
 	(VARATT_IS_1B(PTR) ? VARSIZE_1B(PTR)-VARHDRSZ_SHORT : \
 	  VARSIZE_4B(PTR)-VARHDRSZ)
+#define SET_VARSIZE_4B(PTR,len) \
+	(((varattrib_4b *) (PTR))->va_4byte.va_header = (((uint32_t) (len)) << 2))
 #define SET_VARSIZE_1B(PTR,len) \
 	(((varattrib_1b *) (PTR))->va_header = (((uint8_t) (len)) << 1) | 0x01)
 

@@ -13,29 +13,48 @@ PointerGetDatum(const void *X)
 	return (Datum) X;
 }
 
-float DatumGetFloat4(Datum d) {
-    float f;
-    std::memcpy(&f, &d, sizeof(float));
-    return f;
+uint32_t
+DatumGetInt32(Datum X)
+{
+	return (uint32_t) X;
 }
 
-static void* cstring_to_text_4b(const char *s) {
-    size_t n = std::strlen(s);
-    size_t tot = VARHDRSZ + n;
-    unsigned char *p = (unsigned char*)std::malloc(tot);
-    if (!p) { std::perror("malloc"); std::exit(1); }
-    int32_t len = (int32_t)tot;
-    std::memcpy(p, &len, 4);         // total length incl header
-    std::memcpy(p + 4, s, n);
+float
+DatumGetFloat4(Datum X)
+{
+	union
+	{
+		uint32_t	value;
+		float		retval;
+	} myunion;
+
+	myunion.value = DatumGetInt32(X);
+	return myunion.retval;
+}
+
+char *
+DatumGetCString(Datum X)
+{
+	return (char *) (X);
+}
+
+void*
+cstring_to_text_4b(const char *s) {
+    size_t data_len = std::strlen(s);
+    size_t tot = VARHDRSZ + data_len;
+    char *p = (char*)std::malloc(tot);
+    if (!p) {
+        std::perror("malloc");
+        std::exit(1);
+    }
+    SET_VARSIZE_4B(p, data_len + VARHDRSZ);
+    std::memcpy(p + VARHDRSZ, s, data_len);
     return (void*)p;
 }
 
-static void* cstring_to_text_1b(const char *s) {
+void*
+cstring_to_text_1b(const char *s) {
     size_t data_len = std::strlen(s);
-    if (data_len > 127) {
-        // fall back to 4B when too large for 1B
-        return cstring_to_text_4b(s);
-    }
     size_t tot = VARHDRSZ + data_len;
     char *p = (char*)std::malloc(tot);
     if (!p) {
@@ -47,38 +66,48 @@ static void* cstring_to_text_1b(const char *s) {
     return (void*)p;
 }
 
-static void* cstring_to_text_auto(const char *s) {
+void*
+cstring_to_text_auto(const char *s) {
     size_t n = std::strlen(s);
     return (n <= 127) ? cstring_to_text_1b(s) : cstring_to_text_4b(s);
 }
 
-void call_test_function(void* so, const char* name) {
+void
+call_test_function(void* so, const char* name, const char* text1, const char* text2) {
     PGFunction test_function = (PGFunction)dlsym(so, name);
     if (!test_function) {
         std::cerr << "Failed to find function " << name << ": " << dlerror() << std::endl;
         return;
     }
 
-    // Create text values with proper varlena headers
-    void* t1 = cstring_to_text_auto("Hello there");
-    void* t2 = cstring_to_text_auto("Hallo dear");
-
+    Datum d;
     LOCAL_FCINFO(fcinfo, 2);
-    InitFunctionCallInfoData(*fcinfo, nullptr, 2, 0 /*collation*/, nullptr, nullptr);
+    if ( text1 || text2 ) {
+        void* t1 = cstring_to_text_auto(text1);
 
-    fcinfo->args[0].value  = PointerGetDatum(t1);
-    fcinfo->args[0].isnull = false;
-    fcinfo->args[1].value  = PointerGetDatum(t2);
-    fcinfo->args[1].isnull = false;
+        InitFunctionCallInfoData(*fcinfo, nullptr, 2, 0, nullptr, nullptr);
 
-    std::cout << "Testing " << name << "()" << std::endl;
-    Datum d = test_function(fcinfo);
+        if ( text1 ) {
+            fcinfo->args[0].value  = PointerGetDatum(t1);
+            fcinfo->args[0].isnull = false;
+        }
 
-    float sim = DatumGetFloat4(d);
-    std::cout << "Result for " << name << ": " << sim << std::endl;
+        if ( text2 ) {
+            void* t2 = cstring_to_text_auto(text2);
+            fcinfo->args[1].value  = PointerGetDatum(t2);
+            fcinfo->args[1].isnull = false;
+        }
+    }
 
-    std::free(t1);
-    std::free(t2);
+    d = test_function(fcinfo);
+    if (strcmp(name, "similarity") == 0 ||
+    strcmp(name, "word_similarity") == 0 ||
+    strcmp(name, "strict_word_similarity") == 0) {
+        std::cout << name << "('" << text1 << "', '" << text2 << "') = " << DatumGetFloat4(d) << std::endl;
+    }
+    else if (strcmp(name, "show_limit") == 0) {
+        std::cout << name << "() = " << DatumGetFloat4(d) << std::endl;
+    }
 }
 
 int main() {
@@ -99,9 +128,23 @@ int main() {
         return 1;
     }
 
-    call_test_function(pgtrgm, "similarity");
-    call_test_function(pgtrgm, "word_similarity");
-    call_test_function(pgtrgm, "strict_word_similarity");
+    // 1B Tests
+    const char* t1 = "Hello there";
+    const char* t2 = "Hallo dear";
+    call_test_function(pgtrgm, "similarity", t1, t2);
+    call_test_function(pgtrgm, "word_similarity", t1, t2);
+    call_test_function(pgtrgm, "strict_word_similarity", t1, t2);
+
+    // 4B Tests
+    const char* t3 = "This is a length string that is determined to exceed the 127 byte limit to make use of the varlena extended header and it is not that very longer than the other string";
+    const char* t4 = "This is a length string that is determined to exceed the 127 byte limit to make use of the varlena extended header and it is very very longer than the other string";
+    call_test_function(pgtrgm, "similarity", t3, t4);
+    call_test_function(pgtrgm, "word_similarity", t3, t4);
+    call_test_function(pgtrgm, "strict_word_similarity", t3, t4);
+
+    // // Test show_trgm and show_limit
+    // call_test_function(pgtrgm, "show_trgm", "Hello there", nullptr);
+    call_test_function(pgtrgm, "show_limit", nullptr, nullptr);
 
     // Clean up
     dlclose(pgtrgm);
