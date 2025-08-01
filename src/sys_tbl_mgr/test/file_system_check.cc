@@ -1,4 +1,3 @@
-// #include <string>
 #include <fmt/ranges.h>
 
 #include <common/init.hh>
@@ -7,12 +6,32 @@
 
 #include <storage/field.hh>
 #include <storage/io_mgr.hh>
-#include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/schema_mgr.hh>
-#include <sys_tbl_mgr/table_mgr.hh>
+#include <sys_tbl_mgr/table.hh>
 
 using namespace springtail;
+
+// get base path to database files
+std::filesystem::path table_base;
+
+template<typename Tbl>
+std::pair<TablePtr, std::shared_ptr<std::vector<FieldPtr>>>
+get_table_and_fields(uint64_t db_id)
+{
+    auto schema = std::make_shared<ExtentSchema>(Tbl::Data::SCHEMA);
+    std::vector<Index> secondary_keys;
+    TableMetadata tbl_meta;
+    tbl_meta.snapshot_xid = 1;
+
+    uint64_t xid = constant::LATEST_XID;
+
+    XidLsn access_xid(xid);
+    TablePtr table = std::make_shared<Table>(db_id, Tbl::ID, xid, table_base, Tbl::Primary::KEY, secondary_keys, tbl_meta, schema);
+    std::shared_ptr<std::vector<FieldPtr>> fields = schema->get_fields();
+
+    return std::make_pair(table, fields);
+}
 
 std::vector<SchemaColumn>
 read_schema_columns(uint64_t db_id, uint64_t table_id, XidLsn &access_start, XidLsn &access_end)
@@ -20,8 +39,7 @@ read_schema_columns(uint64_t db_id, uint64_t table_id, XidLsn &access_start, Xid
     std::vector<SchemaColumn> columns;
 
     // read schema table
-    auto schema_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::Schemas::ID, constant::LATEST_XID);
-    auto schema_table_fields = schema_table->extent_schema()->get_fields();
+    auto [schema_table, schema_table_fields] = get_table_and_fields<sys_tbl::Schemas>(db_id);
     // read everything with the given table_id
     auto search_key = sys_tbl::Schemas::Primary::key_tuple(table_id, 0, 0, 0);
     auto schema_table_iter = schema_table->lower_bound(search_key);
@@ -85,8 +103,8 @@ read_schema_columns(uint64_t db_id, uint64_t table_id, XidLsn &access_start, Xid
     }
 
     // read indexes table
-    auto indexes_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::Indexes::ID, constant::LATEST_XID);
-    auto indexes_table_fields = indexes_table->extent_schema()->get_fields();
+    auto [indexes_table, indexes_table_fields] = get_table_and_fields<sys_tbl::Indexes>(db_id);
+
     // read everything with the given table_id
     auto indexes_search_key = sys_tbl::Indexes::Primary::key_tuple(table_id, constant::INDEX_PRIMARY, access_end.xid, access_end.lsn, 0);
     auto indexes_table_iter = indexes_table->inverse_lower_bound(indexes_search_key);
@@ -176,8 +194,7 @@ get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
     std::vector<TableRoot> roots;
 
     // read table roots table
-    auto table_roots = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableRoots::ID, constant::LATEST_XID);
-    auto table_roots_fields = table_roots->extent_schema()->get_fields();
+    auto [table_roots, table_roots_fields] = get_table_and_fields<sys_tbl::TableRoots>(db_id);
 
     auto table_roots_search_key = sys_tbl::TableRoots::Primary::key_tuple(table_id, constant::INDEX_PRIMARY, xid);
 
@@ -198,8 +215,8 @@ get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
     roots.push_back({constant::INDEX_PRIMARY, roots_eid});
 
     // access the stats table
-    auto table_stats = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableStats::ID, constant::LATEST_XID);
-    auto table_stats_fields = table_stats->extent_schema()->get_fields();
+    auto [table_stats, table_stats_fields] = get_table_and_fields<sys_tbl::TableStats>(db_id);
+
     auto table_stats_search_key = sys_tbl::TableStats::Primary::key_tuple(table_id, constant::LATEST_XID);
     auto table_stats_iter = table_stats->inverse_lower_bound(table_stats_search_key);
     CHECK(table_stats_iter != table_stats->end());
@@ -249,11 +266,10 @@ main(int argc, char *argv[])
     std::map<uint64_t, std::string> databases = Properties::get_databases();
 
     // get base path to database files
-    std::filesystem::path table_base;
     nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
     Json::get_to<std::filesystem::path>(json, "table_dir", table_base);
     table_base = Properties::make_absolute_path(table_base);
-    std::cout << fmt::format("\ntable_base = {}", table_base.string()) << std::endl;
+    LOG_INFO("Verifying tables at table_base = {}", table_base.string());
 
     // iterate over databases
     for (const auto &db_id_name: databases) {
@@ -261,8 +277,7 @@ main(int argc, char *argv[])
         const std::string &db_name = db_id_name.second;
 
         // read table names table
-        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, constant::LATEST_XID);
-        auto table_fields = table->extent_schema()->get_fields();
+        auto [table, table_fields] = get_table_and_fields<sys_tbl::TableNames>(db_id);
 
         for (auto row: (*table)) {
             auto table_ns_id = table_fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
@@ -271,55 +286,58 @@ main(int argc, char *argv[])
             uint64_t xid = table_fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
             bool exists = table_fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
             if (!exists) {
-                std::cout << fmt::format("\nDB {}:{}: Skipping non-existing table {}.{} tid={}, xid={}",
-                    db_id, db_name, table_ns_id, table_name, tid, xid) << std::endl;
+                LOG_INFO("DB {}:{}: Skipping non-existing table {}.{} tid={}, xid={}", db_id, db_name, table_ns_id, table_name, tid, xid);
                 continue;
             }
-            std::cout << fmt::format("\nDB {}:{}: Found table {}.{} tid={}, xid={}",
-                    db_id, db_name, table_ns_id, table_name, tid, xid) << std::endl;
+            LOG_INFO("DB {}:{}: Found table {}.{} tid={}, xid={}", db_id, db_name, table_ns_id, table_name, tid, xid);
 
-            // TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, constant::LATEST_XID);
             TablePtr table = get_table(table_base, db_id, tid, constant::LATEST_XID);
             CHECK(table.get() != nullptr);
 
-            std::cout << "Table dir: " << table->get_dir_path().c_str() << std::endl;
+            LOG_INFO("\tTable dir: {}", table->get_dir_path().c_str());
 
-            // ExtentSchemaPtr table_schema = table->extent_schema();
             ExtentSchemaPtr table_schema = get_extent_schema(db_id, tid, XidLsn(table->get_xid()));;
             FieldArrayPtr table_key_fields = table_schema->get_sort_fields();
 
             BTreePtr table_btree = table->index(constant::INDEX_PRIMARY);
             CHECK(table_btree.get() != nullptr);
-            std::cout << fmt::format("Primary index created with path = {}, xid = {}, primary_schema size = {}, extent id = {}",
-                table_btree->get_file_path().c_str(), table_btree->get_xid(), table_btree->get_schema()->get_sort_keys().size(), table_btree->get_root_offset()) << std::endl;
+            LOG_INFO("\tPrimary index created with path = {}, xid = {}, primary_schema size = {}, extent id = {}",
+                    table_btree->get_file_path().c_str(), table_btree->get_xid(), table_btree->get_schema()->get_sort_keys().size(), table_btree->get_root_offset());
+
             ExtentSchemaPtr index_schema = table_btree->get_schema();
             FieldPtr extent_id_field = index_schema->get_field(constant::INDEX_EID_FIELD);
             FieldArrayPtr key_fields = index_schema->get_sort_fields();
 
-            std::cout << fmt::format("table_key_fields->size() = {}, key_fields->size() = {}, table->has_primary() = {}",
-                        table_key_fields->size(), key_fields->size(), table->has_primary()) << std::endl;
-            std::cout << "Table schema sort keys:" << std::endl;
+            LOG_INFO("\t\ttable_key_fields->size() = {}, key_fields->size() = {}, table->has_primary() = {}",
+                        table_key_fields->size(), key_fields->size(), table->has_primary());
+
+            LOG_INFO("\tTable schema has {} sort keys:", table_schema->get_sort_keys().size());
             for (auto &key: table_schema->get_sort_keys()) {
-                std::cout << "\t" << key << std::endl;
-            }
-            std::cout << "Primary index schema sort keys:" << std::endl;
-            for (auto &key: index_schema->get_sort_keys()) {
-                std::cout << "\t" << key << std::endl;
+                LOG_INFO("\t\t{}", key );
             }
 
+            LOG_INFO("\tPrimary index schema has {} sort keys:", index_schema->get_sort_keys());
+            for (auto &key: index_schema->get_sort_keys()) {
+                LOG_INFO("\t\t{}", key );
+            }
+
+            // Verifying primary key sizes in table, schema, and index schema
             if (table->has_primary()) {
                 CHECK(table_key_fields->size() == key_fields->size());
+                CHECK(table_schema->get_sort_keys().size() == index_schema->get_sort_keys().size());
             }
 
+            // Verifying field types
             for (size_t i = 0; i < table_key_fields->size(); i++) {
                 CHECK(table_key_fields->at(i)->get_type() == key_fields->at(i)->get_type());
             }
 
+            // Verify extents for the primary key
             BTree::Iterator btree_iter = table_btree->begin();
             while(btree_iter != table_btree->end()) {
                 const Extent::Row &btree_row = *btree_iter;
                 uint64_t extent_id = extent_id_field->get_uint64(&btree_row);
-                std::cout << "Verifying extent_id = " << extent_id << std::endl;
+                LOG_INFO("\tVerifying extent_id = {}", extent_id);
 
                 StorageCache::SafePagePtr page = table->read_page(extent_id);
                 StorageCache::Page::Iterator page_iter = page->last();
@@ -332,6 +350,9 @@ main(int argc, char *argv[])
 
                 ++btree_iter;
             }
+
+            // TODO: add validation of secondary indexes
+            // TODO: add validation of previous xid snapshot
         }
     }
 
