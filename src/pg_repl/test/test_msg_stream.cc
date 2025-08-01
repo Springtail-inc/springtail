@@ -45,11 +45,6 @@ namespace {
             "}";
 
             ::setenv(environment::ENV_OVERRIDE_JSON, js.c_str(), 1);
-            //auto ts = ::getenv(environment::ENV_OVERRIDE_JSON);
-            //assert(ts);
-
-            // don't load this into redis
-            //::setenv(environment::LOAD_OVERRIDE, "false", 1);
 
             // code here will execute just before the test ensues
             springtail_init_test();
