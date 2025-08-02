@@ -875,14 +875,24 @@ Service::CreateNamespace(grpc::ServerContext* context,
                 request->db_id(), request->namespace_id(), request->name(), request->xid(),
                 request->lsn());
 
+
+    XidLsn xid(request->xid(), request->lsn());
+    nlohmann::json ddl;
+
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
-    // update the namespace_names table
-    XidLsn xid(request->xid(), request->lsn());
-    auto ddl =
-        _mutate_namespace(request->db_id(), request->namespace_id(), request->name(), xid, true);
-    ddl["action"] = "ns_create";
+    auto ns_info = _get_namespace_info(request->db_id(), request->namespace_id(), xid);
+    if (ns_info) {
+        LOG_INFO("Namespace exists -- db {} namespace_id {} name {} xid {} lsn {}",
+                request->db_id(), request->namespace_id(), request->name(), request->xid(),
+                request->lsn());
+        ddl["action"] = "no_change";
+    } else {
+        // update the namespace_names table
+        ddl = _mutate_namespace(request->db_id(), request->namespace_id(), request->name(), xid, true);
+        ddl["action"] = "ns_create";
+    }
 
     // serialize the JSON and return
     response->set_statement(nlohmann::to_string(ddl));

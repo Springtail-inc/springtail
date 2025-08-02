@@ -39,7 +39,7 @@ int main(int argc, char* argv[])
     // init logging/backtrace
     springtail_init();
 
-    PgMsgStreamReader reader(file);
+    PgMsgStreamReader reader({}, file);
 
     bool eos = false;
 

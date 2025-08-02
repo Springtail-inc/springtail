@@ -215,6 +215,7 @@ CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_handle_table_even
 DECLARE
     -- Table meta
     table_relname text;
+    table_namespace_id oid;
     table_replident "char";
     table_persistence "char";
     rel_kind "char";
@@ -230,14 +231,14 @@ DECLARE
     table_info text;
 BEGIN
     -- Get the table details from pg_class along with the partition details
-    SELECT pg_class.relname, pg_class.relreplident, pg_class.relpersistence, pg_class.relkind, CASE WHEN pg_class.relispartition THEN
+    SELECT pg_class.relname, pg_class.relnamespace, pg_class.relreplident, pg_class.relpersistence, pg_class.relkind, CASE WHEN pg_class.relispartition THEN
             (SELECT inhparent FROM pg_inherits WHERE inhrelid = pg_class.oid)
         END as parent_table_id,
         pg_get_expr(pg_class.relpartbound, pg_class.oid, TRUE) as partition_bound,
         pg_get_partkeydef(pg_class.oid) as partition_key
     FROM pg_class
     WHERE oid = obj_id
-    INTO table_relname, table_replident, table_persistence, rel_kind, parent_table_id, partition_bound, partition_key;
+    INTO table_relname, table_namespace_id, table_replident, table_persistence, rel_kind, parent_table_id, partition_bound, partition_key;
 
     -- Only during the ALTER command, get the partition details. This is required to handle the partition events
     IF command_tag = 'ALTER TABLE' AND partition_key IS NOT NULL THEN
@@ -308,6 +309,7 @@ BEGIN
     -- Form the JSON containing the table information including column details, partition info etc
     table_info = json_build_object(
         'table_name', table_relname,
+        'table_namespace_id', table_namespace_id::bigint,
         'partition_bound', partition_bound,
         'partition_key', partition_key,
         'partition_data', partition_data,
@@ -371,6 +373,7 @@ BEGIN
             'oid', obj.objid::bigint,
             'obj', obj.object_type,
             'schema', obj.schema_name,
+            'schema_id', table_info->'table_namespace_id',
             'table', table_info->'table_name',
             'columns', table_info->'columns',
             'parent_table_id', table_info->'parent_table_id',
@@ -507,6 +510,7 @@ BEGIN
                 'oid', obj.objid::bigint,
                 'obj', obj.object_type,
                 'schema', obj.schema_name,
+                'schema_id', table_info->'table_namespace_id',
                 'table', table_info->'table_name',
                 'columns', table_info->'columns',
                 'parent_table_id', table_info->'parent_table_id',
