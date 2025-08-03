@@ -41,7 +41,7 @@ int main(int argc, char *argv[])
 
     while (start_file && std::filesystem::exists(*start_file)) {
 
-        PgMsgStreamReader reader(*start_file, start_offset, -1);
+        PgMsgStreamReader reader({}, *start_file, start_offset, -1);
         if (start_offset == 0 &&
                     fs::timestamp_file_exists(*start_file,
                                               pg_log_mgr::PgLogMgr::LOG_PREFIX_REPL,
