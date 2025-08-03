@@ -24,7 +24,7 @@ PgLogRecovery::repair_logs()
 
     while (_latest_log && lsn == INVALID_LSN) {
         LOG_DEBUG(LOG_PG_LOG_MGR, "Found latest log file: {}", *_latest_log);
-        lsn = PgMsgStreamReader::scan_log(*_latest_log, true);
+        lsn = PgMsgStreamReader::scan_log(_db_id, *_latest_log, true);
 
         if (lsn == INVALID_LSN) {
             // didn't find a latest completed LSN in the file, so remove this file and keep going back

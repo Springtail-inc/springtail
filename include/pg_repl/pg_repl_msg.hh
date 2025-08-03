@@ -188,6 +188,7 @@ namespace springtail
         uint32_t oid;
         int32_t xid;        // proto vers 2+ only if streaming
         std::string namespace_name;
+        uint32_t namespace_id;
         std::string table;
         std::vector<PgMsgSchemaColumn> columns;
         uint64_t parent_table_id;
