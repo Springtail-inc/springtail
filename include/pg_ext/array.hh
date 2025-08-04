@@ -9,4 +9,6 @@ typedef struct {
     char data[];
 } ArrayType;
 
+#define ARR_ELEMTYPE(a) ((a)->elemtype)
+
 extern "C" PGEXT_API ArrayType *construct_array_builtin(const void *elems, int nelems, uint32_t elmtype, size_t elem_size);

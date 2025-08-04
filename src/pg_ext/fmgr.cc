@@ -61,6 +61,7 @@ pg_detoast_datum_packed(struct varlena *datum)
 }
 
 void getTypeOutputInfo(Oid type, Oid *funcOid, bool *typIsVarlena){
+    std::cout << "getTypeOutputInfo: " << type << std::endl;
     auto it = _type_output_registry.find(type);
     if (it == _type_output_registry.end())
         throw std::runtime_error("getTypeOutputInfo: unknown type OID");
@@ -154,11 +155,46 @@ PGFunction lookup_pgfunction_by_oid(Oid oid)
     return nullptr;
 }
 
+typedef char *Pointer;
+static inline Pointer
+DatumGetPointer(Datum X)
+{
+	return (Pointer) X;
+}
+
+static inline char *
+DatumGetCString(Datum X)
+{
+	return (char *) DatumGetPointer(X);
+}
+
+Datum
+FunctionCall1(FmgrInfo *flinfo,Datum arg1)
+{
+	LOCAL_FCINFO(fcinfo, 1);
+	Datum		result;
+
+	InitFunctionCallInfoData(*fcinfo, flinfo, 1, 0, NULL, NULL);
+
+	fcinfo->args[0].value = arg1;
+	fcinfo->args[0].isnull = false;
+
+	result = FunctionCallInvoke(fcinfo);
+
+	/* Check for null result, since caller is clearly not expecting one */
+	if (fcinfo->isnull)
+		std::cerr << "FunctionCall1Coll: null result" << std::endl;
+
+	return result;
+}
+
+char *
+OutputFunctionCall(FmgrInfo *flinfo, Datum val)
+{
+	return DatumGetCString(FunctionCall1(flinfo, val));
+}
+
 const char* OidOutputFunctionCall(Oid function_oid, Datum value)
 {
-    PGFunction func = lookup_pgfunction_by_oid(function_oid);
-    if (!func)
-        return nullptr;
-
     return nullptr;
 }

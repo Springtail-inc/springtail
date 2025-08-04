@@ -65,9 +65,42 @@ struct TypeInfo {
 };
 
 static std::unordered_map<Oid, TypeInfo> _type_output_registry = {
-    { 23, {1001, false} },   // INT4OID → int4out
-    { 25, {1002, true} },    // TEXTOID → textout
-    { 1043, {1003, true} },  // VARCHAROID → varcharout
+    { 16, { 1242, false } }, // BOOLOID → boolout
+    { 17, { 140, false } },  // BYTEAOID → byteaout
+    { 18, { 114, false } },  // CHAROID → charout
+    { 19, { 30, false } },   // NAMEOID → nameout
+    { 20, { 23, false } },   // INT8OID → int8out
+    { 21, { 1082, false } }, // INT2OID → int2out
+    { 22, { 1700, false } }, // BPCHAROID → bpcharout
+    { 23, { 1001, false } }, // INT4OID → int4out
+    { 24, { 25, false } },   // OIDOID → oidout
+    { 25, { 1002, true } },  // TEXTOID → textout
+    { 26, { 295, false } },  // VARCHAROID → varcharout
+    { 600, { 1263, false } }, // POINTOID → pointout
+    { 700, { 1004, false } }, // FLOAT4OID → float4out
+    { 701, { 1184, false } }, // FLOAT8OID → float8out
+    { 1042, { 1007, false } }, // BPCHAROID → bpcharout
+    { 1043, { 1003, true } }, // VARCHAROID → varcharout
+    { 1082, { 1005, false } }, // DATEOID → dateout
+    { 1083, { 1006, false } }, // TIMEOID → timeout
+    { 1114, { 1184, false } }, // TIMESTAMPOID → timestamptzout
+    { 1184, { 1185, false } }, // TIMESTAMPTZOID → timestamptzout
+    { 1266, { 1270, false } }, // TIMETZOID → timetzout
+    { 1270, { 1271, false } }, // ABSTIMEOID → abstimeout
+    { 1700, { 1701, false } }, // CIRCLEOID → circleout
+    { 1790, { 1791, false } }, // MACADDROID → macaddrout
+    { 2202, { 2203, false } }, // BITOID → bitout
+    { 2203, { 2204, false } }, // VARBITOID → varbitout
+    { 2249, { 2250, false } }, // UUIDOID → uuidout
+    { 2950, { 2951, false } }, // XMLEXTERNALOID → xmlexternalout
+    { 2951, { 2952, false } }, // XMLOID → xmlout
+    { 3802, { 3803, false } }, // PG_LSNOID → pg_lsnout
+    { 1033, { 1034, false } }, // JSONOID → jsonout
+    { 2952, { 2953, false } }, // XMLARRAYOID → xmlarrayout
+    { 1999, { 2000, false } }, // CIDROID → cidrout
+    { 2000, { 2001, false } }, // INETOID → inetout
+    { 2070, { 2071, false } }, // MACADDR8OID → macaddr8out
+    { 2281, { 2282, false } }, // INTERVALOID → intervalout
 };
 // XXX Add support for User defined types
 
