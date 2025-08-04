@@ -201,7 +201,7 @@ if __name__ == "__main__":
             tests = gen_all_tests(test_folder, default_config_file, build_dir, {}, default_test_sets)
 
             if overlays:
-                for overlay_name in ovelays:
+                for overlay_name in overlays:
                     overlay_config_file = os.path.join(tmp_config_dir, f'{overlay_name}.json')
                     overlay_test_sets = overlays[overlay_name]['test_sets']
                     tests += gen_all_tests(test_folder, overlay_config_file,
