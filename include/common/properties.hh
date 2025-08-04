@@ -189,6 +189,9 @@ namespace springtail {
          */
         static std::vector<uint64_t> get_database_ids(const nlohmann::json &json_db_ids);
 
+        /** Helper to get included schemas */
+        static std::vector<std::string> get_include_schemas(uint64_t db_id);
+
     private:
         /** json containing parsed settings file */
         nlohmann::json _json;

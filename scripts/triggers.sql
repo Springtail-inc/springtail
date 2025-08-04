@@ -218,6 +218,7 @@ CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_handle_table_even
 DECLARE
     -- Table meta
     table_relname text;
+    table_namespace_id oid;
     table_replident "char";
     table_persistence "char";
     rel_kind "char";
@@ -258,6 +259,7 @@ BEGIN
         RAISE NOTICE 'springtail: ignoring temporary table %', table_relname;
         RETURN NULL;
     END IF;
+
 
     -- Only during the ALTER command, get the partition details. This is required to handle the partition events
     IF command_tag = 'ALTER TABLE' AND partition_key IS NOT NULL THEN
@@ -328,6 +330,7 @@ BEGIN
     -- Form the JSON containing the table information including column details, partition info etc
     table_info = json_build_object(
         'table_name', table_relname,
+        'table_namespace_id', table_namespace_id::bigint,
         'partition_bound', partition_bound,
         'partition_key', partition_key,
         'partition_data', partition_data,
@@ -393,6 +396,7 @@ BEGIN
             'oid', obj.objid::bigint,
             'obj', obj.object_type,
             'schema', obj.schema_name,
+            'schema_id', table_info->'table_namespace_id',
             'table', table_info->'table_name',
             'columns', table_info->'columns',
             'parent_table_id', table_info->'parent_table_id',
@@ -531,6 +535,7 @@ BEGIN
                 'oid', obj.objid::bigint,
                 'obj', obj.object_type,
                 'schema', obj.schema_name,
+                'schema_id', table_info->'table_namespace_id',
                 'table', table_info->'table_name',
                 'columns', table_info->'columns',
                 'parent_table_id', table_info->'parent_table_id',

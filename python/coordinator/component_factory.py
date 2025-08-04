@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 from component import Component
 from postgres_component import PostgresComponent
 from common import run_command
@@ -61,18 +62,23 @@ class ComponentFactory:
             pid_path=os.path.join(self.pid_dir, 'proxy.pid')
         )
 
-    def create_postgres(self) -> PostgresComponent:
+    def create_postgres(self, pid_path: Optional[str]) -> PostgresComponent:
         """Create a new postgres component."""
         # get the path to the postgres binary, and the version
         bindir = run_command('pg_config', ['--bindir']).strip()
-        version_str = run_command('pg_config', ['--version']).strip()
-        # version string is like: 'PostgreSQL 16.4 (Ubuntu 16.4-0ubuntu0.24.04.2)'
-        version = version_str.split(' ')[1].split('.')[0]
+
+        if not pid_path:
+            # if pid_path is not provided, use the default path based on the version
+            # version string is like: 'PostgreSQL 16.4 (Ubuntu 16.4-0ubuntu0.24.04.2)'
+            version_str = run_command('pg_config', ['--version']).strip()
+            version = version_str.split(' ')[1].split('.')[0]
+            pid_path = f'/var/run/postgresql/{version}-main.pid'
+
         return PostgresComponent(
             name="postgres",
             id=self.POSTGRES,
             path=bindir,
-            pid_path=f'/var/run/postgresql/{version}-main.pid'
+            pid_path=pid_path
         )
 
     def create_xid_subscriber_daemon(self) -> Component:
