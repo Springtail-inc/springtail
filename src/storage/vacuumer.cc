@@ -70,6 +70,8 @@ Vacuumer::_init()
         // Core thread of the vacuumer
         _vacuumer_thread = std::thread(&Vacuumer::_internal_run, this);
         LOG_INFO("Vacuumer thread started");
+    } else {
+        _extents_tracking_enabled = false;
     }
 }
 
@@ -88,6 +90,10 @@ Vacuumer::_internal_shutdown()
 void
 Vacuumer::commit_expired_extents(uint64_t db_id, uint64_t committed_xid)
 {
+    if (!_extents_tracking_enabled) {
+        return;
+    }
+
     std::unique_lock lock(_mutex);
 
     // Lets persist expired extents
@@ -316,6 +322,10 @@ Vacuumer::expire_extent(const std::filesystem::path &file,
                         uint32_t size,
                         uint64_t xid)
 {
+    if (!_extents_tracking_enabled) {
+        return;
+    }
+
     std::unique_lock lock(_mutex);
     _extent_map[file][xid].emplace_back(extent_id, size);
 }
@@ -325,6 +335,10 @@ Vacuumer::expire_snapshot(uint64_t db_id,
                           const std::filesystem::path &table_dir,
                           uint64_t xid)
 {
+    if (!_extents_tracking_enabled) {
+        return;
+    }
+
     std::unique_lock lock(_mutex);
     _snapshot_map[db_id][xid].emplace_back(table_dir);
 }
@@ -845,11 +859,6 @@ Vacuumer::_internal_run()
     while(!_shutdown) {
         // sleep for 1 second before trying to expire more data
         std::this_thread::sleep_for(std::chrono::seconds(1));
-
-        if (!_vacuum_run_enabled) {
-            // Vacuum turned off for run
-            continue;
-        }
 
         // Run vacuum once
         _do_vacuum_run();

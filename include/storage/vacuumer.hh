@@ -63,17 +63,17 @@ public:
     void commit_expired_extents(uint64_t db_id, uint64_t committed_xid);
 
     /**
-     * @brief Enable vacuum run
+     * @brief Enable vacuumer to collect extents/snapshosts to be vacuumed
      */
-    void enable_vacuum_run() {
-        _vacuum_run_enabled = true;
+    void enable_tracking_extents() {
+        _extents_tracking_enabled = true;
     }
 
     /**
-     * @brief Disable vacuum run
+     * @brief Disable vacuumer to collect extents/snapshosts to be vacuumed
      */
-    void disable_vacuum_run() {
-        _vacuum_run_enabled = false;
+    void disable_tracking_extents() {
+        _extents_tracking_enabled = false;
     }
 
     /**
@@ -148,9 +148,9 @@ private:
     bool _vacuum_start_enabled = false;
 
     /**
-     * Flag to control vacuum run
+     * Flag to control extents/snapshots tracking
      */
-    bool _vacuum_run_enabled = true;
+    bool _extents_tracking_enabled = true;
 
     /**
      * Expired extents map
