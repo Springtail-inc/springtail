@@ -186,14 +186,14 @@ if __name__ == "__main__":
     else:
         default_config_file = os.path.join(tmp_config_dir, 'default.json')
         if args.test_set is None:
+            overlays = yaml_config['overlays'];
+
             if default_test_sets is None:
                 default_test_sets = sorted(os.listdir(test_folder))
-
-            overlays = yaml_config['overlays'];
-            if overlays:
-                required_overlay = [x for x in overlays if "overlay_required" in overlays[x] and overlays[x]['overlay_required'] == True]
-                overlay_required_sets = [overlays[x]["test_sets"] for x in required_overlay]
-                overlay_required_sets = [item for sublist in overlay_required_sets for item in sublist]
+                if overlays:
+                    required_overlay = [x for x in overlays if "overlay_required" in overlays[x] and overlays[x]['overlay_required'] == True]
+                    overlay_required_sets = [overlays[x]["test_sets"] for x in required_overlay]
+                    overlay_required_sets = [item for sublist in overlay_required_sets for item in sublist]
 
             # exclude tests that require overlays from running under the default config
             default_test_sets = [x for x in default_test_sets if x not in overlay_required_sets]
@@ -213,8 +213,6 @@ if __name__ == "__main__":
             else:
                 tests = gen_test_cases(os.path.join(test_folder, args.test_set), args.test_case,
                                        default_config_file, build_dir, {})
-    sys.exit();
-
     # sync the test data files
     if not args.skip_downloads:
         helper = AwsHelper(config=botocore.config.Config(signature_version=botocore.UNSIGNED),
