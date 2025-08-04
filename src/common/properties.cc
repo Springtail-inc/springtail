@@ -354,6 +354,64 @@ namespace springtail {
                 pos = start;
             }
         }
+
+        // initialize the system role cache
+        if (_json[ORG_CONFIG].contains("aws_users_override")) {
+            _init_system_roles_from_config();
+        } else {
+            _init_system_roles_from_aws();
+        }
+    }
+
+    void
+    Properties::_init_system_roles_from_config()
+    {
+        nlohmann::json org = _json[ORG_CONFIG];
+        if (!org.contains("aws_users_override") || !org["aws_users_override"].is_array()) {
+            LOG_ERROR("No AWS users override configured in org config");
+            throw Error("No AWS users override configured in org config");
+        }
+
+        for (const auto &user: org["aws_users_override"]) {
+            CHECK(user.is_object());
+            CHECK(user.contains("role"));
+            CHECK(user.contains("username"));
+            CHECK(user.contains("password"));
+
+            if (user["role"] == Properties::DB_ROLE_REPLICATION ||
+                user["role"] == Properties::DB_ROLE_FDW ||
+                user["role"] == Properties::DB_ROLE_PROXY) {
+                _system_roles[user["role"]] = std::make_tuple(user["username"], user["password"]);
+            }
+        }
+    }
+
+    void
+    Properties::_init_system_roles_from_aws()
+    {
+        std::string key = fmt::format(AwsHelper::DB_USERS_SECRET, org_id, account_id, db_instance_id);
+
+        if (_aws_helper == nullptr) {
+            _aws_helper = std::make_shared<AwsHelper>();
+        }
+
+        nlohmann::json secret = _aws_helper->get_secret(key);
+        CHECK(secret.is_array());
+
+        // iterate through json and find role="replication"
+        for (auto &user: secret) {
+            CHECK(user.is_object());
+            CHECK(user.contains("role"));
+            CHECK(user.contains("username"));
+            CHECK(user.contains("password"));
+
+            if (user["role"] == Properties::DB_ROLE_REPLICATION ||
+                user["role"] == Properties::DB_ROLE_FDW ||
+                user["role"] == Properties::DB_ROLE_PROXY) {
+
+                _system_roles[user["role"]] = std::make_tuple(user["username"], user["password"]);
+            }
+        }
     }
 
     std::map<uint64_t, std::string>
@@ -501,26 +559,10 @@ namespace springtail {
             throw RedisNotFoundError("Error missing db_instance_id in redis");
         }
 
-        // in production, moving away from replication_user creds in redis/env
-        if (!primary_db_config.contains("replication_user")) {
-            // pull from aws secrets mgr, this updates _json[ORG_CONFIG]
-            // with replication_user and replication_user_password
-            _set_replication_user_from_aws();
-        }
-
-        // get the org config and see if there is a replication_user_password
-        nlohmann::json org = _json[ORG_CONFIG];
-        if (org.contains("replication_user_password")) {
-            std::string replication_user_password;
-            Json::get_to<std::string>(org, "replication_user_password", replication_user_password);
-            primary_db_config["password"] = replication_user_password;
-        }
-
-        if (org.contains("replication_user")) {
-            std::string replication_user;
-            Json::get_to<std::string>(org, "replication_user", replication_user);
-            primary_db_config["replication_user"] = replication_user;
-        }
+        // use the replication user password from system roles
+        auto role = get_system_role(DB_ROLE_REPLICATION);
+        primary_db_config["replication_user"] = role.first;
+        primary_db_config["password"] = role.second;
 
         return primary_db_config;
     }
@@ -554,18 +596,10 @@ namespace springtail {
             throw RedisNotFoundError("Error missing fdw_config in redis");
         }
 
-        // get the org config and see if there is a fdw_user_password
-        nlohmann::json org = _json[ORG_CONFIG];
+        auto role = get_system_role(DB_ROLE_FDW);
+        fdw_config["fdw_user"] = role.first;
+        fdw_config["password"] = role.second;
 
-        std::string fdw_user_password;
-        if (org.contains("fdw_user_password")) {
-            Json::get_to<std::string>(org, "fdw_user_password", fdw_user_password);
-        }
-
-        // set the fdw password if it exists
-        if (!fdw_user_password.empty()) {
-            fdw_config["password"] = fdw_user_password;
-        }
         return fdw_config;
     }
 
@@ -587,37 +621,4 @@ namespace springtail {
         std::string pid_path = Json::get_or<std::string>(props, Properties::PID_PATH, "/var/springtail/pids");
         return pid_path;
     }
-
-    void
-    Properties::_set_replication_user_from_aws()
-    {
-        uint64_t org_id;
-        uint64_t account_id;
-        uint64_t db_instance_id;
-
-        Json::get_to<uint64_t>(_json[ORG_CONFIG], "organization_id", org_id);
-        Json::get_to<uint64_t>(_json[ORG_CONFIG], "account_id", account_id);
-        Json::get_to<uint64_t>(_json[ORG_CONFIG], "db_instance_id", db_instance_id);
-
-        std::string key = fmt::format(AwsHelper::DB_USERS_SECRET, org_id, account_id, db_instance_id);
-
-        if (_aws_helper == nullptr) {
-            _aws_helper = std::make_shared<AwsHelper>();
-        }
-
-        nlohmann::json secret = _aws_helper->get_secret(key);
-        CHECK(secret.is_array());
-
-        // iterate through json and find role="replication"
-        for (auto &user: secret) {
-            CHECK(user.is_object());
-            CHECK(user.contains("role"));
-            if (user["role"] == "replication") {
-                _json[ORG_CONFIG]["replication_user"] = user["username"];
-                _json[ORG_CONFIG]["replication_user_password"] = user["password"];
-                break;
-            }
-        }
-    }
-
 }

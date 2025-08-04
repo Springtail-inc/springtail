@@ -183,7 +183,6 @@ namespace {
 
         _cache->add_callback("fdw/1",            redis_watcher);
         _cache->add_callback("fdw/1/db_prefix",  redis_watcher);
-        _cache->add_callback("fdw/1/fdw_user",   redis_watcher);
         _cache->add_callback("fdw/1/host",       redis_watcher);
         _cache->add_callback("fdw/1/port",       redis_watcher);
 
@@ -213,7 +212,6 @@ namespace {
 
         _cache->add_callback("instance_config/primary_db/host",             redis_watcher);
         _cache->add_callback("instance_config/primary_db/port",             redis_watcher);
-        _cache->add_callback("instance_config/primary_db/replication_user", redis_watcher);
 
         EXPECT_EQ(_cache->get_callback_count(""), 37);
 

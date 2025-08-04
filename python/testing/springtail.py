@@ -369,7 +369,7 @@ def start_replication(props : Properties, build_dir : str) -> None:
 
 def start_fdw_daemons(props : Properties,
                       build_dir : str,
-                      config_file : str = None) -> None:
+                      config_file : Optional[str] = None) -> None:
     """Import the foreign data wrapper schemas."""
     fdw_config = props.get_fdw_config()
     mount_path = props.get_mount_path()
@@ -407,7 +407,7 @@ def start_fdw_daemons(props : Properties,
     for d in FDW_DAEMONS:
         if d[0] == 'pg_ddl_daemon':
             s = d[2]
-            daemons.append((d[0], d[1], s + f',-u,{fdw_config["fdw_user"]},-p,{fdw_config["password"]}'))
+            daemons.append((d[0], d[1], s + f',-u,{fdw_config["fdw_user"]},-p,{fdw_config["password"]},-x,{fdw_config["proxy_password"]}'))
         else:
             daemons.append(d)
     start_daemons(build_dir, daemons)
@@ -418,6 +418,7 @@ def start_proxy(props : Properties, build_dir : str, restart: bool = False) -> N
     # Start the proxy
     print("Starting proxy...")
     start_daemons(build_dir, PROXY_DAEMONS, restart)
+
 
 def wait_for_running(props : Properties) -> None:
     """Wait for the system to be in a running state."""

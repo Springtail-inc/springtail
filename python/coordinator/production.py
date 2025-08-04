@@ -21,6 +21,8 @@ from aws import AwsHelper
 
 from postgres_component import PostgresComponent
 
+from properties import Properties
+
 S3_BIN_FOLDER = 'packages'
 S3_DOWNLOAD_PATH = '/tmp/'
 
@@ -42,7 +44,6 @@ ENV_VARS = [
     'LUSTRE_MOUNT_NAME',
     'MOUNT_POINT',
     'FDW_ID',
-    'FDW_USER_PASSWORD',
     'LD_LIBRARY_PATH'
 ]
 
@@ -159,7 +160,7 @@ class Production:
 
         raise ValueError("Config Hash not found in version file")
 
-    def install_pgfdw(self) -> str:
+    def install_pgfdw(self, props: Properties) -> str:
         """
         Install the postgres libraries on the local system for the FDW.
         Should be done prior to starting the ddl mgr.
@@ -193,9 +194,7 @@ class Production:
         version_str = run_command('pg_config', ['--version']).strip()
         version = version_str.split(' ')[1].split('.')[0]
 
-        fdw_user = os.environ.get('FDW_USER')
-        if not fdw_user:
-            raise ValueError("FDW_USER environment variable not set")
+        fdw_user = props.get_role(Properties.DB_USER_ROLE_FDW)[0]
 
         env_file = f'/etc/postgresql/{version}/{fdw_user}/environment'
         hba_file = f'/var/lib/postgresql/{version}/{fdw_user}/pg_hba.conf'
@@ -223,7 +222,8 @@ class Production:
         pg = PostgresComponent(name="postgres",
                                id="10",
                                path=bindir,
-                               pid_path=pid_file)
+                               pid_path=pid_file,
+                               props=props)
         pg.shutdown()
 
         return pid_file
@@ -320,25 +320,4 @@ class Production:
 
         self.aws.send_sns_notification(self.topic_arn, subject, message, attributes)
 
-    def get_replication_user(self) -> Optional[Dict[str, str]] :
-        """Retrieve replication user creds from AWS Secrets Manager."""
 
-        # construct the secret name
-        org_id = self.sns_attributes['organization_id']
-        account_id = self.sns_attributes['account_id']
-        db_instance_id = self.sns_attributes['database_instance_id']
-        secret_name = f"sk/{org_id}/{account_id}/aws/dbi/{db_instance_id}/primary_db_password"
-
-        self.logger.debug(f"Attempting to retrieve secret for: {secret_name}")
-
-        secret = self.aws.get_secret(secret_name)
-        if not secret:
-            self.logger.error(f"Secret not found for: {secret_name}")
-            return None
-
-        # find the replication user
-        for user in secret:
-            if user['role'] == 'replication':
-                return user
-
-        return None

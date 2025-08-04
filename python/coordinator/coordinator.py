@@ -17,14 +17,13 @@ sys.path.append(os.path.join(project_root, 'shared'))
 sys.path.append(os.path.join(project_root, 'grpc'))
 
 # import the Properties class
-from properties import Properties
+from properties import Properties, DB_USER_ROLE_FDW, DB_USER_ROLE_PROXY, DB_USER_ROLE_REPLICATION
 from sysutils import stop_daemons
 
 # import the ComponentFactory class and the Scheduler class
 from component_factory import ComponentFactory
 from scheduler import Scheduler, CoordinatorState
 from production import Production
-from postgres_helper import PostgresHelper
 import loader
 
 # import the xid_mgr_client
@@ -160,11 +159,6 @@ class Coordinator:
                         self.logger.error("Failed to start Postgres")
                         raise ValueError("Failed to start Postgres")
 
-                # create the ddl user and fdw user
-                pg_helper = PostgresHelper()
-                (_, ddl_password) = pg_helper.create_ddl_user()
-                pg_helper.create_fdw_user()
-
                 # in test startup ingestion services
                 if not self.production:
                     self.sys_tlb_mgr_component = factory.create_sys_tbl_mgr_daemon()
@@ -180,7 +174,11 @@ class Coordinator:
 
                 self.scheduler.register_component(postgres, 3)
                 self.scheduler.register_component(factory.create_xid_subscriber_daemon(), 4)
-                self.scheduler.register_component(factory.create_ddl_daemon('ddl_user', ddl_password), 5)
+
+                # register the DDL daemon with the correct user and password
+                fdw_user = self.props.get_role(DB_USER_ROLE_FDW)
+                proxy_user = self.props.get_role(DB_USER_ROLE_PROXY)
+                self.scheduler.register_component(factory.create_ddl_daemon(fdw_user[0], fdw_user[1], proxy_user[1]), 5)
 
             case "proxy":
                 self.scheduler.register_component(factory.create_proxy(), 1)

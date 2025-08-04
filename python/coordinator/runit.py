@@ -1,3 +1,5 @@
+# NOTE THIS IS CURRENTLY BROKEN
+
 import sys
 import os
 import argparse
@@ -82,12 +84,6 @@ def gen_random_string(length: int) -> str:
 def run_tests(factory: ComponentFactory) -> None:
     """Run tests for all components"""
     # Create components and test if they are running
-    xid_mgr_daemon = factory.create_xid_mgr_daemon()
-    test(xid_mgr_daemon)
-    assert not xid_mgr_daemon.is_running()
-
-    xid_mgr_daemon.start()
-    assert xid_mgr_daemon.is_running()
 
     pg_xid_subscriber_daemon = factory.create_pg_xid_subscriber_daemon()
     test(pg_xid_subscriber_daemon)

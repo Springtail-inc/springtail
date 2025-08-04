@@ -3,6 +3,7 @@ from typing import Optional
 from component import Component
 from postgres_component import PostgresComponent
 from common import run_command
+from properties import Properties
 
 class ComponentFactory:
     """
@@ -17,10 +18,11 @@ class ComponentFactory:
     XID_SUBSCRIBER_ID = "5"
     POSTGRES = "10"
 
-    def __init__(self, install_dir : str, pid_dir : str):
+    def __init__(self, install_dir : str, pid_dir : str, props: Properties):
         """Initialize the component factory"""
         self.install_dir = install_dir
         self.pid_dir = pid_dir
+        self.props = props
 
     def create_log_mgr_daemon(self) -> Component:
         """Create a new log manager component."""
@@ -42,12 +44,12 @@ class ComponentFactory:
             pid_path=os.path.join(self.pid_dir, 'sys_tbl_mgr.pid')
         )
 
-    def create_ddl_daemon(self, user: str, password: str) -> Component:
+    def create_ddl_daemon(self, user: str, password: str, proxy_user_password: str) -> Component:
         """Create a new write cache component."""
         return Component(
             name="pg_ddl_daemon",
             id=self.DDL_ID,
-            args=["--daemon", "-u", user, "-p", password, "-s", "/var/run/postgresql"],
+            args=["--daemon", "-u", user, "-p", password, "-x", proxy_user_password, "-s", "/var/run/postgresql"],
             path=self.install_dir,
             pid_path=os.path.join(self.pid_dir, 'pg_ddl_mgr.pid')
         )
@@ -78,7 +80,8 @@ class ComponentFactory:
             name="postgres",
             id=self.POSTGRES,
             path=bindir,
-            pid_path=pid_path
+            pid_path=pid_path,
+            props=self.props
         )
 
     def create_xid_subscriber_daemon(self) -> Component:
