@@ -37,7 +37,6 @@ def gen_test_set(test_set: str,
     test = TestSet(test_set, config_file, build_dir, test_params)
     return [ test ]
 
-
 def gen_all_tests(test_folder: str,
                   config_file: str,
                   build_dir: str,
@@ -187,12 +186,24 @@ if __name__ == "__main__":
     else:
         default_config_file = os.path.join(tmp_config_dir, 'default.json')
         if args.test_set is None:
+            if default_test_sets is None:
+                default_test_sets = sorted(os.listdir(test_folder))
+
+            overlays = yaml_config['overlays'];
+            if overlays:
+                required_overlay = [x for x in overlays if "overlay_required" in overlays[x] and overlays[x]['overlay_required'] == True]
+                overlay_required_sets = [overlays[x]["test_sets"] for x in required_overlay]
+                overlay_required_sets = [item for sublist in overlay_required_sets for item in sublist]
+
+            # exclude tests that require overlays from running under the default config
+            default_test_sets = [x for x in default_test_sets if x not in overlay_required_sets]
+
             tests = gen_all_tests(test_folder, default_config_file, build_dir, {}, default_test_sets)
 
-            if yaml_config.get('overlays'):
-                for overlay_name in yaml_config['overlays']:
+            if overlays:
+                for overlay_name in ovelays:
                     overlay_config_file = os.path.join(tmp_config_dir, f'{overlay_name}.json')
-                    overlay_test_sets = yaml_config['overlays'][overlay_name]['test_sets']
+                    overlay_test_sets = overlays[overlay_name]['test_sets']
                     tests += gen_all_tests(test_folder, overlay_config_file,
                                            build_dir, {}, overlay_test_sets)
         else:
@@ -202,6 +213,7 @@ if __name__ == "__main__":
             else:
                 tests = gen_test_cases(os.path.join(test_folder, args.test_set), args.test_case,
                                        default_config_file, build_dir, {})
+    sys.exit();
 
     # sync the test data files
     if not args.skip_downloads:
