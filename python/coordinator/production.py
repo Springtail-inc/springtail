@@ -197,8 +197,8 @@ class Production:
         if not fdw_user:
             raise ValueError("FDW_USER environment variable not set")
 
-        env_file = f'/etc/postgresql/{version}/{fdw_user}/main/environment'
-        hba_file = f'/var/lib/postgresql/{version}/{fdw_user}/main/pg_hba.conf'
+        env_file = f'/etc/postgresql/{version}/{fdw_user}/environment'
+        hba_file = f'/var/lib/postgresql/{version}/{fdw_user}/pg_hba.conf'
         pid_file = f'/var/lib/postgresql/{version}/{fdw_user}/postmaster.pid'
 
         # Update the localhost socket connection to use scram-sha-256
