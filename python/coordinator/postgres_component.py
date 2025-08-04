@@ -30,7 +30,9 @@ class PostgresComponent(Component):
         self.is_production = False
         if environment == 'production':
             self.is_production = True
-            fdw_user = os.environ.get('FDW_USER', 'springtail')
+            fdw_user = os.environ.get('FDW_USER')
+            if not fdw_user:
+                raise ValueError("FDW_USER environment variable not set")
             self.service_name = f'postgresql-{fdw_user}.service'
 
         super().__init__(name, id, path, pid_path)

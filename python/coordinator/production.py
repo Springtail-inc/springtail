@@ -193,7 +193,10 @@ class Production:
         version_str = run_command('pg_config', ['--version']).strip()
         version = version_str.split(' ')[1].split('.')[0]
 
-        fdw_user = os.environ.get('FDW_USER', 'springtail')
+        fdw_user = os.environ.get('FDW_USER')
+        if not fdw_user:
+            raise ValueError("FDW_USER environment variable not set")
+
         env_file = f'/etc/postgresql/{version}/{fdw_user}/main/environment'
         hba_file = f'/var/lib/postgresql/{version}/{fdw_user}/main/pg_hba.conf'
         pid_file = f'/var/lib/postgresql/{version}/{fdw_user}/postmaster.pid'
