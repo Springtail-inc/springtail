@@ -103,7 +103,7 @@ class PostgresComponent(Component):
         """
         self.logger.debug("Shutting down Postgres")
         if self.is_production:
-            run_command('sudo', ['systemctl', 'stop', f'postgresql@{self.version}-main'])
+            run_command('sudo', ['systemctl', 'stop', self.service_name])
         else:
             run_command('sudo', ['service', 'postgresql', 'stop'])
 

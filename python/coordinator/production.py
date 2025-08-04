@@ -141,10 +141,10 @@ class Production:
 
     def get_config_hash(self, file_path: str) -> str:
         """Read and extract Config Hash value from the version file.
-        
+
         Args:
             file_path: Path to the version file
-            
+
         Returns:
             String containing the config hash value
         """
@@ -159,11 +159,16 @@ class Production:
 
         raise ValueError("Config Hash not found in version file")
 
-    def install_pgfdw(self) -> None:
+    def install_pgfdw(self) -> str:
         """
         Install the postgres libraries on the local system for the FDW.
         Should be done prior to starting the ddl mgr.
+
+        Returns:
+            The path to the postmaster.pid file
         """
+        self.logger.info("Installing Postgres FDW")
+
         # Get the share and lib directories
         share_dir = run_command('pg_config', ['--sharedir'])
         lib_dir = run_command('pg_config', ['--pkglibdir'])
@@ -187,11 +192,15 @@ class Production:
         self.logger.info("Updating postgres environment file")
         version_str = run_command('pg_config', ['--version']).strip()
         version = version_str.split(' ')[1].split('.')[0]
-        env_file = f'/etc/postgresql/{version}/main/environment'
+
+        fdw_user = os.environ.get('FDW_USER', 'springtail')
+        env_file = f'/etc/postgresql/{version}/{fdw_user}/main/environment'
+        hba_file = f'/var/lib/postgresql/{version}/{fdw_user}/main/pg_hba.conf'
+        pid_file = f'/var/lib/postgresql/{version}/{fdw_user}/postmaster.pid'
 
         # Update the localhost socket connection to use scram-sha-256
         self.logger.info("Setting up pg_hba.conf")
-        run_command('sudo', ['sed', '-i', 's/^local[[:space:]]\\+all[[:space:]]\\+all[[:space:]]\\+\\(md5\\|peer\\)/local   all   all   scram-sha-256/', f'/etc/postgresql/{version}/main/pg_hba.conf'])
+        run_command('sudo', ['sed', '-i', 's/^local[[:space:]]\\+all[[:space:]]\\+all[[:space:]]\\+\\(md5\\|peer\\)/local   all   all   scram-sha-256/', hba_file])
 
         # Write the environment variables to a temporary file
         with tempfile.NamedTemporaryFile(delete=True, mode='w') as temp_file:
@@ -211,8 +220,10 @@ class Production:
         pg = PostgresComponent(name="postgres",
                                id="10",
                                path=bindir,
-                               pid_path=f'/var/run/postgresql/{version}-main.pid')
+                               pid_path=pid_file)
         pg.shutdown()
+
+        return pid_file
 
 
     def _extract_attributes(self) -> Dict[str, Any]:
