@@ -7,6 +7,7 @@
 #include <common/init.hh>
 #include <common/logging.hh>
 #include <common/exception.hh>
+#include <common/environment.hh>
 
 #include <pg_repl/pg_msg_log_gen.hh>
 #include <pg_repl/pg_repl_msg.hh>
@@ -21,6 +22,30 @@ namespace {
         static constexpr char const * const LOG_FILE = "/tmp/test_log_reader.log";
         static void SetUpTestSuite()
         {
+            // Add two fake databeses with custom include.schemas config
+            std::string js = 
+            "{ "
+            "\"db_instances\": {"
+                "\"1234\": {"
+                    "\"database_ids\": [\"1\", \"2\", \"3\"]"
+                "}"
+            "},"
+            "\"databases\": "
+                "{\"2\": {\"name\": \"springtail\","
+                    "\"replication_slot\": \"springtail_slot\","
+                    "\"publication_name\": \"springtail_pub\","
+                    "\"include\": {"
+                        "\"schemas\": [\"test\"]}},"
+                "\"3\": {\"name\": \"springtail\","
+                    "\"replication_slot\": \"springtail_slot\","
+                    "\"publication_name\": \"springtail_pub\","
+                    "\"include\": {"
+                        "\"schemas\": [\"public\"]}}"
+                "}"
+            "}";
+
+            ::setenv(environment::ENV_OVERRIDE_JSON, js.c_str(), 1);
+
             // code here will execute just before the test ensues
             springtail_init_test();
         }
@@ -69,7 +94,7 @@ namespace {
     {
         bool eos=false;
 
-        PgMsgStreamReader reader(_log_file);
+        PgMsgStreamReader reader({}, _log_file);
 
         int count = 0;
         while (count < 7) {
@@ -84,7 +109,7 @@ namespace {
     TEST_F(MsgStreamReader_Test, Offset)
     {
         bool eos=false;
-        PgMsgStreamReader reader(_log_file);
+        PgMsgStreamReader reader({}, _log_file);
 
         // read next message
         PgMsgPtr msg = reader.read_message({}, eos);
@@ -96,7 +121,7 @@ namespace {
     {
         bool eos=false;
 
-        PgMsgStreamReader reader(_log_file);
+        PgMsgStreamReader reader({}, _log_file);
 
         int count = 0;
         while (!eos) {
@@ -112,7 +137,13 @@ namespace {
     {
         bool eos=false;
 
-        PgMsgStreamReader reader(_log_file);
+        PgMsgStreamReader reader(1, _log_file);
+
+        // ignore create/drop/alter/create index for any namespace but "test"
+        PgMsgStreamReader ns_reader(2, _log_file);
+
+        // public namespace is hardcoded in the test json
+        PgMsgStreamReader pub_reader(3, _log_file);
 
         int count = 0;
         while (!eos) {
@@ -121,55 +152,90 @@ namespace {
                 EXPECT_EQ(count, 28);
                 continue;
             }
+            PgMsgPtr test_msg = ns_reader.read_message(reader.ALL_MESSAGES, eos);
+            PgMsgPtr pub_msg = pub_reader.read_message(reader.ALL_MESSAGES, eos);
+
             nlohmann::json &j = _json_cmds[count];
             switch(msg->msg_type) {
                 case PgMsgEnum::BEGIN:
                     EXPECT_EQ(j["cmd"], "begin");
+                    EXPECT_NE(test_msg, nullptr);
+                    EXPECT_NE(pub_msg, nullptr);
                     break;
                 case PgMsgEnum::COMMIT:
                     EXPECT_EQ(j["cmd"], "commit");
+                    EXPECT_NE(test_msg, nullptr);
+                    EXPECT_NE(pub_msg, nullptr);
                     break;
                 case PgMsgEnum::STREAM_START:
                     EXPECT_EQ(j["cmd"], "stream start");
+                    EXPECT_NE(test_msg, nullptr);
+                    EXPECT_NE(pub_msg, nullptr);
                     break;
                 case PgMsgEnum::STREAM_COMMIT:
                     EXPECT_EQ(j["cmd"], "stream commit");
+                    EXPECT_NE(test_msg, nullptr);
+                    EXPECT_NE(pub_msg, nullptr);
                     break;
                 case PgMsgEnum::STREAM_ABORT:
                     EXPECT_EQ(j["cmd"], "stream abort");
+                    EXPECT_NE(test_msg, nullptr);
+                    EXPECT_NE(pub_msg, nullptr);
                     break;
                 case PgMsgEnum::STREAM_STOP:
                     EXPECT_EQ(j["cmd"], "stream stop");
+                    EXPECT_NE(test_msg, nullptr);
+                    EXPECT_NE(pub_msg, nullptr);
                     break;
                 case PgMsgEnum::CREATE_TABLE:
                     EXPECT_EQ(j["cmd"], "create table");
+                    EXPECT_EQ(test_msg, nullptr);
+                    EXPECT_NE(pub_msg, nullptr);
                     break;
                 case PgMsgEnum::ALTER_TABLE:
                     EXPECT_EQ(j["cmd"], "alter table");
+                    EXPECT_EQ(test_msg, nullptr);
+                    EXPECT_NE(pub_msg, nullptr);
                     break;
                 case PgMsgEnum::DROP_TABLE:
                     EXPECT_EQ(j["cmd"], "drop table");
+                    EXPECT_EQ(test_msg, nullptr);
+                    EXPECT_NE(pub_msg, nullptr);
                     break;
                 case PgMsgEnum::CREATE_INDEX:
                     EXPECT_EQ(j["cmd"], "create index");
+                    EXPECT_EQ(test_msg, nullptr);
+                    EXPECT_NE(pub_msg, nullptr);
                     break;
                 case PgMsgEnum::INSERT:
                     EXPECT_EQ(j["cmd"], "insert");
+                    EXPECT_NE(test_msg, nullptr);
+                    EXPECT_NE(pub_msg, nullptr);
                     break;
                 case PgMsgEnum::UPDATE:
                     EXPECT_EQ(j["cmd"], "update");
+                    EXPECT_NE(test_msg, nullptr);
+                    EXPECT_NE(pub_msg, nullptr);
                     break;
                 case PgMsgEnum::DELETE:
                     EXPECT_EQ(j["cmd"], "delete");
+                    EXPECT_NE(test_msg, nullptr);
+                    EXPECT_NE(pub_msg, nullptr);
                     break;
                 case PgMsgEnum::TRUNCATE:
                     EXPECT_EQ(j["cmd"], "truncate");
+                    EXPECT_NE(test_msg, nullptr);
+                    EXPECT_NE(pub_msg, nullptr);
                     break;
                 case PgMsgEnum::ATTACH_PARTITION:
                     EXPECT_EQ(j["cmd"], "attach partition");
+                    EXPECT_NE(test_msg, nullptr);
+                    EXPECT_NE(pub_msg, nullptr);
                     break;
                 case PgMsgEnum::DETACH_PARTITION:
                     EXPECT_EQ(j["cmd"], "detach partition");
+                    EXPECT_NE(test_msg, nullptr);
+                    EXPECT_NE(pub_msg, nullptr);
                     break;
                 default:
                     std::cout << "Unknown message type: " << j["cmd"] << std::endl;

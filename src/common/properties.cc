@@ -155,6 +155,15 @@ namespace springtail {
         nlohmann::json system_json;
         file >> system_json;
 
+        // patch the config
+        const char *patch = std::getenv(environment::ENV_OVERRIDE_JSON);
+        if (patch) {
+            std::stringstream ss(patch);
+            nlohmann::json override_json;
+            ss >> override_json;
+            system_json.merge_patch(override_json);
+        }
+
         // Extract system config
         _json[LOGGING_CONFIG] = system_json["logging"];
         _json[IOPOOL_CONFIG] = system_json["iopool"];
@@ -394,6 +403,23 @@ namespace springtail {
             db_ids.push_back(db_id);
         }
         return db_ids;
+    }
+
+    std::vector<std::string>
+    Properties::get_include_schemas(uint64_t db_id)
+    {
+        std::vector<std::string> include_schemas;
+
+        auto db_config = Properties::get_db_config(db_id);
+        auto include_json = db_config["include"];
+        if (include_json.contains("schemas") && include_json["schemas"].is_array()) {
+            include_schemas = include_json["schemas"];
+        }
+        if (std::ranges::find(include_schemas, "*") != include_schemas.end()) {
+            // empty means include all schemas
+            return {};
+        }
+        return include_schemas;
     }
 
     nlohmann::json

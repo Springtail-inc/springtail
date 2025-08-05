@@ -146,14 +146,15 @@ class Coordinator:
                 self.scheduler.register_component(factory.create_log_mgr_daemon(), 2)
 
             case "fdw":
+                pid_path = None
                 try:
                     if self.production:
-                        self.production.install_pgfdw()
+                        pid_path = self.production.install_pgfdw()
                 except Exception as e:
                     raise ValueError("Failed to install postgres_fdw: " + str(e))
 
                 # startup postgres if not running
-                postgres = factory.create_postgres()
+                postgres = factory.create_postgres(pid_path)
                 if not postgres.is_running():
                     if not postgres.start():
                         self.logger.error("Failed to start Postgres")
