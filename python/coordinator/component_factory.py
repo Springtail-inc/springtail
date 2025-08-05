@@ -18,10 +18,10 @@ class ComponentFactory:
     XID_SUBSCRIBER_ID = "5"
     POSTGRES = "10"
 
-    def __init__(self, install_dir : str, pid_dir : str, props: Properties):
+    def __init__(self, install_dir : str, props: Properties):
         """Initialize the component factory"""
         self.install_dir = install_dir
-        self.pid_dir = pid_dir
+        self.pid_dir = props.get_pid_path()
         self.props = props
 
     def create_log_mgr_daemon(self) -> Component:
