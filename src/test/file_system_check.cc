@@ -17,6 +17,11 @@ FSCheck::FSCheck()
     Json::get_to<std::filesystem::path>(json, "table_dir", _table_base);
     _table_base = Properties::make_absolute_path(_table_base);
     LOG_INFO("Verifying tables at table_base = {}", _table_base.string());
+
+    for (auto [db_id, db_name]: _databases) {
+        _read_namespaces(db_id);
+        _read_tables(db_id);
+    }
 }
 
 template<typename Tbl>
@@ -30,234 +35,218 @@ FSCheck::_get_table_and_fields(uint64_t db_id)
 
     uint64_t xid = constant::LATEST_XID;
 
-    XidLsn access_xid(xid);
     TablePtr table = std::make_shared<Table>(db_id, Tbl::ID, xid, _table_base, Tbl::Primary::KEY, secondary_keys, tbl_meta, schema);
     std::shared_ptr<std::vector<FieldPtr>> fields = schema->get_fields();
 
     return std::make_pair(table, fields);
 }
 
-std::vector<SchemaColumn>
-FSCheck::_read_schema_columns(uint64_t db_id, uint64_t table_id, XidLsn &access_start, XidLsn &access_end)
+void
+FSCheck::_read_namespaces(uint64_t db_id)
 {
-    std::vector<SchemaColumn> columns;
+    LOG_INFO("Namespaces for db {}", db_id);
+    auto [table, fields] = _get_table_and_fields<sys_tbl::NamespaceNames>(db_id);
 
-    // read schema table
-    auto [schema_table, schema_table_fields] = _get_table_and_fields<sys_tbl::Schemas>(db_id);
-    // read everything with the given table_id
-    auto search_key = sys_tbl::Schemas::Primary::key_tuple(table_id, 0, 0, 0);
-    auto schema_table_iter = schema_table->lower_bound(search_key);
-    for (; schema_table_iter != schema_table->end(); ++schema_table_iter) {
-        auto &schema_table_row = *schema_table_iter;
+    for (auto row: (*table)) {
+        uint64_t ns_id = fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&row);
+        std::string name(fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&row));
+        uint64_t xid = fields->at(sys_tbl::NamespaceNames::Data::XID)->get_uint64(&row);
+        uint64_t lsn = fields->at(sys_tbl::NamespaceNames::Data::LSN)->get_uint64(&row);
+        bool exists = fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row);
+        LOG_INFO("\tNamespace {}:{}", ns_id, name);
 
-        uint64_t schema_table_id = schema_table_fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(&schema_table_row);
-        if (schema_table_id != table_id) {
-            break;
-        }
-        uint32_t position = schema_table_fields->at(sys_tbl::Schemas::Data::POSITION)->get_uint32(&schema_table_row);
-        uint64_t xid = schema_table_fields->at(sys_tbl::Schemas::Data::XID)->get_uint64(&schema_table_row);
-        uint64_t lsn = schema_table_fields->at(sys_tbl::Schemas::Data::LSN)->get_uint64(&schema_table_row);
-        const XidLsn row_xid(xid, lsn);
-        if (access_start < row_xid) {
-            access_start = row_xid;
-        }
-
-        bool exists = schema_table_fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(&schema_table_row);
         if (!exists) {
-            // Remove any existing column at this position
-            for (int i = 0; i < columns.size(); i++) {
-                if (columns[i].position == position) {
-                    columns.erase(columns.begin() + i);
+            _db_ns_id_map.erase(std::make_pair(db_id, ns_id));
+        } else {
+            FSNamespace ns_data{ns_id, name, xid, lsn, exists};
+            _db_ns_id_map[std::make_pair(db_id, ns_id)] = ns_data;
+        }
+    }
+}
+
+void
+FSCheck::_read_tables(uint64_t db_id)
+{
+    LOG_INFO("Tables for db {}", db_id);
+    auto [table, fields] = _get_table_and_fields<sys_tbl::TableNames>(db_id);
+
+    // 1. read all the tables and filter out the tables that have not been deleted yet
+    for (auto row: (*table)) {
+        uint64_t ns_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
+        std::string name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row));
+        uint64_t table_id = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
+        uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
+        uint64_t lsn = fields->at(sys_tbl::TableNames::Data::LSN)->get_uint64(&row);
+        bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
+        if (!exists) {
+            _db_tbl_id_map.erase(std::pair(db_id, table_id));
+        } else {
+            FSTable table_data{ns_id, name, table_id, xid, lsn, exists};
+            _db_tbl_id_map[std::make_pair(db_id, table_id)] = table_data;
+            LOG_INFO("Added table: db_id {}, namespace_id {}, table_id {}", db_id, ns_id, table_id);
+        }
+        LOG_INFO("Table {}:{}", table_id, name);
+    }
+
+    // 2. iterate over the found tables
+    for (auto it = _db_tbl_id_map.lower_bound(std::make_pair(db_id, 0));
+            it != _db_tbl_id_map.end() && it->first.first == db_id; ++it) {
+        uint64_t table_id_key = it->second.table_id;
+
+        // 3. read all columns per table and filter out existing columns
+        {
+            std::map<uint32_t, SchemaColumn> pos_to_column;
+            auto [table, fields] = _get_table_and_fields<sys_tbl::Schemas>(db_id);
+            auto search_key = sys_tbl::Schemas::Primary::key_tuple(table_id_key, 0, 0, 0);
+            auto table_iter = table->lower_bound(search_key);
+            for (; table_iter != table->end(); ++table_iter) {
+                auto &row = *table_iter;
+                uint64_t table_id = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(&row);
+                if (table_id != table_id_key) {
                     break;
                 }
+                uint32_t position = fields->at(sys_tbl::Schemas::Data::POSITION)->get_uint32(&row);
+                uint64_t xid = fields->at(sys_tbl::Schemas::Data::XID)->get_uint64(&row);
+                uint64_t lsn = fields->at(sys_tbl::Schemas::Data::LSN)->get_uint64(&row);
+                bool exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(&row);
+                std::string name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(&row));
+                uint8_t type = fields->at(sys_tbl::Schemas::Data::TYPE)->get_uint8(&row);
+                uint32_t pg_type = fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(&row);
+                bool nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(&row);
+                std::optional<std::string> default_value;
+                if (!fields->at(sys_tbl::Schemas::Data::DEFAULT)->is_null(&row)) {
+                    default_value = fields->at(sys_tbl::Schemas::Data::DEFAULT)->get_text(&row);
+                }
+                uint8_t update_type = fields->at(sys_tbl::Schemas::Data::UPDATE_TYPE)->get_uint8(&row);
+                if (!exists) {
+                    pos_to_column.erase(position);
+                } else {
+                    std::optional<uint32_t> pk_position;
+                    SchemaColumn column(xid, lsn, name, position, static_cast<SchemaType>(type), pg_type, exists, nullable,
+                                        pk_position, default_value);
+                    column.update_type = static_cast<SchemaUpdateType>(update_type);
+                    pos_to_column[position] = column;
+                }
             }
-            continue;
-        }
-        std::string column_name(schema_table_fields->at(sys_tbl::Schemas::Data::NAME)->get_text(&schema_table_row));
-        uint8_t type = schema_table_fields->at(sys_tbl::Schemas::Data::TYPE)->get_uint8(&schema_table_row);
-        int32_t pg_type = schema_table_fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(&schema_table_row);
-        bool nullable = schema_table_fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(&schema_table_row);
-        std::optional<std::string> default_value;
-        if (!schema_table_fields->at(sys_tbl::Schemas::Data::DEFAULT)->is_null(&schema_table_row)) {
-            default_value = schema_table_fields->at(sys_tbl::Schemas::Data::DEFAULT)->get_text(&schema_table_row);
+
+            // 4. copy all found columns into the table data
+            _db_tbl_id_map.at(std::make_pair(db_id, table_id_key)).pos_to_column.insert(pos_to_column.begin(), pos_to_column.end());
         }
 
-        std::optional<uint32_t> pk_position;
-        SchemaColumn column(xid, lsn, column_name, position, static_cast<SchemaType>(type), pg_type, exists, nullable, pk_position, default_value);
+        // 5. read all indexes in READY state for this table and filter out columns
+        {
+            std::map<uint64_t, FSIndex> id_to_index;
+            auto [table, fields] = _get_table_and_fields<sys_tbl::IndexNames>(db_id);
+            auto search_key = sys_tbl::IndexNames::Primary::key_tuple(table_id_key, 0, 0, 0);
+            auto table_iter = table->lower_bound(search_key);
+            for (; table_iter != table->end(); ++table_iter) {
+                auto &row = *table_iter;
+                uint64_t table_id = fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(&row);
+                if (table_id != table_id_key) {
+                    break;
+                }
+                uint64_t index_id = fields->at(sys_tbl::IndexNames::Data::INDEX_ID)->get_uint64(&row);
+                uint64_t xid = fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(&row);
+                uint64_t lsn = fields->at(sys_tbl::IndexNames::Data::LSN)->get_uint64(&row);
+                uint64_t namespace_id = fields->at(sys_tbl::IndexNames::Data::NAMESPACE_ID)->get_uint64(&row);
+                std::string name(fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(&row));
+                uint8_t state = fields->at(sys_tbl::IndexNames::Data::STATE)->get_uint8(&row);
+                bool is_unique = fields->at(sys_tbl::IndexNames::Data::IS_UNIQUE)->get_bool(&row);
+                if (static_cast<sys_tbl::IndexNames::State>(state) != sys_tbl::IndexNames::State::READY) {
+                    id_to_index.erase(index_id);
+                } else {
+                    std::string schema_name = _db_ns_id_map.at(std::make_pair(db_id, namespace_id)).ns_name;
+                    FSIndex fs_index{xid, lsn, {index_id, schema_name, name, table_id, is_unique, state}};
 
-        // Find position where column should be (either existing or new)
-        int idx = 0;
-        for (; idx < columns.size(); idx++) {
-            if (columns[idx].position >= position) {
-                break;
+                    // read index columns
+                    auto [idx_table, idx_fields] = _get_table_and_fields<sys_tbl::Indexes>(db_id);
+                    auto idx_search_key = sys_tbl::Indexes::Primary::key_tuple(table_id_key, index_id, xid, lsn, 0);
+                    auto idx_table_iter = idx_table->lower_bound(idx_search_key);
+
+                    std::map<uint32_t, uint32_t> columns;
+                    for (; idx_table_iter != idx_table->end(); ++idx_table_iter) {
+                        auto &idx_row = *idx_table_iter;
+                        uint64_t idx_table_id = idx_fields->at(sys_tbl::Indexes::Data::TABLE_ID)->get_uint64(&idx_row);
+                        uint64_t idx_index_id = idx_fields->at(sys_tbl::Indexes::Data::INDEX_ID)->get_uint64(&idx_row);
+                        uint64_t idx_xid = idx_fields->at(sys_tbl::Indexes::Data::XID)->get_uint64(&idx_row);
+                        uint64_t idx_lsn = idx_fields->at(sys_tbl::Indexes::Data::LSN)->get_uint64(&idx_row);
+                        if (idx_table_id != table_id || idx_index_id != index_id || idx_xid != xid || idx_lsn != lsn) {
+                            break;
+                        }
+                        uint32_t position = idx_fields->at(sys_tbl::Indexes::Data::POSITION)->get_uint32(&idx_row);
+                        uint32_t column_id = idx_fields->at(sys_tbl::Indexes::Data::COLUMN_ID)->get_uint32(&idx_row);
+                        columns[position] = column_id;
+                    }
+                    for (auto col_iter: columns) {
+                        Index::Column column{col_iter.first, col_iter.second};
+                        fs_index.index.columns.push_back(column);
+                    }
+                    id_to_index[index_id] = fs_index;
+                }
+            }
+
+            // 6. set indexes in the table
+            _db_tbl_id_map.at(std::make_pair(db_id, table_id_key)).id_to_index = id_to_index;
+
+            // 7. read all roots per index and set primary key positions
+            for (auto idx_iter: id_to_index) {
+                uint64_t index_id = idx_iter.first;
+                FSIndex fs_index = idx_iter.second;
+
+                // 8. set primary key positions in the table
+                if (index_id == constant::INDEX_PRIMARY) {
+                    for (auto col_iter: fs_index.index.columns) {
+                        _db_tbl_id_map.at(std::make_pair(db_id, table_id_key)).pos_to_column.at(col_iter.position).pkey_position = col_iter.idx_position;
+                    }
+                }
+
+                // 9. read all roots for this table and index
+                std::vector<FSRoot> roots;
+                auto [root_table, root_fields] = _get_table_and_fields<sys_tbl::TableRoots>(db_id);
+                auto root_search_key = sys_tbl::TableRoots::Primary::key_tuple(table_id_key, index_id, 0);
+                auto root_table_iter = root_table->lower_bound(root_search_key);
+                for (; root_table_iter != root_table->end(); ++root_table_iter) {
+                    auto &root_row = *root_table_iter;
+                    uint64_t root_table_id = root_fields->at(sys_tbl::TableRoots::Data::TABLE_ID)->get_uint64(&root_row);
+                    uint64_t root_index_id = root_fields->at(sys_tbl::TableRoots::Data::INDEX_ID)->get_uint64(&root_row);
+                    if (root_table_id != table_id_key || root_index_id != index_id) {
+                        break;
+                    }
+                    uint64_t root_xid = root_fields->at(sys_tbl::TableRoots::Data::XID)->get_uint64(&root_row);
+                    uint64_t root_extent_id = root_fields->at(sys_tbl::TableRoots::Data::EXTENT_ID)->get_uint64(&root_row);
+                    uint64_t root_snapshot_xid = root_fields->at(sys_tbl::TableRoots::Data::SNAPSHOT_XID)->get_uint64(&root_row);
+                    FSRoot root{root_xid, root_extent_id, root_snapshot_xid};
+                    roots.push_back(root);
+                }
+
+                // 10. set the roots in the table
+                for (auto root: roots) {
+                    _db_tbl_id_map.at(std::make_pair(db_id, table_id_key)).index_xid_to_root.insert(std::make_pair(std::make_pair(index_id, root.xid), root));
+                }
             }
         }
 
-        if (idx < columns.size() && columns[idx].position == position) {
-            // Update existing column at this position
-            columns[idx] = column;
-        } else {
-            // new column, put it in order
-            columns.insert(columns.begin() + idx, column);
-        }
-    }
-
-    if (columns.empty()) {
-        return columns;
-    }
-
-    // read indexes table
-    auto [indexes_table, indexes_table_fields] = _get_table_and_fields<sys_tbl::Indexes>(db_id);
-
-    // read everything with the given table_id
-    auto indexes_search_key = sys_tbl::Indexes::Primary::key_tuple(table_id, constant::INDEX_PRIMARY, access_end.xid, access_end.lsn, 0);
-    auto indexes_table_iter = indexes_table->inverse_lower_bound(indexes_search_key);
-
-    if (indexes_table_iter == indexes_table->end()) {
-        return columns;
-    }
-
-    // determine the XID we found and only read those entries
-    auto index_table_row = *indexes_table_iter;
-    uint64_t index_xid = indexes_table_fields->at(sys_tbl::Indexes::Data::XID)->get_uint64(&index_table_row);
-    uint64_t index_lsn = indexes_table_fields->at(sys_tbl::Indexes::Data::LSN)->get_uint64(&index_table_row);
-    XidLsn index_xid_lsn(index_xid, index_lsn);
-
-    bool done = false;
-    while (!done) {
-        index_table_row = *indexes_table_iter;
-
-        // ensure we are reading data for the requested table
-        uint64_t tid = indexes_table_fields->at(sys_tbl::Indexes::Data::TABLE_ID)->get_uint64(&index_table_row);
-        if (tid != table_id) {
-            // if we have read all of the entries for this table ID, stop processing
-            break;
-        }
-
-        uint64_t xid = indexes_table_fields->at(sys_tbl::Indexes::Data::XID)->get_uint64(&index_table_row);
-        uint64_t lsn = indexes_table_fields->at(sys_tbl::Indexes::Data::LSN)->get_uint64(&index_table_row);
-
-        // ensure we are still reading the correct XID/LSN
-        if (index_xid_lsn != XidLsn(xid, lsn)) {
-            break;
-        }
-
-        // update the primary key details in the schema columns
-        uint32_t column_id = indexes_table_fields->at(sys_tbl::Indexes::Data::COLUMN_ID)->get_uint32(&index_table_row);
-        uint32_t index_pos = indexes_table_fields->at(sys_tbl::Indexes::Data::POSITION)->get_uint32(&index_table_row);
-        bool found = false;
-        for (auto& column : columns) {
-            if (column.position == column_id) {
-                column.pkey_position = index_pos;
-                found = true;
-                break;
+        // 10. read all stats for this table
+        {
+            std::map<uint64_t, FSStats> xid_to_stats;
+            auto [table, fields] = _get_table_and_fields<sys_tbl::TableStats>(db_id);
+            auto search_key = sys_tbl::TableStats::Primary::key_tuple(table_id_key, 0);
+            auto table_iter = table->lower_bound(search_key);
+            for (; table_iter != table->end(); ++table_iter) {
+                auto &row = *table_iter;
+                uint64_t table_id = fields->at(sys_tbl::TableStats::Data::TABLE_ID)->get_uint64(&row);
+                if (table_id != table_id_key) {
+                    break;
+                }
+                uint64_t xid = fields->at(sys_tbl::TableStats::Data::XID)->get_uint64(&row);
+                uint64_t row_count = fields->at(sys_tbl::TableStats::Data::ROW_COUNT)->get_uint64(&row);
+                uint64_t end_offset = fields->at(sys_tbl::TableStats::Data::END_OFFSET)->get_uint64(&row);
+                FSStats stats{xid, row_count, end_offset};
+                xid_to_stats[xid] = stats;
             }
-        }
-        CHECK(found) << "Failed to find matching column for primary key";
-
-        done = (index_pos == 0);
-        if (!done) {
-            --indexes_table_iter;
+            _db_tbl_id_map.at(std::make_pair(db_id, table_id_key)).xid_to_stats = xid_to_stats;
         }
     }
-
-    return columns;
-}
-
-std::shared_ptr<const SchemaMetadata>
-FSCheck::_get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid_lsn)
-{
-    XidLsn access_start(0, 0);
-    XidLsn access_end(constant::LATEST_XID, constant::MAX_LSN);
-    XidLsn target_start(0, 0);
-    XidLsn target_end(constant::LATEST_XID, constant::MAX_LSN);
-
-    std::vector<SchemaColumn> columns = _read_schema_columns(db_id, table_id, access_start, access_end);
-
-    auto metadata = std::make_shared<SchemaMetadata>();
-
-    metadata->access_range = XidRange(access_start, access_end);
-    metadata->target_range = XidRange(target_start, target_end);
-    metadata->columns = columns;
-    metadata->indexes = std::vector<Index>();
-    return metadata;
-}
-
-std::shared_ptr<ExtentSchema>
-FSCheck::_get_extent_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
-{
-    auto &&meta = _get_schema(db_id, table_id, xid);
-
-    // construct the schema from the provided schema metadata
-    return std::make_shared<ExtentSchema>(meta->columns);
-}
-
-TableMetadataPtr
-FSCheck::_get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
-{
-    std::vector<TableRoot> roots;
-
-    // read table roots table
-    auto [table_roots, table_roots_fields] = _get_table_and_fields<sys_tbl::TableRoots>(db_id);
-
-    auto table_roots_search_key = sys_tbl::TableRoots::Primary::key_tuple(table_id, constant::INDEX_PRIMARY, xid);
-
-    // not found in cached roots, go to the table
-    auto search_key = sys_tbl::TableRoots::Primary::key_tuple(table_id, constant::INDEX_PRIMARY, xid);
-    auto table_roots_iter = table_roots->inverse_lower_bound(table_roots_search_key);
-    CHECK(table_roots_iter != table_roots->end());
-    auto &table_roots_row = *table_roots_iter;
-    uint64_t roots_tid = table_roots_fields->at(sys_tbl::TableRoots::Data::TABLE_ID)->get_uint64(&table_roots_row);
-    uint64_t roots_iid = table_roots_fields->at(sys_tbl::TableRoots::Data::INDEX_ID)->get_uint64(&table_roots_row);
-    uint64_t roots_xid = table_roots_fields->at(sys_tbl::TableRoots::Data::XID)->get_uint64(&table_roots_row);
-    uint64_t roots_eid = table_roots_fields->at(sys_tbl::TableRoots::Data::EXTENT_ID)->get_uint64(&table_roots_row);
-    uint64_t roots_sxid = table_roots_fields->at(sys_tbl::TableRoots::Data::SNAPSHOT_XID)->get_uint64(&table_roots_row);
-    CHECK(roots_tid == table_id);
-    CHECK(roots_iid == constant::INDEX_PRIMARY);
-    CHECK(roots_xid <= xid);
-
-    roots.push_back({constant::INDEX_PRIMARY, roots_eid});
-
-    // access the stats table
-    auto [table_stats, table_stats_fields] = _get_table_and_fields<sys_tbl::TableStats>(db_id);
-
-    auto table_stats_search_key = sys_tbl::TableStats::Primary::key_tuple(table_id, constant::LATEST_XID);
-    auto table_stats_iter = table_stats->inverse_lower_bound(table_stats_search_key);
-    CHECK(table_stats_iter != table_stats->end());
-    auto &table_stats_row = *table_stats_iter;
-    uint64_t stats_tid = table_stats_fields->at(sys_tbl::TableStats::Data::TABLE_ID)->get_uint64(&table_stats_row);
-    uint64_t stats_xid = table_stats_fields->at(sys_tbl::TableStats::Data::XID)->get_uint64(&table_stats_row);
-    uint64_t row_count = table_stats_fields->at(sys_tbl::TableStats::Data::ROW_COUNT)->get_uint64(&table_stats_row);
-    uint64_t end_offset = table_stats_fields->at(sys_tbl::TableStats::Data::END_OFFSET)->get_uint64(&table_stats_row);
-    CHECK(stats_tid == table_id);
-    CHECK(stats_xid <= xid);
-
-    auto metadata = std::make_shared<TableMetadata>();
-    metadata->roots = roots;
-
-    metadata->stats.row_count = row_count;
-    metadata->stats.end_offset = end_offset;
-    metadata->snapshot_xid = roots_sxid;
-
-    return metadata;
-}
-
-TablePtr
-FSCheck::_get_table(uint64_t db_id, uint64_t table_id, uint64_t xid)
-{
-    // retrieve the roots and stats of the table
-    auto &&tbl_meta = _get_roots(db_id, table_id, xid);
-    auto &&schema_meta = _get_schema(db_id, table_id, {xid, constant::MAX_LSN});
-
-    ExtentSchemaPtr schema = std::make_shared<ExtentSchema>(schema_meta->columns);
-
-    auto filtered = std::views::filter(schema_meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY; });
-    std::vector<Index> secondary_indexes(filtered.begin(), filtered.end());
-
-    // construct the table and return it
-    return std::make_shared<Table>(db_id, table_id, xid, _table_base,
-                                    schema->get_sort_keys(), secondary_indexes,
-                                    *tbl_meta, schema);
 }
 
 void
@@ -284,12 +273,10 @@ FSCheck::check_db(uint64_t db_id)
 void
 FSCheck::_check_db(uint64_t db_id, const std::string &db_name)
 {
-    // read table names table
-    auto [names_table, table_fields] = _get_table_and_fields<sys_tbl::TableNames>(db_id);
-
-    for (auto row: (*names_table)) {
-        uint64_t tid = table_fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
-        _check_db_table(db_id, db_name, tid, table_fields, row);
+    for (auto it = _db_tbl_id_map.lower_bound(std::make_pair(db_id, 0));
+            it != _db_tbl_id_map.end() && it->first.first == db_id; ++it) {
+        LOG_INFO("Found table {}:{}:{}", it->first.first, it->first.second, it->second.name);
+        _check_db_table(db_id, db_name, it->second);
     }
 }
 
@@ -297,46 +284,19 @@ void
 FSCheck::check_db_table(uint64_t db_id, uint64_t table_id)
 {
     const std::string &db_name = _databases.at(db_id);
-    LOG_INFO("Found database {}:{}", db_id, db_name);
+    LOG_INFO("Found database {}:{} for table {}", db_id, db_name, table_id);
 
-    // read table names table
-    auto [table, table_fields] = _get_table_and_fields<sys_tbl::TableNames>(db_id);
-
-    // read everything with the given table_id
-    auto search_key = sys_tbl::TableNames::Primary::key_tuple(table_id, constant::LATEST_XID, constant::MAX_LSN);
-    auto table_iter = table->inverse_lower_bound(search_key);
-
-    if (table_iter == table->end()) {
-        LOG_INFO("Table {} is not found", table_id);
-        return;
+    std::pair<uint64_t, uint64_t> key = std::make_pair(db_id, table_id);
+    auto it = _db_tbl_id_map.lower_bound(key);
+    if (it == _db_tbl_id_map.end() || it->first != key) {
+        LOG_ERROR("Database {}:{}: table {} is not found", db_id, db_name, table_id);
     }
-
-    auto &row = *table_iter;
-    uint64_t tid = table_fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
-    CHECK(tid == table_id);
-    _check_db_table(db_id, db_name, table_id, table_fields, row);
+    _check_db_table(db_id, db_name, it->second);
 }
 
 void
-FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, uint64_t table_id, std::shared_ptr<std::vector<FieldPtr>> table_fields, const Extent::Row &row)
+FSCheck::_validate_primary_extent(std::shared_ptr<Table> table, ExtentSchemaPtr table_schema)
 {
-    auto table_ns_id = table_fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
-    std::string table_name(table_fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row));
-    uint64_t tid = table_fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
-    uint64_t xid = table_fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
-    bool exists = table_fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
-    if (!exists) {
-        LOG_INFO("DB {}:{}: Skipping non-existing table {}.{} tid={}, xid={}", db_id, db_name, table_ns_id, table_name, tid, xid);
-        return;
-    }
-    LOG_INFO("DB {}:{}: Found table {}.{} tid={}, xid={}", db_id, db_name, table_ns_id, table_name, tid, xid);
-
-    TablePtr table = _get_table(db_id, table_id, constant::LATEST_XID);
-    CHECK(table.get() != nullptr);
-
-    LOG_INFO("\tTable dir: {}", table->get_dir_path().c_str());
-
-    ExtentSchemaPtr table_schema = _get_extent_schema(db_id, table_id, XidLsn(table->get_xid()));;
     FieldArrayPtr table_key_fields = table_schema->get_sort_fields();
 
     BTreePtr table_btree = table->index(constant::INDEX_PRIMARY);
@@ -390,7 +350,165 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, uint64_t ta
 
         ++btree_iter;
     }
+}
 
-    // TODO: add validation of secondary indexes
+void
+FSCheck::_validate_secondary_extents(std::shared_ptr<Table> table, ExtentSchemaPtr table_schema)
+{
+    FieldArrayPtr table_fields = table_schema->get_fields();
+    std::vector<uint64_t> index_ids = table->get_secondary_idx_ids();
+    for (auto id: index_ids) {
+        BTreePtr table_btree = table->index(id);
+        CHECK(table_btree.get() != nullptr);
+        LOG_INFO("\tSecondary index {} created with path = {}, xid = {}, primary_schema size = {}, extent id = {}",
+                id, table_btree->get_file_path().c_str(), table_btree->get_xid(),
+                table_btree->get_schema()->get_sort_keys().size(), table_btree->get_root_offset());
+
+        LOG_INFO("Index table schema column names:");
+        std::vector<std::string> index_table_cols = table->get_index_column_names(id);
+        for (auto col: index_table_cols) {
+            LOG_INFO("\t{}", col);
+        }
+
+        ExtentSchemaPtr index_btree_schema = table_btree->get_schema();
+        LOG_INFO("Index btree schema column names:");
+        std::vector<std::string>index_cols = index_btree_schema->column_order();
+        for (auto col: index_cols) {
+            LOG_INFO("\t{}", col);
+        }
+
+        LOG_INFO("Secondary index size {}", index_btree_schema->get_sort_keys().size());
+        FieldPtr extent_id_field = index_btree_schema->get_field(constant::INDEX_EID_FIELD);
+        FieldPtr row_field = index_btree_schema->get_field(constant::INDEX_RID_FIELD);
+        FieldArrayPtr key_fields = index_btree_schema->get_sort_fields();
+        LOG_INFO("Secondary index: schema size {}, fields size {}", index_btree_schema->get_sort_keys().size(), key_fields->size());
+
+        // Verify extents for the primary key
+        BTree::Iterator btree_iter = table_btree->begin();
+        while(btree_iter != table_btree->end()) {
+            const Extent::Row &btree_row = *btree_iter;
+            uint64_t extent_id = extent_id_field->get_uint64(&btree_row);
+            uint32_t row_id = row_field->get_uint32(&btree_row);
+            LOG_INFO("\tVerifying extent_id = {}, row = {}", extent_id, row_id);
+
+            StorageCache::SafePagePtr page = table->read_page(extent_id);
+            StorageCache::Page::Iterator page_iter = page->begin();
+            page_iter += row_id;
+            Extent::Row table_extent_row = *(page_iter);
+
+            std::shared_ptr<FieldTuple> key_tuple = std::make_shared<FieldTuple>(key_fields, &btree_row);
+            auto btree_keys = index_btree_schema->tuple_subset(key_tuple, index_table_cols);
+
+            std::shared_ptr<FieldTuple> table_extent_row_tuple = std::make_shared<FieldTuple>(table_fields, &table_extent_row);
+            auto table_keys = table_schema->tuple_subset(table_extent_row_tuple, index_table_cols);
+            CHECK(btree_keys->size() == table_keys->size());
+            CHECK(table_keys->equal_prefix(*btree_keys));
+
+            ++btree_iter;
+        }
+    }
+}
+
+void
+FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTable &fs_table)
+{
+    LOG_INFO("Verifying database {}:{} table {}", db_id, db_name, fs_table.table_id);
+
+    // 1. Verify table namespace and xids
+    uint64_t ns_id = fs_table.ns_id;
+    LOG_INFO("Looking for namespace {}:{}", db_id, ns_id);
+    FSNamespace ns = _db_ns_id_map.at(std::make_pair(db_id, ns_id));
+    LOG_INFO("Verifying Database {}:{}; Namespace {}:{}; Table {}:{}",
+        db_id, db_name, ns.ns_id, ns.ns_name, fs_table.table_id, fs_table.name);
+    CHECK(ns.exists);
+    CHECK(fs_table.xid >= ns.xid);
+
+    // 2. Verify column xids
+    std::vector<SchemaColumn> columns;
+    for (auto col_it: fs_table.pos_to_column) {
+        const struct SchemaColumn column = col_it.second;
+        LOG_INFO("\tVerifying Column {}:{}, type {}, pg_type {}, nullable {}, pkey_position {}, default: {}",
+            column.position, column.name, to_string(column.type), column.pg_type, column.nullable,
+            (column.pkey_position.has_value())? column.pkey_position.value(): -1,
+            (column.default_value.has_value())? column.default_value.value(): ""
+        );
+        CHECK(column.exists);
+        CHECK(column.xid >= fs_table.xid);
+        columns.push_back(col_it.second);
+    }
+
+    // 3. Verify indexes xids and roots
+    std::vector<TableRoot> roots;
+    uint64_t root_sxid;
+    uint64_t row_count;
+    uint64_t end_offset;
+    std::vector<Index> secondary_indexes;
+    for (auto idx_it: fs_table.id_to_index) {
+        uint64_t index_id = idx_it.first;
+        const struct FSIndex fs_index = idx_it.second;
+        const struct Index index = fs_index.index;
+        LOG_INFO("\tVerifying Index {}:{}:{}, is_unique {}, state {}",
+            index.schema, index.id, index.name, index.is_unique, index.state
+        );
+        for (auto idx_col_it: index.columns) {
+            LOG_INFO("\t\tIndex position: {}, table column: {}:{}",
+                idx_col_it.idx_position, idx_col_it.position, fs_table.pos_to_column.at(idx_col_it.position).name
+            );
+        }
+        CHECK(index.state == static_cast<uint8_t>(sys_tbl::IndexNames::State::READY));
+        CHECK(fs_index.xid >= fs_table.xid);
+
+        // 4. Verify roots
+        const struct FSRoot *last_root = nullptr;
+        const struct FSStats *last_stat = nullptr;
+        for (auto idx_root_it = fs_table.index_xid_to_root.lower_bound(std::make_pair(index_id, 0));
+                idx_root_it != fs_table.index_xid_to_root.end() && idx_root_it->first.first == index_id;
+                ++idx_root_it ) {
+            const struct FSRoot &root = idx_root_it->second;
+            last_root = &(idx_root_it->second);
+            CHECK(root.xid >= fs_table.xid);
+            if (root.extent_id != constant::UNKNOWN_EXTENT) {
+                // LOG_INFO("Looking for stats for root with data: {}:{}:{}", root.xid, root.extent_id, root.snapshot_xid);
+                auto stat_it = fs_table.xid_to_stats.find(root.xid);
+                CHECK(stat_it != fs_table.xid_to_stats.end());
+                last_stat = &(stat_it->second);
+            }
+        }
+
+        if (last_root != nullptr) {
+            roots.push_back({index_id, last_root->extent_id});
+        }
+        if (index_id == constant::INDEX_PRIMARY) {
+            CHECK(last_root != nullptr);
+            root_sxid = last_root->snapshot_xid;
+            CHECK(last_stat != nullptr);
+            row_count = last_stat->row_count;
+            end_offset = last_stat->end_offset;
+            continue;
+        }
+        secondary_indexes.push_back(index);
+    }
+
+    // 5. Create table
+    ExtentSchemaPtr schema = std::make_shared<ExtentSchema>(columns);
+    auto tbl_meta = std::make_shared<TableMetadata>();
+    tbl_meta->roots = roots;
+
+    tbl_meta->stats.row_count = row_count;
+    tbl_meta->stats.end_offset = end_offset;
+    tbl_meta->snapshot_xid = root_sxid;
+
+    auto table = std::make_shared<Table>(db_id, fs_table.table_id, fs_table.xid, _table_base,
+                                schema->get_sort_keys(), secondary_indexes, *tbl_meta, schema);
+
+    LOG_INFO("\tTable dir: {}", table->get_dir_path().c_str());
+
+   // 6. Validate primary index extent
+    _validate_primary_extent(table, schema);
+
+    // 7. Validate secondary index extent
+    _validate_secondary_extents(table, schema);
+
     // TODO: add validation of previous xid snapshot
+
 }

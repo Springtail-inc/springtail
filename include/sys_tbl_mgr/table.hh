@@ -567,6 +567,21 @@ namespace indexer_helpers {
         {
             return _xid;
         }
+
+        /**
+         * @brief Get a vectore containing the list of secondary index ids for
+         *      this table
+         *
+         * @return std::vector<uint64_t> - list of index ids
+         */
+        std::vector<uint64_t> get_secondary_idx_ids() const
+        {
+            std::vector<uint64_t> index_ids;
+            for (auto it: _secondary_indexes) {
+                index_ids.push_back(it.first);
+            }
+            return index_ids;
+        }
     protected:
         /**
          * Reads a data extent using the provided iterator position within the primary index.
