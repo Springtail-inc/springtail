@@ -187,7 +187,8 @@ namespace springtail::pg_log_mgr {
              * Records a schema change into the batch.
              */
             void schema_change(uint64_t current_xid, std::optional<uint32_t> tid,
-                               int32_t oid, uint32_t pg_xid, uint32_t pg_xid_txn, PgMsgPtr msg);
+                               int32_t oid, uint32_t pg_xid, uint32_t pg_xid_txn, PgMsgPtr msg,
+                               const std::vector<std::string>& include_schemas);
 
         private:
             //// INTERNAL STRUCTURES
@@ -295,8 +296,9 @@ namespace springtail::pg_log_mgr {
              * Helper to handle the table validation management.  Updates the Batch-local view of
              * the invalid tables and also updates the msg object as needed.
              * @param msg The postgres message object.
+             * @param include_schemas The included schemas.
              */
-            bool _handle_validation(PgMsgPtr msg);
+            bool _handle_validation(PgMsgPtr msg, const std::vector<std::string>& include_schemas);
 
             /**
              * Check if the table exists within this batch.
@@ -361,7 +363,7 @@ namespace springtail::pg_log_mgr {
         bool _archive_logs{false};     ///< This flag indicates that the reader should archive old logs instead of removing them
         std::filesystem::path _current_path; ///< current log file path
         std::filesystem::path _repl_log_path;   ///< Path for Postgres logs storage directory
-        PgMsgStreamReader _reader;           ///< msg stream reader for log file
+        PgMsgStreamReader _reader;     ///< msg stream reader for log file
         CommitterQueuePtr _committer_queue;  ///< shared queue for committer
         PgTransactionPtr _current_xact;      ///< current transaction
         std::map<uint32_t, PgTransactionPtr> _xact_map; ///< in progress xact map for streams

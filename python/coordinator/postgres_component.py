@@ -30,6 +30,10 @@ class PostgresComponent(Component):
         self.is_production = False
         if environment == 'production':
             self.is_production = True
+            fdw_user = os.environ.get('FDW_USER')
+            if not fdw_user:
+                raise ValueError("FDW_USER environment variable not set")
+            self.service_name = f'postgresql-{fdw_user}.service'
 
         super().__init__(name, id, path, pid_path)
 
@@ -46,8 +50,8 @@ class PostgresComponent(Component):
 
         self.logger.debug("Re-starting Postgres")
         if self.is_production:
-            run_command('sudo', ['systemctl', 'stop', f'postgresql@{self.version}-main'])
-            run_command('sudo', ['systemctl', 'start', f'postgresql@{self.version}-main'])
+            run_command('sudo', ['systemctl', 'stop', self.service_name])
+            run_command('sudo', ['systemctl', 'start', self.service_name])
         else:
             run_command('sudo', ['service', 'postgresql', 'restart'])
 
@@ -101,7 +105,7 @@ class PostgresComponent(Component):
         """
         self.logger.debug("Shutting down Postgres")
         if self.is_production:
-            run_command('sudo', ['systemctl', 'stop', f'postgresql@{self.version}-main'])
+            run_command('sudo', ['systemctl', 'stop', self.service_name])
         else:
             run_command('sudo', ['service', 'postgresql', 'stop'])
 

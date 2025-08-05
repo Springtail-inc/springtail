@@ -16,6 +16,9 @@ namespace springtail::environment {
     /** Environment variable name for property overrides */
     static constexpr char ENV_OVERRIDE[]           = "SPRINGTAIL_PROPERTIES";
 
+    /** Environment variable name for property overrides using json format*/
+    static constexpr char ENV_OVERRIDE_JSON[]           = "SPRINGTAIL_PROPERTIES_JSON";
+
     /** Environment variable name for the properties file,
      * overrides reading config from redis
      */
