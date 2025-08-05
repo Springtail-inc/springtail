@@ -177,6 +177,11 @@ namespace springtail {
         _json[PROXY_CONFIG] = system_json["proxy"];
         _json[OTEL_CONFIG] = system_json["otel"];
 
+        if (system_json.contains("aws_users_override")) {
+            // If aws_users_override is present, use it instead of aws secrets mgr
+            _json[AWS_USERS_OVERRIDE] = system_json["aws_users_override"];
+        }
+
         // get the redis client
         RedisClientPtr redis_client = _create_redis_client();
 
@@ -283,7 +288,9 @@ namespace springtail {
     Properties::init(bool load_redis)
     {
         // check for an override properties file;
-        // if it exists use it rather than reading the config from redis
+        // if load_redis is true then we load redis from the properties file
+        // otherwise we set the env vars from the file and read redis for system props
+        // if the file is not set, we get redis config from the env and redis for system props
         const char *file = std::getenv(environment::PROPERTIES_FILE_OVERRIDE);
         if (file != nullptr) {
             LOG_INFO("Properties override file: {}", file);
@@ -355,8 +362,10 @@ namespace springtail {
             }
         }
 
+        std::cout << "Properties loaded: " << _json.dump(2) << std::endl;
+
         // initialize the system role cache
-        if (_json[ORG_CONFIG].contains("aws_users_override")) {
+        if (_json.contains("aws_users_override")) {
             _init_system_roles_from_config();
         } else {
             _init_system_roles_from_aws();
@@ -366,13 +375,12 @@ namespace springtail {
     void
     Properties::_init_system_roles_from_config()
     {
-        nlohmann::json org = _json[ORG_CONFIG];
-        if (!org.contains("aws_users_override") || !org["aws_users_override"].is_array()) {
-            LOG_ERROR("No AWS users override configured in org config");
-            throw Error("No AWS users override configured in org config");
+        if (!_json.contains(AWS_USERS_OVERRIDE) || !_json[AWS_USERS_OVERRIDE].is_array()) {
+            LOG_ERROR("No AWS users override configured in config");
+            throw Error("No AWS users override configured in config");
         }
 
-        for (const auto &user: org["aws_users_override"]) {
+        for (const auto &user: _json[AWS_USERS_OVERRIDE]) {
             CHECK(user.is_object());
             CHECK(user.contains("role"));
             CHECK(user.contains("username"));
@@ -389,14 +397,28 @@ namespace springtail {
     void
     Properties::_init_system_roles_from_aws()
     {
+        uint64_t org_id;
+        uint64_t account_id;
+        uint64_t db_instance_id;
+
+        Json::get_to<uint64_t>(_json[ORG_CONFIG], "organization_id", org_id);
+        Json::get_to<uint64_t>(_json[ORG_CONFIG], "account_id", account_id);
+        Json::get_to<uint64_t>(_json[ORG_CONFIG], "db_instance_id", db_instance_id);
+
         std::string key = fmt::format(AwsHelper::DB_USERS_SECRET, org_id, account_id, db_instance_id);
 
-        if (_aws_helper == nullptr) {
-            _aws_helper = std::make_shared<AwsHelper>();
-        }
+        nlohmann::json secret;
+        try {
+            if (_aws_helper == nullptr) {
+                _aws_helper = std::make_shared<AwsHelper>();
+            }
 
-        nlohmann::json secret = _aws_helper->get_secret(key);
-        CHECK(secret.is_array());
+            secret = _aws_helper->get_secret(key);
+            CHECK(secret.is_array());
+        } catch (const Aws::SecretsManager::SecretsManagerError &e) {
+            LOG_ERROR("Error getting AWS secret for key: {}", key);
+            throw Error("AWS Secrets Manager not configured, in dev env use AWS_USERS_OVERRIDE in config");
+        }
 
         // iterate through json and find role="replication"
         for (auto &user: secret) {
@@ -561,8 +583,8 @@ namespace springtail {
 
         // use the replication user password from system roles
         auto role = get_system_role(DB_ROLE_REPLICATION);
-        primary_db_config["replication_user"] = role.first;
-        primary_db_config["password"] = role.second;
+        primary_db_config["replication_user"] = std::get<0>(role);
+        primary_db_config["password"] = std::get<1>(role);
 
         return primary_db_config;
     }
@@ -597,8 +619,8 @@ namespace springtail {
         }
 
         auto role = get_system_role(DB_ROLE_FDW);
-        fdw_config["fdw_user"] = role.first;
-        fdw_config["password"] = role.second;
+        fdw_config["fdw_user"] = std::get<0>(role);
+        fdw_config["password"] = std::get<1>(role);
 
         return fdw_config;
     }

@@ -48,6 +48,8 @@ namespace springtail {
         static inline constexpr char PROXY_CONFIG[] = "proxy";
         /** Open telemetry configuration section */
         static inline constexpr char OTEL_CONFIG[] = "otel";
+        /** AWS Users Override -- instead of using secrets mgr */
+        static inline constexpr char AWS_USERS_OVERRIDE[] = "aws_users_override";
 
         /** Redis notification path for database ids */
         static inline constexpr char DATABASE_IDS_PATH[] = "instance_config/database_ids";
@@ -200,7 +202,11 @@ namespace springtail {
         /** Helper to get included schemas */
         static std::vector<std::string> get_include_schemas(uint64_t db_id);
 
-        /** Helper to get system role from map based on role name */
+        /**
+         * @brief Helper to get system role from map based on role name
+         * @param role_name - name of the role
+         * @return std::tuple<std::string, std::string> - tuple with db_user and db_password
+         */
         std::tuple<std::string, std::string> get_system_role(const std::string &role_name) {
             CHECK(_system_roles.contains(role_name));
             return _system_roles[role_name];

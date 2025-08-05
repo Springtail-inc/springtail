@@ -79,7 +79,7 @@ class Properties:
                     'LUSTRE_DNS_NAME': system_json['fs']['dns_name'],
                 }
 
-                self.aws_users = self._get_users_from_json(system_json['org']['aws_users_override'])
+                self.aws_users = self._get_users_from_json(system_json['aws_users_override'])
 
                 for (key, value) in env_vars.items():
                     if value is not None:
@@ -133,13 +133,13 @@ class Properties:
                 result[user['role']] = (user['username'], user['password'])
 
         if not result[DB_USER_ROLE_REPLICATION]:
-            raise Exception("Replication user not found in AWS secrets.")
+            raise Exception("Replication user not found in Redis user override.")
 
         if not result[DB_USER_ROLE_PROXY]:
-            raise Exception("Proxy password not found in AWS secrets.")
+            raise Exception("Proxy password not found in Redis user override.")
 
         if not result[DB_USER_ROLE_FDW]:
-            raise Exception("FDW user not found in AWS secrets.")
+            raise Exception("FDW user not found in Redis user override.")
 
         return result
 
@@ -324,6 +324,9 @@ class Properties:
         sys_config_json['sys_tbl_mgr'] = system_json['sys_tbl_mgr']
         sys_config_json['proxy'] = system_json['proxy']
         sys_config_json['otel'] = system_json['otel']
+
+        if 'aws_users_override' in system_json:
+            sys_config_json['aws_users_override'] = system_json['aws_users_override']
 
         self.redis.hset(db_instance_key, 'system_settings', json.dumps(sys_config_json))
 
