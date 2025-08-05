@@ -8,4 +8,5 @@
     - custom-pg
     - postgres-config
     - user_dev
+    - redis
     - entrypoint

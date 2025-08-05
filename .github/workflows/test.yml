@@ -70,9 +70,8 @@ jobs:
           cp new-system.json.settings system.json.test
           mkdir -p /opt/springtail/pids
           
-          # Makes sure the redis is configured with `notify-keyspace-events` set to `AKE`
-          sed -i -e "s|^notify-keyspace-events .*|notify-keyspace-events AKE|g" /etc/redis/redis.conf
-          service redis-server restart
+          # Make sure we are using the correct config for Redis
+          /usr/bin/redis-server /etc/redis/redis.conf --daemonize yes
           
           # Copies over the fdw_config file to the designated location
           conf_file=/etc/postgresql/16/main/postgresql.conf
