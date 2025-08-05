@@ -174,11 +174,7 @@ class Coordinator:
 
                 self.scheduler.register_component(postgres, 3)
                 self.scheduler.register_component(factory.create_xid_subscriber_daemon(), 4)
-
-                # register the DDL daemon with the correct user and password
-                fdw_user = self.props.get_role(DB_USER_ROLE_FDW)
-                proxy_user = self.props.get_role(DB_USER_ROLE_PROXY)
-                self.scheduler.register_component(factory.create_ddl_daemon(fdw_user[0], fdw_user[1], proxy_user[1]), 5)
+                self.scheduler.register_component(factory.create_ddl_daemon(), 5)
 
             case "proxy":
                 self.scheduler.register_component(factory.create_proxy(), 1)

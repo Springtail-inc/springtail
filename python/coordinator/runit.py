@@ -102,7 +102,7 @@ def run_tests(factory: ComponentFactory) -> None:
     assert postgres.is_running()
     postgres.create_user('test_user', 'test_password', True, True)
 
-    ddl_daemon = factory.create_ddl_daemon('test_user', 'test_password')
+    ddl_daemon = factory.create_ddl_daemon()
     test(ddl_daemon)
     assert not ddl_daemon.is_running()
 
@@ -181,7 +181,7 @@ if __name__ == "__main__":
     elif component_name == 'postgres':
         component = factory.create_postgres()
     elif component_name == 'ddl_daemon':
-        component = factory.create_ddl_daemon('test_user', 'test_password')
+        component = factory.create_ddl_daemon()
     elif component_name == 'proxy':
         component = factory.create_proxy()
     else:

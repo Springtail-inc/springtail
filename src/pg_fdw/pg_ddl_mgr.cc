@@ -89,12 +89,19 @@ namespace springtail::pg_fdw {
     void
     PgDDLMgr::start()
     {
-        std::string username = springtail_retreive_argument<std::string>(ServiceId::PgDDLMgrId, "username").value();
-        std::string password = springtail_retreive_argument<std::string>(ServiceId::PgDDLMgrId, "password").value();
-        std::string proxy_password = springtail_retreive_argument<std::string>(ServiceId::PgDDLMgrId, "proxy_password").value();
+        auto props = Properties::get_instance();
+
+        auto fdw_user = props->get_system_role(Properties::DB_ROLE_FDW);
+        std::string username = std::get<0>(fdw_user);
+        std::string password = std::get<1>(fdw_user);
+
+        auto proxy_user = props->get_system_role(Properties::DB_ROLE_PROXY);
+        std::string proxy_password = std::get<1>(proxy_user);
+
         std::optional<std::string> hostname = springtail_retreive_argument<std::optional<std::string>>(ServiceId::PgDDLMgrId, "hostname").value();
+
         // start the ddl main thread
-        std::string fdw_id = Properties::get_fdw_id();
+        std::string fdw_id = props->get_fdw_id();
 
         LOG_DEBUG(LOG_FDW, "Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}",
                     fdw_id, username, password, hostname.value_or(""));

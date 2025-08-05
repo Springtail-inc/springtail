@@ -44,12 +44,12 @@ class ComponentFactory:
             pid_path=os.path.join(self.pid_dir, 'sys_tbl_mgr.pid')
         )
 
-    def create_ddl_daemon(self, user: str, password: str, proxy_user_password: str) -> Component:
+    def create_ddl_daemon(self) -> Component:
         """Create a new write cache component."""
         return Component(
             name="pg_ddl_daemon",
             id=self.DDL_ID,
-            args=["--daemon", "-u", user, "-p", password, "-x", proxy_user_password, "-s", "/var/run/postgresql"],
+            args=["--daemon", "-s", "/var/run/postgresql"],
             path=self.install_dir,
             pid_path=os.path.join(self.pid_dir, 'pg_ddl_mgr.pid')
         )
