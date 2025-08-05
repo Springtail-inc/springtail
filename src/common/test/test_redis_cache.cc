@@ -106,6 +106,7 @@ namespace {
         _cache->add_callback(system_settings_key, redis_watcher);
 
         // get value from cache
+        LOG_INFO("Get cached value...");
         nlohmann::json system_settings_value = _cache->get_value(system_settings_key);
         connections = system_settings_value.at(pointer);
         connections++;
@@ -118,6 +119,7 @@ namespace {
         _test_client->hset(key_value, "system_settings", value_string);
 
         // Wait for notification
+        LOG_INFO("Waiting for increment 1...");
         wait_for_increment(counter_value, 1);
 
         // update value in the database again
@@ -128,8 +130,10 @@ namespace {
         _test_client->hset(key_value, "system_settings", value_string);
 
         // wait for notification
+        LOG_INFO("Waiting for increment 2...");
         wait_for_increment(counter_value, 1);
 
+        LOG_INFO("Removing callback");
         _cache->remove_callback(system_settings_key, redis_watcher);
     }
 
