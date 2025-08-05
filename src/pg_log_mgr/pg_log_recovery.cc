@@ -81,12 +81,13 @@ PgLogRecovery::_skip_committed()
     LOG_DEBUG(LOG_PG_LOG_MGR, "Remove old replication logs first for: {}", _xact_path);
 
     auto first_xact_log = fs::find_earliest_modified_file(_xact_path,
-            springtail::xid_mgr::PgXactLogWriter::LOG_PREFIX_XACT, springtail::xid_mgr::PgXactLogWriter::LOG_SUFFIX);
+            springtail::xid_mgr::PgXactLogWriter::LOG_PREFIX_XACT,
+            springtail::xid_mgr::PgXactLogWriter::LOG_SUFFIX);
     if (first_xact_log) {
         auto min_xact_timestamp = fs::extract_timestamp_from_file(first_xact_log.value(),
-                springtail::xid_mgr::PgXactLogWriter::LOG_PREFIX_XACT, springtail::xid_mgr::PgXactLogWriter::LOG_SUFFIX);
+                springtail::xid_mgr::PgXactLogWriter::LOG_PREFIX_XACT,
+                springtail::xid_mgr::PgXactLogWriter::LOG_SUFFIX);
         if (min_xact_timestamp) {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Remove old replication logs first, found:: {}", min_xact_timestamp.value());
             _pg_log_reader->cleanup_log_files(min_xact_timestamp.value());
         }
     }
