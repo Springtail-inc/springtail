@@ -290,7 +290,7 @@ class Test:
                     break
         else:
             # create proxy component
-            factory = ComponentFactory(os.path.join(self._install_dir, 'bin/system'), self._props.get_pid_path(), self._props)
+            factory = ComponentFactory(os.path.join(self._install_dir, 'bin/system'), self._props)
             self._proxy = factory.create_proxy()
 
             if self._proxy.is_running():

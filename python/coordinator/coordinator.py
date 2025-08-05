@@ -134,7 +134,7 @@ class Coordinator:
 
         # Create component factory
         self.logger.debug(f"Creating component factory with bin_dir={self.bin_dir}")
-        factory = ComponentFactory(self.bin_dir, props.get_pid_path())
+        factory = ComponentFactory(self.bin_dir, self.props)
 
         # Register components
         self.logger.info(f"Starting {self.service_name} service")
@@ -148,7 +148,7 @@ class Coordinator:
                 pid_path = None
                 try:
                     if self.production:
-                        pid_path = self.production.install_pgfdw()
+                        pid_path = self.production.install_pgfdw(self.props)
                 except Exception as e:
                     raise ValueError("Failed to install postgres_fdw: " + str(e))
 

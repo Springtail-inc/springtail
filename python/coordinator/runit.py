@@ -140,7 +140,7 @@ if __name__ == "__main__":
     bin_dir = os.path.join(yaml_config.get('install_dir'), 'bin/system')
     if not os.path.exists(bin_dir):
         raise ValueError(f"Invalid binary directory: {bin_dir}")
-    factory = ComponentFactory(bin_dir, props.get_pid_path())
+    factory = ComponentFactory(bin_dir, props)
 
     # Run tests
     if args.test:
