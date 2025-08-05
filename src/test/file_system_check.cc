@@ -266,7 +266,7 @@ void
 FSCheck::check_db(uint64_t db_id)
 {
     const std::string &db_name = _databases.at(db_id);
-    LOG_INFO("Found database {}:{}", db_id, db_name);
+    LOG_INFO("Verifying database {}:{}", db_id, db_name);
     _check_db(db_id, db_name);
 }
 
@@ -275,7 +275,7 @@ FSCheck::_check_db(uint64_t db_id, const std::string &db_name)
 {
     for (auto it = _db_tbl_id_map.lower_bound(std::make_pair(db_id, 0));
             it != _db_tbl_id_map.end() && it->first.first == db_id; ++it) {
-        LOG_INFO("Found table {}:{}:{}", it->first.first, it->first.second, it->second.name);
+        LOG_INFO("Verifying table {}:{}:{}", it->first.first, it->first.second, it->second.name);
         _check_db_table(db_id, db_name, it->second);
     }
 }
@@ -284,12 +284,13 @@ void
 FSCheck::check_db_table(uint64_t db_id, uint64_t table_id)
 {
     const std::string &db_name = _databases.at(db_id);
-    LOG_INFO("Found database {}:{} for table {}", db_id, db_name, table_id);
+    LOG_INFO("Verifying database {}:{} for table {}", db_id, db_name, table_id);
 
     std::pair<uint64_t, uint64_t> key = std::make_pair(db_id, table_id);
     auto it = _db_tbl_id_map.lower_bound(key);
     if (it == _db_tbl_id_map.end() || it->first != key) {
         LOG_ERROR("Database {}:{}: table {} is not found", db_id, db_name, table_id);
+        CHECK(false);
     }
     _check_db_table(db_id, db_name, it->second);
 }
@@ -310,16 +311,6 @@ FSCheck::_validate_primary_extent(std::shared_ptr<Table> table, ExtentSchemaPtr 
 
     LOG_INFO("\t\ttable_key_fields->size() = {}, key_fields->size() = {}, table->has_primary() = {}",
                 table_key_fields->size(), key_fields->size(), table->has_primary());
-
-    LOG_INFO("\tTable schema has {} sort keys:", table_schema->get_sort_keys().size());
-    for (auto &key: table_schema->get_sort_keys()) {
-        LOG_INFO("\t\t{}", key );
-    }
-
-    LOG_INFO("\tPrimary index schema has {} sort keys:", index_schema->get_sort_keys().size());
-    for (auto &key: index_schema->get_sort_keys()) {
-        LOG_INFO("\t\t{}", key );
-    }
 
     // Verifying primary key sizes in table, schema, and index schema
     if (table->has_primary()) {
@@ -373,12 +364,13 @@ FSCheck::_validate_secondary_extents(std::shared_ptr<Table> table, ExtentSchemaP
         LOG_INFO("\tSecondary index: schema size {}, fields size {}", index_btree_schema->get_sort_keys().size(), key_fields->size());
 
         // Verify extents for the primary key
+        std::set<uint64_t> extent_set;
         BTree::Iterator btree_iter = table_btree->begin();
         while(btree_iter != table_btree->end()) {
             const Extent::Row &btree_row = *btree_iter;
             uint64_t extent_id = extent_id_field->get_uint64(&btree_row);
             uint32_t row_id = row_field->get_uint32(&btree_row);
-            LOG_INFO("\tVerifying extent_id = {}, row = {}", extent_id, row_id);
+            extent_set.insert(extent_id);
 
             StorageCache::SafePagePtr page = table->read_page(extent_id);
             StorageCache::Page::Iterator page_iter = page->begin();
@@ -395,17 +387,18 @@ FSCheck::_validate_secondary_extents(std::shared_ptr<Table> table, ExtentSchemaP
 
             ++btree_iter;
         }
+        LOG_INFO("\tVerified {} extents; found extents: ", extent_set.size());
+        for (auto extent_id: extent_set) {
+            LOG_INFO("\t\t{}", extent_id);
+        }
     }
 }
 
 void
 FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTable &fs_table)
 {
-    LOG_INFO("Verifying database {}:{} table {}", db_id, db_name, fs_table.table_id);
-
     // 1. Verify table namespace and xids
     uint64_t ns_id = fs_table.ns_id;
-    LOG_INFO("Looking for namespace {}:{}", db_id, ns_id);
     FSNamespace ns = _db_ns_id_map.at(std::make_pair(db_id, ns_id));
     LOG_INFO("Verifying Database {}:{}; Namespace {}:{}; Table {}:{}",
         db_id, db_name, ns.ns_id, ns.ns_name, fs_table.table_id, fs_table.name);
@@ -490,7 +483,8 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
     auto table = std::make_shared<Table>(db_id, fs_table.table_id, fs_table.xid, _table_base,
                                 schema->get_sort_keys(), secondary_indexes, *tbl_meta, schema);
 
-    LOG_INFO("\tTable dir: {}", table->get_dir_path().c_str());
+    LOG_INFO("\tTable dir: {}, row_count: {}, end_offset: {}, sxid: {}",
+            table->get_dir_path().c_str(), row_count, end_offset, root_sxid);
 
    // 6. Validate primary index extent
     _validate_primary_extent(table, schema);
