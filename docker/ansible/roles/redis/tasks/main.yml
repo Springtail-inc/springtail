@@ -7,9 +7,3 @@
     backrefs: yes            # replaces the matched line instead of adding another
     create: yes              # in case the file is missing
     backup: yes
-
-- name: Enable and start Redis
-  ansible.builtin.service:
-    name: redis-server
-    enabled: true
-    state: started
