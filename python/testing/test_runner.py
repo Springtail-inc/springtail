@@ -186,8 +186,8 @@ if __name__ == "__main__":
     else:
         default_config_file = os.path.join(tmp_config_dir, 'default.json')
         if args.test_set is None:
-            overlays = yaml_config['overlays'];
-
+            overlays = yaml_config['overlays']
+            overlay_required_sets = []
             if default_test_sets is None:
                 default_test_sets = sorted(os.listdir(test_folder))
                 if overlays:
