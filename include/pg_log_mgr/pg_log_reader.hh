@@ -85,7 +85,7 @@ namespace springtail::pg_log_mgr {
         /**
          * @brief Cleanup log files older than the given timestamp
          *
-         * @param min_timestamp Min timstamp file to be retain,
+         * @param min_timestamp Min timestamp file to be retained,
          *                      other files will be removed/archived
          */
         void cleanup_log_files(uint64_t min_timestamp);
