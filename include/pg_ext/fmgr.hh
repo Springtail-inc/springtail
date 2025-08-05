@@ -64,6 +64,56 @@ struct TypeInfo {
     bool is_varlena;
 };
 
+typedef char *Pointer;
+static inline Pointer
+DatumGetPointer(Datum X)
+{
+	return (Pointer) X;
+}
+
+static inline char *
+DatumGetCString(Datum X)
+{
+	return (char *) DatumGetPointer(X);
+}
+
+static inline bool
+DatumGetBool(Datum X)
+{
+	return (X != 0);
+}
+
+static inline float
+DatumGetFloat8(Datum X)
+{
+	return *((float *) DatumGetPointer(X));
+}
+
+Datum
+PointerGetDatum(const void *X)
+{
+	return (Datum) X;
+}
+
+uint32_t
+DatumGetInt32(Datum X)
+{
+	return (uint32_t) X;
+}
+
+float
+DatumGetFloat4(Datum X)
+{
+	union
+	{
+		uint32_t	value;
+		float		retval;
+	} myunion;
+
+	myunion.value = DatumGetInt32(X);
+	return myunion.retval;
+}
+
 static std::unordered_map<Oid, TypeInfo> _type_output_registry = {
     { 16, { 1242, false } }, // BOOLOID → boolout
     { 17, { 140, false } },  // BYTEAOID → byteaout
@@ -189,3 +239,67 @@ extern "C" PGEXT_API const char* OidOutputFunctionCall(Oid function_oid, Datum v
 extern "C" PGEXT_API void getTypeOutputInfo(Oid type, Oid *funcOid, bool *typIsVarlena);
 extern "C" PGEXT_API struct varlena *pg_detoast_datum(struct varlena *datum);
 extern "C" PGEXT_API struct varlena *pg_detoast_datum_packed(struct varlena *datum);
+
+// Standard PostgreSQL type OIDs (from postgres.h)
+#define BOOLOID 16
+#define BYTEAOID 17
+#define CHAROID 18
+#define NAMEOID 19
+#define INT8OID 20
+#define INT2OID 21
+#define INT2VECTOROID 22
+#define INT4OID 23
+#define REGPROCOID 24
+#define TEXTOID 25
+#define OIDOID 26
+#define TIDOID 27
+#define XIDOID 28
+#define CIDOID 29
+#define JSONOID 114
+#define XMLOID 142
+#define XID8OID 5069
+#define POINTOID 600
+#define LSEGOID 601
+#define PATHOID 602
+#define BOXOID 603
+#define POLYGONOID 604
+#define FLOAT4OID 700    // float4 (single precision)
+#define FLOAT8OID 701    // float8 (double precision)
+#define UNKNOWNOID 705
+#define CIRCLEOID 718
+#define CASHOID 790
+#define MACADDROID 829
+#define INETOID 869
+#define CIDROID 650
+#define INT4ARRAYOID 1007
+#define TEXTARRAYOID 1009
+#define FLOAT4ARRAYOID 1021
+#define FLOAT8ARRAYOID 1022
+#define BPCHAROID 1042   // blank-padded char, char(N)
+#define VARCHAROID 1043  // varchar(N)
+#define DATEOID 1082
+#define TIMEOID 1083
+#define TIMESTAMPOID 1114
+#define TIMESTAMPTZOID 1184
+#define INTERVALOID 1186
+#define TIMETZOID 1266
+#define BITOID 1560
+#define VARBITOID 1562
+#define NUMERICOID 1700  // numeric/decimal
+#define REFCURSOROID 1790
+#define REGPROCEDUREOID 2202
+#define REGOPEROID 2203
+#define REGOPERATOROID 2204
+#define REGCLASSOID 2205
+#define REGTYPEOID 2206
+#define REGROLEOID 4096
+#define REGNAMESPACEOID 4089
+#define UUIDOID 2950
+#define JSONBOID 3802
+#define INT4RANGEOID 3904
+#define NUMRANGEOID 3906
+#define TSRANGEOID 3908
+#define TSTZRANGEOID 3910
+#define DATERANGEOID 3912
+#define INT8RANGEOID 3926
+#define JSONPATHOID 4072

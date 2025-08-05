@@ -86,6 +86,20 @@ char* int4out(void* datum) {
     return strdup_cxx(std::to_string(val));
 }
 
+// INT8OID (int64)
+char* int8out(void* datum) {
+    int64_t val = *reinterpret_cast<int64_t*>(datum);
+    return strdup_cxx(std::to_string(val));
+}
+
+// FLOAT4OID (float)
+char* float4out(void* datum) {
+    float val = *reinterpret_cast<float*>(datum);
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%.17g", val);  // match PG precision
+    return strdup_cxx(buf);
+}
+
 // FLOAT8OID (double)
 char* float8out(void* datum) {
     double val = *reinterpret_cast<double*>(datum);
@@ -155,21 +169,8 @@ PGFunction lookup_pgfunction_by_oid(Oid oid)
     return nullptr;
 }
 
-typedef char *Pointer;
-static inline Pointer
-DatumGetPointer(Datum X)
-{
-	return (Pointer) X;
-}
-
-static inline char *
-DatumGetCString(Datum X)
-{
-	return (char *) DatumGetPointer(X);
-}
-
 Datum
-FunctionCall1(FmgrInfo *flinfo,Datum arg1)
+FunctionCall1(FmgrInfo *flinfo, Datum arg1)
 {
 	LOCAL_FCINFO(fcinfo, 1);
 	Datum		result;
@@ -196,5 +197,48 @@ OutputFunctionCall(FmgrInfo *flinfo, Datum val)
 
 const char* OidOutputFunctionCall(Oid function_oid, Datum value)
 {
-    return nullptr;
+    switch (function_oid) {
+        // Numeric types
+        case INT4OID:    // 23
+            return int4out((void*)&value);
+        case INT8OID:    // 20
+            return int8out((void*)&value);
+        case 1004:  // 700
+            return float4out((void*)&value);
+        case 1005:  // 701
+            return float8out((void*)&value);
+        case 1700: // 1700
+            // numeric_out would go here
+            return "numeric_out not implemented";
+
+        // Boolean
+        case BOOLOID:    // 16
+            return boolout((void*)&value);
+
+        // String types
+        case TEXTOID:    // 25
+            return textout((void*)&value);
+        case VARCHAROID: // 1043
+            return varcharout((void*)&value);
+        case BPCHAROID:  // 1042
+            return bpcharout((void*)&value);
+        case NAMEOID:    // 19
+            return nameout((void*)&value);
+
+        // Binary data
+        case BYTEAOID:   // 17
+            return byteaout((void*)&value);
+
+        // OID type
+        case OIDOID:     // 26
+            return oidout((void*)&value);
+
+        // XXX Handle more OIDs?
+
+        default:
+            // For unsupported types, return a string representation
+            static char buf[32];
+            snprintf(buf, sizeof(buf), "Unsupported type OID: %u", function_oid);
+            return buf;
+    }
 }

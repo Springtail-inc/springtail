@@ -3,41 +3,11 @@
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
+#include <iomanip>
 #include <pg_ext/fmgr.hh>
 #include <pg_ext/string.hh>
 #include <pg_ext/array.hh>
-#include <stdint.h>
-
-Datum
-PointerGetDatum(const void *X)
-{
-	return (Datum) X;
-}
-
-uint32_t
-DatumGetInt32(Datum X)
-{
-	return (uint32_t) X;
-}
-
-float
-DatumGetFloat4(Datum X)
-{
-	union
-	{
-		uint32_t	value;
-		float		retval;
-	} myunion;
-
-	myunion.value = DatumGetInt32(X);
-	return myunion.retval;
-}
-
-char *
-DatumGetCString(Datum X)
-{
-	return (char *) (X);
-}
+#include "pg_ext/guc.hh"
 
 void*
 cstring_to_text_4b(const char *s) {
@@ -71,6 +41,24 @@ void*
 cstring_to_text_auto(const char *s) {
     size_t n = std::strlen(s);
     return (n <= 127) ? cstring_to_text_1b(s) : cstring_to_text_4b(s);
+}
+
+void print_bytea_hex(Datum bytea_datum) {
+    struct varlena* v = (struct varlena*)DatumGetPointer(bytea_datum);
+    if (!v) {
+        std::cout << "NULL";
+        return;
+    }
+
+    size_t len = VARSIZE_ANY_EXHDR(v);
+    char* data = VARDATA_ANY(v);
+
+    std::cout << "\\x";
+    for (size_t i = 0; i < len; i++) {
+        std::cout << std::hex << std::setw(2) << std::setfill('0')
+                 << (static_cast<int>(data[i]) & 0xff);
+    }
+    std::cout << std::dec;
 }
 
 void
@@ -127,10 +115,94 @@ call_test_function(void* so, const char* name, const char* text1, const char* te
     else if (strstr(name, "set_limit") != nullptr) {
         std::cout << name << "() called successfully" << std::endl;
     }
+    else if (strncmp(name, "gtrgm_consistent", 16) == 0) {
+        std::cout << name << "() = " << (DatumGetBool(d) ? "true" : "false") << std::endl;
+    }
+    else if (strncmp(name, "gtrgm_compress", 14) == 0 ||
+             strncmp(name, "gtrgm_decompress", 16) == 0 ||
+             strncmp(name, "gtrgm_picksplit", 15) == 0 ||
+             strncmp(name, "gtrgm_union", 11) == 0 ||
+             strncmp(name, "gtrgm_same", 10) == 0) {
+        std::cout << name << "() = ";
+        print_bytea_hex(d);
+        std::cout << std::endl;
+    }
+    else if (strncmp(name, "gtrgm_distance", 14) == 0) {
+        std::cout << name << "() = " << DatumGetFloat8(d) << std::endl;
+    }
+    else if (strncmp(name, "gtrgm_inet_consistent", 20) == 0) {
+        std::cout << name << "() = " << (DatumGetBool(d) ? "true" : "false") << std::endl;
+    }
     else {
         // Default output for other functions
         std::cout << name << " called successfully" << std::endl;
     }
+}
+
+void test_gtrgm_functions(void* pgtrgm, const char* text1, const char* text2) {
+    std::cout << "\n=== Testing GIN/GiST Support Functions ===\n";
+
+    // Test with both text arguments
+    call_test_function(pgtrgm, "gtrgm_consistent", text1, text2);
+    call_test_function(pgtrgm, "gtrgm_compress", text1, nullptr);
+    call_test_function(pgtrgm, "gtrgm_decompress", text1, nullptr);
+    call_test_function(pgtrgm, "gtrgm_union", text1, text2);
+    call_test_function(pgtrgm, "gtrgm_same", text1, text1);  // Same text
+    call_test_function(pgtrgm, "gtrgm_same", text1, text2);  // Different text
+    call_test_function(pgtrgm, "gtrgm_distance", text1, text2);
+    call_test_function(pgtrgm, "gtrgm_picksplit", text1, text2);
+    call_test_function(pgtrgm, "gtrgm_inet_consistent", text1, text2);
+
+    // Test with empty string
+    std::cout << "\n=== Testing with Empty String ===\n";
+    call_test_function(pgtrgm, "gtrgm_consistent", "", text2);
+    call_test_function(pgtrgm, "gtrgm_compress", "", nullptr);
+
+    // Test with NULL inputs (where applicable)
+    std::cout << "\n=== Testing with NULL Input ===\n";
+    call_test_function(pgtrgm, "gtrgm_consistent", nullptr, text2);
+}
+
+void init_trgm(double similarity_threshold, double word_similarity_threshold, double strict_word_similarity_threshold){
+
+    DefineCustomRealVariable("pg_trgm.similarity_threshold",
+        "Sets the threshold used by the % operator.",
+        "Valid range is 0.0 .. 1.0.",
+        &similarity_threshold,
+        0.3f,
+        0.0,
+        1.0,
+        pgext::PGC_USERSET,
+        0,
+        NULL,
+        NULL,
+        NULL);
+    DefineCustomRealVariable("pg_trgm.word_similarity_threshold",
+            "Sets the threshold used by the <% operator.",
+            "Valid range is 0.0 .. 1.0.",
+            &word_similarity_threshold,
+            0.6f,
+            0.0,
+            1.0,
+            pgext::PGC_USERSET,
+            0,
+            NULL,
+            NULL,
+            NULL);
+    DefineCustomRealVariable("pg_trgm.strict_word_similarity_threshold",
+            "Sets the threshold used by the <<% operator.",
+            "Valid range is 0.0 .. 1.0.",
+            &strict_word_similarity_threshold,
+            0.5f,
+            0.0,
+            1.0,
+            pgext::PGC_USERSET,
+            0,
+            NULL,
+            NULL,
+            NULL);
+
+    MarkGUCPrefixReserved("pg_trgm");
 }
 
 int main() {
@@ -154,6 +226,12 @@ int main() {
     const char* t2 = "Hallo dear";
     const char* t3 = "This is a length string that is determined to exceed the 127 byte limit to make use of the varlena extended header and it is not that very longer than the other string";
     const char* t4 = "This is a length string that is determined to exceed the 127 byte limit to make use of the varlena extended header and it is very very longer than the other string";
+
+
+    double		similarity_threshold = 0.3f;
+    double		word_similarity_threshold = 0.6f;
+    double		strict_word_similarity_threshold = 0.5f;
+    init_trgm(similarity_threshold, word_similarity_threshold, strict_word_similarity_threshold);
 
     // 1. Test similarity functions
     std::cout << "\n=== Testing Similarity Functions (1B strings) ===\n";
@@ -188,12 +266,19 @@ int main() {
     call_test_function(pgtrgm, "show_trgm", t1, nullptr);
     call_test_function(pgtrgm, "show_limit", nullptr, nullptr);
 
+
     // 6. Test set_limit
     std::cout << "\n=== Testing Set Limit ===\n";
     call_test_function(pgtrgm, "set_limit", "0.3", nullptr);
     call_test_function(pgtrgm, "show_limit", nullptr, nullptr);
     call_test_function(pgtrgm, "set_limit", "0.7", nullptr);
     call_test_function(pgtrgm, "show_limit", nullptr, nullptr);
+
+    // 7. Test GIN/GiST support functions with different inputs
+    test_gtrgm_functions(pgtrgm, t1, t2);
+
+    // 8. Test with 4B strings
+    test_gtrgm_functions(pgtrgm, t3, t4);
 
     // Clean up
     dlclose(pgtrgm);
