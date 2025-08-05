@@ -364,24 +364,13 @@ FSCheck::_validate_secondary_extents(std::shared_ptr<Table> table, ExtentSchemaP
                 id, table_btree->get_file_path().c_str(), table_btree->get_xid(),
                 table_btree->get_schema()->get_sort_keys().size(), table_btree->get_root_offset());
 
-        LOG_INFO("Index table schema column names:");
         std::vector<std::string> index_table_cols = table->get_index_column_names(id);
-        for (auto col: index_table_cols) {
-            LOG_INFO("\t{}", col);
-        }
-
         ExtentSchemaPtr index_btree_schema = table_btree->get_schema();
-        LOG_INFO("Index btree schema column names:");
-        std::vector<std::string>index_cols = index_btree_schema->column_order();
-        for (auto col: index_cols) {
-            LOG_INFO("\t{}", col);
-        }
 
-        LOG_INFO("Secondary index size {}", index_btree_schema->get_sort_keys().size());
         FieldPtr extent_id_field = index_btree_schema->get_field(constant::INDEX_EID_FIELD);
         FieldPtr row_field = index_btree_schema->get_field(constant::INDEX_RID_FIELD);
         FieldArrayPtr key_fields = index_btree_schema->get_sort_fields();
-        LOG_INFO("Secondary index: schema size {}, fields size {}", index_btree_schema->get_sort_keys().size(), key_fields->size());
+        LOG_INFO("\tSecondary index: schema size {}, fields size {}", index_btree_schema->get_sort_keys().size(), key_fields->size());
 
         // Verify extents for the primary key
         BTree::Iterator btree_iter = table_btree->begin();
