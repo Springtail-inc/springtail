@@ -12,6 +12,8 @@ from common import (
     running_pids
 )
 
+from properties import Properties
+
 class PostgresComponent(Component):
     """PostgresComponent class to represent a single Postgres component"""
 
@@ -19,6 +21,7 @@ class PostgresComponent(Component):
                  id: str,
                  path: str,    # Path is unused but needs to be valid for the parent class
                  pid_path: str,
+                 props: Properties,
                  name: str = "postgres") :
         """Initialize a new PostgresComponent"""
         self.logger = logging.getLogger('springtail')
@@ -30,10 +33,10 @@ class PostgresComponent(Component):
         self.is_production = False
         if environment == 'production':
             self.is_production = True
-            fdw_user = os.environ.get('FDW_USER')
+            fdw_user = self.props.get_role(Properties.DB_USER_ROLE_FDW)
             if not fdw_user:
                 raise ValueError("FDW_USER environment variable not set")
-            self.service_name = f'postgresql-{fdw_user}.service'
+            self.service_name = f'postgresql-{fdw_user[0]}.service'
 
         super().__init__(name, id, path, pid_path)
 
