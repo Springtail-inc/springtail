@@ -82,6 +82,14 @@ namespace springtail::pg_log_mgr {
 
         bool archive_logs() const { return _archive_logs; }
 
+        /**
+         * @brief Cleanup log files older than the given timestamp
+         *
+         * @param min_timestamp Min timestamp file to be retained,
+         *                      other files will be removed/archived
+         */
+        void cleanup_log_files(uint64_t min_timestamp);
+
     private:
         /**
          * Local cache of whether a given table exists or not at the most recently processed XID.

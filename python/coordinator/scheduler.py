@@ -372,7 +372,7 @@ class Scheduler:
                     self.production.install_binaries(config_gitsha)
                     if self.service_name == 'fdw':
                         self.logger.info("Installing postgres_fdw")
-                        self.production.install_pgfdw()
+                        self.production.install_pgfdw(self.props)
 
                 self.logger.info("Restarting services")
                 self.restart_all()
