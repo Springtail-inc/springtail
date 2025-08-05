@@ -17,14 +17,13 @@ sys.path.append(os.path.join(project_root, 'shared'))
 sys.path.append(os.path.join(project_root, 'grpc'))
 
 # import the Properties class
-from properties import Properties
+from properties import Properties, DB_USER_ROLE_FDW, DB_USER_ROLE_PROXY, DB_USER_ROLE_REPLICATION
 from sysutils import stop_daemons
 
 # import the ComponentFactory class and the Scheduler class
 from component_factory import ComponentFactory
 from scheduler import Scheduler, CoordinatorState
 from production import Production
-from postgres_helper import PostgresHelper
 import loader
 
 # import the xid_mgr_client
@@ -146,23 +145,19 @@ class Coordinator:
                 self.scheduler.register_component(factory.create_log_mgr_daemon(), 2)
 
             case "fdw":
+                pid_path = None
                 try:
                     if self.production:
-                        self.production.install_pgfdw()
+                        pid_path = self.production.install_pgfdw()
                 except Exception as e:
                     raise ValueError("Failed to install postgres_fdw: " + str(e))
 
                 # startup postgres if not running
-                postgres = factory.create_postgres()
+                postgres = factory.create_postgres(pid_path)
                 if not postgres.is_running():
                     if not postgres.start():
                         self.logger.error("Failed to start Postgres")
                         raise ValueError("Failed to start Postgres")
-
-                # create the ddl user and fdw user
-                pg_helper = PostgresHelper()
-                (_, ddl_password) = pg_helper.create_ddl_user()
-                pg_helper.create_fdw_user()
 
                 # in test startup ingestion services
                 if not self.production:
@@ -179,7 +174,7 @@ class Coordinator:
 
                 self.scheduler.register_component(postgres, 3)
                 self.scheduler.register_component(factory.create_xid_subscriber_daemon(), 4)
-                self.scheduler.register_component(factory.create_ddl_daemon('ddl_user', ddl_password), 5)
+                self.scheduler.register_component(factory.create_ddl_daemon(), 5)
 
             case "proxy":
                 self.scheduler.register_component(factory.create_proxy(), 1)

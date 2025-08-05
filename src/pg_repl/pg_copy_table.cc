@@ -533,7 +533,8 @@ namespace springtail
         _set_schema(table_oid);
 
         // validate the columns to see if there are invalid columns
-        auto invalid_columns = TableValidator::get_instance()->validate_columns<SchemaColumn>(_schema.columns);
+        auto invalid_columns = TableValidator::get_instance()->validate_columns<SchemaColumn>(_schema.columns,
+                Properties::get_include_schemas(db_id));
         if (invalid_columns.size() > 0) {
             LOG_DEBUG(LOG_PG_REPL, "Invalid columns found as part of _copy_table for table_oid {}", table_oid);
             nlohmann::json table_info = {

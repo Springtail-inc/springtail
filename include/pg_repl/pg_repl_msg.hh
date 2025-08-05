@@ -190,6 +190,7 @@ namespace springtail
         bool rls_enabled;   // is row level security enabled
         bool rls_forced;    // is row level security forced
         std::string namespace_name;
+        uint32_t namespace_id;
         std::string table;
         std::vector<PgMsgSchemaColumn> columns;
         uint64_t parent_table_id;

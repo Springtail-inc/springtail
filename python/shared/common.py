@@ -119,10 +119,10 @@ def run_command(command, args : List[str], outfile : Optional[str] = None, no_er
         else:
             result = subprocess.run(command_with_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=False, cwd=cwd, check=check, timeout=timeout)
     except subprocess.TimeoutExpired as te:
-        logging.error("Command timed out: {' '.join(command_with_args)}")
+        logging.error(f"Command timed out: {' '.join(command_with_args)}")
         raise te
     except subprocess.CalledProcessError as cpe:
-        logging.error(f"Command failed with error: {cpe.returncode}")
+        logging.error(f"Command {command_with_args} failed with error: {cpe.returncode}")
         result = cpe
         pass
 

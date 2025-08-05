@@ -1,3 +1,5 @@
+# NOTE THIS IS CURRENTLY BROKEN
+
 import sys
 import os
 import argparse
@@ -82,12 +84,6 @@ def gen_random_string(length: int) -> str:
 def run_tests(factory: ComponentFactory) -> None:
     """Run tests for all components"""
     # Create components and test if they are running
-    xid_mgr_daemon = factory.create_xid_mgr_daemon()
-    test(xid_mgr_daemon)
-    assert not xid_mgr_daemon.is_running()
-
-    xid_mgr_daemon.start()
-    assert xid_mgr_daemon.is_running()
 
     pg_xid_subscriber_daemon = factory.create_pg_xid_subscriber_daemon()
     test(pg_xid_subscriber_daemon)
@@ -106,7 +102,7 @@ def run_tests(factory: ComponentFactory) -> None:
     assert postgres.is_running()
     postgres.create_user('test_user', 'test_password', True, True)
 
-    ddl_daemon = factory.create_ddl_daemon('test_user', 'test_password')
+    ddl_daemon = factory.create_ddl_daemon()
     test(ddl_daemon)
     assert not ddl_daemon.is_running()
 
@@ -185,7 +181,7 @@ if __name__ == "__main__":
     elif component_name == 'postgres':
         component = factory.create_postgres()
     elif component_name == 'ddl_daemon':
-        component = factory.create_ddl_daemon('test_user', 'test_password')
+        component = factory.create_ddl_daemon()
     elif component_name == 'proxy':
         component = factory.create_proxy()
     else:

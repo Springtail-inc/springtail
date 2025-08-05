@@ -13,16 +13,11 @@ int main(int argc, char *argv[])
     std::optional<std::string> socket_hostname = {};
     std::string socket_host_str;
 
-    std::string username;
-    std::string password;
-
     // parse the arguments
     namespace po = boost::program_options;
     po::options_description desc("Allowed options");
     desc.add_options()("help,h", "Help message.");
     desc.add_options()("daemonize", "Start the server as a daemon");
-    desc.add_options()("username,u", po::value<std::string>(&username)->required(), "DDL Postgres username");
-    desc.add_options()("password,p", po::value<std::string>(&password)->required(), "DDL Postgres password");
     desc.add_options()("socket,s", po::value<std::string>(&socket_host_str), "Unix domain socket path for Postgresql");
 
     po::variables_map vm;
@@ -68,8 +63,6 @@ int main(int argc, char *argv[])
 
     springtail_store_arguments(ServiceId::PgDDLMgrId,
         {
-            {"username", std::any(username)},
-            {"password", std::any(password)},
             {"hostname", std::any(socket_hostname)}
         });
 

@@ -39,11 +39,13 @@ namespace springtail::pg_fdw {
          * @param fdw_id FDW ID for this instance
          * @param username username for ddl mgr
          * @param password password for ddl mgr
+         * @param proxy_password password for roles created on fdw for proxy
          * @param hostname optional hostname for connection
          */
         void init(const std::string &fdw_id,
                   const std::string &username,
                   const std::string &password,
+                  const std::string &proxy_password,
                   const std::optional<std::string> &hostname = std::nullopt);
 
         /**
@@ -84,11 +86,11 @@ namespace springtail::pg_fdw {
         std::string _fdw_id;                       ///< FDW ID
 
         std::string _hostname;                     ///< hostname
-        std::string _username;                     ///< username (ddl user superuser)
-        std::string _password;                     ///< password (ddl user password)
+        std::string _username;                     ///< FDW username
+        std::string _password;                     ///< FDW password
+        std::string _proxy_password;               ///< proxy user password for new roles
         std::string _db_prefix;                    ///< db prefix, may be empty
-        std::string _fdw_username;                 ///< FDW username (ro-only)
-        std::string _fdw_password;                 ///< FDW password
+
         uint64_t _db_instance_id;                  ///< database instance id
         int _port;                                 ///< port
 

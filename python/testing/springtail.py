@@ -465,17 +465,7 @@ def start_fdw_daemons(props : Properties,
 
     # startup pg_ddl_daemon; schema import done by pg_ddl_daemon
     print("Starting pg_ddl_daemon...")
-
-    # a little ugly, but need to add args for username password for fdw daemon for ddl user
-    daemons = []
-    for d in FDW_DAEMONS:
-        if d[0] == 'pg_ddl_daemon':
-            s = d[2]
-            daemons.append((d[0], d[1], s + f',-u,{fdw_config["fdw_user"]},-p,{fdw_config["password"]}'))
-        else:
-            daemons.append(d)
-
-    start_daemons(build_dir, daemons)
+    start_daemons(build_dir, FDW_DAEMONS)
 
 
 def start_proxy(props : Properties, build_dir : str, restart: bool = False) -> None:
@@ -483,6 +473,7 @@ def start_proxy(props : Properties, build_dir : str, restart: bool = False) -> N
     # Start the proxy
     print("Starting proxy...")
     start_daemons(build_dir, PROXY_DAEMONS, restart)
+
 
 def wait_for_running(props : Properties) -> None:
     """Wait for the system to be in a running state."""

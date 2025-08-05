@@ -269,7 +269,6 @@ namespace springtail::pg_log_mgr {
             Coordinator::mark_alive(keep_alive);
 
             // block on index reconciliation queue w/timeout for shutdown
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Waiting for index reconciliation request");
             if (auto request = _index_reconciliation_queue_mgr->pop(_db_id, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT)) {
                 if (request != nullptr) {
                     //Pass it to log reader to notify committer
@@ -310,7 +309,6 @@ namespace springtail::pg_log_mgr {
             std::set<uint32_t> table_ids;
 
             // block on redis table sync queue w/timeout for shutdown
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Waiting for table sync queue");
             auto request = _redis_sync_queue.pop(REDIS_WORKER_ID, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (request == nullptr) {
                 continue; // timeout, check for shutdown
@@ -644,7 +642,6 @@ namespace springtail::pg_log_mgr {
             // get log entry from queue
             PgLogQueueEntryPtr log_entry = this->_logger_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (log_entry == nullptr) {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Timeout waiting for log entry");
                 continue;
             }
 

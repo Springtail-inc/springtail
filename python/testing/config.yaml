@@ -30,3 +30,5 @@ overlays:
     params:
       use_proxy_for_test: true
       use_proxy_for_verify: true
+  include_schema_config:
+    test_sets: ['include_schema']
