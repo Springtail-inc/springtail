@@ -428,7 +428,7 @@ namespace springtail::pg_fdw {
             if (diff_type == "ADDED") {
                 // create a new user with password, even if nologin is set
                 // in case it changes later, we can control with LOGIN/NOLOGIN
-                if (!fdw_conn->exec_no_throw(fmt::format(CREATE_USER, role_name, _fdw_password))) {
+                if (!fdw_conn->exec_no_throw(fmt::format(CREATE_USER, role_name, _password))) {
                     auto sql_state = fdw_conn->get_sql_state();
                     if (sql_state.has_value() && sql_state.value() == LibPqConnection::SQL_DUPLICATE_OBJECT) {
                         // user already exists, we can skip this
