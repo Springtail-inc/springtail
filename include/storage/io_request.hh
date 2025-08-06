@@ -13,7 +13,7 @@
 namespace springtail {
 
     /** IO Status set in response; important keep success == 0 */
-    enum IOStatus { SUCCESS=0, ERROR, 
+    enum IOStatus { SUCCESS=0, ERROR,
                     ERR_NOENT, ERR_ACCESS, ERR_ARGS,
                     ERR_NOSPC, ERR_BADFD, ERR_DECODE, ERR_CKSUM };
 
@@ -22,7 +22,7 @@ namespace springtail {
     class IOResponseAppend;
     class IOResponseRead;
     class IOResponse;
-    
+
     class IOSysFH;
     class IOMgr;
 
@@ -68,7 +68,7 @@ namespace springtail {
 
         /**
          * @brief Get the type as a string
-         * @return std::string 
+         * @return std::string
          */
         std::string get_type() const noexcept;
 
@@ -123,7 +123,7 @@ namespace springtail {
          * @brief Set the status object based on errno.
          * @param fh_errno errno as reported by system call
          */
-        inline void set_status(int fh_errno) 
+        inline void set_status(int fh_errno)
         {
             if (fh_errno == -1) { return; }
             switch (fh_errno) {
@@ -192,7 +192,7 @@ namespace springtail {
          * @param status   IOStatus status
          */
         void complete(std::shared_ptr<ResponseClass> res, IOStatus status) {
-            res->set_status(status); 
+            res->set_status(status);
             promise.set_value(res);
             if (callback) {
                 callback(res);
@@ -211,18 +211,18 @@ namespace springtail {
         /** data vectors */
         std::vector<std::shared_ptr<std::vector<char>>> data;
 
-        IORequestWrite(const std::filesystem::path &path, bool is_compressed, 
-                       uint64_t offset, std::shared_ptr<std::vector<char>> datavec, 
-                       io_write_callback_fn cb) 
+        IORequestWrite(const std::filesystem::path &path, bool is_compressed,
+                       uint64_t offset, std::shared_ptr<std::vector<char>> datavec,
+                       io_write_callback_fn cb)
             : IORequestTemplate(IORequest::IOType::WRITE, path, is_compressed, cb),
               offset(offset) { data.push_back(datavec); }
 
-        IORequestWrite(const std::filesystem::path &path, bool is_compressed, uint64_t offset, 
-                       const std::vector<std::shared_ptr<std::vector<char>>> &data, 
-                       io_write_callback_fn cb) 
+        IORequestWrite(const std::filesystem::path &path, bool is_compressed, uint64_t offset,
+                       const std::vector<std::shared_ptr<std::vector<char>>> &data,
+                       io_write_callback_fn cb)
             : IORequestTemplate(IORequest::IOType::WRITE, path, is_compressed, cb),
               offset(offset), data(data) {}
-    
+
     private:
         /**
          * @brief Issue_request on underlying FH; must handle failure internally
@@ -236,7 +236,7 @@ namespace springtail {
      * @brief Write response
      */
     class IOResponseWrite : public IOResponse {
-    public: 
+    public:
         /** offset of this write */
         uint64_t offset;
 
@@ -260,15 +260,15 @@ namespace springtail {
         /** Data vectors */
         std::vector<std::shared_ptr<std::vector<char>>> data;
 
-        IORequestAppend(const std::filesystem::path &path, bool is_compressed, 
-                        std::shared_ptr<std::vector<char>> datavec, 
-                        io_append_callback_fn cb) 
+        IORequestAppend(const std::filesystem::path &path, bool is_compressed,
+                        std::shared_ptr<std::vector<char>> datavec,
+                        io_append_callback_fn cb)
             : IORequestTemplate(IORequest::IOType::APPEND, path, is_compressed, cb)
               { data.push_back(datavec); }
 
-        IORequestAppend(const std::filesystem::path &path, bool is_compressed, 
-                       const std::vector<std::shared_ptr<std::vector<char>>> &data, 
-                       io_append_callback_fn cb) 
+        IORequestAppend(const std::filesystem::path &path, bool is_compressed,
+                       const std::vector<std::shared_ptr<std::vector<char>>> &data,
+                       io_append_callback_fn cb)
             : IORequestTemplate(IORequest::IOType::APPEND, path, is_compressed, cb), data(data) {}
 
     private:
@@ -276,7 +276,7 @@ namespace springtail {
          * @brief Issue_request on underlying FH; must handle failure internally
          * @param io_mgr  IO Mgr pointer
          * @param fh      File handle for request
-         */    
+         */
         void _issue_request(IOMgr * const io_mgr, std::shared_ptr<IOSysFH> fh) noexcept;
 
     };
@@ -307,9 +307,9 @@ namespace springtail {
     class IORequestRead : public IORequestTemplate<IOResponseRead> {
     public:
         /** offset of this read */
-        uint64_t offset; 
+        uint64_t offset;
 
-        IORequestRead(const std::filesystem::path &path, bool is_compressed, 
+        IORequestRead(const std::filesystem::path &path, bool is_compressed,
                       uint64_t offset, io_read_callback_fn cb)
             : IORequestTemplate(IORequest::IOType::READ, path, is_compressed, cb),
               offset(offset) {}
@@ -319,7 +319,7 @@ namespace springtail {
          * @brief Issue_request on underlying FH; must handle failure internally
          * @param io_mgr  IO Mgr pointer
          * @param fh      File handle for request
-         */    
+         */
         void _issue_request(IOMgr * const io_mgr, std::shared_ptr<IOSysFH> fh) noexcept;
     };
 
@@ -330,7 +330,7 @@ namespace springtail {
     public:
         /** current offset for read */
         uint64_t offset;
-        
+
         /** next valid offset after this read */
         uint64_t next_offset;
 
@@ -343,7 +343,7 @@ namespace springtail {
          * @param status  optional status, default=IOStatus::ERROR
          */
         IOResponseRead(const IORequestRead * const request, IOStatus status=IOStatus::ERROR)
-            : IOResponse(request, status), offset(request->offset) {}
+            : IOResponse(request, status), offset(request->offset), next_offset(0) {}
     };
 
     /**
@@ -351,7 +351,7 @@ namespace springtail {
      */
     class IORequestSync : public IORequestTemplate<IOResponse> {
     public:
-        IORequestSync(const std::filesystem::path &path, bool is_compressed, 
+        IORequestSync(const std::filesystem::path &path, bool is_compressed,
                       io_status_callback_fn cb)
             : IORequestTemplate(IORequest::IOType::SYNC, path, is_compressed, cb) {}
 
@@ -360,7 +360,7 @@ namespace springtail {
          * @brief Issue_request on underlying FH; must handle failure internally
          * @param io_mgr  IO Mgr pointer
          * @param fh      File handle for request
-         */    
+         */
         void _issue_request(IOMgr * const io_mgr, std::shared_ptr<IOSysFH> fh) noexcept;
     };
 }
