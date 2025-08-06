@@ -948,11 +948,17 @@ namespace springtail::pg_log_mgr {
     }
 
     void
+    PgLogReader::cleanup_log_files(uint64_t min_timestamp)
+    {
+        fs::cleanup_files_from_dir(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX, min_timestamp, _archive_logs);
+        fs::cleanup_files_from_dir(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL_STREAMING, PgLogMgr::LOG_SUFFIX, min_timestamp, _archive_logs);
+    }
+
+    void
     PgLogReader::_remove_old_log_files()
     {
         uint64_t min_timestamp = _xid_ts_tracker->get_min_timestamp();
-        fs::cleanup_files_from_dir(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX, min_timestamp, _archive_logs);
-        fs::cleanup_files_from_dir(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL_STREAMING, PgLogMgr::LOG_SUFFIX, min_timestamp, _archive_logs);
+        cleanup_log_files(min_timestamp);
         if (min_timestamp == 0) {
             min_timestamp = _pg_log_timestamp;
         }
