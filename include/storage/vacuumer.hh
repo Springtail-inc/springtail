@@ -192,7 +192,7 @@ private:
     std::thread _vacuumer_thread;           ///< Vacuumer thread
 
     std::atomic<bool> _shutdown{false};   ///< shutdown flag
-    std::atomic<uint64_t> _entries_count_in_memory = 0;  ///< To track count of entries in the memory
+    std::atomic<int64_t> _entries_count_in_memory = 0;  ///< To track count of entries in the memory
 
     /**
      * @brief Round a value up to the nearest multiple of `align`
