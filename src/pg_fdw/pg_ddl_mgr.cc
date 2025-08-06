@@ -88,7 +88,7 @@ namespace springtail::pg_fdw {
         "  FOR r IN (SELECT rolname "
         "            FROM pg_roles "
         "            WHERE rolname NOT LIKE 'pg_%' AND "
-        "                  rolname NOT IN ('{}', '{}') AND "
+	"                  rolname NOT = '{}' AND "
         "                  rolname NOT IN (SELECT DISTINCT rolname FROM pg_roles JOIN pg_database ON pg_roles.oid = datdba) "
         "           ) LOOP "
         "    EXECUTE format('DROP ROLE IF EXISTS %s', r.rolname); "
@@ -406,8 +406,8 @@ namespace springtail::pg_fdw {
         // iterate through the result set and process the role diffs
         for (int i = 0; i < conn->ntuples(); i++) {
             std::string role = conn->get_string(i, 1);
-            if (role == _fdw_username || role == _username) {
-                // skip the fdw user and ddl mgr user, they are not replicated from primary
+            if (role == _username) {
+                // skip the fdw user, they are not replicated from primary
                 LOG_DEBUG(LOG_FDW, "Skipping role {} as it is the fdw or ddl mgr user", role);
                 continue;
             }
@@ -826,8 +826,8 @@ namespace springtail::pg_fdw {
         // must be done after databases are dropped to remove dependencies
         conn = _get_fdw_connection(std::nullopt, "template1");
 
-        // get all roles except the fdw and ddl mgr user
-        conn->exec(fmt::format(DROP_ROLES, _fdw_username, _username));
+        // get all roles except the fdw user
+        conn->exec(fmt::format(DROP_ROLES, _username));
         conn->clear();
         conn->disconnect();
     }
