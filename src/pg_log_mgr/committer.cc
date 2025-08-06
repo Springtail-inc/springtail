@@ -5,6 +5,7 @@
 #include <proto/pg_copy_table.pb.h>
 #include <redis/db_state_change.hh>
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/schema_mgr.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_func.hh>
 #include <xid_mgr/xid_mgr_server.hh>
@@ -603,7 +604,7 @@ namespace springtail::committer {
                 {
                     LOG_DEBUG(LOG_COMMITTER, "TRUNCATE");
                     // note: this should always be the first operation within an extent
-                    table->truncate();
+                    TableMgr::get_instance()->truncate_table(table);
                     break;
                 }
             default:

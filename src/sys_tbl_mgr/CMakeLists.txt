@@ -4,14 +4,27 @@ find_package(Boost COMPONENTS multi_index REQUIRED)
 
 # source files
 set(SYS_TBL_MGR_SOURCES
-    client.cc
     server.cc
     service.cc
     schema_cache.cc
     schema_mgr.cc
     system_tables.cc
+    system_table_mgr.cc
+    table.cc
+)
+
+set(SYS_TBL_MGR_CLIENT_SOURCES
+    client.cc
+    schema_cache.cc
+    schema_mgr.cc
+    shm_cache.cc
+    system_tables.cc
+    system_table_mgr.cc
     table.cc
     table_mgr.cc
+)
+
+set(SCH_MEM_CACHE_SOURCES
     shm_cache.cc
 )
 
@@ -21,6 +34,21 @@ target_include_directories(springtail_sys_tbl_mgr PUBLIC ${CMAKE_BINARY_DIR}/src
 target_link_libraries(springtail_sys_tbl_mgr
   PUBLIC springtail_common springtail_grpc springtail_storage springtail_xid_mgr_client
   PRIVATE proto_sys_tbl_mgr
+  PRIVATE Boost::thread)
+
+# add the library target
+add_library(springtail_sys_tbl_mgr_client ${SYS_TBL_MGR_CLIENT_SOURCES})
+target_include_directories(springtail_sys_tbl_mgr_client PUBLIC ${CMAKE_BINARY_DIR}/src PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(springtail_sys_tbl_mgr_client
+  PUBLIC springtail_common springtail_grpc springtail_storage
+  PRIVATE proto_sys_tbl_mgr
+  PRIVATE Boost::thread)
+
+# add the library target
+add_library(springtail_sch_mem_cache ${SCH_MEM_CACHE_SOURCES})
+target_include_directories(springtail_sch_mem_cache PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(springtail_sch_mem_cache
+  PUBLIC springtail_common
   PRIVATE Boost::thread)
 
 # daemon executable
@@ -37,7 +65,7 @@ add_dsymutil_command(sys_tbl_mgr_daemon)
 springtail_unit_test(test_sys_tbl_mgr
   SOURCES test/test_sys_tbl_mgr.cc
   INCLUDES ${CMAKE_SOURCE_DIR}/include
-  LIBS springtail_sys_tbl_mgr springtail_test GTest::gtest_main
+  LIBS springtail_test GTest::gtest_main
 )
 
 springtail_unit_test(test_schema_cache
@@ -49,7 +77,7 @@ springtail_unit_test(test_schema_cache
 springtail_unit_test(test_shm_cache
   SOURCES test/test_shm_cache.cc
   INCLUDES ${CMAKE_SOURCE_DIR}/include
-  LIBS springtail_sys_tbl_mgr springtail_test GTest::gtest_main
+  LIBS springtail_sch_mem_cache GTest::gtest_main
 )
 
 # install daemon to install directory

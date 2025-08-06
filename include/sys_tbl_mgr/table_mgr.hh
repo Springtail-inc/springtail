@@ -82,6 +82,12 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base,
                           const TableMetadata &metadata);
 
         /**
+         * Truncates the table, removing the callback of any mutated pages in the cache, clearing
+         * all of the indexes, and marking the roots to be cleared in the system tables.
+         */
+        void truncate_table(MutableTablePtr table);
+
+        /**
          * Finalize all outstanding system metadata mutations.
          */
         void finalize_metadata(uint64_t db_id, uint64_t xid);
@@ -96,22 +102,24 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base,
          */
         std::filesystem::path get_table_data_dir(uint64_t db_id, uint64_t table_id, uint64_t xid);
 
+        /**
+         * Retrieves the schema for the table at a given XID.
+         */
+        ExtentSchemaPtr
+        get_extent_schema(TablePtr table);
+
+        /**
+         * Get a schema for accessing an extent from this table that was written at the provided XID.
+         */
+        SchemaPtr
+        get_schema(TablePtr table, uint64_t extent_xid);
+
     private:
         /**
          * @brief Construct a new TableMgr object
          */
         TableMgr();
         ~TableMgr() override = default;
-
-        /**
-         * Construct a system table.
-         */
-        TablePtr _get_system_table(uint64_t db_id, uint64_t table_id, uint64_t xid);
-
-        /**
-         * Construct a mutable system table.
-         */
-        MutableTablePtr _get_mutable_system_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid);
 
         boost::shared_mutex _mutex; ///< Protects access to the table manager.
         std::filesystem::path _table_base; ///< The base directory for individual table directories.

@@ -54,7 +54,7 @@ target_include_directories(pg_wal_decode
 # libs to link against
 target_link_libraries(springtail_pg
     PRIVATE PostgreSQL::PostgreSQL proto_pg_copy_table
-    PUBLIC springtail_common springtail_sys_tbl_mgr
+    PUBLIC springtail_common springtail_sys_tbl_mgr_client
 )
 
 target_link_libraries(pg_wal_dump

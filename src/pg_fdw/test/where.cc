@@ -73,7 +73,7 @@ void search(uint64_t db_id, int val, QualOpName op)
     }
 
     FieldPtr key_field = std::make_shared<ConstTypeField<int32_t>>(val);
-    auto fields = table->extent_schema()->get_fields();
+    auto fields = TableMgr::get_instance()->get_extent_schema(table)->get_fields();
     std::cout << "Up\n";
     while (*iter_start != *iter_end) {
         auto row = *(*iter_start);

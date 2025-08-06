@@ -3,12 +3,10 @@
 #include <common/constants.hh>
 #include <common/circular_buffer.hh>
 #include <memory>
-#include <stdexcept>
 #include <storage/btree.hh>
 #include <storage/cache.hh>
 #include <storage/mutable_btree.hh>
 
-#include <sys_tbl_mgr/schema_mgr.hh>
 #include <variant>
 
 namespace springtail {
@@ -111,7 +109,7 @@ namespace indexer_helpers {
         class Iterator {
             friend Table;
 
-            /** 
+            /**
              * We use the same Iterator type for both primary and secondary indexes.
              * However the way the indexes move around isn't the same.
              * Tracker provides an abstraction for the various index types.
@@ -158,7 +156,7 @@ namespace indexer_helpers {
                     _page_i(page_i)
                 {}
 
-                explicit Primary(const Table *table) 
+                explicit Primary(const Table *table)
                     :Tracker{table}
                 {}
 
@@ -175,7 +173,7 @@ namespace indexer_helpers {
                 friend bool operator==(const Primary& a, const Primary& b) {
                     const Tracker& ta = a;
                     const Tracker& tb = b;
-                    
+
                     if (ta == tb) {
                         return (a._btree_i == a._btree->end() || a._page_i == b._page_i);
                     }
@@ -220,7 +218,7 @@ namespace indexer_helpers {
             };
             std::unordered_map<uint64_t, PageMapItem> _page_map;
             uint64_t _cache_size;
-            // This it to keep a list of extent ids that are in 
+            // This it to keep a list of extent ids that are in
             // _page_map. The list is used for evicting items from the
             // page map. We assume that secondary indexes jump
             // around extent ids somewhat randomly. There is no need to
@@ -273,7 +271,7 @@ namespace indexer_helpers {
         using pointer           = const Extent::Row *;  // or also value_type*
         using reference         = const Extent::Row &;  // or also value_type&
 
-        reference operator*() { 
+        reference operator*() {
 
             struct visitor {
                 reference operator()(const Primary& t) const {
@@ -391,11 +389,11 @@ namespace indexer_helpers {
         private:
             /** Specifically for the end() iterator of a vacant table. */
             Iterator(const Table *table)
-            { 
-                _tracker.emplace<Primary>(table, 
-                        BTreePtr{}, 
-                        BTree::Iterator{}, 
-                        StorageCache::SafePagePtr{}, 
+            {
+                _tracker.emplace<Primary>(table,
+                        BTreePtr{},
+                        BTree::Iterator{},
+                        StorageCache::SafePagePtr{},
                         StorageCache::Page::Iterator{});
             }
 
@@ -407,20 +405,20 @@ namespace indexer_helpers {
                      BTreePtr btree, const BTree::Iterator &btree_i,
                      StorageCache::SafePagePtr page,
                      const StorageCache::Page::Iterator &page_i)
-            { 
+            {
                 _tracker.emplace<Primary>(table, btree, btree_i, std::move(page), page_i);
             }
 
             Iterator(const Table *table,
                      BTreePtr btree, const BTree::Iterator &btree_i,
                      ExtentSchemaPtr index_schema )
-            { 
+            {
                 _tracker.emplace<Secondary>(table, btree, btree_i, index_schema);
             }
 
             Iterator(const Table *table,
                      BTreePtr btree, const BTree::Iterator &btree_i)
-            { 
+            {
                 _tracker.emplace<SecondaryIndexOnly>(table, btree, btree_i);
             }
         };
@@ -444,16 +442,6 @@ namespace indexer_helpers {
         /** Finds the extent_id that may contain the provided key, using the primary key index. */
         uint64_t primary_lookup(TuplePtr tuple);
 
-        /**
-         * Retrieves the schema for the table at a given XID.
-         */
-        ExtentSchemaPtr extent_schema() const;
-
-        /**
-         * Get a schema for accessing an extent from this table that was written at the provided XID.
-         */
-        SchemaPtr schema(uint64_t extent_xid) const;
-
         /** Retrieves the ordered set of columns that form the primary key. */
         std::vector<std::string> primary_key() const
         {
@@ -461,16 +449,13 @@ namespace indexer_helpers {
         }
 
         /** Retrieve the Database ID of this table. */
-        uint64_t db() const
-        {
-            return _db_id;
-        }
+        uint64_t db() const { return _db_id; }
 
         /** Retrieve the ID of this table. */
-        uint64_t id() const
-        {
-            return _id;
-        }
+        uint64_t id() const { return _id; }
+
+        /** Retrieve the XID of this table. */
+        uint64_t xid() const { return _xid; }
 
         bool empty() const;
 
@@ -517,12 +502,12 @@ namespace indexer_helpers {
             return _secondary_indexes.at(idx).first;
         }
 
-        /** 
+        /**
          * Get the index schema.
          */
         ExtentSchemaPtr get_index_schema(uint64_t index_id) const;
 
-        /** 
+        /**
          * Get the secondary index column names in the order as they appear in the index.
          */
         std::vector<std::string> get_index_column_names(uint64_t index_id) const;
@@ -576,7 +561,7 @@ namespace indexer_helpers {
         /**
          * Creates read-only index of the table.
          */
-        BTreePtr 
+        BTreePtr
         _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset);
 
     private:
@@ -681,12 +666,6 @@ namespace indexer_helpers {
         void update(TuplePtr value, uint64_t extent_id);
 
         /**
-         * Truncates the table, removing the callback of any mutated pages in the cache, clearing
-         * all of the indexes, and marking the roots to be cleared in the system tables.
-         */
-        void truncate();
-
-        /**
          * Reads an extent from the tree and returns it.
          * @param extent_id The extent ID to read.
          * @return A pointer to the requested page.
@@ -756,6 +735,28 @@ namespace indexer_helpers {
         TableStats get_stats() const {
             return _stats;
         }
+
+        /**
+         * @brief Get the data file for the table
+         *
+         * @return std::filesystem::path - data file
+         */
+        std::filesystem::path get_data_file() const { return _data_file; }
+
+        /**
+         * @brief Get table target xid
+         *
+         * @return uint64_t - target xid
+         */
+        uint64_t get_target_xid() const { return _target_xid; }
+
+        /**
+         * @brief Truncate indexes and populate metadata
+         *
+         * @param metadata - metadata object passed by reference
+         */
+        void
+        truncate_indexes(TableMetadata &metadata);
 
     private:
         /**

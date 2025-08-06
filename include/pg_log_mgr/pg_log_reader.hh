@@ -12,6 +12,7 @@
 #include <storage/field.hh>
 
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/schema_mgr.hh>
 
 namespace springtail::pg_log_mgr {
     /**

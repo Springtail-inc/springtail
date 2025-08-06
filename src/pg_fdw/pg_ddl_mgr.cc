@@ -163,7 +163,7 @@ namespace springtail::pg_fdw {
 
         // iterate through the user types and add them to the map
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::UserTypes::ID, xid);
-        auto fields = table->extent_schema()->get_fields();
+        auto fields = TableMgr::get_instance()->get_extent_schema(table)->get_fields();
         for (auto row : (*table)) {
             uint64_t namespace_id = fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID)->get_uint64(&row);
             uint64_t type_id = fields->at(sys_tbl::UserTypes::Data::TYPE_ID)->get_uint64(&row);
@@ -233,7 +233,7 @@ namespace springtail::pg_fdw {
 
         // iterate through the schemas and get the schema ids
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, xid);
-        auto fields = table->extent_schema()->get_fields();
+        auto fields = TableMgr::get_instance()->get_extent_schema(table)->get_fields();
         for (auto row : (*table)) {
             // make sure entry exists at this xid
             uint64_t namespace_id = fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&row);

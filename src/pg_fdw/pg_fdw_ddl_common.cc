@@ -15,7 +15,7 @@ namespace springtail::pg_fdw {
             return "";
         }
 
-        auto ns_fields = ns_table->extent_schema()->get_fields();
+        auto ns_fields = TableMgr::get_instance()->get_extent_schema(ns_table)->get_fields();
         auto &&row = *ns_i;
         if (!ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row)) {
             LOG_WARN("Namespace marked as not-exists {} @ {}:{}",
@@ -30,7 +30,7 @@ namespace springtail::pg_fdw {
     PgFdwCommon::_get_parent_table_info(uint64_t db_id, uint64_t schema_xid, uint64_t table_id)
     {
         auto table_names_t = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, schema_xid);
-        auto schema = table_names_t->extent_schema();
+        auto schema = TableMgr::get_instance()->get_extent_schema(table_names_t);
         auto fields = schema->get_fields();
 
         auto search_key = sys_tbl::TableNames::Primary::key_tuple(table_id, schema_xid, constant::MAX_LSN);
@@ -71,7 +71,7 @@ namespace springtail::pg_fdw {
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID,
                                                             schema_xid);
         // get field array
-        auto fields = table->extent_schema()->get_fields();
+        auto fields = TableMgr::get_instance()->get_extent_schema(table)->get_fields();
 
         // iterate over the table names table and populate the table map
         for (auto row : (*table)) {

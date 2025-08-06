@@ -36,7 +36,7 @@ namespace {
     _print_table(uint64_t db_id, uint64_t xid)
     {
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, 12);
-        auto fields = table->extent_schema()->get_fields();
+        auto fields = TableMgr::get_instance()->get_extent_schema(table)->get_fields();
         auto row_i = table->begin();
 
         std::cout << "\n=== START - PrintTable for XID " << xid << " ===\n";
@@ -253,7 +253,7 @@ namespace {
 
         // verify system table correctness
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, 15);
-        auto fields = table->extent_schema()->get_fields();
+        auto fields = TableMgr::get_instance()->get_extent_schema(table)->get_fields();
         auto row_i = table->begin();
 
         auto tuple_row = sys_tbl::TableNames::Data::tuple(90000, "x", 100000, 2, 2, true, std::nullopt, std::nullopt, std::nullopt);

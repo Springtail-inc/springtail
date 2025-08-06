@@ -7,6 +7,7 @@
 #include <sys_tbl_mgr/exception.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/service.hh>
+#include <sys_tbl_mgr/system_table_mgr.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <storage/vacuumer.hh>
 #include <xid_mgr/xid_mgr_client.hh>
@@ -55,7 +56,7 @@ Service::_get_unfinished_indexes_info(uint64_t db_id)
 {
     proto::IndexesInfo indexes;
     auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
-    auto names_schema = names_t->extent_schema();
+    auto names_schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::IndexNames::ID);
     auto names_fields = names_schema->get_fields();
 
     auto search_key = sys_tbl::IndexNames::Primary::key_tuple(0, 0, 0, 0);
@@ -367,7 +368,7 @@ Service::_find_index(uint64_t db_id,
     // use the cached one first
 
     auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
-    auto names_schema = names_t->extent_schema();
+    auto names_schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::IndexNames::ID);
     auto names_fields = names_schema->get_fields();
 
     auto search_key = sys_tbl::IndexNames::Primary::key_tuple(tid, index_id, 0, 0);
@@ -447,7 +448,7 @@ Service::_drop_index(const XidLsn& xid,
 {
     assert(index_state == sys_tbl::IndexNames::State::DELETED || index_state == sys_tbl::IndexNames::State::BEING_DELETED);
     auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
-    auto names_schema = names_t->extent_schema();
+    auto names_schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::IndexNames::ID);
     auto names_fields = names_schema->get_fields();
 
     // find the last record for the index id
@@ -1452,7 +1453,7 @@ Service::_get_modified_partition_details(uint64_t db_id,
                                          bool is_attached)
 {
     auto table = _get_system_table(db_id, sys_tbl::TableNames::ID);
-    auto schema = table->extent_schema();
+    auto schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::TableNames::ID);
     auto fields = schema->get_fields();
 
     // Mutex for the table cache
@@ -1737,7 +1738,7 @@ Service::_get_usertype_info(uint64_t db_id, uint64_t type_id, const XidLsn& xid)
 
     // read from disk
     auto table = _get_system_table(db_id, sys_tbl::UserTypes::ID);
-    auto schema = table->extent_schema();
+    auto schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::UserTypes::ID);
     auto fields = schema->get_fields();
 
     auto search_key = sys_tbl::UserTypes::Primary::key_tuple(type_id, xid.xid, xid.lsn);
@@ -1868,8 +1869,9 @@ Service::Revert(grpc::ServerContext* context,
         // remove rows from the table that are beyond the committed XID
         auto mtable = _get_mutable_system_table(request->db_id(), table_id);
         auto table = _get_system_table(request->db_id(), table_id);
-        FieldPtr xid_f = table->extent_schema()->get_field("xid");
-        auto primary_fields = table->extent_schema()->get_fields(table->primary_key());
+        auto schema = SystemTableMgr::get_instance()->get_extent_schema(table_id);
+        FieldPtr xid_f = schema->get_field("xid");
+        auto primary_fields = schema->get_fields(table->primary_key());
         for (auto row : *table) {
             if (xid_f->get_uint64(&row) > request->xid()) {
                 mtable->remove(std::make_shared<FieldTuple>(primary_fields, &row),
@@ -1898,7 +1900,7 @@ Service::_get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
 
     // not present, read from disk
     auto table_names_t = _get_system_table(db_id, sys_tbl::TableNames::ID);
-    auto schema = table_names_t->extent_schema();
+    auto schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::TableNames::ID);
     auto fields = schema->get_fields();
 
     auto search_key = sys_tbl::TableNames::Primary::key_tuple(table_id, xid.xid, xid.lsn);
@@ -1968,7 +1970,7 @@ Service::_get_namespace_info(uint64_t db_id, uint64_t namespace_id, const XidLsn
 
     // read from disk
     auto table = _get_system_table(db_id, sys_tbl::NamespaceNames::ID);
-    auto schema = table->extent_schema();
+    auto schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::NamespaceNames::ID);
     auto fields = schema->get_fields();
 
     auto search_key = sys_tbl::NamespaceNames::Primary::key_tuple(namespace_id, xid.xid, xid.lsn);
@@ -2027,7 +2029,7 @@ Service::_get_namespace_info(uint64_t db_id, const std::string& name, const XidL
         return nullptr;
     }
 
-    auto schema = table->extent_schema();
+    auto schema = SystemTableMgr::get_instance()->get_extent_schema(table->id());
     auto fields = schema->get_fields();
 
     auto search_key = sys_tbl::NamespaceNames::Secondary::key_tuple(name, xid.xid, xid.lsn);
@@ -2152,16 +2154,17 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
 
     // go over each index and get the roots
     auto roots_t = _get_system_table(db_id, sys_tbl::TableRoots::ID);
-    auto table_id_f = roots_t->extent_schema()->get_field("table_id");
+    auto schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::TableRoots::ID);
+    auto table_id_f = schema->get_field("table_id");
 
-    auto index_id_f = roots_t->extent_schema()->get_field("index_id");
+    auto index_id_f = schema->get_field("index_id");
 
     const std::string& sxid =
         sys_tbl::TableRoots::Data::SCHEMA[sys_tbl::TableRoots::Data::SNAPSHOT_XID].name;
-    auto sxid_f = roots_t->extent_schema()->get_field(sxid);
+    auto sxid_f = schema->get_field(sxid);
 
-    auto eid_f = roots_t->extent_schema()->get_field("extent_id");
-    auto xid_f = roots_t->extent_schema()->get_field("xid");
+    auto eid_f = schema->get_field("extent_id");
+    auto xid_f = schema->get_field("xid");
 
     auto roots_info = std::make_shared<proto::GetRootsResponse>();
 
@@ -2223,18 +2226,19 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     // access the stats table
     if (!stats_found) {
         auto stats_t = _get_system_table(db_id, sys_tbl::TableStats::ID);
-        auto stats_key_fields = stats_t->extent_schema()->get_sort_fields();
+        auto stats_schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::TableStats::ID);
+        auto stats_key_fields = stats_schema->get_sort_fields();
 
         auto search_key = sys_tbl::TableStats::Primary::key_tuple(table_id, xid.xid);
         auto srow_i = stats_t->inverse_lower_bound(search_key);
         auto &&row = *srow_i;
 
         // need to confirm that the table ID matches, but the XID may not match
-        table_id_f = stats_t->extent_schema()->get_field("table_id");
+        table_id_f = stats_schema->get_field("table_id");
         if (srow_i != stats_t->end() && table_id_f->get_uint64(&row) == table_id) {
             // retrieve the stats from the row
-            auto row_count_f = stats_t->extent_schema()->get_field("row_count");
-            auto end_offset_f = stats_t->extent_schema()->get_field("end_offset");
+            auto row_count_f = stats_schema->get_field("row_count");
+            auto end_offset_f = stats_schema->get_field("end_offset");
             row_count = row_count_f->get_uint64(&row);
             end_offset = end_offset_f->get_uint64(&row);
         } else {
@@ -2357,7 +2361,7 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
                               const XidLsn& access_xid)
 {
     auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
-    auto names_schema = names_t->extent_schema();
+    auto names_schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::IndexNames::ID);
     auto names_fields = names_schema->get_fields();
 
     auto search_key = sys_tbl::IndexNames::Primary::key_tuple(table_id, 0, 0, 0);
@@ -2446,7 +2450,7 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
 void
 Service::_populate_index_columns(uint64_t db_id, proto::IndexInfo& info, XidLsn index_xid) {
     auto indexes_t = _get_system_table(db_id, sys_tbl::Indexes::ID);
-    auto indexes_schema = indexes_t->extent_schema();
+    auto indexes_schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::Indexes::ID);
     auto indexes_fields = indexes_schema->get_fields();
 
     auto index_key = sys_tbl::Indexes::Primary::key_tuple(info.table_id(), info.id(), index_xid.xid,
@@ -2491,7 +2495,7 @@ Service::_read_schema_columns(SchemaInfoPtr info,
     auto schemas_t = _get_system_table(db_id, sys_tbl::Schemas::ID);
 
     // construct the column accessors for the schemas table
-    auto schema = schemas_t->extent_schema();
+    auto schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::Schemas::ID);
     auto fields = schema->get_fields();
 
     // read everything with the given table_id
@@ -2591,7 +2595,7 @@ Service::_read_schema_columns(SchemaInfoPtr info,
     // retrieve the primary index data for the table at this XID/LSN
     auto indexes_t = _get_system_table(db_id, sys_tbl::Indexes::ID);
 
-    schema = indexes_t->extent_schema();
+    schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::Indexes::ID);
     fields = schema->get_fields();
 
     // find the first entry that matches for this XID/LSN
@@ -2871,7 +2875,7 @@ Service::_read_schema_history(SchemaInfoPtr info,
     auto schemas_t = _get_system_table(db_id, sys_tbl::Schemas::ID);
 
     // construct the column accessors for the schemas table
-    auto schema = schemas_t->extent_schema();
+    auto schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::Schemas::ID);
     auto fields = schema->get_fields();
 
     // read everything with the given table_id
@@ -3061,7 +3065,7 @@ Service::_get_system_table(uint64_t db_id, uint64_t table_id)
 
     // otherwise create an interface to the table and cache it
     auto&& read_xid = _get_read_xid(db_id);
-    TablePtr table = TableMgr::get_instance()->get_table(db_id, table_id, read_xid.xid);
+    TablePtr table = SystemTableMgr::get_instance()->get_system_table(db_id, table_id, read_xid.xid);
 
     // cache the table interface
     cache[table_id] = table;
@@ -3084,7 +3088,7 @@ Service::_get_mutable_system_table(uint64_t db_id, uint64_t table_id)
     auto&& read_xid = _get_read_xid(db_id);
     auto&& write_xid = _get_write_xid(db_id);
     MutableTablePtr table =
-        TableMgr::get_instance()->get_mutable_table(db_id, table_id, read_xid.xid, write_xid);
+        SystemTableMgr::get_instance()->get_mutable_system_table(db_id, table_id, read_xid.xid, write_xid);
 
     // save the mutable table into the cache
     cache[table_id] = table;

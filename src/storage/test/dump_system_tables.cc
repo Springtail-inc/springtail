@@ -4,8 +4,7 @@
 #include <storage/field.hh>
 #include <storage/io_mgr.hh>
 #include <sys_tbl_mgr/system_tables.hh>
-#include <sys_tbl_mgr/schema_mgr.hh>
-#include <sys_tbl_mgr/table_mgr.hh>
+#include <sys_tbl_mgr/system_table_mgr.hh>
 
 using namespace springtail;
 
@@ -34,14 +33,15 @@ main(int argc,
                            sys_tbl::IndexNames::ID,
                            sys_tbl::NamespaceNames::ID,
                            sys_tbl::UserTypes::ID }) {
-        auto table = TableMgr::get_instance()->get_table(db_id,
+        auto table = SystemTableMgr::get_instance()->get_system_table(db_id,
                                                          table_id,
                                                          constant::LATEST_XID);
-        auto fields = table->extent_schema()->get_fields();
+        auto schema = SystemTableMgr::get_instance()->get_extent_schema(table_id);
+        auto fields = schema->get_fields();
 
         std::cout << fmt::format("TABLE: {}", table_id) << std::endl;
 
-        for (const auto &name : table->extent_schema()->column_order()) {
+        for (const auto &name : schema->column_order()) {
             std::cout << name << ":";
         }
         std::cout << std::endl;

@@ -1,11 +1,13 @@
 #include <mutex>
 #include <stop_token>
 #include <algorithm>
-#include <pg_log_mgr/indexer.hh>
+
 #include <common/logging.hh>
 #include <common/properties.hh>
-#include <sys_tbl_mgr/table_mgr.hh>
+#include <pg_log_mgr/indexer.hh>
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/schema_mgr.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 
 namespace springtail::committer {
 
