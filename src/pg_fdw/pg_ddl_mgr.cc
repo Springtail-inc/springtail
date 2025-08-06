@@ -88,7 +88,7 @@ namespace springtail::pg_fdw {
         "  FOR r IN (SELECT rolname "
         "            FROM pg_roles "
         "            WHERE rolname NOT LIKE 'pg_%' AND "
-	"                  rolname NOT = '{}' AND "
+	"                      rolname <> '{}' AND "
         "                  rolname NOT IN (SELECT DISTINCT rolname FROM pg_roles JOIN pg_database ON pg_roles.oid = datdba) "
         "           ) LOOP "
         "    EXECUTE format('DROP ROLE IF EXISTS %s', r.rolname); "
