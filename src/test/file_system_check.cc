@@ -24,12 +24,40 @@ FSCheck::FSCheck()
     }
 }
 
+template<typename T, typename = void>
+struct has_secondary_key : std::false_type {};
+
+template<typename T>
+struct has_secondary_key<T, std::void_t<decltype(T::Secondary::KEY)>> : std::true_type {};
+
 template<typename Tbl>
 std::pair<TablePtr, std::shared_ptr<std::vector<FieldPtr>>>
 FSCheck::_get_table_and_fields(uint64_t db_id)
 {
     auto schema = std::make_shared<ExtentSchema>(Tbl::Data::SCHEMA);
     std::vector<Index> secondary_keys;
+    if constexpr (has_secondary_key<Tbl>::value) {
+        std::vector<Index> keys;
+        Index idx;
+        idx.id = 1;
+        idx.table_id = Tbl::ID;
+        idx.is_unique = false;
+        idx.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
+
+        uint32_t idx_position = 0;
+        for (auto const& col: Tbl::Secondary::KEY) {
+            // find column position in schema
+            auto it = std::ranges::find_if(Tbl::Data::SCHEMA, [&](auto const& v)
+                    {
+                    return col == v.name;
+                    }
+                    );
+            assert(it != Tbl::Data::SCHEMA.end());
+            idx.columns.emplace_back(idx_position, it->position);
+            ++idx_position;
+        }
+        secondary_keys.push_back(idx);
+    }
     TableMetadata tbl_meta;
     tbl_meta.snapshot_xid = 1;
 

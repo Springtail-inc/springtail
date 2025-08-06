@@ -3,7 +3,6 @@
 #include <common/constants.hh>
 #include <common/circular_buffer.hh>
 #include <memory>
-#include <stdexcept>
 #include <storage/btree.hh>
 #include <storage/cache.hh>
 #include <storage/mutable_btree.hh>
