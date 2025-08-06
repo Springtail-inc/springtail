@@ -78,6 +78,20 @@ PgLogRecovery::_skip_committed()
     //     require changing the xact log to capture all of the relevant messages and their positions
     //     in the repl log so that we can replicate this behavior
 
+    LOG_DEBUG(LOG_PG_LOG_MGR, "Remove old replication logs first");
+
+    auto first_xact_log = fs::find_earliest_modified_file(_xact_path,
+            springtail::xid_mgr::PgXactLogWriter::LOG_PREFIX_XACT,
+            springtail::xid_mgr::PgXactLogWriter::LOG_SUFFIX);
+    if (first_xact_log) {
+        auto min_xact_timestamp = fs::extract_timestamp_from_file(first_xact_log.value(),
+                springtail::xid_mgr::PgXactLogWriter::LOG_PREFIX_XACT,
+                springtail::xid_mgr::PgXactLogWriter::LOG_SUFFIX);
+        if (min_xact_timestamp) {
+            _pg_log_reader->cleanup_log_files(min_xact_timestamp.value());
+        }
+    }
+
     LOG_DEBUG(LOG_PG_LOG_MGR, "Skip already committed records");
 
     // open the repl log
