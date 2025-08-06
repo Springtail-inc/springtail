@@ -463,6 +463,10 @@ namespace springtail::committer {
 
         // construct the mutable table object
         auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, xid, true);
+        if (!sys_tbl_mgr::Client::get_instance()->exists(db_id, tid, XidLsn{xid})) {
+            LOG_DEBUG(LOG_COMMITTER, "The table doesn't exists: {}", tid);
+            return;
+        }
 
         // retrieve extents and apply the mutations to them
         uint64_t extent_cursor = 0;
