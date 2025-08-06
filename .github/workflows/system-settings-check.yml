@@ -11,7 +11,7 @@ on:
         type: string
         required: true
 env:
-  OPTIONAL_PATHS: '.fdws;.databases;.redis.password;.redis.db;.redis.config_db;.redis.user;.org;.fs;.db_instances;.redis.host;.proxy.NOTE;.redis.port;'
+  OPTIONAL_PATHS: '.aws_users_override;.fdws;.databases;.redis.password;.redis.db;.redis.config_db;.redis.user;.org;.fs;.db_instances;.redis.host;.proxy.NOTE;.redis.port;'
   SCRIPT_PATH: '.github/workflows/scripts/json_shape_check.py'
 
 jobs:
