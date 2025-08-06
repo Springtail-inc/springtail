@@ -69,7 +69,8 @@
             "enabled": false,
             "vacuum_dir": "vacuum",
             "global_file_size_threshold": 102400,
-            "hole_punch_block_size": 4096
+            "hole_punch_block_size": 4096,
+            "max_entries_in_memory": 10000
         },
         "metrics_update_freq_sec": 10
     },
