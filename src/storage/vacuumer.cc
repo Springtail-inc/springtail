@@ -92,14 +92,6 @@ Vacuumer::_internal_shutdown()
         _vacuumer_thread.join();
         LOG_INFO("Vacuumer thread joined");
     }
-
-    // Flush all before exiting
-    if (_entries_count_in_memory > 0) {
-        LOG_INFO("Flushing all to disk before shutting down, entries in memory: {} ", _entries_count_in_memory);
-        std::unique_lock lock(_mutex);
-        _flush_all_expired_entries();
-    }
-
 }
 
 void
