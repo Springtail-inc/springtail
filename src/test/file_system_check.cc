@@ -19,22 +19,23 @@ FSCheck::FSCheck(uint64_t max_xid) : _max_xid(max_xid)
     _table_base = Properties::make_absolute_path(_table_base);
     LOG_INFO("Verifying tables at table_base = {}, max_xid = {}", _table_base.string(), _max_xid);
 
-    for (auto it = _databases.begin(); it != _databases.end(); ) {
-        auto db_id = it->first;
-        auto db_name = it->second;
+    std::erase_if(_databases, [this](auto& pair) {
+        auto db_id = pair.first;
+        auto db_name = pair.second;
         uint64_t cutoff_xid = Vacuumer::get_instance()->get_vacuum_cutoff_xid(db_id);
         bool vacuumer_enabled = Vacuumer::get_instance()->is_enabled();
         LOG_INFO("\tDatabase {}, cutoff xid {}", db_id, cutoff_xid);
         if (!vacuumer_enabled || _max_xid >= cutoff_xid) {
             _read_namespaces(db_id);
             _read_tables(db_id);
-            ++it;
+            // keep database
+            return false;
         } else {
-            LOG_INFO("\tDatabase {} - skipping validation, cutoff xid {} > max xid {}", db_id, cutoff_xid, max_xid);
-            it = _databases.erase(it);
+            LOG_INFO("\tDatabase {} - skipping validation, cutoff xid {} > max xid {}", db_id, cutoff_xid, _max_xid);
+            // erase database
+            return true;
         }
-    }
-
+    });
 }
 
 template<typename T, typename = void>
