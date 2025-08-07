@@ -3,7 +3,6 @@
 #include <common/constants.hh>
 #include <common/circular_buffer.hh>
 #include <memory>
-#include <stdexcept>
 #include <storage/btree.hh>
 #include <storage/cache.hh>
 #include <storage/mutable_btree.hh>
@@ -111,7 +110,7 @@ namespace indexer_helpers {
         class Iterator {
             friend Table;
 
-            /** 
+            /**
              * We use the same Iterator type for both primary and secondary indexes.
              * However the way the indexes move around isn't the same.
              * Tracker provides an abstraction for the various index types.
@@ -158,7 +157,7 @@ namespace indexer_helpers {
                     _page_i(page_i)
                 {}
 
-                explicit Primary(const Table *table) 
+                explicit Primary(const Table *table)
                     :Tracker{table}
                 {}
 
@@ -175,7 +174,7 @@ namespace indexer_helpers {
                 friend bool operator==(const Primary& a, const Primary& b) {
                     const Tracker& ta = a;
                     const Tracker& tb = b;
-                    
+
                     if (ta == tb) {
                         return (a._btree_i == a._btree->end() || a._page_i == b._page_i);
                     }
@@ -220,7 +219,7 @@ namespace indexer_helpers {
             };
             std::unordered_map<uint64_t, PageMapItem> _page_map;
             uint64_t _cache_size;
-            // This it to keep a list of extent ids that are in 
+            // This it to keep a list of extent ids that are in
             // _page_map. The list is used for evicting items from the
             // page map. We assume that secondary indexes jump
             // around extent ids somewhat randomly. There is no need to
@@ -273,7 +272,7 @@ namespace indexer_helpers {
         using pointer           = const Extent::Row *;  // or also value_type*
         using reference         = const Extent::Row &;  // or also value_type&
 
-        reference operator*() { 
+        reference operator*() {
 
             struct visitor {
                 reference operator()(const Primary& t) const {
@@ -391,11 +390,11 @@ namespace indexer_helpers {
         private:
             /** Specifically for the end() iterator of a vacant table. */
             Iterator(const Table *table)
-            { 
-                _tracker.emplace<Primary>(table, 
-                        BTreePtr{}, 
-                        BTree::Iterator{}, 
-                        StorageCache::SafePagePtr{}, 
+            {
+                _tracker.emplace<Primary>(table,
+                        BTreePtr{},
+                        BTree::Iterator{},
+                        StorageCache::SafePagePtr{},
                         StorageCache::Page::Iterator{});
             }
 
@@ -407,20 +406,20 @@ namespace indexer_helpers {
                      BTreePtr btree, const BTree::Iterator &btree_i,
                      StorageCache::SafePagePtr page,
                      const StorageCache::Page::Iterator &page_i)
-            { 
+            {
                 _tracker.emplace<Primary>(table, btree, btree_i, std::move(page), page_i);
             }
 
             Iterator(const Table *table,
                      BTreePtr btree, const BTree::Iterator &btree_i,
                      ExtentSchemaPtr index_schema )
-            { 
+            {
                 _tracker.emplace<Secondary>(table, btree, btree_i, index_schema);
             }
 
             Iterator(const Table *table,
                      BTreePtr btree, const BTree::Iterator &btree_i)
-            { 
+            {
                 _tracker.emplace<SecondaryIndexOnly>(table, btree, btree_i);
             }
         };
@@ -517,12 +516,12 @@ namespace indexer_helpers {
             return _secondary_indexes.at(idx).first;
         }
 
-        /** 
+        /**
          * Get the index schema.
          */
         ExtentSchemaPtr get_index_schema(uint64_t index_id) const;
 
-        /** 
+        /**
          * Get the secondary index column names in the order as they appear in the index.
          */
         std::vector<std::string> get_index_column_names(uint64_t index_id) const;
@@ -558,6 +557,30 @@ namespace indexer_helpers {
             return _schema;
         }
 
+        std::filesystem::path get_dir_path() const
+        {
+            return _table_dir;
+        }
+
+        uint64_t get_xid() const
+        {
+            return _xid;
+        }
+
+        /**
+         * @brief Get a vectore containing the list of secondary index ids for
+         *      this table
+         *
+         * @return std::vector<uint64_t> - list of index ids
+         */
+        std::vector<uint64_t> get_secondary_idx_ids() const
+        {
+            std::vector<uint64_t> index_ids;
+            for (auto it: _secondary_indexes) {
+                index_ids.push_back(it.first);
+            }
+            return index_ids;
+        }
     protected:
         /**
          * Reads a data extent using the provided iterator position within the primary index.
@@ -576,7 +599,7 @@ namespace indexer_helpers {
         /**
          * Creates read-only index of the table.
          */
-        BTreePtr 
+        BTreePtr
         _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset);
 
     private:
