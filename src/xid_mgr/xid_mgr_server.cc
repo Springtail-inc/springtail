@@ -161,13 +161,13 @@ XidMgrServer::DBXactLogData::record_log_entry(uint32_t pg_xid, uint64_t xid, boo
     std::unique_lock lock(_mutex);
     _xact_log.log(pg_xid, xid, real_commit);
 
-    if (real_commit) {
-        _last_committed_xid = xid;
-    }
-
     if (has_schema_changes) {
         _xact_history.push_back({xid, _last_committed_xid});
         _dirty_history = true;
+    }
+
+    if (real_commit) {
+        _last_committed_xid = xid;
     }
 }
 
