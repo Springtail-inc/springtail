@@ -33,7 +33,7 @@ namespace springtail {
             Node(PagePtr p)
                 : page(std::move(p)),
                   parent(nullptr)
-            { 
+            {
                   row_i = page->begin();
 			}
 
@@ -144,7 +144,7 @@ namespace springtail {
                     auto root = cache->get(_btree->_file, _btree->_root_offset, _btree->_xid);
 
                     // create a node for the root
-                    auto last = root->last(); 
+                    auto last = root->last();
                     _node = std::make_shared<Node>(std::move(root), last, nullptr);
 
                     // iterate down to the leaf
@@ -306,6 +306,20 @@ namespace springtail {
             return is_empty;
         }
 
+        uint64_t get_xid() const
+        {
+            return _xid;
+        }
+
+        std::filesystem::path get_file_path() const
+        {
+            return _file;
+        }
+
+        uint64_t get_root_offset() const
+        {
+            return _root_offset;
+        }
     private:
         /** Inverted comparison to ensure XID map is sorted in descending order. */
         class ReverseCompare {

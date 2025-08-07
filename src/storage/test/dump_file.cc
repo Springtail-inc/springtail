@@ -229,13 +229,17 @@ main(int argc,
     // read each extent from the file and process it
     uint64_t offset = 0;
     auto response = handle->read(offset);
+    std::cout << fmt::format("\nNext Offset: {}", response->next_offset) << std::endl;
     while (response->next_offset >= response->offset) {
         auto extent = std::make_shared<Extent>(response->data);
 
         process_extent(response->offset, extent);
 
         response = handle->read(response->next_offset);
+        std::cout << fmt::format("Next Offset: {}", response->next_offset) << std::endl;
     }
+    std::cout << std::endl;
 
+    springtail_shutdown();
     return 0;
 }
