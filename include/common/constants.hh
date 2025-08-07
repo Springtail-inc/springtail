@@ -33,8 +33,11 @@ namespace springtail::constant {
     /** Represents the table ID cut-off for system tables. */
     static constexpr uint64_t MAX_SYSTEM_TABLE_ID = 512;
 
-    /** The target maximum extent size. */
+    /** The target maximum extent size for data and primary indexes. */
     static constexpr uint64_t MAX_EXTENT_SIZE = 64 * 1024;
+
+    /** The target maximum extent size for secondary indexes. */
+    static constexpr uint64_t MAX_EXTENT_SIZE_SECONDARY = 8 * 1024;
 
     /** An index ID that represents an extent containing raw data rather than index data.  Used in
         the extent header. */
