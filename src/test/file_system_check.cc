@@ -511,7 +511,7 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
 
     // 3. Verify indexes xids and roots
     std::vector<TableRoot> roots;
-    uint64_t root_sxid = constant::INVALID_XID;
+    uint64_t root_sxid = constant::LATEST_XID;
     uint64_t row_count = 0;
     uint64_t end_offset = 0;
     std::vector<Index> secondary_indexes;
@@ -558,6 +558,8 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
         }
         secondary_indexes.push_back(index);
     }
+
+    CHECK(root_sxid != constant::LATEST_XID);
 
     // 5. Create table
     auto schema = std::make_shared<ExtentSchema>(columns);
