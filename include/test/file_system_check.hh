@@ -10,7 +10,7 @@ namespace springtail::test {
     class FSCheck
     {
     public:
-        FSCheck(uint64_t max_xid = constant::LATEST_XID);
+        explicit FSCheck(uint64_t max_xid = constant::LATEST_XID);
         ~FSCheck() = default;
 
         /**
