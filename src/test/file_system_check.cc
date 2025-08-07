@@ -423,7 +423,7 @@ FSCheck::_validate_primary_extent(std::shared_ptr<Table> table, ExtentSchemaPtr 
 
         StorageCache::SafePagePtr page = table->read_page(extent_id);
         StorageCache::Page::Iterator page_iter = page->last();
-        Extent::Row table_extent_last_row = *(page_iter);
+        Extent::Row table_extent_last_row = *page_iter;
         if (table->has_primary()) {
             FieldTuple key_tuple(key_fields, &btree_row);
             FieldTuple table_extent_last_row_tuple(table_key_fields, &table_extent_last_row);
@@ -466,7 +466,7 @@ FSCheck::_validate_secondary_extents(std::shared_ptr<Table> table, ExtentSchemaP
             StorageCache::SafePagePtr page = table->read_page(extent_id);
             auto page_iter = page->begin();
             page_iter += row_id;
-            Extent::Row table_extent_row = *(page_iter);
+            Extent::Row table_extent_row = *page_iter;
 
             auto key_tuple = std::make_shared<FieldTuple>(key_fields, &btree_row);
             auto btree_keys = index_btree_schema->tuple_subset(key_tuple, index_table_cols);
