@@ -71,28 +71,25 @@ def insert_worker(db_name : str, props : Properties, stop_event : threading.Even
         conn.close()
 
 
-def kill_pg_log_mgr_daemon(pid_path):
-    """Send SIGKILL to the pg_log_mgr daemon."""
-    pid = None
+def kill_core_daemons(pid_path):
+    """Send SIGKILL to the core daemons."""
+    pids = []
     for fname in os.listdir(pid_path):
-        if fname == 'pg_log_mgr.pid':
+        if fname in ['pg_log_mgr.pid', 'sys_tbl_mgr.pid']:
             with open(os.path.join(pid_path, fname), 'r') as f:
-                pid = int(f.read().strip())
-                break
-    if pid:
-        print(f"Killing pg_log_mgr_daemon with PID {pid}")
-        os.kill(pid, signal.SIGKILL)
+                pids.append(int(f.read().strip()))
+    if len(pids) == len(CORE_DAEMONS):
+        for pid in pids:
+            print(f"Killing core daemons with PID {pid}")
+            os.kill(pid, signal.SIGKILL)
     else:
-        raise Exception("pg_log_mgr_daemon PID not found")
+        raise Exception("Core daemons PIDs not found")
 
-def restart_pg_log_mgr_daemon(build_dir):
-    """Restart the pg_log_mgr daemon."""
+def restart_core_daemons(build_dir):
+    """Restart the core daemons."""
     for daemon in CORE_DAEMONS:
-        if daemon[0] == 'pg_log_mgr_daemon':
-            start_daemons(build_dir, [daemon])
-            print("pg_log_mgr_daemon restarted")
-            return
-    raise Exception("pg_log_mgr_daemon not found in CORE_DAEMONS")
+        start_daemons(build_dir, [daemon])
+        print(f"{daemon[0]} restarted")
 
 def parse_arguments() -> argparse.Namespace:
     """Parse the command line arguments."""
@@ -174,15 +171,15 @@ def main():
     if check_logs(system_json_path):
         raise Exception("Issues found in logs")
 
-    # Kill the pg_log_mgr daemon with SIGKILL
+    # Kill the core daemons with SIGKILL
     pid_path = props.get_pid_path()
-    kill_pg_log_mgr_daemon(pid_path)
+    kill_core_daemons(pid_path)
 
     # Wait a moment to ensure process is dead
     time.sleep(2)
 
-    # Restart the pg_log_mgr daemon
-    restart_pg_log_mgr_daemon(build_dir)
+    # Restart the core daemons
+    restart_core_daemons(build_dir)
 
     print("Waiting for daemons to be running...")
     all_running, not_running = check_daemons_running([d[0] for d in CORE_DAEMONS])
