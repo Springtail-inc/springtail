@@ -355,7 +355,7 @@ Vacuumer::hole_punch_file(const std::string& file,
 }
 
 uint64_t
-Vacuumer::_get_vacuum_cutoff_xid(uint64_t db_id)
+Vacuumer::get_vacuum_cutoff_xid(uint64_t db_id)
 {
     RedisDDL _redis_ddl;
 
@@ -694,7 +694,7 @@ Vacuumer::_do_vacuum_run()
             const std::string& file = file_it->first;
             auto& xid_map = file_it->second;
             auto db_id = _get_db_id_from_path(file);
-            auto cutoff_xid = _get_vacuum_cutoff_xid(db_id);  // Get safest XID to vacuum till that point
+            auto cutoff_xid = get_vacuum_cutoff_xid(db_id);  // Get safest XID to vacuum till that point
 
             IntervalTree<uint64_t> itree;
             std::vector<uint64_t> xids_to_process;
@@ -771,7 +771,7 @@ Vacuumer::_do_vacuum_run()
         /* --------------- Snapshot deletion flow -----------------------------------------------------------*/
         // expire snapshots through the min XID
         for (auto db_it = expired_snapshots_map.begin(); db_it != expired_snapshots_map.end(); ) {
-            uint64_t cutoff_xid = _get_vacuum_cutoff_xid(db_it->first);  // Get safest XID to vacuum till that point
+            uint64_t cutoff_xid = get_vacuum_cutoff_xid(db_it->first);  // Get safest XID to vacuum till that point
             auto& xid_map = db_it->second;
 
             for (auto xid_it = xid_map.begin(); xid_it != xid_map.end(); ) {

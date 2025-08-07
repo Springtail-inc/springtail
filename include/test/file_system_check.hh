@@ -10,7 +10,7 @@ namespace springtail::test {
     class FSCheck
     {
     public:
-        FSCheck();
+        FSCheck(uint64_t max_xid = constant::LATEST_XID);
         ~FSCheck() = default;
 
         /**
@@ -40,7 +40,12 @@ namespace springtail::test {
     private:
         std::map<uint64_t, std::string> _databases;     ///< map of database id to database name
         std::filesystem::path _table_base;              ///< directory where all the tables are stored
+        uint64_t _max_xid;                              ///< maximum xid
 
+        /**
+         * @brief Storage for namespace data
+         *
+         */
         struct FSNamespace
         {
             uint64_t ns_id;
@@ -50,6 +55,10 @@ namespace springtail::test {
             bool exists;
         };
 
+        /**
+         * @brief Storage for root data
+         *
+         */
         struct FSRoot
         {
             uint64_t xid;
@@ -57,6 +66,10 @@ namespace springtail::test {
             uint64_t snapshot_xid;
         };
 
+        /**
+         * @brief Storage for stats data
+         *
+         */
         struct FSStats
         {
             uint64_t xid;
@@ -64,6 +77,10 @@ namespace springtail::test {
             uint64_t end_offset;
         };
 
+        /**
+         * @brief Storage for index data
+         *
+         */
         struct FSIndex
         {
             uint64_t xid;
@@ -71,7 +88,10 @@ namespace springtail::test {
             Index index;
         };
 
-
+        /**
+         * @brief Storage for table data
+         *
+         */
         struct FSTable
         {
             uint64_t ns_id;
@@ -86,7 +106,16 @@ namespace springtail::test {
             std::map<uint64_t, FSStats> xid_to_stats;
         };
 
+        /**
+         * @brief Map of database id and namespace id namespace data
+         *
+         */
         std::map<std::pair<uint64_t, uint64_t>, FSNamespace> _db_ns_id_map;
+
+        /**
+         * @brief Map of database id and table id to table data
+         *
+         */
         std::map<std::pair<uint64_t, uint64_t>, FSTable> _db_tbl_id_map;
 
         /**

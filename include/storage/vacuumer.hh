@@ -91,6 +91,21 @@ public:
         _global_file_size_threshold = size;
     }
 
+    /**
+     * @brief Get vacuum-safe XID for a DB
+     *
+     * @param db_id Database ID
+     * @return XID until which vacuum can run
+     */
+    uint64_t get_vacuum_cutoff_xid(uint64_t db_id);
+
+    /**
+     * @brief Return whether the vacuumer is enabled
+     *
+     * @return true - enabled
+     * @return false - disabled
+     */
+    bool is_enabled() { return _vacuum_start_enabled; }
 protected:
     /**
      * @brief Constructor, that inits the vacuumer thread
@@ -208,14 +223,6 @@ private:
      */
     std::vector<HoleInfo> hole_punch_file(const std::string& file,
                                           const std::vector<HoleInfo>& input_extents);
-
-    /**
-     * @brief Get vacuum-safe XID for a DB
-     *
-     * @param db_id Database ID
-     * @return XID until which vacuum can run
-     */
-    uint64_t _get_vacuum_cutoff_xid(uint64_t db_id);
 
     /**
      * @brief Returns db_id following a keyword in a filesystem path.
