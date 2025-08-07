@@ -130,7 +130,7 @@
     "db_instances": {
         "1234": {
             "primary_db": {
-                "host": "localhost",
+                "host": "pg16",
                 "port": 5432
             },
             "database_ids": ["1"],
