@@ -9,6 +9,9 @@
 #include <pg_ext/array.hh>
 #include "pg_ext/guc.hh"
 
+typedef char GinTernaryValue;
+
+
 void*
 cstring_to_text_4b(const char *s) {
     size_t data_len = std::strlen(s);
@@ -139,6 +142,34 @@ call_test_function(void* so, const char* name, const char* text1, const char* te
     }
 }
 
+void
+test_gin_extract_value_trgm(void* pgtrgm, const char* text1){
+    PGFunction test_function = (PGFunction)dlsym(pgtrgm, "gin_extract_value_trgm");
+    if (!test_function) {
+        std::cerr << "Failed to find function gin_extract_value_trgm" << std::endl;
+        return;
+    }
+
+    Datum d;
+    LOCAL_FCINFO(fcinfo, 2);
+
+    const char* text2 = "10";
+    void* t1 = cstring_to_text_auto(text1);
+    void* t2 = cstring_to_text_auto(text2);
+
+    InitFunctionCallInfoData(*fcinfo, nullptr, 2, 0, nullptr, nullptr);
+
+    fcinfo->args[0].value = PointerGetDatum(t1);
+    fcinfo->args[0].isnull = false;
+
+    fcinfo->args[1].value = PointerGetDatum(t2);
+    fcinfo->args[1].isnull = false;
+
+    d = test_function(fcinfo);
+
+    std::cout << DatumGetFloat4(d) << std::endl;
+}
+
 void test_gtrgm_functions(void* pgtrgm, const char* text1, const char* text2) {
     std::cout << "\n=== Testing GIN/GiST Support Functions ===\n";
 
@@ -214,7 +245,7 @@ int main() {
     }
 
     // Load pg_trgm
-    void* pgtrgm = dlopen("/usr/lib/postgresql/16/lib/pg_trgm.so", RTLD_NOW | RTLD_GLOBAL);
+    void* pgtrgm = dlopen("/tmp/pg_trgm.so", RTLD_NOW | RTLD_GLOBAL);
     if (!pgtrgm) {
         std::cerr << "Failed to load pg_trgm: " << dlerror() << std::endl;
         dlclose(shims);
@@ -227,11 +258,14 @@ int main() {
     const char* t3 = "This is a length string that is determined to exceed the 127 byte limit to make use of the varlena extended header and it is not that very longer than the other string";
     const char* t4 = "This is a length string that is determined to exceed the 127 byte limit to make use of the varlena extended header and it is very very longer than the other string";
 
-
     double		similarity_threshold = 0.3f;
     double		word_similarity_threshold = 0.6f;
     double		strict_word_similarity_threshold = 0.5f;
     init_trgm(similarity_threshold, word_similarity_threshold, strict_word_similarity_threshold);
+
+    call_test_function(pgtrgm, "similarity", t1, t2);
+
+    // test_gin_extract_value_trgm(pgtrgm, t1);
 
     // 1. Test similarity functions
     std::cout << "\n=== Testing Similarity Functions (1B strings) ===\n";
@@ -275,10 +309,10 @@ int main() {
     call_test_function(pgtrgm, "show_limit", nullptr, nullptr);
 
     // 7. Test GIN/GiST support functions with different inputs
-    test_gtrgm_functions(pgtrgm, t1, t2);
+    // test_gtrgm_functions(pgtrgm, t1, t2);
 
     // 8. Test with 4B strings
-    test_gtrgm_functions(pgtrgm, t3, t4);
+    // test_gtrgm_functions(pgtrgm, t3, t4);
 
     // Clean up
     dlclose(pgtrgm);

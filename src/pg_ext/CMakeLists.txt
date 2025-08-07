@@ -51,3 +51,23 @@ target_link_libraries(test_runner
 target_include_directories(test_runner
     PRIVATE ${CMAKE_SOURCE_DIR}/include
 )
+
+# Add extn_parser executable
+add_executable(extn_parser extn_parser.cc)
+
+# Link the executable against the required libraries
+target_link_libraries(extn_parser
+    PRIVATE pgext
+    PRIVATE springtail_proxy  # Add the proxy library that contains the parser implementation
+    PRIVATE dl
+    PRIVATE absl::flat_hash_map
+)
+
+target_include_directories(extn_parser
+    PRIVATE ${CMAKE_SOURCE_DIR}/include
+    INCLUDES ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/external/libpg_query/
+        ${CMAKE_SOURCE_DIR}/external/libpg_query/src
+        ${CMAKE_SOURCE_DIR}/external/libpg_query/src/postgres/include
+        ${CMAKE_SOURCE_DIR}/external/libpg_query/vendor/include
+)

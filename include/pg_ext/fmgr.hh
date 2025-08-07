@@ -89,19 +89,19 @@ DatumGetFloat8(Datum X)
 	return *((float *) DatumGetPointer(X));
 }
 
-Datum
+static inline Datum
 PointerGetDatum(const void *X)
 {
 	return (Datum) X;
 }
 
-uint32_t
+static inline uint32_t
 DatumGetInt32(Datum X)
 {
 	return (uint32_t) X;
 }
 
-float
+static inline float
 DatumGetFloat4(Datum X)
 {
 	union

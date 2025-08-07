@@ -195,6 +195,25 @@ OutputFunctionCall(FmgrInfo *flinfo, Datum val)
 	return DatumGetCString(FunctionCall1(flinfo, val));
 }
 
+/**
+ * Returns a string representation of the Datum value, using the
+ * PostgresSQL output function associated with the given OID.
+ *
+ * The returned string is owned by the caller and must be freed.
+ *
+ * The function_oid parameter should be set to the OID of the output
+ * function associated with the type of the value Datum.
+ *
+ * The value Datum is passed directly to the output function, so the
+ * caller must ensure that it is of the correct type for the given
+ * OID.
+ *
+ * If the OID is not recognized, the function returns a string
+ * representation of the OID.
+ *
+ * XXX This currently only supports a limited set of types.  It should
+ * be extended to handle more types.
+ */
 const char* OidOutputFunctionCall(Oid function_oid, Datum value)
 {
     switch (function_oid) {
