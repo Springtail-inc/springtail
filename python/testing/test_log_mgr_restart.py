@@ -98,6 +98,7 @@ def parse_arguments() -> argparse.Namespace:
 
     # Add arguments -f for config file
     parser.add_argument('-f', '--config-file', type=str, required=False, help='Path to the configuration file')
+    parser.add_argument('--repeat', type=int, default=1, help='Number of types log_mgr to be restarted')
 
     args = parser.parse_args()
     if not args.config_file:
@@ -115,6 +116,7 @@ def main():
 
     # Parse command line arguments
     args = parse_arguments()
+    repeat_restarts = args.repeat
 
     # Load the configuration file
     config_file = args.config_file
@@ -171,21 +173,23 @@ def main():
     if check_logs(system_json_path):
         raise Exception("Issues found in logs")
 
-    # Kill the core daemons with SIGKILL
-    pid_path = props.get_pid_path()
-    kill_core_daemons(pid_path)
+    while repeat_restarts > 0:
+        # Kill the core daemons with SIGKILL
+        pid_path = props.get_pid_path()
+        kill_core_daemons(pid_path)
 
-    # Wait a moment to ensure process is dead
-    time.sleep(2)
+        # Wait a moment to ensure process is dead
+        time.sleep(2)
 
-    # Restart the core daemons
-    restart_core_daemons(build_dir)
+        # Restart the core daemons
+        restart_core_daemons(build_dir)
 
-    print("Waiting for daemons to be running...")
-    all_running, not_running = check_daemons_running([d[0] for d in CORE_DAEMONS])
-    if not all_running:
-        check_logs(system_json_path)
-        raise Exception(f"Not all core daemons running: {not_running}")
+        print("Waiting for daemons to be running...")
+        all_running, not_running = check_daemons_running([d[0] for d in CORE_DAEMONS])
+        if not all_running:
+            check_logs(system_json_path)
+            raise Exception(f"Not all core daemons running: {not_running}")
+        repeat_restarts -= 1;
 
     stop_event.set()
     insert_thread.join(timeout=2)
