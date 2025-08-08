@@ -37,7 +37,7 @@ namespace springtail::constant {
     static constexpr uint64_t MAX_EXTENT_SIZE = 64 * 1024;
 
     /** The target maximum extent size for secondary indexes. */
-    static constexpr uint64_t MAX_EXTENT_SIZE_SECONDARY = 8 * 1024;
+    static constexpr uint64_t MAX_EXTENT_SIZE_SECONDARY = 16 * 1024;
 
     /** An index ID that represents an extent containing raw data rather than index data.  Used in
         the extent header. */
