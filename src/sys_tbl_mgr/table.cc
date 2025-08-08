@@ -827,6 +827,8 @@ namespace indexer_helpers {
 
         // INVALIDATE PRIMARY INDEX
         TuplePtr pkey;
+        Extent::Row row;
+
         if (_primary_key.empty()) {
             // no primary key, so use the old extent ID as the primary key
             auto pkey_fields = std::make_shared<FieldArray>(1);
@@ -835,7 +837,7 @@ namespace indexer_helpers {
         } else {
             // has a primary key, get the last row of the original page for the primary index
             auto pkey_fields = _schema->get_fields(_primary_key);
-            auto &&row = *orig_page->last();
+            row = *orig_page->last();
             pkey = std::make_shared<FieldTuple>(pkey_fields, &row);
         }
 
@@ -872,7 +874,6 @@ namespace indexer_helpers {
 
             // POPULATE PRIMARY INDEX
             TuplePtr pkey;
-
             Extent::Row row;
 
             // create the new primary index entry
