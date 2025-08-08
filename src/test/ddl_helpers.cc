@@ -15,11 +15,10 @@ namespace springtail::test::ddl_helpers {
         create_msg.columns = columns;
 
         TableMgr::get_instance()->create_table(db_id, { xid, 0 }, create_msg);
-
     }
 
     proto::IndexProcessRequest create_index(uint64_t db_id, uint64_t table_id, uint64_t xid, uint64_t index_id,
-            std::string idx_name, std::vector<PgMsgSchemaColumn> columns, sys_tbl::IndexNames::State idx_state)
+            std::string idx_name, std::vector<PgMsgSchemaColumn> columns, sys_tbl::IndexNames::State idx_state, bool is_unique)
     {
 
         PgMsgIndex msg;
@@ -28,7 +27,7 @@ namespace springtail::test::ddl_helpers {
         msg.xid = xid;
         msg.namespace_name = "public";
         msg.index = idx_name;
-        msg.is_unique = false;
+        msg.is_unique = is_unique;
         msg.table_oid = table_id;
         msg.oid = index_id;
 
@@ -79,11 +78,15 @@ namespace springtail::test::ddl_helpers {
             return std::make_shared<ValueTuple>(v);
         }
 
-    void populate_table(MutableTablePtr mtable, const std::vector<std::vector<int32_t>>& data)
+    void populate_table(MutableTablePtr mtable, const std::vector<std::vector<int32_t>>& data, bool is_update)
     {
         // insert data to the tree
         for (int i = 0; i < data.size(); i++) {
-            mtable->insert(_create_value(data[i]), constant::UNKNOWN_EXTENT);
+            if (is_update) {
+                mtable->update(_create_value(data[i]), constant::UNKNOWN_EXTENT);
+            } else {
+                mtable->insert(_create_value(data[i]), constant::UNKNOWN_EXTENT);
+            }
         }
     }
 }
