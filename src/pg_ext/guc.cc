@@ -1,7 +1,7 @@
+#include <pg_ext/guc.hh>
+
 #include <charconv>
 #include <stdexcept>
-
-#include <pg_ext/guc.hh>
 
 namespace pgext {
 

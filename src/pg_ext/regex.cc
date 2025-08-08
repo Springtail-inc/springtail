@@ -1,5 +1,5 @@
-#include <regex>
 #include <pg_ext/regex.hh>
+#include <regex>
 
 int pg_regcomp(regex_t *regex, const char *pattern, int cflags) {
     if (!regex || !pattern) return 1;

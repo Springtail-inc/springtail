@@ -1,8 +1,9 @@
 #pragma once
 
+#include <pg_ext/export.hh>
+
 #include <signal.h>
 #include <cstdio>
-#include <pg_ext/export.hh>
 
 extern "C" PGEXT_API volatile sig_atomic_t InterruptPending;
 extern "C" PGEXT_API void ProcessInterrupts();

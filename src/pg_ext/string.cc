@@ -1,4 +1,3 @@
-#include <dlfcn.h>
 #include <pg_ext/string.hh>
 #include <cctype>
 #include <cstdint>

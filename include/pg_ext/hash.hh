@@ -1,11 +1,12 @@
 #pragma once
 
+#include <pg_ext/export.hh>
+
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <cstring>
 #include <vector>
-#include <pg_ext/export.hh>
 
 /* hash_search operations */
 typedef enum {

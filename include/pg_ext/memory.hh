@@ -1,13 +1,12 @@
 #pragma once
 
+#include <pg_ext/export.hh>
+
 #include <list>
 #include <string_view>
 #include <memory>
 #include <map>
 #include <absl/container/flat_hash_map.h>
-
-#include <pg_ext/export.hh>
-
 
 #define MaxAllocSize	((Size) 0x3fffffff) /* 1 gigabyte - 1 */
 

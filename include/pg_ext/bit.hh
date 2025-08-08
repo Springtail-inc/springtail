@@ -1,7 +1,8 @@
 #pragma once
 
-#include <cstdint>
 #include <pg_ext/export.hh>
+
+#include <cstdint>
 
 extern "C" PGEXT_API int pg_popcount(const char* buf, int len);
 extern "C" PGEXT_API uint64_t pg_popcount_optimized(const char *buf, int bytes);

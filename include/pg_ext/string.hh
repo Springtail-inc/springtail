@@ -1,12 +1,12 @@
 #pragma once
 
-#include <cstddef>
 #include <pg_ext/export.hh>
 #include <pg_ext/memory.hh>
 #include <pg_ext/fmgr.hh>
 
-//// EXPORTED INTERFACES
+#include <cstddef>
 
+//// EXPORTED INTERFACES
 extern "C" PGEXT_API char *lowerstr(const char *str);
 extern "C" PGEXT_API char *lowerstr_with_len(const char *str, int len);
 extern "C" PGEXT_API char *upperstr(const char *str);

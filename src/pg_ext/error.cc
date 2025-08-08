@@ -1,8 +1,8 @@
+#include <pg_ext/error.hh>
+
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
-
-#include <pg_ext/error.hh>
 
 // Global variables for error state
 static thread_local int current_elevel = 0;

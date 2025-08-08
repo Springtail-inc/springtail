@@ -1,6 +1,6 @@
+#include <pg_ext/fmgr.hh>
 #include <cstring>
 #include <stdexcept>
-#include <pg_ext/fmgr.hh>
 
 Datum DirectFunctionCall2(PGFunction func, Datum arg1, Datum arg2)
 {

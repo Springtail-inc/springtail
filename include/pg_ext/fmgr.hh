@@ -1,9 +1,10 @@
 #pragma once
 
-#include <cstdint>
-#include <unordered_map>
 #include <pg_ext/export.hh>
 #include <pg_ext/memory.hh>
+
+#include <cstdint>
+#include <unordered_map>
 
 // VARATT START
 #define FLEXIBLE_ARRAY_MEMBER
