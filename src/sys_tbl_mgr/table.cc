@@ -873,6 +873,8 @@ namespace indexer_helpers {
             // POPULATE PRIMARY INDEX
             TuplePtr pkey;
 
+            Extent::Row row;
+
             // create the new primary index entry
             (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
             if (_primary_key.empty()) {
@@ -880,7 +882,7 @@ namespace indexer_helpers {
                 pkey = std::make_shared<FieldTuple>(value_fields, nullptr);
             } else {
                 // has a primary key, use the primary key fields
-                auto &&row = *new_page->last();
+                row = *new_page->last();
                 pkey = std::make_shared<KeyValueTuple>(pkey_fields, value_fields, &row);
             }
 
