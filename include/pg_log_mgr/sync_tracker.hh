@@ -142,6 +142,13 @@ namespace springtail::pg_log_mgr {
          */
         SkipDetails should_skip(uint64_t db_id, uint64_t table_id, uint32_t pg_xid) const;
 
+        /**
+         * @brief Record PG_XID at which table is picked for resync
+         *
+         * @param db_id     Database ID
+         * @param table_id  Table ID
+         * @param xid       PG XID/LSN which will be marked
+         */
         void pick_table_for_sync(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
     protected:

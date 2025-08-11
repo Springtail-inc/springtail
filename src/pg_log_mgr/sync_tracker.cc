@@ -78,7 +78,7 @@ SyncTracker::mark_inflight(uint64_t db_id,
         CHECK(table_i != db_i->second.end());
 
         // clear from the resync map
-        // Erase all elements less than or equal to xid2
+        // Erase all elements less than or equal to picked_table_xid
         table_i->second.erase(table_i->second.begin(), table_i->second.upper_bound(picked_table_xid));
 
         if (table_i->second.empty()) {
