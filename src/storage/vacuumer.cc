@@ -557,6 +557,99 @@ Vacuumer::_get_partials_from_file(const std::filesystem::path &path) {
 }
 
 void
+Vacuumer::cleanup_db(uint64_t cleanup_db_id)
+{
+    std::unique_lock lock(_mutex);
+
+    /********************************** Global file and partials file cleanup ********************************************/
+
+    auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+    auto global_vacuum_runfile = _vacuum_data_base / fmt::format("{}{}", timestamp, VacuumConfig::GLOBAL_RUNFILE_SUFFIX);
+
+    // Read from global vacuum, write on runfile
+    auto handle = IOMgr::get_instance()->open(_global_vacuum_file, IOMgr::IO_MODE::READ, true);
+    auto runhandle = IOMgr::get_instance()->open(global_vacuum_runfile, IOMgr::IO_MODE::WRITE, true);
+
+    int start_offset = 0;
+    auto response = handle->read(start_offset);
+    auto file_f = _global_vacuum_schema->get_field("file");
+
+    while (!response->data.empty()) {
+
+        // Get extent by extent, clear its partial file if its cleanup db_id
+        // otherwise skip everything and copy it to runfile
+        auto extent = std::make_shared<Extent>(response->data);
+        CHECK_GT(extent->row_count(), 0);
+
+        auto db_id = 0;
+        for (auto &row : *extent) {
+            auto file = file_f->get_text(&row);
+            db_id = _get_db_id_from_path(file);
+            if (db_id == cleanup_db_id) {
+                _cleanup_partial_files(file, std::filesystem::is_directory(file));
+            }
+        }
+
+        CHECK_GT(db_id, 0);
+
+        if (db_id != cleanup_db_id) {
+            // Flush to runfile
+            auto write_response = extent->async_flush(runhandle);
+            write_response.wait();
+        }
+
+        // Move to the next extent
+        start_offset = response->next_offset;
+        response = handle->read(start_offset);
+    }
+
+    // Move runfile on to the global file
+    if (std::filesystem::exists(global_vacuum_runfile)) {
+        std::filesystem::rename(global_vacuum_runfile, _global_vacuum_file);
+    } else {
+        // If runfile is empty, all the entries in the global vacuum file
+        // are from the cleaned up db, so lets drop the global file
+        std::filesystem::remove(_global_vacuum_file);
+    }
+    /********************************** End of global and partial files cleanup *******************************************************/
+
+    /********************************** Cleanup memory & partial files ****************************************************/
+
+    if (!_extent_map.empty()) {
+        for (auto file_it = _extent_map.begin(); file_it != _extent_map.end(); ) {
+            auto db_id = _get_db_id_from_path(file_it->first);
+            if (cleanup_db_id == db_id) {
+                // Cleanup partial file and remove from the map
+                _cleanup_partial_files(file_it->first, false);
+                file_it = _extent_map.erase(file_it);
+            } else {
+                ++file_it;
+            }
+        }
+    }
+
+    if (!_snapshot_map.empty()) {
+        auto snapshot_db_entry = _snapshot_map.find(cleanup_db_id);
+        if (snapshot_db_entry != _snapshot_map.end()) {
+            auto& snapshot_xid_map = snapshot_db_entry->second;
+            auto snapshot_xid_entry = snapshot_xid_map.begin();
+
+            // First clear the partial files related to the snapshot paths
+            while (snapshot_xid_entry != snapshot_xid_map.end()) {
+                auto& snapshot_list = snapshot_xid_entry->second;
+                for (const auto& snapshot_path : snapshot_list) {
+                    _cleanup_partial_files(snapshot_path, std::filesystem::is_directory(snapshot_path));
+                }
+            }
+            _snapshot_map.erase(snapshot_db_entry);
+        }
+    }
+    /********************************** End of memory cleanup ************************************************************/
+
+}
+
+void
 Vacuumer::_recover_global_vacuum_file()
 {
     // Map: db_id -> last_committed_xid
@@ -618,6 +711,10 @@ Vacuumer::_recover_global_vacuum_file()
     // Move runfile on to the global file
     if (std::filesystem::exists(global_vacuum_runfile)) {
         std::filesystem::rename(global_vacuum_runfile, _global_vacuum_file);
+    } else {
+        // If runfile is empty, all the entries in the global vacuum file
+        // are > committed_xid, so lets drop the global file
+        std::filesystem::remove(_global_vacuum_file);
     }
 }
 
@@ -719,7 +816,8 @@ Vacuumer::_do_vacuum_run()
 
     // Lets read from global vacuum file if no expired extents is memory (that got written to the global file)
 
-    if (fs::get_file_size(_global_vacuum_file) > _global_file_size_threshold) {
+    auto global_vacuum_filesize = fs::get_file_size(_global_vacuum_file);
+    if (global_vacuum_filesize != -1 && global_vacuum_filesize > _global_file_size_threshold) {
         LOG_INFO("Running vacuum as the global log crossed threshold: {}", _global_vacuum_file);
 
         /* --------------------------------- Populate maps from global vacuum log -------------------------- */

@@ -92,6 +92,14 @@ public:
         _global_file_size_threshold = size;
     }
 
+    /**
+     * @brief Cleanup DB's entries from vacuum storage
+     *        - memory, global vacuum file and partials
+     *
+     * @param cleanup_db_id DB to be cleaned up
+     */
+    void cleanup_db(uint64_t cleanup_db_id);
+
 protected:
     /**
      * @brief Constructor, that inits the vacuumer thread
