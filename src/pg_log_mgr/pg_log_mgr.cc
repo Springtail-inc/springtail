@@ -300,23 +300,20 @@ namespace springtail::pg_log_mgr {
         while (!_shutdown) {
             std::set<uint32_t> table_ids;
 
-            // block on redis table sync queue w/timeout for shutdown
-            auto request = _redis_sync_queue.pop(REDIS_WORKER_ID, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
-            if (request == nullptr) {
-                continue; // timeout, check for shutdown
+            // _get_copy_table_ids block on redis table sync queue w/timeout for shutdown
+            auto [next_table_id, next_xid_lsn] = _get_copy_table_ids();
+            if (next_table_id == -1) {
+                continue; // check for shutdown
             }
-
             do {
                 // populate the tables to copy; check for more work
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Table sync queue: {}@{}:{}", request->table_id(),
-                                    request->xid().xid, request->xid().lsn);
-                table_ids.insert(request->table_id());
+                table_ids.insert(next_table_id);
 
                 // Mark table's XID to be processed for resync
-                SyncTracker::get_instance()->pick_table_for_sync(_db_id, request->table_id(), request->xid());
+                SyncTracker::get_instance()->pick_table_for_sync(_db_id, next_table_id, next_xid_lsn.value());
 
-                request = _redis_sync_queue.try_pop(REDIS_WORKER_ID);
-            } while (request != nullptr);
+                std::tie(next_table_id, next_xid_lsn) = _get_copy_table_ids();
+            } while (next_table_id != -1);
 
             CHECK(!table_ids.empty());
 
