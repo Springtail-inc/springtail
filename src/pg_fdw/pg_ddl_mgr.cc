@@ -107,17 +107,19 @@ namespace springtail::pg_fdw {
     static constexpr char TABLE_EXISTS_SELECT[] =
         "SELECT "
         "  CASE "
-        "    WHEN c.relkind = 'f' THEN ("
+        "    WHEN c.relkind = 'f' THEN ( "
         "      SELECT 1 FROM unnest(ft.ftoptions) AS opt "
-        "      WHERE opt = format('tid=%s', '{}') LIMIT 1"
+        "      WHERE opt = format('tid=%s', '{}') LIMIT 1 "
         "    ) "
-        "    WHEN c.relkind IN ('r', 'p') THEN 1 "
+        "    WHEN c.relkind IN ('p') AND d.description = format('TID:%s', '{}') THEN 1 "
+        "    WHEN c.relkind IN ('r') THEN 1 "
         "    ELSE NULL "
         "  END AS exists "
         "FROM pg_class c "
         "JOIN pg_namespace n ON c.relnamespace = n.oid "
         "LEFT JOIN pg_foreign_table ft ON ft.ftrelid = c.oid "
         "LEFT JOIN pg_foreign_server fs ON ft.ftserver = fs.oid "
+        "LEFT JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = 0 "
         "WHERE n.nspname = '{}' AND c.relname = '{}'";
 
 
@@ -288,7 +290,7 @@ namespace springtail::pg_fdw {
                                   uint32_t table_oid)
     {
         // check if the table exists in the fdw database
-        fdw_conn->exec(fmt::format(TABLE_EXISTS_SELECT, table_oid,
+        fdw_conn->exec(fmt::format(TABLE_EXISTS_SELECT, table_oid, table_oid,
                                    fdw_conn->escape_string(schema_name),
                                    fdw_conn->escape_string(table_name)));
 
