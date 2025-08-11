@@ -19,23 +19,16 @@ FSCheck::FSCheck(uint64_t max_xid) : _max_xid(max_xid)
     _table_base = Properties::make_absolute_path(_table_base);
     LOG_INFO("Verifying tables at table_base = {}, max_xid = {}", _table_base.string(), _max_xid);
 
-    std::erase_if(_databases, [this](auto& pair) {
-        auto db_id = pair.first;
-        auto db_name = pair.second;
-        uint64_t cutoff_xid = Vacuumer::get_instance()->get_vacuum_cutoff_xid(db_id);
-        bool vacuumer_enabled = Vacuumer::get_instance()->is_enabled();
-        LOG_INFO("\tDatabase {}, cutoff xid {}", db_id, cutoff_xid);
-        if (!vacuumer_enabled || _max_xid >= cutoff_xid) {
-            _read_namespaces(db_id);
-            _read_tables(db_id);
-            // keep database
-            return false;
-        } else {
-            LOG_INFO("\tDatabase {} - skipping validation, cutoff xid {} > max xid {}", db_id, cutoff_xid, _max_xid);
-            // erase database
-            return true;
+    bool vacuumer_enabled = Vacuumer::get_instance()->is_enabled();
+    for (const auto &[db_id, db_name]: _databases) {
+        uint64_t cutoff_xid = 0;
+        if (vacuumer_enabled) {
+            cutoff_xid = Vacuumer::get_instance()->get_vacuum_cutoff_xid(db_id);
         }
-    });
+        if (!vacuumer_enabled || _max_xid >= cutoff_xid) {
+            _db_id_to_cutoff_xid.insert(std::make_pair(db_id, cutoff_xid));
+        }
+    }
 }
 
 template<typename T, typename = void>
@@ -84,7 +77,7 @@ FSCheck::_get_table_and_fields(uint64_t db_id)
 }
 
 void
-FSCheck::_read_namespaces(uint64_t db_id)
+FSCheck::_read_namespaces(uint64_t db_id, uint64_t max_xid)
 {
     LOG_INFO("Namespaces for db {}", db_id);
     auto [table, fields] = _get_table_and_fields<sys_tbl::NamespaceNames>(db_id);
@@ -96,8 +89,9 @@ FSCheck::_read_namespaces(uint64_t db_id)
         uint64_t lsn = fields->at(sys_tbl::NamespaceNames::Data::LSN)->get_uint64(&row);
         bool exists = fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row);
         LOG_INFO("\tNamespace {}:{}", ns_id, name);
+        _record_max_xid(xid);
 
-        if (xid > _max_xid) {
+        if (xid > max_xid) {
             break;
         }
 
@@ -111,7 +105,7 @@ FSCheck::_read_namespaces(uint64_t db_id)
 }
 
 void
-FSCheck::_read_tables(uint64_t db_id)
+FSCheck::_read_tables(uint64_t db_id, uint64_t max_xid)
 {
     LOG_INFO("Tables for db {}", db_id);
     auto [table, fields] = _get_table_and_fields<sys_tbl::TableNames>(db_id);
@@ -124,8 +118,9 @@ FSCheck::_read_tables(uint64_t db_id)
         uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
         uint64_t lsn = fields->at(sys_tbl::TableNames::Data::LSN)->get_uint64(&row);
         bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
+        _record_max_xid(xid);
 
-        if (xid > _max_xid) {
+        if (xid > max_xid) {
             break;
         }
 
@@ -172,8 +167,9 @@ FSCheck::_read_tables(uint64_t db_id)
                     default_value = schema_fields->at(sys_tbl::Schemas::Data::DEFAULT)->get_text(&row);
                 }
                 uint8_t update_type = schema_fields->at(sys_tbl::Schemas::Data::UPDATE_TYPE)->get_uint8(&row);
+                _record_max_xid(xid);
 
-                if (xid < table_xid || xid > _max_xid) {
+                if (xid < table_xid || xid > max_xid) {
                     continue;
                 }
 
@@ -214,8 +210,9 @@ FSCheck::_read_tables(uint64_t db_id)
                 std::string name(index_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(&row));
                 uint8_t state = index_fields->at(sys_tbl::IndexNames::Data::STATE)->get_uint8(&row);
                 bool is_unique = index_fields->at(sys_tbl::IndexNames::Data::IS_UNIQUE)->get_bool(&row);
+                _record_max_xid(xid);
 
-                if (xid < table_xid || xid > _max_xid) {
+                if (xid < table_xid || xid > max_xid) {
                     continue;
                 }
 
@@ -286,12 +283,14 @@ FSCheck::_read_tables(uint64_t db_id)
                     uint64_t root_xid = root_fields->at(sys_tbl::TableRoots::Data::XID)->get_uint64(&root_row);
                     uint64_t root_extent_id = root_fields->at(sys_tbl::TableRoots::Data::EXTENT_ID)->get_uint64(&root_row);
                     uint64_t root_snapshot_xid = root_fields->at(sys_tbl::TableRoots::Data::SNAPSHOT_XID)->get_uint64(&root_row);
+                    _record_max_xid(root_xid);
+                    _record_max_xid(root_snapshot_xid);
 
                     if (root_xid < table_xid) {
                         continue;
                     }
 
-                    if (root_xid > _max_xid) {
+                    if (root_xid > max_xid) {
                         break;
                     }
 
@@ -326,12 +325,13 @@ FSCheck::_read_tables(uint64_t db_id)
                 uint64_t xid = stats_fields->at(sys_tbl::TableStats::Data::XID)->get_uint64(&row);
                 uint64_t row_count = stats_fields->at(sys_tbl::TableStats::Data::ROW_COUNT)->get_uint64(&row);
                 uint64_t end_offset = stats_fields->at(sys_tbl::TableStats::Data::END_OFFSET)->get_uint64(&row);
+                _record_max_xid(xid);
 
                 if (xid < table_xid) {
                     continue;
                 }
 
-                if (xid > _max_xid) {
+                if (xid > max_xid) {
                     break;
                 }
 
@@ -345,46 +345,105 @@ FSCheck::_read_tables(uint64_t db_id)
 }
 
 void
-FSCheck::check_dbs()
+FSCheck::_record_max_xid(uint64_t xid)
 {
-    // iterate over databases
-    for (const auto &[db_id, db_name]: _databases) {
-        LOG_INFO("Verifying database {}:{}", db_id, db_name);
-        _check_db(db_id, db_name);
+    if (xid > _max_recorded_xid) {
+        _max_recorded_xid = xid;
     }
 }
 
 void
-FSCheck::check_db(uint64_t db_id)
+FSCheck::_read_database_info(uint64_t db_id, uint64_t max_xid)
 {
-    const std::string &db_name = _databases.at(db_id);
-    LOG_INFO("Verifying database {}:{}", db_id, db_name);
-    _check_db(db_id, db_name);
+    _max_recorded_xid = 0;
+    _db_ns_id_map.clear();
+    _db_tbl_id_map.clear();
+    _read_namespaces(db_id, max_xid);
+    _read_tables(db_id, max_xid);
 }
 
 void
-FSCheck::_check_db(uint64_t db_id, const std::string &db_name)
+FSCheck::check_dbs(bool all_xids)
 {
-    for (auto it = _db_tbl_id_map.lower_bound(std::make_pair(db_id, 0));
-            it != _db_tbl_id_map.end() && it->first.first == db_id; ++it) {
-        LOG_INFO("Verifying table {}:{}:{}", it->first.first, it->first.second, it->second.name);
+    uint64_t first_xid = 1;
+    if (!all_xids) {
+        first_xid = _max_xid;
+    }
+
+    // iterate over databases
+    for (const auto &[db_id, cutoff_xid]: _db_id_to_cutoff_xid) {
+        _check_db(db_id, first_xid, cutoff_xid);
+    }
+}
+
+void
+FSCheck::check_db(uint64_t db_id, bool all_xids)
+{
+    uint64_t first_xid = 1;
+    if (!all_xids) {
+        first_xid = _max_xid;
+    }
+
+    uint64_t cutoff_xid = _db_id_to_cutoff_xid.at(db_id);
+    _check_db(db_id, first_xid, cutoff_xid);
+}
+
+void
+FSCheck::_check_db(uint64_t db_id, uint64_t first_xid, uint64_t cutoff_xid)
+{
+    const std::string &db_name = _databases.at(db_id);
+    LOG_INFO("Verifying database {}:{} with first_xid = {} and cuttoff_xid = {}",
+            db_id, db_name, first_xid, cutoff_xid);
+
+    uint64_t start_xid = (first_xid < cutoff_xid)? cutoff_xid : first_xid;
+    for (uint64_t max_xid = start_xid; max_xid <= _max_xid; ++max_xid) {
+        LOG_INFO("Verifying database {}:{} iteration max_xid = {}",
+            db_id, db_name, max_xid);
+        _read_database_info(db_id, max_xid);
+        if (_max_recorded_xid < max_xid) {
+            break;
+        }
+
+        for (auto it = _db_tbl_id_map.lower_bound(std::make_pair(db_id, 0));
+                it != _db_tbl_id_map.end() && it->first.first == db_id; ++it) {
+            LOG_INFO("Verifying table {}:{}:{}", it->first.first, it->first.second, it->second.name);
+            _check_db_table(db_id, db_name, it->second);
+        }
+        if (max_xid == _max_xid) {
+            break;
+        }
+    }
+}
+
+void
+FSCheck::check_db_table(uint64_t db_id, uint64_t table_id, bool all_xids)
+{
+    uint64_t first_xid = 1;
+    if (!all_xids) {
+        first_xid = _max_xid;
+    }
+
+    uint64_t cutoff_xid = _db_id_to_cutoff_xid.at(db_id);
+    const std::string &db_name = _databases.at(db_id);
+    LOG_INFO("Verifying database {}:{} table {} with first_xid = {} and cuttoff_xid = {}",
+        db_id, db_name, table_id, first_xid, cutoff_xid);
+    uint64_t start_xid = (first_xid < cutoff_xid)? cutoff_xid : first_xid;
+    for (uint64_t max_xid = start_xid; max_xid < _max_xid; ++max_xid) {
+        LOG_INFO("Verifying database {}:{} table {} iteration max_xid = {}",
+            db_id, db_name, table_id, max_xid);
+        _read_database_info(db_id, max_xid);
+        if (_max_recorded_xid < max_xid) {
+            break;
+        }
+
+        std::pair<uint64_t, uint64_t> key = std::make_pair(db_id, table_id);
+        auto it = _db_tbl_id_map.lower_bound(key);
+        if (it == _db_tbl_id_map.end() || it->first != key) {
+            LOG_ERROR("Database {}:{}: table {} is not found", db_id, db_name, table_id);
+            CHECK(false);
+        }
         _check_db_table(db_id, db_name, it->second);
     }
-}
-
-void
-FSCheck::check_db_table(uint64_t db_id, uint64_t table_id)
-{
-    const std::string &db_name = _databases.at(db_id);
-    LOG_INFO("Verifying database {}:{} for table {}", db_id, db_name, table_id);
-
-    std::pair<uint64_t, uint64_t> key = std::make_pair(db_id, table_id);
-    auto it = _db_tbl_id_map.lower_bound(key);
-    if (it == _db_tbl_id_map.end() || it->first != key) {
-        LOG_ERROR("Database {}:{}: table {} is not found", db_id, db_name, table_id);
-        CHECK(false);
-    }
-    _check_db_table(db_id, db_name, it->second);
 }
 
 void
@@ -539,11 +598,9 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
             last_root = &(idx_root_it->second);
             LOG_INFO("\t\tVerifying roots: root.xid = {}, fs_table.xid = {}", root.xid, fs_table.xid);
             CHECK(root.xid >= fs_table.xid);
-            if (root.extent_id != constant::UNKNOWN_EXTENT) {
-                auto stat_it = fs_table.xid_to_stats.find(root.xid);
-                CHECK(stat_it != fs_table.xid_to_stats.end());
-                last_stat = &(stat_it->second);
-            }
+            auto stat_it = fs_table.xid_to_stats.find(root.xid);
+            CHECK(stat_it != fs_table.xid_to_stats.end());
+            last_stat = &(stat_it->second);
         }
 
         if (last_root != nullptr) {
