@@ -587,16 +587,16 @@ namespace springtail::pg_fdw {
         // lookup pg_xid in xid_map;
         // if doesn't exist, get a new xid from xid_mgr and add to map
         std::shared_lock<std::shared_mutex> rd_lock(_mutex);
-        auto it = _xid_map.find(pg_xid);
-        if (it == _xid_map.end()) {
+        if (_trans_pg_xid != pg_xid) {
             rd_lock.unlock();
 
             xid = _update_last_xid(schema_xid);
 
             std::unique_lock<std::shared_mutex> lock(_mutex);
-            _xid_map[pg_xid] = xid;
+            _trans_pg_xid = pg_xid;
+            _trans_xid = xid;
         } else {
-            xid = it->second;
+            xid = _trans_xid;
             rd_lock.unlock();
         }
 
@@ -1321,7 +1321,8 @@ namespace springtail::pg_fdw {
         LOG_DEBUG(LOG_FDW, "fdw_commit_rollback: pg_xid: {}, commit: {}", pg_xid, commit);
         _in_transaction = false;
         std::unique_lock<std::shared_mutex> lock(_mutex);
-        _xid_map.erase(pg_xid);
+        _trans_pg_xid = 0;
+        _trans_xid = 0;
     }
 
     std::vector<std::pair<std::string, std::string>>

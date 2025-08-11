@@ -90,7 +90,7 @@ namespace {
         inline static std::shared_ptr<springtail::pg_log_mgr::IndexReconciliationQueueManager> _index_reconciliation_queue_mgr;
 
         void _populate_table_with_data(uint64_t table_id, uint64_t table_xid,
-                uint64_t data_xid, int num_rows, int num_cols, int start_value = 0) {
+                uint64_t data_xid, int num_rows, int num_cols, int start_value = 0, bool is_update=false) {
             std::vector<std::vector<int32_t>> _data;
             _data.clear();
             _data.reserve(num_rows);
@@ -108,18 +108,19 @@ namespace {
             auto mtable = TableMgr::get_instance()->get_mutable_table(_db_id, table_id, table_xid, data_xid);
 
             // insert a number of rows
-            populate_table(mtable, _data);
+            populate_table(mtable, _data, is_update);
 
             // finalize the table and update roots
             auto &&metadata = mtable->finalize();
             TableMgr::get_instance()->update_roots(_db_id, table_id, data_xid, metadata);
         }
 
-        void _create_index(uint64_t table_id, uint64_t index_id, uint64_t index_xid, std::string index_name, bool process_requests_in_indexer=true) {
+        void _create_index(uint64_t table_id, uint64_t index_id, uint64_t index_xid, std::string index_name,
+                bool process_requests_in_indexer=true, bool is_unique=false) {
             // Create index at an XID
             std::list<proto::IndexProcessRequest> index_requests;
             auto create_idx_request = create_index(_db_id, table_id, index_xid, index_id, index_name,
-                    std::vector<PgMsgSchemaColumn>(_columns.end() - 2, _columns.end()), sys_tbl::IndexNames::State::NOT_READY);
+                    std::vector<PgMsgSchemaColumn>(_columns.end() - 2, _columns.end()), sys_tbl::IndexNames::State::NOT_READY, is_unique);
             index_requests.push_back(std::move(create_idx_request));
 
             // Validate index as NOT_READY
@@ -318,6 +319,7 @@ namespace {
         uint64_t table_xid = access_xid++;
         uint64_t index_xid = access_xid++;
         uint64_t data_xid = access_xid++;
+        uint64_t reconcile_xid = access_xid++;
 
         // Disable vacuum run
         Vacuumer::get_instance()->disable_vacuum_run();
@@ -326,24 +328,26 @@ namespace {
         create_table(_db_id, table_id, table_xid, "test_indexer_table6", _columns);
 
         // Create index
-        _create_index(table_id, index_id, index_xid, "idx_test_indexer_6");
+        _create_index(table_id, index_id, index_xid, "idx_test_indexer_6", true, true);
 
         // Populate table
         _populate_table_with_data(table_id, table_xid, data_xid, 30000, 5);
 
         // Trigger index reconcilation at reconcile_xid
-        uint64_t reconcile_xid = access_xid++;
         _process_index_and_validate(index_id, index_xid, reconcile_xid);
 
         // Get the table file paths
         auto table_dir = TableMgr::get_instance()->get_table_data_dir(_db_id, table_id, access_xid);
 
-        uint64_t data_xid2 = access_xid++;
-        _populate_table_with_data(table_id, index_xid, data_xid2, 1000, 5, 300001);
+        auto next_data_xid = access_xid;
+        for (int i=0; i < 20; i++) {
+            next_data_xid = access_xid++;
+            _populate_table_with_data(table_id, next_data_xid, next_data_xid, 30, 5, 0, true);
+        }
 
         Vacuumer::get_instance()->commit_expired_extents(_db_id, constant::LATEST_XID);
 
-        xid_mgr::XidMgrServer::get_instance()->commit_xid(_db_id, 0, data_xid2, true);
+        xid_mgr::XidMgrServer::get_instance()->commit_xid(_db_id, 0, next_data_xid, true);
 
         // Get the blocks count pre-vacuum
         auto index_file = table_dir / fmt::format(constant::INDEX_FILE, index_id);

@@ -277,7 +277,6 @@ namespace springtail::pg_fdw {
         ~PgFdwMgr();
 
         std::shared_mutex _mutex;               ///< Mutex for xid map
-        std::map<uint64_t, uint64_t> _xid_map;  ///< Map of pg XID to springtail XID
 
         std::shared_mutex _rc_mutex;    ///< roots cache mutex
         std::shared_ptr<sys_tbl_mgr::ShmCache> _roots_cache; ///< An IPC cache shared by pg_xid_subscriber_daemon
@@ -290,6 +289,8 @@ namespace springtail::pg_fdw {
         uint64_t _db_id;                               ///< database id
         uint64_t _schema_xid{0};        ///< The most recently seen schema XID
         uint64_t _last_xid{0};          ///< last known xid
+        uint64_t _trans_xid{0};         ///< current transaction XID
+        uint64_t _trans_pg_xid{0};      ///< current transaction PG XID
         std::atomic<bool> _in_transaction{false};   ///< in transaction flag, when set disables background thread
         std::atomic<bool> _ddl_connection{false};   ///< ddl connection flag, when set does not send updates to collector
 
