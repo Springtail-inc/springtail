@@ -647,13 +647,13 @@ Vacuumer::cleanup_db(uint64_t cleanup_db_id)
 {
     std::unique_lock lock(_mutex);
 
-    /********************************** Global file and partials file cleanup ********************************************/
+    /* --------------------------- Global file and partials file cleanup ---------------------------- */
 
     _cleanup_global_vacuum_file<CleanupOperation::DB_CLEANUP>(cleanup_db_id);
 
-    /********************************** End of global and partial files cleanup *******************************************************/
+    /* --------------------------- End of global and partial files cleanup -------------------------- */
 
-    /********************************** Cleanup memory & partial files ****************************************************/
+    /* --------------------------- Cleanup memory & partial files ----------------------------------- */
 
     if (!_extent_map.empty()) {
         for (auto file_it = _extent_map.begin(); file_it != _extent_map.end(); ) {
@@ -684,7 +684,7 @@ Vacuumer::cleanup_db(uint64_t cleanup_db_id)
             _snapshot_map.erase(snapshot_db_entry);
         }
     }
-    /********************************** End of memory cleanup ************************************************************/
+    /* ------------------------- End of memory cleanup ------------------------------------------ */
 
 }
 
