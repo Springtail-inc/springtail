@@ -183,11 +183,10 @@ namespace {
 
         _cache->add_callback("fdw/1",            redis_watcher);
         _cache->add_callback("fdw/1/db_prefix",  redis_watcher);
-        _cache->add_callback("fdw/1/fdw_user",   redis_watcher);
         _cache->add_callback("fdw/1/host",       redis_watcher);
         _cache->add_callback("fdw/1/port",       redis_watcher);
 
-        EXPECT_EQ(_cache->get_callback_count(""), 18);
+        EXPECT_EQ(_cache->get_callback_count(""), 17);
 
         _cache->add_callback("instance_config/system_settings",     redis_watcher);
         _cache->add_callback("instance_config/primary_db",          redis_watcher);
@@ -196,7 +195,7 @@ namespace {
         _cache->add_callback("instance_config/database_ids",        redis_watcher);
         _cache->add_callback("instance_config/hostname:ingestion",  redis_watcher);
 
-        EXPECT_EQ(_cache->get_callback_count(""), 24);
+        EXPECT_EQ(_cache->get_callback_count(""), 23);
 
         _cache->add_callback("instance_config/system_settings/fs",          redis_watcher);
         _cache->add_callback("instance_config/system_settings/iopool",      redis_watcher);
@@ -209,21 +208,20 @@ namespace {
         _cache->add_callback("instance_config/system_settings/sys_tbl_mgr", redis_watcher);
         _cache->add_callback("instance_config/system_settings/write_cache", redis_watcher);
 
-        EXPECT_EQ(_cache->get_callback_count(""), 34);
+        EXPECT_EQ(_cache->get_callback_count(""), 33);
 
         _cache->add_callback("instance_config/primary_db/host",             redis_watcher);
         _cache->add_callback("instance_config/primary_db/port",             redis_watcher);
-        _cache->add_callback("instance_config/primary_db/replication_user", redis_watcher);
 
-        EXPECT_EQ(_cache->get_callback_count(""), 37);
+        EXPECT_EQ(_cache->get_callback_count(""), 35);
 
         _cache->add_callback("instance_config/database_ids/0",  redis_watcher);
 
-        EXPECT_EQ(_cache->get_callback_count(""), 38);
+        EXPECT_EQ(_cache->get_callback_count(""), 36);
 
         _cache->add_callback("instance_config/system_settings/log_mgr/rpc_config/client_connections", redis_watcher);
 
-        EXPECT_EQ(_cache->get_callback_count(""), 39);
+        EXPECT_EQ(_cache->get_callback_count(""), 37);
 
         int connections = 0;
         // create callback class

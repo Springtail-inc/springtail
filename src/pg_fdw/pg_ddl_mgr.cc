@@ -22,6 +22,7 @@
 #include <pg_fdw/pg_ddl_mgr.hh>
 
 #include <pg_fdw/constants.hh>
+#include <pg_fdw/pg_xid_collector.hh>
 
 namespace springtail::pg_fdw {
 
@@ -73,6 +74,7 @@ namespace springtail::pg_fdw {
                 }
             }
         );
+        PgXidCollector::get_instance()->start_thread();
     }
 
     void
@@ -81,29 +83,39 @@ namespace springtail::pg_fdw {
         _pg_ddl_mgr_thread.join();
         std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
         redis_cache->remove_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
+        PgXidCollector::shutdown();
     }
 
     void
     PgDDLMgr::start()
     {
-        std::string username = springtail_retreive_argument<std::string>(ServiceId::PgDDLMgrId, "username");
-        std::string password = springtail_retreive_argument<std::string>(ServiceId::PgDDLMgrId, "password");
-        std::optional<std::string> hostname = springtail_retreive_argument<std::optional<std::string>>(ServiceId::PgDDLMgrId, "hostname");
+        auto props = Properties::get_instance();
+
+        auto fdw_user = props->get_system_role(Properties::DB_ROLE_FDW);
+        std::string username = std::get<0>(fdw_user);
+        std::string password = std::get<1>(fdw_user);
+
+        auto proxy_user = props->get_system_role(Properties::DB_ROLE_PROXY);
+        std::string proxy_password = std::get<1>(proxy_user);
+
+        std::optional<std::string> hostname = springtail_retreive_argument<std::optional<std::string>>(ServiceId::PgDDLMgrId, "hostname").value();
+
         // start the ddl main thread
-        std::string fdw_id = Properties::get_fdw_id();
+        std::string fdw_id = props->get_fdw_id();
 
         LOG_DEBUG(LOG_FDW, "Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}",
                     fdw_id, username, password, hostname.value_or(""));
-        PgDDLMgr::get_instance()->init(fdw_id, username, password, hostname);
+        PgDDLMgr::get_instance()->init(fdw_id, username, password, proxy_password, hostname);
         PgDDLMgr::get_instance()->_pg_ddl_mgr_thread = std::thread(&PgDDLMgr::run, PgDDLMgr::get_instance());
     }
 
     void
     PgDDLMgr::init(const std::string &fdw_id,
-                      const std::string &username,
-                      const std::string &password,
-                      const std::optional<std::string> &hostname)
-    {
+                   const std::string &username,
+                   const std::string &password,
+                   const std::string &proxy_password,
+                   const std::optional<std::string> &hostname)
+{
         // set fdw id
         _fdw_id = fdw_id;
 
@@ -111,6 +123,9 @@ namespace springtail::pg_fdw {
         // this user has more permissions than the fdw user
         _username = username;
         _password = password;
+
+        // set proxy user password for roles created by this fdw
+        _proxy_password = proxy_password;
 
         // fetch config for fdw (host, port, user, password)
         nlohmann::json fdw_config;
@@ -123,20 +138,15 @@ namespace springtail::pg_fdw {
         } else {
             Json::get_to<std::string>(fdw_config, "host", _hostname);
         }
+
         Json::get_to<int>(fdw_config, "port", _port);
-
-        // get fdw user for proxy to use, this user only has select permissions
-        std::string fdw_username, fdw_password;
-        Json::get_to<std::string>(fdw_config, "fdw_user", fdw_username);
-        Json::get_to<std::string>(fdw_config, "password", fdw_password);
-
         if (fdw_config.contains("db_prefix")) {
             // if the FDW is using a prefix, prepend it
             _db_prefix = fdw_config.at("db_prefix").get<std::string>();
         }
 
-        LOG_DEBUG(LOG_FDW, "FDW ID: {}, Host: {}, Port: {}, Username: {}, FDW Username: {}",
-                     _fdw_id, _hostname, _port, _username, fdw_username);
+        LOG_DEBUG(LOG_FDW, "FDW ID: {}, Host: {}, Port: {}, FDW Username: {}",
+                     _fdw_id, _hostname, _port, _username);
 
         // add subscribers to pubsub threads
         _db_instance_id = Properties::get_db_instance_id();
@@ -148,6 +158,8 @@ namespace springtail::pg_fdw {
 
         _thread_manager = std::make_shared<common::MultiQueueThreadManager>(MAX_THREAD_POOL_SIZE);
         _thread_manager->start();
+
+        LOG_INFO("PgDDLMgr::init() done");
     }
 
     std::map<uint64_t, std::map<uint64_t, std::pair<std::string, std::string>>>
@@ -256,16 +268,6 @@ namespace springtail::pg_fdw {
         // connect to the db to setup the replicated dbs, the fdw user and foreign servers
         LibPqConnectionPtr conn = _connect_fdw(std::nullopt, "template1");
 
-        // see if the fdw user exists, if not create it
-        _fdw_username = username;
-        conn->exec(fmt::format("SELECT 1 FROM pg_roles WHERE rolname = '{}'", username));
-        if (conn->ntuples() == 0) {
-            // create the user
-            conn->clear();
-            conn->exec(fmt::format(CREATE_FDW_USER, username, password));
-            conn->clear();
-        }
-
         // Populate system defined types
         conn->exec(SYSTEM_TYPES);
         int rows = conn->ntuples();
@@ -288,12 +290,15 @@ namespace springtail::pg_fdw {
         for (const auto &[db_id, db_name] : dbs) {
             _create_schemas(conn, db_id, db_name);
         }
+        LOG_INFO("PgDDLMgr::_init_fdw() done");
     }
 
     std::string
     PgDDLMgr::_get_create_schema_with_grants_query(std::string_view schema)
     {
         /** Create schema with grants, params: schema, schema, user, schema, user, schema, user */
+        return fmt::format("CREATE SCHEMA {};", schema);
+#if 0
         return fmt::format("CREATE SCHEMA {};"
                 "  GRANT USAGE ON SCHEMA {} TO {};"
                 "  GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {};"
@@ -302,11 +307,15 @@ namespace springtail::pg_fdw {
                 schema, _fdw_username,
                 schema, _fdw_username,
                 schema, _fdw_username);
+#endif
     }
 
     std::string
     PgDDLMgr::_get_alter_schema_with_grants_query(std::string_view old_schema, std::string_view new_schema)
     {
+        return fmt::format("ALTER SCHEMA {} RENAME TO {};",
+                           old_schema, new_schema);
+#if 0
         /** Alter schema with grants, params: old_schema, new_schema, new_schema, user, new_schema, user, new_schema, user */
         return fmt::format("ALTER SCHEMA {} RENAME TO {};"
             "  GRANT USAGE ON SCHEMA {} TO {};"
@@ -316,6 +325,7 @@ namespace springtail::pg_fdw {
                 new_schema, _fdw_username,
                 new_schema, _fdw_username,
                 new_schema, _fdw_username);
+#endif
     }
 
     std::string
@@ -468,8 +478,9 @@ namespace springtail::pg_fdw {
         LOG_DEBUG(LOG_FDW, "Establishing connection for db_id: {}", db_id);
 
         // use libpq to connect to the database
+        std::vector<std::pair<std::string, std::string>> options = {{"springtail_fdw.ddl_connection", "on"}};
         conn = std::make_shared<LibPqConnection>();
-        conn->connect(_hostname, db_name, _username, _password, _port, false);
+        conn->connect(_hostname, db_name, _username, _password, _port, false, options);
 
         // save the connection in the cache
         _fdw_conn_cache.insert(db_id, conn);
@@ -806,8 +817,8 @@ namespace springtail::pg_fdw {
 
     void
     PgDDLMgr::_create_database(LibPqConnectionPtr conn,
-                     const uint64_t db_id,
-                     const std::string &db_name)
+                               const uint64_t db_id,
+                               const std::string &db_name)
     {
         auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
         LOG_DEBUG(LOG_FDW, "Creating DB ID: {}, DB Name: {}", db_id, db_name);
@@ -824,7 +835,7 @@ namespace springtail::pg_fdw {
         conn->clear();
 
         // grant connect to the fdw user
-        conn->exec(fmt::format("GRANT CONNECT ON DATABASE {} TO {}", prefixed_name, _fdw_username));
+        // conn->exec(fmt::format("GRANT CONNECT ON DATABASE {} TO {}", prefixed_name, _fdw_username));
         conn->clear();
     }
 
@@ -940,11 +951,13 @@ namespace springtail::pg_fdw {
             conn->clear();
 
             // grant usage and select on all tables and sequences to the fdw user
+#if 0 // I don't think this is needed with the new role policy stuff
             conn->exec(fmt::format("GRANT USAGE ON SCHEMA {} TO {}", escaped_schema, _fdw_username));
             conn->clear();
             conn->exec(fmt::format("GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {}", escaped_schema, _fdw_username));
             conn->clear();
             conn->exec(fmt::format("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {}", escaped_schema, _fdw_username));
+#endif
             conn->clear();
         }
 

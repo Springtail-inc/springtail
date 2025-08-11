@@ -1,6 +1,5 @@
 #pragma once
 
-#include <mutex>
 #include <memory>
 #include <shared_mutex>
 #include <optional>
@@ -23,6 +22,7 @@
 #include <xid_mgr/xid_mgr_client.hh>
 
 #include <pg_fdw/pg_fdw_ddl_common.hh>
+#include <pg_fdw/pg_xid_collector_client.hh>
 
 extern "C" {
     #include <postgres.h>
@@ -115,6 +115,7 @@ namespace springtail::pg_fdw {
 
     /** Singleton manager for handling table scan operations */
     class PgFdwMgr : public Singleton<PgFdwMgr> {
+        friend class Singleton<PgFdwMgr>;
     public:
         static constexpr char CATALOG_SCHEMA_NAME[] = SPRINGTAIL_FDW_CATALOG_SCHEMA;  ///< Schema name for catalog tables
         static constexpr char CATALOG_TABLE_NAMES[] = "table_names";      ///< Table name for system table names
@@ -129,6 +130,9 @@ namespace springtail::pg_fdw {
 
         /** Maximum number of user type definitions to cache */
         static constexpr int MAX_USER_TYPE_CACHE = 100;
+
+        /** Sleep interval for FDW background thread */
+        static constexpr int THREAD_SLEEP_INTERVAL_MSEC = 1000;
 
         /**
          * Init call, pass in config file path;
@@ -248,25 +252,53 @@ namespace springtail::pg_fdw {
          */
         static bool check_type_compatibility(const SchemaColumn &column, ConstQualPtr qual);
 
+        /**
+         * @brief Initialization function
+         *
+         * @param db_name - database name
+         * @param ddl_connection - ddl connection flag
+         */
+        void init(const char *db_name, bool ddl_connection);
+
+    private:
+        /**
+         * @brief Construct a new Pg Fdw Mgr object
+         *
+         */
         PgFdwMgr() :
             Singleton(ServiceId::PgFdwMgrId),
             _user_type_cache(MAX_USER_TYPE_CACHE)
         {};
+
+        /**
+         * @brief Destroy the Pg Fdw Mgr object
+         *
+         */
         ~PgFdwMgr();
 
-    private:
-        /** Delete copy constructor */
-        PgFdwMgr(const PgFdwMgr&) = delete;
-        PgFdwMgr& operator=(const PgFdwMgr&) = delete;
-
         std::shared_mutex _mutex;               ///< Mutex for xid map
-        std::map<uint64_t, uint64_t> _xid_map;  ///< Map of pg XID to springtail XID
 
-        std::atomic<uint64_t> _schema_xid; ///< The most recently seen schema XID
-
+        std::shared_mutex _rc_mutex;    ///< roots cache mutex
         std::shared_ptr<sys_tbl_mgr::ShmCache> _roots_cache; ///< An IPC cache shared by pg_xid_subscriber_daemon
 
         LruObjectCache<int32_t, UserType> _user_type_cache; ///< cache of user types
+
+        PgXidCollectorClient _xid_collector_client;    ///< xid collector client
+        std::string _fdw_id;                           ///< fdw id
+        std::mutex _xid_update_mutex;                  ///< mutex for updating xid
+        uint64_t _db_id;                               ///< database id
+        uint64_t _schema_xid{0};        ///< The most recently seen schema XID
+        uint64_t _last_xid{0};          ///< last known xid
+        uint64_t _trans_xid{0};         ///< current transaction XID
+        uint64_t _trans_pg_xid{0};      ///< current transaction PG XID
+        std::atomic<bool> _in_transaction{false};   ///< in transaction flag, when set disables background thread
+        std::atomic<bool> _ddl_connection{false};   ///< ddl connection flag, when set does not send updates to collector
+
+        /**
+         * @brief Function for running background thread
+         *
+         */
+        virtual void _internal_run();
 
         /**
          * @brief Lookup enum user type from cache based on oid and index
@@ -364,6 +396,9 @@ namespace springtail::pg_fdw {
         _get_index_quals(const PgFdwState *state, Index const& idx, List const* qual_list);
 
         /** Helper to create an IPC cache for table roots */
-        std::shared_ptr<sys_tbl_mgr::ShmCache> _try_create_cache();
+        void _try_create_cache();
+
+        /** Helper function to get the last xid */
+        uint64_t _update_last_xid(uint64_t schema_xid);
     };
 } // namespace springtail::pg_fdw

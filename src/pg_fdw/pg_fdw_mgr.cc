@@ -403,8 +403,110 @@ namespace springtail::pg_fdw {
         LOG_INFO("PgFdwMgr delete");
     }
 
+    void
+    PgFdwMgr::init(const char *db_name, bool ddl_connection)
+    {
+        std::string db_name_string(db_name);
+
+        _fdw_id = Properties::get_fdw_id();
+        nlohmann::json fdw_config;
+        fdw_config = Properties::get_fdw_config(_fdw_id);
+        if (fdw_config.contains("db_prefix")) {
+            // if the FDW is using a prefix, prepend it
+            std::string db_prefix = fdw_config.at("db_prefix").get<std::string>();
+            if (db_name_string.starts_with(db_prefix)) {
+                db_name_string = db_name_string.substr(db_prefix.length());
+            }
+        }
+
+        _ddl_connection = ddl_connection;
+        _db_id = Properties::get_db_id(db_name_string);
+
+        LOG_INFO("FDW process started for database id: {}, ddl_connection: {}", _db_id, _ddl_connection);
+
+        if (!_ddl_connection) {
+            _xid_collector_client.init(_db_id);
+        }
+
+        // NOTE: first call to XidMgrClient needs to be done on the main thread to prevent occasional
+        //      deadlock during shutdown for short-lived FDW processes.
+        (void)XidMgrClient::get_instance();
+        start_thread();
+        LOG_INFO("FDW process finished initialization");
+    }
+
+    void
+    PgFdwMgr::_internal_run()
+    {
+        if (_ddl_connection) {
+            return;
+        }
+
+        RedisDDL redis_ddl;
+        while (!_is_shutting_down()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(THREAD_SLEEP_INTERVAL_MSEC));
+            if (_in_transaction) {
+                    continue;
+            }
+
+            // read latest schema xid from redis
+            uint64_t schema_xid = redis_ddl.get_schema_xid(_fdw_id, _db_id);
+            std::unique_lock xid_lock(_xid_update_mutex);
+            if (schema_xid == 0) {
+                schema_xid = _schema_xid;
+            } else {
+                CHECK(schema_xid >= _schema_xid);
+                if (schema_xid > _schema_xid) {
+                    _schema_xid = schema_xid;
+                    sys_tbl_mgr::Client::get_instance()->invalidate_db(_db_id, XidLsn(schema_xid));
+                }
+            }
+
+            LOG_DEBUG(LOG_FDW, "Obtaining and sending data to xid collector for schema xid: {}", schema_xid);
+            // TODO: running this function from the thread resulted in a crash
+            //      find out why this is happening and determine if it should be called
+            //      from the thread to begin with. Maybe a better place would be to call
+            //      it once from init() function.
+            // _try_create_cache();
+            uint64_t xid = _update_last_xid(schema_xid);
+            if (xid > _last_xid) {
+                _last_xid = xid;
+                _xid_collector_client.send_data(_db_id, xid);
+            }
+        }
+    }
+
+    uint64_t
+    PgFdwMgr::_update_last_xid(uint64_t schema_xid)
+    {
+        uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(_db_id, schema_xid);
+        LOG_DEBUG(LOG_FDW, "XidMgrClient returned xid = {}", xid);
+
+        // TODO: fix _root_cache so that we can acquire correct xid
+        /*
+        std::optional<uint64_t> cached_xid;
+        {
+            std::shared_lock<std::shared_mutex> rc_lock(_rc_mutex);
+            if (_roots_cache) {
+                cached_xid = _roots_cache->get_committed_xid(_db_id);
+            }
+        }
+
+        uint64_t xid = constant::INVALID_XID;
+        if (!cached_xid.has_value() || cached_xid.value() < _schema_xid) {
+            xid = XidMgrClient::get_instance()->get_committed_xid(_db_id, schema_xid);
+            LOG_DEBUG(LOG_FDW, "XidMgrClient returned xid = {}", xid);
+        } else {
+            xid = cached_xid.value();
+            LOG_DEBUG(LOG_FDW, "Cached xid returned xid = {}", xid);
+        }
+        */
+        return xid;
+    }
+
     // called from the PG exit callback
-    void PgFdwMgr::fdw_exit()
+    void
+    PgFdwMgr::fdw_exit()
     {
         LOG_DEBUG(LOG_FDW, "Shutting down springtail");
         springtail_shutdown();
@@ -429,13 +531,27 @@ namespace springtail::pg_fdw {
         }
     }
 
-    std::shared_ptr<sys_tbl_mgr::ShmCache>
+    void
     PgFdwMgr::_try_create_cache()
     {
-        std::unique_lock<std::shared_mutex> lock(_mutex);
+        std::unique_lock<std::shared_mutex> lock(_rc_mutex);
+        if (_roots_cache && _roots_cache->is_alive()) {
+            return;
+        }
         try {
             auto cache = std::make_shared<sys_tbl_mgr::ShmCache>(sys_tbl_mgr::SHM_CACHE_ROOTS);
-            return cache;
+            if (cache) {
+                _roots_cache = cache;
+                // start using the new cache
+                sys_tbl_mgr::Client::get_instance()->use_roots_cache(_roots_cache);
+            } else {
+                // If (!cache) continue with the existing cache anyway.
+                // It'll still work as a cache but without
+                // the advantages of push notifications.
+                // If xid_subscriber comes online, we'll try to
+                // open the new (live) IPC cache the next time we come here.
+                LOG_WARN("The IPC roots cache is dead.");
+            }
         } catch (const boost::interprocess::bad_alloc&) {
             // the cache hasn't been created
             // this could happen if xid_mgr_subscriber isn't running
@@ -444,7 +560,6 @@ namespace springtail::pg_fdw {
             LOG_ERROR("fdw_create_state exception:{} ", e.what());
             throw;
         }
-        return {};
     }
 
     PgFdwState *
@@ -453,71 +568,51 @@ namespace springtail::pg_fdw {
                                uint64_t pg_xid,
                                uint64_t schema_xid)
     {
+        _in_transaction = true;
+        DCHECK(db_id == _db_id);
         uint64_t xid; // springtail xid
 
+        // try to use the cache
+        _try_create_cache();
+
+        std::unique_lock xid_lock(_xid_update_mutex);
+
         // check if the schema_xid has progressed, if so, invalidate the schema cache
-        const uint64_t prev_schema_xid = _schema_xid.exchange(schema_xid);
-        if (prev_schema_xid < schema_xid) {
+        DCHECK(schema_xid >= _schema_xid);
+        if (schema_xid > _schema_xid) {
+            _schema_xid = schema_xid;
             sys_tbl_mgr::Client::get_instance()->invalidate_db(db_id, XidLsn(schema_xid));
         }
-
-        std::optional<uint64_t> cached_xid;
-
-        // try to use the cache
 
         // lookup pg_xid in xid_map;
         // if doesn't exist, get a new xid from xid_mgr and add to map
         std::shared_lock<std::shared_mutex> rd_lock(_mutex);
-
-
-        if (!_roots_cache) {
+        if (_trans_pg_xid != pg_xid) {
             rd_lock.unlock();
-            _roots_cache = _try_create_cache();
-            sys_tbl_mgr::Client::get_instance()->use_roots_cache(_roots_cache);
-            rd_lock.lock();
-        } else {
-            if (!_roots_cache->is_alive()) {
 
-                rd_lock.unlock();
+            xid = _update_last_xid(schema_xid);
 
-                auto cache = _try_create_cache();
-                if (cache) {
-                    // start using the new cache
-                    sys_tbl_mgr::Client::get_instance()->use_roots_cache(_roots_cache);
-                } else {
-                    // If (!cache) continue with the existing cache anyway.
-                    // It'll still work as a cache but without
-                    // the advantages of push notifications.
-                    // If xid_subscriber comes online, we'll try to
-                    // open the new (live) IPC cache the next time we come here.
-                    LOG_WARN("The IPC roots cache is dead.");
-                }
-
-                rd_lock.lock();
-            }
-        }
-
-        if (_roots_cache) {
-            cached_xid = _roots_cache->get_committed_xid(db_id);
-        }
-
-        auto it = _xid_map.find(pg_xid);
-        if (it == _xid_map.end()) {
-            rd_lock.unlock();
-            // don't hold lock through get call, can only have one operation
-            // for this transaction in flight at once
-            if (!cached_xid || cached_xid.value() != schema_xid) {
-                xid = XidMgrClient::get_instance()->get_committed_xid(db_id, schema_xid);
-            } else {
-                xid = cached_xid.value();
-            }
             std::unique_lock<std::shared_mutex> lock(_mutex);
-            _xid_map[pg_xid] = xid;
-            lock.unlock();
+            _trans_pg_xid = pg_xid;
+            _trans_xid = xid;
         } else {
-            xid = it->second;
+            xid = _trans_xid;
             rd_lock.unlock();
         }
+
+        if (!_ddl_connection) {
+            while (xid < _last_xid) {
+                LOG_DEBUG(LOG_FDW, "Trying to get valid xid, current xid = {}, _last_xid = {}", xid, _last_xid);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                xid = _update_last_xid(schema_xid);
+            }
+            if (xid > _last_xid) {
+                _last_xid = xid;
+                _xid_collector_client.send_data(db_id, xid);
+            }
+        }
+
+        xid_lock.unlock();
 
         LOG_DEBUG(LOG_FDW, "fdw_create_state: db_id: {}, tid: {}, xid: {}, pg_xid: {}, schema_xid: {}",
                             db_id, tid, xid, pg_xid, schema_xid);
@@ -1224,7 +1319,10 @@ namespace springtail::pg_fdw {
     {
         // remove transaction ID mapping on a commit or rollback
         LOG_DEBUG(LOG_FDW, "fdw_commit_rollback: pg_xid: {}, commit: {}", pg_xid, commit);
-        _xid_map.erase(pg_xid);
+        _in_transaction = false;
+        std::unique_lock<std::shared_mutex> lock(_mutex);
+        _trans_pg_xid = 0;
+        _trans_xid = 0;
     }
 
     std::vector<std::pair<std::string, std::string>>

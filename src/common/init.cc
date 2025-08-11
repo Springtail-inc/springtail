@@ -1,3 +1,5 @@
+#include <fcntl.h>
+
 #include <fstream>
 #include <mutex>
 
@@ -49,6 +51,15 @@ bool DaemonRunner::start()
 
         // ignore hang-up
         std::signal(SIGHUP, SIG_IGN);
+
+        // Instead of closing, redirect to /dev/null
+        int null_fd = open("/dev/null", O_RDWR);
+        if (null_fd != -1) {
+            dup2(null_fd, 0);  // stdin
+            dup2(null_fd, 1);  // stdout
+            dup2(null_fd, 2);  // stderr
+            if (null_fd > 2) close(null_fd);
+        }
     } else {
         // ensure the pid directory exists
         std::filesystem::path pid_dir(pid_filename);
@@ -104,6 +115,7 @@ private:
     {
         for (auto reverse_iter = _service_list.rbegin(); reverse_iter != _service_list.rend();
                 reverse_iter++) {
+            LOG_INFO("Stopping service {}", (*reverse_iter)->get_name());
             (*reverse_iter)->stop();
         }
         _service_list.clear();
@@ -209,6 +221,7 @@ static const std::map<ServiceId, std::vector<ServiceId>> dependencies = {
     {ServiceId::WriteCacheServerId,    {ServiceId::ServiceRegisterId, ServiceId::SysTblMgrServerId}},
     {ServiceId::WriteCacheClientId,    {ServiceId::ServiceRegisterId, ServiceId::WriteCacheServerId}},
     {ServiceId::IOMgrId,               {ServiceId::ServiceRegisterId}},
+    {ServiceId::VacuumerId,            {ServiceId::IOMgrId, ServiceId::XidMgrClientId}},
     {ServiceId::SchemaMgrId,           {ServiceId::SysTblMgrClientId}},
     {ServiceId::TableMgrId,            {ServiceId::IOMgrId, ServiceId::SchemaMgrId, ServiceId::StorageCacheId}},
     {ServiceId::SyncTrackerId,         {ServiceId::ServiceRegisterId}},
@@ -216,7 +229,7 @@ static const std::map<ServiceId, std::vector<ServiceId>> dependencies = {
     {ServiceId::PgXidSubscriberMgrId,  {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::SysTblMgrClientId}},
     {ServiceId::PgDDLMgrId,            {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::TableMgrId}},
     {ServiceId::PgLogCoordinatorId,    {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::WriteCacheServerId, ServiceId::TableMgrId}},
-    {ServiceId::StorageCacheId,        {ServiceId::IOMgrId}}
+    {ServiceId::StorageCacheId,        {ServiceId::IOMgrId, ServiceId::VacuumerId}}
 };
 
 static const std::map<ServiceId, std::string> dependencies_names = {
@@ -227,18 +240,19 @@ static const std::map<ServiceId, std::string> dependencies_names = {
     {ServiceId::XidMgrServerId,        "XigMgrServer"},
     {ServiceId::XidMgrClientId,        "XidMgrClient"},
     {ServiceId::SysTblMgrServerId,     "SysTblMgrServer"},
-    {ServiceId::SysTblMgrClientId,     "SyTblMgrClient"},
+    {ServiceId::SysTblMgrClientId,     "SysTblMgrClient"},
     {ServiceId::WriteCacheServerId,    "WriteCacheServer"},
     {ServiceId::WriteCacheClientId,    "WriteCacheClient"},
     {ServiceId::IOMgrId,               "IOMgr"},
     {ServiceId::SchemaMgrId,           "SchemaMgr"},
     {ServiceId::TableMgrId,            "TableMgr"},
     {ServiceId::SyncTrackerId,         "SyncTracker"},
-    {ServiceId::PgFdwMgrId,            "PGFdwMgr"},
+    {ServiceId::PgFdwMgrId,            "PgFdwMgr"},
     {ServiceId::PgXidSubscriberMgrId,  "PgXidSubscriberMgr"},
     {ServiceId::PgDDLMgrId,            "PgDDLMgr"},
     {ServiceId::PgLogCoordinatorId,    "PgLogCoordinator"},
-    {ServiceId::StorageCacheId,        "StorageCache"}
+    {ServiceId::StorageCacheId,        "StorageCache"},
+    {ServiceId::VacuumerId,            "Vacuumer"}
 };
 
 std::vector<ServiceId>
@@ -305,12 +319,14 @@ springtail_register_service(ServiceId service_id, ShutdownFunc fn)
 void
 springtail_shutdown()
 {
+    LOG_INFO("Shutdown services");
     std::unique_lock running_services_lock(running_services_mutex);
     for (auto service_id : topo_sorted_services) {
         auto it = running_services.find(service_id);
         if (it == running_services.end()) {
             continue;
         }
+        LOG_INFO("Shuting down service {}", dependencies_names.at(service_id));
         it->second();
     }
     // NOTE: This final cleanup step can't be done by a runner because a runner will require logging
@@ -327,13 +343,23 @@ void springtail_store_argument_internal(ServiceId service_id, const std::string 
     it->second.try_emplace(arg_name, value);
 }
 
-std::any springtail_retreive_argument_internal(ServiceId service_id, const std::string &arg_name)
+std::optional<std::any> springtail_retreive_argument_internal(ServiceId service_id, const std::string &arg_name, bool is_required)
 {
-    auto it = service_arguments.find(service_id);
-    CHECK(it != service_arguments.end());
-    auto value_it = it->second.find(arg_name);
-    CHECK(value_it != it->second.end());
-    return value_it->second;
+    auto service_it = service_arguments.find(service_id);
+    if (service_it == service_arguments.end()) {
+        CHECK(!is_required);
+        return std::nullopt;
+    }
+
+    auto& args = service_it->second;
+    auto arg_it = args.find(arg_name);
+
+    if (arg_it == args.end()) {
+        CHECK(!is_required);
+        return std::nullopt;
+    }
+
+    return arg_it->second;
 }
 
 };  // namespace springtail

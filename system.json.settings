@@ -65,6 +65,12 @@
         "page_cache_size": 16384,
         "btree_cache_size": 512,
         "max_extent_per_page": 16,
+        "vacuum_config": {
+            "enabled": false,
+            "vacuum_dir": "vacuum",
+            "global_file_size_threshold": 102400,
+            "hole_punch_block_size": 4096
+        },
         "metrics_update_freq_sec": 10
     },
     "log_mgr": {
@@ -114,17 +120,18 @@
         "account_id": "123",
         "db_instance_id": 1234,
         "fdw_id": "1",
-        "replication_user": "springtail",
-        "replication_user_password": "springtail",
-        "fdw_user_password": "springtail",
         "aws_mock_override": false
     },
+    "aws_users_override": [
+        { "role": "replication", "username": "springtail", "password": "springtail", "type": "text" },
+        { "role": "fdw_superuser", "username": "springtail", "password": "springtail", "type": "text" },
+        { "role": "proxy_to_fdw", "username": "springtail", "password": "springtail_proxy", "type": "text" }
+    ],
     "db_instances": {
         "1234": {
             "primary_db": {
                 "host": "localhost",
-                "port": 5432,
-                "replication_user": "springtail"
+                "port": 5432
             },
             "database_ids": ["1"],
             "hostname:ingestion": "localhost",
@@ -145,7 +152,6 @@
         "1": {
             "host": "localhost",
             "port": 5432,
-            "fdw_user": "springtail",
             "db_prefix": "replica_"
         }
     },

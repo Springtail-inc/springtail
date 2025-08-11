@@ -303,6 +303,21 @@ namespace springtail {
         }
 
         /**
+         * @brief Get the first element sorted by the score
+         */
+        std::optional<T> get_first_by_score()
+        {
+            std::vector<std::string> result;
+            RedisMgr::get_instance()->get_client()->zrange(_key, 0, 0, std::back_inserter(result));
+
+            if (result.empty()) {
+                return std::nullopt;
+            } else {
+                return T(result.front());
+            }
+        }
+
+        /**
          * @brief Clear the set.
          */
         void clear()

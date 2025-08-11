@@ -48,11 +48,21 @@ namespace springtail {
         static inline constexpr char PROXY_CONFIG[] = "proxy";
         /** Open telemetry configuration section */
         static inline constexpr char OTEL_CONFIG[] = "otel";
+        /** AWS Users Override -- instead of using secrets mgr */
+        static inline constexpr char AWS_USERS_OVERRIDE[] = "aws_users_override";
 
         /** Redis notification path for database ids */
         static inline constexpr char DATABASE_IDS_PATH[] = "instance_config/database_ids";
         /** Redis notification path for database states */
         static inline constexpr char DATABASE_STATE_PATH[] = "instance_state";
+
+        /* Secrets mgr roles */
+        /** FDW secrets mgr role */
+        static inline constexpr char DB_ROLE_FDW[] = "fdw_superuser";
+        /** Replication user secrets mgr role */
+        static inline constexpr char DB_ROLE_REPLICATION[] = "replication";
+        /** Proxy user secrets mgr role */
+        static inline constexpr char DB_ROLE_PROXY[] = "proxy_to_fdw";
 
         /**
          * @brief Get JSON object from a key
@@ -116,6 +126,11 @@ namespace springtail {
         /** Helper to get database name from Redis for db id */
         static inline std::string get_db_name(uint64_t db_id) {
             return get_instance()->_get_db_name(db_id);
+        }
+
+        /** Helper to get database id from Redis for db name */
+        static inline uint64_t get_db_id(const std::string &db_name) {
+            return get_instance()->_get_db_id(db_name);
         }
 
         /** Helper to get set of FDW ids from Redis */
@@ -184,6 +199,19 @@ namespace springtail {
          */
         static std::vector<uint64_t> get_database_ids(const nlohmann::json &json_db_ids);
 
+        /** Helper to get included schemas */
+        static std::vector<std::string> get_include_schemas(uint64_t db_id);
+
+        /**
+         * @brief Helper to get system role from map based on role name
+         * @param role_name - name of the role
+         * @return std::tuple<std::string, std::string> - tuple with db_user and db_password
+         */
+        std::tuple<std::string, std::string> get_system_role(const std::string &role_name) {
+            CHECK(_system_roles.contains(role_name));
+            return _system_roles[role_name];
+        }
+
     private:
         /** json containing parsed settings file */
         nlohmann::json _json;
@@ -193,6 +221,9 @@ namespace springtail {
 
         /** AWS for secrets mgr */
         std::shared_ptr<AwsHelper> _aws_helper;
+
+        /** Cache of system roles: role_name -> (db_user, db_password) */
+        std::unordered_map<std::string, std::tuple<std::string, std::string>> _system_roles;
 
         /**
          * @brief Construct a new Properties object
@@ -223,13 +254,7 @@ namespace springtail {
         void _load_redis(const std::string &config_file);
 
         /**
-         * @brief Set the replication user variables from AWS secrets manager
-         */
-        void _set_replication_user_from_aws();
-
-        /**
          * @brief Internal get database instance id
-         *
          * @return uint64_t
          */
         uint64_t _get_db_instance_id() {
@@ -240,7 +265,6 @@ namespace springtail {
 
         /**
          * @brief Internal get organization id
-         *
          * @return std::string
          */
         std::string _get_organization_id() {
@@ -310,6 +334,14 @@ namespace springtail {
         std::string _get_db_name(uint64_t db_id);
 
         /**
+         * @brief Internal get database id for a given database name
+         *
+         * @param db_name- database name
+         * @return uint64_t
+         */
+        uint64_t _get_db_id(const std::string &db_name);
+
+         /**
          * @brief Internal get fdw ids
          *
          * @return std::vector<std::string>
@@ -372,5 +404,15 @@ namespace springtail {
 
         /** Helper to get primary db json for current db instance */
         nlohmann::json _get_primary_db_config();
+
+        /**
+         * @brief Initialize system roles from AWS secrets manager
+         */
+        void _init_system_roles_from_aws();
+
+        /**
+         * @brief Initialize system roles from JSON config
+         */
+        void _init_system_roles_from_config();
     };
 }

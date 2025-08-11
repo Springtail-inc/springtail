@@ -8,6 +8,7 @@
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/service.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
+#include <storage/vacuumer.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 
 namespace springtail::sys_tbl_mgr {
@@ -336,11 +337,12 @@ Service::DropIndex(grpc::ServerContext* context,
 
     XidLsn xid(request->xid(), request->lsn());
 
-    // perform the DROP INDEX
-    _drop_index(xid, request->db_id(), request->index_id(), std::nullopt, sys_tbl::IndexNames::State::BEING_DELETED);
-
     // Create response for the dropped index
     proto::IndexInfo dropped_index;
+
+    // perform the DROP INDEX
+    _drop_index(xid, request->db_id(), request->index_id(), std::nullopt, sys_tbl::IndexNames::State::BEING_DELETED, std::ref(dropped_index));
+
     dropped_index.set_id(request->index_id());
     dropped_index.set_name(request->name());
     dropped_index.set_namespace_name(request->namespace_name());
@@ -440,7 +442,8 @@ Service::_drop_index(const XidLsn& xid,
                      uint64_t db_id,
                      uint64_t index_id,
                      std::optional<uint64_t> tid,
-                     sys_tbl::IndexNames::State index_state)
+                     sys_tbl::IndexNames::State index_state,
+                     std::optional<std::reference_wrapper<proto::IndexInfo>> dropped_index_info_ref)
 {
     assert(index_state == sys_tbl::IndexNames::State::DELETED || index_state == sys_tbl::IndexNames::State::BEING_DELETED);
     auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
@@ -456,6 +459,11 @@ Service::_drop_index(const XidLsn& xid,
         return;
     }
     auto& index_info = std::get<0>(*info);
+
+    // Set table_id in the index info, as the drop index request wont have table ID
+    if (dropped_index_info_ref) {
+        dropped_index_info_ref->get().set_table_id(index_info.table_id());
+    }
 
     auto state = static_cast<sys_tbl::IndexNames::State>(index_info.state());
     if (state == sys_tbl::IndexNames::State::DELETED ||
@@ -867,14 +875,24 @@ Service::CreateNamespace(grpc::ServerContext* context,
                 request->db_id(), request->namespace_id(), request->name(), request->xid(),
                 request->lsn());
 
+
+    XidLsn xid(request->xid(), request->lsn());
+    nlohmann::json ddl;
+
     // acquire a shared lock to ensure no one is doing a finalize
     boost::shared_lock lock(_write_mutex);
 
-    // update the namespace_names table
-    XidLsn xid(request->xid(), request->lsn());
-    auto ddl =
-        _mutate_namespace(request->db_id(), request->namespace_id(), request->name(), xid, true);
-    ddl["action"] = "ns_create";
+    auto ns_info = _get_namespace_info(request->db_id(), request->namespace_id(), xid);
+    if (ns_info) {
+        LOG_INFO("Namespace exists -- db {} namespace_id {} name {} xid {} lsn {}",
+                request->db_id(), request->namespace_id(), request->name(), request->xid(),
+                request->lsn());
+        ddl["action"] = "no_change";
+    } else {
+        // update the namespace_names table
+        ddl = _mutate_namespace(request->db_id(), request->namespace_id(), request->name(), xid, true);
+        ddl["action"] = "ns_create";
+    }
 
     // serialize the JSON and return
     response->set_statement(nlohmann::to_string(ddl));
@@ -1097,6 +1115,9 @@ Service::Finalize(grpc::ServerContext* context,
     _clear_roots_info(request->db_id());
     _clear_schema_info(request->db_id());
     _clear_namespace_info(request->db_id());
+
+    // Commit expired extents in Vacuumer
+    Vacuumer::get_instance()->commit_expired_extents(request->db_id(), request->xid());
 
     span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
     return grpc::Status::OK;

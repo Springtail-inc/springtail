@@ -11,6 +11,9 @@ namespace springtail::constant {
     /** Represents the most recent XID available. */
     static constexpr uint64_t LATEST_XID = std::numeric_limits<uint64_t>::max();
 
+    /** Invalid XID value */
+    static constexpr uint64_t INVALID_XID = 0;
+
     /** Represents the most recent LSN available. */
     static constexpr uint64_t MAX_LSN = std::numeric_limits<uint64_t>::max();
 
@@ -38,7 +41,7 @@ namespace springtail::constant {
     static constexpr uint32_t INDEX_DATA = std::numeric_limits<uint32_t>::max();
 
     /** An index ID that represents the primary index. */
-    static constexpr uint32_t INDEX_PRIMARY = 0;
+    static constexpr uint64_t INDEX_PRIMARY = 0;
 
     /** The name of the child pointer field in a BTree branch extent. */
     static const std::string BTREE_CHILD_FIELD = "__springtail_child";

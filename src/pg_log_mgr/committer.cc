@@ -10,6 +10,7 @@
 #include <xid_mgr/xid_mgr_server.hh>
 
 #include <pg_log_mgr/committer.hh>
+#include <storage/vacuumer.hh>
 
 namespace springtail::committer {
 
@@ -119,6 +120,7 @@ namespace springtail::committer {
                 // note: we used to bundle the commit onto the previous XID, but now the XID is guaranteed to be in-order
                 completed_xid = result->swap().xid();
                 nlohmann::json ddls = result->swap().ddls();
+                auto swapped_tids = result->swap().tids();
 
                 auto token_3 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(completed_xid)}});
 
@@ -138,6 +140,14 @@ namespace springtail::committer {
                     if (_has_ddl_precommit) {
                         _redis_ddl.commit_ddl(db_id, completed_xid);
                         _has_ddl_precommit = false;
+                    }
+
+                    for (const auto swapped_tid: swapped_tids) {
+                        // Notify vacuumer to expire old table snapshot
+                        // Send completed_xid - 1 to get the previous old snapshot dir
+                        // and then expire that at the completed_xid
+                        auto swapped_table_old_dir = TableMgr::get_instance()->get_table_data_dir(db_id, swapped_tid, completed_xid - 1);
+                        Vacuumer::get_instance()->expire_snapshot(db_id, swapped_table_old_dir, completed_xid);
                     }
                 } else {
                     LOG_DEBUG(LOG_COMMITTER, "Record DDL changes db {} xid {}", db_id, completed_xid);
@@ -249,6 +259,19 @@ namespace springtail::committer {
                 //       index root offsets are written to disk
                 sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
 
+                // Check and notify vacuumer about dropped tables
+                if (!completed_ddls.is_null()) {
+                    _expire_table_drops(db_id, completed_ddls, xid);
+                }
+
+                // Check and notify vacuumer about dropped indexes
+                if (!index_requests.empty()) {
+                    _expire_index_drops(db_id, index_requests, xid);
+                }
+
+                // Sync expired extents on the XID with vacuum
+                Vacuumer::get_instance()->commit_expired_extents(db_id, xid);
+
                 // commit the completed XID
                 xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null());
 
@@ -258,6 +281,7 @@ namespace springtail::committer {
                     _redis_ddl.commit_ddl(db_id, xid);
                     _has_ddl_precommit = false;
                 }
+
             } else {
                 // don't commit, but record any DDL changes to the history
                 xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null());
@@ -336,6 +360,36 @@ namespace springtail::committer {
     }
 
     void
+    Committer::_expire_index_drops(uint64_t db_id, std::list<proto::IndexProcessRequest>& index_requests, uint64_t committed_xid)
+    {
+        for (auto const& index_request: index_requests) {
+            auto action = index_request.action();
+            if (action == "drop_index") {
+                auto tid = index_request.index().table_id();
+                auto index_id = index_request.index().id();
+                auto _dropped_index_table_dir = TableMgr::get_instance()->get_table_data_dir(db_id, tid, committed_xid - 1);
+                auto index_file_path = _dropped_index_table_dir / fmt::format(constant::INDEX_FILE, index_id);
+                Vacuumer::get_instance()->expire_snapshot(db_id, index_file_path, committed_xid);
+            }
+        }
+    }
+
+    void
+    Committer::_expire_table_drops(uint64_t db_id, const nlohmann::json &completed_ddls, uint64_t committed_xid)
+    {
+        for (auto& ddl: completed_ddls) {
+            if (ddl.contains("tid") && ddl.contains("action")) {
+                uint64_t tid = ddl["tid"].get<uint64_t>();
+                auto action = ddl["action"].get<std::string>();
+                if (action == "drop") {
+                    auto dropped_table_dir = TableMgr::get_instance()->get_table_data_dir(db_id, tid, committed_xid - 1);
+                    Vacuumer::get_instance()->expire_snapshot(db_id, dropped_table_dir, committed_xid);
+                }
+            }
+        }
+    }
+
+    void
     Committer::_invalidate_systbl_cache(uint64_t db, const nlohmann::json &completed_ddls)
     {
         auto client = sys_tbl_mgr::Client::get_instance();
@@ -409,6 +463,15 @@ namespace springtail::committer {
 
         // construct the mutable table object
         auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, xid, true);
+        if (!sys_tbl_mgr::Client::get_instance()->exists(db_id, tid, XidLsn{xid})) {
+            // This could happen if the table is dropped in the same transaction
+            // BEGIN/INSERT/DROP/COMMIT
+            // TODO: another way to handle the case would be to drop the table mutation
+            // records from the Batch object in the log reader. Marking this as TODO
+            // just to keep the question open for now.
+            LOG_DEBUG(LOG_COMMITTER, "The table doesn't exists: {}", tid);
+            return;
+        }
 
         // retrieve extents and apply the mutations to them
         uint64_t extent_cursor = 0;
