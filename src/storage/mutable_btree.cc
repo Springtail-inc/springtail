@@ -20,7 +20,7 @@ namespace springtail {
         _max_extent_per_page = Json::get_or<uint64_t>(json, "max_extent_per_page", MAX_EXTENT_COUNT);
 
         _cache = std::make_shared<PageCache>(size);
-          
+
         // initialize the schema information
         _init_schemas(schema, keys);
     }
@@ -870,7 +870,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
         // data has been read, so can let others proceed by downgrading the lock
         NodePtr node = std::make_shared<Node>(parent, page, std::move(data_lock));
-             
+
         // now re-acquire the cache lock to update the size of the cache
         cache_lock.lock();
 
@@ -901,7 +901,11 @@ MutableBTree::lower_bound(TuplePtr search_key,
             auto &&i = node->page->lower_bound(key);
 
             // note: we know the tree isn't empty since the root would be a leaf in that case
-            Extent::Row row = (i == node->page->end()) ? node->page->back() : *i;
+            if (i == node->page->end()) {
+                // if the key is greater than the last entry, then we need to follow the last child
+                i = node->page->last();
+            }
+            Extent::Row row = *i;
 
             // retrieve the child offset
             uint64_t extent_id = _branch_child_f->get_uint64(&row);
@@ -1047,7 +1051,8 @@ MutableBTree::lower_bound(TuplePtr search_key,
             // add pointers to the new root for each new page
             for (PagePtr child : new_pages) {
                 auto child_keys = child->index_keys();
-                auto &&child_row = child->back();
+                auto child_itr = child->last();
+                Extent::Row child_row = *child_itr;
                 auto key = std::make_shared<MutableTuple>(child_keys, &child_row);
 
                 LOG_DEBUG(LOG_BTREE, "Adding root entry to child extent_id: {}", child->extent_id);
