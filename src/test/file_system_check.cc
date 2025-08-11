@@ -4,6 +4,7 @@
 #include <sys_tbl_mgr/system_tables.hh>
 
 #include <test/file_system_check.hh>
+#include "common/constants.hh"
 
 using namespace springtail;
 using namespace springtail::test;
@@ -571,7 +572,7 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
 
     // 3. Verify indexes xids and roots
     std::vector<TableRoot> roots;
-    uint64_t root_sxid = constant::LATEST_XID;
+    uint64_t root_sxid = constant::INVALID_XID;
     uint64_t row_count = 0;
     uint64_t end_offset = 0;
     std::vector<Index> secondary_indexes;

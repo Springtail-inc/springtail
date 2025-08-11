@@ -7,6 +7,7 @@
 #include <storage/csv_field.hh>
 #include <storage/btree.hh>
 #include <storage/mutable_btree.hh>
+#include "common/constants.hh"
 
 using namespace springtail;
 
@@ -85,7 +86,7 @@ namespace {
                               uint64_t xid)
         {
             // construct a mutable b-tree for inserting data
-            auto btree = std::make_shared<MutableBTree>(name, _keys, _schema, xid);
+            auto btree = std::make_shared<MutableBTree>(name, _keys, _schema, xid, constant::MAX_EXTENT_SIZE);
 
             btree->init_empty();
             return btree;
@@ -97,7 +98,7 @@ namespace {
                            uint64_t extent_id)
         {
             // construct a mutable b-tree for inserting data
-            auto btree = std::make_shared<MutableBTree>(name, _keys, _schema, xid);
+            auto btree = std::make_shared<MutableBTree>(name, _keys, _schema, xid, constant::MAX_EXTENT_SIZE);
             btree->init(extent_id);
             return btree;
         }
@@ -241,7 +242,7 @@ namespace {
         CHECK(offset != constant::UNKNOWN_EXTENT);
 
         // now read the tree back and make sure there are the right number of entries and that they are in-order
-        auto tree = std::make_shared<BTree>(_base_dir / "Insert10", xid, _schema, offset);
+        auto tree = std::make_shared<BTree>(_base_dir / "Insert10", xid, _schema, offset, constant::MAX_EXTENT_SIZE);
         _verify_names(tree, 10);
 
         btree.reset();
@@ -261,7 +262,7 @@ namespace {
         uint64_t offset = btree->finalize();
 
         // now read the tree back and make sure there are the right number of entries and that they are in-order
-        auto tree = std::make_shared<BTree>(_base_dir / "InsertAll", 1, _schema, offset);
+        auto tree = std::make_shared<BTree>(_base_dir / "InsertAll", 1, _schema, offset, constant::MAX_EXTENT_SIZE);
         _verify_names(tree, 5000);
     }
 
@@ -275,7 +276,7 @@ namespace {
         uint64_t offset = btree->finalize();
 
         // get a pointer to the read-only btree
-        auto tree = std::make_shared<BTree>(_base_dir / "Search", 1, _schema, offset);
+        auto tree = std::make_shared<BTree>(_base_dir / "Search", 1, _schema, offset, constant::MAX_EXTENT_SIZE);
         auto begin_i = tree->begin();
         auto end_i = tree->end();
 
@@ -394,7 +395,7 @@ namespace {
         uint64_t offset_1 = btree->finalize();
 
         // check XID 1 for all entries
-        auto tree = std::make_shared<BTree>(_base_dir / "InsertAndRemove", 1, _schema, offset_1);
+        auto tree = std::make_shared<BTree>(_base_dir / "InsertAndRemove", 1, _schema, offset_1, constant::MAX_EXTENT_SIZE);
         _verify_names(tree, 5000);
 
         // move to the next XID
@@ -417,11 +418,11 @@ namespace {
         // now read the tree back and make sure there are the right number of entries and that they are in-order
 
         // check XID 1 for all entries
-        tree = std::make_shared<BTree>(_base_dir / "InsertAndRemove", 1, _schema, offset_1);
+        tree = std::make_shared<BTree>(_base_dir / "InsertAndRemove", 1, _schema, offset_1, constant::MAX_EXTENT_SIZE);
         _verify_names(tree, 5000);
 
         // check XID 2 for half the entries
-        tree = std::make_shared<BTree>(_base_dir / "InsertAndRemove", 2, _schema, offset_2);
+        tree = std::make_shared<BTree>(_base_dir / "InsertAndRemove", 2, _schema, offset_2, constant::MAX_EXTENT_SIZE);
         _verify_names(tree, 2500);
     }
 
@@ -436,7 +437,7 @@ namespace {
         uint64_t offset_1 = btree->finalize();
 
         // check XID 1 for all entries
-        auto tree = std::make_shared<BTree>(_base_dir / "InsertAndRemoveAll", 1, _schema, offset_1);
+        auto tree = std::make_shared<BTree>(_base_dir / "InsertAndRemoveAll", 1, _schema, offset_1, constant::MAX_EXTENT_SIZE);
         _verify_names(tree, 5000);
 
         // set the next XID
@@ -456,11 +457,11 @@ namespace {
         // now read the tree back and make sure there are the right number of entries and that they are in-order
 
         // check XID 1 for all entries
-        tree = std::make_shared<BTree>(_base_dir / "InsertAndRemoveAll", 1, _schema, offset_1);
+        tree = std::make_shared<BTree>(_base_dir / "InsertAndRemoveAll", 1, _schema, offset_1, constant::MAX_EXTENT_SIZE);
         _verify_names(tree, 5000);
 
         // check XID 2 for no entries
-        tree = std::make_shared<BTree>(_base_dir / "InsertAndRemoveAll", 2, _schema, offset_2);
+        tree = std::make_shared<BTree>(_base_dir / "InsertAndRemoveAll", 2, _schema, offset_2, constant::MAX_EXTENT_SIZE);
         _verify_names(tree, 0);
     }
 
@@ -476,7 +477,7 @@ namespace {
         // finalize the tree
         uint64_t offset = btree->finalize();
 
-        auto tree = std::make_shared<BTree>(_base_dir / "InsertMany", 1, _schema, offset);
+        auto tree = std::make_shared<BTree>(_base_dir / "InsertMany", 1, _schema, offset, constant::MAX_EXTENT_SIZE);
 
         // check for all entries
         _verify_names(tree, 50000);
@@ -512,7 +513,7 @@ namespace {
         tester.set_verify([this, btree]() {
             uint64_t offset = btree->finalize();
 
-            auto tree = std::make_shared<BTree>(_base_dir / "ThreadedInserts", 1, _schema, offset);
+            auto tree = std::make_shared<BTree>(_base_dir / "ThreadedInserts", 1, _schema, offset, constant::MAX_EXTENT_SIZE);
 
             // check for all entries
             _verify_unique_names(tree, 50000);
@@ -528,10 +529,10 @@ namespace {
         std::filesystem::path filename = _base_dir / "ThreadedInsertAndRemove";
 
         // get a mutable btree to perform inserts
-        auto btree1 = std::make_shared<MutableBTree>(filename, _keys, _schema, 1);
+        auto btree1 = std::make_shared<MutableBTree>(filename, _keys, _schema, 1, constant::MAX_EXTENT_SIZE);
         btree1->init_empty();
 
-        auto btree2 = std::make_shared<MutableBTree>(filename, _keys, _schema, 2);
+        auto btree2 = std::make_shared<MutableBTree>(filename, _keys, _schema, 2, constant::MAX_EXTENT_SIZE);
 
         // preapare 5k inserts
         csv::CSVReader reader("test_btree_simple.csv");
@@ -546,7 +547,7 @@ namespace {
         tester.set_verify([this, filename, btree1, btree2]() {
             uint64_t offset = btree1->finalize();
 
-            auto tree = std::make_shared<BTree>(filename, 1, _schema, offset);
+            auto tree = std::make_shared<BTree>(filename, 1, _schema, offset, constant::MAX_EXTENT_SIZE);
 
             // check for all entries
             _verify_unique_names(tree, 5000);
@@ -571,7 +572,7 @@ namespace {
         tester.set_verify([this, btree2]() {
             uint64_t offset = btree2->finalize();
 
-            auto tree = std::make_shared<BTree>(_base_dir / "ThreadedInsertAndRemove", 2, _schema, offset);
+            auto tree = std::make_shared<BTree>(_base_dir / "ThreadedInsertAndRemove", 2, _schema, offset, constant::MAX_EXTENT_SIZE);
 
             // check for all entries
             _verify_names(tree, 0);
@@ -608,13 +609,13 @@ namespace {
             uint64_t offset2 = btree2->finalize();
 
             // check the first file
-            auto tree = std::make_shared<BTree>(_base_dir / "ThreadedInsertsOne", 1, _schema, offset1);
+            auto tree = std::make_shared<BTree>(_base_dir / "ThreadedInsertsOne", 1, _schema, offset1, constant::MAX_EXTENT_SIZE);
 
             // check for all entries
             _verify_unique_names(tree, 50000);
 
             // check the second file
-            tree = std::make_shared<BTree>(_base_dir / "ThreadedInsertsTwo", 1, _schema, offset2);
+            tree = std::make_shared<BTree>(_base_dir / "ThreadedInsertsTwo", 1, _schema, offset2, constant::MAX_EXTENT_SIZE);
 
             // check for all entries
             _verify_unique_names(tree, 50000);

@@ -48,6 +48,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
                       uint64_t extent_id,
                       uint64_t access_xid,
                       uint64_t target_xid,
+                      uint64_t max_extent_size,
                       bool do_rollforward,
                       SafePagePtr::FlushCb flush_cb )
     {
@@ -64,12 +65,12 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
 
         // if the extent ID is UNKNOWN, then we will get an empty page for the file
         if (extent_id == constant::UNKNOWN_EXTENT) {
-            return {_page_cache.get(), _page_cache->get_empty(file, target_xid), std::move(flush_cb)};
+            return {_page_cache.get(), _page_cache->get_empty(file, target_xid, max_extent_size), std::move(flush_cb)};
         }
 
         // if target is the same as access, get the page and return it
         if (target_xid == access_xid) {
-            return {_page_cache.get(), _page_cache->get(file, extent_id, access_xid, target_xid), std::move(flush_cb)};
+            return {_page_cache.get(), _page_cache->get(file, extent_id, access_xid, target_xid, max_extent_size), std::move(flush_cb)};
         }
 
         // if the target is ahead of the access, but there is roll-forward request, then it means
@@ -78,7 +79,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
             // note: we know that the provided extent_id is valid at the access_xid, so we get the
             //       page at the target_xid using that original extent_id so that the caller can
             //       modify it from that point forward
-            return {_page_cache.get(), _page_cache->get(file, extent_id, access_xid, target_xid), std::move(flush_cb)};
+            return {_page_cache.get(), _page_cache->get(file, extent_id, access_xid, target_xid, max_extent_size), std::move(flush_cb)};
         }
 
         // note: from here forward, we know we are dealing with a roll-forward table data page
@@ -131,7 +132,8 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     StorageCache::PageCache::get(const std::filesystem::path &file,
                                  uint64_t extent_id,
                                  uint64_t access_xid,
-                                 uint64_t target_xid)
+                                 uint64_t target_xid,
+                                 uint64_t max_extent_size)
     {
         DCHECK(extent_id != constant::UNKNOWN_EXTENT);
 
@@ -154,18 +156,18 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
         //     the access XID and that the query nodes won't perform any roll-forward on their own.
 
         // note: not in the cache, need to create a new Page
-        return _create(file, extent_id, target_xid, { extent_id });
+        return _create(file, extent_id, target_xid, { extent_id }, max_extent_size);
     }
 
     StorageCache::PagePtr
     StorageCache::PageCache::get_empty(const std::filesystem::path &file,
-                                       uint64_t xid)
+                                       uint64_t xid, uint64_t max_extent_size)
     {
         LOG_DEBUG(LOG_CACHE, "{}, {}", file, xid);
         boost::unique_lock lock(_mutex);
 
         _make_page_space();
-        return std::make_shared<Page>(file, xid);
+        return std::make_shared<Page>(file, xid, max_extent_size);
     }
 
     void
@@ -432,12 +434,13 @@ StorageCache::PageCache::background_cleaner()
     StorageCache::PageCache::_create(const std::filesystem::path &file,
                                      uint64_t extent_id,
                                      uint64_t xid,
-                                     const std::vector<uint64_t> &offsets)
+                                     const std::vector<uint64_t> &offsets,
+                                     uint64_t max_extent_size)
     {
         LOG_DEBUG(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, xid, offsets.size());
 
         // create the page object with the given <file, extent_id> valid at the requested XID
-        auto page = std::make_shared<Page>(file, extent_id, xid, xid, offsets);
+        auto page = std::make_shared<Page>(file, extent_id, xid, xid, offsets, max_extent_size);
 
         // add it to the cache; note: use count starts at 1
         _cache[page->key()][xid] = page;
@@ -608,13 +611,15 @@ StorageCache::PageCache::background_cleaner()
                              uint64_t extent_id,
                              uint64_t start_xid,
                              uint64_t end_xid,
-                             const std::vector<uint64_t> &offsets)
+                             const std::vector<uint64_t> &offsets,
+                             uint64_t max_extent_size)
         : _use_count(1),
           _is_dirty(false),
           _file(file),
           _extent_id(extent_id),
           _start_xid(start_xid),
           _end_xid(end_xid),
+          _max_extent_size(max_extent_size),
           _is_flushing(false)
     {
         for (auto offset : offsets) {
@@ -623,13 +628,14 @@ StorageCache::PageCache::background_cleaner()
     }
 
     StorageCache::Page::Page(const std::filesystem::path &file,
-                             uint64_t xid)
+                             uint64_t xid, uint64_t max_extent_size)
         : _use_count(1),
           _is_dirty(false),
           _file(file),
           _extent_id(constant::UNKNOWN_EXTENT),
           _start_xid(xid),
           _end_xid(xid),
+          _max_extent_size(max_extent_size),
           _is_flushing(false)
     {
         // intentionally empty
@@ -1142,7 +1148,7 @@ StorageCache::PageCache::background_cleaner()
     {
         // if the size of the extent is below the threshold, or it can't be split because
         // it's a single row, then return immediately
-        if (extent->byte_count() < constant::MAX_EXTENT_SIZE || extent->row_count() == 1) {
+        if (extent->byte_count() < _max_extent_size || extent->row_count() == 1) {
             return;
         }
 
