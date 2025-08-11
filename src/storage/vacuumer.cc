@@ -556,12 +556,12 @@ Vacuumer::_get_partials_from_file(const std::filesystem::path &path) {
     return partials;
 }
 
+template <Vacuumer::CleanupOperation op>
 void
-Vacuumer::cleanup_db(uint64_t cleanup_db_id)
+Vacuumer::_cleanup_global_vacuum_file(uint64_t cleanup_db_id)
 {
-    std::unique_lock lock(_mutex);
-
-    /********************************** Global file and partials file cleanup ********************************************/
+    // Map: db_id -> last_committed_xid
+    std::map<uint64_t, uint64_t> committed_xid_map;
 
     auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
@@ -574,29 +574,57 @@ Vacuumer::cleanup_db(uint64_t cleanup_db_id)
     int start_offset = 0;
     auto response = handle->read(start_offset);
     auto file_f = _global_vacuum_schema->get_field("file");
-
     while (!response->data.empty()) {
 
-        // Get extent by extent, clear its partial file if its cleanup db_id
-        // otherwise skip everything and copy it to runfile
+        // Read through the extents and do the appropriate cleanup
         auto extent = std::make_shared<Extent>(response->data);
         CHECK_GT(extent->row_count(), 0);
 
-        auto db_id = 0;
-        for (auto &row : *extent) {
+        if (op == Vacuumer::CleanupOperation::RECOVERY) {
+            auto xid = extent->header().xid;
+            // Since different extent can have different DB records
+            // get the db_id from the file path in the extent record
+            auto i = extent->begin();
+            auto &&row = *i;
             auto file = file_f->get_text(&row);
-            db_id = _get_db_id_from_path(file);
-            if (db_id == cleanup_db_id) {
-                _cleanup_partial_files(file, std::filesystem::is_directory(file));
+            auto db_id = _get_db_id_from_path(file);
+
+            CHECK_GT(db_id, 0);
+
+            // Get the last_committed_xid from the cache
+            // else get from XID server and cache it
+            auto db_it = committed_xid_map.find(db_id);
+            uint64_t last_committed_xid;
+            if (db_it != committed_xid_map.end()) {
+                last_committed_xid = db_it->second;
+            } else {
+                last_committed_xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
+                committed_xid_map[db_id] = last_committed_xid;
             }
-        }
 
-        CHECK_GT(db_id, 0);
+            /* skip writing to runfile if xid > last_committed_xid */
+            if (xid <= last_committed_xid) {
+                // Flush to runfile
+                auto write_response = extent->async_flush(runhandle);
+                write_response.wait();
+            }
+        } else { /* op == Vacuumer::CleanupOperation::DB_CLEANUP */
+            auto db_id = 0;
+            for (auto &row : *extent) {
+                auto file = file_f->get_text(&row);
+                db_id = _get_db_id_from_path(file);
+                if (db_id == cleanup_db_id) {
+                    _cleanup_partial_files(file, std::filesystem::is_directory(file));
+                }
+            }
 
-        if (db_id != cleanup_db_id) {
-            // Flush to runfile
-            auto write_response = extent->async_flush(runhandle);
-            write_response.wait();
+            CHECK_GT(db_id, 0);
+
+            if (db_id != cleanup_db_id) {
+                // Flush to runfile
+                auto write_response = extent->async_flush(runhandle);
+                write_response.wait();
+            }
         }
 
         // Move to the next extent
@@ -609,9 +637,20 @@ Vacuumer::cleanup_db(uint64_t cleanup_db_id)
         std::filesystem::rename(global_vacuum_runfile, _global_vacuum_file);
     } else {
         // If runfile is empty, all the entries in the global vacuum file
-        // are from the cleaned up db, so lets drop the global file
+        // are not relevant, so lets drop the global file
         std::filesystem::remove(_global_vacuum_file);
     }
+}
+
+void
+Vacuumer::cleanup_db(uint64_t cleanup_db_id)
+{
+    std::unique_lock lock(_mutex);
+
+    /********************************** Global file and partials file cleanup ********************************************/
+
+    _cleanup_global_vacuum_file<CleanupOperation::DB_CLEANUP>(cleanup_db_id);
+
     /********************************** End of global and partial files cleanup *******************************************************/
 
     /********************************** Cleanup memory & partial files ****************************************************/
@@ -652,70 +691,7 @@ Vacuumer::cleanup_db(uint64_t cleanup_db_id)
 void
 Vacuumer::_recover_global_vacuum_file()
 {
-    // Map: db_id -> last_committed_xid
-    std::map<uint64_t, uint64_t> committed_xid_map;
-
-    auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
-    auto global_vacuum_runfile = _vacuum_data_base / fmt::format("{}{}", timestamp, VacuumConfig::GLOBAL_RUNFILE_SUFFIX);
-
-    // Read from global vacuum, write on runfile
-    auto handle = IOMgr::get_instance()->open(_global_vacuum_file, IOMgr::IO_MODE::READ, true);
-    auto runhandle = IOMgr::get_instance()->open(global_vacuum_runfile, IOMgr::IO_MODE::WRITE, true);
-
-    int start_offset = 0;
-    auto response = handle->read(start_offset);
-    auto file_f = _global_vacuum_schema->get_field("file");
-
-    while (!response->data.empty()) {
-
-        // Get extent by extent, get XID and check if its <= last_committed_xid
-        // if so, copy that to runfile
-        auto extent = std::make_shared<Extent>(response->data);
-        CHECK_GT(extent->row_count(), 0);
-
-        auto xid = extent->header().xid;
-
-        // Since different extent can have different DB records
-        // get the db_id from the file path in the extent record
-        auto i = extent->begin();
-        auto &&row = *i;
-        auto file = file_f->get_text(&row);
-        auto db_id = _get_db_id_from_path(file);
-
-        CHECK_GT(db_id, 0);
-
-        // Get the last_committed_xid from the cache
-        // else get from XID server and cache it
-        auto db_it = committed_xid_map.find(db_id);
-        uint64_t last_committed_xid;
-        if (db_it != committed_xid_map.end()) {
-            last_committed_xid = db_it->second;
-        } else {
-            last_committed_xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
-            committed_xid_map[db_id] = last_committed_xid;
-        }
-
-        /* skip writing to runfile if xid > last_committed_xid */
-        if (xid <= last_committed_xid) {
-            // Flush to runfile
-            auto write_response = extent->async_flush(runhandle);
-            write_response.wait();
-        }
-
-        // Move to the next extent
-        start_offset = response->next_offset;
-        response = handle->read(start_offset);
-    }
-
-    // Move runfile on to the global file
-    if (std::filesystem::exists(global_vacuum_runfile)) {
-        std::filesystem::rename(global_vacuum_runfile, _global_vacuum_file);
-    } else {
-        // If runfile is empty, all the entries in the global vacuum file
-        // are > committed_xid, so lets drop the global file
-        std::filesystem::remove(_global_vacuum_file);
-    }
+    _cleanup_global_vacuum_file<CleanupOperation::RECOVERY>();
 }
 
 void

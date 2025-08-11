@@ -142,6 +142,11 @@ private:
     };
 
     /**
+     * Enum to indicate the type of cleanup on the global vacuum file
+     */
+    enum class CleanupOperation { DB_CLEANUP, RECOVERY };
+
+    /**
      * Hole-punch block size
      */
     uint64_t _hole_punch_block_size;
@@ -345,5 +350,13 @@ private:
      *        be written to the disk
      */
     void _commit_expired_extents(uint64_t db_id, uint64_t committed_xid);
+
+    /**
+     * @brief Cleans up global vacuum file - db_cleanup or recovery till last committed XID
+     *
+     * @param cleanup_db_id ID to cleanup entries for db_cleanup
+     */
+    template <CleanupOperation op>
+    void _cleanup_global_vacuum_file(uint64_t cleanup_db_id=-1);
 };
 }
