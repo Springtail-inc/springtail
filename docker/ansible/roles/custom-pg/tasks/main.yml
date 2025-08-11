@@ -11,6 +11,8 @@
       - postgresql-common
       - libllvm19
       - ssl-cert
+      - locales-all
+      - sysstat
     state: present
 
 - name: Download Custom PG build from Custom URL
@@ -44,3 +46,11 @@
 - name: Enable Unix Socket for PostgresSQL
   ansible.builtin.shell: |
     chmod a+rwx /var/run/postgresql
+
+- name: Creates a Superuser for PostgresSQL
+  become: yes
+  become_user: postgres
+  ansible.builtin.shell: |
+    pg_ctlcluster 16 main start
+    psql -c "CREATE ROLE springtail WITH LOGIN SUPERUSER PASSWORD 'springtail';"
+    pg_ctlcluster 16 main stop

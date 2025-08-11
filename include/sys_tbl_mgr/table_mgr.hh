@@ -2,7 +2,7 @@
 
 #include <boost/thread.hpp>
 
-#include <common/singleton.hh>
+#include <common/init.hh>
 #include <sys_tbl_mgr/table.hh>
 
 namespace springtail {
@@ -27,7 +27,8 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base,
      * to the target XID as part of GC-1.  Then in GC-2 the system tables can be accessed via the
      * read-only Table interfaces using the target XID.
      */
-    class TableMgr : public Singleton<TableMgr> {
+    class TableMgr : public Singleton<TableMgr>
+    {
         friend class Singleton<TableMgr>;
     public:
         /**
@@ -85,6 +86,16 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base,
          */
         void finalize_metadata(uint64_t db_id, uint64_t xid);
 
+        /**
+         * @brief Get table data dir for a table_id
+         *
+         * @param db_id    Database ID
+         * @param table_id Table ID
+         * @param xid      XID for which table data file is located
+         * @return Table data dir path
+         */
+        std::filesystem::path get_table_data_dir(uint64_t db_id, uint64_t table_id, uint64_t xid);
+
     private:
         /**
          * @brief Construct a new TableMgr object
@@ -106,22 +117,4 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base,
         std::filesystem::path _table_base; ///< The base directory for individual table directories.
     };
 
-    class TableMgrRunner : public ServiceRunner {
-    public:
-        TableMgrRunner() : ServiceRunner("TableMgr") {}
-
-        ~TableMgrRunner() override = default;
-
-        bool start() override
-        {
-            TableMgr::get_instance();
-            return true;
-        }
-
-        void stop() override
-        {
-            TableMgr::shutdown();
-        }
-    };
-
-}
+} // springtail

@@ -26,15 +26,13 @@ namespace {
         static void SetUpTestSuite()
         {
             // make sure we are using the pg_shadow table for proxy user mgr
-            std::string overrides = "proxy.use_pg_shadow=true";
+            std::string overrides = std::format("proxy.use_pg_shadow=true;proxy.user_mgr_sleep_interval_secs={}",
+                                        _sleep_interval);
             ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
 
-            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-            runners.emplace();
-            runners->emplace_back(std::make_unique<pg_proxy::DatabaseMgrRunner>());
-            runners->emplace_back(std::make_unique<pg_proxy::UserMgrRunner>(_sleep_interval));
-            springtail_init_test(runners);
+            springtail_init_test();
 
+            pg_proxy::UserMgr::get_instance();
             std::string host, user, password;
             int port;
             Properties::get_primary_db_config(host, port, user, password);

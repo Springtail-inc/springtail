@@ -1,9 +1,6 @@
-#include <opentelemetry/metrics/meter.h>
-#include <opentelemetry/metrics/provider.h>
-
 #include <common/constants.hh>
 #include <common/coordinator.hh>
-#include <common/open_telemetry.hh>
+#include <common/logging.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <proto/pg_copy_table.pb.h>
 #include <redis/db_state_change.hh>
@@ -13,6 +10,7 @@
 #include <xid_mgr/xid_mgr_server.hh>
 
 #include <pg_log_mgr/committer.hh>
+#include <storage/vacuumer.hh>
 
 namespace springtail::committer {
 
@@ -30,7 +28,7 @@ namespace springtail::committer {
     {
         // perform cleanup for any Committer threads in a previous run
         cleanup();
-        
+
         // use the same worker count for Indexer
         _indexer = std::make_unique<Indexer>(_indexer_worker_count, _index_reconciliation_queue_mgr);
 
@@ -86,7 +84,7 @@ namespace springtail::committer {
                 emplace_result.first->second = timestamp;
             }
 
-            auto token_1 = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
+            auto token_1 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
 
             // handle a TABLE_SYNC_START
             if (result->type() == XidReady::Type::TABLE_SYNC_START) {
@@ -107,7 +105,7 @@ namespace springtail::committer {
                 completed_xid = itr->second;
             }
 
-            auto token_2 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(completed_xid)}});
+            auto token_2 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(completed_xid)}});
             LOG_INFO("Last completed XID: {}@{}", db_id, completed_xid);
 
             // handle a TABLE_SYNC_COMMIT
@@ -122,8 +120,9 @@ namespace springtail::committer {
                 // note: we used to bundle the commit onto the previous XID, but now the XID is guaranteed to be in-order
                 completed_xid = result->swap().xid();
                 nlohmann::json ddls = result->swap().ddls();
+                auto swapped_tids = result->swap().tids();
 
-                auto token_3 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(completed_xid)}});
+                auto token_3 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(completed_xid)}});
 
                 // pre-commit the DDLs in case there's a failure
                 _redis_ddl.precommit_ddl(db_id, completed_xid, ddls);
@@ -141,6 +140,14 @@ namespace springtail::committer {
                     if (_has_ddl_precommit) {
                         _redis_ddl.commit_ddl(db_id, completed_xid);
                         _has_ddl_precommit = false;
+                    }
+
+                    for (const auto swapped_tid: swapped_tids) {
+                        // Notify vacuumer to expire old table snapshot
+                        // Send completed_xid - 1 to get the previous old snapshot dir
+                        // and then expire that at the completed_xid
+                        auto swapped_table_old_dir = TableMgr::get_instance()->get_table_data_dir(db_id, swapped_tid, completed_xid - 1);
+                        Vacuumer::get_instance()->expire_snapshot(db_id, swapped_table_old_dir, completed_xid);
                     }
                 } else {
                     LOG_DEBUG(LOG_COMMITTER, "Record DDL changes db {} xid {}", db_id, completed_xid);
@@ -172,7 +179,7 @@ namespace springtail::committer {
                 xid = result->xact().xid();
                 pg_xid = result->xact().pg_xid();
             }
-            auto token_4 = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(xid)}});
+            auto token_4 = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(xid)}});
             LOG_INFO("Process XID: {}@{}", db_id, xid);
             assert(xid > completed_xid);
 
@@ -252,6 +259,19 @@ namespace springtail::committer {
                 //       index root offsets are written to disk
                 sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
 
+                // Check and notify vacuumer about dropped tables
+                if (!completed_ddls.is_null()) {
+                    _expire_table_drops(db_id, completed_ddls, xid);
+                }
+
+                // Check and notify vacuumer about dropped indexes
+                if (!index_requests.empty()) {
+                    _expire_index_drops(db_id, index_requests, xid);
+                }
+
+                // Sync expired extents on the XID with vacuum
+                Vacuumer::get_instance()->commit_expired_extents(db_id, xid);
+
                 // commit the completed XID
                 xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, pg_xid, xid, !completed_ddls.is_null());
 
@@ -261,6 +281,7 @@ namespace springtail::committer {
                     _redis_ddl.commit_ddl(db_id, xid);
                     _has_ddl_precommit = false;
                 }
+
             } else {
                 // don't commit, but record any DDL changes to the history
                 xid_mgr::XidMgrServer::get_instance()->record_mapping(db_id, pg_xid, xid, !completed_ddls.is_null());
@@ -339,6 +360,36 @@ namespace springtail::committer {
     }
 
     void
+    Committer::_expire_index_drops(uint64_t db_id, std::list<proto::IndexProcessRequest>& index_requests, uint64_t committed_xid)
+    {
+        for (auto const& index_request: index_requests) {
+            auto action = index_request.action();
+            if (action == "drop_index") {
+                auto tid = index_request.index().table_id();
+                auto index_id = index_request.index().id();
+                auto _dropped_index_table_dir = TableMgr::get_instance()->get_table_data_dir(db_id, tid, committed_xid - 1);
+                auto index_file_path = _dropped_index_table_dir / fmt::format(constant::INDEX_FILE, index_id);
+                Vacuumer::get_instance()->expire_snapshot(db_id, index_file_path, committed_xid);
+            }
+        }
+    }
+
+    void
+    Committer::_expire_table_drops(uint64_t db_id, const nlohmann::json &completed_ddls, uint64_t committed_xid)
+    {
+        for (auto& ddl: completed_ddls) {
+            if (ddl.contains("tid") && ddl.contains("action")) {
+                uint64_t tid = ddl["tid"].get<uint64_t>();
+                auto action = ddl["action"].get<std::string>();
+                if (action == "drop") {
+                    auto dropped_table_dir = TableMgr::get_instance()->get_table_data_dir(db_id, tid, committed_xid - 1);
+                    Vacuumer::get_instance()->expire_snapshot(db_id, dropped_table_dir, committed_xid);
+                }
+            }
+        }
+    }
+
+    void
     Committer::_invalidate_systbl_cache(uint64_t db, const nlohmann::json &completed_ddls)
     {
         auto client = sys_tbl_mgr::Client::get_instance();
@@ -412,6 +463,15 @@ namespace springtail::committer {
 
         // construct the mutable table object
         auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, xid, true);
+        if (!sys_tbl_mgr::Client::get_instance()->exists(db_id, tid, XidLsn{xid})) {
+            // This could happen if the table is dropped in the same transaction
+            // BEGIN/INSERT/DROP/COMMIT
+            // TODO: another way to handle the case would be to drop the table mutation
+            // records from the Batch object in the log reader. Marking this as TODO
+            // just to keep the question open for now.
+            LOG_DEBUG(LOG_COMMITTER, "The table doesn't exists: {}", tid);
+            return;
+        }
 
         // retrieve extents and apply the mutations to them
         uint64_t extent_cursor = 0;
@@ -462,7 +522,7 @@ namespace springtail::committer {
             // log how long it took to process this table
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - min_commit_ts->to_system_time());
-            open_telemetry::OpenTelemetry::record_histogram(PG_LOG_MGR_BTREE_LATENCIES, duration.count());
+            open_telemetry::OpenTelemetry::get_instance()->record_histogram(PG_LOG_MGR_BTREE_LATENCIES, duration.count());
             LOG_INFO("Processed table {} in {} milliseconds", tid, duration.count());
         }
         // update the system table roots

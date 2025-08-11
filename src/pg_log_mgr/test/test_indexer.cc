@@ -4,6 +4,7 @@
 #include <common/init.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
+#include <common/filesystem.hh>
 
 #include <pg_log_mgr/index_reconciliation_queue_manager.hh>
 #include <pg_log_mgr/indexer.hh>
@@ -16,6 +17,8 @@
 
 #include <test/services.hh>
 #include <test/ddl_helpers.hh>
+#include <storage/vacuumer.hh>
+#include <xid_mgr/xid_mgr_server.hh>
 
 using namespace springtail;
 using namespace springtail::committer;
@@ -32,13 +35,8 @@ namespace {
         // Called once per testsuite.  Create a table and populate it with data
         static void SetUpTestSuite()
         {
-            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-            runners.emplace();
-            runners->emplace_back(std::make_unique<IOMgrRunner>());
-
-            auto service_runners = test::get_services(true, true, true);
-            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
-            springtail_init_test(runners);
+            springtail_init_test();
+            test::start_services(true, true, true);
 
             _db_id = 1;
             _tid = 1000;
@@ -311,6 +309,56 @@ namespace {
                 [&](auto const& v) { return index_id1 == v.id; });
         ASSERT_TRUE(it != meta->indexes.end());
         ASSERT_EQ(it->state, 1);
+    }
+
+    TEST_F(Indexer_Test, Test_VacuumSecondaryIndex)
+    {
+        uint64_t table_id = _tid++;
+        uint64_t index_id = _secondary_index_id + 7;
+        uint64_t table_xid = access_xid++;
+        uint64_t index_xid = access_xid++;
+        uint64_t data_xid = access_xid++;
+
+        // Disable vacuum run
+        Vacuumer::get_instance()->disable_vacuum_run();
+
+        // Create table
+        create_table(_db_id, table_id, table_xid, "test_indexer_table6", _columns);
+
+        // Create index
+        _create_index(table_id, index_id, index_xid, "idx_test_indexer_6");
+
+        // Populate table
+        _populate_table_with_data(table_id, table_xid, data_xid, 30000, 5);
+
+        // Trigger index reconcilation at reconcile_xid
+        uint64_t reconcile_xid = access_xid++;
+        _process_index_and_validate(index_id, index_xid, reconcile_xid);
+
+        // Get the table file paths
+        auto table_dir = TableMgr::get_instance()->get_table_data_dir(_db_id, table_id, access_xid);
+
+        uint64_t data_xid2 = access_xid++;
+        _populate_table_with_data(table_id, index_xid, data_xid2, 1000, 5, 300001);
+
+        Vacuumer::get_instance()->commit_expired_extents(_db_id, constant::LATEST_XID);
+
+        xid_mgr::XidMgrServer::get_instance()->commit_xid(_db_id, 0, data_xid2, true);
+
+        // Get the blocks count pre-vacuum
+        auto index_file = table_dir / fmt::format(constant::INDEX_FILE, index_id);
+        auto size_pre_vacuum = fs::get_block_count(index_file);
+
+        // Set global threshold as small and run vacuum
+        Vacuumer::get_instance()->set_global_vacuum_threshold(10);
+        Vacuumer::get_instance()->run_vacuum_once();
+
+        // Get the blocks count post-vacuum
+        auto size_post_vacuum = fs::get_block_count(index_file);
+
+        // Some blocks should be vacuumed
+        ASSERT_GT(size_pre_vacuum, size_post_vacuum);
+
     }
 
 } // namespace

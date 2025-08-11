@@ -60,7 +60,14 @@
     "data_cache_size": 16384,
     "page_cache_size": 16384,
     "btree_cache_size": 512,
-    "max_extent_per_page": 16
+    "max_extent_per_page": 16,
+    "vacuum_config": {
+        "enabled": true,
+        "vacuum_dir": "vacuum",
+        "global_file_size_threshold": 1048576,
+        "hole_punch_block_size": 32768
+    },
+    "metrics_update_freq_sec": 10
   },
   "log_mgr": {
     "replication_log_path": "repl_logs",
@@ -94,7 +101,8 @@
     "use_pg_shadow": false,
     "pool_size_limit": 10,
     "pool_timeout_limit": 5,
-    "pool_expiration_interval_secs": 300
+    "pool_expiration_interval_secs": 300,
+    "user_mgr_sleep_interval_secs": 15
   },
   "otel": {
     "enabled": true,

@@ -1,7 +1,10 @@
 #pragma once
 
 #include <libpq-fe.h>
+#include <memory>
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace springtail {
 
@@ -215,6 +218,7 @@ namespace springtail {
          * @param db_pass password
          * @param db_port port
          * @param replication is connection for replication streaming (true/false)
+         * @param options extra options that can be passed to postgres connection
          * @return libpq connection
          */
         void connect(const std::string &db_host,
@@ -222,7 +226,8 @@ namespace springtail {
                      const std::string &db_user,
                      const std::string &db_pass,
                      const int db_port,
-                     const bool replication = false);
+                     const bool replication = false,
+                     const std::optional<std::vector<std::pair<std::string, std::string>>> &options = std::nullopt);
 
         /**
          * @brief Disconnect connection, ignore errors

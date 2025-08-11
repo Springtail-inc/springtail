@@ -1,8 +1,11 @@
 #include <storage/cache.hh>
+#include <storage/vacuumer.hh>
 
 #include <absl/log/log.h>
 #include <absl/log/check.h>
 #include <functional>
+#include <memory>
+#include <unordered_map>
 
 #include <common/json.hh>
 #include <common/open_telemetry.hh>
@@ -18,35 +21,15 @@ namespace springtail {
 /* Thread-local variable to identify the background flushing thread. */
 thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
 
-    /* static member initialization must happen outside of class */
-    StorageCache* StorageCache::_instance = {nullptr};
-    boost::mutex StorageCache::_instance_mutex;
-
-    StorageCache *
-    StorageCache::get_instance()
+    StorageCache::~StorageCache()
     {
-        boost::unique_lock lock(_instance_mutex);
-
-        if (_instance == nullptr) {
-            _instance = new StorageCache();
-        }
-
-        return _instance;
+        LOG_INFO("StorageCache delete");
     }
 
-    void
-    StorageCache::shutdown()
+    StorageCache::StorageCache() : Singleton<StorageCache>(ServiceId::StorageCacheId)
     {
-        boost::unique_lock lock(_instance_mutex);
+        LOG_INFO("StorageCache create");
 
-        if (_instance != nullptr) {
-            delete _instance;
-            _instance = nullptr;
-        }
-    }
-
-    StorageCache::StorageCache()
-    {
         // get the cache size
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
         uint64_t data_size = Json::get_or<uint64_t>(json, "data_cache_size", 16384);
@@ -54,6 +37,10 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
 
         _data_cache = std::make_shared<DataCache>(data_size);
         _page_cache = std::make_shared<PageCache>(page_size);
+
+        int metrics_update_freq = Json::get_or<int>(json, "metrics_update_freq_sec", 10);
+        _metric_counters = std::make_unique<MetricCounters>(
+                std::unordered_map<std::string, std::string>{}, metrics_update_freq);
     }
 
     StorageCache::SafePagePtr
@@ -64,8 +51,6 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
                       bool do_rollforward,
                       SafePagePtr::FlushCb flush_cb )
     {
-        //TODO: SPR-796
-        //auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(target_xid)}});
         LOG_DEBUG(LOG_CACHE, "GET file {} eid {} xid {} txid {}",
                             file, extent_id, access_xid, target_xid);
 
@@ -75,8 +60,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
             target_xid = access_xid;
         }
 
-        //TODO: SPR-796
-        //open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_GET_CALLS);
+        _metric_counters->increment<metrics::StorageCache::GetCalls>();
 
         // if the extent ID is UNKNOWN, then we will get an empty page for the file
         if (extent_id == constant::UNKNOWN_EXTENT) {
@@ -131,7 +115,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     StorageCache::flush(const std::filesystem::path &file)
     {
         auto end_offset = _page_cache->flush_file(file);
-        open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_FLUSH_CALLS);
+        _metric_counters->increment<metrics::StorageCache::FlushCalls>();
         return end_offset;
     }
 
@@ -139,7 +123,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     StorageCache::drop_for_truncate(const std::filesystem::path &file)
     {
         _page_cache->drop_file(file);
-        open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_DROP_CALLS);
+        _metric_counters->increment<metrics::StorageCache::DropCalls>();
     }
 
 
@@ -151,9 +135,6 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     {
         DCHECK(extent_id != constant::UNKNOWN_EXTENT);
 
-        //TODO: SPR-796
-        //auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(target_xid)}});
-
         LOG_DEBUG(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, access_xid, target_xid);
 
         boost::unique_lock lock(_mutex);
@@ -161,14 +142,12 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
         // check if the page already exists in the cache for the given target XID
         PagePtr page = _try_get(file, extent_id, target_xid);
         if (page != nullptr) {
-            //TODO: SPR-796
-            //open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_GET_CALLS);
+            StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::GetCalls>();
             LOG_DEBUG(LOG_CACHE, "Found in cache");
             return page;
         }
 
-        //TODO: SPR-796
-        //open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_GET_CACHE_MISSES);
+        StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::CacheMisses>();
 
         // XXX eventually use the access_xid and extent_id to get the proper set of extents to start
         //     from; for now we assume that the single extent_id *is* the full list of extents for
@@ -193,14 +172,10 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     StorageCache::PageCache::put(PagePtr page,
                                  std::function<bool(std::shared_ptr<Page>)> flush_callback)
     {
-        //TODO: SPR-796
-        //auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(0)}, {"xid", std::to_string(page->_end_xid)}});
-
         LOG_DEBUG(LOG_CACHE, "PUT file {} eid {} s_xid {} e_xid {}",
                             page->_file, page->_extent_id, page->_start_xid, page->_end_xid);
 
-        //TODO: SPR-796
-        //open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_PUT_CALLS);
+        StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::PutCalls>();
 
         boost::unique_lock lock(_mutex);
 
@@ -245,7 +220,8 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     {
         boost::unique_lock lock(_mutex);
 
-        open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_FLUSH_CALLS);
+        StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::FlushCalls>();
+
         const auto start_time = std::chrono::system_clock::now();
 
         //Get the end offset of data file for the table
@@ -328,7 +304,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
         }
 
         auto duration = std::chrono::system_clock::now() - start_time;
-        open_telemetry::OpenTelemetry::record_histogram(STORAGE_CACHE_FLUSH_LATENCIES,
+        open_telemetry::OpenTelemetry::get_instance()->record_histogram(STORAGE_CACHE_FLUSH_LATENCIES,
             std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
 
         // flush list for the file must be empty, so remove it
@@ -343,7 +319,8 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
     {
         boost::unique_lock lock(_mutex);
 
-        open_telemetry::OpenTelemetry::increment_counter(STORAGE_CACHE_DROP_CALLS);
+        StorageCache::get_instance()->_metric_counters->increment<metrics::StorageCache::DropCalls>();
+
         const auto start_time = std::chrono::system_clock::now();
 
         // go through the dirty page list for the file
@@ -387,7 +364,7 @@ thread_local bool StorageCache::PageCache::_is_cleaner_thread = false;
         }
 
         const auto duration = std::chrono::system_clock::now() - start_time;
-        open_telemetry::OpenTelemetry::record_histogram(STORAGE_CACHE_DROP_LATENCIES,
+        open_telemetry::OpenTelemetry::get_instance()->record_histogram(STORAGE_CACHE_DROP_LATENCIES,
             std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
 
         // flush list for the file must be empty, so remove it
@@ -823,16 +800,9 @@ StorageCache::PageCache::background_cleaner()
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
-        // if the page is empty, create an empty extent to back it
-        if (_extents.empty()) {
-            // create an empty extent
-            ExtentHeader header(ExtentType(), _end_xid, schema->row_size(), schema->field_types());
-            auto extent = SafeExtent(_file, std::move(header));
-            _extents.emplace_back( extent.get_ref() );
-
-            // insert the tuple into the extent
-            auto row = (*extent)->append();
-            MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
+        // if the page is empty, do an _append() which handles the empty extent case
+        if (_empty()) {
+            _append(tuple, schema);
             return;
         }
 
@@ -882,6 +852,14 @@ StorageCache::PageCache::background_cleaner()
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
+        // perform the internal append
+        _append(tuple, schema);
+    }
+
+    void
+    StorageCache::Page::_append(TuplePtr tuple,
+                                ExtentSchemaPtr schema)
+    {
         // if the page is empty, create an empty extent to back it
         if (_extents.empty()) {
             // create an empty extent
@@ -1492,8 +1470,6 @@ StorageCache::PageCache::background_cleaner()
         CacheExtentPtr extent = nullptr;
 
         while (extent == nullptr) {
-
-
             // search for the requested extent
             const auto cache_i = _clean_cache.find(key);
             if (cache_i != _clean_cache.end()) {
@@ -1553,6 +1529,9 @@ StorageCache::PageCache::background_cleaner()
         extent->_state = CacheExtent::State::FLUSHING;
         extent->_flush_cv = std::make_shared<boost::condition_variable>();
 
+        // On-disk size of the originating extent
+        uint64_t prev_extent_size = extent->_extent_size;
+
         // perform the flush
         {
             boost::unique_lock lock(_mutex, boost::adopt_lock);
@@ -1561,10 +1540,18 @@ StorageCache::PageCache::background_cleaner()
             auto handle = IOMgr::get_instance()->open(extent->_file, IOMgr::IO_MODE::APPEND, true);
             auto response = extent->async_flush(handle);
 
+            // notify the vacuumer of the now-expired extent
+            if (extent->header().prev_offset != constant::UNKNOWN_EXTENT) {
+                Vacuumer::get_instance()->expire_extent(extent->_file, extent->header().prev_offset,
+                                                        prev_extent_size, extent->header().xid);
+            }
+
             // XXX we could do this asynchronously and return a future that completes when the extent ID
             //     becomes available... should be safe to do so since we are already putting the extent
             //     into an exclusive FLUSHING state
-            extent->_extent_id = response.get()->offset;
+            auto&& flush_response = response.get();
+            extent->_extent_id = flush_response->offset;
+            extent->_extent_size = flush_response->next_offset - flush_response->offset;
 
             lock.lock();
             lock.release();
@@ -1689,7 +1676,8 @@ StorageCache::PageCache::background_cleaner()
         // read the extent
         auto handle = IOMgr::get_instance()->open(file, IOMgr::READ, true);
         auto response = handle->read(extent_id);
-        auto extent = std::make_shared<CacheExtent>(response->data, file, extent_id);
+        auto extent = std::make_shared<CacheExtent>(response->data, file, extent_id,
+                                                    response->next_offset - response->offset);
 
         // reacquire the lock once IO complete
         lock.lock();
@@ -1769,7 +1757,7 @@ StorageCache::PageCache::background_cleaner()
         // extract the extent from the clean cache into the dirty cache
         return _extract(extent);
     }
-    
+
     StorageCache::SafeExtent::SafeExtent(const std::filesystem::path &file,
             const ExtentRef &ref,
             bool mark_dirty)

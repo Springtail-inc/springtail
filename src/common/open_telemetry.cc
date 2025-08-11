@@ -94,7 +94,7 @@ OpenTelemetry::SpdlogExporter::_log_span(const opentelemetry::sdk::trace::SpanDa
         log_str += fmt::format("\n      Attribute - {}: {}", key, value_str);
     }
 
-    OpenTelemetry::get_context_variables([&log_str](opentelemetry::nostd::string_view key, opentelemetry::nostd::string_view value) {
+    OpenTelemetry::get_instance()->get_context_variables([&log_str](opentelemetry::nostd::string_view key, opentelemetry::nostd::string_view value) {
         log_str += fmt::format("\n      Attribute - {}: {}", std::string(key), std::string(value));
         return true;
     });
@@ -371,14 +371,14 @@ OpenTelemetry::_internal_shutdown()
 }
 
 opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer>
-OpenTelemetry::_tracer(const std::string_view& name)
+OpenTelemetry::tracer(const std::string_view& name)
 {
     auto provider = opentelemetry::trace::Provider::GetTracerProvider();
     return provider->GetTracer(name.data());
 }
 
 void
-OpenTelemetry::_increment_counter(std::string_view name)
+OpenTelemetry::increment_counter(std::string_view name, int delta)
 {
     if (!_otel_enabled) {
         return;
@@ -392,14 +392,14 @@ OpenTelemetry::_increment_counter(std::string_view name)
     auto attributes_view = opentelemetry::common::KeyValueIterableView<decltype(attributes)>{attributes};
     auto counter = _counters[name];
     if(counter){
-        counter->Add(1, attributes_view, opentelemetry::context::RuntimeContext::GetCurrent());
+        counter->Add(delta, attributes_view, opentelemetry::context::RuntimeContext::GetCurrent());
     } else {
         LOG_ERROR("Counter '{}' not found", name);
     }
 }
 
 void
-OpenTelemetry::_record_histogram(std::string_view name, double value)
+OpenTelemetry::record_histogram(std::string_view name, double value)
 {
     if (!_otel_enabled) {
         return;

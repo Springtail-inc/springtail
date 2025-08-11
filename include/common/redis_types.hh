@@ -138,4 +138,25 @@ namespace springtail::redis {
      * key: <table_oid>, value: <json>
      */
     static constexpr char HASH_INVALID_TABLES[] = "{}:hash:invalid_tables";
+
+    /**
+     * Hash of min XIDs per fdw:db_id for a given db_instance_id
+     * args: <db_instance_id>
+     * key: <fdw_id>:<db_id>, value: <min xid>
+     */
+    static constexpr char HASH_MIN_XID[] = "{}:fdw_min_xids";
+
+    /**
+     * Set of new FDW processes that have not started quering the database yet
+     * args: <db_instance_id>
+     * key: <fdw_id>:<db_id>:<pid>
+     */
+    static constexpr char SET_FDW_PID[] = "{}:fdw_pids";
+
+    /**
+     * Set holding index XIDs for each db id
+     * args: <db_instance_id>, <db_id>
+     * value: xid
+     */
+    static constexpr char SET_DB_INDEX_XIDS[] = "{}:set:db_index_xids:{}";
 }

@@ -28,13 +28,8 @@ namespace {
         // Called once per testsuite.  Create a table and populate it with data
         static void SetUpTestSuite()
         {
-            auto service_runners = test::get_services(true, true, true);
-            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-            runners.emplace();
-            runners->emplace_back(std::make_unique<IOMgrRunner>());
-            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
-
-            springtail_init_test(runners);
+            springtail_init_test();
+            test::start_services(true, true, true);
 
             PgFdwMgr::fdw_init(nullptr, false);
 
@@ -280,22 +275,27 @@ namespace {
                 state->attr_map.try_emplace(column->attnum, column->attnum);
             }
 
-            if (sortgroup)  {
-                SpringtailPlanState plan;
-                plan.pg_fdw_state = state;
-                // this should setup the sortgroup index
-                mgr->fdw_can_sort(&plan, sortgroup, true);
-                index_id = state->sortgroup_index->id;
-            }
+            SpringtailPlanState plan;
+            plan.pg_fdw_state = state;
+            plan.qual_list = qual_list;
+
+            // this should setup the sortgroup index
+            mgr->fdw_can_sort(&plan, sortgroup, true);
 
             // begin the scan
             mgr->fdw_begin_scan(state, _columns.size(), _attrs, _target_list, qual_list);
+
+            if (state->sortgroup_index.has_value()) {
+                ASSERT_EQ(state->sortgroup_index->id, state->index->id);
+                index_id = state->sortgroup_index->id;
+            }
 
             if (index_id == std::numeric_limits<uint32_t>::max()) {
                 // a full scan is expected
                 ASSERT_EQ(state->index.has_value(), false);
             } else {
                 // the index expected to be used for the scan
+                ASSERT_EQ(state->index.has_value(), true);
                 ASSERT_EQ(state->index->id, index_id);
             }
 
@@ -500,14 +500,17 @@ namespace {
         std::vector<std::vector<int32_t>> filtered_data = _filter_data(qual_list);
         _run_scan(qual_list, filtered_data, _secondary_index_id);
 
-        // col5 = 3, should do a full scan
-        qual_list = _add_qual(_columns[4].position, EQUALS, 3);
-        _run_scan(qual_list, _data, std::numeric_limits<uint32_t>::max());
-
-        // col5 = 3, should do a full scan but sorted by col4
-        qual_list = _add_qual(_columns[4].position, EQUALS, 3);
         auto sortgroup = _add_sortgroup(_columns[3].position, false);
         auto sorted_data = _data;
+        //sort by col4
+        std::ranges::sort(sorted_data, [](auto const& a, auto const& b)
+                {return a[3] < b[3];});
+        _run_scan(nullptr, sorted_data, std::numeric_limits<uint32_t>::max(), sortgroup);
+
+        // add a qual that doesn't have an index, it should use the sortgroup again
+        qual_list = _add_qual(_columns[4].position, EQUALS, 3);
+        sortgroup = _add_sortgroup(_columns[3].position, false);
+        sorted_data = _data;
         //sort by col4
         std::ranges::sort(sorted_data, [](auto const& a, auto const& b)
                 {return a[3] < b[3];});
@@ -516,14 +519,14 @@ namespace {
         sortgroup = _add_sortgroup(_columns[3].position, true);
         std::ranges::sort(sorted_data, [](auto const& a, auto const& b)
                 {return a[3] > b[3];});
-        _run_scan(qual_list, sorted_data, std::numeric_limits<uint32_t>::max(), sortgroup);
+        _run_scan(nullptr, sorted_data, std::numeric_limits<uint32_t>::max(), sortgroup);
 
-        // drop the secondary index, and verify full scan
-        // XXX @eg to figure out a fix for this -- currently breaks the Test_SecondaryAndQuals that
-        //     runs after it
-        // _drop_index(_db_id, _secondary_index_id, _table_xid);
-        // qual_list = _add_qual(_columns[3].position, EQUALS, 3);
-        // _run_scan(qual_list, _data, std::numeric_limits<uint32_t>::max());
+        // now add a qual and sortgroup, we expect it to pick
+        // the qual index (col4 = 3) not the sortgroup
+        qual_list = _add_qual(_columns[3].position, EQUALS, 3);
+        filtered_data = _filter_data(qual_list);
+        sortgroup = _add_sortgroup(_columns[3].position, true);
+        _run_scan(qual_list, filtered_data, _secondary_index_id, sortgroup);
     }
 
     TEST_F(FDWWhere_Test, Test_SecondaryAndQuals)

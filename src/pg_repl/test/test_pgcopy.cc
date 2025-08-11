@@ -25,14 +25,8 @@ namespace {
         std::filesystem::path _base_dir;
 
         static void SetUpTestSuite() {
-            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-            runners.emplace();
-            runners->emplace_back(std::make_unique<IOMgrRunner>());
-
-            auto service_runners = test::get_services(true, true, true);
-            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
-
-            springtail_init_test(runners);
+            springtail_init_test();
+            test::start_services(true, true, true);
 
             // create the public namespace
             auto client = sys_tbl_mgr::Client::get_instance();

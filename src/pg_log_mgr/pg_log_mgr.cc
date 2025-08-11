@@ -261,7 +261,6 @@ namespace springtail::pg_log_mgr {
             Coordinator::mark_alive(keep_alive);
 
             // block on index reconciliation queue w/timeout for shutdown
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Waiting for index reconciliation request");
             if (auto request = _index_reconciliation_queue_mgr->pop(_db_id, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT)) {
                 if (request != nullptr) {
                     //Pass it to log reader to notify committer
@@ -289,7 +288,7 @@ namespace springtail::pg_log_mgr {
         if (_internal_state.is(STATE_STARTUP_SYNC)) {
             // Create the namespaces before starting the copy thread
             auto xid = _pg_log_reader->get_next_xid();
-            auto token_init = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(_db_id)}, {"xid", std::to_string(xid)}});
+            auto token_init = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(_db_id)}, {"xid", std::to_string(xid)}});
 
             PgCopyTable::create_namespaces(_db_id, xid);
             PgCopyTable::create_usertypes(_db_id, xid);
@@ -302,7 +301,6 @@ namespace springtail::pg_log_mgr {
             std::set<uint32_t> table_ids;
 
             // block on redis table sync queue w/timeout for shutdown
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Waiting for table sync queue");
             auto request = _redis_sync_queue.pop(REDIS_WORKER_ID, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (request == nullptr) {
                 continue; // timeout, check for shutdown
@@ -322,7 +320,7 @@ namespace springtail::pg_log_mgr {
 
             CHECK(!table_ids.empty());
 
-            auto token_commit_worker = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(_db_id)}});
+            auto token_commit_worker = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(_db_id)}});
 
             // ensure we've stopped committing
             // note: there's a race condition that could result in this being called multiple times
@@ -370,7 +368,7 @@ namespace springtail::pg_log_mgr {
         std::vector<PgCopyResultPtr> res;
         auto xid = _pg_log_reader->get_next_xid();
 
-        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(xid)}});
+        auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(xid)}});
         LOG_DEBUG(LOG_PG_LOG_MGR, "Copying tables; target xid={}", xid);
         if (table_ids.has_value()) {
             res = PgCopyTable::copy_tables(_db_id, xid, table_ids.value());
@@ -678,7 +676,6 @@ namespace springtail::pg_log_mgr {
             // get log entry from queue
             PgLogQueueEntryPtr log_entry = this->_logger_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (log_entry == nullptr) {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Timeout waiting for log entry");
                 continue;
             }
 

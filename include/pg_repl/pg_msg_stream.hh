@@ -64,16 +64,17 @@ namespace springtail {
         /** Filter for all message types */
         const std::vector<char> ALL_MESSAGES = {'B', 'C', 'R', 'I', 'U', 'D', 'T',
                                                 'O', 'M', 'Y', 'S', 'E', 'c', 'A'};
-
-        PgMsgStreamReader() = default;
-
+        explicit PgMsgStreamReader(uint64_t db_id);
+        PgMsgStreamReader(const PgMsgStreamReader&) = delete;
+        PgMsgStreamReader& operator=(const PgMsgStreamReader&) = delete;
         /**
          * @brief Construct a new Pg Msg Stream Reader object
+         * @param db_id The database id
          * @param start_file file to start reading from
          * @param start_offset offset to start reading from (0 = beginning of file)
          * @param end_offset offset to stop reading at (-1 = end of file)
          */
-        PgMsgStreamReader(const std::filesystem::path &start_file,
+        PgMsgStreamReader(std::optional<uint64_t> db_id, const std::filesystem::path &start_file,
                           uint64_t start_offset=0, uint64_t end_offset=-1);
 
         /**
@@ -135,9 +136,12 @@ namespace springtail {
          * @param truncate if true truncate file to end of last message if eof reached prematurely
          * @return uint64_t end LSN of last message
          */
-        static uint64_t scan_log(const std::filesystem::path &file, bool truncate=false);
+        static uint64_t scan_log(uint64_t db_id,
+                const std::filesystem::path &file, 
+                bool truncate=false);
 
         void set_streaming() { _streaming = true; }
+
     protected:
         // Proto V1; message lengths if fixed length; excludes first byte for opcode
         static inline constexpr int LEN_BEGIN    = (8 + 8 + 4);
@@ -180,6 +184,8 @@ namespace springtail {
         PgMsgPtr _decode_alter_usertype(const PgMsgMessage &message, char *buffer, int len);
         PgMsgPtr _decode_drop_usertype(const PgMsgMessage &message, char *buffer, int len);
         PgMsgPtr _decode_copy_sync(const PgMsgMessage &message, char *buffer, int len);
+        PgMsgPtr _decode_attach_partition(const PgMsgMessage &message, const char *buffer, int len);
+        PgMsgPtr _decode_detach_partition(const PgMsgMessage &message, const char *buffer, int len);
 
         // helpers
         void _decode_schema_columns(const nlohmann::json &json, std::vector<PgMsgSchemaColumn> &columns);
@@ -208,6 +214,8 @@ namespace springtail {
         void _skip_stream_abort();
 
     private:
+        std::optional<uint64_t> _db_id;
+
         std::fstream _stream;                ///< current file stream
 
         std::filesystem::path _current_path; ///< current file path
@@ -215,7 +223,7 @@ namespace springtail {
         uint64_t _message_offset = 0;   ///< offset of the message we just read
         uint64_t _current_offset;       ///< current file offset for next read
         uint64_t _end_msg_offset;       ///< ending message offset in end file
-        uint64_t _internal_offset;      ///< internal offset within file, not to be altered by user
+        uint64_t _internal_offset = 0;      ///< internal offset within file, not to be altered by user
 
         int _proto_version;             ///< protocol version of message block (from header)
 
@@ -228,6 +236,8 @@ namespace springtail {
                 throw PgMessageEOFError();
             }
         }
+
+        bool _is_schema_included(const std::string& schema);
 
         /** Helper to seek stream based on current offset */
         void _seek_stream() {

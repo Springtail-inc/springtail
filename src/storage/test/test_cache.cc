@@ -7,6 +7,7 @@
 #include <storage/csv_field.hh>
 
 #include <sys_tbl_mgr/table_mgr.hh>
+#include <test/services.hh>
 
 using namespace springtail;
 
@@ -39,11 +40,8 @@ namespace {
                                                 sizes.data_cache_size, sizes.page_cache_size, sizes.btree_cache_size, sizes.max_extent_per_page);
             ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
 
-            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-            runners.emplace();
-            runners->emplace_back(std::make_unique<IOMgrRunner>());
-
-            springtail_init_test(runners, LOG_ALL ^ LOG_STORAGE);
+            springtail_init_test(LOG_ALL ^ LOG_STORAGE);
+            test::start_services(true, true, false);
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({
@@ -64,6 +62,7 @@ namespace {
             _base_dir = std::filesystem::temp_directory_path() / "test_cache";
             std::filesystem::remove_all(_base_dir);
             std::filesystem::create_directories(_base_dir);
+
         }
 
         void TearDown() override {

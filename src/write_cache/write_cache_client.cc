@@ -19,7 +19,7 @@
 
 namespace springtail {
 
-WriteCacheClient::WriteCacheClient()
+WriteCacheClient::WriteCacheClient() : Singleton<WriteCacheClient>(ServiceId::WriteCacheClientId)
 {
     nlohmann::json json = Properties::get(Properties::WRITE_CACHE_CONFIG);
     nlohmann::json rpc_json;

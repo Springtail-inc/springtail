@@ -6,8 +6,10 @@
 #include <common/environment.hh>
 #include <common/object_cache.hh>
 #include <common/threaded_test.hh>
+#include <common/filesystem.hh>
 
 #include <storage/csv_field.hh>
+#include <storage/vacuumer.hh>
 
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/table.hh>
@@ -44,17 +46,12 @@ namespace {
         //// TestSuite setup / teardown
 
         static void SetUpTestSuite() {
-            _base_dir = std::filesystem::temp_directory_path() / "test_table";
+            // "test/table/{}" is needed for vacuum to retrieve db_id from the path
+            _base_dir = std::filesystem::temp_directory_path() / "test" / "table";
             std::filesystem::remove_all(_base_dir);
 
-            std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-            runners.emplace();
-            runners->emplace_back(std::make_unique<IOMgrRunner>());
-
-            auto service_runners = test::get_services(true, true, false);
-            std::move(service_runners.begin(), service_runners.end(), std::back_inserter(runners.value()));
-
-            springtail_init_test(runners);
+            springtail_init_test();
+            test::start_services(true, true, false);
 
             auto client = sys_tbl_mgr::Client::get_instance();
 
@@ -992,7 +989,7 @@ namespace {
             ASSERT_GT(value, test_value_down);
         }
 
-        // make sure that that we have enough equal values 
+        // make sure that that we have enough equal values
         // for testing the bounds functions
         ASSERT_GT(equal_count, 1);
 
@@ -1041,6 +1038,34 @@ namespace {
         {
             auto it = table->lower_bound(key_down, 1);
             ASSERT_EQ(it, begin_it);
+        }
+
+        // test simple secondary iterator
+        {
+            auto end_it = table->end(1, true);
+
+            // use the secondary index to iterate over the same set
+            auto k = std::make_shared<ConstTypeField<uint64_t>>(test_value);
+            std::vector<ConstFieldPtr> v({ k });
+            auto key = std::make_shared<ValueTuple>(v);
+
+            auto it = table->lower_bound(key, 1, true);
+            auto idx_schema = table->get_index_schema(1);
+            auto fields = idx_schema->get_fields();
+
+            int count = 0;
+            int equal = 0;
+            for (; it != end_it; ++it) {
+                auto row = *it;
+                auto value = fields->at(0)->get_uint64(&row);
+                if (value == test_value) {
+                    ++equal;
+                }
+                ASSERT_LE(test_value, value);
+                ++count;
+            }
+            ASSERT_EQ(count, set_size);
+            ASSERT_EQ(equal, equal_count);
         }
 
         {
@@ -1147,6 +1172,89 @@ namespace {
             ++count;
         }
         ASSERT_EQ(count, 5000);
+    }
+
+    TEST_P(Table_Test, VaccumTable) {
+        auto client = XidMgrClient::get_instance();
+        auto server = xid_mgr::XidMgrServer::get_instance();
+        uint64_t access_xid = client->get_committed_xid(1, 0);
+        uint64_t target_xid = access_xid + 1;
+        auto table_id = 1007;
+
+        // Disable vacuum run
+        Vacuumer::get_instance()->disable_vacuum_run();
+
+        // create the namespace and table in the sys_tbl_mgr
+        _init_sys_tbls(target_xid, table_id, "test_table_vacuum");
+
+        // create a mutable table
+        TableMetadata metadata;
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
+        auto mtable = _create_mtable(table_id, target_xid, metadata.roots);
+
+        // insert initial rows
+        _populate_table(mtable);
+
+        // finalize the table after create
+        metadata = mtable->finalize();
+        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        server->commit_xid(1, 1, target_xid, true);
+
+        // create an access table and identify extents to be mutated
+        access_xid = target_xid;
+        auto table = _create_table(1007, access_xid, metadata.roots);
+
+        ++target_xid;
+        // Create new mtable at target_xid
+        mtable = _create_mtable(table_id, target_xid, metadata.roots);
+
+        // update some row data with unknown positions
+        // note: rows with table_id = 6
+        std::vector<std::string> keys = {
+            "ctipton5",
+            "dgrgic6",
+            "dvale7",
+            "jpermain8",
+            "aormiston9"
+        };
+
+        std::vector<TuplePtr> update_values = {
+            _create_value(6, "ctipton5", 100),
+            _create_value(7, "dgrgic6" , 100),
+            _create_value(8, "dvale7" , 100),
+            _create_value(9, "jpermain8", 100),
+            _create_value(10, "aormiston9", 100)
+        };
+        for (size_t i = 0; i < update_values.size(); ++i) {
+            auto &&search_key = _create_key(keys[i]);
+            uint64_t extent_id = table->primary_lookup(search_key);
+            mtable->update(update_values[i], extent_id);
+        }
+
+        // finalize the table after update
+        metadata = mtable->finalize();
+        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        server->commit_xid(1, 1, target_xid, true);
+
+        // repopulate with new data
+        //_populate_table(mtable);
+
+        ++target_xid;
+        server->commit_xid(1, 1, target_xid, true);
+
+        auto table_dir = table_helpers::get_table_dir(_base_dir, 1, table_id, 1);
+        auto table_file = table_dir / fmt::format(constant::DATA_FILE);
+        auto size_pre_vacuum = fs::get_block_count(table_file);
+
+        Vacuumer::get_instance()->commit_expired_extents(1, target_xid);
+
+        // Set global threshold as small and run vacuum
+        Vacuumer::get_instance()->set_global_vacuum_threshold(10);
+        Vacuumer::get_instance()->run_vacuum_once();
+
+        auto size_post_vacuum = fs::get_block_count(table_file);
+
+        ASSERT_GT(size_pre_vacuum, size_post_vacuum);
     }
 
     INSTANTIATE_TEST_CASE_P(Table_Test,

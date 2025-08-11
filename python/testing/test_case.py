@@ -418,6 +418,14 @@ class TestCase:
             self._raise_failure(f'Unknown error: {e}')
 
 
+    def _get_db_id(self, db_name: str) -> int:
+        """Get database id from the configuration for the given database name."""
+        configs = self._props.get_db_configs()
+        for item in configs:
+            if item['name'] == db_name:
+                return int(item['id'])
+        return None
+
     def _execute_command(self, command: dict, do_fetch: bool = False) -> list:
         """Execute a sql command or test directive.  When executing a
         SQL statement, will use the "txn" key to determine which
@@ -434,9 +442,11 @@ class TestCase:
 
         if command['type'] == 'recovery_point':
             # check the current XID and store it as a recovery point using the provided name
-            db_id = int(self._props.get_db_configs()[0]['id'])
+            txn = command['txn']
+            current_db = self._connections[txn]['current_db']
+            db_id = self._get_db_id(current_db)
             current_xid = springtail.current_xid(self._props, db_id)
-            self._recovery_points[command['name']] = current_xid
+            self._recovery_points[command['name']] = (db_id, current_xid)
 
         if command['type'] == 'force_recovery':
             # confirm we have a recorded recovery point
@@ -444,12 +454,12 @@ class TestCase:
                 self._raise_error(f'Tried to recover to undefined recovery point: {command["name"]}')
 
             # check the current XID and revert to an earlier target XID
-            target_xid = self._recovery_points[command['name']]
-            logging.debug(f'Force recovery to {target_xid}')
+            (target_db_id, target_xid) = self._recovery_points[command['name']]
+            logging.debug(f'Force recovery to database: {target_db_id}, xid: {target_xid}')
 
             # restart Springtail at the target XID
             springtail.restart(self._props, self._build_dir,
-                               start_xid=target_xid, unarchive_logs=True)
+                               db_id=target_db_id, start_xid=target_xid, unarchive_logs=True)
 
             # reconnect to the replica database
             self._cleanup_fdw_connections()
@@ -460,7 +470,7 @@ class TestCase:
         if command['type'] == 'restart':
             # restart Springtail at the target XID
             springtail.restart(self._props, self._build_dir,
-                               start_xid=None, unarchive_logs=True)
+                               db_id=None, start_xid=None, unarchive_logs=True)
 
             # reconnect to the replica database
             self._cleanup_fdw_connections()
@@ -531,7 +541,7 @@ class TestCase:
 
                 sql = f""" SELECT a.attname AS name,
                                     CASE
-                                        WHEN t.oid = 1560 THEN 1562
+                                        WHEN t.oid = 1560 THEN 1562 --remap bitoid to varbitoid
                                         ELSE t.oid
                                     END AS pg_type,
                                     NOT a.attnotnull AS nullable,
@@ -541,11 +551,23 @@ class TestCase:
                             JOIN pg_type t ON a.atttypid = t.oid
                             JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
                             WHERE n.nspname = '{command["schema"]}' AND c.relname = '{command["table"]}'
-                                    AND c.relkind = 'r'
+                                    AND c.relkind IN ('r','p')
                                     AND a.attnum > 0
                                     AND NOT a.attisdropped
                             ORDER BY a.attnum ASC;"""
                 results['columns'] = self._execute_sql(cursor, sql, True, txn)
+
+                # retrieve the partition information for the table
+                sql = f"""SELECT
+                            CASE WHEN t.relispartition THEN
+                                (SELECT inhparent FROM pg_inherits WHERE inhrelid = t.oid)
+                            END as parent_oid,
+                            pg_get_expr(t.relpartbound, t.oid, TRUE) as partition_bound,
+                            pg_get_partkeydef(t.oid) as partition_key
+                        FROM pg_class t
+                        JOIN pg_catalog.pg_namespace n ON (t.relnamespace = n.oid)
+                        WHERE n.nspname = '{command["schema"]}' AND t.relname = '{command["table"]}';"""
+                results['partition_info'] = self._execute_sql(cursor, sql, True, txn)
 
                 # retrieve the primary index information for the table
                 sql = f"""SELECT unnest(conkey) AS column_id,
@@ -683,7 +705,8 @@ class TestCase:
                 results = {}
 
                 # retrieve the column data
-                with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists"
+                with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists",
+                                "table_names"."parent_table_id", "table_names"."partition_bound", "table_names"."partition_key"
                                 FROM "__pg_springtail_catalog"."table_names"
                                 JOIN "__pg_springtail_catalog"."namespace_names" ON "namespace_names"."namespace_id" = "table_names"."namespace_id"
                                 WHERE "namespace_names"."name" = '{command["schema"]}' AND "table_names"."name" = '{command["table"]}'
@@ -697,6 +720,13 @@ class TestCase:
                           SELECT name, pg_type, nullable, position FROM ranked_columns WHERE rn = 1 AND exists IS TRUE ORDER BY position ASC;"""
 
                 results['columns'] = self._execute_sql(cursor, sql, True, 'replica')
+
+                # retrieve the partition information for the table
+                sql = f"""WITH latest_table AS ({with_sql})
+                          SELECT parent_table_id AS parent_table_id,
+                                 partition_bound AS partition_bound,
+                                 partition_key AS partition_key FROM latest_table WHERE exists IS TRUE LIMIT 1;"""
+                results['partition_info'] = self._execute_sql(cursor, sql, True, 'replica')
 
                 # retrieve the primary key data
                 with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists"
@@ -931,8 +961,7 @@ class TestCase:
         for command in self._sections['verify'][0]['sequential']:
             primary_result = self._execute_command(command, True)
             replica_result = self._replica_command(command)
-
-            if primary_result != replica_result:
+            if primary_result != replica_result and str(primary_result) != str(replica_result):
                 self._raise_failure(
                     f"Verification failed for {self._name}:\n"
                     f"Statement: {command}\n"

@@ -354,7 +354,7 @@ def start_replication(props : Properties, build_dir : str) -> None:
         conn = connect_db_instance(props, db_name)
 
         # Create the publication
-        execute_sql(conn, f"CREATE PUBLICATION {quote_ident(pub_name, conn)} FOR ALL TABLES WITH (publish_via_partition_root);")
+        execute_sql(conn, f"CREATE PUBLICATION {quote_ident(pub_name, conn)} FOR ALL TABLES")
 
         # Create the replication slot;
         # NOTE: it the slot name needs to be globally unique
@@ -369,7 +369,7 @@ def start_replication(props : Properties, build_dir : str) -> None:
 
 def start_fdw_daemons(props : Properties,
                       build_dir : str,
-                      config_file : str = None) -> None:
+                      config_file : Optional[str] = None) -> None:
     """Import the foreign data wrapper schemas."""
     fdw_config = props.get_fdw_config()
     mount_path = props.get_mount_path()
@@ -401,16 +401,7 @@ def start_fdw_daemons(props : Properties,
 
     # startup pg_ddl_daemon; schema import done by pg_ddl_daemon
     print("Starting pg_ddl_daemon...")
-
-    # a little ugly, but need to add args for username password for fdw daemon for ddl user
-    daemons = []
-    for d in FDW_DAEMONS:
-        if d[0] == 'pg_ddl_daemon':
-            s = d[2]
-            daemons.append((d[0], d[1], s + f',-u,{fdw_config["fdw_user"]},-p,{fdw_config["password"]}'))
-        else:
-            daemons.append(d)
-    start_daemons(build_dir, daemons)
+    start_daemons(build_dir, FDW_DAEMONS)
 
 
 def start_proxy(props : Properties, build_dir : str, restart: bool = False) -> None:
@@ -418,6 +409,7 @@ def start_proxy(props : Properties, build_dir : str, restart: bool = False) -> N
     # Start the proxy
     print("Starting proxy...")
     start_daemons(build_dir, PROXY_DAEMONS, restart)
+
 
 def wait_for_running(props : Properties) -> None:
     """Wait for the system to be in a running state."""
@@ -561,7 +553,8 @@ def current_xid(props: Properties, db_id: int) -> int:
 
 def restart(props: Properties,
             build_dir: str,
-            start_xid: int = None,
+            db_id: Optional[int] = None,
+            start_xid: Optional[int] = None,
             unarchive_logs: bool = False) -> None:
     # Stop the daemons
     print("\nStopping daemons...")
@@ -591,12 +584,12 @@ def restart(props: Properties,
                 xact_db_path = os.path.join(xact_path, db_dir)
                 move_files(os.path.join(xact_db_path, 'archive'), xact_db_path)
 
-    if start_xid is not None:
+    if db_id is not None and start_xid is not None:
         # roll start_xid back
         ts = int(datetime.datetime.utcnow().timestamp())
         log_file = "/tmp/roll_back_" + str(ts) + ".log"
-        print(f"Running command: roll_back_xact_log; rolling back to xid: {start_xid}, output log: {log_file}")
-        run_command(os.path.join(build_dir, 'src/xid_mgr/roll_back_xact_log'), ['-p', xact_path, '-d', '1', '-a', 'true', '-x', str(start_xid)], log_file)
+        print(f"Running command: roll_back_xact_log; rolling back database {db_id} to xid: {start_xid}, output log: {log_file}")
+        run_command(os.path.join(build_dir, 'src/xid_mgr/roll_back_xact_log'), ['-p', xact_path, '-d', str(db_id), '-a', 'true', '-x', str(start_xid)], log_file)
 
     # start daemons with XID if specified
     print("\nStarting daemons...")
@@ -689,6 +682,11 @@ def start(config_file: str,
         print("\nSpringtail system started successfully.")
 
     else:
+        if do_fdw_install:
+            # install fdw
+            print("\nInstalling foreign data wrapper...")
+            install_fdw(build_dir)
+
         # start postgres
         print("Starting postgres...")
         start_postgres()
@@ -726,14 +724,13 @@ def stop_with_properties(props: Properties, do_cleanup: bool = False) -> None:
     stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
 
     if do_cleanup:
-        # Clear file system data
-        print("\nClearing file system data...")
-        cleanup_filesystem(props)
-
         # Cleanup db instance
         print("\nCleaning up database instance...")
         cleanup_db_instance(props)
 
+        # Clear file system data
+        print("\nClearing file system data...")
+        cleanup_filesystem(props)
 
 def check_logs(config_file: str) -> List[str]:
     """Check the logs for errors."""

@@ -183,7 +183,7 @@ class Scheduler:
 
         return self.start_all()
 
-    def _track_last_failures(self, name: str) -> None:
+    def _track_last_failures(self, name: str, threshold : int = FAILURE_WINDOW_THRESHOLD, fatal : bool = True) -> None:
         """
         Track last failures for components
 
@@ -198,7 +198,7 @@ class Scheduler:
             self.last_fail_time[name] = {'count': 1, 'time': time.time()}
         else:
             # If the last fail time is not within the failure window threshold, reset the failure count
-            if time.time() - self.last_fail_time[name]['time'] > FAILURE_WINDOW_THRESHOLD:
+            if time.time() - self.last_fail_time[name]['time'] > threshold:
                 self.last_fail_time[name]['count'] = 1
                 self.last_fail_time[name]['time'] = time.time()
 
@@ -206,13 +206,25 @@ class Scheduler:
             # Increment failure count
             self.last_fail_time[name]['count'] += 1
             self.last_fail_time[name]['time'] = time.time()
-        # If we have reached the maximum failures and the last failure was less than FAILURE_WINDOW_THRESHOLD seconds ago, raise an exception
-        elif time.time() - self.last_fail_time[name]['time'] < FAILURE_WINDOW_THRESHOLD:
-            raise ComponentFailureException(f"Component {name} has failed {MAX_FAILURES} times within {FAILURE_WINDOW_THRESHOLD} seconds, aborting", name)
-        # Reset failure count
-        else:
-            self.last_fail_time[name]['count'] = 1
-            self.last_fail_time[name]['time'] = time.time()
+            return
+
+        # If we have reached the maximum failures and the last failure was less than threshold seconds ago, raise an exception
+        if time.time() - self.last_fail_time[name]['time'] < threshold:
+            if fatal:
+                # fatal error, raise an exception
+                self.logger.error(f"Component {name} has failed {MAX_FAILURES} times within {threshold} seconds, aborting")
+                raise ComponentFailureException(f"Component {name} has failed {MAX_FAILURES} times within {threshold} seconds, aborting", name)
+            else:
+                # non-fatal error, just log a warning, send sns message if in production
+                self.logger.warning(f"Component {name} has failed {MAX_FAILURES} times within {threshold} seconds, continuing")
+                if self.production:
+                    self.production.send_sns('warning', component=name, attrs={'warning': 'max_timeouts_reached',
+                                                                               'count': self.last_fail_time[name]['count'],
+                                                                               'threshold_secs': threshold})
+
+        # reset count and timeout
+        self.last_fail_time[name]['count'] = 1
+        self.last_fail_time[name]['time'] = time.time()
 
     def _track_db_state_changes(self) -> None:
         """
@@ -247,9 +259,7 @@ class Scheduler:
                     return False
                 component_name = self.components[id].get_name()
                 self.logger.error(f"PubSub: Error for component: {id}: {component_name}")
-                self._track_last_failures(component_name)
-                if self.production:
-                    self.production.send_sns('failure', component=component_name)
+                self._track_last_failures(component_name, threshold=60*30, fatal=False)
                 return True
 
         except redis.TimeoutError:
@@ -371,7 +381,7 @@ class Scheduler:
                     self.production.install_binaries(config_gitsha)
                     if self.service_name == 'fdw':
                         self.logger.info("Installing postgres_fdw")
-                        self.production.install_pgfdw()
+                        self.production.install_pgfdw(self.props)
 
                 self.logger.info("Restarting services")
                 self.restart_all()
@@ -402,10 +412,12 @@ class Scheduler:
                 # track database state changes
                 self._track_db_state_changes()
 
+                # check for timeouts; don't error, just issue a warning
+                self._check_timeouts()
+
                 # check for pubsub messages, timeouts, or component failures
                 if (
                    self._check_pubsub() or    # check for pubsub ; blocks 1 second if no messages
-                   self._check_timeouts() or  # check for timeouts
                    self._check_components()   # check for component failures
                 ):
                     # restart all components

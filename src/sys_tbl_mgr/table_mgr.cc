@@ -1,4 +1,4 @@
-#include "common/constants.hh"
+#include <common/constants.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
 
@@ -34,7 +34,7 @@ namespace springtail {
         return keys;
     }
 
-    TableMgr::TableMgr()
+    TableMgr::TableMgr() : Singleton<TableMgr>(ServiceId::TableMgrId)
     {
         // get the base directory for table data
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
@@ -70,6 +70,13 @@ namespace springtail {
         return std::make_shared<Table>(db_id, table_id, xid, _table_base,
                                        schema->get_sort_keys(), secondary_indexes,
                                        *tbl_meta, schema);
+    }
+
+    std::filesystem::path
+    TableMgr::get_table_data_dir(uint64_t db_id, uint64_t table_id, uint64_t xid)
+    {
+        auto&& table_meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, table_id, xid);
+        return table_helpers::get_table_dir(_table_base, db_id, table_id, table_meta->snapshot_xid);
     }
 
     bool
