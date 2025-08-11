@@ -100,6 +100,10 @@ namespace springtail::pg_fdw {
         std::map<uint32_t, std::string> _type_map;  ///< map of PG type OIDs to type names
 
         std::thread _pg_ddl_mgr_thread;
+
+        /** User type map from namespace_id -> map of type oid -> <type_name, value_json> */
+        using UserTypeMap = std::unordered_map<uint64_t, std::unordered_map<uint64_t, std::pair<std::string, std::string>>>;
+
         /**
          * @brief Type cache
          * Stores the details about the system types
@@ -114,15 +118,13 @@ namespace springtail::pg_fdw {
          * @param pg_type pg_type OID
          * @param namespace_id namespace id
          * @param namespace_name namespace name
-         * @param user_types map of user types
+         * @param user_types map of user types; map: namespace id -> type_oid -> <type_name, value_json>
          * @return type name
          */
         std::string _get_type_name(int32_t pg_type,
                                    uint64_t namespace_id,
                                    const std::string &namespace_name,
-                                   const std::unordered_map<uint64_t, std::unordered_map<uint64_t,
-                                        std::pair<std::string, std::string>>> &user_types);
-
+                                   const UserTypeMap &user_types);
 
         /** Private constructor */
         PgDDLMgr();
@@ -217,9 +219,9 @@ namespace springtail::pg_fdw {
          * @brief Helper to get user defined types from the system tables
          * @param db_id db id
          * @param xid transaction id
-         * @return map of namespace id to map of type_id to pair <type_name, value_json>
+         * @return map of namespace id to map of type_oid to pair <type_name, value_json>
          */
-        std::unordered_map<uint64_t, std::unordered_map<uint64_t, std::pair<std::string, std::string>>>
+        UserTypeMap
         _get_usertypes(uint64_t db_id, uint64_t xid);
 
         /**

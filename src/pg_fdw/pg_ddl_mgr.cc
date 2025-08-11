@@ -647,11 +647,11 @@ namespace springtail::pg_fdw {
         }
     }
 
-    std::unordered_map<uint64_t, std::unordered_map<uint64_t, std::pair<std::string, std::string>>>
+    PgDDLMgr::UserTypeMap
     PgDDLMgr::_get_usertypes(uint64_t db_id, uint64_t xid)
     {
         // namespace id -> type_id -> <type_name, value_json>
-        std::unordered_map<uint64_t, std::unordered_map<uint64_t, std::pair<std::string, std::string>>> usertype_map;
+        UserTypeMap usertype_map;
 
         // iterate through the user types and add them to the map
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::UserTypes::ID, xid);
@@ -1429,8 +1429,7 @@ namespace springtail::pg_fdw {
     PgDDLMgr::_get_type_name(int32_t pg_type,
                              uint64_t namespace_id,
                              const std::string &namespace_name,
-                             const std::unordered_map<uint64_t, std::unordered_map<uint64_t,
-                                        std::pair<std::string, std::string>>> &user_types)
+                             const UserTypeMap &user_types)
     {
         if (pg_type >= constant::FIRST_USER_DEFINED_PG_OID) {
             auto it = user_types.find(namespace_id);
