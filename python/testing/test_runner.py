@@ -215,9 +215,9 @@ if __name__ == "__main__":
                 tests = gen_test_cases(os.path.join(test_folder, args.test_set), args.test_case,
                                        default_config_file, build_dir, {})
     # sync the test data files
+    helper = AwsHelper(config=botocore.config.Config(signature_version=botocore.UNSIGNED),
+                       region="us-east-1")
     if not args.skip_downloads:
-        helper = AwsHelper(config=botocore.config.Config(signature_version=botocore.UNSIGNED),
-                           region="us-east-1")
         helper.sync_s3_data('test_data', s3_path='test_files')
     else:
         # CI sets skip_downloads to true but
