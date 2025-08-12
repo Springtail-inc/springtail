@@ -420,8 +420,9 @@ class TestCase:
 
     def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool, txn: str = 'replica', quiet: bool = False) -> list:
         """Execute the provided SQL using the provided cursor."""
+        db_name = cursor.connection.info.dbname
         if not quiet:
-            logging.debug(f'Execute transaction {txn} SQL: {sql}')
+            logging.debug(f'Execute transaction \'{txn}\' database \'{db_name}\' SQL: {sql}')
         try:
             cursor.execute(sql)
 
@@ -431,7 +432,7 @@ class TestCase:
         except psycopg2.OperationalError as e:
             self._raise_failure(f'Query timed out: {e}')
         except Exception as e:
-            logging.error(f"Error executing SQL:\n{sql},\n\ttxn: {txn},\n\tError:{str(e)}")
+            logging.error(f"Error executing SQL:\n{sql},\n\ttxn: {txn},\n\tdatabse: {db_name}\n\tError:{str(e)}")
             self._raise_failure(f'Unknown error: {e}')
 
 
@@ -831,8 +832,19 @@ class TestCase:
             db_name = self._db_prefix + db_config['name']
             if db_name in self._fdw:
                 self._fdw[db_name].close()
-            self._fdw[db_name] = springtail.connect_db_instance(self._props, db_name)
-            self._fdw[db_name].autocommit = True
+            connected = False
+            conn_attempts = 0
+            while not connected:
+                try:
+                    self._fdw[db_name] = springtail.connect_db_instance(self._props, db_name)
+                    self._fdw[db_name].autocommit = True
+                    connected = True
+                except Exception as e:
+                    conn_attempts += 1
+                    if conn_attempts == 5:
+                        logging.error("Tried to connect {conn_attempts} times")
+                        raise e
+                    time.sleep(2)
 
     def start_background(self) -> None:
         if self._metadata['live_startup'] is not None:

@@ -855,6 +855,6 @@ DROP SCHEMA IF EXISTS data_type_test CASCADE;
 ### switch_db indices
 DROP SCHEMA IF EXISTS keys_test CASCADE;
 
--- ### switch_db partitions
+### switch_db partitions
 DROP TABLE IF EXISTS preload_sales_hash CASCADE;
 DROP TABLE IF EXISTS country_sales CASCADE;
