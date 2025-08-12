@@ -358,9 +358,10 @@ MutableBTree::last()
     NodePtr node = std::make_shared<Node>(nullptr, _root);
 
     // iterate through the levels until we find a leaf page
+    boost::shared_lock<boost::shared_mutex> page_lock;
     while (node->page->type.is_branch()) {
         // lock page for read access
-        boost::shared_lock page_lock(node->page->mutex);
+        page_lock = boost::shared_lock(node->page->mutex);
 
         // use last() to find the appropriate child branch
         auto &&i = node->page->last();
@@ -381,7 +382,7 @@ MutableBTree::last()
         node = child;
     }
 
-    return Iterator(this, node, node->page->last());
+    return Iterator(this, node, node->page->last(), std::move(page_lock));
 }
 
 MutableBTree::Iterator
@@ -414,7 +415,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
         }
     }
 
-    return Iterator(this, node, std::move(page_i));
+    return Iterator(this, node, std::move(page_i), std::move(page_lock));
 }
 
 
