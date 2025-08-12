@@ -115,7 +115,7 @@ namespace springtail::pg_fdw {
                    const std::string &password,
                    const std::string &proxy_password,
                    const std::optional<std::string> &hostname)
-{
+    {
         // set fdw id
         _fdw_id = fdw_id;
 
@@ -130,6 +130,10 @@ namespace springtail::pg_fdw {
         // fetch config for fdw (host, port, user, password)
         nlohmann::json fdw_config;
         fdw_config = Properties::get_fdw_config(fdw_id);
+
+        if (!fdw_config.contains("state") || fdw_config["state"] != Properties::FDW_STATE_INITIALIZE) {
+            LOG_ERROR("PgDDLMgr::init() called with fdw_id: {} but state is not initialize", fdw_id);
+        }
 
         // get the connection information from the FDW config
         // override hostname if passed in, used for unix domain socket connections
@@ -160,6 +164,8 @@ namespace springtail::pg_fdw {
         _thread_manager->start();
 
         LOG_INFO("PgDDLMgr::init() done");
+
+        Properties::get_instance()->set_fdw_state(Properties::FDW_STATE_RUNNING);
     }
 
     std::map<uint64_t, std::map<uint64_t, std::pair<std::string, std::string>>>
