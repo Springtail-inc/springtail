@@ -241,9 +241,11 @@ namespace springtail::pg_log_mgr {
         /**
          * @brief Pick copy table request from the redis queue
          *
+         * @param timeout timeout in seconds (0 = use try_pop)
+         *
          * @return pair<table_id, optional<XidLsn of the copy table>>
          */
-        std::pair<uint32_t, std::optional<XidLsn>> _get_copy_table_ids();
+        std::pair<uint32_t, std::optional<XidLsn>> _get_copy_table_ids(uint32_t timeout=0);
 
         /** Redis cache callback for watching database state change */
         RedisCache::RedisChangeWatcherPtr _cache_watcher_db_states;
