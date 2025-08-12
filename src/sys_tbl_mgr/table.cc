@@ -14,6 +14,14 @@
 
 namespace springtail {
 
+static auto get_max_extent_size() {
+    return constant::MAX_EXTENT_SIZE;
+}
+
+static auto get_max_extent_size_secondary() {
+    return constant::MAX_EXTENT_SIZE_SECONDARY;
+}
+
 namespace table_helpers {
 
 std::filesystem::path
@@ -220,7 +228,8 @@ namespace indexer_helpers {
         _primary_index = std::make_shared<BTree>(_table_dir / constant::INDEX_PRIMARY_FILE,
                                                  xid,
                                                  primary_schema,
-                                                 it->extent_id);
+                                                 it->extent_id,
+                                                 get_max_extent_size());
 
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
         _pkey_fields = primary_schema->get_fields();
@@ -533,7 +542,7 @@ namespace indexer_helpers {
     StorageCache::SafePagePtr
     Table::_read_page(uint64_t extent_id) const
     {
-        return StorageCache::get_instance()->get(_table_dir / constant::DATA_FILE, extent_id, _xid);
+        return StorageCache::get_instance()->get(_table_dir / constant::DATA_FILE, extent_id, _xid, constant::LATEST_XID, get_max_extent_size());
     }
 
     BTreePtr
@@ -542,7 +551,8 @@ namespace indexer_helpers {
         auto index_schema = _create_index_schema(_schema, index_columns);
         auto btree = std::make_shared<BTree>(_table_dir / fmt::format(constant::INDEX_FILE, index_id),
                 _xid, index_schema,
-                offset);
+                offset,
+                index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary());
         return btree;
     }
 
@@ -623,14 +633,14 @@ namespace indexer_helpers {
             _primary_index = std::make_shared<MutableBTree>(_table_dir / constant::INDEX_PRIMARY_FILE,
                                                             non_primary_key,
                                                             primary_schema,
-                                                            _target_xid);
+                                                            _target_xid, get_max_extent_size());
         } else {
             primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
 
             _primary_index = std::make_shared<MutableBTree>(_table_dir / constant::INDEX_PRIMARY_FILE,
                                                             primary_key,
                                                             primary_schema,
-                                                            _target_xid);
+                                                            _target_xid, get_max_extent_size());
         }
 
 
@@ -793,10 +803,12 @@ namespace indexer_helpers {
     MutableTable::read_page(uint64_t extent_id)
     {
         return StorageCache::get_instance()->get(_data_file, extent_id,
-                                                 _access_xid, _target_xid, false,
-                                                 [this](StorageCache::PagePtr page) {
-                                                     return _flush_handler(page);
-                                                 });
+                _access_xid, _target_xid,
+                get_max_extent_size(),
+                false,
+                [this](StorageCache::PagePtr page) {
+                return _flush_handler(page);
+                });
     }
 
     bool
@@ -823,7 +835,8 @@ namespace indexer_helpers {
         }
 
         // get the original page to use for index updates
-        auto orig_page = StorageCache::get_instance()->get(_data_file, old_eid, _access_xid);
+        auto orig_page = StorageCache::get_instance()->get(_data_file, old_eid, _access_xid, constant::LATEST_XID, get_max_extent_size());
+
 
         // INVALIDATE PRIMARY INDEX
         TuplePtr pkey;
@@ -868,7 +881,7 @@ namespace indexer_helpers {
 
         auto value_fields = std::make_shared<FieldArray>(1);
         for (auto extent_id : offsets) {
-            auto new_page = StorageCache::get_instance()->get(_data_file, extent_id, _target_xid);
+            auto new_page = StorageCache::get_instance()->get(_data_file, extent_id, _target_xid, constant::LATEST_XID, get_max_extent_size());
 
             // POPULATE PRIMARY INDEX
             TuplePtr pkey;
@@ -966,7 +979,9 @@ namespace indexer_helpers {
 
         auto btree = std::make_shared<MutableBTree>(_table_dir / fmt::format(constant::INDEX_FILE, index_id),
                 key, index_schema,
-                _target_xid);
+                _target_xid,
+                index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary()
+                );
         return btree;
     }
 
@@ -975,8 +990,10 @@ namespace indexer_helpers {
                                  uint64_t extent_id)
     {
         // get the page from the cache
-        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false,
-                                                      [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
+        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, 
+                get_max_extent_size(),
+                false,
+                [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
         // check if we need to convert the page contents to a new schema
         _check_convert_page(page);
@@ -991,7 +1008,7 @@ namespace indexer_helpers {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
             _empty_page = std::make_unique<StorageCache::SafePagePtr>(
-                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid));
+                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid, get_max_extent_size()));
         }
 
         // add the row to the page
@@ -1004,7 +1021,7 @@ namespace indexer_helpers {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
             _empty_page = std::make_unique<StorageCache::SafePagePtr>(
-                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid));
+                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid, get_max_extent_size()));
         }
 
         // add the row to the page
@@ -1029,6 +1046,7 @@ namespace indexer_helpers {
 
         // get the page from the cache
         auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
+                get_max_extent_size(),
                 false,
                 [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
@@ -1067,7 +1085,9 @@ namespace indexer_helpers {
     MutableTable::_upsert_direct(TuplePtr value, uint64_t extent_id)
     {
         // get the page from the cache
-        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false,
+        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
+                get_max_extent_size(),
+                false,
                 [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
         // check if we need to convert the page contents to a new schema
@@ -1085,7 +1105,7 @@ namespace indexer_helpers {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
             _empty_page = std::make_unique<StorageCache::SafePagePtr>(
-                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid));
+                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid, get_max_extent_size()));
         }
 
         // add the row to the page
@@ -1119,7 +1139,9 @@ namespace indexer_helpers {
     MutableTable::_remove_direct(TuplePtr value, uint64_t extent_id)
     {
         // get the page from the cache
-        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false,
+        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
+                get_max_extent_size(),
+                false,
                 [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
         // check if we need to convert the page contents to a new schema
@@ -1190,7 +1212,9 @@ namespace indexer_helpers {
             // scan each extent, looking for a match
             uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
 
-            auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false,
+            auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
+                get_max_extent_size(),
+                false,
                 [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
             // check if we need to convert the page contents to a new schema
@@ -1210,6 +1234,7 @@ namespace indexer_helpers {
     {
         // get the page from the cache
         auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
+                get_max_extent_size(),
                 false,
                 [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
@@ -1227,7 +1252,7 @@ namespace indexer_helpers {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
             _empty_page = std::make_unique<StorageCache::SafePagePtr>(
-                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid));
+                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid, get_max_extent_size()));
         }
 
         // add the row to the page

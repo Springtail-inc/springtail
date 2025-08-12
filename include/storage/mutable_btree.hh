@@ -89,7 +89,10 @@ namespace springtail {
         MutableBTree(const std::filesystem::path &file,
                      const std::vector<std::string> &keys,
                      ExtentSchemaPtr schema,
-                     uint64_t xid);
+                     uint64_t xid,
+                     uint64_t max_extent_size);
+
+        MutableBTree() = delete;
 
         /**
          * Initialize an empty tree.
@@ -162,15 +165,6 @@ namespace springtail {
         public:
             using Iterator = StorageCache::Page::Iterator;
             using StoragePagePtr = StorageCache::SafePagePtr;
-
-        private:
-            /**
-             * Checks if the extent has exceeded the max size.  If so, splits the extent in half.
-             * Must have the page locked for exclusive access.
-             *
-             * @param pos An iterator to the extent within the extent list that we may need to split.
-             */
-            bool _check_split(std::vector<ExtentPtr>::iterator pos);
 
         public:
             /** For constructing an empty root. */

@@ -570,13 +570,14 @@ namespace springtail {
              * same as the access XID, then the page is not going to be rolled forward.
              */
             Page(const std::filesystem::path &file, uint64_t extent_id,
-                 uint64_t start_xid, uint64_t end_xid, const std::vector<uint64_t> &offsets);
+                 uint64_t start_xid, uint64_t end_xid, const std::vector<uint64_t> &offsets,
+                 uint64_t max_extent_size);
 
             /**
              * Constructor for creating an empty page.  Starts marked dirty and uses the provided
              * XID as the start, end and target XID for the page.
              */
-            Page(const std::filesystem::path &file, uint64_t xid);
+            Page(const std::filesystem::path &file, uint64_t xid, uint64_t max_extent_size);
 
             /**
              * Writes all of the dirty in-memory extents to disk and returns the full set of extent
@@ -971,6 +972,9 @@ namespace springtail {
             /** The ending XID up through which this page is known valid for access. */
             uint64_t _end_xid;
 
+            /** The max extent size before it'd be split. */
+            uint64_t _max_extent_size;
+
             /** The position on the LRU list; only valid when _use_count is zero. */
             std::list<std::shared_ptr<Page>>::iterator _lru_pos;
 
@@ -1119,13 +1123,13 @@ namespace springtail {
              * @param target_xid The XID at which the page will operate and perform mutations.
              */
             PagePtr get(const std::filesystem::path &file, uint64_t extent_id,
-                        uint64_t access_xid, uint64_t target_xid);
+                        uint64_t access_xid, uint64_t target_xid, uint64_t max_extent_size);
 
             /**
              * Retrieve an empty Page object from the cache for a given file, operating at the
              * provided XID.
              */
-            PagePtr get_empty(const std::filesystem::path &file, uint64_t xid);
+            PagePtr get_empty(const std::filesystem::path &file, uint64_t xid, uint64_t max_extent_size);
 
             /**
              * Returns a page to the cache.  Optionally registers a callback that will be called
@@ -1194,7 +1198,8 @@ namespace springtail {
              * for this new page.
              */
             PagePtr _create(const std::filesystem::path &file, uint64_t extent_id,
-                            uint64_t xid, const std::vector<uint64_t> &offsets);
+                            uint64_t xid, const std::vector<uint64_t> &offsets,
+                            uint64_t max_extent_size);
 
             /**
              * Makes space for a page, evicting an existing page in the cache if necessary.
@@ -1262,7 +1267,8 @@ namespace springtail {
         SafePagePtr get(const std::filesystem::path &file,
                         uint64_t extent_id,
                         uint64_t access_xid,
-                        uint64_t target_xid = constant::LATEST_XID,
+                        uint64_t target_xid,
+                        uint64_t max_extent_size,
                         bool do_rollforward = false,
                         SafePagePtr::FlushCb flush_cb={} );
 
