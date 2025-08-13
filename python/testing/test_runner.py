@@ -8,6 +8,7 @@ import os
 import sys
 import yaml
 import gzip
+import shutil
 
 from test_case import TestCase
 from test_set import TestSet
