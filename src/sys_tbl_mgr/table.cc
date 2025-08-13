@@ -798,6 +798,8 @@ namespace indexer_helpers {
         // Smart vacuum if data exists
         if (std::filesystem::exists(_data_file)) {
             Vacuumer::get_instance()->expire_extent(_data_file, 0, std::filesystem::file_size(_data_file), _target_xid);
+        } else {
+            LOG_INFO("TRUNCATE: File: {} doesn't exist to report to vacuum", _data_file);
         }
     }
 
