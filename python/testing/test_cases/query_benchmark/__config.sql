@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS customers (
 );
 CREATE INDEX idx_lastname ON customers (LastName);
 
-### load_csv customers.csv customers
+### load_csv ../../test_data/customers.csv customers
 
 ## cleanup
 DROP TABLE customers;
