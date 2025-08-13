@@ -474,12 +474,14 @@ class TestCase:
             (target_db_id, target_xid) = self._recovery_points[command['name']]
             logging.debug(f'Force recovery to database: {target_db_id}, xid: {target_xid}')
 
+            # close all connections to the replica database before shutting down
+            self._cleanup_fdw_connections()
+
             # restart Springtail at the target XID
             springtail.restart(self._props, self._build_dir,
                                db_id=target_db_id, start_xid=target_xid, unarchive_logs=True)
 
             # reconnect to the replica database
-            self._cleanup_fdw_connections()
             self._open_db_connections_for_fdw()
 
             return None
