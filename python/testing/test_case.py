@@ -33,6 +33,7 @@ class TestCase:
         self._error = ''
         self._log_errors = []
         self._logged_output = ''
+        self._overlays = []
 
         self._metadata = {
             'autocommit': True,
@@ -74,6 +75,9 @@ class TestCase:
 
     def get_added_databases(self) -> list:
         return self._added_databases
+
+    def get_allowed_overlays(self) -> list:
+        return self._overlays
 
     def _setup_default_fdw(self) -> None:
         if len(self._fdw) == 0:
@@ -340,7 +344,7 @@ class TestCase:
 
                     elif directive[0] == 'add_db':
                         if section != 'setup':
-                            self._raise_error(f'{line_num}: "add_db" must be specified in the "metadata" section')
+                            self._raise_error(f'{line_num}: "add_db" must be specified in the "setup" section')
                         if not self._filename.endswith(_GLOBAL_CONFIG_FILE):
                             self._raise_error(f'{line_num}: "add_db" must be specified in the "{_GLOBAL_CONFIG_FILE}" file')
                         if len(directive) < 2:
@@ -361,6 +365,13 @@ class TestCase:
                             'type': 'switch_db',
                             'database_name': directive[1]
                         }, section, is_threaded, cur_txn, line_num)
+
+                    elif directive[0] == 'allow_overlays':
+                        if section != 'metadata':
+                            self._raise_error(f'{line_num}: "allow_overlays" must be specified in the "metadata" section')
+                        if len(directive) < 2:
+                            self._raise_error(f'{line_num}: "allow_overlays" must specify an overlay name')
+                        self._overlays = directive[1:]
 
                     else:
                         self._raise_error(f'{line_num}: unknown directive "{directive[0]}"')
