@@ -25,24 +25,27 @@ def gen_test_cases(test_set: str,
                    test_files: list,
                    config_file: str,
                    build_dir: str,
-                   test_params: dict) -> list[TestSet]:
+                   test_params: dict,
+                   overlay: None | str) -> list[TestSet]:
     """Generate a test set with specific test cases."""
-    test = TestSet(test_set, config_file, build_dir, test_params, test_files)
+    test = TestSet(test_set, config_file, build_dir, test_params, overlay, test_files)
     return [ test ]
 
 
 def gen_test_set(test_set: str,
                  config_file: str,
                  build_dir: str,
-                 test_params: dict) -> list[TestSet]:
+                 test_params: dict,
+                 overlay: None | str) -> list[TestSet]:
     """Generate all of the test cases in a specific test set."""
-    test = TestSet(test_set, config_file, build_dir, test_params)
+    test = TestSet(test_set, config_file, build_dir, test_params, overlay)
     return [ test ]
 
 def gen_all_tests(test_folder: str,
                   config_file: str,
                   build_dir: str,
                   test_params: dict,
+                  overlay: None | str,
                   test_dirs: list[str]) -> list[TestSet]:
     """Generate all test sets in the test folder.
 
@@ -84,7 +87,7 @@ def create_configurations(tmp_config_dir: str,
         os.makedirs(tmp_config_dir)
 
     # load the default configuration
-    with open(system_json_path, 'r') as f:
+    with open(default_config_file, 'r') as f:
         default_config = json.load(f)
 
     # write out the default configuration
@@ -176,45 +179,37 @@ if __name__ == "__main__":
         # build the test sets for the requested overlay
         if args.test_set is None:
             overlay_test_sets = overlay_config['test_sets']
-            tests = gen_all_tests(test_folder, overlay_config_file, build_dir, overlay_test_params, overlay_test_sets)
+            tests = gen_all_tests(test_folder, overlay_config_file, build_dir, overlay_test_params, args.overlay, overlay_test_sets)
         else:
             if args.test_case is None:
                 tests = gen_test_set(os.path.join(test_folder, args.test_set),
-                                     overlay_config_file, build_dir, overlay_test_params)
+                                     overlay_config_file, build_dir, overlay_test_params, args.overlay)
             else:
                 tests = gen_test_cases(os.path.join(test_folder, args.test_set), args.test_case,
-                                       overlay_config_file, build_dir, overlay_test_params)
+                                       overlay_config_file, build_dir, overlay_test_params, args.overlay)
 
     else:
         default_config_file = os.path.join(tmp_config_dir, 'default.json')
         if args.test_set is None:
             overlays = yaml_config['overlays']
-            overlay_required_sets = []
             if default_test_sets is None:
                 default_test_sets = sorted(os.listdir(test_folder))
-                if overlays:
-                    required_overlay = [x for x in overlays if "overlay_required" in overlays[x] and overlays[x]['overlay_required'] == True]
-                    overlay_required_sets = [overlays[x]["test_sets"] for x in required_overlay]
-                    overlay_required_sets = [item for sublist in overlay_required_sets for item in sublist]
 
-            # exclude tests that require overlays from running under the default config
-            default_test_sets = [x for x in default_test_sets if x not in overlay_required_sets]
-
-            tests = gen_all_tests(test_folder, default_config_file, build_dir, {}, default_test_sets)
+            tests = gen_all_tests(test_folder, default_config_file, build_dir, {}, None, default_test_sets)
 
             if overlays:
                 for overlay_name in overlays:
                     overlay_config_file = os.path.join(tmp_config_dir, f'{overlay_name}.json')
                     overlay_test_sets = overlays[overlay_name]['test_sets']
                     tests += gen_all_tests(test_folder, overlay_config_file,
-                                           build_dir, {}, overlay_test_sets)
+                                           build_dir, {}, overlay_name, overlay_test_sets)
         else:
             if args.test_case is None:
                 tests = gen_test_set(os.path.join(test_folder, args.test_set),
-                                     default_config_file, build_dir, {})
+                                     default_config_file, build_dir, {}, None)
             else:
                 tests = gen_test_cases(os.path.join(test_folder, args.test_set), args.test_case,
-                                       default_config_file, build_dir, {})
+                                       default_config_file, build_dir, {}, None)
     # sync the test data files
     helper = AwsHelper(config=botocore.config.Config(signature_version=botocore.UNSIGNED),
                        region="us-east-1")
