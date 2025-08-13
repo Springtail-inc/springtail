@@ -400,8 +400,12 @@ def start_fdw_daemons(props : Properties,
                 raise Exception("Failed to set the config file path")
 
     # startup pg_ddl_daemon; schema import done by pg_ddl_daemon
+    # set state to initialize
+    props.set_fdw_state(Properties.FDW_STATE_INITIALIZE)
     print("Starting pg_ddl_daemon...")
     start_daemons(build_dir, FDW_DAEMONS)
+    # wait for the fdw state to be running; set by ddl mgr once init is done
+    props.wait_for_fdw_state(Properties.FDW_STATE_RUNNING)
 
 
 def start_proxy(props : Properties, build_dir : str, restart: bool = False) -> None:
