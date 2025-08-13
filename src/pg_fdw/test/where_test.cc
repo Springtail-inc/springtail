@@ -325,9 +325,9 @@ namespace {
                             ASSERT_EQ(filtered_data[rows_valid][i], DatumGetInt32(values[i]));
                         }
                     } else if (qual_list) {
-                        ListCell *lc;
+                        ListCell *lc = nullptr;
                         foreach(lc, qual_list) {
-                            auto* p = static_cast<ConstQualPtr>(lfirst(lc));
+                            const auto* p = static_cast<ConstQualPtr>(lfirst(lc));
                             auto i = p->base.varattno - 1;
 
                             ASSERT_FALSE(nulls[i]);

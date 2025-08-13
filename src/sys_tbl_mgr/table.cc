@@ -19,7 +19,6 @@ static auto get_max_extent_size() {
 }
 
 static auto get_max_extent_size_secondary() {
-//    return 16*1064;
     return constant::MAX_EXTENT_SIZE_SECONDARY;
 }
 
