@@ -1,9 +1,12 @@
+#include <algorithm>
+
 #include <common/common.hh>
 #include <common/exception.hh>
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/open_telemetry.hh>
 #include <common/properties.hh>
+
 
 #include <xid_mgr/xid_mgr_server.hh>
 #include <xid_mgr/xid_mgr_service.hh>
@@ -157,9 +160,14 @@ XidMgrServer::DBXactLogData::record_log_entry(uint32_t pg_xid, uint64_t xid, boo
 {
     std::unique_lock lock(_mutex);
     _xact_log.log(pg_xid, xid, real_commit);
+
     if (has_schema_changes) {
-        _xact_history.push_back(xid);
+        _xact_history.push_back({xid, _last_committed_xid});
         _dirty_history = true;
+    }
+
+    if (real_commit) {
+        _last_committed_xid = xid;
     }
 }
 
@@ -172,12 +180,19 @@ XidMgrServer::DBXactLogData::cleanup_history_and_flush(RedisDDL &redis_ddl)
         uint64_t min_schema_xid = redis_ddl.min_schema_xid(_db_id);
 
         // find position lower than min_schema_xid
-        auto it = std::ranges::lower_bound(_xact_history.begin(), _xact_history.end(), min_schema_xid);
+        auto it = std::lower_bound(
+            _xact_history.begin(),
+            _xact_history.end(),
+            min_schema_xid,
+            XactHistoryComparator{}
+        );
         // erase all smaller xids
         _xact_history.erase(_xact_history.begin(), it);
 
         LOG_DEBUG(LOG_XID_MGR, "The history for db_id={} {}",
-            _db_id, (_xact_history.empty())? "is now empty" : fmt::format("now starts with xid={}", _xact_history.front()));
+            _db_id, (_xact_history.empty())? "is now empty" : fmt::format("now starts with schema_xid={}, latest_xid={}",
+            _xact_history.front().schema_xid, _xact_history.front().latest_real_commit_xid));
+
         _dirty_history = false;
     }
     _xact_log.flush();
@@ -196,7 +211,13 @@ XidMgrServer::DBXactLogData::get_committed_xid(uint64_t schema_xid)
         return last_xid;
     }
 
-    auto pos_i = std::ranges::upper_bound(_xact_history, schema_xid);
+    // get upper bound based on schema xid
+    auto pos_i = std::upper_bound(
+        _xact_history.begin(),
+        _xact_history.end(),
+        schema_xid,
+        XactHistoryComparator{});
+
     if (pos_i == _xact_history.end()) {
         // if the schema XID is ahead of the history, return the most recent commited XID
         LOG_DEBUG(LOG_XID_MGR, "Get committed xid for db_id={}: {}", _db_id, last_xid);
@@ -204,7 +225,7 @@ XidMgrServer::DBXactLogData::get_committed_xid(uint64_t schema_xid)
     }
 
     // if the history is ahead of the commit, return the committed xid
-    auto target_xid = (*pos_i) - 1;
+    auto target_xid = pos_i->latest_real_commit_xid;
     if (target_xid > last_xid) {
         LOG_DEBUG(LOG_XID_MGR, "Get committed xid for db_id={}: {}; ahead of history {}", _db_id, last_xid, target_xid);
         return last_xid;

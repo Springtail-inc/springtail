@@ -136,11 +136,29 @@ private:
         cleanup(uint64_t min_timestamp, bool archive_logs);
 
     private:
+        struct XactHistoryEntry {
+            uint64_t schema_xid;  ///< schema xid
+            uint64_t latest_real_commit_xid;  ///< latest real committted xid
+        };
+
+        struct XactHistoryComparator {
+            bool operator()(const XactHistoryEntry &lhs, const XactHistoryEntry &rhs) const {
+                return lhs.schema_xid < rhs.schema_xid;
+            }
+            bool operator()(uint64_t val, const XactHistoryEntry &rhs) const {
+                return val < rhs.schema_xid;
+            }
+            bool operator()(const XactHistoryEntry &lhs, uint64_t val) const {
+                return lhs.schema_xid < val;
+            }
+        };
+
         PgXactLogWriter _xact_log;              ///< log writer object
         std::shared_mutex _mutex;               ///< mutex for access control
-        std::vector<uint64_t> _xact_history;    ///< schema changes xids
+        std::vector<XactHistoryEntry> _xact_history;  ///< schema changes xids
         uint64_t _db_id;                        ///< database id
         bool _dirty_history{false};             ///< dirty history flag
+        uint64_t _last_committed_xid{0};        ///< last committed xid
     };
 
     std::shared_mutex _mutex;                   ///< mutex for access control to transaction log data

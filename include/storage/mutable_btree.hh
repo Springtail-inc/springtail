@@ -41,7 +41,7 @@ namespace springtail {
 
         struct Node;
         typedef std::shared_ptr<Node> NodePtr;
-        
+
     public:
         /**
          * Cache of Page objects.  Works with the BTree page locks to enable thread-safe access.
@@ -89,7 +89,10 @@ namespace springtail {
         MutableBTree(const std::filesystem::path &file,
                      const std::vector<std::string> &keys,
                      ExtentSchemaPtr schema,
-                     uint64_t xid);
+                     uint64_t xid,
+                     uint64_t max_extent_size);
+
+        MutableBTree() = delete;
 
         /**
          * Initialize an empty tree.
@@ -163,15 +166,6 @@ namespace springtail {
             using Iterator = StorageCache::Page::Iterator;
             using StoragePagePtr = StorageCache::SafePagePtr;
 
-        private:
-            /**
-             * Checks if the extent has exceeded the max size.  If so, splits the extent in half.
-             * Must have the page locked for exclusive access.
-             *
-             * @param pos An iterator to the extent within the extent list that we may need to split.
-             */
-            bool _check_split(std::vector<ExtentPtr>::iterator pos);
-
         public:
             /** For constructing an empty root. */
             Page(MutableBTree *btree,
@@ -230,13 +224,6 @@ namespace springtail {
             }
 
             /**
-             * Returns a reference to the last row in the page.
-             */
-            Extent::Row back() const {
-                return *(_cache_page->last());
-            }
-
-            /**
              * Returns an iterator to the first entry that has a key that is greater than or equal
              * to the provided search_key.  Returns end() if there is no such entry.
              *
@@ -273,7 +260,7 @@ namespace springtail {
              * @param fields The fields in the page that the value corresponds to.
              */
             void insert(TuplePtr search_key, TuplePtr value, MutableFieldArrayPtr fields);
-            
+
             /**
              * Remove an entry from this page.  Removes the first entry in the page with a matching
              * key.
@@ -720,9 +707,9 @@ namespace springtail {
                   _page_i(node->page->begin())
             { }
 
-            Iterator(MutableBTree *btree, NodePtr node, Page::Iterator &&page_i)
+            Iterator(MutableBTree *btree, NodePtr node, Page::Iterator &&page_i, boost::shared_lock<boost::shared_mutex> &&page_lock)
                 : _btree(btree),
-                  _page_lock(node->page->mutex),
+                  _page_lock(std::move(page_lock)),
                   _node(node),
                   _page_i(std::move(page_i))
             { }
