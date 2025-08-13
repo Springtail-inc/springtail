@@ -225,6 +225,7 @@ if __name__ == "__main__":
         # to run performance regressions we use customer.csv
         # so we download it anyway
         csv_file = "customers.csv" 
+        os.makedirs("test_data", exist_ok=True)
         helper.s3.download_file('public-share.springtail.io',
                                 f"test_files/{csv_file}.gz",
                                 f"test_data/{csv_file}.gz")
