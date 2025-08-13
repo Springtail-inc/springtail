@@ -190,8 +190,12 @@ namespace springtail {
         // clear the root
         _remove_root();
 
-        // Smart vacuum
-        Vacuumer::get_instance()->expire_extent(_file, 0, std::filesystem::file_size(_file), _xid);
+        // Smart vacuum if index exists
+        if (std::filesystem::exists(_file)) {
+            Vacuumer::get_instance()->expire_extent(_file, 0, std::filesystem::file_size(_file), _xid);
+        } else {
+            LOG_INFO("TRUNCATE: File: {} doesn't exist to report to vacuum", _file);
+        }
     }
 
     uint64_t
