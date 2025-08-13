@@ -1071,11 +1071,7 @@ namespace indexer_helpers {
 
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_index->lower_bound(search_key, true);
-        auto &&row = *i;
-
-        // if the primary index is not empty, get the target extent
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
+        uint64_t extent_id = _get_extent_id(search_key);
 
         // then we can do a direct insert
         _insert_direct(value, extent_id);
@@ -1125,11 +1121,7 @@ namespace indexer_helpers {
 
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_index->lower_bound(search_key, true);
-        auto &&row = *i;
-
-        // if the primary index is not empty, get the target extent
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
+        uint64_t extent_id = _get_extent_id(search_key);
 
         // then we can do a direct insert
         return _upsert_direct(value, extent_id);
@@ -1173,11 +1165,7 @@ namespace indexer_helpers {
         }
 
         // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
-        auto i = _primary_index->lower_bound(key, true);
-        auto &&row = *i;
-
-        // if the primary index is not empty, get the target extent
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
+        uint64_t extent_id = _get_extent_id(key);
 
         // then we can do a direct removal
         _remove_direct(key, extent_id);
@@ -1273,11 +1261,7 @@ namespace indexer_helpers {
 
         // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_index->lower_bound(search_key, true);
-        auto &&row = *i;
-
-        // if the primary index is not empty, get the target extent
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
+        uint64_t extent_id = _get_extent_id(search_key);
 
         // then we can do a direct update
         _update_direct(value, extent_id);
@@ -1302,6 +1286,15 @@ namespace indexer_helpers {
         // don't need to convert pages if we aren't supporting schema layout mutations
 #endif
     }
+
+uint64_t
+MutableTable::_get_extent_id(TuplePtr search_key) {
+    auto i = _primary_index->lower_bound(search_key, true);
+    auto &&row = *i;
+
+    // if the primary index is not empty, get the target extent
+    return _primary_extent_id_f->get_uint64(&row);
+}
 
     void Table::Iterator::Primary::next()
     {
