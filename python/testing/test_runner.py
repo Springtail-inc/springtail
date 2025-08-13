@@ -67,7 +67,7 @@ def gen_all_tests(test_folder: str,
             print(f'Skipping test set {test_set} -- missing __config.sql')
             continue
         print(f'Processing test set {test_set}')
-        test_sets.append(TestSet(os.path.join(test_folder, test_set), config_file, build_dir, test_params))
+        test_sets.append(TestSet(os.path.join(test_folder, test_set), config_file, build_dir, test_params, overlay))
 
     return test_sets
 
