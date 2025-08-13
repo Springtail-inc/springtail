@@ -19,6 +19,7 @@ static auto get_max_extent_size() {
 }
 
 static auto get_max_extent_size_secondary() {
+//    return 16*1064;
     return constant::MAX_EXTENT_SIZE_SECONDARY;
 }
 
@@ -134,16 +135,12 @@ namespace indexer_helpers {
         {
 
             // get the column names in the order they appear in the index
-            auto &&col_names = schema->get_column_names(index_columns);
+            auto &&key = schema->get_column_names(index_columns);
 
             SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
             SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, 0, false);
 
-            auto key = col_names;
-            key.push_back(constant::INDEX_EID_FIELD);
-            key.push_back(constant::INDEX_RID_FIELD);
-
-            return schema->create_schema(col_names, { extent_c, row_c }, key);
+            return schema->create_schema(key, { extent_c, row_c }, key);
         }
     }
 
@@ -973,16 +970,12 @@ namespace indexer_helpers {
     MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns)
     {
         // get the column names in the order they appear in the index
-        auto &&col_names = _schema->get_column_names(index_columns);
+        auto &&key = _schema->get_column_names(index_columns);
 
         SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
         SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, 0, false);
 
-        auto key = col_names;
-        key.push_back(constant::INDEX_EID_FIELD);
-        key.push_back(constant::INDEX_RID_FIELD);
-
-        auto index_schema = _schema->create_schema(col_names, { extent_c, row_c }, key);
+        auto index_schema = _schema->create_schema(key, { extent_c, row_c }, key);
 
         auto btree = std::make_shared<MutableBTree>(_table_dir / fmt::format(constant::INDEX_FILE, index_id),
                 key, index_schema,

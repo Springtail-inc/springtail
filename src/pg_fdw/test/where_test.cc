@@ -323,7 +323,15 @@ namespace {
 
                             ASSERT_FALSE(nulls[i]);
                             ASSERT_EQ(filtered_data[rows_valid][i], DatumGetInt32(values[i]));
-                            break;
+                        }
+                    } else if (qual_list) {
+                        ListCell *lc;
+                        foreach(lc, qual_list) {
+                            auto* p = static_cast<ConstQualPtr>(lfirst(lc));
+                            auto i = p->base.varattno - 1;
+
+                            ASSERT_FALSE(nulls[i]);
+                            ASSERT_EQ(filtered_data[rows_valid][i], DatumGetInt32(values[i]));
                         }
                     } else {
                         for (int i = 0; i < _columns.size(); i++) {

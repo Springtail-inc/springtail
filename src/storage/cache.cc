@@ -839,10 +839,6 @@ StorageCache::PageCache::background_cleaner()
                                                   return FieldTuple(schema->get_sort_fields(), &row);
                                               });
 
-        // note: row's key should *not* match the tuple's key
-        CHECK(row_i == (*extent)->end() ||
-               !FieldTuple(schema->get_sort_fields(), &*row_i).equal_strict(*key));
-
         // insert the tuple into the extent
         auto row = (*extent)->insert(row_i);
         MutableTuple(schema->get_mutable_fields(), &row).assign(tuple);
