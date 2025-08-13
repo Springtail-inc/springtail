@@ -508,6 +508,9 @@ namespace springtail
                              const PgCopyResultPtr &snapshot_details,
                              bool skip_setting_inflight)
     {
+        LOG_INFO("Copying table {}.{} with oid {} and schema oid {}",
+                 schema_name, table_name, table_oid, schema_oid);
+
         // fetch the schema info for the table; update _schema object
         _set_schema(table_name, schema_name, table_oid, schema_oid);
 
@@ -689,6 +692,9 @@ namespace springtail
         roots_req->set_snapshot_xid(metadata.snapshot_xid);
 
         copy_info->set_is_table_dropped(_is_table_dropped(schema_oid, table_oid));
+        LOG_INFO("Copied table {}.{} with oid {} and schema oid {}",
+                 schema_name, table_name, table_oid, schema_oid);
+
         return std::make_shared<PgCopyResult::TableInfo>(table_oid, copy_info, schema);
     }
 
