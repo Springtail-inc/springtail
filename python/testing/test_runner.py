@@ -223,7 +223,7 @@ if __name__ == "__main__":
         # CI sets skip_downloads to true but
         # to run performance regressions we use customer.csv
         # so we download it anyway
-        csv_file = "customer.csv" 
+        csv_file = "customers.csv" 
         helper.s3.download_file('public-share.springtail.io',
                                 f"test_files/{csv_file}.gz",
                                 f"test_data/{csv_file}.gz")
