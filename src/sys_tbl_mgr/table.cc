@@ -795,8 +795,10 @@ namespace indexer_helpers {
         // update the roots and stats
         sys_tbl_mgr::Client::get_instance()->update_roots(_db_id, _id, _target_xid, metadata);
 
-        // Smart vacuum
-        Vacuumer::get_instance()->expire_extent(_data_file, 0, std::filesystem::file_size(_data_file), _target_xid);
+        // Smart vacuum if data exists
+        if (std::filesystem::exists(_data_file)) {
+            Vacuumer::get_instance()->expire_extent(_data_file, 0, std::filesystem::file_size(_data_file), _target_xid);
+        }
     }
 
     StorageCache::SafePagePtr
