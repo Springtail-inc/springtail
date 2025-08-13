@@ -677,7 +677,6 @@ class TestCase:
 
         with connection.cursor() as cursor:
             if command['type'] == 'sql':
-                self._execute_sql(cursor, command['sql'], True, 'replica')
                 return self._execute_sql(cursor, command['sql'], True, 'replica')
 
             elif command['type'] == 'table_exists':
