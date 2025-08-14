@@ -939,6 +939,7 @@ namespace springtail::pg_fdw {
             conn->exec(fmt::format("IMPORT FOREIGN SCHEMA {} FROM SERVER {} INTO {}",
                                     escaped_schema, SPRINGTAIL_FDW_SERVER_NAME,
                                     escaped_schema));
+            conn->clear();
             _add_partition_table_comment(conn, db_id, schema.second, xid);
             conn->clear();
 
@@ -949,8 +950,8 @@ namespace springtail::pg_fdw {
             conn->exec(fmt::format("GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {}", escaped_schema, _fdw_username));
             conn->clear();
             conn->exec(fmt::format("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {}", escaped_schema, _fdw_username));
-#endif
             conn->clear();
+#endif
         }
 
         // import catalog schema
@@ -978,24 +979,22 @@ namespace springtail::pg_fdw {
     PgDDLMgr::_add_partition_table_comment(LibPqConnectionPtr conn, const uint64_t db_id, const std::string &schema_name, const uint64_t xid)
     {
         // 1. look up schema id in NamespaceNames (use inverse iterator)
-        uint64_t namespace_id = constant::MAX_NAMESPACE_ID;
         auto ns_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, xid);
         auto ns_fields = ns_table->extent_schema()->get_fields();
-        auto ns_search_key = sys_tbl::NamespaceNames::Primary::key_tuple(constant::MAX_NAMESPACE_ID, 0, 0);
-        auto table_iter = ns_table->inverse_lower_bound(ns_search_key);
-        for (; table_iter != ns_table->end(); ++table_iter) {
-            auto &row = *table_iter;
-            uint64_t ns_id = ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&row);
-            std::string ns_name(ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&row));
-            uint64_t ns_xid = ns_fields->at(sys_tbl::NamespaceNames::Data::XID)->get_uint64(&row);
-            bool ns_exists = ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row);
-            if (ns_xid > xid || ns_name != schema_name) {
-                continue;
-            }
-            CHECK(ns_exists);
-            namespace_id = ns_id;
-            break;
-        }
+        auto ns_search_key = sys_tbl::NamespaceNames::Secondary::key_tuple(schema_name, xid, constant::MAX_LSN);
+        auto table_iter = ns_table->inverse_lower_bound(ns_search_key, 1);
+
+        // verify that the record is found
+        CHECK(table_iter != ns_table->end());
+
+        auto &row = *table_iter;
+        uint64_t ns_id = ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&row);
+        std::string ns_name(ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&row));
+        uint64_t ns_xid = ns_fields->at(sys_tbl::NamespaceNames::Data::XID)->get_uint64(&row);
+        bool ns_exists = ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row);
+        DCHECK(ns_xid == xid);
+        CHECK(ns_exists);
+        uint64_t namespace_id = ns_id;
 
         // 2. look up tables for the found namespace ids where partition key != NULL
         //      walk through the whole schema, collect found tables, and exclude deleted tables

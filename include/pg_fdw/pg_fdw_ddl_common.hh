@@ -180,7 +180,8 @@ namespace springtail::pg_fdw {
                 create += fmt::format("\nSERVER {} OPTIONS (tid '{}');", server_name, tid);
             } else {
                 create += ";";
-                create += fmt::format("\nCOMMENT ON TABLE {}.{} IS 'TID:{}';", namespace_name, table, tid);
+                create += fmt::format("\nCOMMENT ON TABLE {}.{} IS 'TID:{}';",
+                    escape_identifier(namespace_name), escape_identifier(table), tid);
             }
 
             LOG_DEBUG(LOG_FDW, "Generated SQL: {}", create);
