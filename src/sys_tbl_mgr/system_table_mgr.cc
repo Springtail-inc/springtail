@@ -99,44 +99,44 @@ SystemTableMgr::get_system_table(uint64_t db_id,
     auto schema = get_extent_schema(table_id);
 
     switch (table_id) {
-    case (sys_tbl::TableNames::ID): {
+    case sys_tbl::TableNames::ID: {
         secondary_keys = _get_secondary_keys<sys_tbl::TableNames>();
         return std::make_shared<Table>(db_id, table_id, xid, _table_base,
                                         sys_tbl::TableNames::Primary::KEY,
                                         secondary_keys, tbl_meta, schema);
     }
-    case (sys_tbl::TableRoots::ID): {
+    case sys_tbl::TableRoots::ID: {
         return std::make_shared<Table>(db_id, table_id, xid, _table_base,
                                         sys_tbl::TableRoots::Primary::KEY,
                                         secondary_keys, tbl_meta, schema);
     }
-    case (sys_tbl::Indexes::ID): {
+    case sys_tbl::Indexes::ID: {
         return std::make_shared<Table>(db_id, table_id, xid, _table_base,
                                         sys_tbl::Indexes::Primary::KEY,
                                         secondary_keys, tbl_meta, schema);
     }
-    case (sys_tbl::Schemas::ID): {
+    case sys_tbl::Schemas::ID: {
         return std::make_shared<Table>(db_id, table_id, xid, _table_base,
                                         sys_tbl::Schemas::Primary::KEY,
                                         secondary_keys, tbl_meta, schema);
     }
-    case (sys_tbl::TableStats::ID): {
+    case sys_tbl::TableStats::ID: {
         return std::make_shared<Table>(db_id, table_id, xid, _table_base,
                                         sys_tbl::TableStats::Primary::KEY,
                                         secondary_keys, tbl_meta, schema);
     }
-    case (sys_tbl::IndexNames::ID): {
+    case sys_tbl::IndexNames::ID: {
         return std::make_shared<Table>(db_id, table_id, xid, _table_base,
                                         sys_tbl::IndexNames::Primary::KEY,
                                         secondary_keys, tbl_meta, schema);
     }
-    case (sys_tbl::NamespaceNames::ID): {
+    case sys_tbl::NamespaceNames::ID: {
         secondary_keys = _get_secondary_keys<sys_tbl::NamespaceNames>();
         return std::make_shared<Table>(db_id, table_id, xid, _table_base,
                                         sys_tbl::NamespaceNames::Primary::KEY,
                                         secondary_keys, tbl_meta, schema);
     }
-    case (sys_tbl::UserTypes::ID): {
+    case sys_tbl::UserTypes::ID: {
         return std::make_shared<Table>(db_id, table_id, xid, _table_base,
                                         sys_tbl::UserTypes::Primary::KEY,
                                         secondary_keys, tbl_meta, schema);
@@ -165,45 +165,45 @@ SystemTableMgr::get_mutable_system_table(uint64_t db_id,
 
 
     switch (table_id) {
-    case (sys_tbl::TableNames::ID): {
+    case sys_tbl::TableNames::ID: {
         secondary_keys = _get_secondary_keys<sys_tbl::TableNames>();
 
         return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                 sys_tbl::TableNames::Primary::KEY, secondary_keys,
                                                 tbl_meta, schema);
     }
-    case (sys_tbl::TableRoots::ID): {
+    case sys_tbl::TableRoots::ID: {
         return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                 sys_tbl::TableRoots::Primary::KEY, secondary_keys,
                                                 tbl_meta, schema);
     }
-    case (sys_tbl::Indexes::ID): {
+    case sys_tbl::Indexes::ID: {
         return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                 sys_tbl::Indexes::Primary::KEY, secondary_keys,
                                                 tbl_meta, schema);
     }
-    case (sys_tbl::Schemas::ID): {
+    case sys_tbl::Schemas::ID: {
         return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                 sys_tbl::Schemas::Primary::KEY, secondary_keys,
                                                 tbl_meta, schema);
     }
-    case (sys_tbl::TableStats::ID): {
+    case sys_tbl::TableStats::ID: {
         return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                 sys_tbl::TableStats::Primary::KEY, secondary_keys,
                                                 tbl_meta, schema);
     }
-    case (sys_tbl::IndexNames::ID): {
+    case sys_tbl::IndexNames::ID: {
         return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                 sys_tbl::IndexNames::Primary::KEY, secondary_keys,
                                                 tbl_meta, schema);
     }
-    case (sys_tbl::NamespaceNames::ID): {
+    case sys_tbl::NamespaceNames::ID: {
         secondary_keys = _get_secondary_keys<sys_tbl::NamespaceNames>();
         return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                 sys_tbl::NamespaceNames::Primary::KEY, secondary_keys,
                                                 tbl_meta, schema);
     }
-    case (sys_tbl::UserTypes::ID): {
+    case sys_tbl::UserTypes::ID: {
         return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                 sys_tbl::UserTypes::Primary::KEY, secondary_keys,
                                                 tbl_meta, schema);

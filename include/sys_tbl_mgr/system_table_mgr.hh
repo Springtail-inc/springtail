@@ -38,7 +38,7 @@ namespace springtail {
     protected:
 
         SystemTableMgr();
-        ~SystemTableMgr() = default;
+        ~SystemTableMgr() override = default;
 
         template<typename Table>
         static std::vector<Index> _get_secondary_keys();
@@ -59,12 +59,7 @@ namespace springtail {
                   is_leaf(l)
             { }
 
-            bool operator==(const SystemKey &other) const
-            {
-                return (table_id == other.table_id &&
-                        index_id == other.index_id &&
-                        is_leaf == other.is_leaf);
-            }
+            bool operator==(const SystemKey &other) const = default;
 
             friend std::size_t hash_value(const SystemKey &k)
             {
