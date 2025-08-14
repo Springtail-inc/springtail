@@ -185,8 +185,12 @@ namespace springtail {
         // update the roots and stats
         sys_tbl_mgr::Client::get_instance()->update_roots(table->db(), table->id(), target_xid, metadata);
 
-        // Smart vacuum
-        Vacuumer::get_instance()->expire_extent(data_file, 0, std::filesystem::file_size(data_file), target_xid);
+        // Smart vacuum if data exists
+        if (std::filesystem::exists(data_file)) {
+            Vacuumer::get_instance()->expire_extent(data_file, 0, std::filesystem::file_size(data_file), target_xid);
+        } else {
+            LOG_INFO("TRUNCATE TABLE: File: {} doesn't exist to report to vacuum", data_file);
+        }
     }
 
     ExtentSchemaPtr

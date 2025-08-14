@@ -22,6 +22,7 @@ namespace springtail {
     namespace VacuumConfig {
         constexpr uint64_t HOLE_PUNCH_BLOCK_SIZE = 4 * 1024;
         constexpr uint64_t GLOBAL_FILE_SIZE_THRESHOLD = 20 * 1024;
+        constexpr uint64_t MAX_ENTRIES_IN_MEMORY = 10000;
 
         constexpr char GLOBAL_FILE_SUFFIX[] = ".global.vcm";
         constexpr char GLOBAL_RUNFILE_SUFFIX[] = ".global.vcm.run";
@@ -63,17 +64,17 @@ public:
     void commit_expired_extents(uint64_t db_id, uint64_t committed_xid);
 
     /**
-     * @brief Enable vacuum run
+     * @brief Enable vacuumer to collect extents/snapshosts to be vacuumed
      */
-    void enable_vacuum_run() {
-        _vacuum_run_enabled = true;
+    void enable_tracking_extents() {
+        _extents_tracking_enabled = true;
     }
 
     /**
-     * @brief Disable vacuum run
+     * @brief Disable vacuumer to collect extents/snapshosts to be vacuumed
      */
-    void disable_vacuum_run() {
-        _vacuum_run_enabled = false;
+    void disable_tracking_extents() {
+        _extents_tracking_enabled = false;
     }
 
     /**
@@ -143,14 +144,20 @@ private:
     uint64_t _global_file_size_threshold;
 
     /**
+     * Max entries in memory to be held before triggering flush to disk
+     * Ideally, on every commit, entries will be flushed upto the committed XID
+     */
+    uint64_t _max_entries_in_memory;
+
+    /**
      * Flag to start vacuum while booting
      */
     bool _vacuum_start_enabled = false;
 
     /**
-     * Flag to control vacuum run
+     * Flag to control extents/snapshots tracking
      */
-    bool _vacuum_run_enabled = true;
+    bool _extents_tracking_enabled = true;
 
     /**
      * Expired extents map
@@ -185,6 +192,8 @@ private:
     std::thread _vacuumer_thread;           ///< Vacuumer thread
 
     std::atomic<bool> _shutdown{false};   ///< shutdown flag
+    std::atomic<int64_t> _entries_count_in_memory = 0;  ///< To track count of entries in the memory
+
     /**
      * @brief Round a value up to the nearest multiple of `align`
      */
@@ -314,5 +323,19 @@ private:
      *                     (since this method will be called after deleting the path)
      */
     void _cleanup_partial_files(const std::filesystem::path &path, bool is_directory);
+
+    /**
+     * @brief Flush all the expired entries in the memory to global vacuum file
+     */
+    void _flush_all_expired_entries();
+
+    /**
+     * @brief Persist expired extents upto committed_xid
+     *
+     * @param db_id Database ID
+     * @param committed_xid XID upto which expired extents will
+     *        be written to the disk
+     */
+    void _commit_expired_extents(uint64_t db_id, uint64_t committed_xid);
 };
 }

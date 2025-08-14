@@ -464,6 +464,15 @@ namespace springtail::committer {
 
         // construct the mutable table object
         auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, xid, true);
+        if (!sys_tbl_mgr::Client::get_instance()->exists(db_id, tid, XidLsn{xid})) {
+            // This could happen if the table is dropped in the same transaction
+            // BEGIN/INSERT/DROP/COMMIT
+            // TODO: another way to handle the case would be to drop the table mutation
+            // records from the Batch object in the log reader. Marking this as TODO
+            // just to keep the question open for now.
+            LOG_DEBUG(LOG_COMMITTER, "The table doesn't exists: {}", tid);
+            return;
+        }
 
         // retrieve extents and apply the mutations to them
         uint64_t extent_cursor = 0;
