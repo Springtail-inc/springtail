@@ -286,6 +286,8 @@ class Production:
             subject = f"Instance startup: {srn}, {service_name} @{timestamp}"
         elif type == 'shutdown':
             subject = f"Instance shutdown: {srn}, {service_name} @{timestamp}"
+        elif type == 'warning':
+            subject = f"Warning detected: {srn}, {service_name}, {component} @{timestamp}"
         elif type == 'failure':
             subject = f"Failure detected: {srn}, {service_name}, {component} @{timestamp}"
         elif type == 'download_start':
