@@ -991,7 +991,7 @@ namespace springtail::pg_fdw {
         auto table_iter = ns_table->inverse_lower_bound(ns_search_key, 1);
 
         // verify that the record is found
-        CHECK(table_iter != ns_table->end());
+        CHECK(table_iter != ns_table->end(1));
 
         auto &ns_row = *table_iter;
         uint64_t ns_id = ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&ns_row);
