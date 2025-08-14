@@ -7,6 +7,8 @@ from lxml import etree
 import os
 import sys
 import yaml
+import gzip
+import shutil
 
 from test_case import TestCase
 from test_set import TestSet
@@ -214,10 +216,24 @@ if __name__ == "__main__":
                 tests = gen_test_cases(os.path.join(test_folder, args.test_set), args.test_case,
                                        default_config_file, build_dir, {})
     # sync the test data files
+    helper = AwsHelper(config=botocore.config.Config(signature_version=botocore.UNSIGNED),
+                       region="us-east-1")
     if not args.skip_downloads:
-        helper = AwsHelper(config=botocore.config.Config(signature_version=botocore.UNSIGNED),
-                           region="us-east-1")
         helper.sync_s3_data('test_data', s3_path='test_files')
+    else:
+        # CI sets skip_downloads to true but
+        # to run performance regressions we use customer.csv
+        # so we download it anyway
+        csv_file = "customers.csv" 
+        os.makedirs("test_data", exist_ok=True)
+        helper.s3.download_file('public-share.springtail.io',
+                                f"test_files/{csv_file}.gz",
+                                f"test_data/{csv_file}.gz")
+        with gzip.open(f"test_data/{csv_file}.gz", 'rb') as f_in:
+            with open(f"test_data/{csv_file}", 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
+            os.remove(f"test_data/{csv_file}.gz")
+
 
     # run the tests
     test_failure = False
