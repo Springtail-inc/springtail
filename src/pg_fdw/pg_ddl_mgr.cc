@@ -1028,7 +1028,7 @@ namespace springtail::pg_fdw {
             if (!exists) {
                 tables.erase(std::pair(table_id, table_name));
             } else {
-                tables.insert(std::pair(table_id, table_name));
+                tables.emplace(table_id, table_name);
             }
         }
 
