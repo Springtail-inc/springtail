@@ -886,6 +886,11 @@ namespace indexer_helpers {
          */
         void _check_convert_page(StorageCache::SafePagePtr &page);
 
+        /**
+         * Helper to extract the extent_id of the target page for a mutation from the primary index.
+         */
+        uint64_t _get_extent_id(TuplePtr search_key);
+
     private:
         uint64_t _db_id; ///< The ID of the database containing this table.
         uint64_t _id; ///< The ID of the table.

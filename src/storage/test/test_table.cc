@@ -1181,8 +1181,8 @@ namespace {
         uint64_t target_xid = access_xid + 1;
         auto table_id = 1007;
 
-        // Disable vacuum run
-        Vacuumer::get_instance()->disable_vacuum_run();
+        // Enable extents tracking in vacuumer
+        Vacuumer::get_instance()->enable_tracking_extents();
 
         // create the namespace and table in the sys_tbl_mgr
         _init_sys_tbls(target_xid, table_id, "test_table_vacuum");

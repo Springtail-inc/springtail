@@ -4,23 +4,30 @@ build_dir: '../../debug'
 tmp_config_dir: '/tmp/tmp_springtail_config'
 
 overlay_config:
+  # uses a small repl log size to force more frequent log rotations
   small_log_rotate:
+    # no parameters
     params: ~
+  # uses a small repl log size to force more frequent log rotations together with streaming postgres config
   small_log_rotate_with_streaming:
     params:
       postgres_config:
         logical_decoding_work_mem: 64
+  # uses a small data cache size to force more frequent eviction
   small_cache_size:
     # no parameters
     params: ~
+  # uses a small worker mem size to ensure streaming mode
   streaming_postgres_config:
     params:
       postgres_config:
         logical_decoding_work_mem: 64
+  # set the test config to run the test and verify steps against the proxy
   integration_test_config:
     params:
       use_proxy_for_test: true
       use_proxy_for_verify: true
+  # special configuration for testing include schema
   include_schema_config:
     # no parameters
     params: ~
@@ -44,7 +51,7 @@ configs:
 
   github_ci:
     - overlay: ~
-      test_sets: ['basic', 'framework', 'preload', 'enum_bits', 'complex', 'numeric']
+      test_sets: ['basic', 'framework', 'preload', 'enum_bits', 'complex', 'numeric', 'query_benchmark']
     - overlay: 'small_log_rotate'
       test_sets: ['recovery']
     - overlay: 'small_log_rotate_with_streaming'
