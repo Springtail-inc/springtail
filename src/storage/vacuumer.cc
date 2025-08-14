@@ -31,6 +31,13 @@ Vacuumer::_init()
         _global_file_size_threshold = VacuumConfig::GLOBAL_FILE_SIZE_THRESHOLD;
     }
 
+    // Max entries to be held in memory before flushing to disk
+    if (vacuum_config_json.contains("max_entries_in_memory")) {
+        Json::get_to<uint64_t>(vacuum_config_json, "max_entries_in_memory", _max_entries_in_memory);
+    } else {
+        _max_entries_in_memory = VacuumConfig::MAX_ENTRIES_IN_MEMORY;
+    }
+
     // Block size to hole-punch
     if (vacuum_config_json.contains("hole_punch_block_size")) {
         Json::get_to<uint64_t>(vacuum_config_json, "hole_punch_block_size", _hole_punch_block_size);
@@ -70,6 +77,8 @@ Vacuumer::_init()
         // Core thread of the vacuumer
         _vacuumer_thread = std::thread(&Vacuumer::_internal_run, this);
         LOG_INFO("Vacuumer thread started");
+    } else {
+        _extents_tracking_enabled = false;
     }
 }
 
@@ -86,10 +95,35 @@ Vacuumer::_internal_shutdown()
 }
 
 void
-Vacuumer::commit_expired_extents(uint64_t db_id, uint64_t committed_xid)
+Vacuumer::_flush_all_expired_entries()
 {
-    std::unique_lock lock(_mutex);
+    // Lock should be acquired by the caller
 
+    // Check if there are entries in extent map, and flush them to disk
+    if (!_extent_map.empty()) {
+        std::set<uint64_t> db_id_list;
+        for (auto file_it = _extent_map.begin(); file_it != _extent_map.end(); ) {
+            db_id_list.insert(_get_db_id_from_path(file_it->first));
+            ++file_it;
+        }
+
+        for (auto db_id: db_id_list) {
+            _commit_expired_extents(db_id, UINT64_MAX);
+        }
+    }
+
+    // If there are entries still left in snapshot map, flush them as well
+    if (!_snapshot_map.empty()) {
+        auto db_id_list = std::views::keys(_snapshot_map);
+        for (auto db_id: db_id_list) {
+            _commit_expired_extents(db_id, UINT64_MAX);
+        }
+    }
+}
+
+void
+Vacuumer::_commit_expired_extents(uint64_t db_id, uint64_t committed_xid)
+{
     // Lets persist expired extents
     auto handle = IOMgr::get_instance()->open(_global_vacuum_file, IOMgr::IO_MODE::APPEND, true);
 
@@ -130,6 +164,7 @@ Vacuumer::commit_expired_extents(uint64_t db_id, uint64_t committed_xid)
                         SnapshotList& snapshot_list = snapshot_xid_entry->second;
                         _upsert_extent_using_snapshot_list(xid_it->first, snapshot_list, extent);
                         snapshot_entries_found = true;
+                        _entries_count_in_memory = _entries_count_in_memory - snapshot_list.size();
                     }
                 }
 
@@ -149,6 +184,7 @@ Vacuumer::commit_expired_extents(uint64_t db_id, uint64_t committed_xid)
                 }
 
                 // Erase from extents map and advance in one step
+                _entries_count_in_memory = _entries_count_in_memory - xid_it->second.size();
                 xid_it = xid_map.erase(xid_it);
             }
 
@@ -182,9 +218,22 @@ Vacuumer::commit_expired_extents(uint64_t db_id, uint64_t committed_xid)
             response.wait();
 
             // Erase and advance
+            _entries_count_in_memory = _entries_count_in_memory - snapshot_list.size();
             snapshot_xid_entry = snapshot_xid_map.erase(snapshot_xid_entry);
         }
     }
+
+}
+
+void
+Vacuumer::commit_expired_extents(uint64_t db_id, uint64_t committed_xid)
+{
+    if (!_extents_tracking_enabled) {
+        return;
+    }
+
+    std::unique_lock lock(_mutex);
+    _commit_expired_extents(db_id, committed_xid);
 }
 
 std::shared_ptr<Extent>
@@ -316,8 +365,13 @@ Vacuumer::expire_extent(const std::filesystem::path &file,
                         uint32_t size,
                         uint64_t xid)
 {
+    if (!_extents_tracking_enabled) {
+        return;
+    }
+
     std::unique_lock lock(_mutex);
     _extent_map[file][xid].emplace_back(extent_id, size);
+    _entries_count_in_memory++;
 }
 
 void
@@ -325,8 +379,13 @@ Vacuumer::expire_snapshot(uint64_t db_id,
                           const std::filesystem::path &table_dir,
                           uint64_t xid)
 {
+    if (!_extents_tracking_enabled) {
+        return;
+    }
+
     std::unique_lock lock(_mutex);
     _snapshot_map[db_id][xid].emplace_back(table_dir);
+    _entries_count_in_memory++;
 }
 
 std::vector<Vacuumer::HoleInfo>
@@ -649,6 +708,12 @@ Vacuumer::_do_vacuum_run()
     // lock while accessing the maps
     std::unique_lock lock(_mutex);
 
+    // Flush everything if the entries in the map crosses threshold
+    if (_entries_count_in_memory > _max_entries_in_memory) {
+        LOG_INFO("Flushing all to disk as entries exceed threshold {} > {}", _entries_count_in_memory, _max_entries_in_memory);
+        _flush_all_expired_entries();
+    }
+
     ExtentMap expired_extents_map;
     SnapshotMap expired_snapshots_map;
 
@@ -845,11 +910,6 @@ Vacuumer::_internal_run()
     while(!_shutdown) {
         // sleep for 1 second before trying to expire more data
         std::this_thread::sleep_for(std::chrono::seconds(1));
-
-        if (!_vacuum_run_enabled) {
-            // Vacuum turned off for run
-            continue;
-        }
 
         // Run vacuum once
         _do_vacuum_run();
