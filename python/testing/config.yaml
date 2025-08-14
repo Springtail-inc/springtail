@@ -13,8 +13,8 @@ default_test_sets: ['basic', 'framework', 'recovery', 'preload', 'enum_bits', 'c
 # the configuration overlays to apply
 overlays:
   # uses a small repl log size to force more frequent log rotations
-  #small_log_rotate:
-  #  test_sets: ['recovery']
+  small_log_rotate:
+    test_sets: ['recovery']
   # uses a small data cache size to force more frequent eviction
   small_cache_size:
     test_sets: ['basic']
