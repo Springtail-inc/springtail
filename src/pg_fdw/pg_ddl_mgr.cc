@@ -993,14 +993,13 @@ namespace springtail::pg_fdw {
         // verify that the record is found
         CHECK(table_iter != ns_table->end());
 
-        auto &row = *table_iter;
-        uint64_t ns_id = ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&row);
-        std::string ns_name(ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&row));
-        uint64_t ns_xid = ns_fields->at(sys_tbl::NamespaceNames::Data::XID)->get_uint64(&row);
-        bool ns_exists = ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row);
+        auto &ns_row = *table_iter;
+        uint64_t ns_id = ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&ns_row);
+        std::string ns_name(ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&ns_row));
+        uint64_t ns_xid = ns_fields->at(sys_tbl::NamespaceNames::Data::XID)->get_uint64(&ns_row);
+        bool ns_exists = ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&ns_row);
         DCHECK(ns_xid == xid);
         CHECK(ns_exists);
-        uint64_t namespace_id = ns_id;
 
         // 2. look up tables for the found namespace ids where partition key != NULL
         //      walk through the whole schema, collect found tables, and exclude deleted tables
@@ -1010,7 +1009,7 @@ namespace springtail::pg_fdw {
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, xid);
         auto fields = table->extent_schema()->get_fields();
         for (auto row: (*table)) {
-            uint64_t ns_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
+            uint64_t table_ns_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
             std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row));
             uint64_t table_id = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
             uint64_t table_xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
@@ -1022,7 +1021,7 @@ namespace springtail::pg_fdw {
             if (table_xid > xid) {
                 break;
             }
-            if (ns_id != namespace_id || !partition_key.has_value()) {
+            if (table_ns_id != ns_id || !partition_key.has_value()) {
                 continue;
             }
             if (!exists) {
