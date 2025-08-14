@@ -1,0 +1,54 @@
+test_folder: 'test_cases'
+system_json_path: '../../system.json.test'
+build_dir: '../../debug'
+tmp_config_dir: '/tmp/tmp_springtail_config'
+
+overlay_config:
+  small_log_rotate:
+    params:
+      postgres_config:
+        logical_decoding_work_mem: 64
+  small_cache_size:
+    # no parameters
+    params: ~
+  streaming_postgres_config:
+    params:
+      postgres_config:
+        logical_decoding_work_mem: 64
+  integration_test_config:
+    params:
+      use_proxy_for_test: true
+      use_proxy_for_verify: true
+  include_schema_config:
+    # no parameters
+    params: ~
+
+configs:
+  nightly:
+    - overlay: ~
+      test_sets: 'all'
+    - overlay: 'small_log_rotate'
+      test_sets: ['recovery', 'large_data']
+    - overlay: 'small_cache_size'
+      test_sets: ['basic']
+    - overlay: 'streaming_postgres_config'
+      test_sets: ['recovery', 'large_data']
+    - overlay: 'integration_test_config'
+      test_sets: ['basic', 'framework', 'recovery']
+    - overlay: 'include_schema_config'
+      test_sets: ['include_schema']
+
+  github_ci:
+    - overlay: ~
+      test_sets: ['basic', 'framework', 'recovery', 'preload', 'enum_bits', 'complex', 'numeric']
+    - overlay: 'small_log_rotate'
+      test_sets: ['recovery']
+    - overlay: 'small_cache_size'
+      test_sets: ['basic']
+    - overlay: 'streaming_postgres_config'
+      test_sets: ['recovery', 'large_data']
+    - overlay: 'integration_test_config'
+      test_sets: ['basic', 'framework', 'recovery']
+    - overlay: 'include_schema_config'
+      test_sets: ['include_schema']
+

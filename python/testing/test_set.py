@@ -36,14 +36,16 @@ class TestSet:
         self._config_file = config_file
         self._build_dir = build_dir
         self._test_params = test_params
-        self._name = os.path.splitext(os.path.basename(self._config_file))[0] + ' - ' + os.path.basename(self._directory)
+        self._name = (overlay if overlay is not None else "default") + ' - ' + os.path.basename(self._directory)
+        # self._name = os.path.splitext(os.path.basename(self._config_file))[0] + ' - ' + os.path.basename(self._directory)
+        self._skip = False
 
         # constuct the special "config" test case for global setup and cleanup
         self._config = TestCase(os.path.join(directory, _GLOBAL_CONFIG_FILE), self._build_dir, self._test_params, ['setup', 'cleanup'])
         self._config.parse_file()
         if not self._check_overlay(overlay, self._config.get_allowed_overlays()):
             logging.error(f'Error: overlay requirement is not fulfilled for the test set')
-            raise ValueError('Invalid overlay used for the test set')
+            self._skip = True
 
         # collect and parse the test cases from the directory
         self._test_files = [ ]
@@ -118,6 +120,9 @@ class TestSet:
             if db_name in added_databases:
                 logging.debug(f'Dropping database {db_name}, config: {db_config}')
                 springtail.drop_database(self._props, db_config)
+
+    def skip(self) -> bool:
+        return self._skip
 
     def run(self,
             shutdown_on_fail: bool = False) -> bool:
