@@ -300,7 +300,7 @@ namespace springtail {
                     return -1;
                 }
             } catch (const std::filesystem::filesystem_error& e) {
-                LOG_ERROR("_get_file_size exception: {}", e.what());
+                LOG_WARNING("_get_file_size exception: {}", e.what());
                 return -1;
             }
         }
