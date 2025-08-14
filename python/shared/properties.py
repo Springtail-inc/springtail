@@ -17,6 +17,10 @@ DB_USER_ROLE_PROXY = "proxy_to_fdw"
 DB_USER_ROLE_FDW = "fdw_superuser"
 
 class Properties:
+    FDW_STATE_INITIALIZE = "initialize"
+    FDW_STATE_RUNNING = "running"
+    FDW_STATE_STOPPED = "stopped"
+
     def __init__(self, config_file=None, load_redis=False) -> None:
         """Initialize the properties object."""
         self.init(config_file)
@@ -218,6 +222,14 @@ class Properties:
 
         return config
 
+    def set_fdw_state(self, state: str) -> None:
+        """Set the foreign data wrapper state in Redis."""
+        key = str(self.db_instance_id) + ':fdw'
+        config = self.get_fdw_config(nocache=True)
+        config['state'] = state
+        self.redis.hset(key, self.fdw_id, json.dumps(config))
+        self.cache[key] = config
+
     def get_proxy_config(self) -> dict:
         """Return the proxy configuration as an object."""
         key = str(self.db_instance_id) + ':instance_config'
@@ -344,6 +356,7 @@ class Properties:
         # create hset for fdw configs, and set the fdw ids
         fdw_key = str(db_instance_id) + ':fdw'
         for fdw_id in system_json['fdws']:
+            system_json['fdws'][fdw_id]['state'] = 'initialize'  # default state
             fdw_json_str = json.dumps(system_json['fdws'][fdw_id])
             self.redis.hset(fdw_key, fdw_id, fdw_json_str)
             self.redis.sadd(fdw_key + '_ids', fdw_id)
@@ -354,6 +367,27 @@ class Properties:
             db_id = dbc['id']
             db_state_key = str(self.db_instance_id) + ':instance_state'
             self.redis.hset(db_state_key, db_id, state)
+
+    def wait_for_fdw_state(self, state: str, timeout: int = 600) -> None:
+        """Wait for the foreign data wrapper state to reach the desired state.
+        :param state: the state to wait for
+        :param timeout: the maximum time to wait in seconds (0 wait forever)
+        """
+        key = str(self.db_instance_id) + ':fdw'
+        start = time.time()
+        while True:
+            config_str = self.redis.hget(key, self.fdw_id)
+            if not config_str:
+                continue
+            current_config = json.loads(config_str)
+            if current_config['state'] == state:
+                return
+            time.sleep(1)
+            if time.time() - start > timeout:
+                break
+
+        if timeout != 0:
+            raise TimeoutError(f'Timed out waiting for fdw state: {state}')
 
     def wait_for_state(self, state : str, id : int, error_state : str = "", timeout : int = 600) -> None:
         """Wait for the database state to reach the desired state.
