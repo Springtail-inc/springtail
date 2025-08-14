@@ -105,7 +105,7 @@ public:
      * @return true - enabled
      * @return false - disabled
      */
-    bool is_enabled() { return _vacuum_start_enabled; }
+    bool is_enabled() const { return _vacuum_start_enabled; }
 protected:
     /**
      * @brief Constructor, that inits the vacuumer thread
