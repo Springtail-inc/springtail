@@ -41,7 +41,8 @@ def generate_tests(test_folder: str,
     logging.info(
         f'Generate test: test_folder: {test_folder}, '
         f'test_set: {"ALL" if test_set is None else test_set}, '
-        f'test_files: {", ".join(test_files) if len(test_files) != 0 else "ALL"}'
+        f'test_files: {", ".join(test_files) if len(test_files) != 0 else "ALL"}, '
+        f'overlay: {overlay}'
     )
 
     test_sets = []
@@ -237,7 +238,7 @@ if __name__ == "__main__":
             tests += generate_tests_for_overlay(test_folder, build_dir, system_json_path, tmp_config_dir, overlays_config, test_sets, [], default_config, overlay)
     else:
         test_sets = [args.test_set] if args.test_set is not None else None
-        tests += generate_tests_for_overlay(test_folder, build_dir, system_json_path, tmp_config_dir, overlays_config, test_sets, args.test_case, default_config, None)
+        tests += generate_tests_for_overlay(test_folder, build_dir, system_json_path, tmp_config_dir, overlays_config, test_sets, args.test_case, default_config, args.overlay)
 
     # sync the test data files
     helper = AwsHelper(config=botocore.config.Config(signature_version=botocore.UNSIGNED),
@@ -248,7 +249,7 @@ if __name__ == "__main__":
         # CI sets skip_downloads to true but
         # to run performance regressions we use customer.csv
         # so we download it anyway
-        csv_file = "customers.csv" 
+        csv_file = "customers.csv"
         os.makedirs("test_data", exist_ok=True)
         helper.s3.download_file('public-share.springtail.io',
                                 f"test_files/{csv_file}.gz",
