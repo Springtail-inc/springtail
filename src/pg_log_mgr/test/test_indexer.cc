@@ -321,8 +321,8 @@ namespace {
         uint64_t data_xid = access_xid++;
         uint64_t reconcile_xid = access_xid++;
 
-        // Disable vacuum run
-        Vacuumer::get_instance()->disable_vacuum_run();
+        // Enable extents tracking in vacuumer
+        Vacuumer::get_instance()->enable_tracking_extents();
 
         // Create table
         create_table(_db_id, table_id, table_xid, "test_indexer_table6", _columns);

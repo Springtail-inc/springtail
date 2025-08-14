@@ -41,7 +41,7 @@ namespace springtail {
 
         struct Node;
         typedef std::shared_ptr<Node> NodePtr;
-        
+
     public:
         /**
          * Cache of Page objects.  Works with the BTree page locks to enable thread-safe access.
@@ -224,13 +224,6 @@ namespace springtail {
             }
 
             /**
-             * Returns a reference to the last row in the page.
-             */
-            Extent::Row back() const {
-                return *(_cache_page->last());
-            }
-
-            /**
              * Returns an iterator to the first entry that has a key that is greater than or equal
              * to the provided search_key.  Returns end() if there is no such entry.
              *
@@ -267,7 +260,7 @@ namespace springtail {
              * @param fields The fields in the page that the value corresponds to.
              */
             void insert(TuplePtr search_key, TuplePtr value, MutableFieldArrayPtr fields);
-            
+
             /**
              * Remove an entry from this page.  Removes the first entry in the page with a matching
              * key.
@@ -714,9 +707,9 @@ namespace springtail {
                   _page_i(node->page->begin())
             { }
 
-            Iterator(MutableBTree *btree, NodePtr node, Page::Iterator &&page_i)
+            Iterator(MutableBTree *btree, NodePtr node, Page::Iterator &&page_i, boost::shared_lock<boost::shared_mutex> &&page_lock)
                 : _btree(btree),
-                  _page_lock(node->page->mutex),
+                  _page_lock(std::move(page_lock)),
                   _node(node),
                   _page_i(std::move(page_i))
             { }
