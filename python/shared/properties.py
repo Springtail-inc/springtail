@@ -403,6 +403,7 @@ class Properties:
         start = time.time()
         while True:
             current_state = self.redis.hget(key, str(id))
+            print(f"Waiting for database {key}:{id} to reach state: {state}, current state: {current_state}")
             if current_state == state:
                 return
             if error_state != "" and current_state == error_state:
