@@ -998,7 +998,7 @@ namespace springtail::pg_fdw {
         std::string ns_name(ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&ns_row));
         uint64_t ns_xid = ns_fields->at(sys_tbl::NamespaceNames::Data::XID)->get_uint64(&ns_row);
         bool ns_exists = ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&ns_row);
-        DCHECK(ns_xid == xid);
+        DCHECK(ns_xid <= xid);
         CHECK(ns_exists);
 
         // 2. look up tables for the found namespace ids where partition key != NULL
