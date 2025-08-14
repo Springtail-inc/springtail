@@ -1,6 +1,6 @@
 ## metadata
 
-### ### allow_overlays small_log_rotate small_log_rotate_with_streaming streaming_postgres_config
+### allow_overlays small_log_rotate small_log_rotate_with_streaming streaming_postgres_config
 
 ## setup
 SELECT 1;
