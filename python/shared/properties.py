@@ -12,11 +12,19 @@ from aws import AwsHelper
 # AWS secret manager secret name for database users
 DB_USERS_SECRET = "sk/{}/{}/aws/dbi/{}/primary_db_password"
 
-DB_USER_ROLE_REPLICATION = "replication"
-DB_USER_ROLE_PROXY = "proxy_to_fdw"
-DB_USER_ROLE_FDW = "fdw_superuser"
-
 class Properties:
+    """Properties class to manage system properties and configurations."""
+
+    # foreign data wrapper states
+    FDW_STATE_INITIALIZE = "initialize"
+    FDW_STATE_RUNNING = "running"
+    FDW_STATE_STOPPED = "stopped"
+
+    # database roles from secrets manager
+    DB_USER_ROLE_REPLICATION = "replication"
+    DB_USER_ROLE_PROXY = "proxy_to_fdw"
+    DB_USER_ROLE_FDW = "fdw_superuser"
+
     def __init__(self, config_file=None, load_redis=False) -> None:
         """Initialize the properties object."""
         self.init(config_file)
@@ -129,16 +137,16 @@ class Properties:
         result = {}
 
         for user in user_json:
-            if DB_USER_ROLE_FDW == user['role'] or DB_USER_ROLE_REPLICATION == user['role'] or DB_USER_ROLE_PROXY == user['role']:
+            if self.DB_USER_ROLE_FDW == user['role'] or self.DB_USER_ROLE_REPLICATION == user['role'] or self.DB_USER_ROLE_PROXY == user['role']:
                 result[user['role']] = (user['username'], user['password'])
 
-        if not result[DB_USER_ROLE_REPLICATION]:
+        if not result[self.DB_USER_ROLE_REPLICATION]:
             raise Exception("Replication user not found in Redis user override.")
 
-        if not result[DB_USER_ROLE_PROXY]:
+        if not result[self.DB_USER_ROLE_PROXY]:
             raise Exception("Proxy password not found in Redis user override.")
 
-        if not result[DB_USER_ROLE_FDW]:
+        if not result[self.DB_USER_ROLE_FDW]:
             raise Exception("FDW user not found in Redis user override.")
 
         return result
@@ -191,7 +199,7 @@ class Properties:
 
         config = json.loads(self.redis.hget(key, 'primary_db'))
 
-        replication_user = self.get_role(DB_USER_ROLE_REPLICATION)
+        replication_user = self.get_role(self.DB_USER_ROLE_REPLICATION)
         config['replication_user'] = replication_user[0]
         config['password'] = replication_user[1]
         self.cache[key] = config
@@ -207,8 +215,8 @@ class Properties:
         if not self.fdw_id:
             return {}
 
-        fdw_user = self.get_role(DB_USER_ROLE_FDW)
-        proxy_user = self.get_role(DB_USER_ROLE_PROXY)
+        fdw_user = self.get_role(self.DB_USER_ROLE_FDW)
+        proxy_user = self.get_role(self.DB_USER_ROLE_PROXY)
 
         config = json.loads(self.redis.hget(key, self.fdw_id))
         config['fdw_user'] = fdw_user[0]
@@ -217,6 +225,14 @@ class Properties:
         self.cache[key] = config
 
         return config
+
+    def set_fdw_state(self, state: str) -> None:
+        """Set the foreign data wrapper state in Redis."""
+        key = str(self.db_instance_id) + ':fdw'
+        config = self.get_fdw_config(nocache=True)
+        config['state'] = state
+        self.redis.hset(key, self.fdw_id, json.dumps(config))
+        self.cache[key] = config
 
     def get_proxy_config(self) -> dict:
         """Return the proxy configuration as an object."""
@@ -344,6 +360,7 @@ class Properties:
         # create hset for fdw configs, and set the fdw ids
         fdw_key = str(db_instance_id) + ':fdw'
         for fdw_id in system_json['fdws']:
+            system_json['fdws'][fdw_id]['state'] = 'initialize'  # default state
             fdw_json_str = json.dumps(system_json['fdws'][fdw_id])
             self.redis.hset(fdw_key, fdw_id, fdw_json_str)
             self.redis.sadd(fdw_key + '_ids', fdw_id)
@@ -355,6 +372,27 @@ class Properties:
             db_state_key = str(self.db_instance_id) + ':instance_state'
             self.redis.hset(db_state_key, db_id, state)
 
+    def wait_for_fdw_state(self, state: str, timeout: int = 600) -> None:
+        """Wait for the foreign data wrapper state to reach the desired state.
+        :param state: the state to wait for
+        :param timeout: the maximum time to wait in seconds (0 wait forever)
+        """
+        key = str(self.db_instance_id) + ':fdw'
+        start = time.time()
+        while True:
+            config_str = self.redis.hget(key, self.fdw_id)
+            if not config_str:
+                continue
+            current_config = json.loads(config_str)
+            if current_config['state'] == state:
+                return
+            time.sleep(1)
+            if time.time() - start > timeout:
+                break
+
+        if timeout != 0:
+            raise TimeoutError(f'Timed out waiting for fdw state: {state}')
+
     def wait_for_state(self, state : str, id : int, error_state : str = "", timeout : int = 600) -> None:
         """Wait for the database state to reach the desired state.
         :param state: the state to wait for
@@ -365,6 +403,7 @@ class Properties:
         start = time.time()
         while True:
             current_state = self.redis.hget(key, str(id))
+            print(f"Waiting for database {key}:{id} to reach state: {state}, current state: {current_state}")
             if current_state == state:
                 return
             if error_state != "" and current_state == error_state:

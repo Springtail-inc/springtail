@@ -17,7 +17,7 @@ sys.path.append(os.path.join(project_root, 'shared'))
 sys.path.append(os.path.join(project_root, 'grpc'))
 
 # import the Properties class
-from properties import Properties, DB_USER_ROLE_FDW, DB_USER_ROLE_PROXY, DB_USER_ROLE_REPLICATION
+from properties import Properties
 from sysutils import stop_daemons
 
 # import the ComponentFactory class and the Scheduler class
@@ -32,7 +32,7 @@ from sys_tbl_mgr import SysTblMgrClient
 
 from otel_logger import init_logging
 
-ALL_DAEMONS = ['sys_tbl_mgr_daemon', 'pg_log_mgr_daemon', 'pg_ddl_daemon', 'proxy']
+ALL_DAEMONS = ['sys_tbl_mgr_daemon', 'pg_log_mgr_daemon', 'pg_ddl_daemon', 'proxy', 'pg_xid_subscriber_daemon']
 
 class Coordinator:
     """The Coordinator class to manage the components of the system."""
@@ -48,7 +48,7 @@ class Coordinator:
         Arguments:
             props -- the properties object
             debug -- the debug flag
-            is_production -- the production flag
+            is_production -- the production flag from config (deployed env)
             install_path -- the installation path
             service_name -- the name of the service
         """
@@ -58,6 +58,11 @@ class Coordinator:
         self.scheduler = None
         self.logger = logging.getLogger('springtail')
         self.debug = debug
+
+        # if running in a production environment set deployed env var
+        if is_production:
+            self.logger.debug("Running in production mode")
+            os.environ['IS_DEPLOYED'] = 'true'
 
         # Get the service type
         self.service_name : str = service_name

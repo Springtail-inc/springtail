@@ -223,7 +223,9 @@ namespace springtail {
         std::string fdw_key = fmt::format(redis::HASH_FDW, db_instance_id);
         std::string fdw_id_key = fmt::format(redis::SET_FDW_IDS, db_instance_id);
         for (const auto& fdw_id : system_json["fdws"].items()) {
-            std::string fdw_json_str = fdw_id.value().dump();
+            auto fdw_config = fdw_id.value();
+            fdw_config["state"] = Properties::FDW_STATE_INITIALIZE; // set initial state
+            std::string fdw_json_str = fdw_config.dump();
             redis_client->hset(fdw_key, fdw_id.key(), fdw_json_str);
             redis_client->sadd(fdw_id_key, fdw_id.key());
         }
@@ -623,6 +625,14 @@ namespace springtail {
         fdw_config["password"] = std::get<1>(role);
 
         return fdw_config;
+    }
+
+    void
+    Properties::_set_fdw_state(const std::string &fdw_id, const std::string &state)
+    {
+        nlohmann::json fdw_config = _get_fdw_config(fdw_id);
+        fdw_config["state"] = state;
+        _cache->set_value("fdw/" + fdw_id, fdw_config);
     }
 
     std::string
