@@ -40,7 +40,7 @@ configs:
 
   github_ci:
     - overlay: ~
-      test_sets: ['basic', 'framework', 'recovery', 'preload', 'enum_bits', 'complex', 'numeric']
+      test_sets: ['basic', 'framework', 'recovery', 'preload', 'enum_bits', 'complex', 'numeric', 'query_benchmark']
     - overlay: 'small_log_rotate'
       test_sets: ['recovery']
     - overlay: 'small_cache_size'
