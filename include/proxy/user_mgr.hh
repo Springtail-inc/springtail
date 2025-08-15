@@ -265,8 +265,6 @@ namespace springtail::pg_proxy {
         std::mutex _sleep_mutex;                ///< mutex for sleep
         std::condition_variable _sleep_cv;      ///< condition variable for sleep
 
-        bool _use_pg_shadow = false;            ///< use pg_shadow table for user updates
-
         /**
          * @brief Add new user to the user map
          * @param username users name
@@ -294,12 +292,7 @@ namespace springtail::pg_proxy {
                                        > &users);
 
         /**
-         * @brief Query users from pg_shadow table; if _use_pg_shadow is true
-         */
-        void _pg_shadow_query_thread();
-
-        /**
-         * @brief Query AWS secrets for user updates; if _use_pg_shadow is false
+         * @brief Query AWS secrets for user updates
          */
         void _aws_secrets_query_thread();
 

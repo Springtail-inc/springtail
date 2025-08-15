@@ -109,7 +109,6 @@
         "mode": "primary",
         "shadow_log_path": null,
         "log_level": 3,
-        "use_pg_shadow": true,
         "pool_size_limit": 0,
         "pool_timeout_limit": 0,
         "pool_expiration_interval_secs": 0,
@@ -125,7 +124,8 @@
     "aws_users_override": [
         { "role": "replication", "username": "springtail", "password": "springtail", "type": "text" },
         { "role": "fdw_superuser", "username": "springtail", "password": "springtail", "type": "text" },
-        { "role": "proxy_to_fdw", "username": "springtail", "password": "springtail_proxy", "type": "text" }
+        { "role": "proxy_to_fdw", "username": "springtail", "password": "springtail_proxy", "type": "text" },
+        { "role": "database", "username": "springtail", "password": "springtail", "type": "text" }
     ],
     "db_instances": {
         "1234": {
