@@ -650,6 +650,7 @@ namespace springtail {
          * not accessed during flushing.
          *
          * @param node The node representing the page we want to flush.
+         * @return Optional pointer to the root node that should be flushed be the caller.
          */
         std::optional<NodePtr> _lock_and_flush_page(NodePtr node);
 
