@@ -33,6 +33,8 @@ namespace springtail {
         std::shared_ptr<Aws::SecretsManager::SecretsManagerClient> _client = nullptr;
 
         void _create_secrets_manager_client();
+
+        nlohmann::json _aws_secrets_overrides; // to override AWS secrets with local config
     };
     using AwsHelperPtr = std::shared_ptr<AwsHelper>;
 

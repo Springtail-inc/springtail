@@ -15,20 +15,14 @@ namespace springtail {
     void
     AwsHelper::_create_secrets_manager_client()
     {
-        Aws::Client::ClientConfiguration client_config;
         // get aws_mock_override from properties org_config
-        nlohmann::json org_config = Properties::get(Properties::ORG_CONFIG);
-        bool aws_mock_override = Json::get_or<bool>(org_config, "aws_mock_override", false);
-
-        Aws::Client::ClientConfiguration config;
-        // if using a mocking service like localstack, override the endpoint
-        if (aws_mock_override) {
-            LOG_INFO("Using AWS mock override");
-            config.endpointOverride = "http://localhost:4566";
-            config.region = "us-east-1"; // doesn't matter
-            config.scheme = Aws::Http::Scheme::HTTP;
+        _aws_secrets_overrides = Properties::get(Properties::AWS_USERS_OVERRIDE);
+        if (!_aws_secrets_overrides.is_null()) {
+            LOG_INFO("AWS users override found in properties");
+            return;
         }
 
+        Aws::Client::ClientConfiguration config;
         _client = std::make_shared<Aws::SecretsManager::SecretsManagerClient>(config);
     }
 
@@ -38,6 +32,11 @@ namespace springtail {
         // Create Secrets Manager client with default credentials
         if (!_client) {
             _create_secrets_manager_client();
+        }
+
+        if (!_aws_secrets_overrides.is_null()) {
+            LOG_INFO("Using AWS users override from properties");
+            return _aws_secrets_overrides;
         }
 
         Aws::SecretsManager::Model::GetSecretValueRequest request;

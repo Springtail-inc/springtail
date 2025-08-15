@@ -120,8 +120,7 @@
         "organization_id": "9876",
         "account_id": "123",
         "db_instance_id": 1234,
-        "fdw_id": "1",
-        "aws_mock_override": false
+        "fdw_id": "1"
     },
     "aws_users_override": [
         { "role": "replication", "username": "springtail", "password": "springtail", "type": "text" },
