@@ -651,7 +651,7 @@ namespace springtail {
          *
          * @param node The node representing the page we want to flush.
          */
-        void _lock_and_flush_page(NodePtr node);
+        std::optional<NodePtr> _lock_and_flush_page(NodePtr node);
 
         /**
          * Removes the page from the provided parent, including removing it from it's list of
