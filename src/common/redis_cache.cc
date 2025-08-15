@@ -380,8 +380,10 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
     try {
         _storage[json_path_ptr] = value;
     } catch (const nlohmann::json::out_of_range& e) {
+        DCHECK(false) << "Invalid path: " << json_path << ", error: " << e.what();
         return false;
     } catch (const nlohmann::json::parse_error& e) {
+        DCHECK(false) << "Failed to parse json: " << e.what();
         return false;
     }
 
@@ -433,6 +435,7 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
                 _get_value("/" + redis_key, _storage);
             std::optional<std::reference_wrapper<const nlohmann::json>> json_optional_object_old =
                 _get_value("/" + redis_key, _old_storage);
+
             if (json_optional_object_new.has_value() && json_optional_object_old.has_value()) {
                 const nlohmann::json &json_object_new = json_optional_object_new.value().get();
                 const nlohmann::json &json_object_old = json_optional_object_old.value().get();
@@ -467,10 +470,11 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
         nlohmann::json key_value_diff = nlohmann::json::diff(_old_storage, _storage);
         _process_diff(key_value_diff, "", lock);
     } else {
-        DCHECK(ret) << "Failed to set value for key: " << redis_key;
-        LOG_ERROR("Storage update failed: reverting the changes");
+        // this may be because the value was already set
+        LOG_WARN("No value set or removed, reverting the changes");
         _storage = _old_storage;
     }
+
     return ret;
 }
 
