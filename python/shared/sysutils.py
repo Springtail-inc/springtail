@@ -49,11 +49,12 @@ def restart_container(container_name: str) -> bool:
 
 
 def stop_daemons(pid_path : str, daemons : List[tuple] = []) -> None:
-    time.sleep(5)
-    """Stop the daemons."""
+    """Stop all daemons."""
     # Stop the daemons
     if not os.path.exists(pid_path):
         raise Exception(f"PID path not found: {pid_path}")
+
+    found_pids = []
 
     # for each .pid file in the pid_path run kill -2 (SIGINT) on the pid in that file
     for file in os.listdir(pid_path):
@@ -62,6 +63,7 @@ def stop_daemons(pid_path : str, daemons : List[tuple] = []) -> None:
         if file.endswith(".pid"):
             with open(file, 'r') as f:
                 pid = f.read().strip()
+                found_pids.append(pid)
                 print(f"Stopping daemon {daemon_name} with pid: {pid}")
                 try:
                     run_command('kill', ['-s', 'TERM', pid])
@@ -73,7 +75,7 @@ def stop_daemons(pid_path : str, daemons : List[tuple] = []) -> None:
     # kill any lingering daemons after waiting a bit
     retry = 20
     while (retry > 0):
-        (pids, _) = running_pids(daemons)
+        (pids, _) = running_pids(daemons, found_pids)
         print(f"Waiting for daemons with pids: {pids}")
         if pids is None or len(pids) == 0:
             return
@@ -221,7 +223,7 @@ def start_daemons(build_dir : str, daemons : List[tuple], restart : bool = True)
         if not os.path.exists(cmd_dir):
             raise Exception(f"Daemon {daemon[0]} not found: {cmd_dir}")
 
-        args = ['--daemon']
+        args = ['--daemonize']
         if len(daemon) > 2:
             args += daemon[2].split(',')
 

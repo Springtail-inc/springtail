@@ -795,8 +795,12 @@ namespace indexer_helpers {
         // update the roots and stats
         sys_tbl_mgr::Client::get_instance()->update_roots(_db_id, _id, _target_xid, metadata);
 
-        // Smart vacuum
-        Vacuumer::get_instance()->expire_extent(_data_file, 0, std::filesystem::file_size(_data_file), _target_xid);
+        // Smart vacuum if data exists
+        if (std::filesystem::exists(_data_file)) {
+            Vacuumer::get_instance()->expire_extent(_data_file, 0, std::filesystem::file_size(_data_file), _target_xid);
+        } else {
+            LOG_INFO("TRUNCATE: File: {} doesn't exist to report to vacuum", _data_file);
+        }
     }
 
     StorageCache::SafePagePtr
@@ -840,6 +844,9 @@ namespace indexer_helpers {
 
         // INVALIDATE PRIMARY INDEX
         TuplePtr pkey;
+        Extent::Row row;
+        StorageCache::Page::Iterator itr;
+
         if (_primary_key.empty()) {
             // no primary key, so use the old extent ID as the primary key
             auto pkey_fields = std::make_shared<FieldArray>(1);
@@ -848,7 +855,8 @@ namespace indexer_helpers {
         } else {
             // has a primary key, get the last row of the original page for the primary index
             auto pkey_fields = _schema->get_fields(_primary_key);
-            auto &&row = *orig_page->last();
+            itr = orig_page->last();
+            row = *itr;
             pkey = std::make_shared<FieldTuple>(pkey_fields, &row);
         }
 
@@ -885,6 +893,8 @@ namespace indexer_helpers {
 
             // POPULATE PRIMARY INDEX
             TuplePtr pkey;
+            Extent::Row row;
+            StorageCache::Page::Iterator itr;
 
             // create the new primary index entry
             (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
@@ -893,7 +903,8 @@ namespace indexer_helpers {
                 pkey = std::make_shared<FieldTuple>(value_fields, nullptr);
             } else {
                 // has a primary key, use the primary key fields
-                auto &&row = *new_page->last();
+                itr = new_page->last();
+                row = *itr;
                 pkey = std::make_shared<KeyValueTuple>(pkey_fields, value_fields, &row);
             }
 
@@ -1071,11 +1082,7 @@ namespace indexer_helpers {
 
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_index->lower_bound(search_key, true);
-        auto &&row = *i;
-
-        // if the primary index is not empty, get the target extent
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
+        uint64_t extent_id = _get_extent_id(search_key);
 
         // then we can do a direct insert
         _insert_direct(value, extent_id);
@@ -1125,11 +1132,7 @@ namespace indexer_helpers {
 
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_index->lower_bound(search_key, true);
-        auto &&row = *i;
-
-        // if the primary index is not empty, get the target extent
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
+        uint64_t extent_id = _get_extent_id(search_key);
 
         // then we can do a direct insert
         return _upsert_direct(value, extent_id);
@@ -1173,11 +1176,7 @@ namespace indexer_helpers {
         }
 
         // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
-        auto i = _primary_index->lower_bound(key, true);
-        auto &&row = *i;
-
-        // if the primary index is not empty, get the target extent
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
+        uint64_t extent_id = _get_extent_id(key);
 
         // then we can do a direct removal
         _remove_direct(key, extent_id);
@@ -1273,11 +1272,7 @@ namespace indexer_helpers {
 
         // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_index->lower_bound(search_key, true);
-        auto &&row = *i;
-
-        // if the primary index is not empty, get the target extent
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
+        uint64_t extent_id = _get_extent_id(search_key);
 
         // then we can do a direct update
         _update_direct(value, extent_id);
@@ -1302,6 +1297,15 @@ namespace indexer_helpers {
         // don't need to convert pages if we aren't supporting schema layout mutations
 #endif
     }
+
+uint64_t
+MutableTable::_get_extent_id(TuplePtr search_key) {
+    auto i = _primary_index->lower_bound(search_key, true);
+    auto &&row = *i;
+
+    // if the primary index is not empty, get the target extent
+    return _primary_extent_id_f->get_uint64(&row);
+}
 
     void Table::Iterator::Primary::next()
     {

@@ -64,6 +64,12 @@ namespace springtail {
         /** Proxy user secrets mgr role */
         static inline constexpr char DB_ROLE_PROXY[] = "proxy_to_fdw";
 
+        /** Redis FDW states; within fdw config JSON, state property */
+        static constexpr char FDW_STATE_INITIALIZE[] = "initialize";
+        static constexpr char FDW_STATE_RUNNING[] = "running";
+        static constexpr char FDW_STATE_DRAINING[] = "draining";
+        static constexpr char FDW_STATE_STOPPED[] = "stopped";
+
         /**
          * @brief Get JSON object from a key
          * @param key key to lookup
@@ -212,6 +218,14 @@ namespace springtail {
             return _system_roles[role_name];
         }
 
+        /**
+         * @brief Set the fdw state object
+         * @param state - state string (e.g., "initialize", "running", "stopped")
+         */
+        void set_fdw_state(const std::string &state) {
+            _set_fdw_state(_get_fdw_id(), state);
+        }
+
     private:
         /** json containing parsed settings file */
         nlohmann::json _json;
@@ -317,6 +331,13 @@ namespace springtail {
             assert (_json[ORG_CONFIG].contains("fdw_id"));
             return _json[ORG_CONFIG]["fdw_id"];
         }
+
+        /**
+         * @brief Set the fdw state in redis
+         * @param fdw_id - fdw id
+         * @param state - state string
+         */
+        void _set_fdw_state(const std::string &fdw_id, const std::string &state);
 
         /**
          * @brief Internal get databases

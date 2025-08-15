@@ -529,6 +529,9 @@ namespace springtail
                              uint32_t table_oid,
                              const PgCopyResultPtr &snapshot_details)
     {
+        LOG_INFO("Copying table {}.{} with oid {} and schema oid {}",
+                 schema_name, table_name, table_oid, schema_oid);
+      
         // set the schema
         _set_schema(table_oid);
 
@@ -706,6 +709,9 @@ namespace springtail
         stats->set_row_count(metadata.stats.row_count);
         stats->set_end_offset(metadata.stats.end_offset);
         roots_req->set_snapshot_xid(metadata.snapshot_xid);
+
+        LOG_INFO("Copied table {}.{} with oid {} and schema oid {}",
+                 schema_name, table_name, table_oid, schema_oid);
 
         return std::make_shared<PgCopyResult::TableInfo>(table_oid, copy_info, schema);
     }

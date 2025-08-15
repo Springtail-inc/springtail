@@ -3,6 +3,7 @@ import io
 import logging
 from lxml import etree
 import os
+import shlex
 import psycopg2
 import springtail
 import time
@@ -164,8 +165,7 @@ class TestCase:
                         self._raise_error(f'{line_num}: directives cannot be placed within a SQL statement')
 
                     # parse the directive
-                    directive = line[3:].split()
-                    logging.debug(f'directive: {directive}')
+                    directive = shlex.split(line[3:])
                     if directive[0] == 'parallel':
                         if section != 'test':
                             self._raise_error(f'{line_num}: "parallel" must be in the "test" section')
@@ -327,6 +327,23 @@ class TestCase:
                             'schema': directive[1],
                             'table': directive[2],
                             'replica_exists': directive[3] == 'true'
+                        }, section, is_threaded, cur_txn, line_num)
+
+                    # Usage - benchmark <release_time_ms> <debug_time_ms> "<query sql>"
+                    # Ex: ### benchmark 1000 5000 "SELECT * FROM customers"
+                    # Measures the execution time of the query as reported by EXPLAIN ANALYZE 
+                    # and compares it to release_time or debug_time respectively
+                    elif directive[0] == 'benchmark':
+                        if section != 'verify':
+                            self._raise_error(f'{line_num}: "benchmark" must be part of the "verify" section')
+                        if len(directive) < 3:
+                            self._raise_error(f'{line_num}: "benchmark" must specify the expected release and debug times')
+
+                        self._append_command({
+                            'type': 'benchmark',
+                            'query_time_release': directive[1],
+                            'query_time_debug': directive[2],
+                            'benchmark_query': directive[3]
                         }, section, is_threaded, cur_txn, line_num)
 
                     # Usage - index_exists <schema> <table> <index> <replica_exists>
@@ -519,12 +536,14 @@ class TestCase:
             (target_db_id, target_xid) = self._recovery_points[command['name']]
             logging.debug(f'Force recovery to database: {target_db_id}, xid: {target_xid}')
 
+            # close all connections to the replica database before shutting down
+            self._cleanup_fdw_connections()
+
             # restart Springtail at the target XID
             springtail.restart(self._props, self._build_dir,
                                db_id=target_db_id, start_xid=target_xid, unarchive_logs=True)
 
             # reconnect to the replica database
-            self._cleanup_fdw_connections()
             self._open_db_connections_for_fdw()
 
             return None
@@ -565,6 +584,10 @@ class TestCase:
             elif command['type'] == 'sql':
                 # execute a SQL command
                 return self._execute_sql(cursor, command['sql'], do_fetch, txn)
+
+            elif command['type'] == "benchmark":
+                sql = f"EXPLAIN (FORMAT JSON, ANALYZE) {command['benchmark_query']};" 
+                return self._execute_sql(cursor, sql, do_fetch, txn)
 
         if command['type'] == 'sync':
             # insert a row to the sync_control table
@@ -949,6 +972,10 @@ class TestCase:
 
                 return results
 
+            elif command['type'] == 'benchmark':
+                sql = f"EXPLAIN (FORMAT JSON, ANALYZE) {command['benchmark_query']};" 
+                return self._execute_sql(cursor, sql, True, 'replica')
+
             else:
                 self._raise_error(f'Cannot execute "{command["type"]}" commands against the replica.')
 
@@ -1159,13 +1186,32 @@ class TestCase:
         for command in self._sections['verify'][0]['sequential']:
             primary_result = self._execute_command(command, True)
             replica_result = self._replica_command(command)
+            if command["type"] == "benchmark":
+                primary_time = primary_result[0][0][0]['Execution Time']
+                replica_time = replica_result[0][0][0]['Execution Time']
+                print(f"Benchmarks: primary:{primary_time}ms, replica:{replica_time}ms")
+                if "debug" in self._build_dir:
+                    expected_time = float(command['query_time_debug'])
+                else:
+                    expected_time = float(command['query_time_release'])
+
+                if replica_time > expected_time:
+                    self._raise_failure(
+                            f"Benchmark verification failed for {self._name}:\n"
+                            f"Statement: {command}\n"
+                            f"Main DB time: {primary_time}ms\n"
+                            f"Replica DB: {replica_time}ms\n"
+                            f"Expected time: {expected_time}ms\n"
+                        )
+                continue
+
             if primary_result != replica_result and str(primary_result) != str(replica_result):
                 self._raise_failure(
-                    f"Verification failed for {self._name}:\n"
-                    f"Statement: {command}\n"
-                    f"Main DB: {primary_result}\n"
-                    f"Replica DB: {replica_result}"
-                )
+                        f"Verification failed for {self._name}:\n"
+                        f"Statement: {command}\n"
+                        f"Main DB: {primary_result}\n"
+                        f"Replica DB: {replica_result}"
+                    )
 
         self._result = 'SUCCESS'
         self._status = 'VERIFY_END'

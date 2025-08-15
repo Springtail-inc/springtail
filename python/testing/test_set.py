@@ -214,6 +214,8 @@ class TestSet:
 
         # shutdown Springtail
         logging.debug('Stopping the Springtail instance')
+        # we don't really wait for the cleanup to finish, so block a little here
+        time.sleep(5)
         springtail.stop(self._config_file)
 
         # perform the primary db cleanup
