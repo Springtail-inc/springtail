@@ -29,7 +29,7 @@ class ComponentFactory:
         return Component(
             name="pg_log_mgr_daemon",
             id=self.LOG_MGR_ID,
-            args=["--daemon"],
+            args=["--daemonize"],
             path=self.install_dir,
             pid_path=os.path.join(self.pid_dir, 'pg_log_mgr.pid')
         )
@@ -39,7 +39,7 @@ class ComponentFactory:
         return Component(
             name="sys_tbl_mgr_daemon",
             id=self.SYS_TBL_MGR_ID,
-            args=["--daemon"],
+            args=["--daemonize"],
             path=self.install_dir,
             pid_path=os.path.join(self.pid_dir, 'sys_tbl_mgr.pid')
         )
@@ -49,7 +49,7 @@ class ComponentFactory:
         return Component(
             name="pg_ddl_daemon",
             id=self.DDL_ID,
-            args=["--daemon", "-s", "/var/run/postgresql"],
+            args=["--daemonize", "-s", "/var/run/postgresql"],
             path=self.install_dir,
             pid_path=os.path.join(self.pid_dir, 'pg_ddl_mgr.pid')
         )
@@ -59,7 +59,7 @@ class ComponentFactory:
         return Component(
             name="proxy",
             id=self.PROXY_ID,
-            args=["--daemon"],
+            args=["--daemonize"],
             path=self.install_dir,
             pid_path=os.path.join(self.pid_dir, 'proxy.pid')
         )
