@@ -20,6 +20,7 @@
 #include <pg_log_mgr/sync_tracker.hh>
 
 #include <xid_mgr/xid_mgr_server.hh>
+#include <storage/vacuumer.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -217,6 +218,9 @@ namespace springtail::pg_log_mgr {
         // remove all files in log directories
         std::filesystem::remove_all(_repl_log_path);
         std::filesystem::remove_all(_xact_log_path);
+
+        // Cleanup from vacuumer
+        Vacuumer::get_instance()->cleanup_db(_db_id);
 
         // create directories if they don't exist
         std::filesystem::create_directories(_repl_log_path);
