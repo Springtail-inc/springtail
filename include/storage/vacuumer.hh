@@ -92,6 +92,14 @@ public:
         _global_file_size_threshold = size;
     }
 
+    /**
+     * @brief Cleanup DB's entries from vacuum storage
+     *        - memory, global vacuum file and partials
+     *
+     * @param cleanup_db_id DB to be cleaned up
+     */
+    void cleanup_db(uint64_t cleanup_db_id);
+
 protected:
     /**
      * @brief Constructor, that inits the vacuumer thread
@@ -132,6 +140,11 @@ private:
         uint64_t offset;
         uint64_t size;
     };
+
+    /**
+     * Enum to indicate the type of cleanup on the global vacuum file
+     */
+    enum class CleanupOperation { DB_CLEANUP, RECOVERY };
 
     /**
      * Hole-punch block size
@@ -337,5 +350,13 @@ private:
      *        be written to the disk
      */
     void _commit_expired_extents(uint64_t db_id, uint64_t committed_xid);
+
+    /**
+     * @brief Cleans up global vacuum file - db_cleanup or recovery till last committed XID
+     *
+     * @param cleanup_db_id ID to cleanup entries for db_cleanup
+     */
+    template <CleanupOperation op>
+    void _cleanup_global_vacuum_file(uint64_t cleanup_db_id=-1);
 };
 }
