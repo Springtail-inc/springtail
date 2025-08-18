@@ -10,6 +10,7 @@
 #include <pg_log_mgr/xid_ready.hh>
 
 #include <write_cache/write_cache_server.hh>
+#include <storage/vacuumer.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -162,5 +163,8 @@ namespace springtail::pg_log_mgr {
 
         // Remove index reconciliation queue for the db
         _index_reconciliation_queue_mgr->remove_queue(db_id);
+
+        // Cleanup from vacuumer
+        Vacuumer::get_instance()->cleanup_db(db_id);
     }
 }

@@ -18,6 +18,11 @@ namespace springtail {
     nlohmann::json
     Properties::get(const std::string &key)
     {
+        if (get_instance()->_json.contains(key) == false) {
+            LOG_WARN("Key '{}' not found in properties", key);
+            // return null
+            return nlohmann::json::value_t::null;
+        }
         return get_instance()->_json[key];
     }
 

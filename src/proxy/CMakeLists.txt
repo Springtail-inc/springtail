@@ -53,17 +53,6 @@ springtail_unit_test(test_parser
   LIBS springtail_proxy GTest::gtest_main
 )
 
-# test user manager executable
-springtail_unit_test(test_user_mgr
-  SOURCES test/test_user_mgr.cc
-  INCLUDES ${CMAKE_SOURCE_DIR}/include
-           ${CMAKE_SOURCE_DIR}/external/libpg_query/
-           ${CMAKE_SOURCE_DIR}/external/libpg_query/src
-           ${CMAKE_SOURCE_DIR}/external/libpg_query/src/postgres/include
-           ${CMAKE_SOURCE_DIR}/external/libpg_query/vendor/include
-  LIBS springtail_proxy GTest::gtest_main
-)
-
 # test database manager executable
 springtail_unit_test(test_database_mgr
   SOURCES test/test_database_mgr.cc

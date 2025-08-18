@@ -227,6 +227,21 @@ namespace springtail::pg_fdw {
                         const std::string &db_name);
 
         /**
+         * @brief Function for adding a comment to the top and intermediary
+         *      partition tables
+         *
+         * @param conn - connection object
+         * @param db_id - database id
+         * @param schema_name - schema name
+         * @param xid - transaction id
+         */
+        void
+        _add_partition_table_comment(LibPqConnectionPtr conn,
+                                     const uint64_t db_id,
+                                     const std::string &schema_name,
+                                     const uint64_t xid);
+
+        /**
          * @brief Function for adding a new replicated database
          *
          * @param db_id - databese id

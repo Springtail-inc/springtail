@@ -8,6 +8,9 @@ namespace springtail::constant {
     /** Used as an extent ID in situations where the extent ID is unknown. */
     static constexpr uint64_t UNKNOWN_EXTENT = std::numeric_limits<uint64_t>::max();
 
+    /** Used as namespace id when namespace id is unknown. */
+    static constexpr uint64_t MAX_NAMESPACE_ID = std::numeric_limits<uint64_t>::max();
+
     /** Represents the most recent XID available. */
     static constexpr uint64_t LATEST_XID = std::numeric_limits<uint64_t>::max();
 
