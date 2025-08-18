@@ -125,21 +125,19 @@ class Component:
         Returns:
             The PID as an integer if successful, None otherwise
         """
-        # check pid path for pid file
-        if not os.path.exists(self.pid_path):
-            return None
-
-        # read pid from file
         try:
-            with open(self.pid_path, 'r') as f:
-                pid = int(f.read().strip())
-                if psutil.pid_exists(pid):
-                    # check if the process is running
-                    process = psutil.Process(pid)
-                    if process.is_running() and process.status() != psutil.STATUS_ZOMBIE:
-                        # process is running, mark it as such
-                        self.logger.info(f"Found running PID for component {self.name}: {pid}")
-                        return pid
+            # use sudo head to read the first line of the pid file
+            # for postgres we may not have permissions to read the file directly
+            pid_str = run_command('sudo', ['head', '-n', '1', self.pid_path]).strip()
+            pid = int(pid_str)
+            if psutil.pid_exists(pid):
+                # check if the process is running
+                process = psutil.Process(pid)
+                if process.is_running() and process.status() != psutil.STATUS_ZOMBIE:
+                    # process is running, mark it as such
+                    self.logger.info(f"Found running PID for component {self.name}: {pid}")
+                    return pid
+
         except Exception as e:
             pass
 

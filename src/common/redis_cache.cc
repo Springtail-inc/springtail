@@ -362,6 +362,8 @@ RedisCache::get_value(const std::string &path)
 bool
 RedisCache::set_value(const std::string &path, const nlohmann::json &value)
 {
+    LOG_INFO("Setting value for path: {}, value: {}", path, value.dump(4));
+
     std::unique_lock lock(_storage_mutex);
 
     std::string json_path = "/" + std::to_string(_instance_id) + ":" + path;
@@ -378,8 +380,10 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
     try {
         _storage[json_path_ptr] = value;
     } catch (const nlohmann::json::out_of_range& e) {
+        DCHECK(false) << "Invalid path: " << json_path << ", error: " << e.what();
         return false;
     } catch (const nlohmann::json::parse_error& e) {
+        DCHECK(false) << "Failed to parse json: " << e.what();
         return false;
     }
 
@@ -406,8 +410,10 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
             CHECK_GE(json_path_queue.size(), 1);
             std::string hash_key = json_path_queue.front();
             json_path_queue.pop_front();
+
             std::optional<std::reference_wrapper<const nlohmann::json>> json_optional_object =
                 _get_value("/" + redis_key + "/" + hash_key, _storage);
+
             if (json_optional_object.has_value() && !json_optional_object.value().get().empty()) {
                 const nlohmann::json &json_object = json_optional_object.value().get();
                 _client->hset(redis_key, hash_key, _json_to_string(json_object));
@@ -418,15 +424,18 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
                 }
                 _client->hdel(redis_key, hash_key);
             }
+
             ret = true;
             break;
         }
+
         case REDIS_TYPE_SET:
         {
             std::optional<std::reference_wrapper<const nlohmann::json>> json_optional_object_new =
                 _get_value("/" + redis_key, _storage);
             std::optional<std::reference_wrapper<const nlohmann::json>> json_optional_object_old =
                 _get_value("/" + redis_key, _old_storage);
+
             if (json_optional_object_new.has_value() && json_optional_object_old.has_value()) {
                 const nlohmann::json &json_object_new = json_optional_object_new.value().get();
                 const nlohmann::json &json_object_old = json_optional_object_old.value().get();
@@ -449,9 +458,11 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
         // creation of new redis keys is not supported
         case REDIS_TYPE_NONE:
             LOG_ERROR("Type {} for key {} is not found", key_type_str, redis_key);
+            DCHECK(false) << "Type " << key_type_str << " for key " << redis_key << " is not found";
             break;
         default:
             LOG_ERROR("Unsupported type {} for key {}", key_type_str, redis_key);
+            DCHECK(false) << "Unsupported type " << key_type_str << " for key " << redis_key;
     }
 
     if (ret) {
@@ -459,9 +470,11 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
         nlohmann::json key_value_diff = nlohmann::json::diff(_old_storage, _storage);
         _process_diff(key_value_diff, "", lock);
     } else {
-        LOG_ERROR("Storage update failed: reverting the changes");
+        // this may be because the value was already set
+        LOG_WARN("No value set or removed, reverting the changes");
         _storage = _old_storage;
     }
+
     return ret;
 }
 
