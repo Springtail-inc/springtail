@@ -69,4 +69,5 @@ namespace springtail::constant {
 
     /** User defined types */
     static constexpr int8_t USER_TYPE_ENUM = 'E';
+    static constexpr int8_t USER_TYPE_EXTENSION = 'U';
 }

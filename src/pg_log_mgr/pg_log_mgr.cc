@@ -293,6 +293,7 @@ namespace springtail::pg_log_mgr {
 
             PgCopyTable::create_namespaces(_db_id, xid);
             PgCopyTable::create_usertypes(_db_id, xid);
+            PgCopyTable::create_extn_types(_db_id, xid);
 
             _do_table_copies();
             _wal_buffer_flag = false;

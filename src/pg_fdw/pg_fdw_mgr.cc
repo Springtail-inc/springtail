@@ -813,7 +813,7 @@ namespace springtail::pg_fdw {
         LOG_DEBUG(LOG_FDW, "fdw_reset_scan: tid: {}", state->tid);
 
         state->filtered_quals.clear();
-        
+
         // init quals
         _init_quals(state, qual_list);
 
@@ -1338,9 +1338,13 @@ namespace springtail::pg_fdw {
     {
         // check for user defined type
         if (springtail_oid >= FirstNormalObjectId) {
-            // user type; enum, lookup index to label
-            assert(field->get_type() == SchemaType::FLOAT32);
-            return _get_enum_datum(state, springtail_oid, pg_oid, field->get_float32(&row));
+            assert(field->get_type() == SchemaType::FLOAT32 || field->get_type() == SchemaType::BINARY);
+            if (field->get_type() == SchemaType::FLOAT32) {
+                return _get_enum_datum(state, springtail_oid, pg_oid, field->get_float32(&row));
+            } else {
+                auto &&value = field->get_binary(&row);
+                return _binary_to_datum(value, pg_oid, atttypmod);
+            }
         }
 
         // otherwise convert they row by the schema type

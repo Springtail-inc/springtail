@@ -48,6 +48,10 @@ namespace springtail
                     // enum types; treat as REAL/FLOAT4, to store the enum index
                     return SchemaType::FLOAT32;
                 }
+                if (pg_type_category == constant::USER_TYPE_EXTENSION) {
+                    // extension types; treat as custom BINARY type
+                    return SchemaType::BINARY;
+                }
                 // put all other types into BINARY data for now
                 return SchemaType::BINARY;
         }

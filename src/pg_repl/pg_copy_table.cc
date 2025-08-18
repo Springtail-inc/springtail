@@ -63,6 +63,21 @@ namespace springtail
         "{}" // Placeholder for namespace condition
         "GROUP BY t.oid, t.typname, n.nspname, n.oid";
 
+    static constexpr char EXTN_QUERY[] =
+        "SELECT t.oid as enum_type_oid, "
+        "       e.extname AS extension, "
+        "       n.oid::integer AS namespace_oid, "
+        "       n.nspname::text AS schema, "
+        "       t.typname::text AS enum_type_name "
+        "FROM pg_type t "
+        "JOIN pg_namespace n ON n.oid = t.typnamespace "
+        "JOIN pg_depend d    ON d.objid = t.oid "
+        "JOIN pg_extension e ON e.oid = d.refobjid "
+        "WHERE t.typtype IN ('b', 'c', 'd', 'e') "
+        "AND n.nspname NOT IN ('pg_catalog', 'information_schema') "
+        "{}" // Placeholder for namespace condition
+        "ORDER BY e.extname, t.typname;";
+
     /** Enum lookup query */
     static constexpr char ENUM_LOOKUP_QUERY[] =
         "SELECT enumtypid::integer, "
@@ -1145,6 +1160,53 @@ namespace springtail
             udt_req.set_type(constant::USER_TYPE_ENUM); // only support enum types
 
             LOG_DEBUG(LOG_PG_LOG_MGR, "Creating user defined type: {}, values: {}", enum_type_name, enum_value_json);
+
+            client->create_usertype(udt_req);
+        }
+
+        // disconnect from the database
+        copy_table.disconnect();
+    }
+
+    void
+    PgCopyTable::create_extn_types(uint64_t db_id, uint64_t xid)
+    {
+        PgCopyTable copy_table;
+
+        // connect to the database
+        copy_table.connect(db_id);
+
+        // get the list of user defined types
+        std::string schema_condition = _get_schema_condition(copy_table._connection, db_id);
+        copy_table._connection.exec(fmt::format(EXTN_QUERY, schema_condition));
+
+        if (copy_table._connection.ntuples() == 0) {
+            LOG_INFO("No extension types found for db_id: {}", db_id);
+            copy_table._connection.clear();
+            copy_table.disconnect();
+            return;
+        }
+
+        auto client = sys_tbl_mgr::Client::get_instance();
+        // iterate through the results and get the user defined types
+        for (int i = 0; i < copy_table._connection.ntuples(); i++) {
+            uint32_t enum_type_oid = copy_table._connection.get_int32(i, 0);
+            std::string extension_name = copy_table._connection.get_string(i, 1);
+            uint32_t namespace_oid = copy_table._connection.get_int32(i, 2);
+            std::string namespace_name = copy_table._connection.get_string(i, 3);
+            std::string enum_type_name = copy_table._connection.get_string(i, 4);
+
+            proto::UserTypeRequest udt_req;
+            udt_req.set_db_id(db_id);
+            udt_req.set_xid(xid);
+            udt_req.set_lsn(0);
+            udt_req.set_name(enum_type_name);
+            udt_req.set_type_id(enum_type_oid);
+            udt_req.set_namespace_id(namespace_oid);
+            udt_req.set_namespace_name(namespace_name);
+            udt_req.set_type(constant::USER_TYPE_EXTENSION); // only support enum types
+
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Creating extension type: {}", enum_type_name);
 
             client->create_usertype(udt_req);
         }

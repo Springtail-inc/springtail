@@ -406,6 +406,13 @@ namespace springtail
         static void create_usertypes(uint64_t db_id, uint64_t xid);
 
         /**
+         * @brief Create extension types
+         * @param db_id database id
+         * @param xid xid
+         */
+        static void create_extn_types(uint64_t db_id, uint64_t xid);
+
+        /**
          * @brief Copy all tables in single schema from remote system
          * @param db_id database id
          * @param xid target xid

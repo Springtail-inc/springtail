@@ -155,13 +155,16 @@ namespace springtail::pg_fdw {
 
             std::string type_name(fields->at(sys_tbl::UserTypes::Data::NAME)->get_text(&row));
             std::string value_json(fields->at(sys_tbl::UserTypes::Data::VALUE)->get_text(&row));
+            int8_t type = fields->at(sys_tbl::UserTypes::Data::TYPE)->get_uint8(&row);
 
             // only enums supported
-            DCHECK(fields->at(sys_tbl::UserTypes::Data::TYPE)->get_uint8(&row) == constant::USER_TYPE_ENUM);
+            DCHECK(type == constant::USER_TYPE_ENUM || type == constant::USER_TYPE_EXTENSION);
 
-            // insert into map by namespace_id
-            LOG_DEBUG(LOG_FDW, "Adding user type: {}.{} = {}:{}", namespace_id, type_id, type_name, value_json);
-            usertype_map[namespace_id][type_id] = std::make_pair(type_name, value_json);
+            if (type == constant::USER_TYPE_ENUM) {
+                // insert into map by namespace_id
+                LOG_DEBUG(LOG_FDW, "Adding user type: {}.{} = {}:{}", namespace_id, type_id, type_name, value_json);
+                usertype_map[namespace_id][type_id] = std::make_pair(type_name, value_json);
+            }
         }
 
         return usertype_map;
@@ -640,7 +643,11 @@ namespace springtail::pg_fdw {
             const auto escaped_schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
             const auto escaped_name = conn->escape_identifier(ddl.at("name").get<std::string>());
             const auto value_json_str = ddl.at("value").get<std::string>();
+            const auto type = ddl.at("type").get<int8_t>();
 
+            if (type == constant::USER_TYPE_EXTENSION) {
+                return "";
+            }
             return _get_create_type_query(escaped_schema, escaped_name, value_json_str, conn);
         }
         else if (action == "ut_drop") {
@@ -767,7 +774,6 @@ namespace springtail::pg_fdw {
                     const uint64_t db_id,
                     const std::string &db_name)
     {
-
         auto token = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(db_id)}});
         RedisDDL redis_ddl;
 
@@ -781,6 +787,16 @@ namespace springtail::pg_fdw {
 
         // connect to the database on the fdw
         conn = _connect_fdw(db_id, _db_prefix + db_name);
+
+        // XXX - EXTN - Fetch this information from the extn cache
+        conn->exec("CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA PUBLIC");
+        conn->clear();
+        conn->exec("CREATE EXTENSION IF NOT EXISTS cube WITH SCHEMA PUBLIC");
+        conn->clear();
+        conn->exec("CREATE EXTENSION IF NOT EXISTS ltree WITH SCHEMA PUBLIC");
+        conn->clear();
+        conn->exec("CREATE EXTENSION IF NOT EXISTS hstore WITH SCHEMA PUBLIC");
+        conn->clear();
 
         std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
 
