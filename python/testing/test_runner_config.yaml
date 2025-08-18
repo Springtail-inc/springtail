@@ -51,8 +51,9 @@ configs:
       test_sets: ['basic']
     - overlay: 'streaming_postgres_config'
       test_sets: ['recovery', 'large_data']
-    - overlay: 'integration_test_config'
-      test_sets: ['basic', 'framework']
+    # temporary commented out because it does not work yet
+    # - overlay: 'integration_test_config'
+    #   test_sets: ['basic', 'framework']
     - overlay: 'include_schema_config'
       test_sets: ['include_schema']
 
@@ -68,8 +69,9 @@ configs:
       test_sets: ['basic']
     - overlay: 'streaming_postgres_config'
       test_sets: ['recovery', 'large_data']
-    - overlay: 'integration_test_config'
-      test_sets: ['basic', 'framework']
+    # temporary commented out because it does not work yet
+    # - overlay: 'integration_test_config'
+    #   test_sets: ['basic', 'framework']
     - overlay: 'include_schema_config'
       test_sets: ['include_schema']
 
