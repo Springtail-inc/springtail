@@ -1204,6 +1204,7 @@ namespace springtail
             udt_req.set_type_id(enum_type_oid);
             udt_req.set_namespace_id(namespace_oid);
             udt_req.set_namespace_name(namespace_name);
+            udt_req.set_value_json("{}"); // set an empty JSON
             udt_req.set_type(constant::USER_TYPE_EXTENSION); // only support enum types
 
             LOG_DEBUG(LOG_PG_LOG_MGR, "Creating extension type: {}", enum_type_name);

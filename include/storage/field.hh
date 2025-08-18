@@ -520,7 +520,7 @@ namespace springtail {
         template <typename T>
         inline T get_value(const void* row) const {
             T result;
-            std::memcpy(&result, 
+            std::memcpy(&result,
                     reinterpret_cast<const Extent::Row *>(row)->data() + _offset,
                     sizeof(T));
             return result;
@@ -1526,9 +1526,9 @@ namespace springtail {
         PgEnumField(SchemaType type, uint32_t offset, UserTypePtr ut)
             : PgLogField(type, offset), _ut(ut)
         {
-            DCHECK_EQ(type, SchemaType::FLOAT32);
+            DCHECK(type == SchemaType::FLOAT32 || type == SchemaType::BINARY);
             DCHECK_NE(ut, nullptr);
-            DCHECK_EQ(ut->type, UserType::ENUM);
+            DCHECK(ut->type == UserType::ENUM || ut->type == UserType::EXTENSION);
         }
 
         bool is_null(const void *row) const override

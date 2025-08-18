@@ -471,6 +471,7 @@ namespace springtail {
         /** Enum type for user defined types */
         enum Type : int8_t {
             ENUM = 'E',
+            EXTENSION = 'U'
         } type;
 
         UserType(uint64_t id, bool exists=false, int8_t type=constant::USER_TYPE_ENUM)
@@ -489,14 +490,16 @@ namespace springtail {
             exists(exists),
             type(static_cast<Type>(type))
         {
-            DCHECK(type == constant::USER_TYPE_ENUM); // only support enum for now
-            DCHECK(value_json.is_array());
-            for (const auto &obj : value_json) {
-                DCHECK(obj.is_object());
-                auto it = obj.begin();  // Only one key-value pair per object
-                float idx = it.value().get<float>();
-                enum_label_map[it.key()] = idx;
-                enum_index_map[idx] = it.key();
+            DCHECK(type == constant::USER_TYPE_ENUM || type == constant::USER_TYPE_EXTENSION);
+            if (type == constant::USER_TYPE_ENUM) {
+                DCHECK(value_json.is_array());
+                for (const auto &obj : value_json) {
+                    DCHECK(obj.is_object());
+                    auto it = obj.begin();  // Only one key-value pair per object
+                    float idx = it.value().get<float>();
+                    enum_label_map[it.key()] = idx;
+                    enum_index_map[idx] = it.key();
+                }
             }
         }
     };
