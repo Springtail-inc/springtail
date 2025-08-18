@@ -9,6 +9,7 @@ import sys
 import yaml
 import gzip
 import shutil
+from typing import Optional
 
 from test_set import TestSet
 
@@ -16,12 +17,12 @@ from aws import AwsHelper
 from common import merge_json
 
 def generate_tests(test_folder: str,
-                   test_set: None | list[str],
+                   test_set: Optional[list[str]],
                    test_files: list[str],
                    config_file: str,
                    build_dir: str,
-                   test_params: None | dict,
-                   overlay: None | str) -> list[TestSet]:
+                   test_params: Optional[dict],
+                   overlay: Optional[str]) -> list[TestSet]:
     """
     Generates a list of TestSet objects based on the provided configuration and test inputs.
 
@@ -83,10 +84,10 @@ def generate_tests_for_overlay(test_folder: str,
                                system_json_path: str,
                                tmp_config_dir: str,
                                overlays_config: dict,
-                               test_set: None | list[str],
+                               test_set: Optional[list[str]],
                                test_files: list[str],
                                default_config: dict,
-                               overlay: None | str) -> list[TestSet]:
+                               overlay: Optional[str]) -> list[TestSet]:
     """
     Generates a list of TestSet objects using overlay-specific configurations.
 
