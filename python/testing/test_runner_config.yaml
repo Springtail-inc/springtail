@@ -44,9 +44,9 @@ configs:
     - overlay: ~
       test_sets: 'all'
     - overlay: 'small_log_rotate'
-      test_sets: ['recovery', 'large_data']
+      test_sets: ['recovery']
     - overlay: 'small_log_rotate_with_streaming'
-      test_sets: ['recovery', 'large_data']
+      test_sets: ['recovery']
     - overlay: 'small_cache_size'
       test_sets: ['basic']
     - overlay: 'streaming_postgres_config'
@@ -63,11 +63,11 @@ configs:
     - overlay: 'small_log_rotate'
       test_sets: ['recovery']
     - overlay: 'small_log_rotate_with_streaming'
-      test_sets: ['recovery', 'large_data']
+      test_sets: ['recovery']
     - overlay: 'small_cache_size'
       test_sets: ['basic']
     - overlay: 'streaming_postgres_config'
-      test_sets: ['recovery']
+      test_sets: ['recovery', 'large_data']
     - overlay: 'integration_test_config'
       test_sets: ['basic', 'framework']
     - overlay: 'include_schema_config'

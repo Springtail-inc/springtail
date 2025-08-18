@@ -2,6 +2,7 @@ import logging
 from lxml import etree
 import os
 import springtail
+import time
 
 from test_case import TestCase
 
@@ -37,9 +38,9 @@ class TestSet:
         self._build_dir = build_dir
         self._test_params = test_params
         self._name = (overlay if overlay is not None else "default") + ' - ' + os.path.basename(self._directory)
-        # self._name = os.path.splitext(os.path.basename(self._config_file))[0] + ' - ' + os.path.basename(self._directory)
         self._skip = False
 
+        logging.info(f"Creating test set: {self._name}")
         # constuct the special "config" test case for global setup and cleanup
         self._config = TestCase(os.path.join(directory, _GLOBAL_CONFIG_FILE), self._build_dir, self._test_params, ['setup', 'cleanup'])
         self._config.parse_file()
@@ -133,6 +134,8 @@ class TestSet:
         Returns True if the tests all succeed, False otherwise
 
         """
+
+        logging.info(f"Running test set: {self._name}")
 
         self._props = springtail.Properties(self._config_file, True)
         self._config.set_props(self._props)
