@@ -23,3 +23,4 @@ extern "C" PGEXT_API int t_isdigit(const char *p);
 extern "C" PGEXT_API int t_isalpha(const char *p);
 extern "C" PGEXT_API char *str_tolower(const char *buff, size_t nbytes, Oid collid);
 extern "C" PGEXT_API char *str_toupper(const char *buff, size_t nbytes, Oid collid);
+extern "C" PGEXT_API char *pstrdup(const char *in);

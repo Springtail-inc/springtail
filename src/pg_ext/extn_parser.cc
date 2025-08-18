@@ -5,12 +5,13 @@
 #include <string>
 #include <fstream>
 #include <unordered_map>
+#include <dlfcn.h>
 #include <nlohmann/json.hpp>
 extern "C" {
     #include "pg_query.h"
 }
 
-std::vector<std::string> WHITELIST_EXTNS = {"pg_trgm"};
+std::vector<std::string> WHITELIST_EXTNS = {"pg_trgm", "cube"};
 
 using DataMap = std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>>;
 
@@ -209,7 +210,7 @@ void print_operators(const DataMap& operators){
     }
 }
 
-void process_extension_dir(const std::filesystem::path& ext_dir) {
+void process_extension_dir(const std::filesystem::path& ext_dir, DataMap& functions, DataMap& operators) {
     std::map<std::string, std::vector<std::string>> versioned_files;
 
     for (const auto& entry : std::filesystem::directory_iterator(ext_dir)) {
@@ -224,9 +225,6 @@ void process_extension_dir(const std::filesystem::path& ext_dir) {
             }
         }
     }
-
-    DataMap functions;
-    DataMap operators;
 
     for (const auto& [extn, files] : versioned_files) {
         std::cout << "Extension: " << extn << std::endl;
@@ -246,7 +244,28 @@ main()
 {
     std::string base_dir = "/usr/share/postgresql/16/extension";
 
-    process_extension_dir(base_dir);
+    DataMap functions;
+    DataMap operators;
+
+    process_extension_dir(base_dir, functions, operators);
+
+    std::unordered_map<std::string, void*> extn_libs;
+
+    std::string lib_dir = "/usr/lib/postgresql/16/lib/";
+
+    for (const auto& entry : std::filesystem::directory_iterator(lib_dir)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".so") {
+            std::string extn_name = entry.path().filename().stem().string();
+            if (std::find(WHITELIST_EXTNS.begin(), WHITELIST_EXTNS.end(), extn_name) != WHITELIST_EXTNS.end()) {
+                extn_libs[extn_name] = dlopen(entry.path().string().c_str(), RTLD_NOW | RTLD_GLOBAL);
+                std::cout << "Loading " << extn_name << " from " << entry.path() << std::endl;
+            }
+        }
+    }
+
+    for (const auto& [extn, lib] : extn_libs) {
+        std::cout << "Extension: " << extn << std::endl;
+    }
 
     return 0;
 }

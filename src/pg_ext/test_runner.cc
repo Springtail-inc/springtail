@@ -170,6 +170,29 @@ test_gin_extract_value_trgm(void* pgtrgm, const char* text1){
     std::cout << DatumGetFloat4(d) << std::endl;
 }
 
+void
+test_gtrgm_compress(void* pgtrgm, const char* text1){
+    PGFunction test_function = (PGFunction)dlsym(pgtrgm, "gtrgm_compress");
+    if (!test_function) {
+        std::cerr << "Failed to find function gtrgm_compress" << std::endl;
+        return;
+    }
+
+    Datum d;
+    LOCAL_FCINFO(fcinfo, 1);
+
+    void* t1 = cstring_to_text_auto(text1);
+
+    InitFunctionCallInfoData(*fcinfo, nullptr, 1, 0, nullptr, nullptr);
+
+    fcinfo->args[0].value = PointerGetDatum(t1);
+    fcinfo->args[0].isnull = false;
+
+    d = test_function(fcinfo);
+
+    std::cout << DatumGetFloat4(d) << std::endl;
+}
+
 void test_gtrgm_functions(void* pgtrgm, const char* text1, const char* text2) {
     std::cout << "\n=== Testing GIN/GiST Support Functions ===\n";
 
@@ -245,9 +268,17 @@ int main() {
     }
 
     // Load pg_trgm
-    void* pgtrgm = dlopen("/tmp/pg_trgm.so", RTLD_NOW | RTLD_GLOBAL);
+    void* pgtrgm = dlopen("/usr/lib/postgresql/16/lib/pg_trgm.so", RTLD_NOW | RTLD_GLOBAL);
     if (!pgtrgm) {
         std::cerr << "Failed to load pg_trgm: " << dlerror() << std::endl;
+        dlclose(shims);
+        return 1;
+    }
+
+    // Load cube
+    void* cube = dlopen("/usr/lib/postgresql/16/lib/cube.so", RTLD_NOW | RTLD_GLOBAL);
+    if (!cube) {
+        std::cerr << "Failed to load cube: " << dlerror() << std::endl;
         dlclose(shims);
         return 1;
     }

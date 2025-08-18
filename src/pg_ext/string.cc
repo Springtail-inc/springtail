@@ -203,3 +203,7 @@ char *str_tolower(const char *buff, size_t nbytes, Oid collid) {
 char *str_toupper(const char *buff, size_t nbytes, Oid collid) {
     return upperstr_with_len(buff, nbytes);
 }
+
+char *pstrdup(const char *in) {
+    return strdup(in);
+}

@@ -28,7 +28,7 @@ extern "C" PGEXT_API void MemoryContextDelete(void *context);
 extern "C" PGEXT_API void *palloc(size_t size);
 extern "C" PGEXT_API void *palloc0(size_t size);
 extern "C" PGEXT_API void pfree(void *ptr);
-
+extern "C" PGEXT_API void *repalloc(void *ptr, size_t size);
 
 //// INTERNAL INTERFACES
 namespace pgext {

@@ -15,6 +15,7 @@ set(LIB_PGEXT_SOURCES
     sort.cc
     crc.cc
     reloptions.cc
+    float.cc
 )
 
 # Create the library

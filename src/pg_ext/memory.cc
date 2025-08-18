@@ -228,3 +228,16 @@ pfree(void *ptr)
     // Try to free the pointer, if not found do nothing
     ctx->free(ptr);
 }
+
+void* repalloc(void* ptr, size_t size)
+{
+    if (ptr == nullptr) {
+        return palloc(size);
+    }
+
+    auto ctx = static_cast<pgext::MemoryContext*>(CurrentMemoryContext);
+    CHECK(ctx != nullptr);
+
+    // Try to reallocate the pointer, if not found do nothing
+    return ctx->alloc(size);
+}
