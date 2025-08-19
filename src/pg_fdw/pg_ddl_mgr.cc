@@ -381,6 +381,8 @@ namespace springtail::pg_fdw {
                         LOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
                                     db_id, _db_xid_map[db_id], schema_xid);
                     } else {
+                        LOG_DEBUG(LOG_FDW, "New schema XID will be applied: db_id={}, current={}, new={}",
+                                    db_id, _db_xid_map[db_id], schema_xid);
                         db_map[db_id][schema_xid] = ddls;
                     }
                 }
