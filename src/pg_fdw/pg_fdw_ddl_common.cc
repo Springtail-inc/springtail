@@ -100,6 +100,12 @@ namespace springtail::pg_fdw {
             uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
             uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
 
+            if (xid > schema_xid) {
+                LOG_DEBUG(LOG_FDW, "Table xid exceeds schema xid table {}.{} tid={}, xid={}, schema_xid={}",
+                                    namespace_name, table_name, tid, xid, schema_xid);
+                continue;
+            }
+
             bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
             if (!exists) {
                 // find table and compare xids, remove if this xid is >= to the one in the map
