@@ -12,14 +12,18 @@ from aws import AwsHelper
 # AWS secret manager secret name for database users
 DB_USERS_SECRET = "sk/{}/{}/aws/dbi/{}/primary_db_password"
 
-DB_USER_ROLE_REPLICATION = "replication"
-DB_USER_ROLE_PROXY = "proxy_to_fdw"
-DB_USER_ROLE_FDW = "fdw_superuser"
-
 class Properties:
+    """Properties class to manage system properties and configurations."""
+
+    # foreign data wrapper states
     FDW_STATE_INITIALIZE = "initialize"
     FDW_STATE_RUNNING = "running"
     FDW_STATE_STOPPED = "stopped"
+
+    # database roles from secrets manager
+    DB_USER_ROLE_REPLICATION = "replication"
+    DB_USER_ROLE_PROXY = "proxy_to_fdw"
+    DB_USER_ROLE_FDW = "fdw_superuser"
 
     def __init__(self, config_file=None, load_redis=False) -> None:
         """Initialize the properties object."""
@@ -133,16 +137,16 @@ class Properties:
         result = {}
 
         for user in user_json:
-            if DB_USER_ROLE_FDW == user['role'] or DB_USER_ROLE_REPLICATION == user['role'] or DB_USER_ROLE_PROXY == user['role']:
+            if self.DB_USER_ROLE_FDW == user['role'] or self.DB_USER_ROLE_REPLICATION == user['role'] or self.DB_USER_ROLE_PROXY == user['role']:
                 result[user['role']] = (user['username'], user['password'])
 
-        if not result[DB_USER_ROLE_REPLICATION]:
+        if not result[self.DB_USER_ROLE_REPLICATION]:
             raise Exception("Replication user not found in Redis user override.")
 
-        if not result[DB_USER_ROLE_PROXY]:
+        if not result[self.DB_USER_ROLE_PROXY]:
             raise Exception("Proxy password not found in Redis user override.")
 
-        if not result[DB_USER_ROLE_FDW]:
+        if not result[self.DB_USER_ROLE_FDW]:
             raise Exception("FDW user not found in Redis user override.")
 
         return result
@@ -195,7 +199,7 @@ class Properties:
 
         config = json.loads(self.redis.hget(key, 'primary_db'))
 
-        replication_user = self.get_role(DB_USER_ROLE_REPLICATION)
+        replication_user = self.get_role(self.DB_USER_ROLE_REPLICATION)
         config['replication_user'] = replication_user[0]
         config['password'] = replication_user[1]
         self.cache[key] = config
@@ -211,8 +215,8 @@ class Properties:
         if not self.fdw_id:
             return {}
 
-        fdw_user = self.get_role(DB_USER_ROLE_FDW)
-        proxy_user = self.get_role(DB_USER_ROLE_PROXY)
+        fdw_user = self.get_role(self.DB_USER_ROLE_FDW)
+        proxy_user = self.get_role(self.DB_USER_ROLE_PROXY)
 
         config = json.loads(self.redis.hget(key, self.fdw_id))
         config['fdw_user'] = fdw_user[0]
@@ -399,6 +403,7 @@ class Properties:
         start = time.time()
         while True:
             current_state = self.redis.hget(key, str(id))
+            print(f"Waiting for database {key}:{id} to reach state: {state}, current state: {current_state}")
             if current_state == state:
                 return
             if error_state != "" and current_state == error_state:
