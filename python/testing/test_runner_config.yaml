@@ -75,7 +75,18 @@ configs:
     - overlay: 'include_schema_config'
       test_sets: ['include_schema']
 
-  test_ci:
+  # this configuration runs when there is nothing specified on the command line
+  default:
     - overlay: ~
-      test_sets: ['framework', 'preload', 'enum_bits', 'numeric']
-
+      test_sets: ['basic', 'framework', 'preload', 'enum_bits', 'complex', 'numeric', 'query_benchmark']
+    - overlay: 'small_log_rotate'
+      test_sets: ['recovery']
+    - overlay: 'small_log_rotate_with_streaming'
+      test_sets: ['recovery']
+    - overlay: 'small_cache_size'
+      test_sets: ['basic']
+    - overlay: 'streaming_postgres_config'
+      test_sets: ['recovery', 'large_data']
+    - overlay: 'include_schema_config'
+      test_sets: ['include_schema']
+    

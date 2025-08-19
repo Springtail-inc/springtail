@@ -200,7 +200,8 @@ class TestSet:
 
             except Exception as e:
                 logging.error(f'Error: exception: [{e}] result: {self._tests[test_file].get_result()["result"]}')
-                if self._tests[test_file].get_result()['result'] == 'FAILED':
+                result = self._tests[test_file].get_result()['result']
+                if result == 'FAILED' or result == 'ERROR':
                     test_failed = True
                 else:
                     logging.info(f'Skipping the test: {test_file}')

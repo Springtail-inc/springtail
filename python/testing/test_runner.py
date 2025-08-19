@@ -164,7 +164,7 @@ def try_generate_junit(junit_file: str, test_sets: list[TestSet]) -> None:
 def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Run Springtail tests")
-    parser.add_argument('-c', '--config', type=str, help='Run specific test sets as specified in the config file for given configuration')
+    parser.add_argument('-c', '--config', type=str, default="default", help='Run specific test sets as specified in the config file for given configuration')
     parser.add_argument('-j', '--junit', type=str, help='Output test results to the specified JUnit XML file')
     parser.add_argument('-o', '--overlay', type=str, help='Run using a specific overlay config')
     parser.add_argument('--skip-downloads', action='store_true', help='Skip downloading the test files from S3')
@@ -173,8 +173,12 @@ def parse_arguments():
     args = parser.parse_args()
 
     # Manual mutual exclusion check
-    if args.config and (args.overlay or args.test_set or args.test_case):
+    if args.config != "default" and (args.overlay or args.test_set or args.test_case):
         parser.error("Argument -c/--config is mutually exclusive with -o/--overlay, test_set, and test_case")
+
+    # Do not use "default" configuration if we want to run specific overlay and/or test cases
+    if args.config == "default" and (args.overlay or args.test_set or args.test_case):
+        args.config = None
 
     return args
 
