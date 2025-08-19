@@ -285,9 +285,9 @@ namespace springtail::pg_log_mgr {
         DbTableSyncXidsMap _resync_map;
 
         /** db -> table -> xid indicating the table @ XID is selected for resync, yet to in-flight*/
-        using TableSyncInProgressXidMap = std::map<uint64_t, XidLsn>;
-        using DbTableSyncInProgressXidMap = std::map<uint64_t, TableSyncInProgressXidMap>;
-        DbTableSyncInProgressXidMap _resync_picked_map;
+        using TableSyncPickedXidMap = std::map<uint64_t, XidLsn>;
+        using DbTableSyncPickedXidMap = std::map<uint64_t, TableSyncPickedXidMap>;
+        DbTableSyncPickedXidMap _resync_picked_map;
 
         /** Entry is added here when a copy for the table is in-flight but hasn't completed. */
         DbMap<TableMap<std::shared_ptr<Inflight>>> _inflight_map;
