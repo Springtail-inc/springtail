@@ -332,6 +332,7 @@ jobs:
           cd debug
           make install -j ${NUM_PROCS}
 
+      #XXX: Fix: https://linear.app/springtail/issue/SPR-955/fix-proxy-tests
       #- name: Run Proxy Tests
       #  if: success()
       #  env:
