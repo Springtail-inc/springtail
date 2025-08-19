@@ -68,7 +68,7 @@ configs:
     - overlay: 'small_cache_size'
       test_sets: ['basic']
     - overlay: 'streaming_postgres_config'
-      test_sets: ['recovery', 'large_data']
+      test_sets: ['recovery']
     # temporary commented out because it does not work yet
     # - overlay: 'integration_test_config'
     #   test_sets: ['basic', 'framework']

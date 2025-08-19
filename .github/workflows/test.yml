@@ -201,7 +201,7 @@ jobs:
           echo "*** Integration Test Log S3 Key: $integration_test_log_s3key"
 
           # Only upload Springtail logs if the _LOG_FLAG is 'failed'
-          # if [ "$_LOG_FLAG" = "failed" ]; then
+          if [ "$_LOG_FLAG" = "failed" ]; then
             # Springtail service log
             echo "Integration test failed, uploading Springtail logs..."
             springtail_log_file="springtail-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.tar.gz"
@@ -211,19 +211,12 @@ jobs:
             springtail_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_PR_ID}/${springtail_log_file}"
             aws s3 cp "$springtail_log_file" "$springtail_log_s3key"
             echo "*** Springtail Log S3 Key: $springtail_log_s3key"
-          # fi
+          fi
           
           # Fail eventually
           if [ "$_LOG_FLAG" = "failed" ]; then
             exit 1
           fi
-
-      - name: Setup interactive ssh session
-        uses: Warpbuilds/action-debugger@v1.3
-        if: success() || failure()
-        with:
-          limit-access-to-actor: true
-          timeout-minutes: 180
 
       - name: Integration Test Report
         uses: dorny/test-reporter@v1
