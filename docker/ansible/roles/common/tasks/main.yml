@@ -1,53 +1,63 @@
 - name: Install core packages
   ansible.builtin.apt:
     name:
-      - lsb-release
-      - wget
-      - software-properties-common
-      - gnupg
-      - build-essential
       - autoconf
-      - libelf-dev
-      - bison
-      - clang-format
-      - pkg-config
-      - flex
-      - libdw-dev
-      - openssh-server
-      - libdwarf-dev
       - binutils-dev
-      - linux-libc-dev
+      - bison
+      - build-essential
+      - ca-certificates
+      - clang-format
       - cmake
-      - git
       - curl
-      - zip
-      - unzip
-      - tar
-      - ninja-build
-      - python3
+      - dnsutils
+      - emacs-nox
+      - flex
+      - g++-14
+      - gcc-14
+      - gdb
+      - git
+      - gnupg
+      - gpg
+      - htop
+      - iftop
+      - iproute2
+      - iputils-ping
+      - jq
       - libbsd-dev
-      - redis-server
+      - libdw-dev
+      - libdwarf-dev
+      - libelf-dev
+      - linux-libc-dev
+      - lsb-release
+      - net-tools
+      - netcat
+      - ninja-build
+      - nmap
+      - openssh-server
+      - pkg-config
       - postgresql-16
       - postgresql-contrib-16
-      - sudo
-      - vim
-      - ca-certificates
-      - gpg
-      - emacs-nox
-      - gcc-14
-      - g++-14
-      - gdb
+      - procps
+      - python3
+      - python3-boto3
+      - python3-jinja2
+      - python3-lxml
       - python3-pip
-      - python3-psycopg2
       - python3-psutil
+      - python3-psycopg2
       - python3-redis
       - python3-requests
       - python3-yaml
-      - python3-jinja2
-      - python3-lxml
-      - python3-boto3
-      - net-tools
-      - jq
+      - redis-server
+      - software-properties-common
+      - sudo
+      - tar
+      - traceroute
+      - unzip
+      - vim
+      - wget
+      - zip
+
     update_cache: true
     state: present
     autoclean: true
