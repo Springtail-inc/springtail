@@ -397,7 +397,12 @@ namespace springtail::pg_fdw {
                     _thread_manager->queue_request(std::make_shared<common::MultiQueueRequest>(
                         db_id, [this, &redis_ddl, db_id, xid_map]() {
                             try {
-                                // apply the DDL statements
+                                uint64_t schema_xid = xid_map.rbegin()->first;
+                                LOG_DEBUG(
+                                    LOG_FDW, "Updating redis ddl @ through schema XID: {}, db_id: {}",
+                                    schema_xid, db_id);
+
+                                    // apply the DDL statements
                                 bool status = _update_schemas(db_id, xid_map);
                                 if (!status) {
                                     // error occured, abort the DDL
@@ -409,10 +414,6 @@ namespace springtail::pg_fdw {
 
                                 // success, update schema XID if applied, otherwise they may be
                                 // queued
-                                uint64_t schema_xid = xid_map.rbegin()->first;
-                                LOG_DEBUG(
-                                    LOG_FDW, "Updating redis ddl @ through schema XID: {}, db_id: {}",
-                                    schema_xid, db_id);
                                 redis_ddl.update_schema_xid(_fdw_id, db_id, schema_xid);
 
                                 std::unique_lock db_lock_unique(_db_mutex);
