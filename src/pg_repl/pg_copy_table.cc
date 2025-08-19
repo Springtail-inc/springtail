@@ -530,7 +530,7 @@ namespace springtail
             // mark the copy as "in-flight" to wake up the log reader
             // note: we don't need a schema since we are going to ignore this table
             pg_log_mgr::SyncTracker::get_instance()->mark_inflight(db_id, _schema.table_oid, xid,
-                    snapshot_details, nullptr);
+                                                                   snapshot_details, nullptr);
 
             return std::make_shared<PgCopyResult::TableInfo>(table_oid, nullptr, nullptr);
         }
@@ -620,7 +620,7 @@ namespace springtail
 
         // mark the copy as inflight and record the snapshot details
         pg_log_mgr::SyncTracker::get_instance()->mark_inflight(db_id, _schema.table_oid, xid,
-                snapshot_details, schema);
+                                                               snapshot_details, schema);
 
         // only do the COPY if there are no partition keys
         // if there are partition keys, then this is not a leaf table
@@ -962,7 +962,7 @@ namespace springtail
                              uint64_t xid,
                              const std::set<uint32_t> &table_oids)
     {
-        return _internal_copy(db_id, xid, std::nullopt, std::nullopt, table_oids, std::nullopt);
+        return _internal_copy(db_id, xid, std::nullopt, std::nullopt, table_oids);
     }
 
     std::vector<PgCopyResultPtr>
