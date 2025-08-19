@@ -505,8 +505,7 @@ namespace springtail
                              const std::string &schema_name,
                              uint64_t table_oid,
                              uint64_t schema_oid,
-                             const PgCopyResultPtr &snapshot_details,
-                             bool skip_setting_inflight)
+                             const PgCopyResultPtr &snapshot_details)
     {
         LOG_INFO("Copying table {}.{} with oid {} and schema oid {}",
                  schema_name, table_name, table_oid, schema_oid);
@@ -528,12 +527,10 @@ namespace springtail
             // mark the table as invalid, we won't copy it
             TableValidator::get_instance()->mark_invalid(table_oid, table_info);
 
-            if (!skip_setting_inflight) {
-                // mark the copy as "in-flight" to wake up the log reader
-                // note: we don't need a schema since we are going to ignore this table
-                pg_log_mgr::SyncTracker::get_instance()->mark_inflight(db_id, _schema.table_oid, xid,
-                        snapshot_details, nullptr);
-            }
+            // mark the copy as "in-flight" to wake up the log reader
+            // note: we don't need a schema since we are going to ignore this table
+            pg_log_mgr::SyncTracker::get_instance()->mark_inflight(db_id, _schema.table_oid, xid,
+                    snapshot_details, nullptr);
 
             return std::make_shared<PgCopyResult::TableInfo>(table_oid, nullptr, nullptr);
         }
@@ -621,11 +618,9 @@ namespace springtail
         auto table = TableMgr::get_instance()->get_snapshot_table(db_id, _schema.table_oid, xid.xid,
                                                                   schema, _schema.secondary_keys);
 
-        if (!skip_setting_inflight) {
-            // mark the copy as inflight and record the snapshot details
-            pg_log_mgr::SyncTracker::get_instance()->mark_inflight(db_id, _schema.table_oid, xid,
-                    snapshot_details, schema);
-        }
+        // mark the copy as inflight and record the snapshot details
+        pg_log_mgr::SyncTracker::get_instance()->mark_inflight(db_id, _schema.table_oid, xid,
+                snapshot_details, schema);
 
         // only do the COPY if there are no partition keys
         // if there are partition keys, then this is not a leaf table
@@ -967,7 +962,7 @@ namespace springtail
                              uint64_t xid,
                              const std::set<uint32_t> &table_oids)
     {
-        return _internal_copy(db_id, xid, std::nullopt, std::nullopt, table_oids, std::nullopt, false);
+        return _internal_copy(db_id, xid, std::nullopt, std::nullopt, table_oids, std::nullopt);
     }
 
     std::vector<PgCopyResultPtr>
@@ -1008,8 +1003,7 @@ namespace springtail
     PgCopyTable::_worker(uint64_t db_id,
                          uint64_t target_xid,
                          CopyQueuePtr copy_queue,
-                         PgCopyResultPtr result,
-                         bool skip_setting_inflight)
+                         PgCopyResultPtr result)
     {
         // create copy table object and connect to db
         PgCopyTable copy_table;
@@ -1044,8 +1038,7 @@ namespace springtail
                                                    request->schema_name,
                                                    request->table_oid,
                                                    request->schema_oid,
-                                                   result,
-                                                   skip_setting_inflight);
+                                                   result);
 
                 // add the table oid to the result
                 result->add_table(info);
@@ -1265,8 +1258,7 @@ namespace springtail
                                 std::optional<std::string> schema_name,
                                 std::optional<std::pair<std::string, std::string>> schema_table,
                                 std::optional<std::set<uint32_t>> table_tids,
-                                std::optional<nlohmann::json> include_json,
-                                bool skip_setting_inflight)
+                                std::optional<nlohmann::json> include_json)
     {
         CopyQueuePtr copy_queue = std::make_shared<CopyQueue>();
 
@@ -1310,7 +1302,7 @@ namespace springtail
             PgCopyResultPtr copy_result = std::make_shared<PgCopyResult>(target_xid);
             table_results.push_back(copy_result);
             workers.push_back(std::thread(&PgCopyTable::_worker,
-                              db_id, target_xid, copy_queue, copy_result, skip_setting_inflight));
+                              db_id, target_xid, copy_queue, copy_result));
         }
 
         // iterate through the tables and copy them

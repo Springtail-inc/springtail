@@ -71,7 +71,13 @@ SyncTracker::mark_inflight(uint64_t db_id,
 
     // Find the XID of the table thats picked for resync
     auto picked_db_i = _resync_picked_map.find(db_id);
-    CHECK(picked_db_i != _resync_picked_map.end());
+
+    // If resync is not picked, return
+    // this is usually the case during initial resyncs
+    if (picked_db_i == _resync_picked_map.end()) {
+        return;
+    }
+
     auto picked_table_i = picked_db_i->second.find(table_id);
     CHECK(picked_table_i != picked_db_i->second.end());
     auto picked_table_xid = picked_table_i->second;
