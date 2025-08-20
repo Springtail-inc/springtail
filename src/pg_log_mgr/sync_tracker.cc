@@ -36,12 +36,14 @@ SyncTracker::issue_resync_and_wait(uint64_t db_id,
     _resync_map[db_id][table_id].insert(xid);
 
     // wait for the resync to begin
+    LOG_INFO("Wait for resync db: {}, table: {} to begin", db_id, table_id);
     auto wait = std::make_shared<Wait>();
     auto wait_i = _wait_map.emplace(db_id, wait).first;
     wait->condition.wait(lock, [&wait]() {
             return wait->notified;
             });
 
+    LOG_INFO("notified after resync picked, db: {}, table: {} to begin", db_id, table_id);
     // clear the entry from the wait map only if table
     // is removed from the resync_map
     bool resync_completed_for_table = true;

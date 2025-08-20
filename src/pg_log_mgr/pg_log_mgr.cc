@@ -363,9 +363,11 @@ namespace springtail::pg_log_mgr {
         _internal_state.wait_and_set({STATE_RUNNING, STATE_STARTUP_SYNC, STATE_REPLAYING},
                                      STATE_SYNC_STALL);
 
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Pushing stall message, db: {}", _db_id);
         // notify xact handler to rollover log
         _notify_xact_start_sync();
 
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Wait for state syncing, db: {}", _db_id);
         // ensure the pipeline was stalled before we complete
         _internal_state.wait_for_state(STATE_SYNCING);
 
