@@ -78,7 +78,7 @@ class TestCase:
     def get_added_databases(self) -> list:
         return self._added_databases
 
-    def get_allowed_overlays(self) -> list:
+    def get_required_overlays(self) -> list:
         return self._overlays
 
     def _setup_default_fdw(self) -> None:
@@ -384,11 +384,11 @@ class TestCase:
                             'database_name': directive[1]
                         }, section, is_threaded, cur_txn, line_num)
 
-                    elif directive[0] == 'allow_overlays':
+                    elif directive[0] == 'require_overlays':
                         if section != 'metadata':
-                            self._raise_error(f'{line_num}: "allow_overlays" must be specified in the "metadata" section')
+                            self._raise_error(f'{line_num}: "require_overlays" must be specified in the "metadata" section')
                         if len(directive) < 2:
-                            self._raise_error(f'{line_num}: "allow_overlays" must specify an overlay name')
+                            self._raise_error(f'{line_num}: "require_overlays" must specify an overlay name')
                         self._overlays = directive[1:]
 
                     else:

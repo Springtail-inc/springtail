@@ -1,6 +1,6 @@
 ## metadata
 ### autocommit true
-### allow_overlays include_schema_config
+### require_overlays include_schema_config
 
 ## setup
 SELECT 1;

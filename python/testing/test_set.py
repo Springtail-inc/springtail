@@ -3,6 +3,7 @@ from lxml import etree
 import os
 import springtail
 import time
+from typing import Optional
 
 from test_case import TestCase
 
@@ -44,7 +45,7 @@ class TestSet:
         # constuct the special "config" test case for global setup and cleanup
         self._config = TestCase(os.path.join(directory, _GLOBAL_CONFIG_FILE), self._build_dir, self._test_params, ['setup', 'cleanup'])
         self._config.parse_file()
-        if not self._check_overlay(overlay, self._config.get_allowed_overlays()):
+        if not self._check_overlay(overlay, self._config.get_required_overlays()):
             logging.error(f'Error: overlay requirement is not fulfilled for the test set')
             self._skip = True
 
@@ -66,7 +67,7 @@ class TestSet:
                 # parse the test
                 self._tests[test_file] = TestCase(os.path.join(directory, test_file), self._build_dir, self._test_params)
                 self._tests[test_file].parse_file()
-                if not self._check_overlay(overlay, self._tests[test_file].get_allowed_overlays()):
+                if not self._check_overlay(overlay, self._tests[test_file].get_required_overlays()):
                     logging.warning(f'skipping test file {test_file} -- cannot run with current overlay \'{overlay}\'')
                     self._tests[test_file].skip()
                     continue
@@ -82,10 +83,10 @@ class TestSet:
                 logging.error(f'Error parsing test -- {e}')
                 pass # this test was recorded as an error and we continue
 
-    def _check_overlay(self, overlay: None | str, allowed_overlays: list) -> bool:
-        if len(allowed_overlays) == 0:
+    def _check_overlay(self, overlay: Optional[str], required_overlays: list) -> bool:
+        if len(required_overlays) == 0:
             return True
-        if overlay is None or overlay not in allowed_overlays:
+        if overlay is None or overlay not in required_overlays:
             return False
         return True
 
