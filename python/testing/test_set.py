@@ -211,9 +211,12 @@ class TestSet:
             # save the logs
             self._tests[test_file].stop_capture()
 
+            # always check logs
+            if len(springtail.check_logs(self._config_file)) != 0:
+                test_failed = True
+
             # if we should stop the tests, break the loop
             if test_failed and not shutdown_on_fail:
-                springtail.check_logs(self._config_file)
                 break
 
             # try to perform cleanup
@@ -222,9 +225,12 @@ class TestSet:
             except Exception as e:
                 logging.error(f'Error on cleanup: {e}')
 
-            # check here if the test failed nad we need to check the logs
+            # always check logs
+            if len(springtail.check_logs(self._config_file)) != 0:
+                test_failed = True
+
+            # check here if the test failed nad we need to stop
             if test_failed:
-                springtail.check_logs(self._config_file)
                 break
 
         # if a test failed and we don't shutdown on failure, return immediately
