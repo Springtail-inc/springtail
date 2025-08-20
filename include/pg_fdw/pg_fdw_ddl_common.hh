@@ -55,8 +55,7 @@ namespace springtail::pg_fdw {
         std::string _partition_bound;
     };
 
-    class PgFdwCommon : public Singleton<PgFdwCommon> {
-        friend class Singleton<PgFdwCommon>;
+    class PgFdwCommon {
     public:
         struct TableEntry {
             uint64_t table_id;
