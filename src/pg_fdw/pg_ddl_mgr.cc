@@ -27,15 +27,6 @@
 namespace springtail::pg_fdw {
 
     /** Get a list of all non-system schema names */
-    static constexpr char SCHEMA_SELECT[] =
-        "SELECT schema_name "
-        "FROM information_schema.schemata "
-        "WHERE schema_name NOT LIKE 'pg_%' "
-        " AND schema_name <> 'information_schema'";
-
-    static constexpr char CREATE_FDW_USER[] =
-        "CREATE USER {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '{}'";
-
     static constexpr char DROP_DATABASE[] =
         "DROP DATABASE IF EXISTS {} WITH (FORCE)";
 
@@ -875,8 +866,8 @@ namespace springtail::pg_fdw {
 
     void
     PgDDLMgr::_create_schemas(LibPqConnectionPtr conn,
-                    const uint64_t db_id,
-                    const std::string &db_name)
+                              const uint64_t db_id,
+                              const std::string &db_name)
     {
 
         auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(db_id)}});
@@ -955,6 +946,8 @@ namespace springtail::pg_fdw {
                                     escaped_schema, SPRINGTAIL_FDW_SERVER_NAME,
                                     escaped_schema));
             conn->clear();
+            _add_partition_table_comment(conn, db_id, schema.second, xid);
+            conn->clear();
 
             // grant usage and select on all tables and sequences to the fdw user
 #if 0 // I don't think this is needed with the new role policy stuff
@@ -963,8 +956,8 @@ namespace springtail::pg_fdw {
             conn->exec(fmt::format("GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {}", escaped_schema, _fdw_username));
             conn->clear();
             conn->exec(fmt::format("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {}", escaped_schema, _fdw_username));
-#endif
             conn->clear();
+#endif
         }
 
         // import catalog schema
@@ -986,6 +979,64 @@ namespace springtail::pg_fdw {
 
         // close the connection
         conn->disconnect();
+    }
+
+    void
+    PgDDLMgr::_add_partition_table_comment(LibPqConnectionPtr conn, const uint64_t db_id, const std::string &schema_name, const uint64_t xid)
+    {
+        // 1. look up schema id in NamespaceNames (use inverse iterator)
+        auto ns_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, xid);
+        auto ns_fields = ns_table->extent_schema()->get_fields();
+        auto ns_search_key = sys_tbl::NamespaceNames::Secondary::key_tuple(schema_name, xid, constant::MAX_LSN);
+        auto table_iter = ns_table->inverse_lower_bound(ns_search_key, 1);
+
+        // verify that the record is found
+        CHECK(table_iter != ns_table->end(1));
+
+        auto &ns_row = *table_iter;
+        uint64_t ns_id = ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(&ns_row);
+        std::string ns_name(ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&ns_row));
+        uint64_t ns_xid = ns_fields->at(sys_tbl::NamespaceNames::Data::XID)->get_uint64(&ns_row);
+        bool ns_exists = ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&ns_row);
+        DCHECK(ns_xid <= xid);
+        CHECK(ns_exists);
+
+        // 2. look up tables for the found namespace ids where partition key != NULL
+        //      walk through the whole schema, collect found tables, and exclude deleted tables
+        //      limit search till xid exceeds xid passed as parameter
+        //      per table store table_name and table_id
+        std::set<std::pair<uint64_t, std::string>> tables;
+        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, xid);
+        auto fields = table->extent_schema()->get_fields();
+        for (auto row: (*table)) {
+            uint64_t table_ns_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
+            std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row));
+            uint64_t table_id = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(&row);
+            uint64_t table_xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
+            bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
+            std::optional<std::string> partition_key = std::nullopt;
+            if (!fields->at(sys_tbl::TableNames::Data::PARTITION_KEY)->is_null(&row)) {
+                partition_key = fields->at(sys_tbl::TableNames::Data::PARTITION_KEY)->get_text(&row);
+            }
+            if (table_xid > xid) {
+                break;
+            }
+            if (table_ns_id != ns_id || !partition_key.has_value()) {
+                continue;
+            }
+            if (!exists) {
+                tables.erase(std::pair(table_id, table_name));
+            } else {
+                tables.emplace(table_id, table_name);
+            }
+        }
+
+        // 3. go through the list of found tables and generate the comment SQL
+        std::string escaped_schema = conn->escape_identifier(schema_name);
+        for (const auto &[table_id, table_name]: tables) {
+            std::string escaped_table = conn->escape_identifier(table_name);
+            conn->exec(fmt::format("COMMENT ON TABLE {}.{} IS 'TID:{}';", escaped_schema, escaped_table, table_id));
+        }
     }
 
     void
