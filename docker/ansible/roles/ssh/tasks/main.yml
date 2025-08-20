@@ -3,3 +3,15 @@
     path: /etc/ssh/sshd_config
     regexp: 'PermitRootLogin prohibit-password'
     replace: 'PermitRootLogin yes'
+
+- name: Allow Password Login via SSH
+  ansible.builtin.replace:
+    path: /etc/ssh/sshd_config
+    regexp: '^PasswordAuthentication no'
+    replace: 'PasswordAuthentication yes'
+
+- name: Ensure SSH service is enabled and started
+  ansible.builtin.service:
+    name: ssh
+    enabled: true
+    state: started
