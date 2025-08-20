@@ -42,8 +42,20 @@ SyncTracker::issue_resync_and_wait(uint64_t db_id,
             return wait->notified;
             });
 
-    // clear the entry
-    _wait_map.erase(wait_i);
+    // clear the entry from the wait map only if table
+    // is removed from the resync_map
+    bool resync_completed_for_table = true;
+    auto db_i = _resync_map.find(db_id);
+    if (db_i != _resync_map.end()) {
+        auto table_i = db_i->second.find(table_id);
+        if (table_i != db_i->second.end()) {
+            resync_completed_for_table = false;
+        }
+    }
+
+    if (resync_completed_for_table) {
+        _wait_map.erase(wait_i);
+    }
 }
 
 void
@@ -89,13 +101,19 @@ SyncTracker::mark_inflight(uint64_t db_id,
     // Erase the entries from the resync_map
     auto db_i = _resync_map.find(db_id);
     CHECK(db_i != _resync_map.end());
+    int count_resync_map_entries_erased = 0;
     if (db_i != _resync_map.end()) {
         auto table_i = db_i->second.find(table_id);
         CHECK(table_i != db_i->second.end());
 
         // clear from the resync map
         // Erase all elements less than or equal to picked_table_xid
-        table_i->second.erase(table_i->second.begin(), table_i->second.upper_bound(picked_table_xid));
+        auto first = table_i->second.begin();
+        auto last  = table_i->second.upper_bound(picked_table_xid);
+
+        count_resync_map_entries_erased = std::distance(first, last);  // number of elements in the range
+
+        table_i->second.erase(first, last);
 
         if (table_i->second.empty()) {
             db_i->second.erase(table_i);
@@ -113,7 +131,10 @@ SyncTracker::mark_inflight(uint64_t db_id,
     auto wait_i = _wait_map.find(db_id);
     if (wait_i != _wait_map.end()) {
         wait_i->second->notified = true;
-        wait_i->second->condition.notify_one();
+        // notify number of resync entries that got erased
+        for (int i = 0; i < count_resync_map_entries_erased; ++i) {
+            wait_i->second->condition.notify_one();
+        }
     }
 }
 
