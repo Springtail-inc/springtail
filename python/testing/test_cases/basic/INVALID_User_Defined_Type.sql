@@ -20,7 +20,7 @@ VALUES ('John Doe', ROW('123 Main St', 'Springfield', '12345'));
 ALTER TABLE invalid_table_with_user_defined_type DROP COLUMN address;
 
 -- Wait for sync to complete
-SELECT pg_sleep(3);
+SELECT pg_sleep(10);
 
 ## verify
 SELECT * FROM invalid_table_with_user_defined_type;

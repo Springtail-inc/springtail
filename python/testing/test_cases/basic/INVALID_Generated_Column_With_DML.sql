@@ -21,7 +21,7 @@ INSERT INTO invalid_table_with_generated_column_with_dml (length, width) VALUES 
 ALTER TABLE invalid_table_with_generated_column_with_dml DROP COLUMN area;
 
 -- Wait for sync to complete
-SELECT pg_sleep(3);
+SELECT pg_sleep(10);
 
 ## verify
 SELECT * FROM invalid_table_with_generated_column_with_dml;
