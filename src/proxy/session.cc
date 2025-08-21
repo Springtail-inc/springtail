@@ -129,15 +129,25 @@ namespace springtail::pg_proxy {
     {
         char buffer[1024];
         int offset = 0;
+        uint32_t header_size = sizeof(char) + sizeof(uint32_t);
 
         // read at least 5 bytes, more if available, read into
         // existing buffer to avoid doing multiple system calls
         ssize_t n = connection->read(buffer, 1024, 5);
-        assert(n >= 5);
+        DCHECK(n >= header_size);
 
         ssize_t msg_length = 0;
 
         while (offset < n) {
+            ssize_t bytes_left = n - offset;
+            if (bytes_left < header_size) {
+                memcpy(buffer, buffer + offset, bytes_left);
+                n = connection->read(buffer + bytes_left, header_size - bytes_left, header_size - bytes_left);
+                DCHECK(n == (header_size - bytes_left));
+                n += bytes_left;
+                offset = 0;
+            }
+
             // code is first byte, skip over it
             // message length includes length field but not code byte
             // so really msg_length -= 4
@@ -148,7 +158,8 @@ namespace springtail::pg_proxy {
             BufferPtr bufferp = blist.get(msg_length);
 
             // copy data into buffer
-            bufferp->copy_into(buffer + offset, std::min(n, msg_length));
+            bufferp->copy_into(buffer + offset, std::min(n - offset, msg_length));
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Read message n: {}, offset: {}", n, offset);
 
             // incr by full message length instead of by n
             // this allows us to find out if we read too little for a full buffer
@@ -158,9 +169,9 @@ namespace springtail::pg_proxy {
         // if we didn't get all the data for the last buffer
         if (offset > n) {
             // read remaining data into tail buffer
-            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Need to read more data for message: {}", offset-n);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Need to read more data for message: {}", offset - n);
             BufferPtr tail = blist.buffers.back();
-            int rd = connection->read(tail->data() + tail->size(), offset-n, offset-n);
+            int rd = connection->read(tail->data() + tail->size(), offset - n, offset - n);
             tail->incr_size(rd);
             CHECK_EQ(rd, offset-n);
         }
