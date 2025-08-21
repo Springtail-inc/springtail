@@ -44,20 +44,8 @@ SyncTracker::issue_resync_and_wait(uint64_t db_id,
             });
 
     LOG_INFO("notified after resync picked, db: {}, table: {} to begin", db_id, table_id);
-    // clear the entry from the wait map only if table
-    // is removed from the resync_map
-    bool resync_completed_for_table = true;
-    auto db_i = _resync_map.find(db_id);
-    if (db_i != _resync_map.end()) {
-        auto table_i = db_i->second.find(table_id);
-        if (table_i != db_i->second.end()) {
-            resync_completed_for_table = false;
-        }
-    }
-
-    if (resync_completed_for_table) {
-        _wait_map.erase(wait_i);
-    }
+    // clear the entry
+    _wait_map.erase(wait_i);
 }
 
 void
@@ -70,6 +58,13 @@ SyncTracker::pick_table_for_sync(uint64_t db_id,
     std::unique_lock lock(_mutex);
 
     _resync_picked_map[db_id][table_id] = xid;
+
+    // if the log reader is waiting, notify it to continue operation
+    auto wait_i = _wait_map.find(db_id);
+    if (wait_i != _wait_map.end()) {
+        wait_i->second->notified = true;
+        wait_i->second->condition.notify_one();
+    }
 }
 
 void
@@ -103,19 +98,13 @@ SyncTracker::mark_inflight(uint64_t db_id,
     // Erase the entries from the resync_map
     auto db_i = _resync_map.find(db_id);
     CHECK(db_i != _resync_map.end());
-    int count_resync_map_entries_erased = 0;
     if (db_i != _resync_map.end()) {
         auto table_i = db_i->second.find(table_id);
         CHECK(table_i != db_i->second.end());
 
         // clear from the resync map
         // Erase all elements less than or equal to picked_table_xid
-        auto first = table_i->second.begin();
-        auto last  = table_i->second.upper_bound(picked_table_xid);
-
-        count_resync_map_entries_erased = std::distance(first, last);  // number of elements in the range
-
-        table_i->second.erase(first, last);
+        table_i->second.erase(table_i->second.begin(), table_i->second.upper_bound(picked_table_xid));
 
         if (table_i->second.empty()) {
             db_i->second.erase(table_i);
@@ -128,16 +117,6 @@ SyncTracker::mark_inflight(uint64_t db_id,
     // add the entry to the inflight map
     auto entry = std::make_shared<Inflight>(copy->pg_xid, copy->xmax, copy->xips, schema);
     _inflight_map[db_id].emplace(table_id, entry);
-
-    // if the log reader is waiting, notify it to continue operation
-    auto wait_i = _wait_map.find(db_id);
-    if (wait_i != _wait_map.end()) {
-        wait_i->second->notified = true;
-        // notify number of resync entries that got erased
-        for (int i = 0; i < count_resync_map_entries_erased; ++i) {
-            wait_i->second->condition.notify_one();
-        }
-    }
 }
 
 void
@@ -276,6 +255,14 @@ SyncTracker::add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
         auto resync_i = _resync_map.find(db_id);
         if (resync_i != _resync_map.end()) {
             if (resync_i->second.contains(table_id)) {
+                return { true, true }; // if the table is present, skip
+            }
+        }
+
+        // Check picked map
+        auto resync_picked_i = _resync_picked_map.find(db_id);
+        if (resync_picked_i != _resync_picked_map.end()) {
+            if (resync_picked_i->second.contains(table_id)) {
                 return { true, true }; // if the table is present, skip
             }
         }
