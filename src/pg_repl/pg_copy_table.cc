@@ -1040,6 +1040,7 @@ namespace springtail
                                                    request->schema_oid,
                                                    result);
 
+                LOG_INFO("Adding copy result for table: {}", request->table_oid);
                 // add the table oid to the result
                 result->add_table(info);
 
