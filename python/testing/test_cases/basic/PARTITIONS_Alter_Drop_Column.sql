@@ -25,6 +25,9 @@ INSERT INTO family_alter_parent_partition_drop VALUES (4, 'Alice', 'Sibling');
 ALTER TABLE family_alter_parent_partition_drop
     DROP COLUMN family_name;
 
+-- Wait for sync to complete
+SELECT pg_sleep(5);
+
 ## verify
 ### schema_check public family_alter_parent_partition_drop
 ### schema_check public family_alter_child_partition_drop_siblings

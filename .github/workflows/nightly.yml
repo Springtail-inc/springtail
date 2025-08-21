@@ -306,10 +306,6 @@ jobs:
           aws s3 cp $PKG_NAME s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/
           echo "PACKAGE_NAME=s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/${PKG_NAME}" >> $GITHUB_ENV
 
-      - name: Setup interactive ssh session
-        if: failure()
-        uses: Warpbuilds/action-debugger@v1.3
-
       - name: Notify Slack on success
         if: success()
         uses: slackapi/slack-github-action@v2.0.0

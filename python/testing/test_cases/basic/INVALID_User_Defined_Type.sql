@@ -19,6 +19,9 @@ VALUES ('John Doe', ROW('123 Main St', 'Springfield', '12345'));
 -- Alter the table to remove the invalid column
 ALTER TABLE invalid_table_with_user_defined_type DROP COLUMN address;
 
+-- Wait for sync to complete
+SELECT pg_sleep(3);
+
 ## verify
 SELECT * FROM invalid_table_with_user_defined_type;
 
