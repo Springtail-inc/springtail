@@ -20,9 +20,6 @@
 --ALTER TABLE family_alter_parent_partition
 --    ADD COLUMN family_name VARCHAR(100);
 --
----- Wait for sync to complete
---SELECT pg_sleep(10);
---
 --## verify
 --### schema_check public family_alter_parent_partition
 --### schema_check public family_alter_child_partition_siblings

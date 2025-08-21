@@ -8,9 +8,6 @@ CREATE TABLE IF NOT EXISTS invalid_table_with_non_standard_collation (
 -- Alter the table to remove the invalid column
 ALTER TABLE invalid_table_with_non_standard_collation DROP COLUMN latin_text;
 
--- Wait for sync to complete
-SELECT pg_sleep(10);
-
 ## verify
 SELECT * FROM invalid_table_with_non_standard_collation;
 

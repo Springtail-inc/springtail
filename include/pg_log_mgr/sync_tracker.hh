@@ -90,7 +90,7 @@ namespace springtail::pg_log_mgr {
         /**
          * Issue's a resync request for a table and waits for the table copy to start.
          */
-        void issue_resync_and_wait(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+        void issue_resync_and_wait(uint64_t db_id, uint64_t table_id, const XidLsn &xid, CommitterQueuePtr committer_queue);
 
         /**
          * Marks that the coppy thread has started the COPY request for this table.  This record is
@@ -294,6 +294,14 @@ namespace springtail::pg_log_mgr {
 
         /** PgLogReader waits for copy to start here. */
         DbMap<std::shared_ptr<Wait>> _wait_map;
+
+        /**
+         * @brief Block the committer from issuing commits during a table sync.
+         * @param db_id            Database id
+         * @param committer_queue  Committer Queue to send block_commit message to
+         */
+        void _block_commits(uint64_t db_id, CommitterQueuePtr committer_queue);
+
     };
 } // springtail::pg_log_mgr
 

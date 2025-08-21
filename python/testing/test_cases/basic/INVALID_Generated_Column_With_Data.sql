@@ -14,9 +14,6 @@ INSERT INTO invalid_table_with_generated_column_with_data (length, width) VALUES
 -- Alter the table to remove the invalid column
 ALTER TABLE invalid_table_with_generated_column_with_data DROP COLUMN area;
 
--- Wait for sync to complete
-SELECT pg_sleep(10);
-
 ## verify
 SELECT * FROM invalid_table_with_generated_column_with_data;
 

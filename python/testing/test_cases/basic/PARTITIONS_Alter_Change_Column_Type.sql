@@ -24,9 +24,6 @@
 --
 --INSERT INTO family_alter_type_parent_partition VALUES (2, 'Jane', 'Sibling', 1001);
 --
----- Wait for sync to complete
---SELECT pg_sleep(10);
---
 --## verify
 --### schema_check public family_alter_type_parent_partition
 --### schema_check public family_alter_type_child_partition_siblings
