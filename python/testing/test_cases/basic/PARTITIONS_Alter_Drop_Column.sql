@@ -26,7 +26,7 @@ ALTER TABLE family_alter_parent_partition_drop
     DROP COLUMN family_name;
 
 -- Wait for sync to complete
-SELECT pg_sleep(5);
+SELECT pg_sleep(10);
 
 ## verify
 ### schema_check public family_alter_parent_partition_drop
