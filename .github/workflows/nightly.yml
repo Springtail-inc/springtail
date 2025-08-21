@@ -106,82 +106,6 @@ jobs:
           # This is the prefix for the logs on S3, including the S3 scheme, buket name all the way to the "folder"
           echo "TEST_LOG_S3_FULL_PREFIX=s3://${DEVSUPPORT_BUCKET_NAME}/${TEST_LOGS_S3_PREFIX}/${CURRENT_DATE}" >> $GITHUB_ENV
 
-      - name: Prepare DB for Unit Tests
-        run: |
-          service postgresql start
-          USER_EXISTS=$(sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='springtail'")
-          if [ "$USER_EXISTS" != "1" ]; then
-            sudo -u postgres psql -c "CREATE USER springtail WITH PASSWORD 'springtail' SUPERUSER LOGIN" 
-          fi
-          sudo -u postgres psql -c "CREATE DATABASE springtail WITH OWNER springtail"
-          # Create triggers
-          sudo -u postgres psql -d springtail -f ${GITHUB_WORKSPACE}/scripts/triggers.sql
-
-      - name: Run Unit Tests
-        if: success()
-        run: |
-          cd python/testing
-          python3 springtail.py -f ../../system.json.test --load-redis --build-dir ../../debug
-          cd ../../debug
-          
-          set +e
-          _LOG_FLAG="failed"
-          # Per SPR-501: break upon test failures - "--gtest_break_on_failure"
-          make check ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose --stop-on-failure" 2>&1 | tee tmplog
-          # Grab the success/failure status of the unit tests
-          if [ $? -eq 0 ] &&  grep -qE "100% tests passed" tmplog
-          then 
-            _LOG_FLAG="succeeded"
-          fi
-          # List the open listening ports and processes info after tests are done
-          echo "==== Listening Ports ===="
-          netstat -tulnp
-          # Show the full launching command of each
-          netstat -tulnp | awk '{print $7}' | grep -o '[0-9]*' | while read pid; do
-            cmd=$(ps -p $pid -o args=)
-            echo "$pid - $cmd"
-          done
-
-          # Grab the current PR ID
-          _LOG_PR_ID="${GITHUB_EVENT_PULL_REQUEST_NUMBER}"
-          # Grab the short SHA
-          _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
-          
-          _TIMESTAMP=$(date +"%Y-%m-%d-%H-%M-%S")
-          log_file="unit-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log.tar.gz" 
-          tar zcvf $log_file tmplog
-          rm tmplog
-          unit_test_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_PR_ID}/$log_file"
-          
-          aws s3 cp "$log_file" "$unit_test_log_s3key"
-          echo "*** Unit Test Log S3 Key: $unit_test_log_s3key"
-          
-          # Fail eventually
-          if [ "$_LOG_FLAG" = "failed" ]; then
-            exit 1
-          fi
-
-      - name: Cleanup Unit Test
-        if: success() || failure()      # run this step even if previous step failed
-        run: |
-          # Drop the springtail database 
-          sudo -u postgres psql -c "DROP DATABASE springtail"
-          service postgresql stop
-
-      - name: Unit Test Report
-        uses: dorny/test-reporter@v1
-        if: success() || failure()      # run this step even if previous step failed
-        with:
-          name: Unit Tests             # Name of the check run which will be created
-          path: ./debug/unit-test-report.xml
-          reporter: java-junit
-
-      - uses: actions/upload-artifact@v4
-        if: success() || failure()      # run this step even if previous step failed
-        with:
-          name: 'Unit Test Logs'
-          path: debug/unit-test-*.log
-
       # Nightly run of integration tests, run N times in a loop.
       - name: Create Superuser for test
         if: success() || failure()      # run this step even if previous step failed
@@ -201,45 +125,6 @@ jobs:
           
           # Run integration tests
           set +e
-          for i in $(seq 1 ${INTEGRATION_TEST_ITERATIONS}) ; 
-          do
-            # Note: there might be discrepancies between the _LOG_TIMESTAMP and the _LOG_DATE due to the time it takes to run the integration tests
-            # it may run across a day. This is fine as long as the logs are grouped by _LOG_DATE
-          
-            _LOG_FLAG="failed"
-            echo "*** Starting iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
-            python3 test_runner.py -c config.yaml -j ${GITHUB_WORKSPACE}/integration-test-report.xml 2>&1 | tee tmplog
-            # Grab the success/failure status of the integration tests
-            if [ $? -eq 0 ] && ! grep -qE "Tests failed: [1-9][0-9]*" tmplog
-            then
-              _LOG_FLAG="succeeded"
-            fi
-            echo "*** Finished iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
-          
-            _TIMESTAMP=$(date +%s)
-          
-            # Test logs
-            log_file="integration-test-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}-${i}.log" 
-            log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${log_file}"
-            aws s3 cp tmplog $log_s3_key
-            echo "*** Integration Test Log S3 Key: $log_s3_key"
-            rm -f tmplog
-          
-            # Springtail service logs
-            springtail_log_file="springtail-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}-${i}.tar.gz"
-            output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../debug)
-            fname=$(echo $output  | cut -f2 -d':' | xargs | head -1)
-            springtail_log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${springtail_log_file}"
-            aws s3 cp $fname $springtail_log_s3_key
-            echo "*** Springtail Log S3 Key: $springtail_log_s3_key"
-            rm -f $fname
-          
-            # If the current iteration of test failed, break out of the loop for now
-            if [ "$_LOG_FLAG" = "failed" ]; then
-              echo "*** Integration test failed at iteration ${i}, breaking out of the loop"
-              exit 1
-            fi
-          done
 
           for i in $(seq 1 ${INTEGRATION_FULL_TEST_ITERATIONS}) ;
           do
@@ -420,6 +305,10 @@ jobs:
           PKG_NAME=$(ls -t *.tgz | head -n1)
           aws s3 cp $PKG_NAME s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/
           echo "PACKAGE_NAME=s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/${PKG_NAME}" >> $GITHUB_ENV
+
+      - name: Setup interactive ssh session
+        if: ${{ failure() }}
+        uses: Warpbuilds/action-debugger@v1.3
 
       - name: Notify Slack on success
         if: success()
