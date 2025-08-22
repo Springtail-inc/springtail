@@ -6,6 +6,8 @@
 namespace springtail {
     class SystemTable : public Table, public std::enable_shared_from_this<SystemTable> {
     public:
+        using Table::schema;
+
         /**
          * UserTable constructor.
          */
