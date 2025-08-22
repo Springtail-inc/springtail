@@ -270,8 +270,18 @@ namespace springtail::pg_log_mgr {
          */
         void _trace_thread();
 
-        /** Function for writer thread to read data from connection and store it */
-        bool _writer_read_data(PgCopyData &data, PgLogWriterPtr &logger, uint64_t &start_offset, std::function<void (uint64_t, const std::filesystem::path &)> queue_append_func);
+        /**
+         * Function for writer thread to read data from connection and store it
+         * @param data data read from connection
+         * @param logger current log writer
+         * @param start_offset start offset for current log writer
+         * @param queue_append_func function to append data to the logger queue
+         * @return true if data was read and processed, false on error
+         */
+        bool _writer_read_data(PgCopyData &data,
+                               PgLogWriterPtr &logger,
+                               uint64_t &start_offset,
+                               std::function<void (uint64_t, const std::filesystem::path &)> queue_append_func);
     };
     using PgLogMgrPtr = std::shared_ptr<PgLogMgr>;
 

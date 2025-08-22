@@ -160,7 +160,7 @@ namespace springtail::pg_log_mgr {
         }
 
         /**
-         * @brief Get the min timestamp id recorded for Porstgress and Springtail Xids
+         * @brief Get the min timestamp id recorded for Postgress and Springtail Xids
          *
          * @return uint64_t - timestamp id
          */

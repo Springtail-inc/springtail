@@ -22,8 +22,6 @@ namespace springtail::pg_log_mgr {
     */
     class PgLogWriter {
     public:
-
-
         /** FSYNC interval, don't fsync more frequently than this */
         static constexpr int PG_LOG_MIN_FSYNC_MS=50;
 

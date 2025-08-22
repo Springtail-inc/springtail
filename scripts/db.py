@@ -82,7 +82,7 @@ def get_database_info(conn) -> dict:
                 WHEN t.typtype = 'c' THEN 'composite'
                 WHEN t.typtype = 'r' THEN 'range'
                 WHEN t.typtype = 'd' THEN 'domain'
-                WHEN t.typtype = 'b' AND t.typname LIKE '%\_%' ESCAPE '\' AND t.typelem != 0 THEN 'array'
+                WHEN t.typtype = 'b' AND t.typname LIKE '%_%' ESCAPE '\' AND t.typelem != 0 THEN 'array'
                 WHEN t.typtype = 'b' THEN 'base'
                 WHEN t.typtype = 'p' THEN 'pseudo'
                 WHEN t.typtype = 'm' THEN 'multirange'

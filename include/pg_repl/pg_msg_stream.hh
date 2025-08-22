@@ -19,19 +19,18 @@ namespace springtail {
         LSN_t end_lsn;
         uint32_t magic;
         uint32_t msg_length;
-        uint32_t proto_version;
 
         /** Magic number used in log header */
-        static constexpr uint32_t PG_LOG_MAGIC=0xDEFC8193UL;
+        static constexpr uint32_t MAGIC=0xDEFC8193UL;
 
         /** Size of the log header */
-        static constexpr int SIZE = (4 + 4 + 8 + 8 + 4);
+        static constexpr int SIZE = (4 + 4 + 8 + 8);
 
         PgMsgStreamHeader() = default;
 
-        PgMsgStreamHeader(uint32_t msg_length, LSN_t start_lsn, LSN_t end_lsn, uint32_t proto_version)
-            : start_lsn(start_lsn), end_lsn(end_lsn), magic(PG_LOG_MAGIC),
-              msg_length(msg_length), proto_version(proto_version)
+        PgMsgStreamHeader(uint32_t msg_length, LSN_t start_lsn, LSN_t end_lsn)
+            : start_lsn(start_lsn), end_lsn(end_lsn), magic(MAGIC),
+              msg_length(msg_length)
         {}
 
         PgMsgStreamHeader(const char * const buffer) {
@@ -39,20 +38,19 @@ namespace springtail {
             msg_length = recvint32(buffer + 4);
             start_lsn = recvint64(buffer + 8);
             end_lsn = recvint64(buffer + 16);
-            proto_version = recvint32(buffer + 24);
+            DCHECK_EQ(magic, MAGIC);
         }
 
-        void encode_header(char * const buffer) {
-            sendint32(magic, buffer);
+        void encode_header(char * const buffer) const {
+            sendint32(MAGIC, buffer);
             sendint32(msg_length, buffer + 4);
             sendint64(start_lsn, buffer + 8);
             sendint64(end_lsn, buffer + 16);
-            sendint32(proto_version, buffer + 24);
         }
 
-        std::string to_string() {
-            return fmt::format("Header: magic={:#X}, msg_length={}, start_lsn={}, end_lsn={}, proto_version={}",
-                                magic, msg_length, start_lsn, end_lsn, proto_version);
+        std::string to_string() const {
+            return fmt::format("Header: msg_length={}, start LSN={}, end LSN={}",
+                                msg_length, start_lsn, end_lsn);
         }
     };
 
@@ -72,10 +70,10 @@ namespace springtail {
          * @param db_id The database id
          * @param start_file file to start reading from
          * @param start_offset offset to start reading from (0 = beginning of file)
-         * @param end_offset offset to stop reading at (-1 = end of file)
          */
-        PgMsgStreamReader(std::optional<uint64_t> db_id, const std::filesystem::path &start_file,
-                          uint64_t start_offset=0, uint64_t end_offset=-1);
+        PgMsgStreamReader(std::optional<uint64_t> db_id,
+                          const std::filesystem::path &start_file,
+                          uint64_t start_offset=0);
 
         /**
          * @brief Set the file and offset to start reading from
@@ -121,10 +119,7 @@ namespace springtail {
          */
         bool end_of_stream() const
         {
-            if (_stream.eof()) {
-                return true;
-            }
-            if (_end_msg_offset != -1 && _current_offset >= _end_msg_offset) {
+            if (_current_offset >= _file_end_offset || _stream.eof()) {
                 return true;
             }
             return false;
@@ -137,10 +132,12 @@ namespace springtail {
          * @return uint64_t end LSN of last message
          */
         static uint64_t scan_log(uint64_t db_id,
-                const std::filesystem::path &file, 
+                const std::filesystem::path &file,
                 bool truncate=false);
 
         void set_streaming() { _streaming = true; }
+
+        const PgMsgStreamHeader& current_header() const { return _header; }
 
     protected:
         // Proto V1; message lengths if fixed length; excludes first byte for opcode
@@ -221,9 +218,12 @@ namespace springtail {
         std::filesystem::path _current_path; ///< current file path
 
         uint64_t _message_offset = 0;   ///< offset of the message we just read
-        uint64_t _current_offset;       ///< current file offset for next read
-        uint64_t _end_msg_offset;       ///< ending message offset in end file
-        uint64_t _internal_offset = 0;      ///< internal offset within file, not to be altered by user
+        uint64_t _current_offset;       ///< current file offset
+
+        uint64_t _xlog_msg_end_offset = 0; ///< ending offset of the xlog message in the file
+        uint64_t _file_end_offset = 0;     ///< ending offset of the file, file size
+
+        PgMsgStreamHeader _header;      ///< header of the current xlog data message
 
         int _proto_version;             ///< protocol version of message block (from header)
 
@@ -237,71 +237,66 @@ namespace springtail {
             }
         }
 
+        // XXX as written this is somewhat expensive, we should cache the results in a map
+        // and invalidate on db_config changes from redis cache. SPR-968
+        /** Check if namespace name (schema) is in the include list for filtering from properties */
         bool _is_schema_included(const std::string& schema);
 
+        /**
+         * @brief Read message header from stream
+         * Fills in _header and sets _xlog_msg_end_offset and _current_offset
+         */
+        void _read_header();
+
         /** Helper to seek stream based on current offset */
-        void _seek_stream() {
-            if (_current_offset == _internal_offset) {
-                return;
-            }
-            _check_fail();
-            _stream.seekg(_current_offset, std::fstream::beg);
-            _check_fail();
-            _internal_offset = _current_offset;
-        }
+        void _seek_stream(uint64_t file_offset);
 
         /** Read stream at current offset, return uint32_t */
         uint32_t _recvint32() {
-            _seek_stream();
             uint32_t res = recvint32(_stream);
             _check_fail();
             _current_offset += 4;
-            _internal_offset += 4;
             return res;
         }
 
         /** Read stream at current offset, return uint64_t */
         uint64_t _recvint64() {
-            _seek_stream();
             uint64_t res = recvint64(_stream);
             _check_fail();
             _current_offset += 8;
-            _internal_offset += 8;
             return res;
         }
 
         /** Read stream at current offset, return uint16_t */
         uint16_t _recvint16() {
-            _seek_stream();
             uint16_t res = recvint16(_stream);
             _check_fail();
             _current_offset += 2;
-            _internal_offset += 2;
             return res;
         }
 
         /** Read stream at current offset, return uint8_t */
         uint8_t _recvint8() {
-            _seek_stream();
             uint8_t res = recvint8(_stream);
             _check_fail();
             _current_offset++;
-            _internal_offset++;
             return res;
         }
 
-        /** Read stream at current offset and copy data into buffer; return true if eof hit, false otherwise */
+        /** Read stream at current offset and copy data into buffer; return false if eof hit, true otherwise */
         bool _read_buffer(char *buffer, int size) {
-            _seek_stream();
-            _stream.read(buffer, size);
-            if (_stream.eof()) {
-                // hit eof
+            if (size + _current_offset > _file_end_offset) {
+                // trying to read past end of file
                 return false;
             }
+
+            // make sure we don't read past the end of the xlog message
+            DCHECK_LE(size + _current_offset, _xlog_msg_end_offset);
+
+            _stream.read(buffer, size);
             _check_fail();
-            assert(_stream.gcount() == size);
+            DCHECK_EQ(_stream.gcount(), size);
             _current_offset += size;
-            _internal_offset += size;
             return true; // no eof
         }
 
@@ -332,6 +327,13 @@ namespace springtail {
          * @return uint64_t offset after message chunk written
          */
         uint64_t write_message(const PgCopyData &data);
+
+        /**
+         * @brief Write header to the stream
+         * @param header header to write
+         * @return uint64_t offset after header written
+         */
+        uint64_t write_header(const PgMsgStreamHeader &header);
 
         /**
          * @brief Perform fsync of data

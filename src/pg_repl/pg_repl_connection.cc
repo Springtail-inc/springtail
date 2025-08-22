@@ -92,6 +92,9 @@ namespace springtail
             lsn = _last_flushed_lsn;
         }
 
+        LOG_INFO("Reconnecting to database: {}, slot: {}, lsn: {}",
+                 _db_name, _slot_name, lsn);
+
         // restart streaming
         start_streaming(lsn, false);
     }
@@ -104,6 +107,9 @@ namespace springtail
             // error already streaming
             throw PgStreamingError();
         }
+
+        LOG_INFO("Starting streaming for database: {}, slot: {}, LSN: {} ({})",
+                 _db_name, _slot_name, LSN, pg_msg::lsn_to_str(LSN));
 
         _stream_connection = std::make_unique<LibPqConnection>();
         _stream_connection->connect(_db_host, _db_name, _db_user, _db_pass, _db_port, true);

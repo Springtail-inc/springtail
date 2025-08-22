@@ -262,7 +262,7 @@ PgLogRecovery::_replay_active()
         });
     CHECK(min_i != _active_map.end());
 
-    uint64_t start_offset = min_i->second.offset;
+    uint64_t start_offset = min_i->second.offset;  // XXX how is this set, need to handle with xlog header
     _repl_log = min_i->second.file;
     uint64_t timestamp = fs::extract_timestamp_from_file(_repl_log.value(), PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX).value();
     _repl_reader.set_file(*_repl_log, start_offset);

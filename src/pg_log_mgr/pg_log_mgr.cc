@@ -503,10 +503,14 @@ namespace springtail::pg_log_mgr {
             }
 
             // read data from pg, length will be 0 if no data (timeout)
+            // this will return contents of an xlogdata message
+            // typically it will contain a single replication message but it
+            // may be split across multiple buffers
             _pg_conn.read_data(data);
             if (data.length == 0) {
                 return true;
             }
+
         } catch (const PgIOShutdown &e) {
             LOG_DEBUG(LOG_PG_LOG_MGR, "Received shutdown signal");
             return false;
@@ -514,6 +518,8 @@ namespace springtail::pg_log_mgr {
             LOG_ERROR("Error reading data from pg: {}", e.what());
             // try reconnecting
             try {
+                LOG_WARN("Reconnecting to postgres db: {} at LSN: {}",
+                         _db_id, logger->get_latest_synced_lsn());
                 _pg_conn.reconnect(logger->get_latest_synced_lsn());
             } catch (const PgConnectionError &e) {
                 LOG_ERROR("Error reconnecting to pg: {}", e.what());
@@ -522,28 +528,36 @@ namespace springtail::pg_log_mgr {
                 return false;
             }
         }
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Recevied data: length={}, msg_length={}, msg_offset={}",
-            data.length, data.msg_length, data.msg_offset);
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Received data: length={}, msg_length={}, msg_offset={}, start_lsn={}, end_lsn={}",
+            data.length, data.msg_length, data.msg_offset, data.starting_lsn, data.ending_lsn);
 
         if (!logger->log_data(data)) {
             // data has been consumed by keep alive or not full message
             return true;
         }
 
+        if (data.msg_offset + data.length < data.msg_length) {
+            // message not complete yet
+            return true;
+        }
+
         // push data to queue, if data message is complete then record start/end offsets
         uint64_t end_offset = logger->offset();
 
-        // record start/end offsets for this message
+        // record end offset for this message
         queue_append_func(end_offset, logger->filename());
-        // logger_queue.push(start_offset, end_offset, logger->filename());
+
+        // update start offset for next message as return param
         start_offset = end_offset;
 
-        // check to see if we should rollover log
+        // check to see if we should rollover log; only do so at end of message
         if (end_offset > _log_size_rollover_threshold) {
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Rollover log: path={}, end_offset={}", logger->filename(), end_offset);
             logger->close();
             logger = _create_repl_logger();
             start_offset = 0;
         }
+
         return true;
     }
 
@@ -631,6 +645,9 @@ namespace springtail::pg_log_mgr {
         auto coordinator = Coordinator::get_instance();
         auto& keep_alive = coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
 
+        std::filesystem::path last_path;
+        uint64_t last_timestamp = 0;
+
         while (!_shutdown) {
             // mark alive with coordinator
             Coordinator::mark_alive(keep_alive);
@@ -668,9 +685,15 @@ namespace springtail::pg_log_mgr {
             LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Processing log entry: path={}, start_offset={}, num_messages={}",
                       log_entry->path, log_entry->start_offset, log_entry->num_messages);
 
-            auto file_timestamp = fs::extract_timestamp_from_file(log_entry->path, LOG_PREFIX_REPL, LOG_SUFFIX);
-            CHECK(file_timestamp);
-            _pg_log_reader->process_log(log_entry->path, *file_timestamp,
+            // extract timestamp from file name if different file
+            if (last_timestamp == 0 || last_path != log_entry->path) {
+                auto file_timestamp = fs::extract_timestamp_from_file(log_entry->path, LOG_PREFIX_REPL, LOG_SUFFIX);
+                CHECK(file_timestamp);
+                last_timestamp = *file_timestamp;
+                last_path = log_entry->path;
+            }
+
+            _pg_log_reader->process_log(log_entry->path, last_timestamp,
                                         log_entry->start_offset, log_entry->num_messages);
         }
         LOG_DEBUG(LOG_PG_LOG_MGR, "Exiting log reader thread");

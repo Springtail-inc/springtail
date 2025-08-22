@@ -39,6 +39,15 @@ target_link_libraries(pg_log_mgr_daemon
 )
 add_dsymutil_command(pg_log_mgr_daemon)
 
+add_executable(pg_wal_logger_app test/pg_wal_logger_app.cc)
+target_include_directories(pg_wal_logger_app
+    PRIVATE ${CMAKE_SOURCE_DIR}/include
+)
+target_link_libraries(pg_wal_logger_app
+    PUBLIC springtail_pglog
+    PRIVATE Boost::program_options
+)
+
 ## unit tests
 springtail_unit_test(test_xact_log
   SOURCES test/test_xact_log.cc

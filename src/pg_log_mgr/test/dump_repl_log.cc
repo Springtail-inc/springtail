@@ -41,7 +41,7 @@ int main(int argc, char *argv[])
 
     while (start_file && std::filesystem::exists(*start_file)) {
 
-        PgMsgStreamReader reader({}, *start_file, start_offset, -1);
+        PgMsgStreamReader reader({}, *start_file, start_offset);
         if (start_offset == 0 &&
                     fs::timestamp_file_exists(*start_file,
                                               pg_log_mgr::PgLogMgr::LOG_PREFIX_REPL,
@@ -50,8 +50,11 @@ int main(int argc, char *argv[])
             reader.set_streaming();
         }
 
+        int fsize = std::filesystem::file_size(*start_file);
+
         // consume messages from log; num_messages of -1 means go until eos
         bool eos = false; // end of stream
+        LSN_t last_lsn = 0;
         while (!eos) {
             // read next message
             PgMsgPtr msg = reader.read_message(reader.ALL_MESSAGES, eos);
@@ -59,10 +62,17 @@ int main(int argc, char *argv[])
                 continue;
             }
 
+            // get the current xlog header
+            auto &header = reader.current_header();
+            if (header.start_lsn > last_lsn) {
+                std::cout << "Xlog " << header.to_string() << std::endl;
+                last_lsn = header.start_lsn;
+            }
+
             // dump the message
             std::string msg_str = pg_msg::dump_msg(*msg);
             std::cout << msg_str;
-            std::cout << "Msg Offset: " << reader.offset() << std::endl;
+            std::cout << "Msg End Offset: " << reader.offset() << std::endl << std::endl;
 
             if (msg->msg_type == PgMsgEnum::BEGIN) {
                 // extract xid
@@ -72,6 +82,11 @@ int main(int argc, char *argv[])
                     duplicate_xids.insert(begin_msg.xid);
                 }
                 xids.insert(begin_msg.xid);
+            }
+
+            // eos is often only set when we actually try to read past the end of the file
+            if (reader.offset() == fsize) {
+                eos = true;
             }
         }
 

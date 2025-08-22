@@ -233,7 +233,7 @@ namespace springtail {
         }
 
         /**
-         * @brief This function extracts timestamp id from the file nae
+         * @brief This function extracts timestamp id from the file name
          *
          * @param path      - full file path
          * @param prefix    - file prefix

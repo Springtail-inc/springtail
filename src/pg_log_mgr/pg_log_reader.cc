@@ -976,11 +976,14 @@ namespace springtail::pg_log_mgr {
             LOG_DEBUG(LOG_PG_LOG_MGR, "Logs rollover to the new log timestamp id: {}", msg->pg_log_timestamp);
             _remove_old_log_files();
             _pg_log_timestamp = msg->pg_log_timestamp;
+
             if (_is_streaming) {
                 fs::create_empty_file_with_timestamp(_repl_log_path, PgLogMgr::LOG_PREFIX_REPL_STREAMING, PgLogMgr::LOG_SUFFIX, _pg_log_timestamp);
             }
         }
+
         _is_streaming = msg->is_streaming;
+
         // handle the message
         switch(msg->msg_type) {
         case PgMsgEnum::BEGIN:
