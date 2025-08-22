@@ -93,14 +93,6 @@ public:
     }
 
     /**
-     * @brief Get vacuum-safe XID for a DB
-     *
-     * @param db_id Database ID
-     * @return XID until which vacuum can run
-     */
-    uint64_t get_vacuum_cutoff_xid(uint64_t db_id);
-
-    /**
      * @brief Return whether the vacuumer is enabled
      *
      * @return true - enabled
