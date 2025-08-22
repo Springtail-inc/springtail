@@ -22,7 +22,7 @@ namespace springtail {
         /**
          * Retrieves the schema for the table at a given XID.
          */
-        virtual ExtentSchemaPtr extent_schema() const
+        virtual ExtentSchemaPtr extent_schema() const override
         {
             return SystemTableMgr::get_instance()->get_extent_schema(_id);
         }
@@ -30,7 +30,7 @@ namespace springtail {
         /**
          * Get a schema for accessing an extent from this table that was written at the provided XID.
          */
-        virtual SchemaPtr schema(uint64_t extent_xid) const
+        virtual SchemaPtr schema(uint64_t extent_xid) const override
         {
             return SystemTableMgr::get_instance()->get_schema(_id);
         }
