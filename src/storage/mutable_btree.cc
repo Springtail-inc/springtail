@@ -97,16 +97,15 @@ namespace springtail {
         page_lock.unlock();
 
         if (do_flush) {
-            // check if this is the root
-            if (parent == nullptr) {
+            // will first lock the parent, then lock the page and flush it
+            auto root_node = _lock_and_flush_page(node);
+            if (root_node) {
+                CHECK((*root_node)->parent == nullptr);
                 // no longer need to hold the lock on the entire tree
                 tree_lock.unlock();
 
                 // will exclusive lock the tree and flush the root
-                _lock_and_flush_root(node);
-            } else {
-                // will first lock the parent, then lock the page and flush it
-                _lock_and_flush_page(node);
+                _lock_and_flush_root(*root_node);
             }
         }
 
@@ -1137,41 +1136,47 @@ MutableBTree::lower_bound(TuplePtr search_key,
         }
     }
 
-    void
+    std::optional<MutableBTree::NodePtr>
     MutableBTree::_lock_and_flush_page(NodePtr node)
     {
-        PagePtr parent = node->parent->page;
-
-        // note: we are holding a shared lock on the parent's disk_mutex already
-        // if the parent has already been flushed, then by definition this page was also flushed
-        if (parent->flushed) {
-            return;
+        if (!node->parent) {
+            return node;
         }
 
-        // release the shared lock on the disk_mutex since we want to flush the page
-        node->lock.unlock();
+        std::optional<NodePtr> root_to_flush;
+        while (node->parent) {
+            PagePtr parent = node->parent->page;
 
-        // now that we are holding the parent, flush the page
-        _flush_page(node->page, parent);
-
-        // move to the parent
-        node = node->parent;
-
-        // check if the parent needs to be flushed
-        if (node->page->check_flush()) {
-            // check if the parent being flushed is the root of the tree
-            if (node->parent == nullptr) {
-                // will re-acquire an exclusive lock on tree and then flush the root and update it
-                _lock_and_flush_root(node);
-            } else {
-                // will lock the parent's parent and then lock and flush the parent
-                _lock_and_flush_page(node);
+            // note: we are holding a shared lock on the parent's disk_mutex already
+            // if the parent has already been flushed, then by definition this page was also flushed
+            if (parent->flushed) {
+                break;
             }
-        } else {
-            // otherwise, update the parent's size in the cache
-            boost::unique_lock cache_lock(_cache->mutex);
-            _cache_update_size(node->page, cache_lock);
+
+            // release the shared lock on the disk_mutex since we want to flush the page
+            node->lock.unlock();
+
+            // now that we are holding the parent, flush the page
+            _flush_page(node->page, parent);
+
+            // move to the parent
+            node = node->parent;
+
+            // check if the parent needs to be flushed
+            if (node->page->check_flush()) {
+                if (!node->parent) {
+                    root_to_flush = node;
+                    break;
+                }
+            } else {
+                // otherwise, update the parent's size in the cache
+                boost::unique_lock cache_lock(_cache->mutex);
+                _cache_update_size(node->page, cache_lock);
+                break;
+            }
         }
+
+        return root_to_flush;
     }
 
     void

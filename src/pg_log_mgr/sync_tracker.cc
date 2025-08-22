@@ -32,15 +32,30 @@ SyncTracker::issue_resync_and_wait(uint64_t db_id,
     TableSyncRequest request(table_id, xid);
     table_sync_queue.push(request);
 
+    // add the table to the resync map; will get removed when mark_inflight() is called
+    _resync_map[db_id][table_id].insert(xid);
+
     // wait for the resync to begin
     auto wait = std::make_shared<Wait>();
     auto wait_i = _wait_map.emplace(db_id, wait).first;
     wait->condition.wait(lock, [&wait]() {
-        return wait->notified;
-    });
+            return wait->notified;
+            });
 
     // clear the entry
     _wait_map.erase(wait_i);
+}
+
+void
+SyncTracker::pick_table_for_sync(uint64_t db_id,
+                                 uint64_t table_id,
+                                 const XidLsn &xid)
+{
+    LOG_DEBUG(LOG_PG_LOG_MGR, "Pick for Sync: db {} table {} xid {}:{}",
+              db_id, table_id, xid.xid, xid.lsn);
+    std::unique_lock lock(_mutex);
+
+    _resync_picked_map[db_id][table_id] = xid;
 }
 
 void
@@ -53,6 +68,42 @@ SyncTracker::mark_inflight(uint64_t db_id,
     LOG_DEBUG(LOG_PG_LOG_MGR, "db {} table {} xid {}:{}",
               db_id, table_id, xid.xid, xid.lsn);
     std::unique_lock lock(_mutex);
+
+    // Find the XID of the table thats picked for resync
+    auto picked_db_i = _resync_picked_map.find(db_id);
+
+    // If resync is not picked, return
+    // this is usually the case during initial resyncs
+    if (picked_db_i == _resync_picked_map.end()) {
+        return;
+    }
+
+    auto picked_table_i = picked_db_i->second.find(table_id);
+    CHECK(picked_table_i != picked_db_i->second.end());
+    auto picked_table_xid = picked_table_i->second;
+    picked_db_i->second.erase(table_id);
+    if (picked_db_i->second.empty()) {
+        _resync_picked_map.erase(picked_db_i);
+    }
+
+    // Erase the entries from the resync_map
+    auto db_i = _resync_map.find(db_id);
+    CHECK(db_i != _resync_map.end());
+    if (db_i != _resync_map.end()) {
+        auto table_i = db_i->second.find(table_id);
+        CHECK(table_i != db_i->second.end());
+
+        // clear from the resync map
+        // Erase all elements less than or equal to picked_table_xid
+        table_i->second.erase(table_i->second.begin(), table_i->second.upper_bound(picked_table_xid));
+
+        if (table_i->second.empty()) {
+            db_i->second.erase(table_i);
+            if (db_i->second.empty()) {
+                _resync_map.erase(db_i);
+            }
+        }
+    }
 
     // add the entry to the inflight map
     auto entry = std::make_shared<Inflight>(copy->pg_xid, copy->xmax, copy->xips, schema);
@@ -197,6 +248,14 @@ SyncTracker::add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
         std::unique_lock lock(_mutex);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "db {} table_id {} pg_xid {}", db_id, table_id, pg_xid);
+
+        // first check the resync map
+        auto resync_i = _resync_map.find(db_id);
+        if (resync_i != _resync_map.end()) {
+            if (resync_i->second.contains(table_id)) {
+                return { true, true }; // if the table is present, skip
+            }
+        }
 
         // check the inflight map
         auto inflight_i = _inflight_map.find(db_id);

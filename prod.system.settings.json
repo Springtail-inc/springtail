@@ -99,7 +99,6 @@
     "shadow_log_path": "/shadow_logs/proxy_shadow.log",
     "log_level": 2,
     "keep_alive_port": 10080,
-    "use_pg_shadow": false,
     "pool_size_limit": 10,
     "pool_timeout_limit": 5,
     "pool_expiration_interval_secs": 300,

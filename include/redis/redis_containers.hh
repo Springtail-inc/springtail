@@ -90,6 +90,17 @@ namespace springtail {
         }
 
         /**
+         * @brief Peek an item from the queue, doesnt move/remove it
+         */
+        std::shared_ptr<T> peek() const {
+            auto res = _redis->lindex(_key, -1);
+            if (res) {
+                return std::make_shared<T>(std::move(*res));
+            }
+            return nullptr;
+        }
+
+        /**
          * @brief Try to pop an item from queue (list).
          *
          * Operates identically to pop() except that if no elements exist in the list, it returns

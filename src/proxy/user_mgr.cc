@@ -12,10 +12,6 @@
 
 namespace springtail::pg_proxy {
 
-    /** SELECT query for fetching users from primary for authentication */
-    static constexpr char USER_SELECT[] = "SELECT username, password, databases "
-        "FROM __pg_springtail_triggers.springtail_get_user_access();";
-
     static constexpr char USER_DB_SELECT[] = "SELECT r.rolname AS username, d.datname AS database_name "
         "FROM pg_database d "
         "CROSS JOIN pg_roles r "
@@ -130,12 +126,10 @@ namespace springtail::pg_proxy {
     {
         // set the user manager to use pg_shadow or AWS secrets
         nlohmann::json json = Properties::get(Properties::PROXY_CONFIG);
-        _use_pg_shadow = Json::get_or<bool>(json, "use_pg_shadow", false);
-
         _sleep_interval = Json::get_or<uint32_t>(json, "user_mgr_sleep_interval_secs", USER_MGR_SLEEP_INTERVAL_SECS);
 
-        LOG_INFO("UserMgr setup to use {}, user_mgr_sleep_interval_secs = {}",
-                _use_pg_shadow ? "pg_shadow" : "AWS secrets", _sleep_interval);
+        LOG_INFO("UserMgr setup to use AWS secrets, user_mgr_sleep_interval_secs = {}",
+                _sleep_interval);
 
         start_thread();
     }
@@ -144,11 +138,7 @@ namespace springtail::pg_proxy {
     UserMgr::_internal_run()
     {
         _id = std::this_thread::get_id();
-        if (_use_pg_shadow) {
-            _pg_shadow_query_thread();
-        } else {
-            _aws_secrets_query_thread();
-        }
+        _aws_secrets_query_thread();
     }
 
     void
@@ -280,62 +270,6 @@ namespace springtail::pg_proxy {
                 _sleep_cv.wait_for(sleep_lock, std::chrono::seconds(_sleep_interval));
             }
         }
-    }
-
-    void
-    UserMgr::_pg_shadow_query_thread()
-    {
-        springtail::LibPqConnection conn;
-        while (!_is_shutting_down()) {
-            _connect_primary_db(conn);
-
-            try {
-                conn.exec(USER_SELECT);
-            } catch (Error &e) {
-                LOG_ERROR("Error: {}. Failed to execute the query; will try to reconnect", e.what());
-                conn.disconnect();
-                std::unique_lock sleep_lock(_sleep_mutex);
-                _sleep_cv.wait_for(sleep_lock, std::chrono::seconds(_sleep_interval));
-                continue;
-            }
-
-            // list of users from the query
-            // username, password, databases (set)
-            std::vector<std::tuple<std::string, std::string, PasswordType, std::set<std::string>>> users;
-
-            for (int i = 0; i < conn.ntuples(); i++) {
-                // get data from the query
-                std::string username = conn.get_string(i, 0);
-                std::string password = conn.get_string(i, 1);
-                std::string databases = conn.get_string(i, 2);
-                nlohmann::json db_names_json = nlohmann::json::parse(databases);
-                std::set<std::string> database_set;
-                assert(db_names_json.is_array());
-
-                for (auto &db_name: db_names_json) {
-                    assert(db_name.is_string());
-                    database_set.insert(db_name.get<std::string>());
-                }
-
-                PasswordType password_type = TEXT;
-                if (password.starts_with("md5") && password.length() == 35) {
-                    password_type = MD5;
-                } else if (password.starts_with("SCRAM-SHA-256")) {
-                    password_type = SCRAM;
-                }
-                // shouldn't see TEXT in pg_shadow, if empty it is probably TRUST
-
-                users.emplace_back(username, password, password_type, database_set);
-            }
-            conn.disconnect();
-
-            _modify_users(users);
-
-            { // iteruptible sleep
-                std::unique_lock sleep_lock(_sleep_mutex);
-                _sleep_cv.wait_for(sleep_lock, std::chrono::seconds(_sleep_interval));
-            }
-        } // end while
     }
 
     void

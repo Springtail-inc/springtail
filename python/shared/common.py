@@ -71,7 +71,7 @@ def execute_sql_select(conn, sql : str, args=None) -> List:
     return result
 
 
-def running_pids(names : List[str]) -> tuple[List[Dict], List[str]]:
+def running_pids(names : List[str], search_pids : List[str] = []) -> tuple[List[Dict], List[str]]:
     """Return a list of process IDs for the given process names."""
     pids = []
     not_running = []
@@ -80,7 +80,7 @@ def running_pids(names : List[str]) -> tuple[List[Dict], List[str]]:
         # SPR-317: Normally if we have an 'init' PID(1) that reaps zombies this we do not need the following.
         #   But just in case, 'cause we cannot assume where & how we run the tests.
         try:
-            if proc.status() != psutil.STATUS_ZOMBIE and proc.info['name'] in names:
+            if proc.status() != psutil.STATUS_ZOMBIE and (proc.info['name'] in names or proc.info['pid'] in search_pids):
                 pids.append({'name':proc.info['name'], 'pid':proc.info['pid']})
                 running_names[proc.info['name']] = True
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):

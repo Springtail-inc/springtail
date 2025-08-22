@@ -1188,7 +1188,6 @@ namespace springtail::pg_log_mgr {
             for (auto &entry : swap->table_info()) {
                 // update the existence cache for the referenced tables
                 _exists_cache->insert(db_id, entry->table_id, true);
-
                 auto copy_info = entry->info;
                 if (copy_info == nullptr) {
                     // During resync if the table is found to be invalid as part of the copy flow, the table
@@ -1197,36 +1196,51 @@ namespace springtail::pg_log_mgr {
                     LOG_DEBUG(LOG_PG_LOG_MGR, "Copy info not present for table {}", entry->table_id);
                     continue;
                 }
-                LOG_DEBUG(LOG_PG_LOG_MGR, "table_id {}", entry->table_id);
 
-                // perform the table swap
-                auto *namespace_req = copy_info->mutable_namespace_req();
-                namespace_req->set_xid(xid);
-                namespace_req->set_lsn(constant::RESYNC_NAMESPACE_LSN);
+                if (copy_info->is_table_dropped()) {
+                    // Table is dropped when the sync was in queue/in-progress
 
-                auto *create = copy_info->mutable_table_req();
-                create->set_xid(xid);
-                create->set_lsn(constant::RESYNC_CREATE_LSN);
+                    auto table_req = copy_info->table_req();
+                    auto table_info = table_req.table();
+                    PgMsgDropTable drop_msg;
+                    drop_msg.oid = table_info.id();
+                    drop_msg.namespace_name = table_info.namespace_name();
+                    drop_msg.table = table_info.name();
+                    std::string &&ddl_stmt = client->drop_table(_db_id, XidLsn{xid}, std::move(drop_msg));
+                    ddls.emplace_back(ddl_stmt);
+                } else {
 
-                auto *indexes = copy_info->mutable_index_reqs();
-                std::vector<proto::IndexRequest> indexes_vec;
-                for (auto &index : *indexes) {
-                    index.set_xid(xid);
-                    index.set_lsn(constant::RESYNC_CREATE_LSN);
-                    indexes_vec.push_back(index);
+                    LOG_DEBUG(LOG_PG_LOG_MGR, "table_id {}", entry->table_id);
+
+                    // perform the table swap
+                    auto *namespace_req = copy_info->mutable_namespace_req();
+                    namespace_req->set_xid(xid);
+                    namespace_req->set_lsn(constant::RESYNC_NAMESPACE_LSN);
+
+                    auto *create = copy_info->mutable_table_req();
+                    create->set_xid(xid);
+                    create->set_lsn(constant::RESYNC_CREATE_LSN);
+
+                    auto *indexes = copy_info->mutable_index_reqs();
+                    std::vector<proto::IndexRequest> indexes_vec;
+                    for (auto &index : *indexes) {
+                        index.set_xid(xid);
+                        index.set_lsn(constant::RESYNC_CREATE_LSN);
+                        indexes_vec.push_back(index);
+                    }
+
+                    auto *roots = copy_info->mutable_roots_req();
+                    roots->set_xid(xid);
+
+                    // note: this will also invalidate the table's client cache entry
+                    auto ddl_str = client->swap_sync_table(*namespace_req, *create, indexes_vec, *roots);
+
+                    // store the ddl mutations for the FDWs
+                    auto ddl = nlohmann::json::parse(ddl_str);
+                    assert(ddl.is_array());
+                    ddls.insert(ddls.end(), ddl.begin(), ddl.end());
+                    table_ids.emplace_back(static_cast<uint64_t>(entry->table_id));
                 }
-
-                auto *roots = copy_info->mutable_roots_req();
-                roots->set_xid(xid);
-
-                // note: this will also invalidate the table's client cache entry
-                auto ddl_str = client->swap_sync_table(*namespace_req, *create, indexes_vec, *roots);
-
-                // store the ddl mutations for the FDWs
-                auto ddl = nlohmann::json::parse(ddl_str);
-                assert(ddl.is_array());
-                ddls.insert(ddls.end(), ddl.begin(), ddl.end());
-                table_ids.emplace_back(static_cast<uint64_t>(entry->table_id));
             }
             LOG_INFO("Swapped synced tables: {}@{}", db_id, xid);
 
@@ -1353,6 +1367,12 @@ namespace springtail::pg_log_mgr {
     {
         LOG_DEBUG(LOG_PG_LOG_MGR, "Stream commit: xid={}, xact_lsn={}\n", commit_msg.xid, commit_msg.xact_lsn);
 
+        {
+            auto it = _batch_map.find(commit_msg.xid);
+            DCHECK(it != _batch_map.end());
+            _current_batch = it->second;
+        }
+
         // commit only happens for the top level xid, subxacts under the xid
         // automatically commit unless they were previously aborted
         auto itr = _xact_map.find(commit_msg.xid);
@@ -1407,6 +1427,12 @@ namespace springtail::pg_log_mgr {
     PgLogReader::_process_stream_abort(const PgMsgStreamAbort &abort_msg)
     {
         LOG_DEBUG(LOG_PG_LOG_MGR, "Stream abort: xid={}, sub_xid={}\n", abort_msg.xid, abort_msg.sub_xid);
+
+        {
+            auto it = _batch_map.find(abort_msg.xid);
+            DCHECK(it != _batch_map.end());
+            _current_batch = it->second;
+        }
 
         auto itr = _xact_map.find(abort_msg.xid);
         if (itr == _xact_map.end()) {
