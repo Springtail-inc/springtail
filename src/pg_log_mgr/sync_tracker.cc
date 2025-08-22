@@ -10,7 +10,14 @@ SyncTracker::block_commits(uint64_t db_id,
     LOG_DEBUG(LOG_PG_LOG_MGR, "db {}", db_id);
     std::unique_lock lock(_mutex);
 
-    if (!_inflight_map.contains(db_id) && !_sync_map.contains(db_id)) {
+    _block_commits(db_id, committer_queue);
+}
+
+void
+SyncTracker::_block_commits(uint64_t db_id, CommitterQueuePtr committer_queue)
+{
+    // Caller should have acquired lock
+    if (!_resync_map.contains(db_id) && !_inflight_map.contains(db_id) && !_sync_map.contains(db_id)) {
         LOG_DEBUG(LOG_PG_LOG_MGR, "Stop committing XIDs for db: {}", db_id);
         committer_queue->push(std::make_shared<committer::XidReady>(db_id));
     }
@@ -19,7 +26,8 @@ SyncTracker::block_commits(uint64_t db_id,
 void
 SyncTracker::issue_resync_and_wait(uint64_t db_id,
                                    uint64_t table_id,
-                                   const XidLsn &xid)
+                                   const XidLsn &xid,
+                                   CommitterQueuePtr committer_queue)
 {
     LOG_DEBUG(LOG_PG_LOG_MGR, "db {} table {} xid {}:{}",
               db_id, table_id, xid.xid, xid.lsn);
@@ -32,18 +40,11 @@ SyncTracker::issue_resync_and_wait(uint64_t db_id,
     TableSyncRequest request(table_id, xid);
     table_sync_queue.push(request);
 
+    // ensure we've stopped committing
+    _block_commits(db_id, committer_queue);
+
     // add the table to the resync map; will get removed when mark_inflight() is called
     _resync_map[db_id][table_id].insert(xid);
-
-    // wait for the resync to begin
-    auto wait = std::make_shared<Wait>();
-    auto wait_i = _wait_map.emplace(db_id, wait).first;
-    wait->condition.wait(lock, [&wait]() {
-            return wait->notified;
-            });
-
-    // clear the entry
-    _wait_map.erase(wait_i);
 }
 
 void
@@ -108,13 +109,6 @@ SyncTracker::mark_inflight(uint64_t db_id,
     // add the entry to the inflight map
     auto entry = std::make_shared<Inflight>(copy->pg_xid, copy->xmax, copy->xips, schema);
     _inflight_map[db_id].emplace(table_id, entry);
-
-    // if the log reader is waiting, notify it to continue operation
-    auto wait_i = _wait_map.find(db_id);
-    if (wait_i != _wait_map.end()) {
-        wait_i->second->notified = true;
-        wait_i->second->condition.notify_one();
-    }
 }
 
 void

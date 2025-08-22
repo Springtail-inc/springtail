@@ -686,7 +686,7 @@ namespace springtail::pg_log_mgr {
                                            const std::vector<uint64_t> &pg_xids)
     {
         // block until we have the snapshot details
-        SyncTracker::get_instance()->issue_resync_and_wait(_db, table_oid, xidlsn);
+        SyncTracker::get_instance()->issue_resync_and_wait(_db, table_oid, xidlsn, _committer_queue);
 
         // drop any mutations that are in the WriteCache for this TID at this XID
         for (auto pg_xid : pg_xids) {
