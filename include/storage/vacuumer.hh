@@ -100,6 +100,14 @@ public:
      */
     void cleanup_db(uint64_t cleanup_db_id);
 
+    /**
+     * @brief Get last seen cutoff XID for the DB
+     *
+     * @param db_id Database ID
+     * @return cutoff_xid for the DB, or 0 if nothing found
+     */
+    uint64_t get_last_seen_cutoff_xid(uint64_t db_id);
+
 protected:
     /**
      * @brief Constructor, that inits the vacuumer thread
@@ -127,7 +135,7 @@ protected:
     void _internal_run() override;
 
     /**
-     * @brief Graceful shutdown of vacummer thread
+     * @brief Graceful shutdown of vacuumer thread
      */
     void _internal_shutdown() override;
 
@@ -199,6 +207,7 @@ private:
     std::filesystem::path _vacuum_data_base; ///< The base directory for vacuum directories
     std::filesystem::path _global_vacuum_file; ///< Global vacuum file
     std::filesystem::path _global_vacuum_runfile; ///< Global vacuum file for current run
+    std::string _vacuum_cutoff_xid_redis_hash;    ///< name of the redis hash holding last seen vacuum cutoff XIDs
 
     RedisDDL _redis_ddl; ///< Interface to the DDL structures in Redis.
 
@@ -358,5 +367,13 @@ private:
      */
     template <CleanupOperation op>
     void _cleanup_global_vacuum_file(uint64_t cleanup_db_id=-1);
+
+    /**
+     * @brief Save last seen cutoff xid in redis per db
+     *
+     * @param db_id      Database ID
+     * @param cutoff_xid Cutoff XID
+     */
+    void _save_last_seen_cutoff_xid(uint64_t db_id, uint64_t cutoff_xid);
 };
 }
