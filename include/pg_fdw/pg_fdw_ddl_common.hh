@@ -275,7 +275,7 @@ namespace springtail::pg_fdw {
                 return commands;
             }
 
-            auto ns_fields = TableMgr::get_instance()->get_extent_schema(ns_table)->get_fields();
+            auto ns_fields = ns_table->extent_schema()->get_fields();
             auto &&row = *ns_i;
             if (namespace_name != ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(&row)) {
                 LOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
@@ -342,7 +342,7 @@ namespace springtail::pg_fdw {
                                                         schema_xid);
 
             // iterate through it
-            auto fields = TableMgr::get_instance()->get_extent_schema(table)->get_fields();
+            auto fields = table->extent_schema()->get_fields();
             for (auto row : (*table)) {
                 uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(&row);
 

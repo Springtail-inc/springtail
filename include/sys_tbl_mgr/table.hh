@@ -101,7 +101,7 @@ namespace indexer_helpers {
      * Read-only interface to a table at a fixed XID.  Provides interfaces for accessing table
      * information, performing scans, extent_id lookups, etc.
      */
-    class Table : public std::enable_shared_from_this<Table> {
+    class Table {
     public:
         /**
          * A forward iterator over the rows of a Table object.
@@ -442,6 +442,16 @@ namespace indexer_helpers {
         /** Finds the extent_id that may contain the provided key, using the primary key index. */
         uint64_t primary_lookup(TuplePtr tuple);
 
+        /**
+         * Retrieves the schema for the table at a given XID.
+         */
+        virtual ExtentSchemaPtr extent_schema() const = 0;
+
+        /**
+         * Get a schema for accessing an extent from this table that was written at the provided XID.
+         */
+        virtual SchemaPtr schema(uint64_t extent_xid) const = 0;
+
         /** Retrieves the ordered set of columns that form the primary key. */
         std::vector<std::string> primary_key() const
         {
@@ -453,9 +463,6 @@ namespace indexer_helpers {
 
         /** Retrieve the ID of this table. */
         uint64_t id() const { return _id; }
-
-        /** Retrieve the XID of this table. */
-        uint64_t xid() const { return _xid; }
 
         bool empty() const;
 
@@ -588,7 +595,7 @@ namespace indexer_helpers {
         BTreePtr
         _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset);
 
-    private:
+    protected:
         uint64_t _db_id; ///< The ID of the database containing this table.
         uint64_t _id; ///< The ID of the table.
 

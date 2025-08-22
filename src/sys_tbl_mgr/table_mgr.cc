@@ -7,6 +7,8 @@
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/system_table_mgr.hh>
+#include <sys_tbl_mgr/user_table.hh>
+
 #include <storage/vacuumer.hh>
 
 namespace springtail {
@@ -44,9 +46,9 @@ namespace springtail {
         auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY; });
         std::vector<Index> secondary_indexes(filtered.begin(), filtered.end());
 
-        return std::make_shared<Table>(db_id, table_id, xid, _table_base,
-                                       schema->get_sort_keys(), secondary_indexes,
-                                       *tbl_meta, schema);
+        return std::make_shared<UserTable>(db_id, table_id, xid, _table_base,
+                                           schema->get_sort_keys(), secondary_indexes,
+                                           *tbl_meta, schema);
     }
 
     std::filesystem::path
@@ -192,17 +194,4 @@ namespace springtail {
             LOG_INFO("TRUNCATE TABLE: File: {} doesn't exist to report to vacuum", data_file);
         }
     }
-
-    ExtentSchemaPtr
-    TableMgr::get_extent_schema(TablePtr table)
-    {
-        return SchemaMgr::get_instance()->get_extent_schema(table->db(), table->id(), XidLsn(table->xid()));
-    }
-
-    SchemaPtr
-    TableMgr::get_schema(TablePtr table, uint64_t extent_xid)
-    {
-        return SchemaMgr::get_instance()->get_schema(table->db(), table->id(), XidLsn(extent_xid), XidLsn(table->xid()));
-    }
-
 }

@@ -3,7 +3,7 @@
 #include <filesystem>
 #include <map>
 
-#include <sys_tbl_mgr/table.hh>
+#include <sys_tbl_mgr/system_table.hh>
 
 
 namespace springtail::test {

@@ -122,7 +122,7 @@ namespace {
 
         // create an access table
         auto table = TableMgr::get_instance()->get_table(db_id, oid, xid);
-        auto schema = TableMgr::get_instance()->get_extent_schema(table);
+        auto schema = table->extent_schema();
         auto fields = schema->get_fields();
 
         // verify stats

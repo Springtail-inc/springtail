@@ -3,7 +3,6 @@
 #include <sys_tbl_mgr/system_tables.hh>
 
 #include <test/file_system_check.hh>
-#include "common/constants.hh"
 
 using namespace springtail;
 using namespace springtail::test;
@@ -64,7 +63,7 @@ FSCheck::_get_table_and_fields(uint64_t db_id)
 
     uint64_t xid = constant::LATEST_XID;
 
-    TablePtr table = std::make_shared<Table>(db_id, Tbl::ID, xid, _table_base, Tbl::Primary::KEY, secondary_keys, tbl_meta, schema);
+    TablePtr table = std::make_shared<SystemTable>(db_id, Tbl::ID, xid, _table_base, Tbl::Primary::KEY, secondary_keys, tbl_meta, schema);
     std::shared_ptr<std::vector<FieldPtr>> fields = schema->get_fields();
 
     return std::make_pair(table, fields);
@@ -509,7 +508,7 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
     tbl_meta->stats.end_offset = end_offset;
     tbl_meta->snapshot_xid = root_sxid;
 
-    auto table = std::make_shared<Table>(db_id, fs_table.table_id, fs_table.xid, _table_base,
+    auto table = std::make_shared<SystemTable>(db_id, fs_table.table_id, fs_table.xid, _table_base,
                                 schema->get_sort_keys(), secondary_indexes, *tbl_meta, schema);
 
     LOG_INFO("\tTable dir: {}, row_count: {}, end_offset: {}, sxid: {}",

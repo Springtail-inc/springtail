@@ -102,18 +102,6 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base,
          */
         std::filesystem::path get_table_data_dir(uint64_t db_id, uint64_t table_id, uint64_t xid);
 
-        /**
-         * Retrieves the schema for the table at a given XID.
-         */
-        ExtentSchemaPtr
-        get_extent_schema(TablePtr table);
-
-        /**
-         * Get a schema for accessing an extent from this table that was written at the provided XID.
-         */
-        SchemaPtr
-        get_schema(TablePtr table, uint64_t extent_xid);
-
     private:
         /**
          * @brief Construct a new TableMgr object

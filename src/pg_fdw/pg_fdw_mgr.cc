@@ -704,7 +704,7 @@ namespace springtail::pg_fdw {
         }
 
         if (!state->fields) {
-            state->fields = TableMgr::get_instance()->get_extent_schema(state->table)->get_fields(target_colnames);
+            state->fields = state->table->extent_schema()->get_fields(target_colnames);
         }
 
         // set the iterators for the scan taking quals into consideration
@@ -1687,7 +1687,7 @@ namespace springtail::pg_fdw {
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::UserTypes::ID,
                                                          schema_xid);
         // get field array
-        auto fields = TableMgr::get_instance()->get_extent_schema(table)->get_fields();
+        auto fields = table->extent_schema()->get_fields();
 
         // escape the namespace name; used for qualified type names
         std::string escaped_namespace = quote_identifier(namespace_name.c_str());
