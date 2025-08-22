@@ -1368,6 +1368,12 @@ namespace springtail::pg_log_mgr {
     {
         LOG_DEBUG(LOG_PG_LOG_MGR, "Stream commit: xid={}, xact_lsn={}\n", commit_msg.xid, commit_msg.xact_lsn);
 
+        {
+            auto it = _batch_map.find(commit_msg.xid);
+            DCHECK(it != _batch_map.end());
+            _current_batch = it->second;
+        }
+
         // commit only happens for the top level xid, subxacts under the xid
         // automatically commit unless they were previously aborted
         auto itr = _xact_map.find(commit_msg.xid);
@@ -1422,6 +1428,12 @@ namespace springtail::pg_log_mgr {
     PgLogReader::_process_stream_abort(const PgMsgStreamAbort &abort_msg)
     {
         LOG_DEBUG(LOG_PG_LOG_MGR, "Stream abort: xid={}, sub_xid={}\n", abort_msg.xid, abort_msg.sub_xid);
+
+        {
+            auto it = _batch_map.find(abort_msg.xid);
+            DCHECK(it != _batch_map.end());
+            _current_batch = it->second;
+        }
 
         auto itr = _xact_map.find(abort_msg.xid);
         if (itr == _xact_map.end()) {
