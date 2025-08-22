@@ -79,18 +79,6 @@ SyncTracker::pick_table_for_sync(uint64_t db_id,
 }
 
 void
-SyncTracker::pick_table_for_sync(uint64_t db_id,
-                                 uint64_t table_id,
-                                 const XidLsn &xid)
-{
-    LOG_DEBUG(LOG_PG_LOG_MGR, "Pick for Sync: db {} table {} xid {}:{}",
-              db_id, table_id, xid.xid, xid.lsn);
-    std::unique_lock lock(_mutex);
-
-    _resync_picked_map[db_id][table_id] = xid;
-}
-
-void
 SyncTracker::mark_inflight(uint64_t db_id,
                            uint64_t table_id,
                            const XidLsn &xid,
