@@ -282,14 +282,6 @@ SyncTracker::add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
             }
         }
 
-        // Check picked map
-        auto resync_picked_i = _resync_picked_map.find(db_id);
-        if (resync_picked_i != _resync_picked_map.end()) {
-            if (resync_picked_i->second.contains(table_id)) {
-                return { true, true }; // if the table is present, skip
-            }
-        }
-
         // check the inflight map
         auto inflight_i = _inflight_map.find(db_id);
         if (inflight_i != _inflight_map.end()) {
