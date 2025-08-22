@@ -159,4 +159,11 @@ namespace springtail::redis {
      * value: xid
      */
     static constexpr char SET_DB_INDEX_XIDS[] = "{}:set:db_index_xids:{}";
+
+    /**
+     * Hash of vacuum cutoff XIDs per db_id for a given db_instance_id
+     * args: <db_instance_id>
+     * key: <db_id>, value: <cutoff_xid>
+     */
+    static constexpr char VACUUM_CUTOFF_XID[] = "{}:vacuum_cutoff_xids";
 }

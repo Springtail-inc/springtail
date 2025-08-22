@@ -721,6 +721,9 @@ namespace springtail::pg_proxy {
         get_instance()->set_log_level(log_level);
 
         get_instance()->_proxy_thread = std::thread(&ProxyServer::run, ProxyServer::get_instance());
+
+        // force user manager to startup user sync thread
+        UserMgr::get_instance();
     }
 
 } // namespace springtail::pg_proxy

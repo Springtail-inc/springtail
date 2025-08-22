@@ -24,7 +24,7 @@ FSCheck::FSCheck(uint64_t max_xid) : _max_xid(max_xid)
     for (const auto &[db_id, db_name]: _databases) {
         uint64_t cutoff_xid = 0;
         if (vacuumer_enabled) {
-            cutoff_xid = Vacuumer::get_instance()->get_vacuum_cutoff_xid(db_id);
+            cutoff_xid = Vacuumer::get_instance()->get_last_seen_cutoff_xid(db_id);
         }
         if (!vacuumer_enabled || _max_xid >= cutoff_xid) {
             _db_id_to_cutoff_xid.insert(std::make_pair(db_id, cutoff_xid));

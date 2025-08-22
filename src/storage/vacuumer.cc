@@ -7,6 +7,7 @@
 #include <storage/interval_tree.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
+#include <common/redis_types.hh>
 
 namespace springtail {
 
@@ -80,6 +81,10 @@ Vacuumer::_init()
     } else {
         _extents_tracking_enabled = false;
     }
+
+    // Initialize redis hash to save cutoff XIDs
+    uint64_t db_instance_id = Properties::get_db_instance_id();
+    _vacuum_cutoff_xid_redis_hash = fmt::format(redis::VACUUM_CUTOFF_XID, db_instance_id);
 }
 
 void
@@ -413,8 +418,27 @@ Vacuumer::hole_punch_file(const std::string& file,
     return not_punched;
 }
 
+void
+Vacuumer::_save_last_seen_cutoff_xid(uint64_t db_id, uint64_t cutoff_xid)
+{
+    RedisClientPtr client = RedisMgr::get_instance()->get_client();
+    client->hset(_vacuum_cutoff_xid_redis_hash, std::to_string(db_id), std::to_string(cutoff_xid));
+}
+
 uint64_t
-Vacuumer::get_vacuum_cutoff_xid(uint64_t db_id)
+Vacuumer::get_last_seen_cutoff_xid(uint64_t db_id)
+{
+    RedisClientPtr client = RedisMgr::get_instance()->get_client();
+    auto val = client->hget(_vacuum_cutoff_xid_redis_hash, std::to_string(db_id));
+    if (val) {
+        return std::stoull(*val);
+    } else {
+        return 0;
+    }
+}
+
+uint64_t
+Vacuumer::_get_vacuum_cutoff_xid(uint64_t db_id)
 {
     RedisDDL _redis_ddl;
 
@@ -833,7 +857,13 @@ Vacuumer::_do_vacuum_run()
             const std::string& file = file_it->first;
             auto& xid_map = file_it->second;
             auto db_id = _get_db_id_from_path(file);
-            auto cutoff_xid = get_vacuum_cutoff_xid(db_id);  // Get safest XID to vacuum till that point
+
+            // Get safest XID to vacuum till that point
+            // and save in the redis for stats
+            auto cutoff_xid = _get_vacuum_cutoff_xid(db_id);
+            if (cutoff_xid > 0) {
+                _save_last_seen_cutoff_xid(db_id, cutoff_xid);
+            }
 
             IntervalTree<uint64_t> itree;
             std::vector<uint64_t> xids_to_process;
@@ -910,7 +940,12 @@ Vacuumer::_do_vacuum_run()
         /* --------------- Snapshot deletion flow -----------------------------------------------------------*/
         // expire snapshots through the min XID
         for (auto db_it = expired_snapshots_map.begin(); db_it != expired_snapshots_map.end(); ) {
-            uint64_t cutoff_xid = get_vacuum_cutoff_xid(db_it->first);  // Get safest XID to vacuum till that point
+            // Get safest XID to vacuum till that point
+            // and save in redis for stats
+            uint64_t cutoff_xid = _get_vacuum_cutoff_xid(db_it->first);
+            if (cutoff_xid > 0) {
+                _save_last_seen_cutoff_xid(db_it->first, cutoff_xid);
+            }
             auto& xid_map = db_it->second;
 
             for (auto xid_it = xid_map.begin(); xid_it != xid_map.end(); ) {
