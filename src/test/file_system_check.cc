@@ -508,7 +508,7 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
     tbl_meta->stats.end_offset = end_offset;
     tbl_meta->snapshot_xid = root_sxid;
 
-    auto table = std::make_shared<SystemTable>(db_id, fs_table.table_id, fs_table.xid, _table_base,
+    auto table = std::make_shared<Table>(db_id, fs_table.table_id, fs_table.xid, _table_base,
                                 schema->get_sort_keys(), secondary_indexes, *tbl_meta, schema);
 
     LOG_INFO("\tTable dir: {}, row_count: {}, end_offset: {}, sxid: {}",

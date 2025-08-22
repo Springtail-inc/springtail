@@ -445,12 +445,12 @@ namespace indexer_helpers {
         /**
          * Retrieves the schema for the table at a given XID.
          */
-        virtual ExtentSchemaPtr extent_schema() const = 0;
+        virtual ExtentSchemaPtr extent_schema() const { return nullptr; }
 
         /**
          * Get a schema for accessing an extent from this table that was written at the provided XID.
          */
-        virtual SchemaPtr schema(uint64_t extent_xid) const = 0;
+        virtual SchemaPtr schema(uint64_t extent_xid) const { return nullptr; }
 
         /** Retrieves the ordered set of columns that form the primary key. */
         std::vector<std::string> primary_key() const
