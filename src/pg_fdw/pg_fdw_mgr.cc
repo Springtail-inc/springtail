@@ -1220,8 +1220,23 @@ namespace springtail::pg_fdw {
                 }
             }
 
+            // note: state->rows has taken quals into account in fdw_get_rel_size
+            auto rows = state->rows;
+
+            // The paths related to join clauses seem to be handled by PG 
+            // differently. For example, if there are no normal quals,
+            // it seems to be much better to give PG the full count of rows
+            // in fdw_get_rel_size and then create a low cost path for the join index.
+            // TODO: consider removing paths that are not present in baserel completely
+            // from fdw_get_path_keys.
+            auto it = std::ranges::find(pg_state->join_indexes, idx.id);
+            if (it != pg_state->join_indexes.end()) {
+
+                rows = 1;
+            }
+
             item = lappend(item, makeConst(INT8OID,
-                        -1, InvalidOid, 8, state->rows, false, true));
+                        -1, InvalidOid, 8, rows, false, true));
             item = lappend(item, makeConst(INT4OID,
                         -1, InvalidOid, 4, cost, false, true));
             result = lappend(result, item);
@@ -1231,7 +1246,7 @@ namespace springtail::pg_fdw {
     }
 
     void
-    PgFdwMgr::fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, double *rows, int *width)
+    PgFdwMgr::fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, List* join_quals, double *rows, int *width)
     {
         // fetch stats from state for row count
         PgFdwState *state = static_cast<PgFdwState *>(planstate->pg_fdw_state);
@@ -1261,6 +1276,18 @@ namespace springtail::pg_fdw {
             }
         }
         planstate->rows = *rows;
+
+        // Now let's see if we have joinable indexes, that are delayed.
+        for (auto const& idx: state->indexes) {
+            auto index_quals = _get_index_quals(state, idx, join_quals);
+            // check for the full match
+            if (index_quals.size() == idx.columns.size() &&
+                    // ... and all must be EQUALS
+                std::ranges::find_if(index_quals, [](const auto& v) {return v->base.op != EQUALS;}) == index_quals.end()) {
+
+                state->join_indexes.push_back(idx.id);
+            }
+        }
 
         // estimate width based on target list using most common types
         ListCell *lc;

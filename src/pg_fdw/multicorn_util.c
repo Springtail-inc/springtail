@@ -192,7 +192,8 @@ findPaths(PlannerInfo *root,
                 allclauses = list_concat(allclauses, clauses);
             }
         }
-        /* Every key has a corresponding restriction, we can build */
+
+         /* Every key has a corresponding restriction, we can build */
         /* the parameterized path and add it to the plan. */
         if (allclauses != NIL)
         {
@@ -414,12 +415,14 @@ makeQual(AttrNumber varattno, char *opname, Expr *value, bool isarray,
             elog(DEBUG3, "T_Var");
             qual = palloc0(sizeof(VarQual));
             qual->right_type = T_Var;
+            qual->typeoid = ((Var *) value)->vartype;
             ((VarQual *) qual)->rightvarattno = ((Var *) value)->varattno;
             break;
         default:
             elog(DEBUG3, "default");
             qual = palloc0(sizeof(ParamQual));
             qual->right_type = T_Param;
+            qual->typeoid = ((Param *) value)->paramtype;
             ((ParamQual *) qual)->expr = value;
             qual->typeoid = InvalidOid;
             break;
@@ -914,7 +917,26 @@ multicorn_getRelSize(PlannerInfo *root,
                             &planstate->qual_list);
     }
 
-    fdw_get_rel_size(planstate, planstate->target_list, planstate->qual_list, &rows, &width);
+    // Extract restrictions from potential join clauses 
+    List* join_quals = NIL;
+    foreach(lc, root->eq_classes)
+    {
+        EquivalenceClass *ec = (EquivalenceClass *) lfirst(lc);
+        if (ec->ec_members->length <= 1) {
+            continue;
+        }
+        ListCell   *ri_lc;
+        foreach(ri_lc, ec->ec_sources)
+        {
+            RestrictInfo *ri = (RestrictInfo *) lfirst(ri_lc);
+            // it must be a join related clause
+            if (ri->clause_relids && !bms_is_subset(ri->clause_relids, baserel->relids)) {
+                extractRestrictions(root, baserel->relids, ri->clause, &join_quals);
+            }
+        }
+    }
+
+    fdw_get_rel_size(planstate, planstate->target_list, planstate->qual_list, join_quals, &rows, &width);
 
     baserel->rows = rows;
     baserel->reltarget->width = width;
