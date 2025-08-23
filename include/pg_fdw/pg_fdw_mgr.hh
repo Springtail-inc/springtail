@@ -108,6 +108,7 @@ namespace springtail::pg_fdw {
         std::optional<Index> sortgroup_index; ///< Index matching the sortgroup.
         std::optional<Index> index; ///< The final index to use for scanning
         std::vector<uint64_t> join_indexes; ///< List of table index ids that a present in outer join clauses.
+        std::vector<uint64_t> qual_indexes; ///< List of table index ids that a present in restric clauses.
 
         /** Constructor */
         PgFdwState(TablePtr table, uint64_t db_id, uint64_t tid, uint64_t xid);

@@ -1201,6 +1201,21 @@ namespace springtail::pg_fdw {
         // [(('id',),1,100)]
 
         for (auto const& idx: pg_state->indexes) {
+            // note: state->rows has taken quals into account in fdw_get_rel_size
+            auto rows = state->rows;
+
+            // The paths related to join clauses seem to be handled by PG 
+            // differently. For example, if there are no normal quals,
+            // it seems to be much better to give PG the full count of rows
+            // in fdw_get_rel_size and then create a low cost path for the join index.
+            // TODO: consider removing paths that are not present in baserel completely
+            // from fdw_get_path_keys.
+            if (std::ranges::find(pg_state->qual_indexes, idx.id) == pg_state->qual_indexes.end()) {
+                if (std::ranges::find(pg_state->join_indexes, idx.id) != pg_state->join_indexes.end()) {
+                   rows = 1;
+                }
+            }
+
             List      *attnums = NULL;
             List      *item = NULL;
             LOG_DEBUG(LOG_FDW, "adding index path: {}", idx.id);
@@ -1218,21 +1233,6 @@ namespace springtail::pg_fdw {
                 } else {
                     cost = SPRINGTAIL_SECONDARY_SCAN_COST;
                 }
-            }
-
-            // note: state->rows has taken quals into account in fdw_get_rel_size
-            auto rows = state->rows;
-
-            // The paths related to join clauses seem to be handled by PG 
-            // differently. For example, if there are no normal quals,
-            // it seems to be much better to give PG the full count of rows
-            // in fdw_get_rel_size and then create a low cost path for the join index.
-            // TODO: consider removing paths that are not present in baserel completely
-            // from fdw_get_path_keys.
-            auto it = std::ranges::find(pg_state->join_indexes, idx.id);
-            if (it != pg_state->join_indexes.end()) {
-
-                rows = 1;
             }
 
             item = lappend(item, makeConst(INT8OID,
@@ -1261,18 +1261,20 @@ namespace springtail::pg_fdw {
             if (index_quals.size() == idx.columns.size() &&
                     // ... and all must be EQUALS
                 std::ranges::find_if(index_quals, [](const auto& v) {return v->base.op != EQUALS;}) == index_quals.end()) {
+                state->qual_indexes.push_back(idx.id);
 
                 if (!idx.is_unique) {
-                    // We don't know cardinality stats. Just set to a number that
-                    // is less than the total rows.
-                    *rows = *rows/10;
-                    if (*rows == 0) {
-                        *rows = 2;
+                    if (*rows >= state->stats.row_count) {
+                        // We don't know cardinality stats. Just set to a number that
+                        // is less than the total rows.
+                        *rows = *rows/10;
+                        if (*rows == 0) {
+                            *rows = 2;
+                        }
                     }
                 } else {
                     *rows = 1;
                 }
-                break;
             }
         }
         planstate->rows = *rows;
