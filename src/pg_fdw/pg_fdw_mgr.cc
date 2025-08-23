@@ -1207,19 +1207,20 @@ namespace springtail::pg_fdw {
             // The paths related to join clauses seem to be handled by PG 
             // differently. For example, if there are no normal quals,
             // it seems to be much better to give PG the full count of rows
-            // in fdw_get_rel_size and then create a low cost path for the join index.
+            // from fdw_get_rel_size and then create a low cost path for the join index.
             // TODO: consider removing paths that are not present in baserel completely
             // from fdw_get_path_keys.
-            if (std::ranges::find(pg_state->qual_indexes, idx.id) == pg_state->qual_indexes.end()) {
-                if (std::ranges::find(pg_state->join_indexes, idx.id) != pg_state->join_indexes.end()) {
-                   if (idx.is_unique) {
-                       rows = 1;
-                   } else {
-                       rows /= 100;
-                       if (!rows) {
-                           rows = 2;
-                       }
-                   }
+            //
+            // Only check the index to be join_indexes if it isn't already in quals
+            if (std::ranges::find(pg_state->qual_indexes, idx.id) == pg_state->qual_indexes.end() &&
+                std::ranges::find(pg_state->join_indexes, idx.id) != pg_state->join_indexes.end()) {
+                if (idx.is_unique) {
+                    rows = 1;
+                } else {
+                    rows /= 100;
+                    if (!rows) {
+                        rows = 2;
+                    }
                 }
             }
 
