@@ -1212,7 +1212,14 @@ namespace springtail::pg_fdw {
             // from fdw_get_path_keys.
             if (std::ranges::find(pg_state->qual_indexes, idx.id) == pg_state->qual_indexes.end()) {
                 if (std::ranges::find(pg_state->join_indexes, idx.id) != pg_state->join_indexes.end()) {
-                   rows = 1;
+                   if (idx.is_unique) {
+                       rows = 1;
+                   } else {
+                       rows /= 100;
+                       if (!rows) {
+                           rows = 2;
+                       }
+                   }
                 }
             }
 
