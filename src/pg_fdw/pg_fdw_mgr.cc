@@ -1864,6 +1864,8 @@ namespace springtail::pg_fdw {
                                 int idx,
                                 const ConstQual *qual)
     {
+        DCHECK(qual->base.right_type == T_Const);
+
         FieldArrayPtr fields = state->qual_fields;
 
         if (qual->isnull) {
