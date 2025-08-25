@@ -56,7 +56,7 @@ Service::_get_unfinished_indexes_info(uint64_t db_id)
 {
     proto::IndexesInfo indexes;
     auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
-    auto names_schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::IndexNames::ID);
+    auto names_schema = names_t->extent_schema();;
     auto names_fields = names_schema->get_fields();
 
     auto search_key = sys_tbl::IndexNames::Primary::key_tuple(0, 0, 0, 0);
@@ -368,7 +368,7 @@ Service::_find_index(uint64_t db_id,
     // use the cached one first
 
     auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
-    auto names_schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::IndexNames::ID);
+    auto names_schema = names_t->extent_schema();
     auto names_fields = names_schema->get_fields();
 
     auto search_key = sys_tbl::IndexNames::Primary::key_tuple(tid, index_id, 0, 0);
@@ -448,7 +448,7 @@ Service::_drop_index(const XidLsn& xid,
 {
     assert(index_state == sys_tbl::IndexNames::State::DELETED || index_state == sys_tbl::IndexNames::State::BEING_DELETED);
     auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
-    auto names_schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::IndexNames::ID);
+    auto names_schema = names_t->extent_schema();
     auto names_fields = names_schema->get_fields();
 
     // find the last record for the index id
@@ -1453,7 +1453,7 @@ Service::_get_modified_partition_details(uint64_t db_id,
                                          bool is_attached)
 {
     auto table = _get_system_table(db_id, sys_tbl::TableNames::ID);
-    auto schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::TableNames::ID);
+    auto schema = table->extent_schema();
     auto fields = schema->get_fields();
 
     // Mutex for the table cache
@@ -1738,7 +1738,7 @@ Service::_get_usertype_info(uint64_t db_id, uint64_t type_id, const XidLsn& xid)
 
     // read from disk
     auto table = _get_system_table(db_id, sys_tbl::UserTypes::ID);
-    auto schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::UserTypes::ID);
+    auto schema = table->extent_schema();
     auto fields = schema->get_fields();
 
     auto search_key = sys_tbl::UserTypes::Primary::key_tuple(type_id, xid.xid, xid.lsn);
@@ -1849,9 +1849,6 @@ Service::Revert(grpc::ServerContext* context,
                 LOG_DEBUG(LOG_SCHEMA, "Picked root file {} for system table {}", root_i->second,
                           table_id);
 
-                // update the symlink
-                auto symlink_path = table_dir / "roots";
-
                 std::filesystem::create_symlink(root_i->second,
                                                 table_dir / constant::ROOTS_TMP_FILE);
                 std::filesystem::rename(table_dir / constant::ROOTS_TMP_FILE,
@@ -1869,7 +1866,7 @@ Service::Revert(grpc::ServerContext* context,
         // remove rows from the table that are beyond the committed XID
         auto mtable = _get_mutable_system_table(request->db_id(), table_id);
         auto table = _get_system_table(request->db_id(), table_id);
-        auto schema = SystemTableMgr::get_instance()->get_extent_schema(table_id);
+        auto schema = table->extent_schema();
         FieldPtr xid_f = schema->get_field("xid");
         auto primary_fields = schema->get_fields(table->primary_key());
         for (auto row : *table) {
@@ -1900,7 +1897,7 @@ Service::_get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
 
     // not present, read from disk
     auto table_names_t = _get_system_table(db_id, sys_tbl::TableNames::ID);
-    auto schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::TableNames::ID);
+    auto schema = table_names_t->extent_schema();
     auto fields = schema->get_fields();
 
     auto search_key = sys_tbl::TableNames::Primary::key_tuple(table_id, xid.xid, xid.lsn);
@@ -1970,7 +1967,7 @@ Service::_get_namespace_info(uint64_t db_id, uint64_t namespace_id, const XidLsn
 
     // read from disk
     auto table = _get_system_table(db_id, sys_tbl::NamespaceNames::ID);
-    auto schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::NamespaceNames::ID);
+    auto schema = table->extent_schema();
     auto fields = schema->get_fields();
 
     auto search_key = sys_tbl::NamespaceNames::Primary::key_tuple(namespace_id, xid.xid, xid.lsn);
@@ -2029,7 +2026,7 @@ Service::_get_namespace_info(uint64_t db_id, const std::string& name, const XidL
         return nullptr;
     }
 
-    auto schema = SystemTableMgr::get_instance()->get_extent_schema(table->id());
+    auto schema = table->extent_schema();
     auto fields = schema->get_fields();
 
     auto search_key = sys_tbl::NamespaceNames::Secondary::key_tuple(name, xid.xid, xid.lsn);
@@ -2154,7 +2151,7 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
 
     // go over each index and get the roots
     auto roots_t = _get_system_table(db_id, sys_tbl::TableRoots::ID);
-    auto schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::TableRoots::ID);
+    auto schema = roots_t->extent_schema();
     auto table_id_f = schema->get_field("table_id");
 
     auto index_id_f = schema->get_field("index_id");
@@ -2226,7 +2223,7 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     // access the stats table
     if (!stats_found) {
         auto stats_t = _get_system_table(db_id, sys_tbl::TableStats::ID);
-        auto stats_schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::TableStats::ID);
+        auto stats_schema = stats_t->extent_schema();
         auto stats_key_fields = stats_schema->get_sort_fields();
 
         auto search_key = sys_tbl::TableStats::Primary::key_tuple(table_id, xid.xid);
@@ -2361,7 +2358,7 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
                               const XidLsn& access_xid)
 {
     auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
-    auto names_schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::IndexNames::ID);
+    auto names_schema = names_t->extent_schema();
     auto names_fields = names_schema->get_fields();
 
     auto search_key = sys_tbl::IndexNames::Primary::key_tuple(table_id, 0, 0, 0);
@@ -2450,7 +2447,7 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
 void
 Service::_populate_index_columns(uint64_t db_id, proto::IndexInfo& info, XidLsn index_xid) {
     auto indexes_t = _get_system_table(db_id, sys_tbl::Indexes::ID);
-    auto indexes_schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::Indexes::ID);
+    auto indexes_schema = indexes_t->extent_schema();
     auto indexes_fields = indexes_schema->get_fields();
 
     auto index_key = sys_tbl::Indexes::Primary::key_tuple(info.table_id(), info.id(), index_xid.xid,
@@ -2495,7 +2492,7 @@ Service::_read_schema_columns(SchemaInfoPtr info,
     auto schemas_t = _get_system_table(db_id, sys_tbl::Schemas::ID);
 
     // construct the column accessors for the schemas table
-    auto schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::Schemas::ID);
+    auto schema = schemas_t->extent_schema();
     auto fields = schema->get_fields();
 
     // read everything with the given table_id
@@ -2595,7 +2592,7 @@ Service::_read_schema_columns(SchemaInfoPtr info,
     // retrieve the primary index data for the table at this XID/LSN
     auto indexes_t = _get_system_table(db_id, sys_tbl::Indexes::ID);
 
-    schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::Indexes::ID);
+    schema = indexes_t->extent_schema();
     fields = schema->get_fields();
 
     // find the first entry that matches for this XID/LSN
@@ -2875,7 +2872,7 @@ Service::_read_schema_history(SchemaInfoPtr info,
     auto schemas_t = _get_system_table(db_id, sys_tbl::Schemas::ID);
 
     // construct the column accessors for the schemas table
-    auto schema = SystemTableMgr::get_instance()->get_extent_schema(sys_tbl::Schemas::ID);
+    auto schema = schemas_t->extent_schema();
     auto fields = schema->get_fields();
 
     // read everything with the given table_id

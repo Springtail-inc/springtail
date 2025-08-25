@@ -103,9 +103,9 @@ namespace springtail {
         }
 #endif
 
-        return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid,
-                                              _table_base, schema->get_sort_keys(), secondary_indexes,
-                                              *tbl_meta, schema, for_gc);
+        return std::make_shared<UserMutableTable>(db_id, table_id, access_xid, target_xid,
+                                                  _table_base, schema->get_sort_keys(), secondary_indexes,
+                                                  *tbl_meta, schema, for_gc);
     }
 
     MutableTablePtr
@@ -127,9 +127,9 @@ namespace springtail {
         }
 
         // construct an empty mutable table with the provided snapshot XID and return it
-        return std::make_shared<MutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
-                                              _table_base, schema->get_sort_keys(), secondary_keys,
-                                              tbl_meta, schema, false);
+        return std::make_shared<UserMutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
+                                                  _table_base, schema->get_sort_keys(), secondary_keys,
+                                                  tbl_meta, schema, false);
     }
 
     void
@@ -170,28 +170,5 @@ namespace springtail {
                            const TableMetadata &metadata)
     {
         sys_tbl_mgr::Client::get_instance()->update_roots(db_id, table_id, target_xid, metadata);
-    }
-
-    void
-    TableMgr::truncate_table(MutableTablePtr table)
-    {
-        std::filesystem::path data_file = table->get_data_file();
-        // remove any dirty cached pages for this table since they don't need to be written
-        StorageCache::get_instance()->drop_for_truncate(data_file);
-
-        // clear the indexes
-        TableMetadata metadata;
-        table->truncate_indexes(metadata);
-
-        uint64_t target_xid = table->get_target_xid();
-        // update the roots and stats
-        sys_tbl_mgr::Client::get_instance()->update_roots(table->db(), table->id(), target_xid, metadata);
-
-        // Smart vacuum if data exists
-        if (std::filesystem::exists(data_file)) {
-            Vacuumer::get_instance()->expire_extent(data_file, 0, std::filesystem::file_size(data_file), target_xid);
-        } else {
-            LOG_INFO("TRUNCATE TABLE: File: {} doesn't exist to report to vacuum", data_file);
-        }
     }
 }

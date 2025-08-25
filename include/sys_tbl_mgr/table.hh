@@ -569,7 +569,8 @@ namespace indexer_helpers {
         std::vector<uint64_t> get_secondary_idx_ids() const
         {
             std::vector<uint64_t> index_ids;
-            for (auto it: _secondary_indexes) {
+            index_ids.reserve(_secondary_indexes.size());
+            for (auto &it: _secondary_indexes) {
                 index_ids.push_back(it.first);
             }
             return index_ids;
@@ -629,7 +630,7 @@ namespace indexer_helpers {
     /**
      * Interface for mutating a table at the most recent XID.
      */
-    class MutableTable : public std::enable_shared_from_this<MutableTable> {
+    class MutableTable {
     public:
         /**
          * Mutable table constructor.
@@ -695,6 +696,12 @@ namespace indexer_helpers {
          * row to remove.
          */
         void update(TuplePtr value, uint64_t extent_id);
+
+        /**
+         * Truncates the table, removing the callback of any mutated pages in the cache, clearing
+         * all of the indexes, and marking the roots to be cleared in the system tables.
+         */
+        virtual void truncate() = 0;
 
         /**
          * Reads an extent from the tree and returns it.
@@ -767,29 +774,7 @@ namespace indexer_helpers {
             return _stats;
         }
 
-        /**
-         * @brief Get the data file for the table
-         *
-         * @return std::filesystem::path - data file
-         */
-        std::filesystem::path get_data_file() const { return _data_file; }
-
-        /**
-         * @brief Get table target xid
-         *
-         * @return uint64_t - target xid
-         */
-        uint64_t get_target_xid() const { return _target_xid; }
-
-        /**
-         * @brief Truncate indexes and populate metadata
-         *
-         * @param metadata - metadata object passed by reference
-         */
-        void
-        truncate_indexes(TableMetadata &metadata);
-
-    private:
+    protected:
         /**
          * Page callback on evict() / flush_file() that will perform an _invalidate_indexes() and
          * _flush_and_populate_indexes() on the provided page.
@@ -900,7 +885,7 @@ namespace indexer_helpers {
          */
         uint64_t _get_extent_id(TuplePtr search_key);
 
-    private:
+    protected:
         uint64_t _db_id; ///< The ID of the database containing this table.
         uint64_t _id; ///< The ID of the table.
 

@@ -493,7 +493,7 @@ namespace springtail::committer {
             }
 
             // process each extent of ordered mutations
-            for (auto wc_extent : extent_list) {
+            for (auto &wc_extent : extent_list) {
                 // update the coordinator
                 Coordinator::mark_alive(keep_alive);
 
@@ -613,7 +613,7 @@ namespace springtail::committer {
                 {
                     LOG_DEBUG(LOG_COMMITTER, "TRUNCATE");
                     // note: this should always be the first operation within an extent
-                    TableMgr::get_instance()->truncate_table(table);
+                    table->truncate();
                     break;
                 }
             default:

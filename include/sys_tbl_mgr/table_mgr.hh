@@ -82,12 +82,6 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base,
                           const TableMetadata &metadata);
 
         /**
-         * Truncates the table, removing the callback of any mutated pages in the cache, clearing
-         * all of the indexes, and marking the roots to be cleared in the system tables.
-         */
-        void truncate_table(MutableTablePtr table);
-
-        /**
          * Finalize all outstanding system metadata mutations.
          */
         void finalize_metadata(uint64_t db_id, uint64_t xid);

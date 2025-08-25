@@ -244,6 +244,7 @@ namespace indexer_helpers {
 
             // work with the index
             std::vector<uint32_t> idx_cols;
+            idx_cols.reserve(idx_cols.size());
             for (auto const &col: idx.columns) {
                 idx_cols.push_back(col.position);
             }
@@ -655,6 +656,7 @@ namespace indexer_helpers {
             assert(idx.id != constant::INDEX_PRIMARY);
             // work with the index
             std::vector<uint32_t> idx_cols;
+            idx_cols.reserve(idx.columns.size());
             for (auto const &col: idx.columns) {
                 idx_cols.push_back(col.position);
             }
@@ -762,20 +764,6 @@ namespace indexer_helpers {
         }
 
         // note: no change in the stats.row_count
-    }
-
-    void
-    MutableTable::truncate_indexes(TableMetadata &metadata)
-    {
-        // clear the indexes
-        metadata.snapshot_xid = _snapshot_xid;
-        metadata.roots = {{ constant::INDEX_PRIMARY, constant::UNKNOWN_EXTENT }};
-        _primary_index->truncate();
-
-        for (auto& [index_id, idx]: _secondary_indexes) {
-            idx.first->truncate();
-            metadata.roots.emplace_back(index_id, constant::UNKNOWN_EXTENT);
-        }
     }
 
     StorageCache::SafePagePtr
@@ -912,7 +900,7 @@ namespace indexer_helpers {
         metadata.roots.push_back({constant::INDEX_PRIMARY, _primary_index->finalize()});
 
         // now flush the indexes, capturing the roots
-        for (auto secondary : _secondary_indexes) {
+        for (auto &secondary : _secondary_indexes) {
             metadata.roots.emplace_back(secondary.first, secondary.second.first->finalize());
         }
 

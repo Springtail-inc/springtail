@@ -4,7 +4,8 @@
 #include <sys_tbl_mgr/table.hh>
 
 namespace springtail {
-    class SystemTable : public Table, public std::enable_shared_from_this<SystemTable> {
+    class SystemTable : public Table,
+                        public std::enable_shared_from_this<SystemTable> {
     public:
         using Table::schema;
 
@@ -36,5 +37,28 @@ namespace springtail {
         {
             return SystemTableMgr::get_instance()->get_schema(_id);
         }
+    };
+
+    class SystemMutableTable: public MutableTable,
+                              public std::enable_shared_from_this<SystemMutableTable> {
+
+    public:
+        /**
+         * System mutable table constructor.
+         */
+        SystemMutableTable(uint64_t db_id,
+                           uint64_t table_id,
+                           uint64_t access_xid,
+                           uint64_t target_xid,
+                           const std::filesystem::path &table_base,
+                           const std::vector<std::string> &primary_key,
+                           const std::vector<Index> &secondary,
+                           const TableMetadata &metadata,
+                           ExtentSchemaPtr schema,
+                           bool for_gc = false) :
+            MutableTable(db_id, table_id, access_xid, target_xid, table_base, primary_key,
+                         secondary, metadata, schema, for_gc) {}
+
+        virtual void truncate() override {}
     };
 } // springtail
