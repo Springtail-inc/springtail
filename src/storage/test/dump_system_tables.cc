@@ -36,7 +36,7 @@ main(int argc,
         auto table = SystemTableMgr::get_instance()->get_system_table(db_id,
                                                          table_id,
                                                          constant::LATEST_XID);
-        auto schema = SystemTableMgr::get_instance()->get_extent_schema(table_id);
+        auto schema = table->extent_schema();
         auto fields = schema->get_fields();
 
         std::cout << fmt::format("TABLE: {}", table_id) << std::endl;

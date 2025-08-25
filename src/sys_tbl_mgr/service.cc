@@ -56,7 +56,7 @@ Service::_get_unfinished_indexes_info(uint64_t db_id)
 {
     proto::IndexesInfo indexes;
     auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
-    auto names_schema = names_t->extent_schema();;
+    auto names_schema = names_t->extent_schema();
     auto names_fields = names_schema->get_fields();
 
     auto search_key = sys_tbl::IndexNames::Primary::key_tuple(0, 0, 0, 0);

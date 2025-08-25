@@ -178,7 +178,7 @@ namespace {
             auto keys = _make_keys(table_id, roots);
 
 
-            return std::make_shared<MutableTable>(_db_id, table_id, xid - 1, xid, _base_dir,
+            return std::make_shared<UserMutableTable>(_db_id, table_id, xid - 1, xid, _base_dir,
                                                   _primary_keys, keys,
                                                   tbl_meta, _schema);
         }
