@@ -66,7 +66,7 @@ namespace springtail {
                           const XidLsn &target_xid)
     {
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
-            return SystemTableMgr::get_instance()->get_schema(table_id);
+            return SystemTableMgr::get_instance()->_get_schema(table_id);
         }
 
         // XXX keep some kind of local cache?
@@ -88,7 +88,7 @@ namespace springtail {
                                  const XidLsn &xid)
     {
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
-            return SystemTableMgr::get_instance()->get_extent_schema(table_id);
+            return SystemTableMgr::get_instance()->_get_extent_schema(table_id);
         }
 
         // XXX keep some kind of local cache?  how to keep it valid given the XID progression?

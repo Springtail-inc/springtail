@@ -27,7 +27,7 @@ namespace springtail {
          */
         virtual ExtentSchemaPtr extent_schema() const override
         {
-            return SystemTableMgr::get_instance()->get_extent_schema(_id);
+            return SystemTableMgr::get_instance()->_get_extent_schema(_id);
         }
 
         /**
@@ -35,7 +35,7 @@ namespace springtail {
          */
         virtual SchemaPtr schema(uint64_t extent_xid) const override
         {
-            return SystemTableMgr::get_instance()->get_schema(_id);
+            return SystemTableMgr::get_instance()->_get_schema(_id);
         }
     };
 
@@ -66,6 +66,8 @@ namespace springtail {
         virtual void truncate() override
         {
             // no truncation for system tables
+            LOG_WARN("Truncate operation on system table is not supported.");
+            DCHECK(false);
         }
     };
 } // springtail

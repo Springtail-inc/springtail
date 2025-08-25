@@ -39,7 +39,7 @@ SystemTableMgr::SystemTableMgr() : Singleton<SystemTableMgr>(ServiceId::SystemTa
 }
 
 std::shared_ptr<Schema>
-SystemTableMgr::get_schema(uint64_t table_id)
+SystemTableMgr::_get_schema(uint64_t table_id)
 {
     // first check if it's an immutable system table schema
     auto &&system_i = _system_cache.find({ table_id, constant::INDEX_DATA, true });
@@ -48,7 +48,7 @@ SystemTableMgr::get_schema(uint64_t table_id)
 }
 
 std::shared_ptr<ExtentSchema>
-SystemTableMgr::get_extent_schema(uint64_t table_id)
+SystemTableMgr::_get_extent_schema(uint64_t table_id)
 {
     // first check if it's an immutable system table schema
     auto &&system_i = _system_cache.find({ table_id, constant::INDEX_DATA, true });
@@ -97,7 +97,7 @@ SystemTableMgr::get_system_table(uint64_t db_id,
     tbl_meta.snapshot_xid = 1;
 
     // get the table's schema
-    auto schema = get_extent_schema(table_id);
+    auto schema = _get_extent_schema(table_id);
 
     switch (table_id) {
     case sys_tbl::TableNames::ID: {
@@ -160,7 +160,7 @@ SystemTableMgr::get_mutable_system_table(uint64_t db_id,
     TableMetadata tbl_meta;
     tbl_meta.snapshot_xid = 1;
 
-    auto schema = get_extent_schema(table_id);
+    auto schema = _get_extent_schema(table_id);
 
     // XXX note that the table stats are currently broken for system tables... would need a way to bootstrap
 

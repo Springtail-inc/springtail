@@ -9,7 +9,10 @@ namespace springtail {
 
     class SystemTableMgr : public Singleton<SystemTableMgr>
     {
-        friend Singleton<SystemTableMgr>;
+        friend class Singleton<SystemTableMgr>;
+        friend class SystemTable;
+        friend class SchemaMgr;
+
     public:
         /**
          * Construct a system table.
@@ -21,11 +24,12 @@ namespace springtail {
          */
         MutableTablePtr get_mutable_system_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid);
 
+    protected:
         /**
          * Retrieve the schema for a given table at a given point in time.
          * @param table_id The ID of the table being requested.
          */
-        std::shared_ptr<Schema> get_schema(uint64_t table_id);
+        std::shared_ptr<Schema> _get_schema(uint64_t table_id);
 
         /**
          * Retrieve an ExtentSchema for a given table at a given XID that can be used for writing /
@@ -33,9 +37,7 @@ namespace springtail {
          * underlying data.
          * @param table_id The table we need the schema for.
          */
-        std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t table_id);
-
-    protected:
+        std::shared_ptr<ExtentSchema> _get_extent_schema(uint64_t table_id);
 
         SystemTableMgr();
         ~SystemTableMgr() override = default;
