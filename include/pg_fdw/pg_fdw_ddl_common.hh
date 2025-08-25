@@ -55,8 +55,7 @@ namespace springtail::pg_fdw {
         std::string _partition_bound;
     };
 
-    class PgFdwCommon : public Singleton<PgFdwCommon> {
-        friend class Singleton<PgFdwCommon>;
+    class PgFdwCommon {
     public:
         struct TableEntry {
             uint64_t table_id;
@@ -347,8 +346,12 @@ namespace springtail::pg_fdw {
             auto fields = table->extent_schema()->get_fields();
             for (auto row : (*table)) {
                 uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(&row);
+                uint64_t xid = fields->at(sys_tbl::Schemas::Data::XID)->get_uint64(&row);
+                if (xid > schema_xid) {
+                    continue;
+                }
 
-                LOG_DEBUG(LOG_FDW, "Found table in schemas table: {}", tid);
+                LOG_DEBUG(LOG_FDW, "Found table in schemas table: {}, xid: {}, schema_xid: {}", tid, xid, schema_xid);
 
                 // check if we have moved to next tid
                 if (tid != current_tid) {

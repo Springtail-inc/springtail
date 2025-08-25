@@ -1,1 +1,7 @@
-{}
+{
+    "storage": {
+        "vacuum_config": {
+            "enabled": false
+        }   
+    }   
+}

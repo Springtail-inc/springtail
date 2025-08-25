@@ -66,19 +66,19 @@ jobs:
       - name: Prepare Tests
         run: |
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
-          # Turns off the OTEL in the system.json.settings
-          jq '.otel.enabled = false' system.json.settings > tmp.json && mv tmp.json system.json.settings
+          # Override some settings in the config file
+          .github/workflows/scripts/merge_system_settings.py system.json.settings .github/workflows/nightly.overrides.json system.json.test
+
           # Replace the correct `springtail` code directory
-          sed -i -e "s|/home/dev/springtail|${GITHUB_WORKSPACE}|g" system.json.settings
-          cp system.json.settings system.json.test
+          sed -i -e "s|/home/dev/springtail|${GITHUB_WORKSPACE}|g" system.json.test
           mkdir -p /opt/springtail/pids
           service redis-server start
           
-          # Copies over the fdw_config file to the designated location
+          # Copy over the fdw_config file to the designated location
           conf_file=/etc/postgresql/16/main/postgresql.conf
           fdw_config_file_path=$(grep -E "^springtail_fdw.config_file_path" $conf_file | awk '{print $3}' | tr -d "'")
           mkdir -p $(dirname $fdw_config_file_path)
-          cp system.json.settings $fdw_config_file_path
+          cp system.json.test $fdw_config_file_path
 
       - name: Build
         run: |
@@ -207,7 +207,7 @@ jobs:
           
             _LOG_FLAG="failed"
             echo "*** Starting iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
-            python3 test_runner.py -a -c config.yaml -j ${GITHUB_WORKSPACE}/integration-test-report.xml 2>&1 | tee tmplog
+            python3 test_runner.py -c nightly -j ${GITHUB_WORKSPACE}/integration-test-report.xml 2>&1 | tee tmplog
             # Grab the success/failure status of the integration tests
             if [ $? -eq 0 ] && ! grep -qE "Tests failed: [1-9][0-9]*" tmplog
             then

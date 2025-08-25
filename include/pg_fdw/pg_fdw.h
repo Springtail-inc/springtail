@@ -52,7 +52,7 @@ void fdw_commit_rollback(uint64_t pg_xid, bool commit);
 //// Called from path_util.c
 
 /** Helper to get estimate of row width/number of rows */
-void fdw_get_rel_size(SpringtailPlanState *state, List *target_list, List *qual_list, double *rows, int *width);
+void fdw_get_rel_size(SpringtailPlanState *state, List *target_list, List *qual_list, List* join_quals, double *rows, int *width);
 
 /** Helper return sub-list of sortable columns if table is sortable by sort group */
 List *fdw_can_sort(SpringtailPlanState *state, List *sortgroup);

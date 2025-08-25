@@ -1,13 +1,14 @@
-#include <common/constants.hh>
 #include <memory>
+
+#include <common/constants.hh>
+#include <common/json.hh>
+#include <common/properties.hh>
+
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/schema_mgr.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
-#include <write_cache/write_cache_client.hh>
-#include <storage/vacuumer.hh>
-#include <common/json.hh>
-#include <common/properties.hh>
 
 //#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
 #include <common/time_trace.hh>
@@ -243,6 +244,7 @@ namespace indexer_helpers {
 
             // work with the index
             std::vector<uint32_t> idx_cols;
+            idx_cols.reserve(idx_cols.size());
             for (auto const &col: idx.columns) {
                 idx_cols.push_back(col.position);
             }
@@ -282,18 +284,6 @@ namespace indexer_helpers {
         // extract the extent_id and return it
         auto &&row = *i;
         return _primary_extent_id_f->get_uint64(&row);
-    }
-
-    ExtentSchemaPtr
-    Table::extent_schema() const
-    {
-        return SchemaMgr::get_instance()->get_extent_schema(_db_id, _id, XidLsn(_xid));
-    }
-
-    SchemaPtr
-    Table::schema(uint64_t extent_xid) const
-    {
-        return SchemaMgr::get_instance()->get_schema(_db_id, _id, XidLsn(extent_xid), XidLsn(_xid));
     }
 
     Table::Iterator
@@ -666,6 +656,7 @@ namespace indexer_helpers {
             assert(idx.id != constant::INDEX_PRIMARY);
             // work with the index
             std::vector<uint32_t> idx_cols;
+            idx_cols.reserve(idx.columns.size());
             for (auto const &col: idx.columns) {
                 idx_cols.push_back(col.position);
             }
@@ -773,34 +764,6 @@ namespace indexer_helpers {
         }
 
         // note: no change in the stats.row_count
-    }
-
-    void
-    MutableTable::truncate()
-    {
-        // remove any dirty cached pages for this table since they don't need to be written
-        StorageCache::get_instance()->drop_for_truncate(_data_file);
-
-        // clear the indexes
-        TableMetadata metadata;
-        metadata.snapshot_xid = _snapshot_xid;
-        metadata.roots = {{ constant::INDEX_PRIMARY, constant::UNKNOWN_EXTENT }};
-        _primary_index->truncate();
-
-        for (auto& [index_id, idx]: _secondary_indexes) {
-            idx.first->truncate();
-            metadata.roots.emplace_back(index_id, constant::UNKNOWN_EXTENT);
-        }
-
-        // update the roots and stats
-        sys_tbl_mgr::Client::get_instance()->update_roots(_db_id, _id, _target_xid, metadata);
-
-        // Smart vacuum if data exists
-        if (std::filesystem::exists(_data_file)) {
-            Vacuumer::get_instance()->expire_extent(_data_file, 0, std::filesystem::file_size(_data_file), _target_xid);
-        } else {
-            LOG_INFO("TRUNCATE: File: {} doesn't exist to report to vacuum", _data_file);
-        }
     }
 
     StorageCache::SafePagePtr
@@ -937,7 +900,7 @@ namespace indexer_helpers {
         metadata.roots.push_back({constant::INDEX_PRIMARY, _primary_index->finalize()});
 
         // now flush the indexes, capturing the roots
-        for (auto secondary : _secondary_indexes) {
+        for (auto &secondary : _secondary_indexes) {
             metadata.roots.emplace_back(secondary.first, secondary.second.first->finalize());
         }
 
@@ -1001,7 +964,7 @@ namespace indexer_helpers {
                                  uint64_t extent_id)
     {
         // get the page from the cache
-        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, 
+        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
                 get_max_extent_size(),
                 false,
                 [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
