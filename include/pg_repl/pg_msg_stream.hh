@@ -135,6 +135,9 @@ namespace springtail {
                 const std::filesystem::path &file,
                 bool truncate=false);
 
+        /**
+         * @brief Set the streaming mode to true; used when starting new file that is mid-stream
+         */
         void set_streaming() { _streaming = true; }
 
         const PgMsgStreamHeader& current_header() const { return _header; }
@@ -250,6 +253,15 @@ namespace springtail {
 
         /** Helper to seek stream based on current offset */
         void _seek_stream(uint64_t file_offset);
+
+        /**
+         * @brief Scan a file and return the restart LSN of the last valid message
+         * Truncate file to end of last valid message if eof reached prematurely
+         * @param file log file to scan
+         * @param truncate if true truncate file to end of last full message if eof reached
+         * @return restart LSN, or INVALID_LSN if file has no valid header
+         */
+        LSN_t _repair_log(const std::filesystem::path &file, bool truncate);
 
         /** Read stream at current offset, return uint32_t */
         uint32_t _recvint32() {

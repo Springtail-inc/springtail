@@ -1467,54 +1467,78 @@ namespace springtail {
     uint64_t
     PgMsgStreamReader::scan_log(uint64_t db_id, const std::filesystem::path &file, bool truncate)
     {
-        // updated logic:
-        // 1) scan for BEGIN/COMMIT records
-        //    b) if we see a COMMIT, then can record the LSN associated with that as the most recent
-        //    c) once we see EOF, return the latest completed LSN
-        // 2) if no LSN completed in this file, then return INVALID_LSN
-        static std::vector<char> filter = { pg_msg::MSG_COMMIT,
-                                            pg_msg::MSG_STREAM_COMMIT };
-        uint64_t end_lsn = INVALID_LSN;
-        uint64_t offset = 0;
-
         PgMsgStreamReader reader(db_id, file);
-        do {
-            auto msg = reader.read_message(filter);
 
-            // nullptr if message skipped
-            if (msg == nullptr) {
-                LOG_INFO("Skipping message at offset {} in file {}", offset, file);
+        auto end_lsn = reader._repair_log(file, truncate);
+        LOG_INFO("Scanned file {}, found end LSN: {}", file, end_lsn);
+
+        return end_lsn;
+    }
+
+    LSN_t
+    PgMsgStreamReader::_repair_log(const std::filesystem::path &file, bool truncate)
+    {
+        // this replicates some login in _open_file and _seek_stream
+        // but we need to handle reading the header separately
+
+        // open file and position at start
+        if (_stream.is_open()) {
+            _stream.close();
+        }
+
+        _stream.open(file, std::fstream::in | std::fstream::binary);
+        if (!_stream.is_open()) {
+            LOG_ERROR("Unable to open file: {}", file);
+            throw PgIOError();
+        }
+        _current_path = file;
+
+        // get file size
+        _file_end_offset = std::filesystem::file_size(file);
+
+        // check if file too small to contain a valid header
+        if (_file_end_offset < PgMsgStreamHeader::SIZE) {
+            if (truncate) {
+                _truncate_file(file, 0);
+            }
+            return INVALID_LSN;
+        }
+
+        while (true) {
+            // Make sure we have room for at least a header
+            DCHECK_GT(_current_offset + PgMsgStreamHeader::SIZE, _file_end_offset);
+
+            // read header at current offset and get next header offset
+            // after reading the header, _current_offset is set to just after the header
+            _read_header();
+
+            // check if the full message fits in the file
+            if (_xlog_msg_end_offset == _file_end_offset) {
+                // last full message, restart after this message
+                return _header.end_lsn;
+            }
+
+            if (_xlog_msg_end_offset < _file_end_offset) {
+                // safe message, seek to next message
+                _stream.seekg(_xlog_msg_end_offset, std::fstream::beg);
+                _current_offset = _xlog_msg_end_offset;
                 continue;
             }
 
-            // store the lsn
-            switch (msg->msg_type) {
-            case (PgMsgEnum::COMMIT):
-                end_lsn = std::get<PgMsgCommit>(msg->msg).xact_lsn;
-                offset = reader.offset();
-                break;
-
-            case (PgMsgEnum::STREAM_COMMIT):
-                end_lsn = std::get<PgMsgStreamCommit>(msg->msg).xact_lsn;
-                offset = reader.offset();
-                break;
-
-            default:
-                LOG_ERROR("Invalid message type: {}", static_cast<uint8_t>(msg->msg_type));
-                throw PgUnexpectedDataError();
+            // partial message detected; _xlog_msg_end_offset > _file_end_offset
+            // truncate to just before this message header
+            auto new_end_offset = _current_offset - PgMsgStreamHeader::SIZE;
+            if (truncate) {
+                _truncate_file(file, new_end_offset);
             }
-        } while (!reader.end_of_stream());
 
-        // fast-exit if the file contains no commits
-        if (end_lsn == INVALID_LSN) {
-            return end_lsn;
+            // replay this message
+            return _header.start_lsn;
         }
-
-        // note: do we need to close the stream before doing this?
-        // truncate to the end of the last-seen commit
-        _truncate_file(file, offset);
-        return end_lsn;
     }
+
+
+
 
     bool
     PgMsgStreamReader::_is_schema_included(const std::string& schema)
