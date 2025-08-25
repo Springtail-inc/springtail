@@ -362,9 +362,10 @@ namespace springtail::pg_fdw {
         auto it = table_map.find(tid);
         if (it != table_map.end()) {
             std::vector<nlohmann::json> actions = it->second;
-            std::sort(actions.begin(), actions.end(), [](const nlohmann::json& a, const nlohmann::json& b) {
-                if (a["action"] == b["action"]) return false;
-                return a["action"] == "drop";
+            std::ranges::sort(actions, [](const nlohmann::json& a, const nlohmann::json& b) {
+                if (a["action"] == b["action"])
+                    return false;
+                return a["action"] == "drop" && b["action"] != "drop";
             });
             for (const auto& act : actions) {
                 output.push_back(act);
@@ -375,7 +376,7 @@ namespace springtail::pg_fdw {
         auto child_iter = children_map.find(tid);
         if (child_iter != children_map.end()) {
             std::vector<int> child_ids = child_iter->second;
-            std::sort(child_ids.begin(), child_ids.end());
+            std::ranges::sort(child_ids);
             for (int childId : child_ids) {
                 traverse(childId, children_map, table_map, output);
             }
@@ -406,22 +407,22 @@ namespace springtail::pg_fdw {
                     int parent = obj["parent_table_id"].get<int>();
 
                     // Only link to parent if it exists in the JSON (Case B rule)
-                    if (table_map.count(parent)) {
+                    if (table_map.contains(parent)) {
                         parent_map[tid] = parent;
                         auto &vec = children_map[parent];
-                        if (std::find(vec.begin(), vec.end(), tid) == vec.end()) {
+                        if (std::ranges::find(vec, tid) == vec.end()) {
                             vec.push_back(tid);
                         }
                     } else {
                         // Parent missing -> treat as root
-                        if (std::find(roots.begin(), roots.end(), tid) == roots.end()) {
+                        if (std::ranges::find(roots, tid) == roots.end()) {
                             roots.push_back(tid);
                         }
                         LOG_INFO("[WARN] Parent {} not found in JSON, treating {} as root", parent, tid);
                     }
                 } else {
                     // Root table, i.e., doesn't have a parent table id
-                    if (std::find(roots.begin(), roots.end(), tid) == roots.end()) {
+                    if (std::ranges::find(roots, tid) == roots.end()) {
                         roots.push_back(tid);
                     }
                 }
@@ -437,15 +438,13 @@ namespace springtail::pg_fdw {
         }
 
         // Also detect roots as those without parent
-        for (auto &[tid, _] : table_map) {
-            if (!parent_map.count(tid)) {
-                if (std::find(roots.begin(), roots.end(), tid) == roots.end()) {
-                    roots.push_back(tid);
-                }
+        for (const auto &[tid, _] : table_map) {
+            if (!parent_map.contains(tid) && std::ranges::find(roots, tid) == roots.end()) {
+                roots.push_back(tid);
             }
         }
 
-        std::sort(roots.begin(), roots.end());
+        std::ranges::sort(roots);
 
         // Traverse hierarchy
         nlohmann::json sorted = nlohmann::json::array();
@@ -454,15 +453,15 @@ namespace springtail::pg_fdw {
         }
 
         // Combine passthrough + sorted
-        nlohmann::json final = nlohmann::json::array();
+        nlohmann::json sorted_ddls = nlohmann::json::array();
         for (const auto &obj : passthrough) {
-            final.push_back(obj);
+            sorted_ddls.push_back(obj);
         }
         for (const auto &obj : sorted) {
-            final.push_back(obj);
+            sorted_ddls.push_back(obj);
         }
 
-        return final;
+        return sorted_ddls;
     }
 
     void
