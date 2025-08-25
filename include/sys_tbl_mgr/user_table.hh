@@ -61,6 +61,10 @@ namespace springtail {
             MutableTable(db_id, table_id, access_xid, target_xid, table_base, primary_key,
                          secondary, metadata, schema, for_gc) {}
 
+        /**
+         * Truncates the table, removing the callback of any mutated pages in the cache, clearing
+         * all of the indexes, and marking the roots to be cleared in the system tables.
+         */
         virtual void truncate() override
         {
             // remove any dirty cached pages for this table since they don't need to be written
