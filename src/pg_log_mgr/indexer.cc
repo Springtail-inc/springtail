@@ -1,11 +1,13 @@
 #include <mutex>
 #include <stop_token>
 #include <algorithm>
-#include <pg_log_mgr/indexer.hh>
+
 #include <common/logging.hh>
 #include <common/properties.hh>
-#include <sys_tbl_mgr/table_mgr.hh>
+#include <pg_log_mgr/indexer.hh>
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/schema_mgr.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 
 namespace springtail::committer {
 
@@ -26,7 +28,7 @@ namespace springtail::committer {
         // Set counter for XID for ddls
         _xid_ddl_counter_map[xid].store(index_requests.size());
         for (auto const& index_request: index_requests) {
-            auto action = index_request.action();
+            auto &action = index_request.action();
             if (action == "create_index") {
                 build({db_id, xid, index_request});
             } else if (action == "drop_index") {

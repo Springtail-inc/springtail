@@ -89,13 +89,13 @@ target_link_libraries(springtail_pg_fdw
     PRIVATE springtail_common
     PRIVATE springtail_storage
     PRIVATE springtail_xid_mgr_client
-    PRIVATE springtail_sys_tbl_mgr
+    PRIVATE springtail_sys_tbl_mgr_client
     PRIVATE springtail_xid_collector_client
 )
 
 target_link_libraries(springtail_pg_ddl
     PUBLIC springtail_common
-    springtail_xid_mgr
+    PRIVATE springtail_xid_mgr
     PRIVATE Boost::thread
     nlohmann_json::nlohmann_json
     gRPC::grpc++
@@ -107,7 +107,7 @@ target_link_libraries(springtail_test_fdw
     springtail_pg
     springtail_common
     springtail_xid_mgr
-    springtail_sys_tbl_mgr
+    springtail_sys_tbl_mgr_client
     springtail_xid_collector_client
     PRIVATE Boost::thread
     nlohmann_json::nlohmann_json
@@ -137,6 +137,7 @@ target_include_directories(pg_xid_subscriber_daemon
 target_link_libraries(pg_xid_subscriber_daemon
     PRIVATE springtail_common
     PRIVATE springtail_pg
+    PRIVATE springtail_sch_mem_cache
     PRIVATE springtail_xid_mgr_client
     PRIVATE Boost::program_options
 )
@@ -170,17 +171,17 @@ set(END_GROUP "")
 endif()
 
 target_link_libraries(dump_table
-     PRIVATE springtail_test_fdw
-     PRIVATE springtail_xid_collector_client
-     PRIVATE springtail_pg
-     PRIVATE springtail_common
-     PRIVATE springtail_storage
-     PRIVATE springtail_sys_tbl_mgr
-     PRIVATE springtail_xid_mgr
-     PRIVATE Boost::program_options
-     PRIVATE ${START_GROUP}
-         ${POSTGRES_DEP_LIBS}
-     ${END_GROUP}
+    PRIVATE springtail_test_fdw
+    PRIVATE springtail_xid_collector_client
+    PRIVATE springtail_pg
+    PRIVATE springtail_common
+    PRIVATE springtail_storage
+    PRIVATE springtail_sys_tbl_mgr_client
+    PRIVATE springtail_xid_mgr
+    PRIVATE Boost::program_options
+    PRIVATE ${START_GROUP}
+        ${POSTGRES_DEP_LIBS}
+    ${END_GROUP}
 )
 add_dsymutil_command(dump_table)
 
@@ -192,7 +193,7 @@ target_include_directories(where
 target_link_libraries(where
     PRIVATE springtail_common
     PRIVATE springtail_storage
-    PRIVATE springtail_sys_tbl_mgr
+    PRIVATE springtail_sys_tbl_mgr_client
     PRIVATE ${START_GROUP}
         ${POSTGRES_DEP_LIBS}
     ${END_GROUP}
@@ -220,7 +221,6 @@ springtail_unit_test(test_xid_subscriber
   LIBS springtail_pg
        springtail_common
        springtail_test
-       springtail_sys_tbl_mgr
        ${START_GROUP}
          ${POSTGRES_DEP_LIBS}
        ${END_GROUP}
@@ -282,7 +282,6 @@ springtail_unit_test(test_pg_fdw_common
     LIBS springtail_pg
          springtail_common
          springtail_test
-         springtail_sys_tbl_mgr
          GTest::gtest_main
 )
 
