@@ -9,7 +9,7 @@
 using namespace springtail;
 using namespace springtail::test;
 
-FSCheck::FSCheck(uint64_t max_xid) : _max_xid(max_xid)
+FSCheck::FSCheck(uint64_t max_xid, bool all_xids) : _max_xid(max_xid), _all_xids(all_xids)
 {
     // get all database ids
     _databases = Properties::get_databases();
@@ -364,10 +364,10 @@ FSCheck::_read_database_info(uint64_t db_id, uint64_t max_xid)
 }
 
 void
-FSCheck::check_dbs(bool all_xids)
+FSCheck::check_dbs()
 {
     uint64_t first_xid = 1;
-    if (!all_xids) {
+    if (!_all_xids) {
         first_xid = _max_xid;
     }
 
@@ -378,10 +378,10 @@ FSCheck::check_dbs(bool all_xids)
 }
 
 void
-FSCheck::check_db(uint64_t db_id, bool all_xids)
+FSCheck::check_db(uint64_t db_id)
 {
     uint64_t first_xid = 1;
-    if (!all_xids) {
+    if (!_all_xids) {
         first_xid = _max_xid;
     }
 
@@ -401,7 +401,7 @@ FSCheck::_check_db(uint64_t db_id, uint64_t first_xid, uint64_t cutoff_xid)
         LOG_INFO("Verifying database {}:{} iteration max_xid = {}",
             db_id, db_name, max_xid);
         _read_database_info(db_id, max_xid);
-        if (_max_recorded_xid < max_xid) {
+        if (_all_xids && _max_recorded_xid < max_xid) {
             break;
         }
 
@@ -410,7 +410,8 @@ FSCheck::_check_db(uint64_t db_id, uint64_t first_xid, uint64_t cutoff_xid)
             LOG_INFO("Verifying table {}:{}:{}", it->first.first, it->first.second, it->second.name);
             _check_db_table(db_id, db_name, it->second);
         }
-        if (max_xid == _max_xid) {
+
+        if (!_all_xids) {
             break;
         }
     }

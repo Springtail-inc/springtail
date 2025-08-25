@@ -24,8 +24,8 @@ main(int argc, char *argv[])
     // no logging
     springtail_init(false, std::nullopt, LOG_NONE);
 
-    auto fs_check = std::make_shared<test::FSCheck>(max_xid);
-    fs_check->check_dbs(all_xids);
+    auto fs_check = std::make_shared<test::FSCheck>(max_xid, all_xids);
+    fs_check->check_dbs();
     fs_check.reset();
 
     springtail_shutdown();

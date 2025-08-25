@@ -10,25 +10,23 @@ namespace springtail::test {
     class FSCheck
     {
     public:
-        explicit FSCheck(uint64_t max_xid = constant::LATEST_XID);
+        explicit FSCheck(uint64_t max_xid = constant::LATEST_XID, bool all_xids = false);
         ~FSCheck() = default;
 
         /**
          * @brief Check all databases
          *
-         * @param all_xids - check all available xids
          */
         void
-        check_dbs(bool all_xids = false);
+        check_dbs();
 
         /**
          * @brief Check given database
          *
          * @param db_id - database id
-         * @param all_xids - check all available xids
          */
         void
-        check_db(uint64_t db_id, bool all_xids = false);
+        check_db(uint64_t db_id);
 
         /**
          * @brief Check given table in the given database
@@ -45,7 +43,8 @@ namespace springtail::test {
         std::map<uint64_t, uint64_t> _db_id_to_cutoff_xid;  ///< cuttoff xid per database
         std::filesystem::path _table_base;              ///< directory where all the tables are stored
         uint64_t _max_xid;                              ///< maximum xid
-        uint64_t _max_recorded_xid{0};
+        uint64_t _max_recorded_xid{0};                  ///< maximum xid found in system tables
+        bool _all_xids;                                 ///< iterate over all xids
 
         /**
          * @brief Storage for namespace data
