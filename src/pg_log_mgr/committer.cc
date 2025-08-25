@@ -5,6 +5,7 @@
 #include <proto/pg_copy_table.pb.h>
 #include <redis/db_state_change.hh>
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/schema_mgr.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <write_cache/write_cache_func.hh>
 #include <xid_mgr/xid_mgr_server.hh>
@@ -492,7 +493,7 @@ namespace springtail::committer {
             }
 
             // process each extent of ordered mutations
-            for (auto wc_extent : extent_list) {
+            for (auto &wc_extent : extent_list) {
                 // update the coordinator
                 Coordinator::mark_alive(keep_alive);
 

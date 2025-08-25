@@ -103,16 +103,6 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base,
         TableMgr();
         ~TableMgr() override = default;
 
-        /**
-         * Construct a system table.
-         */
-        TablePtr _get_system_table(uint64_t db_id, uint64_t table_id, uint64_t xid);
-
-        /**
-         * Construct a mutable system table.
-         */
-        MutableTablePtr _get_mutable_system_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid);
-
         boost::shared_mutex _mutex; ///< Protects access to the table manager.
         std::filesystem::path _table_base; ///< The base directory for individual table directories.
     };
