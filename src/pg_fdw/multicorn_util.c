@@ -424,7 +424,6 @@ makeQual(AttrNumber varattno, char *opname, Expr *value, bool isarray,
             qual->right_type = T_Param;
             qual->typeoid = ((Param *) value)->paramtype;
             ((ParamQual *) qual)->expr = value;
-            qual->typeoid = InvalidOid;
             break;
     }
     qual->varattno = varattno;
