@@ -1,5 +1,6 @@
 #include <common/json.hh>
 #include <common/properties.hh>
+#include <storage/vacuumer.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 
 #include <test/file_system_check.hh>
@@ -8,7 +9,7 @@
 using namespace springtail;
 using namespace springtail::test;
 
-FSCheck::FSCheck()
+FSCheck::FSCheck(uint64_t max_xid, bool all_xids) : _max_xid(max_xid), _all_xids(all_xids)
 {
     // get all database ids
     _databases = Properties::get_databases();
@@ -17,11 +18,17 @@ FSCheck::FSCheck()
     nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
     Json::get_to<std::filesystem::path>(json, "table_dir", _table_base);
     _table_base = Properties::make_absolute_path(_table_base);
-    LOG_INFO("Verifying tables at table_base = {}", _table_base.string());
+    LOG_INFO("Verifying tables at table_base = {}, max_xid = {}", _table_base.string(), _max_xid);
 
-    for (auto [db_id, db_name]: _databases) {
-        _read_namespaces(db_id);
-        _read_tables(db_id);
+    bool vacuumer_enabled = Vacuumer::get_instance()->is_enabled();
+    for (const auto &[db_id, db_name]: _databases) {
+        uint64_t cutoff_xid = 0;
+        if (vacuumer_enabled) {
+            cutoff_xid = Vacuumer::get_instance()->get_last_seen_cutoff_xid(db_id);
+        }
+        if (!vacuumer_enabled || _max_xid >= cutoff_xid) {
+            _db_id_to_cutoff_xid.insert(std::make_pair(db_id, cutoff_xid));
+        }
     }
 }
 
@@ -71,7 +78,7 @@ FSCheck::_get_table_and_fields(uint64_t db_id)
 }
 
 void
-FSCheck::_read_namespaces(uint64_t db_id)
+FSCheck::_read_namespaces(uint64_t db_id, uint64_t max_xid)
 {
     LOG_INFO("Namespaces for db {}", db_id);
     auto [table, fields] = _get_table_and_fields<sys_tbl::NamespaceNames>(db_id);
@@ -83,6 +90,11 @@ FSCheck::_read_namespaces(uint64_t db_id)
         uint64_t lsn = fields->at(sys_tbl::NamespaceNames::Data::LSN)->get_uint64(&row);
         bool exists = fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(&row);
         LOG_INFO("\tNamespace {}:{}", ns_id, name);
+        _record_max_xid(xid);
+
+        if (xid > max_xid) {
+            break;
+        }
 
         if (!exists) {
             _db_ns_id_map.erase(std::make_pair(db_id, ns_id));
@@ -94,7 +106,7 @@ FSCheck::_read_namespaces(uint64_t db_id)
 }
 
 void
-FSCheck::_read_tables(uint64_t db_id)
+FSCheck::_read_tables(uint64_t db_id, uint64_t max_xid)
 {
     LOG_INFO("Tables for db {}", db_id);
     auto [table, fields] = _get_table_and_fields<sys_tbl::TableNames>(db_id);
@@ -107,12 +119,19 @@ FSCheck::_read_tables(uint64_t db_id)
         uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(&row);
         uint64_t lsn = fields->at(sys_tbl::TableNames::Data::LSN)->get_uint64(&row);
         bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(&row);
+        _record_max_xid(xid);
+
+        if (xid > max_xid) {
+            break;
+        }
+
         if (!exists) {
             _db_tbl_id_map.erase(std::pair(db_id, table_id));
+            LOG_INFO("Removed table: db_id {}, namespace_id {}, table_id {}, xid {}", db_id, ns_id, table_id, xid);
         } else {
             FSTable table_data{ns_id, name, table_id, xid, lsn, exists};
             _db_tbl_id_map[std::make_pair(db_id, table_id)] = table_data;
-            LOG_INFO("Added table: db_id {}, namespace_id {}, table_id {}", db_id, ns_id, table_id);
+            LOG_INFO("Added table: db_id {}, namespace_id {}, table_id {}, xid {}", db_id, ns_id, table_id, xid);
         }
         LOG_INFO("Table {}:{}", table_id, name);
     }
@@ -121,40 +140,50 @@ FSCheck::_read_tables(uint64_t db_id)
     for (auto it = _db_tbl_id_map.lower_bound(std::make_pair(db_id, 0));
             it != _db_tbl_id_map.end() && it->first.first == db_id; ++it) {
         uint64_t table_id_key = it->second.table_id;
+        uint64_t table_xid = it->second.xid;
 
         // 3. read all columns per table and filter out existing columns
         {
+            LOG_INFO("Getting columns for table {}:{}, xid {}", table_id_key, it->second.name, it->second.xid);
             std::map<uint32_t, SchemaColumn> pos_to_column;
-            auto [table, fields] = _get_table_and_fields<sys_tbl::Schemas>(db_id);
+            auto [schema_table, schema_fields] = _get_table_and_fields<sys_tbl::Schemas>(db_id);
             auto search_key = sys_tbl::Schemas::Primary::key_tuple(table_id_key, 0, 0, 0);
-            auto table_iter = table->lower_bound(search_key);
-            for (; table_iter != table->end(); ++table_iter) {
+            auto table_iter = schema_table->lower_bound(search_key);
+            for (; table_iter != schema_table->end(); ++table_iter) {
                 auto &row = *table_iter;
                 uint64_t table_id = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(&row);
                 if (table_id != table_id_key) {
                     break;
                 }
-                uint32_t position = fields->at(sys_tbl::Schemas::Data::POSITION)->get_uint32(&row);
-                uint64_t xid = fields->at(sys_tbl::Schemas::Data::XID)->get_uint64(&row);
-                uint64_t lsn = fields->at(sys_tbl::Schemas::Data::LSN)->get_uint64(&row);
-                bool exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(&row);
-                std::string name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(&row));
-                uint8_t type = fields->at(sys_tbl::Schemas::Data::TYPE)->get_uint8(&row);
-                uint32_t pg_type = fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(&row);
-                bool nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(&row);
+                uint32_t position = schema_fields->at(sys_tbl::Schemas::Data::POSITION)->get_uint32(&row);
+                uint64_t xid = schema_fields->at(sys_tbl::Schemas::Data::XID)->get_uint64(&row);
+                uint64_t lsn = schema_fields->at(sys_tbl::Schemas::Data::LSN)->get_uint64(&row);
+                bool exists = schema_fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(&row);
+                std::string name(schema_fields->at(sys_tbl::Schemas::Data::NAME)->get_text(&row));
+                uint8_t type = schema_fields->at(sys_tbl::Schemas::Data::TYPE)->get_uint8(&row);
+                uint32_t pg_type = schema_fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(&row);
+                bool nullable = schema_fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(&row);
                 std::optional<std::string> default_value;
-                if (!fields->at(sys_tbl::Schemas::Data::DEFAULT)->is_null(&row)) {
-                    default_value = fields->at(sys_tbl::Schemas::Data::DEFAULT)->get_text(&row);
+                if (!schema_fields->at(sys_tbl::Schemas::Data::DEFAULT)->is_null(&row)) {
+                    default_value = schema_fields->at(sys_tbl::Schemas::Data::DEFAULT)->get_text(&row);
                 }
-                uint8_t update_type = fields->at(sys_tbl::Schemas::Data::UPDATE_TYPE)->get_uint8(&row);
+                uint8_t update_type = schema_fields->at(sys_tbl::Schemas::Data::UPDATE_TYPE)->get_uint8(&row);
+                _record_max_xid(xid);
+
+                if (xid < table_xid || xid > max_xid) {
+                    continue;
+                }
+
                 if (!exists) {
                     pos_to_column.erase(position);
+                    LOG_INFO("\tRemoved column: db_id {}, table_id {}, xid {}, name '{}'", db_id, table_id, xid, name);
                 } else {
                     std::optional<uint32_t> pk_position;
                     SchemaColumn column(xid, lsn, name, position, static_cast<SchemaType>(type), pg_type, exists, nullable,
                                         pk_position, default_value);
                     column.update_type = static_cast<SchemaUpdateType>(update_type);
                     pos_to_column[position] = column;
+                    LOG_INFO("\tAdded column: db_id {}, table_id {}, xid {}, name '{}'", db_id, table_id, xid, name);
                 }
             }
 
@@ -164,26 +193,35 @@ FSCheck::_read_tables(uint64_t db_id)
 
         // 5. read all indexes in READY state for this table and filter out columns
         {
+            LOG_INFO("Getting indexes for table {}:{}, xid {}", table_id_key, it->second.name, it->second.xid);
             std::map<uint64_t, FSIndex> id_to_index;
-            auto [table, fields] = _get_table_and_fields<sys_tbl::IndexNames>(db_id);
+            auto [index_table, index_fields] = _get_table_and_fields<sys_tbl::IndexNames>(db_id);
             auto search_key = sys_tbl::IndexNames::Primary::key_tuple(table_id_key, 0, 0, 0);
-            auto table_iter = table->lower_bound(search_key);
-            for (; table_iter != table->end(); ++table_iter) {
+            auto table_iter = index_table->lower_bound(search_key);
+            for (; table_iter != index_table->end(); ++table_iter) {
                 auto &row = *table_iter;
-                uint64_t table_id = fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(&row);
+                uint64_t table_id = index_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(&row);
                 if (table_id != table_id_key) {
                     break;
                 }
-                uint64_t index_id = fields->at(sys_tbl::IndexNames::Data::INDEX_ID)->get_uint64(&row);
-                uint64_t xid = fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(&row);
-                uint64_t lsn = fields->at(sys_tbl::IndexNames::Data::LSN)->get_uint64(&row);
-                uint64_t namespace_id = fields->at(sys_tbl::IndexNames::Data::NAMESPACE_ID)->get_uint64(&row);
-                std::string name(fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(&row));
-                uint8_t state = fields->at(sys_tbl::IndexNames::Data::STATE)->get_uint8(&row);
-                bool is_unique = fields->at(sys_tbl::IndexNames::Data::IS_UNIQUE)->get_bool(&row);
+                uint64_t index_id = index_fields->at(sys_tbl::IndexNames::Data::INDEX_ID)->get_uint64(&row);
+                uint64_t xid = index_fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(&row);
+                uint64_t lsn = index_fields->at(sys_tbl::IndexNames::Data::LSN)->get_uint64(&row);
+                uint64_t namespace_id = index_fields->at(sys_tbl::IndexNames::Data::NAMESPACE_ID)->get_uint64(&row);
+                std::string name(index_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(&row));
+                uint8_t state = index_fields->at(sys_tbl::IndexNames::Data::STATE)->get_uint8(&row);
+                bool is_unique = index_fields->at(sys_tbl::IndexNames::Data::IS_UNIQUE)->get_bool(&row);
+                _record_max_xid(xid);
+
+                if (xid < table_xid || xid > max_xid) {
+                    continue;
+                }
+
                 if (static_cast<sys_tbl::IndexNames::State>(state) != sys_tbl::IndexNames::State::READY) {
                     id_to_index.erase(index_id);
+                    LOG_INFO("\tRemoved index: index_id {}, xid {}, name '{}', state {}", index_id, xid, name, state);
                 } else {
+                    LOG_INFO("\tAdding index: index_id {}, xid {}, name '{}'", index_id, xid, name);
                     std::string schema_name = _db_ns_id_map.at(std::make_pair(db_id, namespace_id)).ns_name;
                     FSIndex fs_index{xid, lsn, {index_id, schema_name, name, table_id, is_unique, state}};
 
@@ -205,12 +243,14 @@ FSCheck::_read_tables(uint64_t db_id)
                         uint32_t position = idx_fields->at(sys_tbl::Indexes::Data::POSITION)->get_uint32(&idx_row);
                         uint32_t column_id = idx_fields->at(sys_tbl::Indexes::Data::COLUMN_ID)->get_uint32(&idx_row);
                         columns[position] = column_id;
+                        LOG_INFO("\t\tAdding index column: index_id {}, index_xid {}, position = {}, column_id {}", index_id, idx_xid, position, column_id);
                     }
-                    for (auto col_iter: columns) {
-                        Index::Column column{col_iter.first, col_iter.second};
+                    for (const auto &[idx_position, col_position]: columns) {
+                        Index::Column column{idx_position, col_position};
                         fs_index.index.columns.push_back(column);
                     }
                     id_to_index[index_id] = fs_index;
+                    LOG_INFO("\tAdded index: index_id {}, xid {}, name '{}'", index_id, xid, name);
                 }
             }
 
@@ -218,9 +258,9 @@ FSCheck::_read_tables(uint64_t db_id)
             _db_tbl_id_map.at(std::make_pair(db_id, table_id_key)).id_to_index = id_to_index;
 
             // 7. read all roots per index and set primary key positions
-            for (auto idx_iter: id_to_index) {
-                uint64_t index_id = idx_iter.first;
-                FSIndex fs_index = idx_iter.second;
+            LOG_INFO("Getting roots for table {}:{}, xid {}", table_id_key, it->second.name, it->second.xid);
+            for (const auto &[index_id, fs_index]: id_to_index) {
+                LOG_INFO("\tGetting roots for index {}", index_id);
 
                 // 8. set primary key positions in the table
                 if (index_id == constant::INDEX_PRIMARY) {
@@ -244,34 +284,61 @@ FSCheck::_read_tables(uint64_t db_id)
                     uint64_t root_xid = root_fields->at(sys_tbl::TableRoots::Data::XID)->get_uint64(&root_row);
                     uint64_t root_extent_id = root_fields->at(sys_tbl::TableRoots::Data::EXTENT_ID)->get_uint64(&root_row);
                     uint64_t root_snapshot_xid = root_fields->at(sys_tbl::TableRoots::Data::SNAPSHOT_XID)->get_uint64(&root_row);
+                    _record_max_xid(root_xid);
+                    _record_max_xid(root_snapshot_xid);
+
+                    if (root_xid < table_xid) {
+                        continue;
+                    }
+
+                    if (root_xid > max_xid) {
+                        break;
+                    }
+
                     FSRoot root{root_xid, root_extent_id, root_snapshot_xid};
                     roots.push_back(root);
+                    LOG_INFO("\t\tAdded root for root_xid {}, extent_id {}, snapshot_xid {}", root_xid, root_extent_id, root_snapshot_xid);
                 }
 
                 // 10. set the roots in the table
                 for (auto root: roots) {
-                    _db_tbl_id_map.at(std::make_pair(db_id, table_id_key)).index_xid_to_root.insert(std::make_pair(std::make_pair(index_id, root.xid), root));
+                    _db_tbl_id_map.at(std::make_pair(db_id, table_id_key))
+                        .index_xid_to_root
+                        .try_emplace({index_id, root.xid}, root);
                 }
             }
         }
 
-        // 10. read all stats for this table
+        // 11. read all stats for this table
         {
+            LOG_INFO("Getting stats for table {}:{}, xid {}", table_id_key, it->second.name, it->second.xid);
             std::map<uint64_t, FSStats> xid_to_stats;
-            auto [table, fields] = _get_table_and_fields<sys_tbl::TableStats>(db_id);
+
+            auto [stats_table, stats_fields] = _get_table_and_fields<sys_tbl::TableStats>(db_id);
             auto search_key = sys_tbl::TableStats::Primary::key_tuple(table_id_key, 0);
-            auto table_iter = table->lower_bound(search_key);
-            for (; table_iter != table->end(); ++table_iter) {
+            auto table_iter = stats_table->lower_bound(search_key);
+            for (; table_iter != stats_table->end(); ++table_iter) {
                 auto &row = *table_iter;
-                uint64_t table_id = fields->at(sys_tbl::TableStats::Data::TABLE_ID)->get_uint64(&row);
+                uint64_t table_id = stats_fields->at(sys_tbl::TableStats::Data::TABLE_ID)->get_uint64(&row);
                 if (table_id != table_id_key) {
                     break;
                 }
-                uint64_t xid = fields->at(sys_tbl::TableStats::Data::XID)->get_uint64(&row);
-                uint64_t row_count = fields->at(sys_tbl::TableStats::Data::ROW_COUNT)->get_uint64(&row);
-                uint64_t end_offset = fields->at(sys_tbl::TableStats::Data::END_OFFSET)->get_uint64(&row);
+                uint64_t xid = stats_fields->at(sys_tbl::TableStats::Data::XID)->get_uint64(&row);
+                uint64_t row_count = stats_fields->at(sys_tbl::TableStats::Data::ROW_COUNT)->get_uint64(&row);
+                uint64_t end_offset = stats_fields->at(sys_tbl::TableStats::Data::END_OFFSET)->get_uint64(&row);
+                _record_max_xid(xid);
+
+                if (xid < table_xid) {
+                    continue;
+                }
+
+                if (xid > max_xid) {
+                    break;
+                }
+
                 FSStats stats{xid, row_count, end_offset};
                 xid_to_stats[xid] = stats;
+                LOG_INFO("\tAdded stats for xid {}, row_count {}, end_offser {}", xid, row_count, end_offset);
             }
             _db_tbl_id_map.at(std::make_pair(db_id, table_id_key)).xid_to_stats = xid_to_stats;
         }
@@ -279,49 +346,106 @@ FSCheck::_read_tables(uint64_t db_id)
 }
 
 void
+FSCheck::_record_max_xid(uint64_t xid)
+{
+    if (xid > _max_recorded_xid) {
+        _max_recorded_xid = xid;
+    }
+}
+
+void
+FSCheck::_read_database_info(uint64_t db_id, uint64_t max_xid)
+{
+    _max_recorded_xid = 0;
+    _db_ns_id_map.clear();
+    _db_tbl_id_map.clear();
+    _read_namespaces(db_id, max_xid);
+    _read_tables(db_id, max_xid);
+}
+
+void
 FSCheck::check_dbs()
 {
-    // iterate over databases
-    for (const auto &db_id_name: _databases) {
-        uint64_t db_id = db_id_name.first;
-        const std::string &db_name = db_id_name.second;
+    uint64_t first_xid = 1;
+    if (!_all_xids) {
+        first_xid = _max_xid;
+    }
 
-        LOG_INFO("Verifying database {}:{}", db_id, db_name);
-        _check_db(db_id, db_name);
+    // iterate over databases
+    for (const auto &[db_id, cutoff_xid]: _db_id_to_cutoff_xid) {
+        _check_db(db_id, first_xid, cutoff_xid);
     }
 }
 
 void
 FSCheck::check_db(uint64_t db_id)
 {
-    const std::string &db_name = _databases.at(db_id);
-    LOG_INFO("Verifying database {}:{}", db_id, db_name);
-    _check_db(db_id, db_name);
+    uint64_t first_xid = 1;
+    if (!_all_xids) {
+        first_xid = _max_xid;
+    }
+
+    uint64_t cutoff_xid = _db_id_to_cutoff_xid.at(db_id);
+    _check_db(db_id, first_xid, cutoff_xid);
 }
 
 void
-FSCheck::_check_db(uint64_t db_id, const std::string &db_name)
+FSCheck::_check_db(uint64_t db_id, uint64_t first_xid, uint64_t cutoff_xid)
 {
-    for (auto it = _db_tbl_id_map.lower_bound(std::make_pair(db_id, 0));
-            it != _db_tbl_id_map.end() && it->first.first == db_id; ++it) {
-        LOG_INFO("Verifying table {}:{}:{}", it->first.first, it->first.second, it->second.name);
+    const std::string &db_name = _databases.at(db_id);
+    LOG_INFO("Verifying database {}:{} with first_xid = {} and cuttoff_xid = {}",
+            db_id, db_name, first_xid, cutoff_xid);
+
+    uint64_t start_xid = (first_xid < cutoff_xid)? cutoff_xid : first_xid;
+    for (uint64_t max_xid = start_xid; max_xid <= _max_xid; ++max_xid) {
+        LOG_INFO("Verifying database {}:{} iteration max_xid = {}",
+            db_id, db_name, max_xid);
+        _read_database_info(db_id, max_xid);
+        if (_all_xids && _max_recorded_xid < max_xid) {
+            break;
+        }
+
+        for (auto it = _db_tbl_id_map.lower_bound(std::make_pair(db_id, 0));
+                it != _db_tbl_id_map.end() && it->first.first == db_id; ++it) {
+            LOG_INFO("Verifying table {}:{}:{}", it->first.first, it->first.second, it->second.name);
+            _check_db_table(db_id, db_name, it->second);
+        }
+
+        if (!_all_xids) {
+            break;
+        }
+    }
+}
+
+void
+FSCheck::check_db_table(uint64_t db_id, uint64_t table_id, bool all_xids)
+{
+    uint64_t first_xid = 1;
+    if (!all_xids) {
+        first_xid = _max_xid;
+    }
+
+    uint64_t cutoff_xid = _db_id_to_cutoff_xid.at(db_id);
+    const std::string &db_name = _databases.at(db_id);
+    LOG_INFO("Verifying database {}:{} table {} with first_xid = {} and cuttoff_xid = {}",
+        db_id, db_name, table_id, first_xid, cutoff_xid);
+    uint64_t start_xid = (first_xid < cutoff_xid)? cutoff_xid : first_xid;
+    for (uint64_t max_xid = start_xid; max_xid < _max_xid; ++max_xid) {
+        LOG_INFO("Verifying database {}:{} table {} iteration max_xid = {}",
+            db_id, db_name, table_id, max_xid);
+        _read_database_info(db_id, max_xid);
+        if (_max_recorded_xid < max_xid) {
+            break;
+        }
+
+        std::pair<uint64_t, uint64_t> key = std::make_pair(db_id, table_id);
+        auto it = _db_tbl_id_map.lower_bound(key);
+        if (it == _db_tbl_id_map.end() || it->first != key) {
+            LOG_ERROR("Database {}:{}: table {} is not found", db_id, db_name, table_id);
+            CHECK(false);
+        }
         _check_db_table(db_id, db_name, it->second);
     }
-}
-
-void
-FSCheck::check_db_table(uint64_t db_id, uint64_t table_id)
-{
-    const std::string &db_name = _databases.at(db_id);
-    LOG_INFO("Verifying database {}:{} for table {}", db_id, db_name, table_id);
-
-    std::pair<uint64_t, uint64_t> key = std::make_pair(db_id, table_id);
-    auto it = _db_tbl_id_map.lower_bound(key);
-    if (it == _db_tbl_id_map.end() || it->first != key) {
-        LOG_ERROR("Database {}:{}: table {} is not found", db_id, db_name, table_id);
-        CHECK(false);
-    }
-    _check_db_table(db_id, db_name, it->second);
 }
 
 void
@@ -353,15 +477,15 @@ FSCheck::_validate_primary_extent(std::shared_ptr<Table> table, ExtentSchemaPtr 
     }
 
     // Verify extents for the primary key
-    BTree::Iterator btree_iter = table_btree->begin();
+    auto btree_iter = table_btree->begin();
     while(btree_iter != table_btree->end()) {
         const Extent::Row &btree_row = *btree_iter;
         uint64_t extent_id = extent_id_field->get_uint64(&btree_row);
-        LOG_INFO("\tVerifying extent_id = {}", extent_id);
+        LOG_INFO("\t\tVerifying extent_id = {}", extent_id);
 
         StorageCache::SafePagePtr page = table->read_page(extent_id);
         StorageCache::Page::Iterator page_iter = page->last();
-        Extent::Row table_extent_last_row = *(page_iter);
+        Extent::Row table_extent_last_row = *page_iter;
         if (table->has_primary()) {
             FieldTuple key_tuple(key_fields, &btree_row);
             FieldTuple table_extent_last_row_tuple(table_key_fields, &table_extent_last_row);
@@ -392,9 +516,9 @@ FSCheck::_validate_secondary_extents(std::shared_ptr<Table> table, ExtentSchemaP
         FieldArrayPtr key_fields = index_btree_schema->get_sort_fields();
         LOG_INFO("\tSecondary index: schema size {}, fields size {}", index_btree_schema->get_sort_keys().size(), key_fields->size());
 
-        // Verify extents for the primary key
+        // Verify extents for the secondary key
         std::set<uint64_t> extent_set;
-        BTree::Iterator btree_iter = table_btree->begin();
+        auto btree_iter = table_btree->begin();
         while(btree_iter != table_btree->end()) {
             const Extent::Row &btree_row = *btree_iter;
             uint64_t extent_id = extent_id_field->get_uint64(&btree_row);
@@ -402,14 +526,14 @@ FSCheck::_validate_secondary_extents(std::shared_ptr<Table> table, ExtentSchemaP
             extent_set.insert(extent_id);
 
             StorageCache::SafePagePtr page = table->read_page(extent_id);
-            StorageCache::Page::Iterator page_iter = page->begin();
+            auto page_iter = page->begin();
             page_iter += row_id;
-            Extent::Row table_extent_row = *(page_iter);
+            Extent::Row table_extent_row = *page_iter;
 
-            std::shared_ptr<FieldTuple> key_tuple = std::make_shared<FieldTuple>(key_fields, &btree_row);
+            auto key_tuple = std::make_shared<FieldTuple>(key_fields, &btree_row);
             auto btree_keys = index_btree_schema->tuple_subset(key_tuple, index_table_cols);
 
-            std::shared_ptr<FieldTuple> table_extent_row_tuple = std::make_shared<FieldTuple>(table_fields, &table_extent_row);
+            auto table_extent_row_tuple = std::make_shared<FieldTuple>(table_fields, &table_extent_row);
             auto table_keys = table_schema->tuple_subset(table_extent_row_tuple, index_table_cols);
             CHECK(btree_keys->size() == table_keys->size());
             CHECK(table_keys->equal_prefix(*btree_keys));
@@ -436,8 +560,7 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
 
     // 2. Verify column xids
     std::vector<SchemaColumn> columns;
-    for (auto col_it: fs_table.pos_to_column) {
-        const struct SchemaColumn column = col_it.second;
+    for (const auto &[pos, column]: fs_table.pos_to_column) {
         LOG_INFO("\tVerifying Column {}:{}, type {}, pg_type {}, nullable {}, pkey_position {}, default: {}",
             column.position, column.name, to_string(column.type), column.pg_type, column.nullable,
             (column.pkey_position.has_value())? column.pkey_position.value(): -1,
@@ -445,7 +568,7 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
         );
         CHECK(column.exists);
         CHECK(column.xid >= fs_table.xid);
-        columns.push_back(col_it.second);
+        columns.push_back(column);
     }
 
     // 3. Verify indexes xids and roots
@@ -454,9 +577,7 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
     uint64_t row_count = 0;
     uint64_t end_offset = 0;
     std::vector<Index> secondary_indexes;
-    for (auto idx_it: fs_table.id_to_index) {
-        uint64_t index_id = idx_it.first;
-        const struct FSIndex fs_index = idx_it.second;
+    for (const auto &[index_id, fs_index]: fs_table.id_to_index) {
         const struct Index index = fs_index.index;
         LOG_INFO("\tVerifying Index {}:{}:{}, is_unique {}, state {}",
             index.schema, index.id, index.name, index.is_unique, index.state
@@ -477,13 +598,11 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
                 ++idx_root_it ) {
             const struct FSRoot &root = idx_root_it->second;
             last_root = &(idx_root_it->second);
+            LOG_INFO("\t\tVerifying roots: root.xid = {}, fs_table.xid = {}", root.xid, fs_table.xid);
             CHECK(root.xid >= fs_table.xid);
-            if (root.extent_id != constant::UNKNOWN_EXTENT) {
-                // LOG_INFO("Looking for stats for root with data: {}:{}:{}", root.xid, root.extent_id, root.snapshot_xid);
-                auto stat_it = fs_table.xid_to_stats.find(root.xid);
-                CHECK(stat_it != fs_table.xid_to_stats.end());
-                last_stat = &(stat_it->second);
-            }
+            auto stat_it = fs_table.xid_to_stats.find(root.xid);
+            CHECK(stat_it != fs_table.xid_to_stats.end());
+            last_stat = &(stat_it->second);
         }
 
         if (last_root != nullptr) {
@@ -500,8 +619,10 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
         secondary_indexes.push_back(index);
     }
 
+    CHECK(root_sxid != constant::LATEST_XID);
+
     // 5. Create table
-    ExtentSchemaPtr schema = std::make_shared<ExtentSchema>(columns);
+    auto schema = std::make_shared<ExtentSchema>(columns);
     auto tbl_meta = std::make_shared<TableMetadata>();
     tbl_meta->roots = roots;
 
@@ -512,15 +633,12 @@ FSCheck::_check_db_table(uint64_t db_id, const std::string &db_name, const FSTab
     auto table = std::make_shared<Table>(db_id, fs_table.table_id, fs_table.xid, _table_base,
                                 schema->get_sort_keys(), secondary_indexes, *tbl_meta, schema);
 
-    LOG_INFO("\tTable dir: {}, row_count: {}, end_offset: {}, sxid: {}",
-            table->get_dir_path().c_str(), row_count, end_offset, root_sxid);
+    LOG_INFO("\tValidata Table indexes for table {}, dir: {}, row_count: {}, end_offset: {}, sxid: {}",
+            table->id(), table->get_dir_path().c_str(), row_count, end_offset, root_sxid);
 
-   // 6. Validate primary index extent
+    // 6. Validate primary index extent
     _validate_primary_extent(table, schema);
 
     // 7. Validate secondary index extent
     _validate_secondary_extents(table, schema);
-
-    // TODO: add validation of previous xid snapshot
-
 }
