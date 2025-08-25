@@ -1201,6 +1201,29 @@ namespace springtail::pg_fdw {
         // [(('id',),1,100)]
 
         for (auto const& idx: pg_state->indexes) {
+            // note: state->rows has taken quals into account in fdw_get_rel_size
+            auto rows = state->rows;
+
+            // The paths related to join clauses seem to be handled by PG 
+            // differently. For example, if there are no normal quals,
+            // it seems to be much better to give PG the full count of rows
+            // from fdw_get_rel_size and then create a low cost path for the join index.
+            // TODO: consider removing paths that are not present in baserel completely
+            // from fdw_get_path_keys.
+            //
+            // Only check the index to be join_indexes if it isn't already in quals
+            if (std::ranges::find(pg_state->qual_indexes, idx.id) == pg_state->qual_indexes.end() &&
+                std::ranges::find(pg_state->join_indexes, idx.id) != pg_state->join_indexes.end()) {
+                if (idx.is_unique) {
+                    rows = 1;
+                } else {
+                    rows /= 100;
+                    if (!rows) {
+                        rows = 2;
+                    }
+                }
+            }
+
             List      *attnums = NULL;
             List      *item = NULL;
             LOG_DEBUG(LOG_FDW, "adding index path: {}", idx.id);
@@ -1221,7 +1244,7 @@ namespace springtail::pg_fdw {
             }
 
             item = lappend(item, makeConst(INT8OID,
-                        -1, InvalidOid, 8, state->rows, false, true));
+                        -1, InvalidOid, 8, rows, false, true));
             item = lappend(item, makeConst(INT4OID,
                         -1, InvalidOid, 4, cost, false, true));
             result = lappend(result, item);
@@ -1231,7 +1254,7 @@ namespace springtail::pg_fdw {
     }
 
     void
-    PgFdwMgr::fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, double *rows, int *width)
+    PgFdwMgr::fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, List* join_quals, double *rows, int *width)
     {
         // fetch stats from state for row count
         PgFdwState *state = static_cast<PgFdwState *>(planstate->pg_fdw_state);
@@ -1246,21 +1269,35 @@ namespace springtail::pg_fdw {
             if (index_quals.size() == idx.columns.size() &&
                     // ... and all must be EQUALS
                 std::ranges::find_if(index_quals, [](const auto& v) {return v->base.op != EQUALS;}) == index_quals.end()) {
+                state->qual_indexes.push_back(idx.id);
 
                 if (!idx.is_unique) {
-                    // We don't know cardinality stats. Just set to a number that
-                    // is less than the total rows.
-                    *rows = *rows/10;
-                    if (*rows == 0) {
-                        *rows = 2;
+                    if (*rows >= state->stats.row_count) {
+                        // We don't know cardinality stats. Just set to a number that
+                        // is less than the total rows.
+                        *rows = *rows/10;
+                        if (*rows == 0) {
+                            *rows = 2;
+                        }
                     }
                 } else {
                     *rows = 1;
                 }
-                break;
             }
         }
         planstate->rows = *rows;
+
+        // Now let's see if we have joinable indexes, that are delayed.
+        for (auto const& idx: state->indexes) {
+            auto index_quals = _get_index_quals(state, idx, join_quals);
+            // check for the full match
+            if (index_quals.size() == idx.columns.size() &&
+                    // ... and all must be EQUALS
+                std::ranges::find_if(index_quals, [](const auto& v) {return v->base.op != EQUALS;}) == index_quals.end()) {
+
+                state->join_indexes.push_back(idx.id);
+            }
+        }
 
         // estimate width based on target list using most common types
         ListCell *lc;
@@ -1695,6 +1732,11 @@ namespace springtail::pg_fdw {
         // iterate over the user types table and populate the user type map
         for (auto row : (*table)) {
             auto type_ns_id = fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID)->get_uint64(&row);
+            auto xid = fields->at(sys_tbl::UserTypes::Data::XID)->get_uint64(&row);
+
+            if (xid > schema_xid) {
+                continue;
+            }
 
             // check for schema-namespace match
             if (type_ns_id != namespace_id) {
@@ -1827,6 +1869,8 @@ namespace springtail::pg_fdw {
                                 int idx,
                                 const ConstQual *qual)
     {
+        DCHECK(qual->base.right_type == T_Const);
+
         FieldArrayPtr fields = state->qual_fields;
 
         if (qual->isnull) {

@@ -222,14 +222,15 @@ static const std::map<ServiceId, std::vector<ServiceId>> dependencies = {
     {ServiceId::WriteCacheClientId,    {ServiceId::ServiceRegisterId, ServiceId::WriteCacheServerId}},
     {ServiceId::IOMgrId,               {ServiceId::ServiceRegisterId}},
     {ServiceId::VacuumerId,            {ServiceId::IOMgrId, ServiceId::XidMgrClientId}},
-    {ServiceId::SchemaMgrId,           {ServiceId::SysTblMgrClientId}},
-    {ServiceId::TableMgrId,            {ServiceId::IOMgrId, ServiceId::SchemaMgrId, ServiceId::StorageCacheId}},
+    {ServiceId::SchemaMgrId,           {ServiceId::SysTblMgrClientId, ServiceId::SystemTableMgrId}},
+    {ServiceId::TableMgrId,            {ServiceId::IOMgrId, ServiceId::SchemaMgrId, ServiceId::StorageCacheId, ServiceId::SystemTableMgrId}},
     {ServiceId::SyncTrackerId,         {ServiceId::ServiceRegisterId}},
     {ServiceId::PgFdwMgrId,            {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::TableMgrId}},
     {ServiceId::PgXidSubscriberMgrId,  {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::SysTblMgrClientId}},
     {ServiceId::PgDDLMgrId,            {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::TableMgrId}},
     {ServiceId::PgLogCoordinatorId,    {ServiceId::ServiceRegisterId, ServiceId::XidMgrClientId, ServiceId::WriteCacheServerId, ServiceId::TableMgrId}},
-    {ServiceId::StorageCacheId,        {ServiceId::IOMgrId, ServiceId::VacuumerId}}
+    {ServiceId::StorageCacheId,        {ServiceId::IOMgrId, ServiceId::VacuumerId}},
+    {ServiceId::SystemTableMgrId,      {ServiceId::StorageCacheId, ServiceId::IOMgrId}}
 };
 
 static const std::map<ServiceId, std::string> dependencies_names = {
@@ -252,7 +253,8 @@ static const std::map<ServiceId, std::string> dependencies_names = {
     {ServiceId::PgDDLMgrId,            "PgDDLMgr"},
     {ServiceId::PgLogCoordinatorId,    "PgLogCoordinator"},
     {ServiceId::StorageCacheId,        "StorageCache"},
-    {ServiceId::VacuumerId,            "Vacuumer"}
+    {ServiceId::VacuumerId,            "Vacuumer"},
+    {ServiceId::SystemTableMgrId,      "SystemTableMgr"}
 };
 
 std::vector<ServiceId>

@@ -64,42 +64,6 @@ namespace springtail {
 
         ~SchemaMgr() override = default;
 
-        /**
-         * A key for the system schema cache.
-         */
-        struct SystemKey {
-            uint64_t table_id;
-            uint64_t index_id;
-            bool is_leaf;
-
-            SystemKey(uint64_t t, uint64_t i, bool l)
-                : table_id(t),
-                  index_id(i),
-                  is_leaf(l)
-            { }
-
-            bool operator==(const SystemKey &other) const
-            {
-                return (table_id == other.table_id &&
-                        index_id == other.index_id &&
-                        is_leaf == other.is_leaf);
-            }
-
-            friend std::size_t hash_value(const SystemKey &k)
-            {
-                std::size_t seed = 0;
-
-                boost::hash_combine(seed, k.table_id);
-                boost::hash_combine(seed, k.index_id);
-                boost::hash_combine(seed, k.is_leaf);
-
-                return seed;
-            }
-        };
-
-        /** A map of fixed system schemas.  Maps from System Table ID to the ExtentSchema for that table. */
-        std::unordered_map<SystemKey, std::shared_ptr<ExtentSchema>, boost::hash<SystemKey>> _system_cache;
-
         /** Helper to convert schema column to map */
         std::map<uint32_t, SchemaColumn> _convert_columns(const std::vector<SchemaColumn> &columns);
     };

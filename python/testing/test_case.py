@@ -9,6 +9,7 @@ import springtail
 import time
 import common
 import threading
+from typing import Optional
 
 _GLOBAL_CONFIG_FILE = '__config.sql'
 
@@ -34,6 +35,7 @@ class TestCase:
         self._error = ''
         self._log_errors = []
         self._logged_output = ''
+        self._overlays = []
 
         self._metadata = {
             'autocommit': True,
@@ -75,6 +77,9 @@ class TestCase:
 
     def get_added_databases(self) -> list:
         return self._added_databases
+
+    def get_required_overlays(self) -> list:
+        return self._overlays
 
     def _setup_default_fdw(self) -> None:
         if len(self._fdw) == 0:
@@ -290,7 +295,7 @@ class TestCase:
 
                     # Usage - benchmark <release_time_ms> <debug_time_ms> "<query sql>"
                     # Ex: ### benchmark 1000 5000 "SELECT * FROM customers"
-                    # Measures the execution time of the query as reported by EXPLAIN ANALYZE 
+                    # Measures the execution time of the query as reported by EXPLAIN ANALYZE
                     # and compares it to release_time or debug_time respectively
                     elif directive[0] == 'benchmark':
                         if section != 'verify':
@@ -357,7 +362,7 @@ class TestCase:
 
                     elif directive[0] == 'add_db':
                         if section != 'setup':
-                            self._raise_error(f'{line_num}: "add_db" must be specified in the "metadata" section')
+                            self._raise_error(f'{line_num}: "add_db" must be specified in the "setup" section')
                         if not self._filename.endswith(_GLOBAL_CONFIG_FILE):
                             self._raise_error(f'{line_num}: "add_db" must be specified in the "{_GLOBAL_CONFIG_FILE}" file')
                         if len(directive) < 2:
@@ -378,6 +383,13 @@ class TestCase:
                             'type': 'switch_db',
                             'database_name': directive[1]
                         }, section, is_threaded, cur_txn, line_num)
+
+                    elif directive[0] == 'require_overlays':
+                        if section != 'metadata':
+                            self._raise_error(f'{line_num}: "require_overlays" must be specified in the "metadata" section')
+                        if len(directive) < 2:
+                            self._raise_error(f'{line_num}: "require_overlays" must specify an overlay name')
+                        self._overlays = directive[1:]
 
                     else:
                         self._raise_error(f'{line_num}: unknown directive "{directive[0]}"')
@@ -413,15 +425,20 @@ class TestCase:
         """Load the provided CSV file into the specified table."""
         logging.debug(f'Load CSV {filename} into {table}')
 
-        with open(filename, 'r') as f:
-            f.readline() # skip the header
-            cursor.copy_from(f, table, sep=',', null='')
+        try:
+            with open(filename, 'r') as f:
+                f.readline() # skip the header
+                cursor.copy_from(f, table, sep=',', null='')
+        except Exception as e:
+            logging.error(f"Failed to load CSV file {filename} into {table} \n\tError:{str(e)}")
+            self._raise_failure(f'Failed to load CSV file: {e}')
 
 
     def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool, txn: str = 'replica', quiet: bool = False) -> list:
         """Execute the provided SQL using the provided cursor."""
+        db_name = cursor.connection.info.dbname
         if not quiet:
-            logging.debug(f'Execute transaction {txn} SQL: {sql}')
+            logging.debug(f'Execute transaction \'{txn}\' database \'{db_name}\' SQL: {sql}')
         try:
             cursor.execute(sql)
 
@@ -431,7 +448,7 @@ class TestCase:
         except psycopg2.OperationalError as e:
             self._raise_failure(f'Query timed out: {e}')
         except Exception as e:
-            logging.error(f"Error executing SQL:\n{sql},\n\ttxn: {txn},\n\tError:{str(e)}")
+            logging.error(f"Error executing SQL:\n{sql},\n\ttxn: {txn},\n\tdatabse: {db_name}\n\tError:{str(e)}")
             self._raise_failure(f'Unknown error: {e}')
 
 
@@ -442,6 +459,32 @@ class TestCase:
             if item['name'] == db_name:
                 return int(item['id'])
         return None
+
+    def _restart(self, recovery_point: Optional[str] = None) -> None:
+        target_db_id = None
+        target_xid = None
+        if recovery_point is not None:
+            # confirm we have a recorded recovery point
+            if recovery_point not in self._recovery_points:
+                self._raise_error(f'Tried to recover to undefined recovery point: {recovery_point}')
+
+            # check the current XID and revert to an earlier target XID
+            (target_db_id, target_xid) = self._recovery_points[recovery_point]
+            logging.debug(f'Force recovery to database: {target_db_id}, xid: {target_xid}')
+
+        # close all connections to the replica database before shutting down
+        self._cleanup_fdw_connections()
+
+        # restart Springtail at the target XID
+        try:
+            springtail.restart(self._props, self._build_dir,
+                            db_id=target_db_id, start_xid=target_xid, unarchive_logs=True)
+        except Exception as e:
+            self._raise_error(f'Failed to restart daemons')
+
+        # reconnect to the replica database
+        self._open_db_connections_for_fdw()
+
 
     def _execute_command(self, command: dict, do_fetch: bool = False) -> list:
         """Execute a sql command or test directive.  When executing a
@@ -466,35 +509,12 @@ class TestCase:
             self._recovery_points[command['name']] = (db_id, current_xid)
 
         if command['type'] == 'force_recovery':
-            # confirm we have a recorded recovery point
-            if command['name'] not in self._recovery_points:
-                self._raise_error(f'Tried to recover to undefined recovery point: {command["name"]}')
-
-            # check the current XID and revert to an earlier target XID
-            (target_db_id, target_xid) = self._recovery_points[command['name']]
-            logging.debug(f'Force recovery to database: {target_db_id}, xid: {target_xid}')
-
-            # close all connections to the replica database before shutting down
-            self._cleanup_fdw_connections()
-
-            # restart Springtail at the target XID
-            springtail.restart(self._props, self._build_dir,
-                               db_id=target_db_id, start_xid=target_xid, unarchive_logs=True)
-
-            # reconnect to the replica database
-            self._open_db_connections_for_fdw()
-
+            logging.debug(f'Execute command {command["type"]} from line {command["line"]}, name {command["name"]}')
+            self._restart(command["name"])
             return None
 
         if command['type'] == 'restart':
-            # restart Springtail at the target XID
-            springtail.restart(self._props, self._build_dir,
-                               db_id=None, start_xid=None, unarchive_logs=True)
-
-            # reconnect to the replica database
-            self._cleanup_fdw_connections()
-            self._open_db_connections_for_fdw()
-
+            self._restart()
             return None
 
         # handle SQL statements
@@ -524,7 +544,7 @@ class TestCase:
                 return self._execute_sql(cursor, command['sql'], do_fetch, txn)
 
             elif command['type'] == "benchmark":
-                sql = f"EXPLAIN (FORMAT JSON, ANALYZE) {command['benchmark_query']};" 
+                sql = f"EXPLAIN (FORMAT JSON, ANALYZE) {command['benchmark_query']};"
                 return self._execute_sql(cursor, sql, do_fetch, txn)
 
         if command['type'] == 'sync':
@@ -776,7 +796,7 @@ class TestCase:
                 return results
 
             elif command['type'] == 'benchmark':
-                sql = f"EXPLAIN (FORMAT JSON, ANALYZE) {command['benchmark_query']};" 
+                sql = f"EXPLAIN (FORMAT JSON, ANALYZE) {command['benchmark_query']};"
                 return self._execute_sql(cursor, sql, True, 'replica')
 
             else:
@@ -817,13 +837,16 @@ class TestCase:
             if db_name in self._connections[txn]['connections']:
                 self._connections[txn]['connections'][db_name].close()
 
-            if use_proxy:
-                logging.debug(f'Connecting to proxy for txn "{txn}" database "{db_name}"')
-                self._connections[txn]['connections'][db_name] = springtail.connect_proxy(self._props, db_name)
-            else:
-                logging.debug(f'Connecting to primary for txn "{txn}" database "{db_name}"')
-                self._connections[txn]['connections'][db_name] = springtail.connect_db_instance(self._props, db_name)
-            self._connections[txn]['connections'][db_name].autocommit = self._metadata['autocommit']
+            try:
+                if use_proxy:
+                    logging.debug(f'Connecting to proxy for txn "{txn}" database "{db_name}"')
+                    self._connections[txn]['connections'][db_name] = springtail.connect_proxy(self._props, db_name)
+                else:
+                    logging.debug(f'Connecting to primary for txn "{txn}" database "{db_name}"')
+                    self._connections[txn]['connections'][db_name] = springtail.connect_db_instance(self._props, db_name)
+                self._connections[txn]['connections'][db_name].autocommit = self._metadata['autocommit']
+            except Exception as e:
+                self._raise_error(f"Failed to connect to database")
 
     def _open_db_connections_for_fdw(self) -> None:
         for db_config in self._props.get_db_configs():
@@ -831,8 +854,19 @@ class TestCase:
             db_name = self._db_prefix + db_config['name']
             if db_name in self._fdw:
                 self._fdw[db_name].close()
-            self._fdw[db_name] = springtail.connect_db_instance(self._props, db_name)
-            self._fdw[db_name].autocommit = True
+            connected = False
+            conn_attempts = 0
+            while not connected:
+                try:
+                    self._fdw[db_name] = springtail.connect_db_instance(self._props, db_name)
+                    self._fdw[db_name].autocommit = True
+                    connected = True
+                except Exception as e:
+                    conn_attempts += 1
+                    if conn_attempts == 5:
+                        logging.error("Tried to connect {conn_attempts} times")
+                        raise e
+                    time.sleep(2)
 
     def start_background(self) -> None:
         if self._metadata['live_startup'] is not None:

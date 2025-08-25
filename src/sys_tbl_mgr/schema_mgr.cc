@@ -6,39 +6,13 @@
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/schema_mgr.hh>
 #include <sys_tbl_mgr/system_tables.hh>
+#include <sys_tbl_mgr/system_table_mgr.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 
 namespace springtail {
 
     SchemaMgr::SchemaMgr() : Singleton<SchemaMgr>(ServiceId::SchemaMgrId)
-    {
-        // note: don't need a valid sql_type for the internal nodes since they aren't exposed
-        SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, 0, false);
-
-        // TableNames
-        _system_cache[{ sys_tbl::TableNames::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::TableNames::Data::SCHEMA);
-
-        // TableRoots
-        _system_cache[{ sys_tbl::TableRoots::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::TableRoots::Data::SCHEMA);
-
-        // Indexes
-        _system_cache[{ sys_tbl::Indexes::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::Indexes::Data::SCHEMA);
-
-        // Schemas
-        _system_cache[{ sys_tbl::Schemas::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::Schemas::Data::SCHEMA);
-
-        // TableStats
-        _system_cache[{ sys_tbl::TableStats::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::TableStats::Data::SCHEMA);
-
-        // IndexNames
-        _system_cache[{ sys_tbl::IndexNames::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::IndexNames::Data::SCHEMA);
-
-        // NamespaceNames
-        _system_cache[{ sys_tbl::NamespaceNames::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::NamespaceNames::Data::SCHEMA);
-
-        // UserTypes
-        _system_cache[{ sys_tbl::UserTypes::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::UserTypes::Data::SCHEMA);
-    }
+    {}
 
     std::map<uint32_t, SchemaColumn>
     SchemaMgr::_convert_columns(const std::vector<SchemaColumn> &columns)
@@ -91,10 +65,8 @@ namespace springtail {
                           const XidLsn &access_xid,
                           const XidLsn &target_xid)
     {
-        // first check if it's an immutable system table schema
-        auto &&system_i = _system_cache.find({ table_id, constant::INDEX_DATA, true });
-        if (system_i != _system_cache.end()) {
-            return system_i->second;
+        if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
+            return SystemTableMgr::get_instance()->_get_schema(table_id);
         }
 
         // XXX keep some kind of local cache?
@@ -115,10 +87,8 @@ namespace springtail {
                                  uint64_t table_id,
                                  const XidLsn &xid)
     {
-        // first check if it's an immutable system table schema
-        auto &&system_i = _system_cache.find({ table_id, constant::INDEX_DATA, true });
-        if (system_i != _system_cache.end()) {
-            return system_i->second;
+        if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
+            return SystemTableMgr::get_instance()->_get_extent_schema(table_id);
         }
 
         // XXX keep some kind of local cache?  how to keep it valid given the XID progression?

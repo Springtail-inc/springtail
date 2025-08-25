@@ -105,9 +105,9 @@ extern "C" {
     }
 
     void
-    fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, double *rows, int *width)
+    fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, List* join_quals, double *rows, int *width)
     {
-        get_fdw_mgr()->fdw_get_rel_size(planstate, target_list, qual_list, rows, width);
+        get_fdw_mgr()->fdw_get_rel_size(planstate, target_list, qual_list, join_quals, rows, width);
     }
 
     void
