@@ -40,8 +40,7 @@ namespace springtail {
 
     void
     PgMsgStreamReader::set_file(const std::filesystem::path &file,
-                                uint64_t start_offset,
-                                uint64_t end_offset)
+                                uint64_t start_offset)
     {
         if (file != _current_path || !_stream.is_open()) {
             // file isn't currently open, so open it
@@ -127,6 +126,7 @@ namespace springtail {
             if (file_offset <= _current_offset) {
                 // we've jumped to or just past the desired offset
                 // if we are past it is due to the header
+                // check that we aren't in the middle of a header
                 DCHECK(file_offset == _current_offset || file_offset == _current_offset - PgMsgStreamHeader::SIZE);
                 return;
             }

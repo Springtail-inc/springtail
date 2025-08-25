@@ -79,10 +79,9 @@ namespace springtail {
          * @brief Set the file and offset to start reading from
          * @param start_file file to start reading from
          * @param start_offset offset to start reading from (0 = beginning of file)
-         * @param end_offset offset to stop reading at (-1 = end of file)
          */
         void set_file(const std::filesystem::path &start_file,
-                      uint64_t start_offset=0, uint64_t end_offset=-1);
+                      uint64_t start_offset=0);
 
         /**
          * @brief Read next message from stream

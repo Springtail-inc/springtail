@@ -277,9 +277,11 @@ PgLogRecovery::_replay_active()
         pg_msg::MSG_MESSAGE  // this will capture create_table, drop_table, alter_table,
                              // create_index, drop_index
     };
+
     std::vector<char> scan_filter = {pg_msg::MSG_BEGIN,         pg_msg::MSG_STREAM_START,
                                      pg_msg::MSG_COMMIT,        pg_msg::MSG_STREAM_STOP,
                                      pg_msg::MSG_STREAM_COMMIT, pg_msg::MSG_STREAM_ABORT};
+
     std::vector<char> &filter = scan_filter;
     bool skip = true;
 
@@ -402,8 +404,10 @@ PgLogRecovery::_next_repl_log()
         return false;
     }
 
-    _repl_log =
-        fs::get_next_log_file(*_repl_log, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
+    _repl_log = fs::get_next_log_file(*_repl_log,
+        PgLogMgr::LOG_PREFIX_REPL,
+        PgLogMgr::LOG_SUFFIX);
+
     if (!_repl_log) {
         LOG_DEBUG(LOG_PG_LOG_MGR, "No next replication log found");
         return false;
@@ -411,6 +415,7 @@ PgLogRecovery::_next_repl_log()
 
     _repl_reader.set_file(*_repl_log);
     LOG_DEBUG(LOG_PG_LOG_MGR, "Found next log file {}", _repl_log.value().string());
+
     return true;
 }
 
