@@ -1695,6 +1695,11 @@ namespace springtail::pg_fdw {
         // iterate over the user types table and populate the user type map
         for (auto row : (*table)) {
             auto type_ns_id = fields->at(sys_tbl::UserTypes::Data::NAMESPACE_ID)->get_uint64(&row);
+            auto xid = fields->at(sys_tbl::UserTypes::Data::XID)->get_uint64(&row);
+
+            if (xid > schema_xid) {
+                continue;
+            }
 
             // check for schema-namespace match
             if (type_ns_id != namespace_id) {
