@@ -64,6 +64,9 @@ namespace {
         }
 
         static void TearDownTestSuite() {
+            // Cleanup vacuum files
+            Vacuumer::get_instance()->cleanup_db(_db_id);
+
             _index_reconciliation_queue_mgr->remove_queue(_db_id);
             _indexer.reset();
             springtail_shutdown();

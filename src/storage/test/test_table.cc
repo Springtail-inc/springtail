@@ -102,6 +102,11 @@ namespace {
             _primary_keys = std::vector<std::string>({"name"});
         }
 
+        void TearDown() override {
+            // Cleanup vacuum files
+            Vacuumer::get_instance()->cleanup_db(_db_id);
+        }
+
         ExtentSchemaPtr _schema;
         FieldArrayPtr _fields, _csv_fields;
 

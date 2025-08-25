@@ -18,7 +18,8 @@ def stop_daemons(pid_path : str, daemons : List[tuple] = []) -> None:
     """Stop all daemons."""
     # Stop the daemons
     if not os.path.exists(pid_path):
-        raise Exception(f"PID path not found: {pid_path}")
+        print(f"PID path: {pid_path} does not exist")
+        return
 
     found_pids = []
 
