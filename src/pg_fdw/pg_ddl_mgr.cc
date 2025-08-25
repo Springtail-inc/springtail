@@ -352,6 +352,119 @@ namespace springtail::pg_fdw {
                            escaped_schema, escaped_name, value_ss.str());
     }
 
+    // Recursive DFS
+    void traverse(int tid,
+                  const std::unordered_map<int, std::vector<int>>& children_map,
+                  const std::unordered_map<int, std::vector<nlohmann::json>>& table_map,
+                  nlohmann::json& output)
+    {
+        // Process this node's actions: drop before create
+        auto it = table_map.find(tid);
+        if (it != table_map.end()) {
+            std::vector<nlohmann::json> actions = it->second;
+            std::sort(actions.begin(), actions.end(), [](const nlohmann::json& a, const nlohmann::json& b) {
+                if (a["action"] == b["action"]) return false;
+                return a["action"] == "drop";
+            });
+            for (const auto& act : actions) {
+                output.push_back(act);
+            }
+        }
+
+        // Recurse into children
+        auto child_iter = children_map.find(tid);
+        if (child_iter != children_map.end()) {
+            std::vector<int> child_ids = child_iter->second;
+            std::sort(child_ids.begin(), child_ids.end());
+            for (int childId : child_ids) {
+                traverse(childId, children_map, table_map, output);
+            }
+        }
+    }
+
+    nlohmann::json
+    sort_ddls_by_hierarchy(nlohmann::json arr)
+    {
+        // Build lookup maps
+        std::unordered_map<int, std::vector<nlohmann::json>> table_map;
+        std::unordered_map<int, std::vector<int>> children_map;
+        std::unordered_map<int, int> parent_map;
+        std::vector<int> roots;
+
+        // Collect passthrough actions (not create/drop)
+        nlohmann::json passthrough = nlohmann::json::array();
+
+        for (const auto &obj : arr) {
+            auto action = obj["action"].get<std::string>();
+
+            // Only create or drop actions are processed. They are the ones that are used in the resync flow
+            if (action == "create" || action == "drop") {
+                int tid = obj["tid"].get<int>();
+                table_map[tid].push_back(obj);
+
+                if (obj.contains("parent_table_id")) {
+                    int parent = obj["parent_table_id"].get<int>();
+
+                    // Only link to parent if it exists in the JSON (Case B rule)
+                    if (table_map.count(parent)) {
+                        parent_map[tid] = parent;
+                        auto &vec = children_map[parent];
+                        if (std::find(vec.begin(), vec.end(), tid) == vec.end()) {
+                            vec.push_back(tid);
+                        }
+                    } else {
+                        // Parent missing -> treat as root
+                        if (std::find(roots.begin(), roots.end(), tid) == roots.end()) {
+                            roots.push_back(tid);
+                        }
+                        LOG_INFO("[WARN] Parent {} not found in JSON, treating {} as root", parent, tid);
+                    }
+                } else {
+                    // Root table, i.e., doesn't have a parent table id
+                    if (std::find(roots.begin(), roots.end(), tid) == roots.end()) {
+                        roots.push_back(tid);
+                    }
+                }
+            } else {
+                // Not create/drop -> passthrough
+                passthrough.push_back(obj);
+            }
+        }
+
+        // If no create/drop actions, return passthrough only
+        if (table_map.empty()) {
+            return passthrough;
+        }
+
+        // Also detect roots as those without parent
+        for (auto &[tid, _] : table_map) {
+            if (!parent_map.count(tid)) {
+                if (std::find(roots.begin(), roots.end(), tid) == roots.end()) {
+                    roots.push_back(tid);
+                }
+            }
+        }
+
+        std::sort(roots.begin(), roots.end());
+
+        // Traverse hierarchy
+        nlohmann::json sorted = nlohmann::json::array();
+        for (int rootTid : roots) {
+            traverse(rootTid, children_map, table_map, sorted);
+        }
+
+        // Combine passthrough + sorted
+        nlohmann::json final = nlohmann::json::array();
+        for (const auto &obj : passthrough) {
+            final.push_back(obj);
+        }
+        for (const auto &obj : sorted) {
+            final.push_back(obj);
+        }
+
+        return final;
+    }
+
     void
     PgDDLMgr::run()
     {
@@ -377,11 +490,14 @@ namespace springtail::pg_fdw {
                     uint64_t schema_xid = entry.at("xid").get<uint64_t>();
                     auto ddls = entry.at("ddls");
 
+                    // Sort the DDLs based on their hierarchy
+                    auto sorted_ddls = sort_ddls_by_hierarchy(ddls);
+
                     if (_db_xid_map.contains(db_id) && _db_xid_map[db_id] >= schema_xid) {
                         LOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
                                     db_id, _db_xid_map[db_id], schema_xid);
                     } else {
-                        db_map[db_id][schema_xid] = ddls;
+                        db_map[db_id][schema_xid] = sorted_ddls;
                     }
                 }
                 if (db_map.empty()) {

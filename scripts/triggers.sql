@@ -59,7 +59,7 @@ RETURNS JSON LANGUAGE plpgsql AS $$
 DECLARE
 BEGIN
         RETURN (
-        SELECT json_agg(json_col)
+        SELECT json_agg(json_col ORDER BY depth, path)
         FROM (
             SELECT json_build_object(
                 'table_name', obj_select.table_name,
@@ -68,15 +68,24 @@ BEGIN
                 'namespace_id', obj_select.namespace_id::bigint,
                 'partition_bound', obj_select.partition_bound,
                 'partition_key', obj_select.partition_key,
-                'parent_table_id', obj_select.parent_table_id::bigint
-            ) AS json_col
+                'parent_table_id', obj_select.parent_table_id::bigint,
+                'depth', obj_select.depth
+            ) AS json_col,
+            obj_select.depth,
+            obj_select.path
             FROM (
                 WITH RECURSIVE children AS (
-                    SELECT inhrelid, inhparent
+                    SELECT inhrelid, inhparent,
+                        1 AS depth,
+                        ARRAY[inhrelid]::oid[] AS path
                     FROM pg_inherits
                     WHERE inhparent = table_name::regclass
+
                     UNION ALL
-                    SELECT pi.inhrelid, pi.inhparent
+
+                    SELECT pi.inhrelid, pi.inhparent,
+                        c.depth + 1,
+                        c.path || pi.inhrelid
                     FROM pg_inherits pi
                     JOIN children c ON c.inhrelid = pi.inhparent
                 )
@@ -87,7 +96,9 @@ BEGIN
                     child_ns.oid AS namespace_id,
                     pg_get_expr(child.relpartbound, child.oid, TRUE) AS partition_bound,
                     pg_get_partkeydef(child.oid) AS partition_key,
-                    children.inhparent AS parent_table_id
+                    children.inhparent AS parent_table_id,
+                    children.depth,
+                    children.path
                 FROM children
                 JOIN pg_class child ON child.oid = children.inhrelid
                 JOIN pg_namespace child_ns ON child_ns.oid = child.relnamespace
