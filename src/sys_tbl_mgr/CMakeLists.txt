@@ -37,6 +37,7 @@ add_executable(file_system_check test/file_system_check.cc)
 target_include_directories(file_system_check PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
 target_link_libraries(file_system_check
   PUBLIC springtail_test_check
+  PRIVATE Boost::program_options
 )
 add_dsymutil_command(file_system_check)
 
