@@ -63,6 +63,9 @@ namespace springtail {
          * Truncate function call is empty as we are not going to truncate system tables.
          *
          */
-        virtual void truncate() override {}
+        virtual void truncate() override
+        {
+            // no truncation for system tables
+        }
     };
 } // springtail
