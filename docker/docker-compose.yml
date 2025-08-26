@@ -21,7 +21,7 @@ services:
       - pgdata:/var/lib/postgresql/data
 
   dev:
-    image: dev:snapshot
+    image: build:test-ga
     container_name: dev-snapshot
     depends_on:
       - postgres
@@ -34,8 +34,13 @@ services:
     tty: true
     ports:
       - "2222:22" # map host 2222 to container 22
+    entrypoint: ["tail", "-f", "/dev/null"]
+    environment:
+      CI_WORKSPACE: /__w/springtail/springtail
+      CI_BUILD_TYPE: debug
+      SYSTEM_SETTINGS_OVERRIDE: .github/workflows/ci-general.overrides.json
     volumes:
-      - ${SPRINGTAIL_SRC}:/home/dev/springtail
+#      - ${SPRINGTAIL_SRC}:/home/dev/springtail
       - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
