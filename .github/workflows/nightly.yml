@@ -412,30 +412,30 @@ jobs:
               ]
             }
 
-      - name: Notify Slack on failure
-        if: failure()
-        uses: slackapi/slack-github-action@v2.0.0
-        with:
-          webhook: ${{ env.SLACK_WEBHOOK_URL }}
-          webhook-type: incoming-webhook
-          payload: |
-            {
-              "channel": "${{ env.SLACK_CHANNEL }}",
-              "text": ":crying_cat_face: Nightly Build & Test Failed ",
-              "attachments": [
-                {
-                  "color": "#DF3A01",
-                  "fields": [
-                    {
-                      "title": "Git SHA",
-                      "value": "${{ github.sha }}",
-                      "short": true
-                    },
-                    {
-                      "title": "Logs",
-                      "value": "s3://${{ env.DEVSUPPORT_BUCKET_NAME }}/${{ env.TEST_LOGS_S3_PREFIX }}/${{ env.CURRENT_DATE }}/"
-                    }
-                  ]
-                }
-              ]
-            }
+      # - name: Notify Slack on failure
+      #   if: failure()
+      #   uses: slackapi/slack-github-action@v2.0.0
+      #   with:
+      #     webhook: ${{ env.SLACK_WEBHOOK_URL }}
+      #     webhook-type: incoming-webhook
+      #     payload: |
+      #       {
+      #         "channel": "${{ env.SLACK_CHANNEL }}",
+      #         "text": ":crying_cat_face: Nightly Build & Test Failed ",
+      #         "attachments": [
+      #           {
+      #             "color": "#DF3A01",
+      #             "fields": [
+      #               {
+      #                 "title": "Git SHA",
+      #                 "value": "${{ github.sha }}",
+      #                 "short": true
+      #               },
+      #               {
+      #                 "title": "Logs",
+      #                 "value": "s3://${{ env.DEVSUPPORT_BUCKET_NAME }}/${{ env.TEST_LOGS_S3_PREFIX }}/${{ env.CURRENT_DATE }}/"
+      #               }
+      #             ]
+      #           }
+      #         ]
+      #       }
