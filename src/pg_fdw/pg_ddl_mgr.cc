@@ -395,6 +395,7 @@ namespace springtail::pg_fdw {
         // Collect passthrough actions (not create/drop)
         nlohmann::json passthrough = nlohmann::json::array();
 
+        // Pass 1: collect all tables
         for (const auto &obj : arr) {
             auto action = obj["action"].get<std::string>();
 
@@ -402,42 +403,44 @@ namespace springtail::pg_fdw {
             if (action == "create" || action == "drop") {
                 int tid = obj["tid"].get<int>();
                 table_map[tid].push_back(obj);
-
-                if (obj.contains("parent_table_id")) {
-                    int parent = obj["parent_table_id"].get<int>();
-
-                    // Only link to parent if it exists in the JSON (Case B rule)
-                    if (table_map.contains(parent)) {
-                        parent_map[tid] = parent;
-                        auto &vec = children_map[parent];
-                        if (std::ranges::find(vec, tid) == vec.end()) {
-                            vec.push_back(tid);
-                        }
-                    } else {
-                        // Parent missing -> treat as root
-                        if (std::ranges::find(roots, tid) == roots.end()) {
-                            roots.push_back(tid);
-                        }
-                        LOG_INFO("[WARN] Parent {} not found in JSON, treating {} as root", parent, tid);
-                    }
-                } else {
-                    // Root table, i.e., doesn't have a parent table id
-                    if (std::ranges::find(roots, tid) == roots.end()) {
-                        roots.push_back(tid);
-                    }
-                }
             } else {
-                // Not create/drop -> passthrough
                 passthrough.push_back(obj);
             }
         }
 
-        // If no create/drop actions, return passthrough only
-        if (table_map.empty()) {
-            return passthrough;
+        // Pass 2: build parent-child relationships
+        for (const auto &obj : arr) {
+            auto action = obj["action"].get<std::string>();
+            // Only create or drop actions are processed. They are the ones that are used in the resync flow
+            if (action != "create" && action != "drop")
+                continue;
+
+            int tid = obj["tid"].get<int>();
+            if (obj.contains("parent_table_id")) {
+                int parent = obj["parent_table_id"].get<int>();
+
+                if (table_map.contains(parent)) {
+                    parent_map[tid] = parent;
+                    auto &vec = children_map[parent];
+                    if (std::ranges::find(vec, tid) == vec.end()) {
+                        vec.push_back(tid);
+                    }
+                } else {
+                    // Parent truly missing
+                    if (std::ranges::find(roots, tid) == roots.end()) {
+                        roots.push_back(tid);
+                    }
+                    LOG_INFO("[WARN] Parent {} not found in JSON, treating {} as root", parent, tid);
+                }
+            } else {
+                // No parent_table_id -> root
+                if (std::ranges::find(roots, tid) == roots.end()) {
+                    roots.push_back(tid);
+                }
+            }
         }
 
-        // Also detect roots as those without parent
+        // Pass 3: detect any without parent
         for (const auto &[tid, _] : table_map) {
             if (!parent_map.contains(tid) && std::ranges::find(roots, tid) == roots.end()) {
                 roots.push_back(tid);
@@ -489,16 +492,20 @@ namespace springtail::pg_fdw {
                     uint64_t schema_xid = entry.at("xid").get<uint64_t>();
                     auto ddls = entry.at("ddls");
 
+                    LOG_DEBUG(LOG_FDW, "Original DDLS: {}", ddls.dump(4));
+
                     // Sort the DDLs based on their hierarchy
                     auto sorted_ddls = sort_ddls_by_hierarchy(ddls);
+
+                    LOG_DEBUG(LOG_FDW, "Sorted DDLS: {}", sorted_ddls.dump(4));
 
                     if (_db_xid_map.contains(db_id) && _db_xid_map[db_id] >= schema_xid) {
                         LOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
                                     db_id, _db_xid_map[db_id], schema_xid);
                     } else {
-                        db_map[db_id][schema_xid] = sorted_ddls;
                         LOG_DEBUG(LOG_FDW, "New schema XID will be applied: db_id={}, current={}, new={}",
                                     db_id, _db_xid_map[db_id], schema_xid);
+                        db_map[db_id][schema_xid] = sorted_ddls;
                     }
                 }
                 if (db_map.empty()) {
