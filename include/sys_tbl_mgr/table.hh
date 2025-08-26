@@ -7,7 +7,6 @@
 #include <storage/cache.hh>
 #include <storage/mutable_btree.hh>
 
-#include <sys_tbl_mgr/schema_mgr.hh>
 #include <variant>
 
 namespace springtail {
@@ -102,7 +101,7 @@ namespace indexer_helpers {
      * Read-only interface to a table at a fixed XID.  Provides interfaces for accessing table
      * information, performing scans, extent_id lookups, etc.
      */
-    class Table : public std::enable_shared_from_this<Table> {
+    class Table {
     public:
         /**
          * A forward iterator over the rows of a Table object.
@@ -446,12 +445,12 @@ namespace indexer_helpers {
         /**
          * Retrieves the schema for the table at a given XID.
          */
-        ExtentSchemaPtr extent_schema() const;
+        virtual ExtentSchemaPtr extent_schema() const { return nullptr; }
 
         /**
          * Get a schema for accessing an extent from this table that was written at the provided XID.
          */
-        SchemaPtr schema(uint64_t extent_xid) const;
+        virtual SchemaPtr schema(uint64_t extent_xid) const { return nullptr; }
 
         /** Retrieves the ordered set of columns that form the primary key. */
         std::vector<std::string> primary_key() const
@@ -460,16 +459,10 @@ namespace indexer_helpers {
         }
 
         /** Retrieve the Database ID of this table. */
-        uint64_t db() const
-        {
-            return _db_id;
-        }
+        uint64_t db() const { return _db_id; }
 
         /** Retrieve the ID of this table. */
-        uint64_t id() const
-        {
-            return _id;
-        }
+        uint64_t id() const { return _id; }
 
         bool empty() const;
 
@@ -576,7 +569,8 @@ namespace indexer_helpers {
         std::vector<uint64_t> get_secondary_idx_ids() const
         {
             std::vector<uint64_t> index_ids;
-            for (auto it: _secondary_indexes) {
+            index_ids.reserve(_secondary_indexes.size());
+            for (auto &it: _secondary_indexes) {
                 index_ids.push_back(it.first);
             }
             return index_ids;
@@ -602,7 +596,7 @@ namespace indexer_helpers {
         BTreePtr
         _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset);
 
-    private:
+    protected:
         uint64_t _db_id; ///< The ID of the database containing this table.
         uint64_t _id; ///< The ID of the table.
 
@@ -636,7 +630,7 @@ namespace indexer_helpers {
     /**
      * Interface for mutating a table at the most recent XID.
      */
-    class MutableTable : public std::enable_shared_from_this<MutableTable> {
+    class MutableTable {
     public:
         /**
          * Mutable table constructor.
@@ -707,7 +701,7 @@ namespace indexer_helpers {
          * Truncates the table, removing the callback of any mutated pages in the cache, clearing
          * all of the indexes, and marking the roots to be cleared in the system tables.
          */
-        void truncate();
+        virtual void truncate() = 0;
 
         /**
          * Reads an extent from the tree and returns it.
@@ -780,7 +774,7 @@ namespace indexer_helpers {
             return _stats;
         }
 
-    private:
+    protected:
         /**
          * Page callback on evict() / flush_file() that will perform an _invalidate_indexes() and
          * _flush_and_populate_indexes() on the provided page.
@@ -891,7 +885,7 @@ namespace indexer_helpers {
          */
         uint64_t _get_extent_id(TuplePtr search_key);
 
-    private:
+    protected:
         uint64_t _db_id; ///< The ID of the database containing this table.
         uint64_t _id; ///< The ID of the table.
 

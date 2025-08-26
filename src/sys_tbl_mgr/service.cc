@@ -7,6 +7,7 @@
 #include <sys_tbl_mgr/exception.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <sys_tbl_mgr/service.hh>
+#include <sys_tbl_mgr/system_table_mgr.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <storage/vacuumer.hh>
 #include <xid_mgr/xid_mgr_client.hh>
@@ -1848,9 +1849,6 @@ Service::Revert(grpc::ServerContext* context,
                 LOG_DEBUG(LOG_SCHEMA, "Picked root file {} for system table {}", root_i->second,
                           table_id);
 
-                // update the symlink
-                auto symlink_path = table_dir / "roots";
-
                 std::filesystem::create_symlink(root_i->second,
                                                 table_dir / constant::ROOTS_TMP_FILE);
                 std::filesystem::rename(table_dir / constant::ROOTS_TMP_FILE,
@@ -1868,8 +1866,9 @@ Service::Revert(grpc::ServerContext* context,
         // remove rows from the table that are beyond the committed XID
         auto mtable = _get_mutable_system_table(request->db_id(), table_id);
         auto table = _get_system_table(request->db_id(), table_id);
-        FieldPtr xid_f = table->extent_schema()->get_field("xid");
-        auto primary_fields = table->extent_schema()->get_fields(table->primary_key());
+        auto schema = table->extent_schema();
+        FieldPtr xid_f = schema->get_field("xid");
+        auto primary_fields = schema->get_fields(table->primary_key());
         for (auto row : *table) {
             if (xid_f->get_uint64(&row) > request->xid()) {
                 mtable->remove(std::make_shared<FieldTuple>(primary_fields, &row),
@@ -2152,16 +2151,17 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
 
     // go over each index and get the roots
     auto roots_t = _get_system_table(db_id, sys_tbl::TableRoots::ID);
-    auto table_id_f = roots_t->extent_schema()->get_field("table_id");
+    auto schema = roots_t->extent_schema();
+    auto table_id_f = schema->get_field("table_id");
 
-    auto index_id_f = roots_t->extent_schema()->get_field("index_id");
+    auto index_id_f = schema->get_field("index_id");
 
     const std::string& sxid =
         sys_tbl::TableRoots::Data::SCHEMA[sys_tbl::TableRoots::Data::SNAPSHOT_XID].name;
-    auto sxid_f = roots_t->extent_schema()->get_field(sxid);
+    auto sxid_f = schema->get_field(sxid);
 
-    auto eid_f = roots_t->extent_schema()->get_field("extent_id");
-    auto xid_f = roots_t->extent_schema()->get_field("xid");
+    auto eid_f = schema->get_field("extent_id");
+    auto xid_f = schema->get_field("xid");
 
     auto roots_info = std::make_shared<proto::GetRootsResponse>();
 
@@ -2223,18 +2223,19 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     // access the stats table
     if (!stats_found) {
         auto stats_t = _get_system_table(db_id, sys_tbl::TableStats::ID);
-        auto stats_key_fields = stats_t->extent_schema()->get_sort_fields();
+        auto stats_schema = stats_t->extent_schema();
+        auto stats_key_fields = stats_schema->get_sort_fields();
 
         auto search_key = sys_tbl::TableStats::Primary::key_tuple(table_id, xid.xid);
         auto srow_i = stats_t->inverse_lower_bound(search_key);
         auto &&row = *srow_i;
 
         // need to confirm that the table ID matches, but the XID may not match
-        table_id_f = stats_t->extent_schema()->get_field("table_id");
+        table_id_f = stats_schema->get_field("table_id");
         if (srow_i != stats_t->end() && table_id_f->get_uint64(&row) == table_id) {
             // retrieve the stats from the row
-            auto row_count_f = stats_t->extent_schema()->get_field("row_count");
-            auto end_offset_f = stats_t->extent_schema()->get_field("end_offset");
+            auto row_count_f = stats_schema->get_field("row_count");
+            auto end_offset_f = stats_schema->get_field("end_offset");
             row_count = row_count_f->get_uint64(&row);
             end_offset = end_offset_f->get_uint64(&row);
         } else {
@@ -3061,7 +3062,7 @@ Service::_get_system_table(uint64_t db_id, uint64_t table_id)
 
     // otherwise create an interface to the table and cache it
     auto&& read_xid = _get_read_xid(db_id);
-    TablePtr table = TableMgr::get_instance()->get_table(db_id, table_id, read_xid.xid);
+    TablePtr table = SystemTableMgr::get_instance()->get_system_table(db_id, table_id, read_xid.xid);
 
     // cache the table interface
     cache[table_id] = table;
@@ -3084,7 +3085,7 @@ Service::_get_mutable_system_table(uint64_t db_id, uint64_t table_id)
     auto&& read_xid = _get_read_xid(db_id);
     auto&& write_xid = _get_write_xid(db_id);
     MutableTablePtr table =
-        TableMgr::get_instance()->get_mutable_table(db_id, table_id, read_xid.xid, write_xid);
+        SystemTableMgr::get_instance()->get_mutable_system_table(db_id, table_id, read_xid.xid, write_xid);
 
     // save the mutable table into the cache
     cache[table_id] = table;

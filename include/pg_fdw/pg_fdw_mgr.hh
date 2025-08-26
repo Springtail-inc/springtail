@@ -107,6 +107,8 @@ namespace springtail::pg_fdw {
                                     /// Index columns are sorted by their position in the index.
         std::optional<Index> sortgroup_index; ///< Index matching the sortgroup.
         std::optional<Index> index; ///< The final index to use for scanning
+        std::vector<uint64_t> join_indexes; ///< List of table index ids that a present in outer join clauses.
+        std::vector<uint64_t> qual_indexes; ///< List of table index ids that a present in restric clauses.
 
         /** Constructor */
         PgFdwState(TablePtr table, uint64_t db_id, uint64_t tid, uint64_t xid);
@@ -161,7 +163,6 @@ namespace springtail::pg_fdw {
          * @param attrs Array of pg attributes
          * @param target_list List of target columns (Value or String)
          * @param qual_list List of predicate clauses (BaseQual)
-         * @param sortgroup List of sort group columns (DeparsedSortGroup)
          */
         void fdw_begin_scan(PgFdwState *state,
                             int num_attrs,
@@ -216,8 +217,9 @@ namespace springtail::pg_fdw {
          * @param planstate Plan state
          * @param target_list List of target columns (String or Value)
          * @param qual_list List of predicate clauses (BaseQual)
+         * @param join_quals List of predicate clauses (BaseQual) that are part of join clauses
          */
-        void fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, double *rows, int *width);
+        void fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, List* join_quals, double *rows, int *width);
 
         /** Commit or rollback a transaction, remove the XID mappings
          * @param pg_xid Postgres XID

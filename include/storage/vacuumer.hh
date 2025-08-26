@@ -93,6 +93,14 @@ public:
     }
 
     /**
+     * @brief Return whether the vacuumer is enabled
+     *
+     * @return true - enabled
+     * @return false - disabled
+     */
+    bool is_enabled() const { return _vacuum_start_enabled; }
+
+    /**
      * @brief Cleanup DB's entries from vacuum storage
      *        - memory, global vacuum file and partials
      *
