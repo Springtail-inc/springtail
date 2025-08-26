@@ -1,11 +1,17 @@
 # The Dockerfile for CI build & tests (for GitHub Actions)
 FROM ubuntu:noble
 
+ARG CI_BUILD_TYPE
+ARG NCORES=4
+ARG CI_WORKSPACE=/__w/springtail/springtail
 ENV TINI_VERSION=v0.19.0 \
     ZIC=true \
     VCPKG_FORCE_SYSTEM_BINARIES=1 \
     VCPKG_ROOT=/home/dev/external/vcpkg \
-    USER=root
+    USER=root \
+    CI_BUILD_TYPE=$CI_BUILD_TYPE \
+    NCORES=$NCORES \
+    CI_WORKSPACE=$CI_WORKSPACE
 
 # Install ansible and other dependencies
 RUN apt-get update && apt-get install -y ansible-core
@@ -14,36 +20,35 @@ COPY docker/ansible/ /var/ansible/
 # Run Ansible playbook to install additional dependencies
 RUN ansible-playbook /var/ansible/playbook.base.yml --connection=local --inventory localhost, --extra-vars "ansible_python_interpreter=/usr/bin/python3"
 
-# CI container specific setup
-# Configure services and create PostgreSQL user
-RUN service postgresql start && \
-    sudo -u postgres psql -c "CREATE USER springtail WITH PASSWORD 'springtail' SUPERUSER LOGIN" && \
-    service postgresql stop
-
 # Copy over the source code and run build
-WORKDIR /__w/springtail/springtail
-COPY . /__w/springtail/springtail
+WORKDIR $CI_WORKSPACE
+COPY . $CI_WORKSPACE
 RUN rm -rf release/* && \
     rm -rf debug/* && \
     rm -rf shared-lib/* && \
     find . -name "*~" | xargs rm -f && \
-    find . -name "#*" | xargs rm -f
-
-RUN ./vcpkg.sh && \
-    mkdir -p /home/dev/debug && \
+    find . -name "#*" | xargs rm -f && \
+    ./vcpkg.sh && \
+    mkdir -p /home/dev/${CI_BUILD_TYPE} && \
     mkdir -p /home/dev/install && \
-    ln -s /home/dev/debug debug && \
-    ln -s /home/dev/install install && \
-    cmake -B debug -S . -D'CMAKE_BUILD_TYPE=Debug' -DVCPKG_INSTALL_OPTIONS="--allow-unsupported" && \
-    cd debug && \
-    make -j6 && \
+    ln -s /home/dev/${CI_BUILD_TYPE} ${CI_BUILD_TYPE} && \
+    ln -s /home/dev/install install
+
+RUN if [ "$CI_BUILD_TYPE" = "debug" ]; then \
+          cmake -B "debug" -S . -D'CMAKE_BUILD_TYPE=debug' -DVCPKG_INSTALL_OPTIONS="--allow-unsupported;--clean-after-build";  \
+        else \
+          cmake -B "release" -S . -D'CMAKE_BUILD_TYPE=release' -DCMAKE_BUILD_TYPE=RelWithDebInfo -DNDEBUG=1 -DVCPKG_INSTALL_OPTIONS="--allow-unsupported;--clean-after-build";  \
+        fi
+
+RUN cd ${CI_BUILD_TYPE} && \
+    make -j${NCORES} && \
     cd .. && \
     pip3 install --break-system-packages -r python/performance/requirements.txt && \
-    rm -rf /__w/springtail/springtail /home/dev/debug/src /home/dev/external/vcpkg/buildtrees /home/dev/external/vcpkg/packages /home/dev/external/vcpkg/downloads 
+    rm -rf $CI_WORKSPACE /home/dev/${CI_BUILD_TYPE}/src /home/dev/external/vcpkg/buildtrees /home/dev/external/vcpkg/packages /home/dev/external/vcpkg/downloads
 
 # Pull back the libpg_query
 RUN cd /home/dev/external && git clone https://github.com/Springtail-inc/libpg_query.git
 
 # Set tini as the container's entrypoint
-ENTRYPOINT ["/tini"]
+ENTRYPOINT ["/tini", "--"]
 

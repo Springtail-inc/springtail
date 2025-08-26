@@ -1,0 +1,41 @@
+# The Dockerfile for CI build & tests (for GitHub Actions)
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+ARG CI_BUILD_TYPE
+ARG NCORES=4
+ARG CI_WORKSPACE=/__w/springtail/springtail
+ENV TINI_VERSION=v0.19.0 \
+    ZIC=true \
+    VCPKG_FORCE_SYSTEM_BINARIES=1 \
+    VCPKG_ROOT=/home/dev/external/vcpkg \
+    USER=root \
+    CI_BUILD_TYPE=$CI_BUILD_TYPE \
+    NCORES=$NCORES \
+    CI_WORKSPACE=$CI_WORKSPACE
+
+# Copy over the source code and run build
+WORKDIR $CI_WORKSPACE
+COPY . $CI_WORKSPACE
+RUN ./vcpkg.sh
+RUN if [ "$CI_BUILD_TYPE" = "debug" ]; then \
+          cmake -B "debug" -S . -D'CMAKE_BUILD_TYPE=debug' -DVCPKG_INSTALL_OPTIONS="--allow-unsupported;--clean-after-build";  \
+        else \
+          cmake -B "release" -S . -D'CMAKE_BUILD_TYPE=release' -DCMAKE_BUILD_TYPE=RelWithDebInfo -DNDEBUG=1 -DVCPKG_INSTALL_OPTIONS="--allow-unsupported;--clean-after-build";  \
+        fi && \
+        rm -rf /home/dev/${CI_BUILD_TYPE}/src /home/dev/external/vcpkg/buildtrees /home/dev/external/vcpkg/packages /home/dev/external/vcpkg/downloads
+
+RUN cd ${CI_BUILD_TYPE} && \
+    make -j${NCORES} && \
+    cd / && \
+    # Copies the subdirectories inside $CI_WORKSPACE/python/grpc/ to /home/dev/save/python/grpc/, excluding any files.
+    # As these are generated during build and we want to save them to avoid rebuilding;
+    # Later in tests we move them back to $CI_WORKSPACE/python/grpc/
+    mkdir -p /home/dev/save/python/grpc/ && \
+    rsync -a --include='/*/' --exclude='/*'  $CI_WORKSPACE/python/grpc/ /home/dev/save/python/grpc/ && \
+    # Copies all the OBJ files (.o) out of the `debug
+    rm -rf $CI_WORKSPACE
+
+# Set tini as the container's entrypoint
+ENTRYPOINT ["/tini", "--"]
+

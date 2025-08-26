@@ -1,9 +1,4 @@
 {
-  "storage": {
-    "vacuum_config": {
-      "enabled": true
-    }
-  },
   "otel": {
     "enabled": false
   },

@@ -1,0 +1,113 @@
+name: Build Springtail Container
+on:
+  workflow_call:
+    inputs:
+      base_image_tag:
+        description: 'The image version tag for the base image to pull. Excluding the REPO URI. Example: service-d09837a'
+        type: string
+        required: true
+      build_type:
+        description: 'The type of build to perform. "release" or "debug". The type of build need to match the base image type.'
+        type: string
+        required: true
+        default: "debug"
+      output_image_tag:
+        description: 'The tag to apply to the built image. Excluding the REPO URI. Example: service-1239837a'
+        type: string
+        required: false
+        default: ""
+      springtail_include_time_traces:
+        description: 'Whether to include time traces in the Springtail build. This can be useful for performance analysis and debugging.'
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      aws_role_arn:
+        description: "The ARN of the role to assume."
+        required: true
+      aws_ecr_docker_password:
+        description: "The password for the ECR docker registry."
+        required: true
+    outputs:
+      output_image_tag:
+        description: "The tag of the built image. Ready to use for the next steps."
+        value: ${{ jobs.build-container.outputs.output_image_tag }}
+jobs:
+  build-container:
+    name: Build Springtail Container
+    runs-on: warp-ubuntu-latest-arm64-4x
+    timeout-minutes: 15
+    env:
+      CI_BUILD_TYPE: ${{ inputs.build_type }}
+      NCORES: 4
+      ECR_REPO_URI: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}
+      CI_WORKSPACE: ${{ github.workspace }}
+      VCPKG_FORCE_SYSTEM_BINARIES: 1
+      ZIC: true
+      USER: root
+      PYTHONUNBUFFERED: 1
+      BASE_IMAGE_TAG: ${{ inputs.base_image_tag }}
+      OUTPUT_IMAGE_TAG: ${{ inputs.output_image_tag }}
+    outputs:
+      output_image_tag: ${{ steps.build.outputs.output_image_tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          clean: true
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.aws_role_arn }}
+          role-session-name: tempSession
+          aws-region: us-east-1
+
+      - name: Build Springtail Container
+        id: build
+        run: |
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}    
+          # Login ECR
+          aws ecr get-login-password | docker login --username AWS --password-stdin ${ECR_REPO_URI}
+          # Ensure the base image is available locally
+          docker pull "${ECR_REPO_URI}:${BASE_IMAGE_TAG}"          
+          if ${{ inputs.springtail_include_time_traces }}; then
+            echo "Enabling time traces in Springtail build."
+            export SPRINGTAIL_INCLUDE_TIME_TRACES=1
+          else
+            echo "Time traces not enabled for Springtail build."
+            unset SPRINGTAIL_INCLUDE_TIME_TRACES
+          fi
+          # Get the short SHA for tagging the image
+          SHORT_SHA=$(echo ${GITHUB_SHA} | cut -c1-7)
+          base_image_uri="${ECR_REPO_URI}:${BASE_IMAGE_TAG}"
+
+          # Tag image with the run ID for uniqueness
+          output_image_tag="${OUTPUT_IMAGE_TAG}"
+          if [ -z "${OUTPUT_IMAGE_TAG}" ]; then
+            # Generate a unique short random tag
+            r=$(head /dev/urandom | tr -dc a-f0-9 | head -c6)
+            output_image_tag="${BASE_IMAGE_TAG}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${r}"
+          fi
+          
+          output_image_uri="${ECR_REPO_URI}:${output_image_tag}"
+          
+          include_time_traces_flag=""
+          if ${{ inputs.springtail_include_time_traces }}; then
+            includ_time_traces_flag="-e SPRINGTAIL_INCLUDE_TIME_TRACES=1"
+          fi
+          
+          docker buildx build --build-arg \
+            BASE_IMAGE="${base_image_uri}" \
+            --push \
+            --tag "${output_image_uri}" \
+            --cache-from type=registry,ref="${ECR_REPO_URI}:buildcache" \
+            --cache-to   type=registry,ref="${ECR_REPO_URI}:buildcache",mode=max,oci-mediatypes=true \
+            --build-arg CI_BUILD_TYPE="$CI_BUILD_TYPE" \
+            --build-arg NCORES="${NCORES}" \
+            --platform linux/arm64 \
+            -f .github/workflows/Dockerfile.build $include_time_traces_flag .
+          
+          # Output
+          echo "output_image_tag=$output_image_tag" >> $GITHUB_OUTPUT
+          echo "Built: output_image_uri"

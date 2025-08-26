@@ -19,13 +19,74 @@ jobs:
     with:
       canonical_copy: 'system.json.settings'
       target_files: 'prod.system.settings.json'
-  test:
-    uses: ./.github/workflows/test.yml
+
+  build:
+    uses: ./.github/workflows/rw-build-container.yml
     needs: [ system-settings-check ]
     if: ${{ github.event.pull_request.draft == false }}
     with:
-      builder_image_version_tag: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
-      num_procs: "${{ vars.NUM_PROCS }}"
+      base_image_tag: ${{ vars.IMAGE_TAG_DEBUG }}
+      build_type: "debug"
     secrets:
       aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
       aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
+
+  unit-test:
+    uses: ./.github/workflows/rw-run-unit-test.yml
+    needs: [ build ]
+    if: ${{ github.event.pull_request.draft == false }}
+    with:
+      image_tag: ${{ needs.build.outputs.output_image_tag }}
+      s3_log_prefix: "testlogs/${{ github.event.pull_request.number }}"
+      build_type: 'debug'
+    secrets:
+      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
+      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
+
+  integration-test:
+    uses: ./.github/workflows/rw-run-integration-test.yml
+    needs: [ build ]
+    if: ${{ github.event.pull_request.draft == false }}
+    with:
+      image_tag: ${{ needs.build.outputs.output_image_tag }}
+      config_to_run: "github_ci"
+      s3_log_prefix: "testlogs/${{ github.event.pull_request.number }}"
+      build_type: 'debug'
+    secrets:
+      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
+      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
+
+  slack-notification:
+    uses: ./.github/workflows/rw-notify-slack.yml
+    needs: [ unit-test, integration-test ]
+    if: always()
+    with:
+      slack_webhook_url: ${{ vars.GENERIC_SLACK_WEBHOOK_URL }}
+      # Need to create a new channel for PR notifications.
+      slack_channel: "#nightly-builds"
+      text: >
+        PR #${{ github.event.pull_request.number }} (<${{ github.event.pull_request.html_url }}|${{ github.event.pull_request.title }}>) 
+        by ${{ github.event.pull_request.user.login }} has completed the CI workflow
+      attachment: |
+        {
+          color": "${{ needs.unit-test.result == 'success' && needs.integration-test.result == 'success' && 'good' || 'danger' }}",
+          "fields": [
+            {
+              "title": "Build",
+              "value": "${{ needs.build.result }}",
+              "short": true
+            },
+            {
+              "title": "Unit Test",
+              "value": "${{ needs.unit-test.result }}",
+              "short": true
+            },
+            {
+              "title": "Integration Test",
+              "value": "${{ needs.integration-test.result }}",
+              "short": true
+            }
+          ]
+        }
+        
+

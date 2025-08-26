@@ -1,0 +1,186 @@
+# A reusable workflow that runs tests on the code.
+name: Run Integration Test
+
+on:
+  workflow_call:
+    inputs:
+      image_tag:
+        description: 'The image version tag for the base builder to pull.'
+        type: string
+        required: true
+      system_settings_override:
+        description: 'A JSON file that contains overrides for the system.json.settings file.'
+        type: string
+        required: false
+        default: '.github/workflows/ci-general.overrides.json'
+      config_to_run:
+        description: 'The configuration to to run for the integration tests.'
+        type: string
+        required: true
+      iterations:
+        description: 'The number of iterations to run for the integration test.'
+        type: string
+        required: false
+        default: "1"
+      s3_log_prefix:
+        description: 'The S3 prefix for logs. This is the folder inside the S3 bucket where logs will be stored.'
+        type: string
+        required: true
+      build_type:
+        description: 'The type of build to base the tests on. "release" or "debug". The type of build need to match the base image type.'
+        type: string
+        required: true
+        default: "debug"
+    secrets:
+      aws_role_arn:
+        description: "The ARN of the role to assume."
+        required: true
+      aws_ecr_docker_password:
+        description: "The password for the ECR docker registry."
+        required: true
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: test
+    runs-on: warp-ubuntu-latest-arm64-4x
+    timeout-minutes: 40
+    container:
+      image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ inputs.image_tag }}
+      credentials:
+        username: AWS
+        password: ${{ secrets.aws_ecr_docker_password }}
+
+    env:
+      CI_WORKSPACE: /__w/springtail/springtail
+      CI_BUILD_TYPE: ${{ inputs.build_type }}
+      S3_LOGS_PREFIX_FULL: "s3://devsupport.springtail.internal/${{ inputs.s3_log_prefix }}"
+      ECR_REPO_URI: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}
+      IMAGE_TAG: ${{ inputs.image_tag }}
+      SYSTEM_SETTINGS_OVERRIDE: ${{ inputs.system_settings_override }}
+      VCPKG_FORCE_SYSTEM_BINARIES: 1
+      VCPKG_ROOT: /home/dev/external/vcpkg
+      DOCKER: 1
+      ZIC: true
+      USER: root
+      PYTHONUNBUFFERED: 1
+      GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+      GITHUB_LATEST_SHA: ${{ github.event.pull_request.head.sha }}
+      NUM_PROCS: ${{ inputs.num_procs }}
+      INTEGRATION_TEST_CONFIG: ${{ inputs.config_to_run }}
+      INTEGRATION_TEST_ITERATIONS: ${{ inputs.iterations }}
+      SPRINGTAIL_LOG_PATH: /var/log/springtail.log
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          clean: true
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.aws_role_arn }}
+          role-session-name: tempSession
+          aws-region: us-east-1
+
+      - name: Prepare Tests
+        run: |
+          git config --global --add safe.directory ${CI_WORKSPACE}
+          # Override some settings in the config file
+          .github/workflows/scripts/merge_system_settings.py system.json.settings ${SYSTEM_SETTINGS_OVERRIDE} system.json.test
+
+          mkdir -p /opt/springtail/pids
+          service redis-server start
+          
+          # Copy over the fdw_config file to the designated location
+          conf_file=/etc/postgresql/16/main/postgresql.conf
+          fdw_config_file_path=$(grep -E "^springtail_fdw.config_file_path" $conf_file | awk '{print $3}' | tr -d "'")
+          mkdir -p $(dirname $fdw_config_file_path)
+          cp system.json.test $fdw_config_file_path
+          
+          # Reinstall vcpkg dependencies to ensure all are present
+          ./vcpkg.sh
+          ln -s /home/dev/debug debug
+          ln -s /home/dev/release release          
+          ln -s /home/dev/install install
+          
+          # Copies back the grpc generated files
+          rsync -a --include='/*/' --exclude='/*' /home/dev/save/python/grpc/ $CI_WORKSPACE/python/grpc/
+
+          service postgresql start
+          sudo -u postgres psql -c "CREATE DATABASE springtail WITH OWNER springtail"
+          sudo -u postgres psql -d springtail -f ${CI_WORKSPACE}/scripts/triggers.sql
+
+      - name: Run Integration Tests
+        run: |
+          # Grab the short SHA
+          _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
+          
+          cd python/testing
+          service postgresql start
+          ./startup.sh -s data_init.sql
+          
+          # Run integration tests
+          set +e
+          for i in $(seq 1 ${INTEGRATION_TEST_ITERATIONS}) ; 
+          do
+            # Note: 
+            # 1. there might be discrepancies between the _LOG_TIMESTAMP and the _LOG_DATE due to the time it takes to run the integration tests
+            # it may run across a day. This is fine as long as the logs are grouped by _LOG_DATE
+            # 2. the integration-test-report.xml will always be from the last iteration of the tests (overwritten each iteration)
+          
+            _LOG_FLAG="failed"
+            echo "*** Starting iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
+            python3 test_runner.py -c nightly -j ${GITHUB_WORKSPACE}/integration-test-report.xml 2>&1 | tee tmplog
+            # Grab the success/failure status of the integration tests
+            if [ $? -eq 0 ] && ! grep -qE "Tests failed: [1-9][0-9]*" tmplog
+            then
+              _LOG_FLAG="succeeded"
+            fi
+            echo "*** Finished iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
+          
+            _TIMESTAMP=$(date +%s)
+          
+            # Test logs
+            log_file="integration-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}-${i}.log" 
+            log_s3_key="${S3_LOGS_PREFIX_FULL}/${log_file}"
+            aws s3 cp tmplog $log_s3_key
+            echo "*** Integration Test Log S3 Key: $log_s3_key"
+            rm -f tmplog
+          
+            # Springtail service logs
+            springtail_log_file="springtail-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}-${i}.tar.gz"
+            output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../${CI_BUILD_TYPE})
+            fname=$(echo $output  | cut -f2 -d':' | xargs | head -1)
+            springtail_log_s3_key="${S3_LOGS_PREFIX_FULL}/${springtail_log_file}"
+            aws s3 cp $fname $springtail_log_s3_key
+            echo "*** Springtail Log S3 Key: $springtail_log_s3_key"
+            rm -f $fname
+          
+            # If the current iteration of test failed, break out of the loop for now
+            if [ "$_LOG_FLAG" = "failed" ]; then
+              echo "*** Integration test failed at iteration ${i}, breaking out of the loop"
+              exit 1
+            fi
+          done
+
+
+      - name: Integration Test Report
+        uses: dorny/test-reporter@v1
+        if: success() || failure()                         # Only upload the *last* report
+        with:
+          name: Integration Tests (test_runner)            # Name of the check run which will be created
+          path: ./integration-test-report.xml
+          reporter: java-junit
+
+      - uses: actions/upload-artifact@v4
+        if: success() || failure()      # run this step even if previous step failed
+        with:
+          name: 'Integration Test Logs'
+          path: ./python/testing/integration-test-*.log.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        if: success() || failure()      # run this step even if previous step failed
+        with:
+          name: 'Springtail Logs'
+          path: ./python/testing/springtail-*.tar.gz
