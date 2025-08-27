@@ -33,11 +33,33 @@ namespace springtail {
     }
 
     void
+    PgMsgLogGen::finalize_message()
+    {
+        if (_buffer_offset > 0) {
+            // encode and write the header
+            PgMsgStreamHeader header{_buffer_offset, _lsn - 1, _lsn};
+            char header_buf[PgMsgStreamHeader::SIZE];
+            header.encode_header(header_buf);
+            if (::fwrite(header_buf, sizeof(header_buf), 1, _fp) < 0) {
+                throw Error("Failed to write to file: " + _file_name.string());
+            }
+
+            // write the buffer
+            if (::fwrite(_buffer, _buffer_offset, 1, _fp) < 0) {
+                throw Error("Failed to write to file: " + _file_name.string());
+            }
+
+            _buffer_offset = 0;
+        }
+    }
+
+    void
     PgMsgLogGen::_write(const char *data, size_t size)
     {
-        if (::fwrite(data, size, 1, _fp) < 0) {
-            throw Error("Failed to write to file: " + _file_name.string());
-        }
+        CHECK(size + _buffer_offset < sizeof(_buffer))
+            << "Buffer overflow in PgMsgLogGen::_write";
+        std::memcpy(_buffer + _buffer_offset, data, size);
+        _buffer_offset += size;
     }
 
     void
@@ -574,7 +596,10 @@ namespace springtail {
             if (line[0] == '{') {
                 // Convert each line to a json object using the nlohmann::json library
                 nlohmann::json json = nlohmann::json::parse(line);
+                // parse the command, and generate the appropriate log message
                 _parse_command(json);
+                // sync the message to disk
+                _log_gen.finalize_message();
             }
             free(line);
             line = nullptr;

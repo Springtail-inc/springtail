@@ -76,9 +76,6 @@ namespace springtail {
         // get file size
         _file_end_offset = std::filesystem::file_size(file);
 
-        // read in the first header
-        _read_header();
-
         if (offset > _current_offset) {
             _seek_stream(offset);
         }
@@ -1492,6 +1489,7 @@ namespace springtail {
             throw PgIOError();
         }
         _current_path = file;
+        _current_offset = 0;
 
         // get file size
         _file_end_offset = std::filesystem::file_size(file);
@@ -1504,9 +1502,11 @@ namespace springtail {
             return INVALID_LSN;
         }
 
-        while (true) {
-            // Make sure we have room for at least a header
-            DCHECK_GT(_current_offset + PgMsgStreamHeader::SIZE, _file_end_offset);
+        uint64_t last_msg_end_offset = 0;
+        LSN_t last_valid_end_lsn = INVALID_LSN;
+
+        // Make sure we have room for at least a header
+        while (_current_offset + PgMsgStreamHeader::SIZE <= _file_end_offset) {
 
             // read header at current offset and get next header offset
             // after reading the header, _current_offset is set to just after the header
@@ -1522,23 +1522,30 @@ namespace springtail {
                 // safe message, seek to next message
                 _stream.seekg(_xlog_msg_end_offset, std::fstream::beg);
                 _current_offset = _xlog_msg_end_offset;
+
+                // remember this as the last valid message
+                // if we need to truncate, we truncate to just after this message
+                last_msg_end_offset = _xlog_msg_end_offset;
+                last_valid_end_lsn = _header.end_lsn;
+
                 continue;
             }
 
-            // partial message detected; _xlog_msg_end_offset > _file_end_offset
-            // truncate to just before this message header
-            auto new_end_offset = _current_offset - PgMsgStreamHeader::SIZE;
-            if (truncate) {
-                _truncate_file(file, new_end_offset);
-            }
+            DCHECK_GT(_xlog_msg_end_offset, _file_end_offset);
+            // if we reach here, we have a partial message at the end of the file
 
-            // replay this message
-            return _header.start_lsn;
+            break;
         }
+
+        // partial message detected; _xlog_msg_end_offset > _file_end_offset
+        // truncate to just before this message header
+        if (truncate) {
+            _truncate_file(file, last_msg_end_offset);
+        }
+
+        // replay this message, if there was one
+        return last_valid_end_lsn;
     }
-
-
-
 
     bool
     PgMsgStreamReader::_is_schema_included(const std::string& schema)

@@ -67,6 +67,12 @@ springtail_unit_test(test_pg_log_indexer
   LIBS springtail_pglog springtail_test GTest::gtest_main
 )
 
+springtail_unit_test(test_log_repair
+  SOURCES test/test_log_repair.cc
+  INCLUDES ${CMAKE_SOURCE_DIR}/include
+  LIBS springtail_pglog GTest::gtest_main
+)
+
 # dump_repl_log
 add_executable(dump_repl_log test/dump_repl_log.cc)
 target_include_directories(dump_repl_log
