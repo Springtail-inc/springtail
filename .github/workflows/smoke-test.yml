@@ -1,0 +1,7 @@
+name: PR Smoke
+on: { pull_request: {} }
+jobs:
+  echo:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Test PR Trigger"
