@@ -674,8 +674,8 @@ StorageCache::PageCache::background_cleaner()
         // note: if the page is empty, we should be calling flush_empty()
         CHECK(!_extents.empty());
 
-        // perform the usual flush()
-        return _flush(header);
+        // perform flush(), internally does asynchronously
+        return _async_flush(header);
     }
 
     StorageCache::Page::Iterator
@@ -1164,6 +1164,61 @@ StorageCache::PageCache::background_cleaner()
     }
 
     std::vector<uint64_t>
+    StorageCache::Page::_async_flush(const ExtentHeader &header)
+    {
+        auto cache = StorageCache::get_instance();
+
+        std::vector<uint64_t> offsets;
+        std::vector<CacheExtentPtr> cache_extents;
+        struct FlushTask {
+            ExtentRef ext_ref;
+            SafeExtent safe_ext;
+            bool is_flushing;
+        };
+
+        std::vector<FlushTask> tasks;
+
+        for (auto &ref : _extents) {
+            // note: we don't need to do anything to CLEAN extents here
+            if (!ref.is_clean()) {
+                // XXX if the extent was already flushed to disk in the background, we don't
+                //     actually need to read it in again here, we just need to get the extent ID
+
+                auto &&e = ref.make_safe_extent(_file);
+
+                // bring DIRTY extents to MUTABLE
+                if ((*e)->state() == CacheExtent::State::DIRTY) {
+                    // update the extent header
+                    (*e)->header() = header;
+                    tasks.push_back(FlushTask{ref, e, true});
+                    cache_extents.push_back(*e);
+                }
+            } else {
+                tasks.push_back(FlushTask{ref, {}, false});
+            }
+        }
+
+        if (cache_extents.size() > 0) {
+            cache->_data_cache->async_flush(cache_extents);
+        }
+
+        for (auto& task: tasks) {
+            if (task.is_flushing) {
+                // bring MUTABLE extents to CLEAN
+                if ((*task.safe_ext)->state() == CacheExtent::State::MUTABLE) {
+                    // return the now MUTABLE extent back to the read cache
+                    cache->_data_cache->reinsert(*task.safe_ext);
+                }
+                task.ext_ref = task.safe_ext.get_ref();
+                CHECK(task.ext_ref.is_clean());
+            }
+            offsets.push_back(task.ext_ref.id());
+        }
+
+        return offsets;
+    }
+
+    std::vector<uint64_t>
     StorageCache::Page::_flush(const ExtentHeader &header)
     {
         auto cache = StorageCache::get_instance();
@@ -1413,6 +1468,32 @@ StorageCache::PageCache::background_cleaner()
     }
 
     void
+    StorageCache::DataCache::async_flush(std::vector<CacheExtentPtr> extents)
+    {
+        boost::unique_lock lock(_mutex);
+
+        struct FlushTask {
+            CacheExtentPtr extent;
+            std::future<std::shared_ptr<IOResponseAppend>> flush_future;
+        };
+
+        std::vector<FlushTask> flush_tasks;
+
+        for (auto& extent: extents) {
+            auto flush_future = _async_flush(extent);
+            if (flush_future) {
+                flush_tasks.emplace_back(FlushTask{extent, std::move(*flush_future)});
+            } else {
+                flush_tasks.emplace_back(FlushTask{extent, {}});
+            }
+        }
+
+        for (auto& flush_task: flush_tasks) {
+            _process_flush_future(flush_task.extent, std::move(flush_task.flush_future));
+        }
+    }
+
+    void
     StorageCache::DataCache::drop_dirty(CacheExtentPtr extent)
     {
         boost::unique_lock lock(_mutex);
@@ -1509,6 +1590,63 @@ StorageCache::PageCache::background_cleaner()
         }
 
         return extent;
+    }
+
+    void
+    StorageCache::DataCache::_process_flush_future(CacheExtentPtr extent,
+            std::future<std::shared_ptr<IOResponseAppend>>&& flush_response_fut)
+    {
+        if (flush_response_fut.valid()) {
+            boost::unique_lock lock(_mutex, boost::adopt_lock);
+            lock.unlock();
+
+            // On-disk size of the originating extent
+            uint64_t prev_extent_size = extent->_extent_size;
+
+            // notify the vacuumer of the now-expired extent
+            if (extent->header().prev_offset != constant::UNKNOWN_EXTENT) {
+                Vacuumer::get_instance()->expire_extent(extent->_file, extent->header().prev_offset,
+                        prev_extent_size, extent->header().xid);
+            }
+
+            auto&& flush_response = flush_response_fut.get();
+            extent->_extent_id = flush_response->offset;
+            extent->_extent_size = flush_response->next_offset - flush_response->offset;
+
+            lock.lock();
+            lock.release();
+
+            // update the cache ID as pointing to the new extent ID
+            _cache_id_map[extent->_cache_id] = extent->key();
+
+            // mark as MUTABLE, place on the clean LRU
+            extent->_state = CacheExtent::State::MUTABLE;
+
+            // notify anyone waiting
+            extent->_flush_cv->notify_all();
+            extent->_flush_cv = nullptr;
+        } else {
+            // Since no future, extent must be in flushing and will be handled in _flush
+            _flush(extent);
+        }
+    }
+
+    std::optional<std::future<std::shared_ptr<IOResponseAppend>>>
+    StorageCache::DataCache::_async_flush(CacheExtentPtr extent)
+    {
+        if (extent->_state != CacheExtent::State::FLUSHING &&
+                extent->_state == CacheExtent::State::DIRTY) {
+            // mark the extent as FLUSHING so that other callers will block until flush complete
+            extent->_state = CacheExtent::State::FLUSHING;
+            extent->_flush_cv = std::make_shared<boost::condition_variable>();
+
+            auto handle = IOMgr::get_instance()->open(extent->_file, IOMgr::IO_MODE::APPEND, true);
+            auto response = extent->async_flush(handle);
+
+            return response;
+        }
+
+        return std::nullopt;
     }
 
     void
