@@ -1,0 +1,11 @@
+{
+    "log_mgr": {
+        "log_size_rollover_threshold": 32768,
+        "archive_logs": true
+    },
+    "storage": {
+        "vacuum_config": {
+            "enabled": false
+        }
+    }
+}

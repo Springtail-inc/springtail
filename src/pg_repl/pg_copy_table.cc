@@ -235,6 +235,12 @@ namespace springtail
         return {pg_xid8, _schema.xids};
     }
 
+    bool PgCopyTable::_is_table_dropped(uint64_t schema_oid, uint64_t table_oid) {
+        _connection.exec(
+                fmt::format("SELECT 1 FROM pg_class WHERE oid = {} AND relnamespace = {}", table_oid, schema_oid));
+        return (_connection.ntuples() == 0);
+    }
+
     void PgCopyTable::_get_secondary_indexes()
     {
         _connection.exec(fmt::format(SECONDARY_INDEX_QUERY, _schema.table_oid));
@@ -529,11 +535,11 @@ namespace springtail
                              uint32_t table_oid,
                              const PgCopyResultPtr &snapshot_details)
     {
-        LOG_INFO("Copying table {}.{} with oid {} and schema oid {}",
-                 schema_name, table_name, table_oid, schema_oid);
-      
         // set the schema
         _set_schema(table_oid);
+
+        LOG_INFO("Copying table {}.{} with oid {} and schema oid {}",
+                 _schema.schema_name, _schema.table_name, table_oid, _schema.schema_oid);
 
         // validate the columns to see if there are invalid columns
         auto invalid_columns = TableValidator::get_instance()->validate_columns<SchemaColumn>(_schema.columns,
@@ -710,8 +716,9 @@ namespace springtail
         stats->set_end_offset(metadata.stats.end_offset);
         roots_req->set_snapshot_xid(metadata.snapshot_xid);
 
+        copy_info->set_is_table_dropped(_is_table_dropped(_schema.schema_oid, table_oid));
         LOG_INFO("Copied table {}.{} with oid {} and schema oid {}",
-                 schema_name, table_name, table_oid, schema_oid);
+                 _schema.schema_name, _schema.table_name, table_oid, _schema.schema_oid);
 
         return std::make_shared<PgCopyResult::TableInfo>(table_oid, copy_info, schema);
     }
@@ -869,9 +876,6 @@ namespace springtail
 
             case (SchemaType::BINARY): {
                 std::string_view tmp(row.data() + pos, length);
-
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Converting unsupported type '{}' into BINARY", pg_type);
-                // XXX print out the binary data here
                 std::vector<char> data(tmp.begin(), tmp.end());
                 fields->push_back(std::make_shared<ConstTypeField<std::vector<char>>>(data));
                 pos += length;

@@ -312,20 +312,20 @@ namespace springtail::pg_log_mgr {
         while (!_shutdown) {
             std::set<uint32_t> table_ids;
 
-            // block on redis table sync queue w/timeout for shutdown
-            auto request = _redis_sync_queue.pop(REDIS_WORKER_ID, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
-            if (request == nullptr) {
-                continue; // timeout, check for shutdown
+            // _get_copy_table_ids block on redis table sync queue w/timeout for shutdown
+            auto [next_table_id, next_xid_lsn] = _get_copy_table_ids(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+            if (next_table_id == -1) {
+                continue; // check for shutdown
             }
-
             do {
                 // populate the tables to copy; check for more work
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Table sync queue: {}@{}:{}", request->table_id(),
-                                    request->xid().xid, request->xid().lsn);
-                table_ids.insert(request->table_id());
+                table_ids.insert(next_table_id);
 
-                request = _redis_sync_queue.try_pop(REDIS_WORKER_ID);
-            } while (request != nullptr);
+                // Mark table's XID to be processed for resync
+                SyncTracker::get_instance()->pick_table_for_sync(_db_id, next_table_id, next_xid_lsn.value());
+
+                std::tie(next_table_id, next_xid_lsn) = _get_copy_table_ids();
+            } while (next_table_id != -1);
 
             CHECK(!table_ids.empty());
 
@@ -345,6 +345,24 @@ namespace springtail::pg_log_mgr {
         }
     }
 
+    std::pair<uint32_t, std::optional<XidLsn>>
+    PgLogMgr::_get_copy_table_ids(uint32_t timeout) {
+        uint32_t table_id = -1;
+        std::shared_ptr<TableSyncRequest> request;
+        if (timeout > 0) {
+            request = _redis_sync_queue.pop(REDIS_WORKER_ID, timeout);
+        } else {
+            request = _redis_sync_queue.try_pop(REDIS_WORKER_ID);
+        }
+        if (request != nullptr) {
+            // populate the tables to copy; check for more work
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Table sync queue: {}@{}:{}", request->table_id(),
+                    request->xid().xid, request->xid().lsn);
+            return std::make_pair(request->table_id(), request->xid());
+        }
+        return std::make_pair(table_id, std::nullopt);
+    }
+
     void
     PgLogMgr::_do_table_copies(std::optional<std::set<uint32_t>> table_ids)
     {
@@ -355,6 +373,9 @@ namespace springtail::pg_log_mgr {
 
         // notify xact handler to rollover log
         _notify_xact_start_sync();
+
+        // ensure the pipeline was stalled before we complete
+        _internal_state.wait_for_state(STATE_SYNCING);
 
         // copy tables
         LOG_DEBUG(LOG_PG_LOG_MGR, "Copying tables for db {}; state=synchronizing", _db_id);
@@ -369,19 +390,37 @@ namespace springtail::pg_log_mgr {
             res = PgCopyTable::copy_db(_db_id, xid);
         }
 
-        // ensure the pipeline was stalled before we complete
-        _internal_state.wait_for_state(STATE_SYNCING);
-
         LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; res size={}", res.size());
-        if (res.size() > 0) {
-            // process copy results
-            _process_copy_results(res);
-        } else {
-            // no tables copied
-            LOG_DEBUG(LOG_PG_LOG_MGR, "No tables copied; setting state=running");
-            // set to running this unblocks the xact handler
-            _internal_state.set(STATE_RUNNING);
-            Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_RUNNING);
+
+        bool copy_task_pending = true;
+        while(copy_task_pending) {
+            if (res.size() > 0) {
+                // process copy results
+                copy_task_pending = _process_copy_results(res);
+                if (copy_task_pending) {
+                    auto [next_table_id, next_xid_lsn] = _get_copy_table_ids();
+                    if (next_table_id != -1) {
+                        xid = _pg_log_reader->get_next_xid();
+                        SyncTracker::get_instance()->pick_table_for_sync(_db_id, next_table_id, next_xid_lsn.value());
+                        LOG_DEBUG(LOG_PG_LOG_MGR, "Copying more tables; target xid={}", xid);
+                        res = PgCopyTable::copy_tables(_db_id, xid, std::set<uint32_t>{next_table_id});
+                    } else {
+                        // Not able to fetch next table, so exit copy
+                        LOG_DEBUG(LOG_PG_LOG_MGR, "Couldn't fetch more tables; setting state=running");
+                        // set to running this unblocks the xact handler
+                        _internal_state.set(STATE_RUNNING);
+                        Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_RUNNING);
+                        copy_task_pending = false;
+                    }
+                }
+            } else {
+                // no tables copied
+                LOG_DEBUG(LOG_PG_LOG_MGR, "No more tables copied; setting state=running");
+                // set to running this unblocks the xact handler
+                _internal_state.set(STATE_RUNNING);
+                Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_RUNNING);
+                copy_task_pending = false;
+            }
         }
     }
 
@@ -395,7 +434,7 @@ namespace springtail::pg_log_mgr {
     }
 
 
-    void
+    bool
     PgLogMgr::_process_copy_results(const std::vector<PgCopyResultPtr> &res)
     {
         assert(_internal_state.is(STATE_SYNCING));
@@ -415,11 +454,16 @@ namespace springtail::pg_log_mgr {
             SyncTracker::get_instance()->add_sync(std::get<pg_log_mgr::PgXactMsg::TableSyncMsg>(redis_xact.msg));
         }
 
-        // process stalled messages; set state to replaying
-        _internal_state.set(STATE_REPLAYING);
-        _internal_state.wait_for_state(STATE_RUNNING);
-
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; state=replaying");
+        if (_redis_sync_queue.peek() == nullptr) {
+            // process stalled messages; set state to replaying
+            _internal_state.set(STATE_REPLAYING);
+            _internal_state.wait_for_state(STATE_RUNNING);
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; state=replaying");
+            return false;
+        } else {
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; More to process, dont wake up logreader");
+            return true;
+        }
     }
 
     bool

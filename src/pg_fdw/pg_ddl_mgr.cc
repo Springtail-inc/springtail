@@ -113,7 +113,8 @@ namespace springtail::pg_fdw {
         "LEFT JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = 0 "
         "WHERE n.nspname = '{}' AND c.relname = '{}'";
 
-
+    static constexpr char CREATE_USER[] =
+        "CREATE USER {} WITH LOGIN PASSWORD '{}' IN ROLE pg_read_all_data;";
 
     PgDDLMgr::PgDDLMgr() : _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE)
     {
@@ -893,6 +894,131 @@ namespace springtail::pg_fdw {
                            escaped_schema, escaped_name, value_ss.str());
     }
 
+    // Recursive DFS
+    void traverse(int tid,
+                  const std::unordered_map<int, std::vector<int>>& children_map,
+                  const std::unordered_map<int, std::vector<nlohmann::json>>& table_map,
+                  nlohmann::json& output)
+    {
+        // Process this node's actions: drop before create
+        auto it = table_map.find(tid);
+        if (it != table_map.end()) {
+            std::vector<nlohmann::json> actions = it->second;
+            std::ranges::stable_sort(actions, [](const nlohmann::json& a, const nlohmann::json& b) {
+                bool resyncA = a.value("is_resync", false);
+                bool resyncB = b.value("is_resync", false);
+
+                // Only reorder when both are resync actions
+                if (!(resyncA && resyncB)) {
+                    return false; // preserve input order
+                }
+
+                // Within resync, ensure DROP before CREATE
+                if (a["action"] == b["action"])
+                    return false;
+
+                return a["action"] == "drop" && b["action"] == "create";
+            });
+            for (const auto& act : actions) {
+                output.push_back(act);
+            }
+        }
+
+        // Recurse into children
+        auto child_iter = children_map.find(tid);
+        if (child_iter != children_map.end()) {
+            std::vector<int> child_ids = child_iter->second;
+            std::ranges::sort(child_ids);
+            for (int childId : child_ids) {
+                traverse(childId, children_map, table_map, output);
+            }
+        }
+    }
+
+    nlohmann::json
+    sort_ddls_by_hierarchy(nlohmann::json arr)
+    {
+        // Build lookup maps
+        std::unordered_map<int, std::vector<nlohmann::json>> table_map;
+        std::unordered_map<int, std::vector<int>> children_map;
+        std::unordered_map<int, int> parent_map;
+        std::vector<int> roots;
+
+        // Collect passthrough actions (not create/drop)
+        nlohmann::json passthrough = nlohmann::json::array();
+
+        // Pass 1: collect all tables
+        for (const auto &obj : arr) {
+            auto action = obj["action"].get<std::string>();
+
+            // Only create or drop actions are processed. They are the ones that are used in the resync flow
+            if (action == "create" || action == "drop") {
+                int tid = obj["tid"].get<int>();
+                table_map[tid].push_back(obj);
+            } else {
+                passthrough.push_back(obj);
+            }
+        }
+
+        // Pass 2: build parent-child relationships
+        for (const auto &obj : arr) {
+            auto action = obj["action"].get<std::string>();
+            // Only create or drop actions are processed. They are the ones that are used in the resync flow
+            if (action != "create" && action != "drop")
+                continue;
+
+            int tid = obj["tid"].get<int>();
+            if (obj.contains("parent_table_id")) {
+                int parent = obj["parent_table_id"].get<int>();
+
+                if (table_map.contains(parent)) {
+                    parent_map[tid] = parent;
+                    auto &vec = children_map[parent];
+                    if (std::ranges::find(vec, tid) == vec.end()) {
+                        vec.push_back(tid);
+                    }
+                } else {
+                    // Parent truly missing
+                    if (std::ranges::find(roots, tid) == roots.end()) {
+                        roots.push_back(tid);
+                    }
+                    LOG_INFO("[WARN] Parent {} not found in JSON, treating {} as root", parent, tid);
+                }
+            } else {
+                // No parent_table_id -> root
+                if (std::ranges::find(roots, tid) == roots.end()) {
+                    roots.push_back(tid);
+                }
+            }
+        }
+
+        // Pass 3: detect any without parent
+        for (const auto &[tid, _] : table_map) {
+            if (!parent_map.contains(tid) && std::ranges::find(roots, tid) == roots.end()) {
+                roots.push_back(tid);
+            }
+        }
+
+        std::ranges::sort(roots);
+
+        // Traverse hierarchy
+        nlohmann::json sorted = nlohmann::json::array();
+        for (int rootTid : roots) {
+            traverse(rootTid, children_map, table_map, sorted);
+        }
+
+        // Combine passthrough + sorted
+        nlohmann::json sorted_ddls = nlohmann::json::array();
+        for (const auto &obj : passthrough) {
+            sorted_ddls.push_back(obj);
+        }
+        for (const auto &obj : sorted) {
+            sorted_ddls.push_back(obj);
+        }
+
+        return sorted_ddls;
+    }
+
     void
     PgDDLMgr::run()
     {
@@ -918,11 +1044,20 @@ namespace springtail::pg_fdw {
                     uint64_t schema_xid = entry.at("xid").get<uint64_t>();
                     auto ddls = entry.at("ddls");
 
+                    LOG_DEBUG(LOG_FDW, "Original DDLS: {}", ddls.dump(4));
+
+                    // Sort the DDLs based on their hierarchy
+                    auto sorted_ddls = sort_ddls_by_hierarchy(ddls);
+
+                    LOG_DEBUG(LOG_FDW, "Sorted DDLS: {}", sorted_ddls.dump(4));
+
                     if (_db_xid_map.contains(db_id) && _db_xid_map[db_id] >= schema_xid) {
                         LOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
                                     db_id, _db_xid_map[db_id], schema_xid);
                     } else {
-                        db_map[db_id][schema_xid] = ddls;
+                        LOG_DEBUG(LOG_FDW, "New schema XID will be applied: db_id={}, current={}, new={}",
+                                    db_id, _db_xid_map[db_id], schema_xid);
+                        db_map[db_id][schema_xid] = sorted_ddls;
                     }
                 }
                 if (db_map.empty()) {
@@ -938,7 +1073,12 @@ namespace springtail::pg_fdw {
                     _thread_manager->queue_request(std::make_shared<common::MultiQueueRequest>(
                         db_id, [this, &redis_ddl, db_id, xid_map]() {
                             try {
-                                // apply the DDL statements
+                                uint64_t schema_xid = xid_map.rbegin()->first;
+                                LOG_DEBUG(
+                                    LOG_FDW, "Updating redis ddl @ through schema XID: {}, db_id: {}",
+                                    schema_xid, db_id);
+
+                                    // apply the DDL statements
                                 bool status = _update_schemas(db_id, xid_map);
                                 if (!status) {
                                     // error occured, abort the DDL
@@ -950,10 +1090,6 @@ namespace springtail::pg_fdw {
 
                                 // success, update schema XID if applied, otherwise they may be
                                 // queued
-                                uint64_t schema_xid = xid_map.rbegin()->first;
-                                LOG_DEBUG(
-                                    LOG_FDW, "Updating redis ddl @ through schema XID: {}, db_id: {}",
-                                    schema_xid, db_id);
                                 redis_ddl.update_schema_xid(_fdw_id, db_id, schema_xid);
 
                                 std::unique_lock db_lock_unique(_db_mutex);

@@ -90,7 +90,7 @@ namespace springtail::pg_log_mgr {
         /**
          * Issue's a resync request for a table and waits for the table copy to start.
          */
-        void issue_resync_and_wait(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+        void issue_resync_and_wait(uint64_t db_id, uint64_t table_id, const XidLsn &xid, CommitterQueuePtr committer_queue);
 
         /**
          * Marks that the coppy thread has started the COPY request for this table.  This record is
@@ -141,6 +141,15 @@ namespace springtail::pg_log_mgr {
          *         table given the pg_xid.
          */
         SkipDetails should_skip(uint64_t db_id, uint64_t table_id, uint32_t pg_xid) const;
+
+        /**
+         * @brief Record PG_XID at which table is picked for resync
+         *
+         * @param db_id     Database ID
+         * @param table_id  Table ID
+         * @param xid       PG XID/LSN which will be marked
+         */
+        void pick_table_for_sync(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
     protected:
         SyncTracker() : Singleton<SyncTracker>(ServiceId::SyncTrackerId) {}
@@ -269,11 +278,27 @@ namespace springtail::pg_log_mgr {
         /** Used to track all of the table syncs operating at a given snapshot XID. */
         DbMap<PgXidMap<std::shared_ptr<XidRecord>>> _sync_map;
 
+        /** db-> table indicating that a resync was issued but it hasn't been picked up by the copy
+          thread yet. */
+        using TableSyncXidsMap = std::map<uint64_t, std::set<XidLsn>>;
+        using DbTableSyncXidsMap = std::map<uint64_t, TableSyncXidsMap>;
+        DbTableSyncXidsMap _resync_map;
+
+        /** db -> table -> xid indicating the table @ XID is selected for resync, yet to in-flight*/
+        using TableSyncPickedXidMap = std::map<uint64_t, XidLsn>;
+        using DbTableSyncPickedXidMap = std::map<uint64_t, TableSyncPickedXidMap>;
+        DbTableSyncPickedXidMap _resync_picked_map;
+
         /** Entry is added here when a copy for the table is in-flight but hasn't completed. */
         DbMap<TableMap<std::shared_ptr<Inflight>>> _inflight_map;
 
-        /** PgLogReader waits for copy to start here. */
-        DbMap<std::shared_ptr<Wait>> _wait_map;
+        /**
+         * @brief Block the committer from issuing commits during a table sync.
+         * @param db_id            Database id
+         * @param committer_queue  Committer Queue to send block_commit message to
+         */
+        void _block_commits(uint64_t db_id, CommitterQueuePtr committer_queue);
+
     };
 } // springtail::pg_log_mgr
 

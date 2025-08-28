@@ -203,7 +203,7 @@ jobs:
           cd python/testing
           set +e
           _LOG_FLAG="failed"          
-          python3 test_runner.py -c config.yaml -j /__w/springtail/springtail/integration-test-report.xml --skip-downloads 2>&1 | tee tmplog
+          python3 test_runner.py -c github_ci -j /__w/springtail/springtail/integration-test-report.xml --skip-downloads 2>&1 | tee tmplog
           # Grab the success/failure status of the integration tests
           if [ $? -eq 0 ] && ! grep -qE "Tests failed: [1-9][0-9]*" tmplog
           then

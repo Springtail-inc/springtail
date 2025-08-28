@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import json
+import shutil
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
@@ -92,6 +93,12 @@ class Production:
         """
         Install the springtail binaries on the local system.
         Current s3 bucket: s3://data-share.springtail.internal/packages/
+
+        We follow two steps for the installation process:
+
+          1. Download the latest package from S3 to a temporary location
+          2. Extract the package and check the config hash, if matches, copy over to the installation path.
+             Otherwise, clean up and error out.
         """
         global S3_DOWNLOAD_PATH, S3_BIN_FOLDER
 
@@ -111,27 +118,43 @@ class Production:
             self.send_sns('download_failed')
             raise ValueError("Failed to download springtail binaries")
 
+        # Extract the springtail_tgz to a temporary location (under S3_DOWNLOAD_PATH) and check the config hash
+        temp_dir = tempfile.mkdtemp(dir=S3_DOWNLOAD_PATH)
+        try:
+            run_command('tar', ['xzf', springtail_tgz, '-C', temp_dir])
+        except Exception as e:
+            self.logger.error("Failed to extract springtail binaries: %s", str(e))
+            self.send_sns('download_failed')
+            os.unlink(springtail_tgz)
+            shutil.rmtree(temp_dir)
+            raise e
+
+        package_config_sha = self.get_config_hash(os.path.join(temp_dir, 'INFO.txt'))
+        if package_config_sha != config_gitsha:
+            msg = f"Config Git SHA mismatch: expected {config_gitsha}, got {package_config_sha}"
+            self.logger.error(msg)
+            self.send_sns('config_git_sha_mismatch')
+            os.unlink(springtail_tgz)
+            shutil.rmtree(temp_dir)
+            raise ValueError(msg)
+
+        # Only send this if the config hash matches
         self.send_sns('download_complete', version=(os.path.basename(springtail_tgz)))
 
         try:
-            # Create the install directory if it doesn't exist
+            # Create the installation directory if it doesn't exist
             if not os.path.exists(self.install_path):
                 makedir(self.install_path)
 
             # set LD_LIBRARY_PATH
             os.environ['LD_LIBRARY_PATH'] = os.path.join(self.install_path, SPRINGTAIL_LIB_DIR)
 
-            # Install the binaries and shared libraries
-            run_command('sudo', ['tar', 'xzf', springtail_tgz, '-C', self.install_path])
+            # Install the binaries and shared libraries by moving the temp_dir contents to install_path
+            # Important: for rsync to work correctly, temp_dir and self.install_path must end with a '/'
+            run_command('sudo', ['rsync', '-a', os.path.join(temp_dir, ''), os.path.join(self.install_path, '')])
 
             # Make sure shared-lib is readable by all
             run_command('sudo', ['chmod', '-R', '755', os.path.join(self.install_path, SPRINGTAIL_LIB_DIR)])
-
-            package_config_sha = self.get_config_hash(os.path.join(self.install_path, 'INFO.txt'))
-            if package_config_sha != config_gitsha:
-                self.logger.error(f"Config Git SHA mismatch: expected {config_gitsha}, got {package_config_sha}")
-                raise ValueError("Config Git SHA mismatch")
-
             self.logger.info(f"Springtail binaries installed to {self.install_path}")
             self.send_sns('install_complete', version=os.path.basename(springtail_tgz))
 
@@ -139,6 +162,12 @@ class Production:
             self.logger.error(f"Failed to install springtail binaries: {str(e)}")
             self.send_sns('install_failed', version=os.path.basename(springtail_tgz))
             raise e
+        finally:
+            try:
+                os.unlink(springtail_tgz)
+                shutil.rmtree(temp_dir)
+            except Exception as e:
+                self.logger.warning("Failed to clean up temporary files: %s %s (%s)", springtail_tgz, temp_dir, str(e))
 
     def get_config_hash(self, file_path: str) -> str:
         """Read and extract Config Hash value from the version file.
@@ -312,6 +341,9 @@ class Production:
             subject = f"Maximum restart retries hit: {srn}, {service_name} @{timestamp}"
             msg = f"Component tried restarting, but couldn't restart after maximum retries: {component}"
             attributes['component'] = component
+        elif type == 'config_git_sha_mismatch':
+            subject = f"Config Git SHA mismatch: {srn}, {service_name} @{timestamp}"
+            msg = "The config git SHA of the downloaded package does not match the expected value in Redis."
         else:
             self.logger.error(f"Unknown SNS message type: {type}")
             return

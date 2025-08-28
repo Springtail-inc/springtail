@@ -3,6 +3,8 @@ from lxml import etree
 import os
 import springtail
 import traceback
+import time
+from typing import Optional
 
 from test_case import TestCase
 
@@ -30,17 +32,23 @@ class TestSet:
                  config_file: str,
                  build_dir: str,
                  test_params: dict,
+                 overlay: None | str,
                  test_files: list[str] = []) -> None:
         """Initialize the test set"""
         self._directory = directory
         self._config_file = config_file
         self._build_dir = build_dir
         self._test_params = test_params
-        self._name = os.path.splitext(os.path.basename(self._config_file))[0] + ' - ' + os.path.basename(self._directory)
+        self._name = (overlay if overlay is not None else "default") + ' - ' + os.path.basename(self._directory)
+        self._skip = False
 
+        logging.info(f"Creating test set: {self._name}")
         # constuct the special "config" test case for global setup and cleanup
         self._config = TestCase(os.path.join(directory, _GLOBAL_CONFIG_FILE), self._build_dir, self._test_params, ['setup', 'cleanup'])
         self._config.parse_file()
+        if not self._check_overlay(overlay, self._config.get_required_overlays()):
+            logging.error(f'Error: overlay requirement is not fulfilled for the test set')
+            self._skip = True
 
         # collect and parse the test cases from the directory
         self._test_files = [ ]
@@ -60,6 +68,10 @@ class TestSet:
                 # parse the test
                 self._tests[test_file] = TestCase(os.path.join(directory, test_file), self._build_dir, self._test_params)
                 self._tests[test_file].parse_file()
+                if not self._check_overlay(overlay, self._tests[test_file].get_required_overlays()):
+                    logging.warning(f'skipping test file {test_file} -- cannot run with current overlay \'{overlay}\'')
+                    self._tests[test_file].skip()
+                    continue
 
                 # if only a subset of test cases was requested, limit them here
                 if test_files and test_file not in test_files:
@@ -75,6 +87,12 @@ class TestSet:
                 logging.error(f'Error parsing test -- {e}')
                 pass # this test was recorded as an error and we continue
 
+    def _check_overlay(self, overlay: Optional[str], required_overlays: list) -> bool:
+        if len(required_overlays) == 0:
+            return True
+        if overlay is None or overlay not in required_overlays:
+            return False
+        return True
 
     def _apply_replica_full(self) -> None:
         sql = "SELECT __pg_springtail_triggers.set_identity_on_tables_without_pk();"
@@ -109,6 +127,9 @@ class TestSet:
                 logging.debug(f'Dropping database {db_name}, config: {db_config}')
                 springtail.drop_database(self._props, db_config)
 
+    def skip(self) -> bool:
+        return self._skip
+
     def run(self,
             shutdown_on_fail: bool = False) -> bool:
         """Runs one or more of the test cases in the test set in the
@@ -118,6 +139,8 @@ class TestSet:
         Returns True if the tests all succeed, False otherwise
 
         """
+
+        logging.info(f"Running test set: {self._name}")
 
         self._props = springtail.Properties(self._config_file, True)
         self._config.set_props(self._props)
@@ -181,8 +204,9 @@ class TestSet:
                 self._tests[test_file].verify()
 
             except Exception as e:
-                logging.error(f'Error running test: {test_file}')
-                if self._tests[test_file].get_result()['result'] == 'FAILED':
+                logging.error(f'Error: exception: [{e}] result: {self._tests[test_file].get_result()["result"]}')
+                result = self._tests[test_file].get_result()['result']
+                if result == 'FAILED' or result == 'ERROR':
                     test_failed = True
                 else:
                     logging.error(f'Error: exception: [{e}] result: {self._tests[test_file].get_result()["result"]}')
@@ -192,9 +216,12 @@ class TestSet:
             # save the logs
             self._tests[test_file].stop_capture()
 
+            # always check logs
+            if len(springtail.check_logs(self._config_file)) != 0:
+                test_failed = True
+
             # if we should stop the tests, break the loop
             if test_failed and not shutdown_on_fail:
-                springtail.check_logs(self._config_file)
                 break
 
             # try to perform cleanup
@@ -203,9 +230,12 @@ class TestSet:
             except Exception as e:
                 logging.error(f'Error on cleanup: {e}')
 
-            # check here if the test failed nad we need to check the logs
+            # always check logs
+            if len(springtail.check_logs(self._config_file)) != 0:
+                test_failed = True
+
+            # check here if the test failed nad we need to stop
             if test_failed:
-                springtail.check_logs(self._config_file)
                 break
 
         # if a test failed and we don't shutdown on failure, return immediately

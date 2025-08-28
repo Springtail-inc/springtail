@@ -1,7 +1,3 @@
--- DISABLED TEST
-## metadata
-### disable_test
-
 ## test
 
 ### parallel

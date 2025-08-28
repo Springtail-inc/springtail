@@ -12,7 +12,7 @@
 #include <storage/vacuumer.hh>
 
 #include <sys_tbl_mgr/client.hh>
-#include <sys_tbl_mgr/table.hh>
+#include <sys_tbl_mgr/user_table.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
 #include <xid_mgr/xid_mgr_server.hh>
@@ -102,6 +102,11 @@ namespace {
             _primary_keys = std::vector<std::string>({"name"});
         }
 
+        void TearDown() override {
+            // Cleanup vacuum files
+            Vacuumer::get_instance()->cleanup_db(_db_id);
+        }
+
         ExtentSchemaPtr _schema;
         FieldArrayPtr _fields, _csv_fields;
 
@@ -163,7 +168,7 @@ namespace {
 
             auto keys = _make_keys(table_id, roots);
 
-            return std::make_shared<Table>(_db_id, table_id, xid, _base_dir,
+            return std::make_shared<UserTable>(_db_id, table_id, xid, _base_dir,
                                            _primary_keys, keys,
                                            tbl_meta, _schema);
         }
@@ -178,7 +183,7 @@ namespace {
             auto keys = _make_keys(table_id, roots);
 
 
-            return std::make_shared<MutableTable>(_db_id, table_id, xid - 1, xid, _base_dir,
+            return std::make_shared<UserMutableTable>(_db_id, table_id, xid - 1, xid, _base_dir,
                                                   _primary_keys, keys,
                                                   tbl_meta, _schema);
         }
