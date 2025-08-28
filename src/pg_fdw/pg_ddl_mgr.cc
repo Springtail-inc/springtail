@@ -362,10 +362,20 @@ namespace springtail::pg_fdw {
         auto it = table_map.find(tid);
         if (it != table_map.end()) {
             std::vector<nlohmann::json> actions = it->second;
-            std::ranges::sort(actions, [](const nlohmann::json& a, const nlohmann::json& b) {
+            std::ranges::stable_sort(actions, [](const nlohmann::json& a, const nlohmann::json& b) {
+                bool resyncA = a.value("is_resync", false);
+                bool resyncB = b.value("is_resync", false);
+
+                // Only reorder when both are resync actions
+                if (!(resyncA && resyncB)) {
+                    return false; // preserve input order
+                }
+
+                // Within resync, ensure DROP before CREATE
                 if (a["action"] == b["action"])
                     return false;
-                return a["action"] == "drop" && b["action"] != "drop";
+
+                return a["action"] == "drop" && b["action"] == "create";
             });
             for (const auto& act : actions) {
                 output.push_back(act);
