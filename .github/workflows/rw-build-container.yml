@@ -66,7 +66,7 @@ jobs:
       - name: Build Springtail Container
         id: build
         run: |
-          git config --global --add safe.directory ${GITHUB_WORKSPACE}    
+          git config --global --add safe.directory ${CI_WORKSPACE}    
           # Login ECR
           aws ecr get-login-password | docker login --username AWS --password-stdin ${ECR_REPO_URI}
           # Ensure the base image is available locally
