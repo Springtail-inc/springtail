@@ -954,7 +954,7 @@ namespace springtail {
     public:
         using value_type = std::shared_ptr<numeric::NumericData>;
 
-        explicit ConstTypeField(std::vector<char> v) 
+        explicit ConstTypeField(std::vector<char> v)
             : _value{std::move(v)}
         {}
 

@@ -30,7 +30,7 @@ WHERE username = 'user2';
 
 ## verify
 ### schema_check public table_with_notnull_constraint_alter_drop
--- SELECT * FROM table_with_notnull_constraint_alter_drop;
+SELECT * FROM table_with_notnull_constraint_alter_drop order by id;
 
 ## cleanup
 DROP TABLE IF EXISTS table_with_notnull_constraint_alter_drop;

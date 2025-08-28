@@ -41,7 +41,9 @@ namespace springtail {
          * @param columns list of columns, and types
          * @return uint32_t table ID
          */
-        uint32_t create_table(const std::string &table_name, const std::vector<PgMsgSchemaColumn> &columns);
+        uint32_t create_table(const std::string &table_name,
+                              const std::vector<PgMsgSchemaColumn> &columns,
+                              const nlohmann::json &json);
 
         /**
          * @brief Create index
@@ -58,7 +60,8 @@ namespace springtail {
          * @param table_id table id
          * @param columns list of columns, and types
          */
-        void alter_table(uint32_t table_id, const std::vector<PgMsgSchemaColumn> &columns);
+        void alter_table(uint32_t table_id, const std::vector<PgMsgSchemaColumn> &columns,
+                         const nlohmann::json &json);
 
         /**
          * @brief Drop a table

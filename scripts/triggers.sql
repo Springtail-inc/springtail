@@ -1,6 +1,7 @@
 -- Triggers for create/alter table and drop table events
 -- https://www.postgresql.org/docs/current/plpgsql-trigger.html
-CREATE SCHEMA IF NOT EXISTS __pg_springtail_triggers;
+
+CREATE SCHEMA IF NOT EXISTS __pg_springtail_triggers; -- NOTE: if this schema changes, change pg_copy_table.cc too
 
 CREATE OR REPLACE FUNCTION __pg_springtail_triggers.springtail_event_trigger_for_drops()
         RETURNS event_trigger LANGUAGE plpgsql AS $$
@@ -16,7 +17,9 @@ BEGIN
                                      OR obj.object_type = 'index'
                                      OR obj.object_type = 'schema'
                                      OR obj.object_type = 'type')
-            AND (obj.schema_name IS NULL OR obj.schema_name NOT LIKE 'pg_%') THEN
+            AND (obj.schema_name IS NULL OR
+                 obj.schema_name NOT LIKE 'pg_%')
+            AND obj.schema_name IS DISTINCT FROM '__pg_springtail_triggers' THEN
 
             -- sometimes tg_tag is DROP TABLE even if type is index
             IF obj.object_type = 'table' THEN
@@ -238,18 +241,35 @@ DECLARE
     partition_key text;
     partition_data json;
     is_partition_event boolean;
+    -- Row security details
+    rowsecurity boolean;
+    forcerowsecurity boolean;
     -- Table details output
     table_info text;
 BEGIN
+    IF schema_name = '__pg_springtail_triggers' THEN
+        -- Ignore the internal schema
+        RAISE NOTICE 'springtail: ignoring internal schema __pg_springtail_triggers';
+        RETURN NULL;
+    END IF;
+
     -- Get the table details from pg_class along with the partition details
-    SELECT pg_class.relname, pg_class.relnamespace, pg_class.relreplident, pg_class.relpersistence, pg_class.relkind, CASE WHEN pg_class.relispartition THEN
+    SELECT pg_class.relname, pg_class.relnamespace, pg_class.relreplident, pg_class.relpersistence, pg_class.relkind,
+        pg_class.relrowsecurity, pg_class.relforcerowsecurity,
+        CASE WHEN pg_class.relispartition THEN
             (SELECT inhparent FROM pg_inherits WHERE inhrelid = pg_class.oid)
         END as parent_table_id,
         pg_get_expr(pg_class.relpartbound, pg_class.oid, TRUE) as partition_bound,
         pg_get_partkeydef(pg_class.oid) as partition_key
     FROM pg_class
     WHERE oid = obj_id
-    INTO table_relname, table_namespace_id, table_replident, table_persistence, rel_kind, parent_table_id, partition_bound, partition_key;
+    INTO table_relname, table_namespace_id, table_replident, table_persistence, rel_kind, rowsecurity, forcerowsecurity, parent_table_id, partition_bound, partition_key;
+
+    IF table_persistence = 't' THEN
+        -- Temporary tables are not supported
+        RAISE NOTICE 'springtail: ignoring temporary table %', table_relname;
+        RETURN NULL;
+    END IF;
 
     -- Only during the ALTER command, get the partition details. This is required to handle the partition events
     IF command_tag = 'ALTER TABLE' AND partition_key IS NOT NULL THEN
@@ -329,7 +349,9 @@ BEGIN
         'has_pkey', has_pkey,
         'table_persistence', table_persistence,
         'table_replident', table_replident,
-        'rel_kind', rel_kind
+        'rel_kind', rel_kind,
+        'rowsecurity', rowsecurity,
+        'forcerowsecurity', forcerowsecurity
     );
 
     -- RAISE NOTICE 'springtail: % op, %', command_tag, table_info::text;
@@ -390,7 +412,9 @@ BEGIN
             'parent_table_id', table_info->'parent_table_id',
             'partition_bound', table_info->'partition_bound',
             'partition_key', table_info->'partition_key',
-            'partition_data', table_info->'partition_data'
+            'partition_data', table_info->'partition_data',
+            'rls_enabled', table_info->'rowsecurity',
+            'rls_forced', table_info->'forcerowsecurity'
         );
 
         -- command_tag is CREATE TABLE or ALTER TABLE
@@ -527,7 +551,9 @@ BEGIN
                 'parent_table_id', table_info->'parent_table_id',
                 'partition_bound', table_info->'partition_bound',
                 'partition_key', table_info->'partition_key',
-                'partition_data', table_info->'partition_data'
+                'partition_data', table_info->'partition_data',
+                'rls_enabled', table_info->'rowsecurity',
+                'rls_forced', table_info->'forcerowsecurity'
             );
 
         ELSIF obj.command_tag = 'CREATE INDEX' THEN

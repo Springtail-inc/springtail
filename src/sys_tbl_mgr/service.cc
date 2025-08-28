@@ -528,6 +528,8 @@ Service::_create_table(const proto::TableRequest& request)
     ddl["tid"] = request.table().id();
     ddl["xid"] = request.xid();
     ddl["lsn"] = request.lsn();
+    ddl["rls_enabled"] = request.table().rls_enabled();
+    ddl["rls_forced"] = request.table().rls_forced();
     ddl["columns"] = nlohmann::json::array();
 
     // partition info
@@ -567,8 +569,10 @@ Service::_create_table(const proto::TableRequest& request)
     // add table name
     auto table_info =
         std::make_shared<TableCacheRecord>(request.table().id(), request.xid(), request.lsn(),
-                                           ns_info->id, request.table().name(), true,
-                                           parent_table_id, partition_key, partition_bound);
+                                           ns_info->id, request.table().name(),
+                                           parent_table_id, partition_key, partition_bound,
+                                           request.table().rls_enabled(),
+                                           request.table().rls_forced(), true);
     _set_table_info(request.db_id(), table_info);
 
     // add roots and stats entry -- may get overwritten later if data is added to the table
@@ -655,6 +659,8 @@ Service::AlterTable(grpc::ServerContext* context,
     ddl["lsn"] = request->lsn();
     ddl["schema"] = request->table().namespace_name();
     ddl["table"] = request->table().name();
+    ddl["rls_enabled"] = request->table().rls_enabled();
+    ddl["rls_forced"] = request->table().rls_forced();
 
     // retrieve the name of the table at the point of alteration
     XidLsn xid(request->xid(), request->lsn());
@@ -688,14 +694,17 @@ Service::AlterTable(grpc::ServerContext* context,
         ddl["parent_table_id"] = parent_table_id.value();
     }
 
+    auto new_info = std::make_shared<TableCacheRecord>(request->table().id(), request->xid(),
+                                                       request->lsn(), ns_info->id,
+                                                       request->table().name(),
+                                                       parent_table_id, partition_key,
+                                                       partition_bound, request->table().rls_enabled(),
+                                                       request->table().rls_forced(), true);
+
     if (table_info->namespace_id != ns_info->id) {
         // if the schema/namespace changed then update the table_names table
         // insert the new name for this oid
-        auto new_info = std::make_shared<TableCacheRecord>(request->table().id(), request->xid(),
-                                                           request->lsn(), ns_info->id,
-                                                           request->table().name(), true,
-                                                           parent_table_id, partition_key,
-                                                           partition_bound);
+
         _set_table_info(request->db_id(), new_info);
 
         // set the DDL statement
@@ -709,11 +718,6 @@ Service::AlterTable(grpc::ServerContext* context,
     } else if (table_info->name != request->table().name()) {
         // if the name is changed, update the name in the table_names table
         // insert the new name for this oid
-        auto new_info = std::make_shared<TableCacheRecord>(request->table().id(), request->xid(),
-                                                           request->lsn(), ns_info->id,
-                                                           request->table().name(), true,
-                                                           parent_table_id, partition_key,
-                                                           partition_bound);
         _set_table_info(request->db_id(), new_info);
 
         // set the DDL statement
@@ -731,6 +735,24 @@ Service::AlterTable(grpc::ServerContext* context,
 
         _set_primary_index(request->db_id(), ns_info->id, request->table().id(), table_info->name,
                            ns_info->name, xid);
+
+    } else if (table_info->rls_enabled != request->table().rls_enabled()) {
+        // if the RLS flags are changed, update the table_names table
+        LOG_INFO("RLS enabled changed for table {}@{}:{} {} -> {}",
+                  request->db_id(), request->xid(), request->table().id(),
+                  table_info->rls_enabled, request->table().rls_enabled());
+        _set_table_info(request->db_id(), new_info);
+
+        // set the DDL statement
+        ddl["action"] = "set_rls_enabled";
+        ddl["rls_enabled"] = request->table().rls_enabled();
+    } else if (table_info->rls_forced != request->table().rls_forced()) {
+        // if the RLS forced flags are changed, update the table_names table
+        _set_table_info(request->db_id(), new_info);
+
+        // set the DDL statement
+        ddl["action"] = "set_rls_forced";
+        ddl["rls_forced"] = request->table().rls_forced();
     } else {
         XidLsn xid(request->xid(), request->lsn());
 
@@ -758,6 +780,9 @@ Service::AlterTable(grpc::ServerContext* context,
         _set_primary_index(request->db_id(), ns_info->id, request->table().id(),
                     request->table().name(), request->table().namespace_name(), xid);
     }
+
+    LOG_DEBUG(LOG_SCHEMA, "Alter table {}@{}:{} action: {}", request->db_id(), request->xid(),
+                            request->table().id(), ddl["action"].get<std::string>());
 
     response->set_statement(nlohmann::to_string(ddl));
     span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
@@ -843,6 +868,7 @@ Service::_drop_table(const proto::DropTableRequest& request)
     }
 
     // mark the table as dropped in the table_names
+    // don't have the rls flags, so set them to false, shouldn't matter
     auto table_info = std::make_shared<TableCacheRecord>(
         request.table_id(), request.xid(), request.lsn(), ns_info->id, request.name(), false);
     _set_table_info(request.db_id(), table_info);
@@ -1591,8 +1617,9 @@ Service::AttachPartition(grpc::ServerContext* context,
 
         auto updated_table_info =
             std::make_shared<TableCacheRecord>(attached_table_id, request->xid(), request->lsn(),
-                                               table_info->namespace_id, table_info->name, true,
-                                               request->table_id(), partition_key, partition_bound);
+                                               table_info->namespace_id, table_info->name,
+                                               request->table_id(), partition_key, partition_bound,
+                                               table_info->rls_enabled, table_info->rls_forced, true);
         _set_table_info(request->db_id(), updated_table_info);
 
         // get the namespace info
@@ -1655,8 +1682,9 @@ Service::DetachPartition(grpc::ServerContext* context,
         // update the system table
         auto updated_table_info =
             std::make_shared<TableCacheRecord>(detached_table_id, request->xid(), request->lsn(),
-                                               table_info->namespace_id, table_info->name, true,
-                                               std::nullopt, partition_key, std::nullopt);
+                                               table_info->namespace_id, table_info->name,
+                                               std::nullopt, partition_key, std::nullopt,
+                                               table_info->rls_enabled, table_info->rls_forced, true);
         _set_table_info(request->db_id(), updated_table_info);
 
         // get the namespace info
@@ -1931,6 +1959,8 @@ Service::_get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
     info->lsn = fields->at(sys_tbl::TableNames::Data::LSN)->get_uint64(&row);
     info->namespace_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(&row);
     info->name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(&row);
+    info->rls_enabled = fields->at(sys_tbl::TableNames::Data::RLS_ENABLED)->get_bool(&row);
+    info->rls_forced = fields->at(sys_tbl::TableNames::Data::RLS_FORCED)->get_bool(&row);
     info->exists = exists;
 
     std::optional<uint64_t> parent_table_id = std::nullopt;
@@ -2076,7 +2106,8 @@ Service::_set_table_info(uint64_t db_id, TableCacheRecordPtr table_info)
         sys_tbl::TableNames::Data::tuple(table_info->namespace_id, table_info->name, table_info->id,
                                          table_info->xid, table_info->lsn, table_info->exists,
                                          table_info->parent_table_id, table_info->partition_key,
-                                         table_info->partition_bound);
+                                         table_info->partition_bound, table_info->rls_enabled,
+                                         table_info->rls_forced);
     table_names_t->upsert(tuple, constant::UNKNOWN_EXTENT);
 }
 
@@ -3145,6 +3176,9 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
         newMap[column.position()] = &column;
     }
 
+    LOG_DEBUG(LOG_SCHEMA, "Comparing schemas for update: old size = {}, new size = {}",
+                            oldMap.size(), newMap.size());
+
     // Check for removals: any column in oldMap that's missing in newMap
     for (const auto& [pos, old_col] : oldMap) {
         if (newMap.find(pos) == newMap.end()) {
@@ -3257,6 +3291,10 @@ Service::_generate_update(const google::protobuf::RepeatedPtrField<proto::TableC
     // No change detected
     ddl["action"] = "no_change";
     update.set_update_type(static_cast<int8_t>(SchemaUpdateType::NO_CHANGE));
+
+    LOG_DEBUG(LOG_SCHEMA, "No schema change detected for table @{}:{}",
+                            xid.xid, xid.lsn);
+
     return update;
 }
 }  // namespace springtail::sys_tbl_mgr

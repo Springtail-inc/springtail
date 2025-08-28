@@ -1,28 +1,30 @@
 -- DISABLED_TEST
--- ## test
--- CREATE TABLE IF NOT EXISTS table_with_constraint (
---     id SERIAL PRIMARY KEY,
---     username VARCHAR(100) NOT NULL,
---     email VARCHAR(100) NOT NULL,
---     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
---     CONSTRAINT unique_email UNIQUE (email)
--- );
--- 
--- -- Insert a valid row
--- INSERT INTO table_with_constraint (username, email) 
--- VALUES ('user1', 'user1@example.com');
--- 
--- -- Remove the UNIQUE constraint from the email column
--- ALTER TABLE table_with_constraint DROP CONSTRAINT IF EXISTS unique_email;
--- 
--- -- Insert another row after the constraint is dropped
--- INSERT INTO table_with_constraint (username, email)
--- VALUES ('user2', 'user2@example.com');
--- 
--- ## verify
--- ### schema_check public table_with_constraint
--- SELECT * FROM table_with_constraint;
--- 
--- ## cleanup
--- DROP TABLE IF EXISTS table_with_constraint;
--- 
+## metadata
+### disable_test
+
+## test
+CREATE TABLE IF NOT EXISTS table_with_constraint (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(100) NOT NULL,
+    email VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT unique_email UNIQUE (email)
+);
+
+-- Insert a valid row
+INSERT INTO table_with_constraint (username, email)
+VALUES ('user1', 'user1@example.com');
+
+-- Remove the UNIQUE constraint from the email column
+ALTER TABLE table_with_constraint DROP CONSTRAINT IF EXISTS unique_email;
+
+-- Insert another row after the constraint is dropped
+INSERT INTO table_with_constraint (username, email)
+VALUES ('user2', 'user2@example.com');
+
+## verify
+### schema_check public table_with_constraint
+SELECT * FROM table_with_constraint;
+
+## cleanup
+DROP TABLE IF EXISTS table_with_constraint;

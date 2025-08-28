@@ -1,0 +1,28 @@
+- name: Ensure unzip is present
+  ansible.builtin.package:
+    name: unzip
+    state: present
+
+- name: Download AWS CLI v2 bundle (aarch64)
+  ansible.builtin.get_url:
+    url: "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip"
+    dest: "/tmp/awscliv2.zip"
+    mode: "0644"
+
+- name: Unpack AWS CLI bundle
+  ansible.builtin.unarchive:
+    src: "/tmp/awscliv2.zip"
+    dest: "/tmp"
+    remote_src: true
+    creates: "/tmp/aws/install"
+
+- name: Run AWS CLI installer
+  ansible.builtin.command: >
+    /tmp/aws/install
+  args:
+    creates: "/usr/local/bin/aws"   # idempotent
+
+- name: (Optional) Clean up extracted files
+  ansible.builtin.file:
+    path: "/tmp/aws"
+    state: absent

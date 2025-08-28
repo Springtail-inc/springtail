@@ -1,14 +1,17 @@
 -- DISABLED_TEST
--- ## test
--- CREATE TABLE IF NOT EXISTS table_with_unique_constraint (
---     id SERIAL PRIMARY KEY,
---     username VARCHAR(50) NOT NULL UNIQUE,
---     email VARCHAR(100) NOT NULL UNIQUE,
---     created_at TIMESTAMP 
--- );
+## metadata
+### disable_test
 
--- ## verify
--- ### schema_check public table_with_unique_constraint
+## test
+CREATE TABLE IF NOT EXISTS table_with_unique_constraint (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    email VARCHAR(100) NOT NULL UNIQUE,
+    created_at TIMESTAMP
+);
 
--- ## cleanup
--- DROP TABLE IF EXISTS table_with_unique_constraint;
+## verify
+### schema_check public table_with_unique_constraint
+
+## cleanup
+DROP TABLE IF EXISTS table_with_unique_constraint;
