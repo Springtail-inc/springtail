@@ -1261,6 +1261,7 @@ Service::SwapSyncTable(grpc::ServerContext* context,
     auto info = _get_table_info(create_req.db_id(), create_req.table().id(), xid);
 
     // 4. if the table exists at the end of the XID, perform a drop
+    bool is_resync = false;
     if (info != nullptr) {
         proto::DropTableRequest drop;
         drop.set_db_id(create_req.db_id());
@@ -1274,6 +1275,8 @@ Service::SwapSyncTable(grpc::ServerContext* context,
                             drop.xid(), drop.lsn());
 
         auto&& drop_ddl = this->_drop_table(drop);
+        drop_ddl["is_resync"] = true;
+        is_resync = true;
         ddls.push_back(drop_ddl);
     }
 
@@ -1283,6 +1286,7 @@ Service::SwapSyncTable(grpc::ServerContext* context,
 
     assert(create_req.lsn() == constant::RESYNC_CREATE_LSN);
     auto&& create_ddl = this->_create_table(create_req);
+    create_ddl["is_resync"] = is_resync;
     ddls.push_back(create_ddl);
 
     for (const proto::IndexRequest& index : index_reqs) {
