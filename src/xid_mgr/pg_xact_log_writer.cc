@@ -241,6 +241,9 @@ PgXactLogWriter::set_last_xid_in_storage(std::filesystem::path base_dir,
                     break;
                 }
 
+                DCHECK_GT(current_xid.xid, last_committed_xid)
+                    << "Current xid must be greater than last committed xid";
+
                 // check if the current xid is greater than the last xid, if so we can stop processing
                 if (current_xid.xid > last_xid) {
                     LOG_DEBUG(LOG_XID_MGR, "Current xid {} is greater than last_xid {}", current_xid.xid, last_xid);

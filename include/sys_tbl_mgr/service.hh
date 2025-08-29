@@ -185,6 +185,8 @@ private:
         uint64_t lsn;           ///< The LSN at which this entry becomes valid.
         uint64_t namespace_id;  ///< The ID of the schema/namespace of the table.
         std::string name;       ///< The name of the table.
+        bool rls_enabled;       ///< A flag indicating if RLS is enabled for this table.
+        bool rls_forced;        ///< A flag indicating if RLS is forced for this table.
         bool exists;            ///< A flag indicating if the table exists at this point.
         std::optional<uint64_t> parent_table_id;  ///< The parent table ID for partitioned tables (INVALID_TABLE if not set)
         std::optional<std::string> partition_key;  ///< The partition key expression for partitioned tables.
@@ -194,11 +196,14 @@ private:
                          uint64_t lsn,
                          uint64_t namespace_id,
                          const std::string& name,
-                         bool exists,
                          std::optional<uint64_t> parent_table_id,
                          const std::optional<std::string> &partition_key,
-                         const std::optional<std::string> &partition_bound)
-            : id(id), xid(xid), lsn(lsn), namespace_id(namespace_id), name(name), exists(exists),
+                         const std::optional<std::string> &partition_bound,
+                         bool rls_enabled,
+                         bool rls_forced,
+                         bool exists)
+            : id(id), xid(xid), lsn(lsn), namespace_id(namespace_id), name(name),
+              rls_enabled(rls_enabled), rls_forced(rls_forced), exists(exists),
               parent_table_id(parent_table_id), partition_key(partition_key), partition_bound(partition_bound)
         {
         }

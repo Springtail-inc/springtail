@@ -56,9 +56,17 @@ int main(int argc, char *argv[])
     std::set<uint32_t> pg_xid_set;
 
     uint64_t last_xid = 0;
+    std::string filename;
     while (has_more) {
         auto pg_xid = reader.get_pg_xid();
         auto xid = reader.get_xid();
+
+        std::string current_filename = reader.get_current_file();
+        if (filename.empty() || current_filename != filename) {
+            filename = current_filename;
+            std::cout << fmt::format("File: {}\n", filename);
+        }
+
         std::cout << fmt::format(fmt::runtime(format_str.c_str()),
                                  pg_xid, xid, reader.get_real_commit()) << std::endl;
 
@@ -91,7 +99,7 @@ int main(int argc, char *argv[])
         }
 
         has_more = reader.next();
-    };
+    }
 
     springtail_shutdown();
 }

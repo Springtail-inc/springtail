@@ -12,14 +12,9 @@ RUN apt-get update && apt-get install -y ansible-core
 # Copy over the ansible assets
 COPY docker/ansible/ /var/ansible/
 # Run Ansible playbook to install additional dependencies
-RUN ansible-playbook /var/ansible/playbook.base.yml --connection=local --inventory localhost, --extra-vars "ansible_python_interpreter=/usr/bin/python3"
+RUN ansible-playbook /var/ansible/playbook.ci.yml --connection=local --inventory localhost, --extra-vars "ansible_python_interpreter=/usr/bin/python3"
 
 # CI container specific setup
-# Configure services and create PostgreSQL user
-RUN service postgresql start && \
-    sudo -u postgres psql -c "CREATE USER springtail WITH PASSWORD 'springtail' SUPERUSER LOGIN" && \
-    service postgresql stop
-
 # Copy over the source code and run build
 WORKDIR /__w/springtail/springtail
 COPY . /__w/springtail/springtail

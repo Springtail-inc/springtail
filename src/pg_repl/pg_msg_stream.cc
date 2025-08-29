@@ -964,6 +964,7 @@ namespace springtail {
 
         table_msg.xid = message.xid; // only valid in streaming mode
         table_msg.lsn = message.lsn;
+
         json["table"].get_to(table_msg.table);
         json["schema"].get_to(table_msg.namespace_name);
 
@@ -977,6 +978,8 @@ namespace springtail {
         json["schema_id"].get_to(table_msg.namespace_id);
 
         json["oid"].get_to(table_msg.oid);
+        json["rls_enabled"].get_to(table_msg.rls_enabled);
+        json["rls_forced"].get_to(table_msg.rls_forced);
         if (!json["parent_table_id"].is_null()) {
             json["parent_table_id"].get_to(table_msg.parent_table_id);
         } else {
