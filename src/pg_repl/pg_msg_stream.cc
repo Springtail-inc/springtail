@@ -42,6 +42,8 @@ namespace springtail {
     PgMsgStreamReader::set_file(const std::filesystem::path &file,
                                 uint64_t start_offset)
     {
+        LOG_DEBUG(LOG_PG_REPL, "Setting file to: {}, offset: {}", file, start_offset);
+
         if (file != _current_path || !_stream.is_open()) {
             // file isn't currently open, so open it
             // this reads in the header and sets _current_offset
@@ -57,6 +59,9 @@ namespace springtail {
         if (_current_offset != start_offset) {
             _seek_stream(start_offset);
         }
+
+        LOG_DEBUG(LOG_PG_REPL, "Set file to: {}, offset: {}, xlog_msg_end_offset: {}",
+                  file, _current_offset, _xlog_msg_end_offset);
     }
 
     void
@@ -72,38 +77,52 @@ namespace springtail {
             throw PgIOError();
         }
         _current_path = file;
-
-        // get file size
-        _file_end_offset = std::filesystem::file_size(file);
+        _current_offset = 0;
+        _header = PgMsgStreamHeader();
 
         if (offset > _current_offset) {
             _seek_stream(offset);
         }
+
+        LOG_DEBUG(LOG_PG_REPL, "Opened file: {}, offset: {}, xlog_msg_end_offset: {}",
+                  file, _current_offset, _xlog_msg_end_offset);
     }
 
     void
     PgMsgStreamReader::_seek_stream(uint64_t file_offset)
     {
-        if (file_offset >= _file_end_offset) {
-            LOG_WARN("Attempt to seek past end of file: {}, offset: {}, file_end_offset: {}",
-                      _current_path, file_offset, _file_end_offset);
-            throw PgMessageEOFError();
-        }
-
         // jumping to next message, read in xlog header
         if (file_offset == _xlog_msg_end_offset) {
             if (_current_offset != _xlog_msg_end_offset) {
                 // seeking to end of current xlog message, just seek to it
                 _stream.seekg(_xlog_msg_end_offset, std::fstream::beg);
-                _current_offset = _xlog_msg_end_offset;
                 _check_fail();
+                _current_offset = _xlog_msg_end_offset;
             }
             _read_header();
             return;
         }
 
+        // nothing to do if we are already at the desired offset
         if (file_offset == _current_offset) {
             return;
+        }
+
+        // check if we are seeking back to the start of prev header
+        // we don't support seeking back before the start of the current header
+        // we shouldn't encounter this.
+        if (file_offset < _current_offset) {
+            if (file_offset == _header.header_offset) {
+                // set the stream to just after the header
+                if (_current_offset != _header.header_offset + PgMsgStreamHeader::SIZE) {
+                    _stream.seekg(_header.header_offset + PgMsgStreamHeader::SIZE, std::fstream::beg);
+                    _check_fail();
+                    _current_offset = _header.header_offset + PgMsgStreamHeader::SIZE;
+                }
+                // otherwise current offset is already just after the header
+                return;
+            }
+            CHECK(false) << "Seeking backwards not supported: current_offset=" << _current_offset << ", seek_offset=" << file_offset;
         }
 
         // if new offset is after end of current xlog message
@@ -113,6 +132,7 @@ namespace springtail {
             if (_current_offset != _xlog_msg_end_offset) {
                 DCHECK_LT(_current_offset, _xlog_msg_end_offset);
                 _stream.seekg(_xlog_msg_end_offset, std::fstream::beg);
+                _check_fail();
                 _current_offset = _xlog_msg_end_offset;
                 _check_fail();
             }
@@ -138,8 +158,8 @@ namespace springtail {
 
         // we've jumped past the desired offset, so seek back to it
         _stream.seekg(file_offset, std::fstream::beg);
-        _current_offset = file_offset;
         _check_fail();
+        _current_offset = file_offset;
 
         return;
     }
@@ -156,10 +176,8 @@ namespace springtail {
         char header_buffer[PgMsgStreamHeader::SIZE];
         _stream.read(header_buffer, PgMsgStreamHeader::SIZE);
         _header = PgMsgStreamHeader(header_buffer);
+        _header.header_offset = _current_offset;
         _current_offset += PgMsgStreamHeader::SIZE;
-
-        LOG_DEBUG(LOG_PG_REPL, "Read header: {}, current_offset: {}, xlog_msg_end_offset: {}",
-                  _header.to_string(), _current_offset, _xlog_msg_end_offset);
 
         // check if the header is valid
         if (_header.magic != PgMsgStreamHeader::MAGIC) {
@@ -169,6 +187,9 @@ namespace springtail {
 
         // set the end message offset
         _xlog_msg_end_offset = _header.msg_length + _current_offset;
+
+        LOG_DEBUG(LOG_PG_REPL, "Read header: {}, current_offset: {}, xlog_msg_end_offset: {}",
+                  _header.to_string(),  _current_offset, _xlog_msg_end_offset);
     }
 
     PgMsgPtr
@@ -183,13 +204,15 @@ namespace springtail {
     PgMsgPtr
     PgMsgStreamReader::read_message(const std::vector<char> &filter)
     {
-        LOG_DEBUG(LOG_PG_REPL, "Reading message, current_offset: {}\n", _current_offset);
+        LOG_DEBUG(LOG_PG_REPL, "Reading message, current_offset: {}, xlog_msg_end_offset: {}",
+                  _current_offset, _xlog_msg_end_offset);
+
         // check if we've already encountered the end of the file
         if (end_of_stream()) {
             return nullptr;
         }
 
-        if (_current_offset == _xlog_msg_end_offset) {
+        if (_current_offset == _xlog_msg_end_offset || _current_offset == 0) {
             // we've reached the end of the current xlog message, so read the next header
             _read_header();
         }
@@ -261,6 +284,7 @@ namespace springtail {
                 return _decode_stream_abort();
             default:
                 LOG_WARN("Unknown message type: {}", msg_type);
+                DCHECK(false) << "Unknown message type";
                 throw PgMessageError();
         }
     }
@@ -1495,10 +1519,10 @@ namespace springtail {
         _current_offset = 0;
 
         // get file size
-        _file_end_offset = std::filesystem::file_size(file);
+        auto file_end_offset = std::filesystem::file_size(file);
 
         // check if file too small to contain a valid header
-        if (_file_end_offset < PgMsgStreamHeader::SIZE) {
+        if (file_end_offset < PgMsgStreamHeader::SIZE) {
             if (truncate) {
                 _truncate_file(file, 0);
             }
@@ -1509,19 +1533,19 @@ namespace springtail {
         LSN_t last_valid_end_lsn = INVALID_LSN;
 
         // Make sure we have room for at least a header
-        while (_current_offset + PgMsgStreamHeader::SIZE <= _file_end_offset) {
+        while (_current_offset + PgMsgStreamHeader::SIZE <= file_end_offset) {
 
             // read header at current offset and get next header offset
             // after reading the header, _current_offset is set to just after the header
             _read_header();
 
             // check if the full message fits in the file
-            if (_xlog_msg_end_offset == _file_end_offset) {
+            if (_xlog_msg_end_offset == file_end_offset) {
                 // last full message, restart after this message
                 return _header.end_lsn;
             }
 
-            if (_xlog_msg_end_offset < _file_end_offset) {
+            if (_xlog_msg_end_offset < file_end_offset) {
                 // safe message, seek to next message
                 _stream.seekg(_xlog_msg_end_offset, std::fstream::beg);
                 _current_offset = _xlog_msg_end_offset;
@@ -1534,13 +1558,13 @@ namespace springtail {
                 continue;
             }
 
-            DCHECK_GT(_xlog_msg_end_offset, _file_end_offset);
+            DCHECK_GT(_xlog_msg_end_offset, file_end_offset);
             // if we reach here, we have a partial message at the end of the file
 
             break;
         }
 
-        // partial message detected; _xlog_msg_end_offset > _file_end_offset
+        // partial message detected; _xlog_msg_end_offset > file_end_offset
         // truncate to just before this message header
         if (truncate) {
             _truncate_file(file, last_msg_end_offset);

@@ -133,8 +133,10 @@ namespace springtail::pg_log_mgr {
         _current_offset = _writer.write_message(data);
 
         // check if a full message was written
-        if (data.msg_offset + data.length == data.msg_length) {
-            _add_lsn_to_queue(_msg_end_offset, data.ending_lsn);
+        if (data.starting_lsn != INVALID_LSN &&
+            data.msg_offset + data.length == data.msg_length) {
+            // always ack one LSN behind the current message lsn
+            _add_lsn_to_queue(_msg_end_offset, data.starting_lsn - 1);
 
             LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Write repl message end: start lsn={}, length={}, msg_length={}",
                       data.ending_lsn, data.length, data.msg_length);

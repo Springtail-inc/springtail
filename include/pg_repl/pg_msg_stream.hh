@@ -20,6 +20,8 @@ namespace springtail {
         uint32_t magic;
         uint32_t msg_length;
 
+        uint64_t header_offset=-1; // not stored in file, filled on reading this header
+
         /** Magic number used in log header */
         static constexpr uint32_t MAGIC=0xDEFC8193UL;
 
@@ -49,8 +51,8 @@ namespace springtail {
         }
 
         std::string to_string() const {
-            return fmt::format("Header: msg_length={}, start LSN={}, end LSN={}",
-                                msg_length, start_lsn, end_lsn);
+            return fmt::format("Header: msg_length={}, start LSN={}, end LSN={}, hdr_offset={}",
+                                msg_length, start_lsn, end_lsn, header_offset);
         }
     };
 
@@ -118,7 +120,7 @@ namespace springtail {
          */
         bool end_of_stream() const
         {
-            if (_current_offset >= _file_end_offset || _stream.eof()) {
+            if (_stream.eof()) {
                 return true;
             }
             return false;
@@ -223,7 +225,6 @@ namespace springtail {
         uint64_t _current_offset;       ///< current file offset
 
         uint64_t _xlog_msg_end_offset = 0; ///< ending offset of the xlog message in the file
-        uint64_t _file_end_offset = 0;     ///< ending offset of the file, file size
 
         PgMsgStreamHeader _header;      ///< header of the current xlog data message
 
@@ -296,15 +297,14 @@ namespace springtail {
 
         /** Read stream at current offset and copy data into buffer; return false if eof hit, true otherwise */
         bool _read_buffer(char *buffer, int size) {
-            if (size + _current_offset > _file_end_offset) {
-                // trying to read past end of file
-                return false;
-            }
-
             // make sure we don't read past the end of the xlog message
             DCHECK_LE(size + _current_offset, _xlog_msg_end_offset);
 
             _stream.read(buffer, size);
+            if (_stream.eof()) {
+                // hit eof
+                return false;
+            }
             _check_fail();
             DCHECK_EQ(_stream.gcount(), size);
             _current_offset += size;

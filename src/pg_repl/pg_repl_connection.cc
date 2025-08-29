@@ -685,6 +685,9 @@ namespace springtail
         _message_start_lsn = wal_start;
         _message_end_lsn = wal_end;
 
+        LOG_DEBUG(LOG_PG_REPL, "XLOG data msg recvd: wal_start={}, wal_end={}, send_time={}",
+                            wal_start, wal_end, send_time);
+
         if (_message_end_lsn > _server_latest_lsn) {
             _server_latest_lsn = _message_end_lsn;
         }

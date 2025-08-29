@@ -185,7 +185,7 @@ namespace {
         uint32_t msg_length;
         while ((msg_length = read_header(offset)) > 0) {
             // process the log
-            _log_reader.process_log(_log_file, offset, 1);
+            _log_reader.process_log(_log_file, offset, offset + msg_length + PgMsgStreamHeader::SIZE);
         }
 
         for (int i = 0; i < _xact_list.size(); i++) {
@@ -244,7 +244,7 @@ namespace {
         // loop reading the header and process the log
         while ((msg_length = read_header(offset)) > 0) {
             // process the log
-            _log_reader.process_log(_log_file, offset, 1);
+            _log_reader.process_log(_log_file, offset, offset + msg_length + PgMsgStreamHeader::SIZE);
 
             // process the transactions resulting from log message block
             while (!_queue->empty()) {

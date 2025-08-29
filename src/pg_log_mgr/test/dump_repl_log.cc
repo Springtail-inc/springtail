@@ -54,18 +54,32 @@ int main(int argc, char *argv[])
 
         // consume messages from log; num_messages of -1 means go until eos
         bool eos = false; // end of stream
-        LSN_t last_lsn = 0;
+        uint64_t last_hdr_offset = 0;
+        LSN_t last_lsn = INVALID_LSN;
+
         while (!eos) {
             // read next message
+            auto current_offset = reader.offset();
+            std::cout << "Offset: " << current_offset << std::endl;
+
             PgMsgPtr msg = reader.read_message(reader.ALL_MESSAGES, eos);
             if (msg == nullptr) {
+                std::cout << "No more messages or message skipped, eos: " << eos << std::endl;
                 continue;
             }
 
             // get the current xlog header
-            auto &header = reader.current_header();
-            if (header.start_lsn > last_lsn) {
-                std::cout << "Xlog " << header.to_string() << std::endl;
+            auto header = reader.current_header();
+            if (header.header_offset != last_hdr_offset) {
+                std::cout << std::format("Xlog {}, xlog_end_offset: {}\n",
+                                         header.to_string(),
+                                         header.msg_length + header.header_offset + PgMsgStreamHeader::SIZE);
+
+                auto hdr_lsn = header.start_lsn;
+                DCHECK_EQ(header.start_lsn, header.end_lsn);
+                if (last_lsn != INVALID_LSN && hdr_lsn != last_lsn) {
+                    std::cout << std::format("LSN jump from {} to {}\n", last_lsn, hdr_lsn);
+                }
                 last_lsn = header.start_lsn;
             }
 

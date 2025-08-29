@@ -907,7 +907,7 @@ namespace springtail::pg_log_mgr {
     PgLogReader::process_log(const std::filesystem::path &path,
                              uint64_t timestamp,
                              uint64_t start_offset,
-                             int num_messages)
+                             uint64_t end_offset)
     {
         // init stream reader
         _reader.set_file(path, start_offset);
@@ -928,9 +928,9 @@ namespace springtail::pg_log_mgr {
 
         _current_path = path;
 
-        // consume messages from log; num_messages of -1 means go until eos
+        // consume messages from log; end offset of -1 means go until eos
         bool eos = false; // end of stream
-        while (num_messages != 0 && !eos) {
+        while ((end_offset == -1 || _reader.offset() < end_offset) && !eos) {
             // read next message
             PgMsgPtr msg = _reader.read_message(filter, eos);
             if (msg != nullptr) {
@@ -938,10 +938,6 @@ namespace springtail::pg_log_mgr {
 
                 // process the message
                 this->enqueue_msg(msg);
-            }
-
-            if (num_messages > 0) {
-                --num_messages;
             }
         }
     }

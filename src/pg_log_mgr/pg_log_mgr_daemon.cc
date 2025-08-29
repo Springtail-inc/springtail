@@ -46,8 +46,8 @@ int main(int argc, char *argv[])
             {"vacuum_global_ns", std::any(vaccumer_namespace)}
         });
     springtail_init_daemon("pg_log_mgr", pidfile,
-                           LOG_ALL ^ (LOG_PG_REPL | LOG_STORAGE));
                            // LOG_ALL ^ (LOG_PG_REPL | LOG_PG_LOG_MGR_DATA | LOG_STORAGE | LOG_CACHE));
+                           LOG_ALL ^ (LOG_STORAGE));
     pg_log_mgr::PgLogCoordinator::get_instance()->init();
 
     springtail_daemon_run();

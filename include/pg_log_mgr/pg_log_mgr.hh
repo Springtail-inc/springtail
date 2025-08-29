@@ -74,6 +74,11 @@ namespace springtail::pg_log_mgr {
         /** minimum size for log rollover */
         static constexpr int LOG_ROLLOVER_SIZE_BYTES = 128 * 1024 * 1024;
 
+        /** max reconnect count within time period */
+        static constexpr int MAX_RECONNECT_COUNT = 5;
+        /** reconnect time period in seconds */
+        static constexpr int RECONNECT_TIME_PERIOD_SEC = 60;
+
         /**
          * @brief Construct a new Pg Log Mgr object
          * @param db_id db id
@@ -184,6 +189,10 @@ namespace springtail::pg_log_mgr {
         int _port;
         std::atomic<bool> _wal_buffer_flag{false}; ///< buffering WAL in the writer during init
 
+        // reconnect tracking
+        int _reconnect_count{0};
+        uint64_t _reconnect_time{0};
+
         /** Internal state synchronizer */
         common::StateSynchronizer<StateEnum> _internal_state{STATE_STARTUP};
 
@@ -209,6 +218,10 @@ namespace springtail::pg_log_mgr {
         std::thread _writer_thread;           ///< log writer thread
         std::filesystem::path _repl_log_path; ///< replication log base path
         PgLogQueue _logger_queue;             ///< queue between writer and reader
+        LSN_t _current_lsn{0};                ///< LSN from last message received
+        uint64_t _msg_log_start_offset{0};    ///< start offset of unpushed messages
+        char _current_msg_type{0};            ///< current message type being processed
+        bool _expect_lsn_change{false};       ///< true if we expect an LSN change on next message (debugging)
 
         /** Process data from replication stream in loop, queue path, offsets */
         void _log_writer_thread();
@@ -223,8 +236,6 @@ namespace springtail::pg_log_mgr {
 
         ///// Stage 3 of pipeline, mapping pg xids to xids; notify GC
         std::filesystem::path _xact_log_path;      ///< xact log base path
-
-        LSN_t _last_pushed_lsn = INVALID_LSN;      ///< last pushed lsn to redis queue for GC
 
         /** notify xact handler to start sync */
         void _notify_xact_start_sync();
@@ -287,14 +298,21 @@ namespace springtail::pg_log_mgr {
          * Function for writer thread to read data from connection and store it
          * @param data data read from connection
          * @param logger current log writer
-         * @param start_offset start offset for current log writer
          * @param queue_append_func function to append data to the logger queue
+         *                          start_offset, end_offset, log file path
          * @return true if data was read and processed, false on error
          */
         bool _writer_read_data(PgCopyData &data,
                                PgLogWriterPtr &logger,
-                               uint64_t &start_offset,
-                               std::function<void (uint64_t, const std::filesystem::path &)> queue_append_func);
+                               std::function<void (uint64_t, uint64_t, const std::filesystem::path &)> queue_append_func);
+
+        /**
+         * Function for reading replicated data from the connection; attempts reconnect on failure
+         * @param logger current log writer
+         * @param data data read from connection; data.length = 0 if no data
+         * @return true if no error, false on error or shutdown
+         */
+        bool _read_repl_data(PgLogWriterPtr logger, PgCopyData &data);
     };
     using PgLogMgrPtr = std::shared_ptr<PgLogMgr>;
 
