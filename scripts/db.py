@@ -33,7 +33,7 @@ def get_database_info(conn) -> dict:
     # Query 3: Top 5 largest tables and their sizes
     cursor.execute("""
         SELECT
-            table_name,
+            quote_ident(table_schema) || '.' || quote_ident(table_name) AS table_name,
             pg_size_pretty(pg_total_relation_size(quote_ident(table_schema) || '.' || quote_ident(table_name))) AS size
         FROM
             information_schema.tables
@@ -64,25 +64,43 @@ def get_database_info(conn) -> dict:
 
     # Query 6: Custom functions
     cursor.execute("""
-        SELECT DISTINCT quote_ident(p.proname) as function
+        SELECT DISTINCT quote_ident(n.nspname) || '.' || quote_ident(p.proname) as function
         FROM   pg_catalog.pg_proc p
         JOIN   pg_catalog.pg_namespace n ON n.oid = p.pronamespace
         WHERE  n.nspname NOT IN ('pg_catalog', 'information_schema')
+        ORDER BY function;
   """)
     functions = cursor.fetchall()
     database_info['custom_functions'] = [func[0] for func in functions]
 
-    # Query 7: Custom types \dT
+    # Query 7: Custom types
     cursor.execute("""
-        SELECT DISTINCT t.typname as type
+        SELECT DISTINCT t.typname as type,
+            CASE t.typcategory
+                WHEN 'A' THEN 'array'
+                WHEN 'B' THEN 'boolean'
+                WHEN 'C' THEN 'composite'
+                WHEN 'D' THEN 'date/time'
+                WHEN 'E' THEN 'enum'
+                WHEN 'G' THEN 'geometric'
+                WHEN 'I' THEN 'network address'
+                WHEN 'N' THEN 'numeric'
+                WHEN 'P' THEN 'pseudo-type'
+                WHEN 'S' THEN 'string'
+                WHEN 'T' THEN 'timespan'
+                WHEN 'U' THEN 'user-defined'
+                WHEN 'V' THEN 'bit-string'
+                ELSE 'unknown'
+            END as category
         FROM pg_type t
         LEFT JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
         WHERE (t.typrelid = 0 OR (SELECT c.relkind = 'c' FROM pg_catalog.pg_class c WHERE c.oid = t.typrelid))
         AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_type el WHERE el.oid = t.typelem AND el.typarray = t.oid)
-        AND n.nspname NOT IN ('pg_catalog', 'information_schema');
+        AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+        ORDER BY schema_type_name;
     """)
     types = cursor.fetchall()
-    database_info['custom_types'] = [type[0] for type in types]
+    database_info['custom_types'] = [f"{type[0]}: ({type[1]})" for type in types]
 
     # Query 8: Get active connections for this db
     cursor.execute("""
@@ -148,6 +166,7 @@ def get_database_info(conn) -> dict:
     database_info['collation'] = encoding_info[1]
     database_info['ctype'] = encoding_info[2]
 
+    # Query 13: Tables with policies
     cursor.execute("""
         SELECT
         COUNT(DISTINCT p.polrelid) AS tables_with_policies
@@ -160,6 +179,22 @@ def get_database_info(conn) -> dict:
     """)
     tables_with_policies = cursor.fetchone()[0]
     database_info['tables_with_policies'] = tables_with_policies
+
+    # Query 14: Number of root level partitioned tables
+    cursor.execute("""
+        SELECT COUNT(*),
+            CASE WHEN relkind = 'p' and relispartition is false THEN 'root'
+                 WHEN relkind = 'r' and relispartition is true THEN 'child'
+                 ELSE 'other' END as type
+            FROM pg_class
+            WHERE (relkind ='p' and relispartition is false) OR
+                  (relkind = 'r' and relispartition is true)
+            GROUP BY type ORDER BY type desc;
+    """)
+    partitioned_tables = cursor.fetchall()
+    # root tables are column 0, child tables are column 1
+    database_info['root_partitioned_tables'] = partitioned_tables[0][0] if len(partitioned_tables) > 0 else 0
+    database_info['child_partitioned_tables'] = partitioned_tables[1][0] if len(partitioned_tables) > 1 else 0
 
     cursor.close()
     return database_info
@@ -225,6 +260,7 @@ def parseargs():
     parser.add_argument("-p", "--password", type=str, help="Database password.")
     parser.add_argument("-H", "--host", type=str, default="localhost", help="Database host.")
     parser.add_argument("-P", "--port", type=int, default=5432, help="Database port.")
+    parser.add_argument("--single", action="store_true", help="Only analyze the specified database, skip other databases.")
     return parser.parse_args()
 
 def main():
@@ -235,14 +271,17 @@ def main():
     # Connect to the 'postgres' database to fetch all databases
     conn = psycopg2.connect(dbname=args.database, user=args.user, password=args.password, host=args.host, port=args.port)
     cursor = conn.cursor()
-    cursor.execute("""
-        SELECT datname
-        FROM pg_database d
-        WHERE datistemplate = false
-        AND has_database_privilege(current_user, d.datname, 'CONNECT');
-    """)
-    databases = cursor.fetchall()
-    cursor.close()
+    if args.single:
+        databases = [(args.database,)]
+    else:
+        cursor.execute("""
+            SELECT datname
+            FROM pg_database d
+            WHERE datistemplate = false
+            AND has_database_privilege(current_user, d.datname, 'CONNECT');
+        """)
+        databases = cursor.fetchall()
+        cursor.close()
 
     db_options = get_db_options(conn)
 
@@ -284,6 +323,8 @@ def main():
         print(f"Number of tables: {db_info['num_tables']}")
         print(f"Tables without primary key: {db_info['tables_without_primary_key']}")
         print(f"Tables with policies: {db_info['tables_with_policies']}")
+        print(f"Partitioned tables: Roots: {db_info['root_partitioned_tables']}, Children: {db_info['child_partitioned_tables']}")
+        print(f"Tables using custom types: {db_info['custom_type_tables']}")
         print("Largest tables:")
         for table, size in db_info['top_tables']:
             print(f"  {table}: {size}")
@@ -292,8 +333,6 @@ def main():
         print("Connections by user:")
         for user, app_name, count in db_info['connections_by_user']:
             print(f"  {user}:{app_name}: {count}")
-
-        print(f"Tables using custom types: {db_info['custom_type_tables']}")
 
         print("Extensions loaded:")
         for ext in db_info['extensions']:

@@ -4,8 +4,7 @@
 #include <map>
 #include <mutex>
 
-#include <common/service_register.hh>
-#include <common/singleton.hh>
+#include <common/init.hh>
 
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/committer.hh>
@@ -15,7 +14,8 @@
 
 namespace springtail::pg_log_mgr {
 
-    class PgLogCoordinator final : public Singleton<PgLogCoordinator> {
+    class PgLogCoordinator final : public Singleton<PgLogCoordinator>
+    {
     public:
         /**
          * @brief Initialization function
@@ -26,7 +26,7 @@ namespace springtail::pg_log_mgr {
     private:
         friend class Singleton<PgLogCoordinator>;
         PgLogCoordinator();
-        ~PgLogCoordinator() = default;
+        virtual ~PgLogCoordinator() override = default;
 
         std::mutex _mutex;                         ///< mutex for _log_mgrs map
         std::map<uint64_t, PgLogMgrPtr> _log_mgrs; ///< map of db_id to log mgr
@@ -76,20 +76,4 @@ namespace springtail::pg_log_mgr {
          */
         void _remove_database(uint64_t db_id);
     };
-
-    class PgLogCoordinatorRunner : public ServiceRunner {
-    public:
-        PgLogCoordinatorRunner() : ServiceRunner("PgLogCoordinator") {}
-
-        bool start() override
-        {
-            pg_log_mgr::PgLogCoordinator::get_instance()->init();
-            return true;
-        }
-
-        void stop() override
-        {
-            pg_log_mgr::PgLogCoordinator::shutdown();
-        }
-    };
-}
+} // springtail::pg_log_mgr

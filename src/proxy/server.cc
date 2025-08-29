@@ -387,6 +387,8 @@ namespace springtail::pg_proxy {
     ProxyServer::_internal_shutdown()
     {
         LOG_INFO("Proxy server shutting down");
+        notify_shutdown();
+        _proxy_thread.join();
     }
 
     void
@@ -649,9 +651,12 @@ namespace springtail::pg_proxy {
         PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Wrote to eventfd: {}", ret);
     }
 
-    bool
-    ProxyRunner::start()
+    void
+    ProxyServer::start()
     {
+        bool force_shadow = springtail_retreive_argument<bool>(ServiceId::ProxyServerId, "force_shadow").value();
+        bool force_primary = springtail_retreive_argument<bool>(ServiceId::ProxyServerId, "force_primary").value();
+
         nlohmann::json json = Properties::get(Properties::PROXY_CONFIG);
         int num_threads = Json::get_or<int>(json, "threads", 4);
         int port = Json::get_or<int>(json, "port", 8888);
@@ -694,9 +699,9 @@ namespace springtail::pg_proxy {
         std::string mode = Json::get_or<std::string>(json, "mode", "normal");
 
         // overrides from command line (for debugging)
-        if (_force_primary) {
+        if (force_primary) {
             mode = "primary";
-        } else if (_force_shadow) {
+        } else if (force_shadow) {
             mode = "shadow";
         }
 
@@ -712,13 +717,13 @@ namespace springtail::pg_proxy {
             throw Error("Invalid mode specified");
         }
 
-        ProxyServer *server = ProxyServer::get_instance();
-        server->init(port, num_threads, certificate, key, keep_alive_port, server_mode, enable_ssl, logger);
-        server->set_log_level(log_level);
+        get_instance()->init(port, num_threads, certificate, key, keep_alive_port, server_mode, enable_ssl, logger);
+        get_instance()->set_log_level(log_level);
 
-        _proxy_thread = std::thread(&ProxyServer::run, ProxyServer::get_instance());
+        get_instance()->_proxy_thread = std::thread(&ProxyServer::run, ProxyServer::get_instance());
 
-        return true;
+        // force user manager to startup user sync thread
+        UserMgr::get_instance();
     }
 
 } // namespace springtail::pg_proxy

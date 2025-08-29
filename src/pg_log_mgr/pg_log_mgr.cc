@@ -20,6 +20,7 @@
 #include <pg_log_mgr/sync_tracker.hh>
 
 #include <xid_mgr/xid_mgr_server.hh>
+#include <storage/vacuumer.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -51,34 +52,42 @@ namespace springtail::pg_log_mgr {
 
         // construct the callback for watching for database state changes
         _cache_watcher_db_states = std::make_shared<RedisCache::RedisChangeWatcher>(
-            [this](const std::string &path, const nlohmann::json &new_value) -> void {
-                LOG_DEBUG(LOG_PG_LOG_MGR,"Replicated database state change; path: {}, state: {}",
-                    path, new_value.dump(4));
-                CHECK(path.starts_with(Properties::DATABASE_STATE_PATH));
-
-                // extract database id
-                std::vector<std::string> path_parts;
-                common::split_string("/", path, path_parts);
-                CHECK_EQ(path_parts.size(), 2);
-                uint64_t db_id = stoull(path_parts[1]);
-                CHECK_EQ(db_id, _db_id);
-
-                // if we ever get in here, this means that this database will be deleted
-                if (new_value.type() == nlohmann::json::value_t::null) {
-                    return;
-                }
-
-                // extract state and handle state change
-                CHECK(new_value.type() == nlohmann::json::value_t::string);
-                std::string state_str = new_value.get<std::string>();
-                redis::db_state_change::DBState state = redis::db_state_change::db_state_map[state_str];
-
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Received state change: {}", redis::db_state_change::db_state_to_name[state]);
-                _handle_external_state_change(state);
+            [this](const std::string &path, const nlohmann::json &new_value) {
+                _on_database_state_changed(path, new_value);
             }
         );
     }
 
+    void
+    PgLogMgr::_on_database_state_changed(const std::string &path,
+                                         const nlohmann::json &new_value)
+    {
+        LOG_DEBUG(LOG_PG_LOG_MGR,"Replicated database state change; path: {}, state: {}",
+                  path, new_value.dump(4));
+
+        CHECK(path.starts_with(Properties::DATABASE_STATE_PATH));
+
+        // extract database id
+        std::vector<std::string> path_parts;
+        common::split_string("/", path, path_parts);
+        CHECK_EQ(path_parts.size(), 2);
+        
+        uint64_t db_id = stoull(path_parts[1]);
+        CHECK_EQ(db_id, _db_id);
+
+        // if we ever get in here, this means that this database will be deleted
+        if (new_value.type() == nlohmann::json::value_t::null) {
+            return;
+        }
+
+        // extract state and handle state change
+        CHECK(new_value.type() == nlohmann::json::value_t::string);
+        std::string state_str = new_value.get<std::string>();
+        redis::db_state_change::DBState state = redis::db_state_change::db_state_map[state_str];
+
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Received state change: {}", redis::db_state_change::db_state_to_name[state]);
+        _handle_external_state_change(state);
+    }
 
     void
     PgLogMgr::startup()
@@ -210,6 +219,9 @@ namespace springtail::pg_log_mgr {
         std::filesystem::remove_all(_repl_log_path);
         std::filesystem::remove_all(_xact_log_path);
 
+        // Cleanup from vacuumer
+        Vacuumer::get_instance()->cleanup_db(_db_id);
+
         // create directories if they don't exist
         std::filesystem::create_directories(_repl_log_path);
         std::filesystem::create_directories(_xact_log_path);
@@ -261,7 +273,6 @@ namespace springtail::pg_log_mgr {
             Coordinator::mark_alive(keep_alive);
 
             // block on index reconciliation queue w/timeout for shutdown
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Waiting for index reconciliation request");
             if (auto request = _index_reconciliation_queue_mgr->pop(_db_id, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT)) {
                 if (request != nullptr) {
                     //Pass it to log reader to notify committer
@@ -289,7 +300,7 @@ namespace springtail::pg_log_mgr {
         if (_internal_state.is(STATE_STARTUP_SYNC)) {
             // Create the namespaces before starting the copy thread
             auto xid = _pg_log_reader->get_next_xid();
-            auto token_init = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(_db_id)}, {"xid", std::to_string(xid)}});
+            auto token_init = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(_db_id)}, {"xid", std::to_string(xid)}});
 
             PgCopyTable::create_namespaces(_db_id, xid);
             PgCopyTable::create_usertypes(_db_id, xid);
@@ -302,25 +313,24 @@ namespace springtail::pg_log_mgr {
         while (!_shutdown) {
             std::set<uint32_t> table_ids;
 
-            // block on redis table sync queue w/timeout for shutdown
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Waiting for table sync queue");
-            auto request = _redis_sync_queue.pop(REDIS_WORKER_ID, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
-            if (request == nullptr) {
-                continue; // timeout, check for shutdown
+            // _get_copy_table_ids block on redis table sync queue w/timeout for shutdown
+            auto [next_table_id, next_xid_lsn] = _get_copy_table_ids(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+            if (next_table_id == -1) {
+                continue; // check for shutdown
             }
-
             do {
                 // populate the tables to copy; check for more work
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Table sync queue: {}@{}:{}", request->table_id(),
-                                    request->xid().xid, request->xid().lsn);
-                table_ids.insert(request->table_id());
+                table_ids.insert(next_table_id);
 
-                request = _redis_sync_queue.try_pop(REDIS_WORKER_ID);
-            } while (request != nullptr);
+                // Mark table's XID to be processed for resync
+                SyncTracker::get_instance()->pick_table_for_sync(_db_id, next_table_id, next_xid_lsn.value());
+
+                std::tie(next_table_id, next_xid_lsn) = _get_copy_table_ids();
+            } while (next_table_id != -1);
 
             CHECK(!table_ids.empty());
 
-            auto token_commit_worker = open_telemetry::OpenTelemetry::set_context_variables({{"db_id", std::to_string(_db_id)}});
+            auto token_commit_worker = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(_db_id)}});
 
             // ensure we've stopped committing
             // note: there's a race condition that could result in this being called multiple times
@@ -336,6 +346,24 @@ namespace springtail::pg_log_mgr {
         }
     }
 
+    std::pair<uint32_t, std::optional<XidLsn>>
+    PgLogMgr::_get_copy_table_ids(uint32_t timeout) {
+        uint32_t table_id = -1;
+        std::shared_ptr<TableSyncRequest> request;
+        if (timeout > 0) {
+            request = _redis_sync_queue.pop(REDIS_WORKER_ID, timeout);
+        } else {
+            request = _redis_sync_queue.try_pop(REDIS_WORKER_ID);
+        }
+        if (request != nullptr) {
+            // populate the tables to copy; check for more work
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Table sync queue: {}@{}:{}", request->table_id(),
+                    request->xid().xid, request->xid().lsn);
+            return std::make_pair(request->table_id(), request->xid());
+        }
+        return std::make_pair(table_id, std::nullopt);
+    }
+
     void
     PgLogMgr::_do_table_copies(std::optional<std::set<uint32_t>> table_ids)
     {
@@ -347,12 +375,15 @@ namespace springtail::pg_log_mgr {
         // notify xact handler to rollover log
         _notify_xact_start_sync();
 
+        // ensure the pipeline was stalled before we complete
+        _internal_state.wait_for_state(STATE_SYNCING);
+
         // copy tables
         LOG_DEBUG(LOG_PG_LOG_MGR, "Copying tables for db {}; state=synchronizing", _db_id);
         std::vector<PgCopyResultPtr> res;
         auto xid = _pg_log_reader->get_next_xid();
 
-        auto token = open_telemetry::OpenTelemetry::set_context_variables({{"xid", std::to_string(xid)}});
+        auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(xid)}});
         LOG_DEBUG(LOG_PG_LOG_MGR, "Copying tables; target xid={}", xid);
         if (table_ids.has_value()) {
             res = PgCopyTable::copy_tables(_db_id, xid, table_ids.value());
@@ -360,19 +391,37 @@ namespace springtail::pg_log_mgr {
             res = PgCopyTable::copy_db(_db_id, xid);
         }
 
-        // ensure the pipeline was stalled before we complete
-        _internal_state.wait_for_state(STATE_SYNCING);
-
         LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; res size={}", res.size());
-        if (res.size() > 0) {
-            // process copy results
-            _process_copy_results(res);
-        } else {
-            // no tables copied
-            LOG_DEBUG(LOG_PG_LOG_MGR, "No tables copied; setting state=running");
-            // set to running this unblocks the xact handler
-            _internal_state.set(STATE_RUNNING);
-            Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_RUNNING);
+
+        bool copy_task_pending = true;
+        while(copy_task_pending) {
+            if (res.size() > 0) {
+                // process copy results
+                copy_task_pending = _process_copy_results(res);
+                if (copy_task_pending) {
+                    auto [next_table_id, next_xid_lsn] = _get_copy_table_ids();
+                    if (next_table_id != -1) {
+                        xid = _pg_log_reader->get_next_xid();
+                        SyncTracker::get_instance()->pick_table_for_sync(_db_id, next_table_id, next_xid_lsn.value());
+                        LOG_DEBUG(LOG_PG_LOG_MGR, "Copying more tables; target xid={}", xid);
+                        res = PgCopyTable::copy_tables(_db_id, xid, std::set<uint32_t>{next_table_id});
+                    } else {
+                        // Not able to fetch next table, so exit copy
+                        LOG_DEBUG(LOG_PG_LOG_MGR, "Couldn't fetch more tables; setting state=running");
+                        // set to running this unblocks the xact handler
+                        _internal_state.set(STATE_RUNNING);
+                        Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_RUNNING);
+                        copy_task_pending = false;
+                    }
+                }
+            } else {
+                // no tables copied
+                LOG_DEBUG(LOG_PG_LOG_MGR, "No more tables copied; setting state=running");
+                // set to running this unblocks the xact handler
+                _internal_state.set(STATE_RUNNING);
+                Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_RUNNING);
+                copy_task_pending = false;
+            }
         }
     }
 
@@ -386,7 +435,7 @@ namespace springtail::pg_log_mgr {
     }
 
 
-    void
+    bool
     PgLogMgr::_process_copy_results(const std::vector<PgCopyResultPtr> &res)
     {
         assert(_internal_state.is(STATE_SYNCING));
@@ -406,11 +455,16 @@ namespace springtail::pg_log_mgr {
             SyncTracker::get_instance()->add_sync(std::get<pg_log_mgr::PgXactMsg::TableSyncMsg>(redis_xact.msg));
         }
 
-        // process stalled messages; set state to replaying
-        _internal_state.set(STATE_REPLAYING);
-        _internal_state.wait_for_state(STATE_RUNNING);
-
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; state=replaying");
+        if (_redis_sync_queue.peek() == nullptr) {
+            // process stalled messages; set state to replaying
+            _internal_state.set(STATE_REPLAYING);
+            _internal_state.wait_for_state(STATE_RUNNING);
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; state=replaying");
+            return false;
+        } else {
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; More to process, dont wake up logreader");
+            return true;
+        }
     }
 
     bool
@@ -637,7 +691,6 @@ namespace springtail::pg_log_mgr {
             // get log entry from queue
             PgLogQueueEntryPtr log_entry = this->_logger_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (log_entry == nullptr) {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Timeout waiting for log entry");
                 continue;
             }
 

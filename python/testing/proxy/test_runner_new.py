@@ -99,7 +99,7 @@ class Test:
         run_command('sudo', ['cp', libregress_so, self._regress_lib_path])
 
         logging.debug('Starting the fdw instance')
-        springtail.install_fdw(self._build_dir)
+        springtail.install_fdw(self._props, self._build_dir)
 
         logging.debug('Set up regression database')
         self.setup_regress_db()
@@ -284,10 +284,10 @@ class Test:
         os.rename(os.path.join(self._regress_path, 'regression.diffs'), os.path.join(self._regress_path, 'regression.diff.' + suffix))
 
 
-    def run_diff(self, dir1, dir2, output_file):
+    def run_diff(self, dir1, dir2, output_file) -> bool:
         """
         Compare two directories and write differences to output file
-        
+
         Args:
             dir1 (str): Path to first directory
             dir2 (str): Path to second directory
@@ -309,6 +309,7 @@ class Test:
         # Log according to the return code
         if result.returncode == 0:
             logging.info(f'Directories {dir1} and {dir2} are identical')
+            return True
         elif result.returncode == 1:
             logging.info(f'Directories {dir1} and {dir2} differ; diff output file: {output_file}')
             # Directories differ; write the output.
@@ -322,6 +323,7 @@ class Test:
             with open(output_file, 'w') as out:
                 out.write(full_output)
                 out.close()
+            return False
         else:
             logging.error(f"Error running diff: {result.stderr.decode()}")
             error_msg = result.stderr or "Unknown error"
@@ -330,7 +332,7 @@ class Test:
     def run_regress(self,
                     schedule: str,
                     test_files: list[str] = [],
-                    notimeout: bool = False) -> None:
+                    notimeout: bool = False) -> bool:
 
         # allocate the regression directory and set the paths
         self.allocate_regress_dir()
@@ -381,7 +383,7 @@ class Test:
 
         # compare postgress and proxy runs
         out_path = os.path.join(self._regress_path, 'regression_result.diff.out')
-        self.run_diff(pg_out_dir, proxy_out_dir, out_path)
+        return self.run_diff(pg_out_dir, proxy_out_dir, out_path)
 
     def cleanup(self):
         """Cleanup the regression directory"""
@@ -432,7 +434,10 @@ if __name__ == "__main__":
     test = Test(yaml_config['system_json_path'], args.build_dir)
 
     try:
-        test.run_regress(args.schedule, args.test_files, args.notimeout)
+        if test.run_regress(args.schedule, args.test_files, args.notimeout):
+            sys.exit(0)
+        else:
+            sys.exit(1)
     except Exception as e:
         logging.error(f'Failed to run the regression tests: {e}')
         # cleanup the regression tmp dir on exception

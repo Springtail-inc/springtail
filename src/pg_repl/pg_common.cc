@@ -43,6 +43,9 @@ namespace springtail
             case CHAROID:
                 return SchemaType::INT8;
 
+            case NUMERICOID:
+                return SchemaType::NUMERIC;
+
             default:
                 if (pg_type_category == constant::USER_TYPE_ENUM) {
                     // enum types; treat as REAL/FLOAT4, to store the enum index

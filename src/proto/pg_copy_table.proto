@@ -17,4 +17,7 @@ message CopyTableInfo {
 
     // Root pointers and stats update
     UpdateRootsRequest roots_req = 4;
+
+    // Indicate if the table is dropped
+    bool is_table_dropped = 5;
 }

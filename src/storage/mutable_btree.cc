@@ -2,16 +2,18 @@
 #include <common/json.hh>
 #include <common/properties.hh>
 #include <storage/mutable_btree.hh>
+#include <storage/vacuumer.hh>
 
 namespace springtail {
 
     MutableBTree::MutableBTree(const std::filesystem::path &file,
                                const std::vector<std::string> &keys,
                                ExtentSchemaPtr schema,
-                               uint64_t xid)
+                               uint64_t xid, uint64_t max_extent_size)
         : _file(file),
           _sort_keys(keys),
           _xid(xid),
+          _max_extent_size(max_extent_size),
           _finalized(true)
     {
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
@@ -19,7 +21,7 @@ namespace springtail {
         _max_extent_per_page = Json::get_or<uint64_t>(json, "max_extent_per_page", MAX_EXTENT_COUNT);
 
         _cache = std::make_shared<PageCache>(size);
-          
+
         // initialize the schema information
         _init_schemas(schema, keys);
     }
@@ -31,7 +33,7 @@ namespace springtail {
         CHECK_EQ(_root, nullptr);
 
         // construct an empty extent
-        auto cache_page = StorageCache::get_instance()->get(_file, constant::UNKNOWN_EXTENT, _xid);
+        auto cache_page = StorageCache::get_instance()->get(_file, constant::UNKNOWN_EXTENT, _xid, constant::LATEST_XID, _max_extent_size);
 
         // create an empty root
         _root = std::make_shared<Page>(this, std::move(cache_page), _leaf_schema);
@@ -95,16 +97,15 @@ namespace springtail {
         page_lock.unlock();
 
         if (do_flush) {
-            // check if this is the root
-            if (parent == nullptr) {
+            // will first lock the parent, then lock the page and flush it
+            auto root_node = _lock_and_flush_page(node);
+            if (root_node) {
+                CHECK((*root_node)->parent == nullptr);
                 // no longer need to hold the lock on the entire tree
                 tree_lock.unlock();
 
                 // will exclusive lock the tree and flush the root
-                _lock_and_flush_root(node);
-            } else {
-                // will first lock the parent, then lock the page and flush it
-                _lock_and_flush_page(node);
+                _lock_and_flush_root(*root_node);
             }
         }
 
@@ -187,6 +188,13 @@ namespace springtail {
 
         // clear the root
         _remove_root();
+
+        // Smart vacuum if index exists
+        if (std::filesystem::exists(_file)) {
+            Vacuumer::get_instance()->expire_extent(_file, 0, std::filesystem::file_size(_file), _xid);
+        } else {
+            LOG_INFO("TRUNCATE: File: {} doesn't exist to report to vacuum", _file);
+        }
     }
 
     uint64_t
@@ -353,9 +361,10 @@ MutableBTree::last()
     NodePtr node = std::make_shared<Node>(nullptr, _root);
 
     // iterate through the levels until we find a leaf page
+    boost::shared_lock<boost::shared_mutex> page_lock;
     while (node->page->type.is_branch()) {
         // lock page for read access
-        boost::shared_lock page_lock(node->page->mutex);
+        page_lock = boost::shared_lock(node->page->mutex);
 
         // use last() to find the appropriate child branch
         auto &&i = node->page->last();
@@ -376,7 +385,7 @@ MutableBTree::last()
         node = child;
     }
 
-    return Iterator(this, node, node->page->last());
+    return Iterator(this, node, node->page->last(), std::move(page_lock));
 }
 
 MutableBTree::Iterator
@@ -409,7 +418,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
         }
     }
 
-    return Iterator(this, node, std::move(page_i));
+    return Iterator(this, node, std::move(page_i), std::move(page_lock));
 }
 
 
@@ -516,7 +525,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
         auto extent_id = _cache_page->flush_empty(header);
 
         // XXX how to handle the XIDs?
-        auto cache_page = StorageCache::get_instance()->get(_btree->_file, extent_id, _btree->_xid);
+        auto cache_page = StorageCache::get_instance()->get(_btree->_file, extent_id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
         auto page = std::make_shared<Page>(_btree, extent_id);
         page->set_cache_page(std::move(cache_page), _schema);
 
@@ -539,7 +548,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
         auto ids = _cache_page->flush(header);
         for (auto id : ids) {
             // XXX how to handle XIDs?
-            auto cache_page = StorageCache::get_instance()->get(_btree->_file, id, _btree->_xid);
+            auto cache_page = StorageCache::get_instance()->get(_btree->_file, id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
 
             // XXX need a better way to create these combined tuples
             auto row = *(cache_page->last());
@@ -582,7 +591,6 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
         // replace the backing page
         _cache_page = std::move(cache_page);
-
     }
 
     MutableBTree::PagePtr
@@ -792,7 +800,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
         // get the backing page
         // XXX how should we handle the access XID here??
-        auto cache_page = StorageCache::get_instance()->get(_file, page->extent_id, _xid);
+        auto cache_page = StorageCache::get_instance()->get(_file, page->extent_id, _xid, constant::LATEST_XID, _max_extent_size);
 
         // determine the schema for this page
         ExtentSchemaPtr schema = (cache_page->header().type.is_branch())
@@ -867,7 +875,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
         // data has been read, so can let others proceed by downgrading the lock
         NodePtr node = std::make_shared<Node>(parent, page, std::move(data_lock));
-             
+
         // now re-acquire the cache lock to update the size of the cache
         cache_lock.lock();
 
@@ -898,7 +906,11 @@ MutableBTree::lower_bound(TuplePtr search_key,
             auto &&i = node->page->lower_bound(key);
 
             // note: we know the tree isn't empty since the root would be a leaf in that case
-            Extent::Row row = (i == node->page->end()) ? node->page->back() : *i;
+            if (i == node->page->end()) {
+                // if the key is greater than the last entry, then we need to follow the last child
+                i = node->page->last();
+            }
+            Extent::Row row = *i;
 
             // retrieve the child offset
             uint64_t extent_id = _branch_child_f->get_uint64(&row);
@@ -1039,12 +1051,13 @@ MutableBTree::lower_bound(TuplePtr search_key,
         PagePtr new_root;
         if (new_pages.size() > 1) {
             // construct the new root's extent
-            auto cache_page = StorageCache::get_instance()->get(_file, constant::UNKNOWN_EXTENT, _xid);
+            auto cache_page = StorageCache::get_instance()->get(_file, constant::UNKNOWN_EXTENT, _xid, constant::LATEST_XID, _max_extent_size);
 
             // add pointers to the new root for each new page
             for (PagePtr child : new_pages) {
                 auto child_keys = child->index_keys();
-                auto &&child_row = child->back();
+                auto child_itr = child->last();
+                Extent::Row child_row = *child_itr;
                 auto key = std::make_shared<MutableTuple>(child_keys, &child_row);
 
                 LOG_DEBUG(LOG_BTREE, "Adding root entry to child extent_id: {}", child->extent_id);
@@ -1123,41 +1136,47 @@ MutableBTree::lower_bound(TuplePtr search_key,
         }
     }
 
-    void
+    std::optional<MutableBTree::NodePtr>
     MutableBTree::_lock_and_flush_page(NodePtr node)
     {
-        PagePtr parent = node->parent->page;
-
-        // note: we are holding a shared lock on the parent's disk_mutex already
-        // if the parent has already been flushed, then by definition this page was also flushed
-        if (parent->flushed) {
-            return;
+        if (!node->parent) {
+            return node;
         }
 
-        // release the shared lock on the disk_mutex since we want to flush the page
-        node->lock.unlock();
+        std::optional<NodePtr> root_to_flush;
+        while (node->parent) {
+            PagePtr parent = node->parent->page;
 
-        // now that we are holding the parent, flush the page
-        _flush_page(node->page, parent);
-
-        // move to the parent
-        node = node->parent;
-
-        // check if the parent needs to be flushed
-        if (node->page->check_flush()) {
-            // check if the parent being flushed is the root of the tree
-            if (node->parent == nullptr) {
-                // will re-acquire an exclusive lock on tree and then flush the root and update it
-                _lock_and_flush_root(node);
-            } else {
-                // will lock the parent's parent and then lock and flush the parent
-                _lock_and_flush_page(node);
+            // note: we are holding a shared lock on the parent's disk_mutex already
+            // if the parent has already been flushed, then by definition this page was also flushed
+            if (parent->flushed) {
+                break;
             }
-        } else {
-            // otherwise, update the parent's size in the cache
-            boost::unique_lock cache_lock(_cache->mutex);
-            _cache_update_size(node->page, cache_lock);
+
+            // release the shared lock on the disk_mutex since we want to flush the page
+            node->lock.unlock();
+
+            // now that we are holding the parent, flush the page
+            _flush_page(node->page, parent);
+
+            // move to the parent
+            node = node->parent;
+
+            // check if the parent needs to be flushed
+            if (node->page->check_flush()) {
+                if (!node->parent) {
+                    root_to_flush = node;
+                    break;
+                }
+            } else {
+                // otherwise, update the parent's size in the cache
+                boost::unique_lock cache_lock(_cache->mutex);
+                _cache_update_size(node->page, cache_lock);
+                break;
+            }
         }
+
+        return root_to_flush;
     }
 
     void

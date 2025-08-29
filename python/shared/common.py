@@ -71,7 +71,7 @@ def execute_sql_select(conn, sql : str, args=None) -> List:
     return result
 
 
-def running_pids(names : List[str]) -> tuple[List[Dict], List[str]]:
+def running_pids(names : List[str], search_pids : List[str] = []) -> tuple[List[Dict], List[str]]:
     """Return a list of process IDs for the given process names."""
     pids = []
     not_running = []
@@ -80,7 +80,7 @@ def running_pids(names : List[str]) -> tuple[List[Dict], List[str]]:
         # SPR-317: Normally if we have an 'init' PID(1) that reaps zombies this we do not need the following.
         #   But just in case, 'cause we cannot assume where & how we run the tests.
         try:
-            if proc.status() != psutil.STATUS_ZOMBIE and proc.info['name'] in names:
+            if proc.status() != psutil.STATUS_ZOMBIE and (proc.info['name'] in names or proc.info['pid'] in search_pids):
                 pids.append({'name':proc.info['name'], 'pid':proc.info['pid']})
                 running_names[proc.info['name']] = True
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
@@ -102,7 +102,7 @@ def kill_processes(names : List[str]) -> None:
             proc.kill()
 
 
-def run_command(command, args : List[str], outfile : str = None, no_err : bool = False, cwd : str = os.getcwd(), timeout : float = None) -> Optional[str]:
+def run_command(command, args : List[str], outfile : Optional[str] = None, no_err : bool = False, cwd : str = os.getcwd(), timeout : Optional[float] = None) -> Optional[str]:
     """Run the given command with the given arguments and return the last line of the output."""
     command_with_args = [command] + args
 
@@ -119,10 +119,10 @@ def run_command(command, args : List[str], outfile : str = None, no_err : bool =
         else:
             result = subprocess.run(command_with_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=False, cwd=cwd, check=check, timeout=timeout)
     except subprocess.TimeoutExpired as te:
-        logging.error("Command timed out: {' '.join(command_with_args)}")
+        logging.error(f"Command timed out: {' '.join(command_with_args)}")
         raise te
     except subprocess.CalledProcessError as cpe:
-        logging.error(f"Command failed with error: {cpe.returncode}")
+        logging.error(f"Command {command_with_args} failed with error: {cpe.returncode}")
         result = cpe
         pass
 
@@ -131,7 +131,7 @@ def run_command(command, args : List[str], outfile : str = None, no_err : bool =
         raise Exception(f"Command failed with error: {result.stderr}")
 
     if outfile:
-        return result.returncode
+        return str(result.returncode)
 
     # Split the output into lines and get the last line
     output_lines = result.stdout.strip().split('\n')

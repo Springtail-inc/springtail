@@ -4,19 +4,11 @@
 extern "C" {
 #endif
 
-#include "postgres.h"
-#include "nodes/pg_list.h"
-#include "catalog/pg_foreign_server.h"
-#include "catalog/pg_foreign_table.h"
-#include "catalog/pg_type.h"
-#include "commands/defrem.h"
-#include "commands/explain.h"
-#include "foreign/fdwapi.h"
-#include "foreign/foreign.h"
-#include "funcapi.h"
-#include "lib/stringinfo.h"
-#include "nodes/bitmapset.h"
-#include "nodes/makefuncs.h"
+#include <postgres.h>
+#include <nodes/pg_list.h>
+#include <commands/explain.h>
+#include <foreign/fdwapi.h>
+#include <nodes/makefuncs.h>
 
 #include <pg_fdw/constants.hh>
 
@@ -34,6 +26,7 @@ typedef struct SpringtailTargetColumn {
 typedef struct SpringtailPlanState {
     uint64_t tid;
     double   width;
+    uint64_t rows;
     List    *target_list;       ///< List of target columns (SpringtailTargetColumn)
     List    *pathkeys;          ///< List of de-parsed path keys (DeparsedSortGroup)
     List    *qual_list;         ///< List of predicate clauses (BaseQual)

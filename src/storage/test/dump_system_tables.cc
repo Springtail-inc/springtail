@@ -4,8 +4,7 @@
 #include <storage/field.hh>
 #include <storage/io_mgr.hh>
 #include <sys_tbl_mgr/system_tables.hh>
-#include <sys_tbl_mgr/schema_mgr.hh>
-#include <sys_tbl_mgr/table_mgr.hh>
+#include <sys_tbl_mgr/system_table_mgr.hh>
 
 using namespace springtail;
 
@@ -18,14 +17,8 @@ main(int argc,
         return 1;
     }
 
-    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-    runners.emplace();
-    runners->emplace_back(std::make_unique<IOMgrRunner>());
-    runners->emplace_back(std::make_unique<SchemaMgrRunner>());
-    runners->emplace_back(std::make_unique<TableMgrRunner>());
-
     // no logging
-    springtail_init(runners, false, std::nullopt, LOG_NONE);
+    springtail_init(false, std::nullopt, LOG_NONE);
 
     // takes the database ID from the first argument
     uint64_t db_id = std::stoull(argv[1]);
@@ -40,14 +33,15 @@ main(int argc,
                            sys_tbl::IndexNames::ID,
                            sys_tbl::NamespaceNames::ID,
                            sys_tbl::UserTypes::ID }) {
-        auto table = TableMgr::get_instance()->get_table(db_id,
+        auto table = SystemTableMgr::get_instance()->get_system_table(db_id,
                                                          table_id,
                                                          constant::LATEST_XID);
-        auto fields = table->extent_schema()->get_fields();
+        auto schema = table->extent_schema();
+        auto fields = schema->get_fields();
 
         std::cout << fmt::format("TABLE: {}", table_id) << std::endl;
 
-        for (const auto &name : table->extent_schema()->column_order()) {
+        for (const auto &name : schema->column_order()) {
             std::cout << name << ":";
         }
         std::cout << std::endl;

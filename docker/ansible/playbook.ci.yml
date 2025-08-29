@@ -3,8 +3,10 @@
   become: true
   roles:
     - common
+    - awscli
     - python
     - custom-pg
     - postgres-config
     - user_dev
+    - redis
     - entrypoint

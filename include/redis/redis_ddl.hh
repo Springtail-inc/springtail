@@ -104,6 +104,16 @@ namespace springtail {
         void update_schema_xid(const std::string &fdw_id, uint64_t db_id, uint64_t schema_xid);
 
         /**
+         * Used by FDW to retrieve the most recent schema XID for the database
+         * @brief Get the schema xid object
+         *
+         * @param fdw_id The ID of the FDW we are updating.
+         * @param db_id The ID of the database instance we are updating.
+         * @return uint64_t - the most recent schema XID
+         */
+        uint64_t get_schema_xid(const std::string &fdw_id, uint64_t db_id);
+
+        /**
          * Used by the FDW to commit the record without updating the schema XID.
          * This is used when the FDW already has the change applied and needs to remove
          * it from the queue.
@@ -117,6 +127,38 @@ namespace springtail {
          * @return The minimum schema XID applied across all of the FDWs.
          */
         uint64_t min_schema_xid(uint64_t db_id);
+
+        /**
+         * @brief Returns the minimum XID which is inflight in FDW for a DB
+         *
+         * @param db_id Database ID
+         * @return minimum XID
+         */
+        uint64_t min_fdw_xid(uint64_t db_id);
+
+        /**
+         * @brief Insert index XID in the tracker
+         *
+         * @param db_id Database ID
+         * @param xid   Index XID
+         */
+        void insert_index_xid(uint64_t db_id, uint64_t xid);
+
+        /**
+         * @brief Remove index XID from the tracker
+         *
+         * @param db_id Database ID
+         * @param xid   Index XID
+         */
+        void remove_index_xid(uint64_t db_id, uint64_t xid);
+
+        /**
+         * @brief Get minimum index XID from the tracker for the db
+         *
+         * @param db_id Database ID
+         * @return minimum index XID
+         */
+        uint64_t min_index_xid(uint64_t db_id);
 
     private:
         std::shared_ptr<RedisClient> _redis;

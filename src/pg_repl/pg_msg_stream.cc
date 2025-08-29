@@ -24,12 +24,19 @@ extern "C" {
 }
 
 namespace springtail {
+    PgMsgStreamReader::PgMsgStreamReader(uint64_t db_id)
+        :_db_id{db_id}
+    {}
 
-    PgMsgStreamReader::PgMsgStreamReader(const std::filesystem::path &start_file,
-                                         uint64_t start_offset,
-                                         uint64_t end_offset)
-        : _current_path(start_file), _current_offset(start_offset), _end_msg_offset(end_offset)
+    PgMsgStreamReader::PgMsgStreamReader(std::optional<uint64_t> db_id, 
+            const std::filesystem::path &start_file,
+            uint64_t start_offset,
+            uint64_t end_offset)
+        : _db_id(db_id),
+        _current_path(start_file),
+        _current_offset(start_offset), _end_msg_offset(end_offset)
     {
+        // for faster binary search
         _open_file(start_file, start_offset);
     }
 
@@ -861,6 +868,12 @@ namespace springtail {
         json["oid"].get_to(msg.oid);
         json["schema"].get_to(msg.namespace_name);
         json["table_name"].get_to(msg.table_name);
+
+        if (!_is_schema_included(msg.namespace_name)) {
+            LOG_INFO("Create index skipped: {} {}\n", msg.table_name, msg.namespace_name);
+            return {};
+        }
+
         json["table_oid"].get_to(msg.table_oid);
         json["is_unique"].get_to(msg.is_unique);
         json["identity"].get_to(msg.index);
@@ -901,10 +914,31 @@ namespace springtail {
         json["oid"].get_to(msg.oid);
         json["identity"].get_to(msg.index);
 
+        if (!_is_schema_included(msg.namespace_name)) {
+            LOG_INFO("Create index skipped: {} {}\n", msg.oid, msg.namespace_name);
+            return {};
+        }
+
         PgMsgPtr decoded_msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_INDEX);
         decoded_msg->msg.emplace<PgMsgDropIndex>(msg);
 
         return decoded_msg;
+    }
+
+    PartitionData
+    _decode_partition_data(const nlohmann::json &partition_data){
+        PartitionData data;
+        data.table_id = partition_data["table_id"];
+        data.namespace_id = partition_data["namespace_id"];
+        data.table_name = partition_data["table_name"];
+        if (partition_data.contains("partition_key") && !partition_data["partition_key"].is_null()) {
+            data.partition_key = partition_data["partition_key"];
+        }
+        if (partition_data.contains("partition_bound") && !partition_data["partition_bound"].is_null()) {
+            data.partition_bound = partition_data["partition_bound"];
+        }
+        data.parent_table_id = partition_data["parent_table_id"];
+        return data;
     }
 
     PgMsgPtr
@@ -917,6 +951,8 @@ namespace springtail {
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded create table: json: {}", json.dump());
+
         // check object type, could be an index, default value or something other
         // than a table
         std::string object_type;
@@ -928,13 +964,39 @@ namespace springtail {
 
         table_msg.xid = message.xid; // only valid in streaming mode
         table_msg.lsn = message.lsn;
+
         json["table"].get_to(table_msg.table);
         json["schema"].get_to(table_msg.namespace_name);
+
+        //check include schemas
+        if (!_is_schema_included(table_msg.namespace_name)) {
+            LOG_INFO("Create table skipped: {} {}\n", table_msg.table, table_msg.namespace_name);
+            return {};
+        }
+
+        DCHECK(json.contains("schema_id"));
+        json["schema_id"].get_to(table_msg.namespace_id);
+
         json["oid"].get_to(table_msg.oid);
+        json["rls_enabled"].get_to(table_msg.rls_enabled);
+        json["rls_forced"].get_to(table_msg.rls_forced);
+        if (!json["parent_table_id"].is_null()) {
+            json["parent_table_id"].get_to(table_msg.parent_table_id);
+        } else {
+            table_msg.parent_table_id = 0;
+        }
+        if (!json["partition_key"].is_null()) {
+            json["partition_key"].get_to(table_msg.partition_key);
+        }
+        if (!json["partition_bound"].is_null()) {
+            json["partition_bound"].get_to(table_msg.partition_bound);
+        }
+
+        for (const auto &partition_data : json["partition_data"]) {
+            table_msg.partition_data.push_back(_decode_partition_data(partition_data));
+        }
 
         _decode_schema_columns(json["columns"], table_msg.columns);
-
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded create table: json: {}", json.dump());
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_TABLE);
         msg->msg.emplace<PgMsgTable>(table_msg);
@@ -974,12 +1036,19 @@ namespace springtail {
             CHECK_EQ(object_type, "table");
             return nullptr;
         }
-
+    
         drop_table_msg.xid = message.xid; // only valid in streaming mode
         drop_table_msg.lsn = message.lsn;
 
         json["oid"].get_to(drop_table_msg.oid);
         json["schema"].get_to(drop_table_msg.namespace_name);
+
+        //check include schemas
+        if (!_is_schema_included(drop_table_msg.namespace_name)) {
+            LOG_INFO("Drop table skipped: {} {}\n", drop_table_msg.table, drop_table_msg.namespace_name);
+            return {};
+        }
+
         json["name"].get_to(drop_table_msg.table);
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_TABLE);
@@ -1012,6 +1081,12 @@ namespace springtail {
         json["oid"].get_to(ns_msg.oid);
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded create/alter namespace: json: {}", json.dump());
+
+        //check include schemas
+        if (!_is_schema_included(ns_msg.name)) {
+            LOG_INFO("Create namespace skipped: {}\n", ns_msg.name);
+            return {};
+        }
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_NAMESPACE);
         msg->msg.emplace<PgMsgNamespace>(ns_msg);
@@ -1058,6 +1133,12 @@ namespace springtail {
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded drop namespace: json: {}", json.dump());
 
+        //check include schemas
+        if (!_is_schema_included(ns_msg.name)) {
+            LOG_INFO("Drop namespace skipped: {}\n", ns_msg.name);
+            return {};
+        }
+
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_NAMESPACE);
         msg->msg.emplace<PgMsgNamespace>(ns_msg);
 
@@ -1085,6 +1166,12 @@ namespace springtail {
         json["value"].get_to(usertype_msg.value_json);
 
         CHECK_EQ(usertype_msg.type, 'E');
+
+        //check include schemas
+        if (!_is_schema_included(usertype_msg.namespace_name)) {
+            LOG_INFO("Create user type skipped: {}\n", usertype_msg.namespace_name);
+            return {};
+        }
 
         LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded create/alter usertype: json: {}", json.dump());
 
@@ -1132,6 +1219,12 @@ namespace springtail {
         json["name"].get_to(usertype_msg.name);
         json["schema"].get_to(usertype_msg.namespace_name);
 
+        //check include schemas
+        if (!_is_schema_included(usertype_msg.namespace_name)) {
+            LOG_INFO("Create user type skipped: {}\n", usertype_msg.namespace_name);
+            return {};
+        }
+
         LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded drop usertype: json: {}", json.dump());
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_TYPE);
@@ -1153,6 +1246,60 @@ namespace springtail {
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::COPY_SYNC);
         msg->msg.emplace<PgMsgCopySync>(copy_sync_msg);
+
+        return msg;
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_attach_partition(const PgMsgMessage &message, const char *buffer, int len)
+    {
+        PgMsgAttachPartition attach_partition_msg;
+        std::string data_str(buffer, len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded attach partition: json: {}", json.dump());
+
+        attach_partition_msg.xid = message.xid;
+        attach_partition_msg.lsn = message.lsn;
+
+        json["table_id"].get_to(attach_partition_msg.table_id);
+        json["schema"].get_to(attach_partition_msg.namespace_name);
+        json["table"].get_to(attach_partition_msg.table_name);
+        json["partition_key"].get_to(attach_partition_msg.partition_key);
+
+        for (const auto &partition_data : json["partition_data"]) {
+            attach_partition_msg.partition_data.push_back(_decode_partition_data(partition_data));
+        }
+
+        auto msg = std::make_shared<PgMsg>(PgMsgEnum::ATTACH_PARTITION);
+        msg->msg.emplace<PgMsgAttachPartition>(attach_partition_msg);
+
+        return msg;
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_detach_partition(const PgMsgMessage &message, const char *buffer, int len)
+    {
+        PgMsgDetachPartition detach_partition_msg;
+        std::string data_str(buffer, len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded detach partition: json: {}", json.dump());
+
+        detach_partition_msg.xid = message.xid;
+        detach_partition_msg.lsn = message.lsn;
+
+        json["table_id"].get_to(detach_partition_msg.table_id);
+        json["schema"].get_to(detach_partition_msg.namespace_name);
+        json["table"].get_to(detach_partition_msg.table_name);
+        json["partition_key"].get_to(detach_partition_msg.partition_key);
+
+        for (const auto &partition_data : json["partition_data"]) {
+            detach_partition_msg.partition_data.push_back(_decode_partition_data(partition_data));
+        }
+
+        auto msg = std::make_shared<PgMsg>(PgMsgEnum::DETACH_PARTITION);
+        msg->msg.emplace<PgMsgDetachPartition>(detach_partition_msg);
 
         return msg;
     }
@@ -1224,6 +1371,10 @@ namespace springtail {
             return _decode_alter_usertype(msg, buffer.data(), data_len);
         } else if (msg.prefix_str == pg_msg::MSG_PREFIX_DROP_TYPE) {
             return _decode_drop_usertype(msg, buffer.data(), data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_ATTACH_PARTITION) {
+            return _decode_attach_partition(msg, buffer.data(), data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_DETACH_PARTITION) {
+            return _decode_detach_partition(msg, buffer.data(), data_len);
         } else {
             LOG_INFO("Unknown message prefix: {}", msg.prefix_str);
             return nullptr;
@@ -1231,7 +1382,7 @@ namespace springtail {
     }
 
     uint64_t
-    PgMsgStreamReader::scan_log(const std::filesystem::path &file, bool truncate)
+    PgMsgStreamReader::scan_log(uint64_t db_id, const std::filesystem::path &file, bool truncate)
     {
         // updated logic:
         // 1) scan for BEGIN/COMMIT records
@@ -1243,7 +1394,7 @@ namespace springtail {
         uint64_t end_lsn = INVALID_LSN;
         uint64_t offset = 0;
 
-        PgMsgStreamReader reader(file);
+        PgMsgStreamReader reader(db_id, file);
         do {
             auto msg = reader.read_message(filter);
 
@@ -1279,6 +1430,16 @@ namespace springtail {
         // truncate to the end of the last-seen commit
         _truncate_file(file, offset);
         return end_lsn;
+    }
+
+    bool PgMsgStreamReader::_is_schema_included(const std::string& schema)
+    {
+        if (!_db_id.has_value()) {
+            return true;
+        }
+        auto included_schemas = Properties::get_include_schemas(*_db_id);
+        return included_schemas.empty() ||
+           std::ranges::find(included_schemas, schema) != included_schemas.end();
     }
 
     void

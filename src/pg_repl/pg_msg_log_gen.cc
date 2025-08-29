@@ -220,7 +220,8 @@ namespace springtail {
 
     uint32_t
     PgMsgLogGen::create_table(const std::string &table_name,
-                              const std::vector<PgMsgSchemaColumn> &columns)
+                              const std::vector<PgMsgSchemaColumn> &columns,
+                              const nlohmann::json &json)
     {
         uint32_t table_id = _next_table_id++;
         _table_id_to_name[table_id] = table_name;
@@ -231,8 +232,12 @@ namespace springtail {
         msg["oid"] = table_id;
         msg["obj"] = "table";
         msg["schema"] = "public";
+        msg["schema_id"] = 20000;
         msg["columns"] = _gen_table_schema(table_id, columns);
         msg["table"] = table_name;
+
+        msg["rls_enabled"] = json.value("rls_enabled", false);
+        msg["rls_forced"] = json.value("rls_forced", false);
 
         _write_message(pg_msg::MSG_PREFIX_CREATE_TABLE, msg);
 
@@ -240,7 +245,9 @@ namespace springtail {
     }
 
     void
-    PgMsgLogGen::alter_table(uint32_t table_id, const std::vector<PgMsgSchemaColumn> &columns)
+    PgMsgLogGen::alter_table(uint32_t table_id,
+                             const std::vector<PgMsgSchemaColumn> &columns,
+                             const nlohmann::json &json)
     {
         nlohmann::json msg;
 
@@ -248,8 +255,12 @@ namespace springtail {
         msg["oid"] = table_id;
         msg["obj"] = "table";
         msg["schema"] = "public";
+        msg["schema_id"] = 20000;
         msg["columns"] = _gen_table_schema(table_id, columns);
         msg["table"] = _table_id_to_name[table_id];
+
+        msg["rls_enabled"] = json.value("rls_enabled", false);
+        msg["rls_forced"] = json.value("rls_forced", false);
 
         _write_message(pg_msg::MSG_PREFIX_ALTER_TABLE, msg);
     }
@@ -489,9 +500,51 @@ namespace springtail {
     }
 
     void
+    PgMsgLogGen::attach_partition(const std::string &table_name,
+                                  uint32_t table_id,
+                                  const std::string &schema,
+                                  const std::string &partition_key,
+                                  nlohmann::json partition_data)
+    {
+        nlohmann::json msg;
+
+        msg["cmd"] = "ATTACH PARTITION";
+        msg["table_id"] = table_id;
+        msg["schema"] = schema;
+        msg["partition_data"] = partition_data;
+        msg["partition_key"] = partition_key;
+        msg["table"] = table_name;
+
+        _write_message(pg_msg::MSG_PREFIX_ATTACH_PARTITION, msg);
+
+        _lsn++;
+    }
+
+    void
+    PgMsgLogGen::detach_partition(const std::string &table_name,
+                                  uint32_t table_id,
+                                  const std::string &schema,
+                                  const std::string &partition_key,
+                                  nlohmann::json partition_data)
+    {
+        nlohmann::json msg;
+
+        msg["cmd"] = "DETACH PARTITION";
+        msg["table_id"] = table_id;
+        msg["schema"] = schema;
+        msg["partition_data"] = partition_data;
+        msg["partition_key"] = partition_key;
+        msg["table"] = table_name;
+
+        _write_message(pg_msg::MSG_PREFIX_DETACH_PARTITION, msg);
+
+        _lsn++;
+    }
+
+    void
     PgMsgLogGen::dump_file(const std::filesystem::path &file_name)
     {
-        PgMsgStreamReader reader(file_name);
+        PgMsgStreamReader reader({}, file_name);
         bool eos = false;
 
         int count = 0;
@@ -621,6 +674,14 @@ namespace springtail {
             _parse_stream_abort(json);
             return;
         }
+        if (cmd == PG_OP_ATTACH_PARTITION) {
+            _parse_attach_partition(json);
+            return;
+        }
+        if (cmd == PG_OP_DETACH_PARTITION) {
+            _parse_detach_partition(json);
+            return;
+        }
 
 
         throw Error("Unknown command: " + cmd);
@@ -683,7 +744,7 @@ namespace springtail {
         std::string table = json["table"];
 
         std::vector<PgMsgSchemaColumn> columns = _parse_columns(json);
-        uint32_t table_id = _log_gen.create_table(table, columns);
+        uint32_t table_id = _log_gen.create_table(table, columns, json);
 
         _table_name_to_id[table] = table_id;
     }
@@ -694,7 +755,7 @@ namespace springtail {
 
         std::vector<PgMsgSchemaColumn> columns = _parse_columns(json);
         uint32_t table_id = _get_table_id(table);
-        _log_gen.alter_table(table_id, columns);
+        _log_gen.alter_table(table_id, columns, json);
     }
 
     void
@@ -823,5 +884,17 @@ namespace springtail {
     PgLogGenJson::_parse_stream_abort(const nlohmann::json &json)
     {
         _log_gen.stream_abort();
+    }
+
+    void
+    PgLogGenJson::_parse_attach_partition(const nlohmann::json &json)
+    {
+        _log_gen.attach_partition(json["table"], json["table_id"], json["schema"], json["partition_key"], json["partition_data"]);
+    }
+
+    void
+    PgLogGenJson::_parse_detach_partition(const nlohmann::json &json)
+    {
+        _log_gen.detach_partition(json["table"], json["table_id"], json["schema"], json["partition_key"], json["partition_data"]);
     }
 } // namespace springtail

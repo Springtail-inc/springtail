@@ -12,6 +12,7 @@
 #include <storage/field.hh>
 
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/schema_mgr.hh>
 
 namespace springtail::pg_log_mgr {
     /**
@@ -82,6 +83,14 @@ namespace springtail::pg_log_mgr {
 
         bool archive_logs() const { return _archive_logs; }
 
+        /**
+         * @brief Cleanup log files older than the given timestamp
+         *
+         * @param min_timestamp Min timestamp file to be retained,
+         *                      other files will be removed/archived
+         */
+        void cleanup_log_files(uint64_t min_timestamp);
+
     private:
         /**
          * Local cache of whether a given table exists or not at the most recently processed XID.
@@ -141,7 +150,7 @@ namespace springtail::pg_log_mgr {
                 : _db(db_id), _pg_xid(pg_xid), _committer_queue(committer_queue),
                 _exists_cache(exists_cache), _index_requests_mgr(index_requests_mgr)
             {
-                auto tracer = open_telemetry::OpenTelemetry::tracer("PgLogReader");
+                auto tracer = open_telemetry::OpenTelemetry::get_instance()->tracer("PgLogReader");
                 _span = tracer->StartSpan("Transaction");
                 _span->SetAttribute("pg_xid", pg_xid);
             }
@@ -187,7 +196,8 @@ namespace springtail::pg_log_mgr {
              * Records a schema change into the batch.
              */
             void schema_change(uint64_t current_xid, std::optional<uint32_t> tid,
-                               int32_t oid, uint32_t pg_xid, uint32_t pg_xid_txn, PgMsgPtr msg);
+                               int32_t oid, uint32_t pg_xid, uint32_t pg_xid_txn, PgMsgPtr msg,
+                               const std::vector<std::string>& include_schemas);
 
         private:
             //// INTERNAL STRUCTURES
@@ -295,8 +305,9 @@ namespace springtail::pg_log_mgr {
              * Helper to handle the table validation management.  Updates the Batch-local view of
              * the invalid tables and also updates the msg object as needed.
              * @param msg The postgres message object.
+             * @param include_schemas The included schemas.
              */
-            bool _handle_validation(PgMsgPtr msg);
+            bool _handle_validation(PgMsgPtr msg, const std::vector<std::string>& include_schemas);
 
             /**
              * Check if the table exists within this batch.
@@ -361,7 +372,7 @@ namespace springtail::pg_log_mgr {
         bool _archive_logs{false};     ///< This flag indicates that the reader should archive old logs instead of removing them
         std::filesystem::path _current_path; ///< current log file path
         std::filesystem::path _repl_log_path;   ///< Path for Postgres logs storage directory
-        PgMsgStreamReader _reader;           ///< msg stream reader for log file
+        PgMsgStreamReader _reader;     ///< msg stream reader for log file
         CommitterQueuePtr _committer_queue;  ///< shared queue for committer
         PgTransactionPtr _current_xact;      ///< current transaction
         std::map<uint32_t, PgTransactionPtr> _xact_map; ///< in progress xact map for streams

@@ -8,6 +8,7 @@
 
 #include <storage/btree.hh>
 #include <storage/mutable_btree.hh>
+#include "common/constants.hh"
 
 using namespace springtail;
 
@@ -57,7 +58,7 @@ class BenchmarkHelper {
                          uint64_t xid)
     {
         // construct a mutable b-tree for inserting data
-        auto btree = std::make_shared<MutableBTree>(name, _keys, _schema, xid);
+        auto btree = std::make_shared<MutableBTree>(name, _keys, _schema, xid, constant::MAX_EXTENT_SIZE);
 
         btree->init_empty();
         return btree;
@@ -76,7 +77,7 @@ static void BM_BTreeLookupHelper(benchmark::State& state, bool miss) {
     auto offset = btree->finalize();
 
     // get a pointer to the read-only btree
-    auto tree = std::make_shared<BTree>(path, 1, helper._schema, offset);
+    auto tree = std::make_shared<BTree>(path, 1, helper._schema, offset, constant::MAX_EXTENT_SIZE);
     std::mt19937 generator{std::random_device{}()};
     std::uniform_int_distribution<> dist(0, row_count - 1);
 
@@ -147,10 +148,7 @@ BENCHMARK(BM_BTreeInsert)
 int main(int argc, char **argv) {
     benchmark::Initialize(&argc, argv);
 
-    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-    runners.emplace();
-    runners->emplace_back(std::make_unique<IOMgrRunner>());
-    springtail_init(runners, false, std::nullopt, LOG_NONE);
+    springtail_init(false, std::nullopt, LOG_NONE);
 
     benchmark::RunSpecifiedBenchmarks();
 

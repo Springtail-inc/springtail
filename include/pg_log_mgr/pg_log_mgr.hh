@@ -201,6 +201,10 @@ namespace springtail::pg_log_mgr {
         /** Setup streaming and startup threads */
         bool _start_streaming(uint64_t lsn = INVALID_LSN, bool do_init = false);
 
+        /** Handle database state changes from Redis */
+        void _on_database_state_changed(const std::string &path,
+                                        const nlohmann::json &new_value);
+
         ///// Stage 1 of pipeline, writing replication log to disk
         std::thread _writer_thread;           ///< log writer thread
         std::filesystem::path _repl_log_path; ///< replication log base path
@@ -236,7 +240,16 @@ namespace springtail::pg_log_mgr {
         void _copy_thread();
 
         /** Process copy table results; insert into redis */
-        void _process_copy_results(const std::vector<PgCopyResultPtr> &res);
+        bool _process_copy_results(const std::vector<PgCopyResultPtr> &res);
+
+        /**
+         * @brief Pick copy table request from the redis queue
+         *
+         * @param timeout timeout in seconds (0 = use try_pop)
+         *
+         * @return pair<table_id, optional<XidLsn of the copy table>>
+         */
+        std::pair<uint32_t, std::optional<XidLsn>> _get_copy_table_ids(uint32_t timeout=0);
 
         /** Redis cache callback for watching database state change */
         RedisCache::RedisChangeWatcherPtr _cache_watcher_db_states;

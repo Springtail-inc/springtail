@@ -3,12 +3,10 @@
 #include <common/constants.hh>
 #include <common/circular_buffer.hh>
 #include <memory>
-#include <stdexcept>
 #include <storage/btree.hh>
 #include <storage/cache.hh>
 #include <storage/mutable_btree.hh>
 
-#include <sys_tbl_mgr/schema_mgr.hh>
 #include <variant>
 
 namespace springtail {
@@ -103,7 +101,7 @@ namespace indexer_helpers {
      * Read-only interface to a table at a fixed XID.  Provides interfaces for accessing table
      * information, performing scans, extent_id lookups, etc.
      */
-    class Table : public std::enable_shared_from_this<Table> {
+    class Table {
     public:
         /**
          * A forward iterator over the rows of a Table object.
@@ -111,7 +109,7 @@ namespace indexer_helpers {
         class Iterator {
             friend Table;
 
-            /** 
+            /**
              * We use the same Iterator type for both primary and secondary indexes.
              * However the way the indexes move around isn't the same.
              * Tracker provides an abstraction for the various index types.
@@ -130,7 +128,7 @@ namespace indexer_helpers {
                 {}
 
                 friend bool operator==(const Tracker& a, const Tracker& b) {
-                    CHECK_EQ(a._table, b._table);
+                    DCHECK_EQ(a._table, b._table);
                     if (a._btree == nullptr && b._btree == nullptr) {
                         return true;
                     } else if (a._btree == nullptr || b._btree == nullptr) {
@@ -158,7 +156,7 @@ namespace indexer_helpers {
                     _page_i(page_i)
                 {}
 
-                explicit Primary(const Table *table) 
+                explicit Primary(const Table *table)
                     :Tracker{table}
                 {}
 
@@ -168,15 +166,14 @@ namespace indexer_helpers {
                 void next();
                 void prev();
 
-                const Extent::Row& row() const 
-                {
+                const Extent::Row& row() const {
                     return *_page_i;
                 }
 
                 friend bool operator==(const Primary& a, const Primary& b) {
                     const Tracker& ta = a;
                     const Tracker& tb = b;
-                    
+
                     if (ta == tb) {
                         return (a._btree_i == a._btree->end() || a._page_i == b._page_i);
                     }
@@ -184,162 +181,245 @@ namespace indexer_helpers {
                 }
 
                 StorageCache::SafePagePtr _page; ///< A pointer to the data page currently being processed.
-                StorageCache::Page::Iterator _page_i; ///< An iterator into the Extent.
-                std::optional<StorageCache::Page::Iterator> _end;
+            StorageCache::Page::Iterator _page_i; ///< An iterator into the Extent.
+            std::optional<StorageCache::Page::Iterator> _end;
+        };
+
+        /**
+         * This is to iterate using the secondary index.
+         */
+        struct Secondary : Tracker
+        {
+            Secondary(const Table *table,
+                    BTreePtr btree, const BTree::Iterator &btree_i,
+                    ExtentSchemaPtr schema );
+
+            Secondary(Secondary&&) = default;
+            virtual ~Secondary() = default;
+
+            void next();
+            void prev();
+            const Extent::Row& row() const {
+                return *_page_i;
+            }
+
+            friend bool operator==(const Secondary& a, const Secondary& b) {
+                const Tracker& ta = a;
+                const Tracker& tb = b;
+                return ta == tb;
+            }
+
+            FieldPtr _extent_id_f;
+            FieldPtr _row_id_f;
+
+            struct PageMapItem {
+                StorageCache::SafePagePtr page;
+                StorageCache::Page::Iterator it_begin;
+            };
+            std::unordered_map<uint64_t, PageMapItem> _page_map;
+            uint64_t _cache_size;
+            // This it to keep a list of extent ids that are in
+            // _page_map. The list is used for evicting items from the
+            // page map. We assume that secondary indexes jump
+            // around extent ids somewhat randomly. There is no need to
+            // pay for something like maintaining LRU.
+            CircularBuffer<uint64_t> _eid_buffer;
+
+            uint64_t _extent_id = 0;
+            StorageCache::Page::Iterator _page_i_begin;
+            StorageCache::Page::Iterator _page_i;
+
+            void update_page();
+        };
+
+        /**
+         * This is to iterate using the secondary index. It is different from
+         * the Secondary type in so that it doesn't provide access to full data rows but
+         * to the index values only.
+         */
+        struct SecondaryIndexOnly : Tracker
+        {
+            SecondaryIndexOnly(const Table *table,
+                    BTreePtr btree, const BTree::Iterator &btree_i);
+
+            SecondaryIndexOnly(SecondaryIndexOnly&&) = default;
+            virtual ~SecondaryIndexOnly() = default;
+
+            void next() {
+                ++_btree_i;
+            }
+            void prev() {
+                --_btree_i;
+            }
+            const Extent::Row& row() const {
+                return *_btree_i;
+            }
+
+            friend bool operator==(const SecondaryIndexOnly& a, const SecondaryIndexOnly& b) {
+                const Tracker& ta = a;
+                const Tracker& tb = b;
+                return ta == tb;
+            }
+        };
+
+        std::variant<std::monostate, Primary, Secondary, SecondaryIndexOnly> _tracker;
+
+    public:
+        using iterator_category = std::bidirectional_iterator_tag;
+        using difference_type   = std::ptrdiff_t;
+        using value_type        = const Extent::Row;
+        using pointer           = const Extent::Row *;  // or also value_type*
+        using reference         = const Extent::Row &;  // or also value_type&
+
+        reference operator*() {
+
+            struct visitor {
+                reference operator()(const Primary& t) const {
+                    return t.row();
+                }
+                reference operator()(const SecondaryIndexOnly& t) const {
+                    return t.row();
+                }
+                reference operator()(const Secondary& t) const {
+                    return t.row();
+                }
+                reference operator() [[noreturn]] (const std::monostate&) const {
+                    CHECK(false);
+                }
             };
 
-            /**
-             * This is to iterate using the secondary index.
-             */
-            struct Secondary : Tracker
-            {
-                Secondary(const Table *table,
-                        BTreePtr btree, const BTree::Iterator &btree_i,
-                        ExtentSchemaPtr schema );
+            return std::visit<reference>(visitor{}, _tracker);
+        }
 
-                Secondary(Secondary&&) = default;
-                virtual ~Secondary() = default;
+        pointer operator->() { return &*(*this); }
 
-                void next();
-                void prev();
-                const Extent::Row& row() const;
-
-                friend bool operator==(const Secondary& a, const Secondary& b) {
-                    const Tracker& ta = a;
-                    const Tracker& tb = b;
-                    return ta == tb;
+        /**
+         * Move the iterator forward to the next row.
+         */
+        Iterator& operator++() {
+            struct visitor {
+                void operator()(Primary& t) const {
+                    t.next();
                 }
-
-                FieldPtr _extent_id_f;
-                FieldPtr _row_id_f;
-
-                struct PageMapItem {
-                    StorageCache::SafePagePtr page;
-                    StorageCache::Page::Iterator it_begin;
-                };
-                std::unordered_map<uint64_t, PageMapItem> _page_map;
-                uint64_t _cache_size;
-                // This it to keep a list of extent ids that are in 
-                // _page_map. The list is used for evicting items from the
-                // page map. We assume that secondary indexes jump
-                // around extent ids somewhat randomly. There is no need to
-                // pay for something like maintaining LRU.
-                CircularBuffer<uint64_t> _eid_buffer;
-
-                uint64_t _extent_id = 0;
-                StorageCache::Page::Iterator _page_i_begin;
-                StorageCache::Page::Iterator _page_i;
-
-                void update_page();
+                void operator()(SecondaryIndexOnly& t) const {
+                    t.next();
+                }
+                void operator()(Secondary& t) const {
+                    t.next();
+                }
+                void operator()(const std::monostate&) const {
+                    CHECK(false);
+                }
             };
+            std::visit(visitor{}, _tracker);
+            return *this;
+        }
 
-            std::variant<std::monostate, Primary, Secondary> _tracker;
-
-        public:
-            using iterator_category = std::bidirectional_iterator_tag;
-            using difference_type   = std::ptrdiff_t;
-            using value_type        = const Extent::Row;
-            using pointer           = const Extent::Row *;  // or also value_type*
-            using reference         = const Extent::Row &;  // or also value_type&
-
-            reference operator*() { 
-                if (auto p = std::get_if<Primary>(&_tracker)) {
-                    return p->row();
+        /**
+         * Move the iterator backward to the previous row.
+         */
+        Iterator& operator--() {
+            struct visitor {
+                void operator()(Primary& t) const {
+                    t.prev();
                 }
-                auto p = std::get_if<Secondary>(&_tracker);
-                assert(p);
-                return p->row();
-            }
-            pointer operator->() { return &*(*this); }
-
-            /**
-             * Move the iterator forward to the next row.
-             */
-            Iterator& operator++() {
-                if (auto p = std::get_if<Primary>(&_tracker)) {
-                    p->next();
-                } else if (auto p = std::get_if<Secondary>(&_tracker)) {
-                    p->next();
-                } else {
-                    assert(false);
+                void operator()(SecondaryIndexOnly& t) const {
+                    t.prev();
                 }
-                return *this;
-            }
-
-            /**
-             * Move the iterator backward to the previous row.
-             */
-            Iterator& operator--() {
-                if (auto p = std::get_if<Primary>(&_tracker)) {
-                    p->prev();
-                } else if (auto p = std::get_if<Secondary>(&_tracker)) {
-                    p->prev();
-                } else {
-                    assert(false);
+                void operator()(Secondary& t) const {
+                    t.prev();
                 }
-                return *this;
-            }
-
-            /**
-             * Compares two iterators for equality.
-             */
-            friend bool operator==(const Iterator& a, const Iterator& b) {
-                if (auto pa = std::get_if<Primary>(&a._tracker)) {
-                    auto pb =  std::get_if<Primary>(&b._tracker);
-                    assert(pb);
-                    return *pa == *pb;
-                } else if (auto pa = std::get_if<Secondary>(&a._tracker)) {
-                    auto pb =  std::get_if<Secondary>(&b._tracker);
-                    assert(pb);
-                    return *pa == *pb;
+                void operator()(const std::monostate&) const {
+                    CHECK(false);
                 }
-                assert(false);
-                return false;
-            }
+            };
+            std::visit(visitor{}, _tracker);
+            return *this;
+        }
 
-            /**
-             * Compares two iterators for inequality.
-             */
-            friend bool operator!= (const Iterator& a, const Iterator& b) { return !(a == b); }
-
-
-            /** This will return the current extent id of the iterator.
-            */
-            uint64_t extent_id() const {
-                if (auto p = std::get_if<Primary>(&_tracker)) {
-                    return p->_page_i.extent_id();
+        /**
+         * Compares two iterators for equality.
+         */
+        friend bool operator==(const Iterator& a, const Iterator& b) {
+            struct visitor {
+                const Iterator& _b;
+                explicit visitor(const Iterator&b) : _b{b} {}
+                bool operator()(const Primary& t) const {
+                    return t == std::get<Primary>(_b._tracker);
                 }
-                throw std::runtime_error("Unsupported for secondary indexes");
-            }
+                bool operator()(const SecondaryIndexOnly& t) const {
+                    return t == std::get<SecondaryIndexOnly>(_b._tracker);
+                }
+                bool operator()(const Secondary& t) const {
+                    return t == std::get<Secondary>(_b._tracker);
+                }
+                bool operator() [[noreturn]] (const std::monostate&) const {
+                    CHECK(false);
+                }
+            };
+            return std::visit<bool>(visitor{b}, a._tracker);
+        }
+
+        /**
+         * Compares two iterators for inequality.
+         */
+        friend bool operator!= (const Iterator& a, const Iterator& b) { return !(a == b); }
+
+
+        /** This will return the current extent id of the iterator.
+        */
+        uint64_t extent_id() const {
+            struct visitor {
+                uint64_t operator()(const Primary& t) const {
+                    return t._page_i.extent_id();
+                }
+                uint64_t operator() [[noreturn]] (const SecondaryIndexOnly&) const {
+                    CHECK(false);
+                }
+                uint64_t operator() [[noreturn]] (const Secondary&) const {
+                    CHECK(false);
+                }
+                uint64_t operator() [[noreturn]] (const std::monostate&) const {
+                    CHECK(false);
+                }
+            };
+            return std::visit<uint64_t>(visitor{}, _tracker);
+        }
 
         private:
             /** Specifically for the end() iterator of a vacant table. */
             Iterator(const Table *table)
-            { 
-                _tracker.emplace<Primary>(table, 
-                        BTreePtr{}, 
-                        BTree::Iterator{}, 
-                        StorageCache::SafePagePtr{}, 
+            {
+                _tracker.emplace<Primary>(table,
+                        BTreePtr{},
+                        BTree::Iterator{},
+                        StorageCache::SafePagePtr{},
                         StorageCache::Page::Iterator{});
             }
 
             /** Specifically for the end() iterator. */
-            Iterator(const Table *table, uint32_t index_id);
+            Iterator(const Table *table, uint32_t index_id, bool index_only);
 
             /** For constructing an Iterator from the Table functions. */
             Iterator(const Table *table,
                      BTreePtr btree, const BTree::Iterator &btree_i,
                      StorageCache::SafePagePtr page,
                      const StorageCache::Page::Iterator &page_i)
-            { 
+            {
                 _tracker.emplace<Primary>(table, btree, btree_i, std::move(page), page_i);
             }
 
             Iterator(const Table *table,
                      BTreePtr btree, const BTree::Iterator &btree_i,
-                     ExtentSchemaPtr index_schema)
-            { 
+                     ExtentSchemaPtr index_schema )
+            {
                 _tracker.emplace<Secondary>(table, btree, btree_i, index_schema);
+            }
+
+            Iterator(const Table *table,
+                     BTreePtr btree, const BTree::Iterator &btree_i)
+            {
+                _tracker.emplace<SecondaryIndexOnly>(table, btree, btree_i);
             }
         };
 
@@ -365,12 +445,12 @@ namespace indexer_helpers {
         /**
          * Retrieves the schema for the table at a given XID.
          */
-        ExtentSchemaPtr extent_schema() const;
+        virtual ExtentSchemaPtr extent_schema() const { return nullptr; }
 
         /**
          * Get a schema for accessing an extent from this table that was written at the provided XID.
          */
-        SchemaPtr schema(uint64_t extent_xid) const;
+        virtual SchemaPtr schema(uint64_t extent_xid) const { return nullptr; }
 
         /** Retrieves the ordered set of columns that form the primary key. */
         std::vector<std::string> primary_key() const
@@ -379,16 +459,10 @@ namespace indexer_helpers {
         }
 
         /** Retrieve the Database ID of this table. */
-        uint64_t db() const
-        {
-            return _db_id;
-        }
+        uint64_t db() const { return _db_id; }
 
         /** Retrieve the ID of this table. */
-        uint64_t id() const
-        {
-            return _id;
-        }
+        uint64_t id() const { return _id; }
 
         bool empty() const;
 
@@ -396,31 +470,31 @@ namespace indexer_helpers {
          * Returns an iterator to the first row that is greater than or equal to the provided search
          * key.  Search key must match the primary index order.
          */
-        Iterator lower_bound(TuplePtr search_key, uint32_t index_id = constant::INDEX_PRIMARY);
+        Iterator lower_bound(TuplePtr search_key, uint64_t index_id = constant::INDEX_PRIMARY, bool index_only = false);
 
-        Iterator upper_bound(TuplePtr search_key, uint32_t index_id = constant::INDEX_PRIMARY);
+        Iterator upper_bound(TuplePtr search_key, uint64_t index_id = constant::INDEX_PRIMARY, bool index_only = false);
 
         /**
          * Returns an iterator to the first row that is less than or equal to the provided search
          * key.  Search key must match the primary index order.
          */
-        Iterator inverse_lower_bound(TuplePtr search_key, uint32_t index_id = constant::INDEX_PRIMARY);
+        Iterator inverse_lower_bound(TuplePtr search_key, uint64_t index_id = constant::INDEX_PRIMARY, bool index_only = false);
 
         /**
          * An iterator to the start of the table.
          */
-        Iterator begin(uint32_t index_id = constant::INDEX_PRIMARY);
+        Iterator begin(uint64_t index_id = constant::INDEX_PRIMARY, bool index_only = false);
 
         /**
          * An iterator to the end of the table.
          */
-        Iterator end(uint32_t index_id = constant::INDEX_PRIMARY)
+        Iterator end(uint64_t index_id = constant::INDEX_PRIMARY, bool index_only = false)
         {
             // check for vacant table
             if (index_id == constant::INDEX_PRIMARY && _primary_index == nullptr) {
                 return Iterator(this);
             }
-            return Iterator(this, index_id);
+            return Iterator(this, index_id, index_only);
         }
 
         /**
@@ -434,6 +508,16 @@ namespace indexer_helpers {
             }
             return _secondary_indexes.at(idx).first;
         }
+
+        /**
+         * Get the index schema.
+         */
+        ExtentSchemaPtr get_index_schema(uint64_t index_id) const;
+
+        /**
+         * Get the secondary index column names in the order as they appear in the index.
+         */
+        std::vector<std::string> get_index_column_names(uint64_t index_id) const;
 
         /**
          * Reads an extent from the tree and returns it.
@@ -466,6 +550,31 @@ namespace indexer_helpers {
             return _schema;
         }
 
+        std::filesystem::path get_dir_path() const
+        {
+            return _table_dir;
+        }
+
+        uint64_t get_xid() const
+        {
+            return _xid;
+        }
+
+        /**
+         * @brief Get a vectore containing the list of secondary index ids for
+         *      this table
+         *
+         * @return std::vector<uint64_t> - list of index ids
+         */
+        std::vector<uint64_t> get_secondary_idx_ids() const
+        {
+            std::vector<uint64_t> index_ids;
+            index_ids.reserve(_secondary_indexes.size());
+            for (auto &it: _secondary_indexes) {
+                index_ids.push_back(it.first);
+            }
+            return index_ids;
+        }
     protected:
         /**
          * Reads a data extent using the provided iterator position within the primary index.
@@ -484,10 +593,10 @@ namespace indexer_helpers {
         /**
          * Creates read-only index of the table.
          */
-        BTreePtr 
+        BTreePtr
         _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset);
 
-    private:
+    protected:
         uint64_t _db_id; ///< The ID of the database containing this table.
         uint64_t _id; ///< The ID of the table.
 
@@ -521,7 +630,7 @@ namespace indexer_helpers {
     /**
      * Interface for mutating a table at the most recent XID.
      */
-    class MutableTable : public std::enable_shared_from_this<MutableTable> {
+    class MutableTable {
     public:
         /**
          * Mutable table constructor.
@@ -592,7 +701,7 @@ namespace indexer_helpers {
          * Truncates the table, removing the callback of any mutated pages in the cache, clearing
          * all of the indexes, and marking the roots to be cleared in the system tables.
          */
-        void truncate();
+        virtual void truncate() = 0;
 
         /**
          * Reads an extent from the tree and returns it.
@@ -665,7 +774,7 @@ namespace indexer_helpers {
             return _stats;
         }
 
-    private:
+    protected:
         /**
          * Page callback on evict() / flush_file() that will perform an _invalidate_indexes() and
          * _flush_and_populate_indexes() on the provided page.
@@ -771,7 +880,12 @@ namespace indexer_helpers {
          */
         void _check_convert_page(StorageCache::SafePagePtr &page);
 
-    private:
+        /**
+         * Helper to extract the extent_id of the target page for a mutation from the primary index.
+         */
+        uint64_t _get_extent_id(TuplePtr search_key);
+
+    protected:
         uint64_t _db_id; ///< The ID of the database containing this table.
         uint64_t _id; ///< The ID of the table.
 

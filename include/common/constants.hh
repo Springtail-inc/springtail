@@ -8,8 +8,14 @@ namespace springtail::constant {
     /** Used as an extent ID in situations where the extent ID is unknown. */
     static constexpr uint64_t UNKNOWN_EXTENT = std::numeric_limits<uint64_t>::max();
 
+    /** Used as namespace id when namespace id is unknown. */
+    static constexpr uint64_t MAX_NAMESPACE_ID = std::numeric_limits<uint64_t>::max();
+
     /** Represents the most recent XID available. */
     static constexpr uint64_t LATEST_XID = std::numeric_limits<uint64_t>::max();
+
+    /** Invalid XID value */
+    static constexpr uint64_t INVALID_XID = 0;
 
     /** Represents the most recent LSN available. */
     static constexpr uint64_t MAX_LSN = std::numeric_limits<uint64_t>::max();
@@ -30,15 +36,18 @@ namespace springtail::constant {
     /** Represents the table ID cut-off for system tables. */
     static constexpr uint64_t MAX_SYSTEM_TABLE_ID = 512;
 
-    /** The target maximum extent size. */
+    /** The target maximum extent size for data and primary indexes. */
     static constexpr uint64_t MAX_EXTENT_SIZE = 64 * 1024;
+
+    /** The target maximum extent size for secondary indexes. */
+    static constexpr uint64_t MAX_EXTENT_SIZE_SECONDARY = 64 * 1024;
 
     /** An index ID that represents an extent containing raw data rather than index data.  Used in
         the extent header. */
     static constexpr uint32_t INDEX_DATA = std::numeric_limits<uint32_t>::max();
 
     /** An index ID that represents the primary index. */
-    static constexpr uint32_t INDEX_PRIMARY = 0;
+    static constexpr uint64_t INDEX_PRIMARY = 0;
 
     /** The name of the child pointer field in a BTree branch extent. */
     static const std::string BTREE_CHILD_FIELD = "__springtail_child";

@@ -9,8 +9,7 @@
 #include <condition_variable>
 
 #include <common/logging.hh>
-#include <common/service_register.hh>
-#include <common/singleton.hh>
+#include <common/init.hh>
 
 #include <pg_repl/libpq_connection.hh>
 
@@ -187,23 +186,13 @@ namespace springtail::pg_proxy {
     /**
      * @brief Cache of user credentials. Queries Redis for creds.
      */
-    class UserMgr final : public SingletonWithThread<UserMgr> {
+    class UserMgr final : public Singleton<UserMgr>
+    {
     public:
         /**
          * @brief Sleep interval for user manager thread
          */
         static constexpr uint32_t USER_MGR_SLEEP_INTERVAL_SECS = 15;
-
-        /**
-         * @brief Initialize UserMgr object
-         * @param sleep_interval - UserMgr thread sleep interval in seconds
-         */
-        void init(const uint32_t sleep_interval);
-
-        void stop_thread() override {
-            SingletonWithThread<UserMgr>::stop_thread();
-            _sleep_cv.notify_all();
-        }
 
         /**
          * @brief Lookup user by username and database name
@@ -215,6 +204,15 @@ namespace springtail::pg_proxy {
 
     protected:
         /**
+         * @brief Wake up internal thread.
+         *
+         */
+        virtual void _internal_thread_shutdown() override
+        {
+            _sleep_cv.notify_all();
+        }
+
+        /**
          * @brief Stop function for stopping UserMgr thread
          *
          */
@@ -223,7 +221,7 @@ namespace springtail::pg_proxy {
         }
 
     private:
-        friend class SingletonWithThread<UserMgr>;      ///< the base class should be friend
+        friend class Singleton<UserMgr>;      ///< the base class should be friend
 
         /** The password string types used in the secrets mgr */
         static constexpr const char* PASSWORD_STRING_TEXT = "text";
@@ -233,11 +231,21 @@ namespace springtail::pg_proxy {
         /**
          * @brief Private constructor
          */
-        UserMgr() = default;
+        UserMgr() : Singleton<UserMgr>(ServiceId::UserMgrId)
+        {
+            _init();
+        }
+
         /**
          * @brief Private destructor
          */
         ~UserMgr() override = default;
+
+        /**
+         * @brief Initialize UserMgr object
+         * @param sleep_interval - UserMgr thread sleep interval in seconds
+         */
+        void _init();
 
         /**
          * @brief Comparison operator for ordering User objects by username inside the map container
@@ -256,8 +264,6 @@ namespace springtail::pg_proxy {
 
         std::mutex _sleep_mutex;                ///< mutex for sleep
         std::condition_variable _sleep_cv;      ///< condition variable for sleep
-
-        bool _use_pg_shadow = false;            ///< use pg_shadow table for user updates
 
         /**
          * @brief Add new user to the user map
@@ -286,12 +292,7 @@ namespace springtail::pg_proxy {
                                        > &users);
 
         /**
-         * @brief Query users from pg_shadow table; if _use_pg_shadow is true
-         */
-        void _pg_shadow_query_thread();
-
-        /**
-         * @brief Query AWS secrets for user updates; if _use_pg_shadow is false
+         * @brief Query AWS secrets for user updates
          */
         void _aws_secrets_query_thread();
 
@@ -306,28 +307,4 @@ namespace springtail::pg_proxy {
          */
         void _connect_primary_db(LibPqConnection &conn);
     };
-
-    class UserMgrRunner : public ServiceRunner {
-    public:
-        explicit UserMgrRunner(uint32_t sleep_interval) :
-            ServiceRunner("UserMgr"),
-            _sleep_interval(sleep_interval) {}
-
-        ~UserMgrRunner() override = default;
-
-        bool start() override
-        {
-            UserMgr::get_instance()->init(_sleep_interval);
-            return true;
-        }
-
-        void stop() override
-        {
-            UserMgr::get_instance()->stop_thread();
-            UserMgr::shutdown();
-        }
-    private:
-        uint32_t _sleep_interval;
-    };
-
 } // namespace springtail::pg_proxy

@@ -215,13 +215,39 @@ namespace springtail {
         }
 
         /**
+         * @brief Get entry from cache based on key ID, without moving it to the end of the LRU cache
+         * @param id key to lookup entry
+         * @return entry (value)
+         */
+        std::shared_ptr<EntryType>
+        peek(const IdType &id)
+        {
+            // find the entry if it exists
+            auto &&i = _lookup.find(id);
+            if (i == _lookup.end()) {
+                return nullptr;
+            }
+
+            // return the data without moving it to the end of the LRU cache
+            return std::get<1>(*(i->second));
+        }
+
+        std::shared_ptr<EntryType>
+        evict(const IdType &id)
+        {
+            // call the evict method with no_callback set to false
+            return evict(id, false);
+        }
+
+        /**
          * @brief Evict an entry from the cache based on ID (key).  Throws an exception if the entry
          *        cannot be evicted due to the callback.
          * @param id ID (key)
+         * @param no_callback if true, do not call the callback function even if it exists
          * @return std::shared_ptr<EntryType> value of the evicted entry or nullptr if not found
          */
         std::shared_ptr<EntryType>
-        evict(const IdType &id)
+        evict(const IdType &id, bool no_callback)
         {
             // find the entry if it exists
             auto &&i = _lookup.find(id);
@@ -234,7 +260,7 @@ namespace springtail {
             auto value = std::get<1>(entry);
 
             // check the callback if one exists
-            if (_callback && _callback(value) == false) {
+            if (!no_callback && _callback && _callback(value) == false) {
                 return nullptr; // if we weren't able to evict, return a nullptr
             }
 

@@ -5,6 +5,7 @@
 #include <storage/cache.hh>
 #include <storage/field.hh>
 #include <storage/schema.hh>
+#include "common/constants.hh"
 
 namespace springtail {
 
@@ -33,7 +34,7 @@ namespace springtail {
             Node(PagePtr p)
                 : page(std::move(p)),
                   parent(nullptr)
-            { 
+            {
                   row_i = page->begin();
 			}
 
@@ -115,7 +116,7 @@ namespace springtail {
 
                     // read the child extent
                     LOG_DEBUG(LOG_BTREE, "Get page {}", extent_id);
-                    auto child = cache->get(_btree->_file, extent_id, _btree->_xid);
+                    auto child = cache->get(_btree->_file, extent_id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
 
                     --depth;
                     auto begin = child->begin();
@@ -141,10 +142,10 @@ namespace springtail {
                     auto cache = StorageCache::get_instance();
 
                     // get the root page
-                    auto root = cache->get(_btree->_file, _btree->_root_offset, _btree->_xid);
+                    auto root = cache->get(_btree->_file, _btree->_root_offset, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
 
                     // create a node for the root
-                    auto last = root->last(); 
+                    auto last = root->last();
                     _node = std::make_shared<Node>(std::move(root), last, nullptr);
 
                     // iterate down to the leaf
@@ -153,7 +154,7 @@ namespace springtail {
                         uint64_t child_id = _btree->_branch_child_f->get_uint64(&*(_node->row_i));
 
                         // read the extent
-                        auto child = cache->get(_btree->_file, child_id, _btree->_xid);
+                        auto child = cache->get(_btree->_file, child_id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
 
                         // create a node for the child an move to it
                         auto last = child->last();
@@ -191,7 +192,7 @@ namespace springtail {
                     // read the child's extent ID
                     uint64_t extent_id = _btree->_branch_child_f->get_uint64(&*(_node->row_i));
                     // read the child extent
-                    auto child = cache->get(_btree->_file, extent_id, _btree->_xid);
+                    auto child = cache->get(_btree->_file, extent_id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
 
                     --depth;
                     auto last = child->last();
@@ -226,7 +227,10 @@ namespace springtail {
         BTree(const std::filesystem::path &file,
               uint64_t xid,
               ExtentSchemaPtr schema,
-              uint64_t root_offset);
+              uint64_t root_offset,
+              uint64_t max_extent_size);
+
+        BTree() = delete;
 
         /**
          * Returns an Iterator to the beginning entry of the tree for a given XID.
@@ -300,12 +304,26 @@ namespace springtail {
                 return true;
             }
 
-            auto root = StorageCache::get_instance()->get(_file, _root_offset, _xid);
+            auto root = StorageCache::get_instance()->get(_file, _root_offset, _xid, constant::LATEST_XID, _max_extent_size);
             bool is_empty = root->empty();
 
             return is_empty;
         }
 
+        uint64_t get_xid() const
+        {
+            return _xid;
+        }
+
+        std::filesystem::path get_file_path() const
+        {
+            return _file;
+        }
+
+        uint64_t get_root_offset() const
+        {
+            return _root_offset;
+        }
     private:
         /** Inverted comparison to ensure XID map is sorted in descending order. */
         class ReverseCompare {
@@ -330,6 +348,8 @@ namespace springtail {
         FieldPtr _branch_child_f; ///< The branch field holding the child extent offset.
 
         uint64_t _root_offset; ///< The extent ID of the root of the tree.
+                               ///
+        uint64_t _max_extent_size; ///< The extent size of the tree.
 
     private:
         /**

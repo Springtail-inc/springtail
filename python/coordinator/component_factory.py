@@ -1,7 +1,9 @@
 import os
+from typing import Optional
 from component import Component
 from postgres_component import PostgresComponent
 from common import run_command
+from properties import Properties
 
 class ComponentFactory:
     """
@@ -16,17 +18,18 @@ class ComponentFactory:
     XID_SUBSCRIBER_ID = "5"
     POSTGRES = "10"
 
-    def __init__(self, install_dir : str, pid_dir : str):
+    def __init__(self, install_dir : str, props: Properties):
         """Initialize the component factory"""
         self.install_dir = install_dir
-        self.pid_dir = pid_dir
+        self.pid_dir = props.get_pid_path()
+        self.props = props
 
     def create_log_mgr_daemon(self) -> Component:
         """Create a new log manager component."""
         return Component(
             name="pg_log_mgr_daemon",
             id=self.LOG_MGR_ID,
-            args=["--daemon"],
+            args=["--daemonize"],
             path=self.install_dir,
             pid_path=os.path.join(self.pid_dir, 'pg_log_mgr.pid')
         )
@@ -36,17 +39,17 @@ class ComponentFactory:
         return Component(
             name="sys_tbl_mgr_daemon",
             id=self.SYS_TBL_MGR_ID,
-            args=["--daemon"],
+            args=["--daemonize"],
             path=self.install_dir,
             pid_path=os.path.join(self.pid_dir, 'sys_tbl_mgr.pid')
         )
 
-    def create_ddl_daemon(self, user: str, password: str) -> Component:
+    def create_ddl_daemon(self) -> Component:
         """Create a new write cache component."""
         return Component(
             name="pg_ddl_daemon",
             id=self.DDL_ID,
-            args=["--daemon", "-u", user, "-p", password, "-s", "/var/run/postgresql"],
+            args=["--daemonize", "-s", "/var/run/postgresql"],
             path=self.install_dir,
             pid_path=os.path.join(self.pid_dir, 'pg_ddl_mgr.pid')
         )
@@ -56,23 +59,29 @@ class ComponentFactory:
         return Component(
             name="proxy",
             id=self.PROXY_ID,
-            args=["--daemon"],
+            args=["--daemonize"],
             path=self.install_dir,
             pid_path=os.path.join(self.pid_dir, 'proxy.pid')
         )
 
-    def create_postgres(self) -> PostgresComponent:
+    def create_postgres(self, pid_path: Optional[str]) -> PostgresComponent:
         """Create a new postgres component."""
         # get the path to the postgres binary, and the version
         bindir = run_command('pg_config', ['--bindir']).strip()
-        version_str = run_command('pg_config', ['--version']).strip()
-        # version string is like: 'PostgreSQL 16.4 (Ubuntu 16.4-0ubuntu0.24.04.2)'
-        version = version_str.split(' ')[1].split('.')[0]
+
+        if not pid_path:
+            # if pid_path is not provided, use the default path based on the version
+            # version string is like: 'PostgreSQL 16.4 (Ubuntu 16.4-0ubuntu0.24.04.2)'
+            version_str = run_command('pg_config', ['--version']).strip()
+            version = version_str.split(' ')[1].split('.')[0]
+            pid_path = f'/var/run/postgresql/{version}-main.pid'
+
         return PostgresComponent(
             name="postgres",
             id=self.POSTGRES,
             path=bindir,
-            pid_path=f'/var/run/postgresql/{version}-main.pid'
+            pid_path=pid_path,
+            props=self.props
         )
 
     def create_xid_subscriber_daemon(self) -> Component:

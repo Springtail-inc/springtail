@@ -11,7 +11,7 @@
 #include <openssl/ssl.h>
 
 #include <common/thread_pool.hh>
-#include <common/singleton.hh>
+#include <common/init.hh>
 
 #include <proxy/connection.hh>
 #include <proxy/session.hh>
@@ -21,7 +21,8 @@
 
 namespace springtail::pg_proxy {
 
-    class ProxyServer : public Singleton<ProxyServer> {
+    class ProxyServer : public Singleton<ProxyServer>
+    {
         friend class Singleton<ProxyServer>;
     public:
         enum MODE : int8_t {
@@ -119,7 +120,10 @@ namespace springtail::pg_proxy {
             _wake_event_loop();
         }
 
+        static void start();
     protected:
+        ProxyServer() : Singleton<ProxyServer>(ServiceId::ProxyServerId) {}
+        virtual ~ProxyServer() override = default;
 
         /** Shutdown server */
         void _internal_shutdown() override;
@@ -164,29 +168,10 @@ namespace springtail::pg_proxy {
 
         /** Start keep alive thread */
         void _start_keep_alive(int port);
+
+        /** Main server thread */
+        std::thread _proxy_thread;
     };
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
-
-    class ProxyRunner : public ServiceRunner {
-    public:
-        ProxyRunner(bool force_shadow, bool force_primary) :
-            ServiceRunner("ProxyServer"),
-            _force_shadow(force_shadow),
-            _force_primary(force_primary) {}
-
-        bool start() override;
-
-        void stop() override {
-            ProxyServer *server = ProxyServer::get_instance();
-            server->notify_shutdown();
-            _proxy_thread.join();
-            ProxyServer::shutdown();
-        }
-    private:
-        std::thread _proxy_thread;
-        bool _force_shadow{false};
-        bool _force_primary{false};
-    };
-
 
 } // namespace springtail::pg_proxy

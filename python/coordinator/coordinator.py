@@ -24,7 +24,6 @@ from sysutils import stop_daemons
 from component_factory import ComponentFactory
 from scheduler import Scheduler, CoordinatorState
 from production import Production
-from postgres_helper import PostgresHelper
 import loader
 
 # import the xid_mgr_client
@@ -33,7 +32,7 @@ from sys_tbl_mgr import SysTblMgrClient
 
 from otel_logger import init_logging
 
-ALL_DAEMONS = ['sys_tbl_mgr_daemon', 'pg_log_mgr_daemon', 'pg_ddl_daemon', 'proxy']
+ALL_DAEMONS = ['sys_tbl_mgr_daemon', 'pg_log_mgr_daemon', 'pg_ddl_daemon', 'proxy', 'pg_xid_subscriber_daemon']
 
 class Coordinator:
     """The Coordinator class to manage the components of the system."""
@@ -49,7 +48,7 @@ class Coordinator:
         Arguments:
             props -- the properties object
             debug -- the debug flag
-            is_production -- the production flag
+            is_production -- the production flag from config (deployed env)
             install_path -- the installation path
             service_name -- the name of the service
         """
@@ -59,6 +58,11 @@ class Coordinator:
         self.scheduler = None
         self.logger = logging.getLogger('springtail')
         self.debug = debug
+
+        # if running in a production environment set deployed env var
+        if is_production:
+            self.logger.debug("Running in production mode")
+            os.environ['IS_DEPLOYED'] = 'true'
 
         # Get the service type
         self.service_name : str = service_name
@@ -135,7 +139,7 @@ class Coordinator:
 
         # Create component factory
         self.logger.debug(f"Creating component factory with bin_dir={self.bin_dir}")
-        factory = ComponentFactory(self.bin_dir, props.get_pid_path())
+        factory = ComponentFactory(self.bin_dir, self.props)
 
         # Register components
         self.logger.info(f"Starting {self.service_name} service")
@@ -146,23 +150,19 @@ class Coordinator:
                 self.scheduler.register_component(factory.create_log_mgr_daemon(), 2)
 
             case "fdw":
+                pid_path = None
                 try:
                     if self.production:
-                        self.production.install_pgfdw()
+                        pid_path = self.production.install_pgfdw(self.props)
                 except Exception as e:
                     raise ValueError("Failed to install postgres_fdw: " + str(e))
 
                 # startup postgres if not running
-                postgres = factory.create_postgres()
+                postgres = factory.create_postgres(pid_path)
                 if not postgres.is_running():
                     if not postgres.start():
                         self.logger.error("Failed to start Postgres")
                         raise ValueError("Failed to start Postgres")
-
-                # create the ddl user and fdw user
-                pg_helper = PostgresHelper()
-                (_, ddl_password) = pg_helper.create_ddl_user()
-                pg_helper.create_fdw_user()
 
                 # in test startup ingestion services
                 if not self.production:
@@ -179,7 +179,7 @@ class Coordinator:
 
                 self.scheduler.register_component(postgres, 3)
                 self.scheduler.register_component(factory.create_xid_subscriber_daemon(), 4)
-                self.scheduler.register_component(factory.create_ddl_daemon('ddl_user', ddl_password), 5)
+                self.scheduler.register_component(factory.create_ddl_daemon(), 5)
 
             case "proxy":
                 self.scheduler.register_component(factory.create_proxy(), 1)

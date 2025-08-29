@@ -12,6 +12,8 @@ from common import (
     running_pids
 )
 
+from properties import Properties
+
 class PostgresComponent(Component):
     """PostgresComponent class to represent a single Postgres component"""
 
@@ -19,17 +21,24 @@ class PostgresComponent(Component):
                  id: str,
                  path: str,    # Path is unused but needs to be valid for the parent class
                  pid_path: str,
+                 props: Properties,
                  name: str = "postgres") :
         """Initialize a new PostgresComponent"""
         self.logger = logging.getLogger('springtail')
 
         version_str = run_command('pg_config', ['--version']).strip()
         self.version = version_str.split(' ')[1].split('.')[0]
+        self.props = props
 
-        environment = os.environ.get('DEPLOYMENT_ENV', 'development')
+        # check the environment to see if we are in production
+        environment = os.environ.get('IS_DEPLOYED', 'false')
         self.is_production = False
-        if environment == 'production':
+        if environment == 'true':
             self.is_production = True
+            self.fdw_user = self.props.get_role(Properties.DB_USER_ROLE_FDW)
+            if not self.fdw_user:
+                raise ValueError("FDW_USER environment variable not set")
+            self.service_name = f'postgresql-{self.fdw_user[0]}.service'
 
         super().__init__(name, id, path, pid_path)
 
@@ -46,8 +55,8 @@ class PostgresComponent(Component):
 
         self.logger.debug("Re-starting Postgres")
         if self.is_production:
-            run_command('sudo', ['systemctl', 'stop', f'postgresql@{self.version}-main'])
-            run_command('sudo', ['systemctl', 'start', f'postgresql@{self.version}-main'])
+            run_command('sudo', ['systemctl', 'stop', self.service_name])
+            run_command('sudo', ['systemctl', 'start', self.service_name])
         else:
             run_command('sudo', ['service', 'postgresql', 'restart'])
 
@@ -66,7 +75,7 @@ class PostgresComponent(Component):
             self.pid = None
             self.process = None
 
-            time.sleep(0.5)
+            time.sleep(1)
 
         return False
 
@@ -89,7 +98,7 @@ class PostgresComponent(Component):
         while time.time() < timeout:
             if not self.is_running():
                 return True
-            time.sleep(0.1)
+            time.sleep(1)
 
         return False
 
@@ -101,8 +110,10 @@ class PostgresComponent(Component):
         """
         self.logger.debug("Shutting down Postgres")
         if self.is_production:
-            run_command('sudo', ['systemctl', 'stop', f'postgresql@{self.version}-main'])
+            self.logger.debug(f"Stopping Postgres service with systemctl: {self.service_name}")
+            run_command('sudo', ['systemctl', 'stop', self.service_name])
         else:
+            self.logger.debug(f"Stopping Postgres service with service: postgresql")
             run_command('sudo', ['service', 'postgresql', 'stop'])
 
         # Wait for process to terminate
@@ -114,7 +125,7 @@ class PostgresComponent(Component):
                 self.process = None
                 return True
 
-            time.sleep(0.1)
+            time.sleep(1)
 
         return False
 
@@ -141,7 +152,10 @@ class PostgresComponent(Component):
 
         # try connecting to the database and running select 1
         try:
-            run_command('sudo', ['-u', 'postgres', 'psql', '-c', 'select 1'])
+            user = 'postgres'
+            if self.is_production:
+                user = self.fdw_user[0]
+            run_command('sudo', ['-u', user, 'psql', '-d', 'postgres', '-c', 'select 1'])
         except Exception as e:
             self.logger.error(f"Failed to connect to Postgres: {str(e)}")
             return False

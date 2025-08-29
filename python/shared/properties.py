@@ -13,6 +13,18 @@ from aws import AwsHelper
 DB_USERS_SECRET = "sk/{}/{}/aws/dbi/{}/primary_db_password"
 
 class Properties:
+    """Properties class to manage system properties and configurations."""
+
+    # foreign data wrapper states
+    FDW_STATE_INITIALIZE = "initialize"
+    FDW_STATE_RUNNING = "running"
+    FDW_STATE_STOPPED = "stopped"
+
+    # database roles from secrets manager
+    DB_USER_ROLE_REPLICATION = "replication"
+    DB_USER_ROLE_PROXY = "proxy_to_fdw"
+    DB_USER_ROLE_FDW = "fdw_superuser"
+
     def __init__(self, config_file=None, load_redis=False) -> None:
         """Initialize the properties object."""
         self.init(config_file)
@@ -52,11 +64,6 @@ class Properties:
                 self.redis_ssl = system_json['redis']['ssl'] if 'ssl' in system_json['redis'] else False
                 self.db_instance_id = str(system_json['org']['db_instance_id'])
                 self.fdw_id = system_json['org']['fdw_id']
-                self.fdw_user_password = system_json['org']['fdw_user_password']
-
-                # for test env, replication user and password are set in system.json
-                self.replication_user = system_json['org']['replication_user']
-                self.replication_user_password = system_json['org']['replication_user_password']
 
                 # not in config file, but will be set in production env
                 self.instance_key = None
@@ -78,12 +85,9 @@ class Properties:
                     'MOUNT_POINT': system_json['fs']['mount_point'],
                     'LUSTRE_MOUNT_NAME': system_json['fs']['mount_name'],
                     'LUSTRE_DNS_NAME': system_json['fs']['dns_name'],
-                    'FDW_USER_PASSWORD': self.fdw_user_password,
-
-                    # needed for a variety of reasons in test env.
-                    'REPLICATION_USER': self.replication_user,
-                    'REPLICATION_USER_PASSWORD': self.replication_user_password
                 }
+
+                self.aws_users = self._get_users_from_json(system_json['aws_users_override'])
 
                 for (key, value) in env_vars.items():
                     if value is not None:
@@ -102,7 +106,6 @@ class Properties:
             self.redis_config_db = int(os.environ.get('REDIS_CONFIG_DATABASE_ID', 0))
             self.redis_ssl = parse_bool(os.environ.get('REDIS_SSL', 'false'))
             self.db_instance_id = os.environ.get('DATABASE_INSTANCE_ID', None)
-            self.fdw_user_password = os.environ.get('FDW_USER_PASSWORD', None)
             self.fdw_id = os.environ.get('FDW_ID', None)
             self.org_id = os.environ.get('ORGANIZATION_ID', None)
             self.account_id = os.environ.get('ACCOUNT_ID', None)
@@ -113,7 +116,7 @@ class Properties:
 
             # fetch replication user from aws secrets manager
             self.aws = AwsHelper()
-            (self.replication_user, self.replication_user_password) = self._get_replication_user_from_aws()
+            self.aws_users = self._get_users_from_aws()
 
             # unset the REPLICATION_USER_PASSWORD environment variable
             os.environ.pop('REPLICATION_USER_PASSWORD', None)
@@ -121,19 +124,46 @@ class Properties:
         self.redis = Redis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db, ssl=self.redis_ssl,
                            username=self.redis_user, password=self.redis_password, encoding="utf-8", decode_responses=True)
 
-    def _get_replication_user_from_aws(self) -> tuple[str, str]:
-        """Get the replication user and password from AWS Secrets Manager."""
+    def _get_users_from_json(self, user_json: list[dict]) -> Dict[str, tuple[str, str]]:
+        """Get the users from the config file.
+
+        Args:
+            user_json (list[dict]): The user JSON from the config file/secrets manager
+
+        Returns:
+            Dict[str, str]: A dictionary of tuples of user credentials for the roles:
+            replication, proxy_to_fdw, fdw_superuser
+        """
+        result = {}
+
+        for user in user_json:
+            if self.DB_USER_ROLE_FDW == user['role'] or self.DB_USER_ROLE_REPLICATION == user['role'] or self.DB_USER_ROLE_PROXY == user['role']:
+                result[user['role']] = (user['username'], user['password'])
+
+        if not result[self.DB_USER_ROLE_REPLICATION]:
+            raise Exception("Replication user not found in Redis user override.")
+
+        if not result[self.DB_USER_ROLE_PROXY]:
+            raise Exception("Proxy password not found in Redis user override.")
+
+        if not result[self.DB_USER_ROLE_FDW]:
+            raise Exception("FDW user not found in Redis user override.")
+
+        return result
+
+    def _get_users_from_aws(self) -> Dict[str, tuple[str, str]]:
+        """Get the users from AWS secrets manager.
+
+        Returns: a dictionary of tuples of user credentials for the roles:
+            replication, proxy_to_fdw, fdw_superuser
+        """
         secret = DB_USERS_SECRET.format(self.org_id, self.account_id, self.db_instance_id)
 
         secret_data = self.aws.get_secret(secret)
         if secret_data is None:
             raise Exception(f"Failed to get secret {secret}")
 
-        for user in secret_data:
-            if user['role'] == 'replication':
-                return user['username'], user['password']
-
-        raise Exception("Replication user not found in AWS secrets.")
+        return self._get_users_from_json(secret_data)
 
     def get_db_configs(self) -> list[dict]:
         """Return a json array of database instance id:name pairs.
@@ -168,8 +198,10 @@ class Properties:
             return self.cache['db_instance_config']
 
         config = json.loads(self.redis.hget(key, 'primary_db'))
-        config['password'] = self.replication_user_password
-        config['replication_user'] = self.replication_user
+
+        replication_user = self.get_role(self.DB_USER_ROLE_REPLICATION)
+        config['replication_user'] = replication_user[0]
+        config['password'] = replication_user[1]
         self.cache[key] = config
 
         return config
@@ -183,11 +215,24 @@ class Properties:
         if not self.fdw_id:
             return {}
 
+        fdw_user = self.get_role(self.DB_USER_ROLE_FDW)
+        proxy_user = self.get_role(self.DB_USER_ROLE_PROXY)
+
         config = json.loads(self.redis.hget(key, self.fdw_id))
-        config['password'] = self.fdw_user_password
+        config['fdw_user'] = fdw_user[0]
+        config['password'] = fdw_user[1]
+        config['proxy_password'] = proxy_user[1]
         self.cache[key] = config
 
         return config
+
+    def set_fdw_state(self, state: str) -> None:
+        """Set the foreign data wrapper state in Redis."""
+        key = str(self.db_instance_id) + ':fdw'
+        config = self.get_fdw_config(nocache=True)
+        config['state'] = state
+        self.redis.hset(key, self.fdw_id, json.dumps(config))
+        self.cache[key] = config
 
     def get_proxy_config(self) -> dict:
         """Return the proxy configuration as an object."""
@@ -296,6 +341,9 @@ class Properties:
         sys_config_json['proxy'] = system_json['proxy']
         sys_config_json['otel'] = system_json['otel']
 
+        if 'aws_users_override' in system_json:
+            sys_config_json['aws_users_override'] = system_json['aws_users_override']
+
         self.redis.hset(db_instance_key, 'system_settings', json.dumps(sys_config_json))
 
         # setup db_config
@@ -312,6 +360,7 @@ class Properties:
         # create hset for fdw configs, and set the fdw ids
         fdw_key = str(db_instance_id) + ':fdw'
         for fdw_id in system_json['fdws']:
+            system_json['fdws'][fdw_id]['state'] = 'initialize'  # default state
             fdw_json_str = json.dumps(system_json['fdws'][fdw_id])
             self.redis.hset(fdw_key, fdw_id, fdw_json_str)
             self.redis.sadd(fdw_key + '_ids', fdw_id)
@@ -323,6 +372,27 @@ class Properties:
             db_state_key = str(self.db_instance_id) + ':instance_state'
             self.redis.hset(db_state_key, db_id, state)
 
+    def wait_for_fdw_state(self, state: str, timeout: int = 600) -> None:
+        """Wait for the foreign data wrapper state to reach the desired state.
+        :param state: the state to wait for
+        :param timeout: the maximum time to wait in seconds (0 wait forever)
+        """
+        key = str(self.db_instance_id) + ':fdw'
+        start = time.time()
+        while True:
+            config_str = self.redis.hget(key, self.fdw_id)
+            if not config_str:
+                continue
+            current_config = json.loads(config_str)
+            if current_config['state'] == state:
+                return
+            time.sleep(1)
+            if time.time() - start > timeout:
+                break
+
+        if timeout != 0:
+            raise TimeoutError(f'Timed out waiting for fdw state: {state}')
+
     def wait_for_state(self, state : str, id : int, error_state : str = "", timeout : int = 600) -> None:
         """Wait for the database state to reach the desired state.
         :param state: the state to wait for
@@ -333,6 +403,7 @@ class Properties:
         start = time.time()
         while True:
             current_state = self.redis.hget(key, str(id))
+            print(f"Waiting for database {key}:{id} to reach state: {state}, current state: {current_state}")
             if current_state == state:
                 return
             if error_state != "" and current_state == error_state:
@@ -476,6 +547,16 @@ class Properties:
         field_key = self.service_name + ':' + self.instance_key
         self.redis.hset(key, field_key, state)
 
+    def get_role(self, role: str) -> tuple[str, str]:
+        """Get the role credentials for given role.
+
+        Returns: a tuple of (username, password) for the given role.
+        """
+        if role not in self.aws_users:
+            raise Exception(f"Role {role} not found in AWS users")
+        return self.aws_users[role]
+
+
 def parse_args():
     """Parse the command line arguments."""
     parser = argparse.ArgumentParser(description='Properties utility')
@@ -523,9 +604,7 @@ def main():
         'REDIS_SSL',
         'MOUNT_POINT',
         'LUSTRE_MOUNT_NAME',
-        'LUSTRE_DNS_NAME',
-        'FDW_USER_PASSWORD',
-        'REPLICATION_USER_PASSWORD'
+        'LUSTRE_DNS_NAME'
     ]
 
     print("\nEnvironment Variables:")

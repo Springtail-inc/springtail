@@ -6,6 +6,12 @@
 #include <optional>
 
 #include <fmt/format.h>
+#include <common/logging.hh>
+
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 namespace springtail {
     class fs {
@@ -253,6 +259,68 @@ namespace springtail {
         }
 
         /**
+         * @brief Truncates file from the given offset
+         *
+         * @param file File to truncate
+         * @param offset Offset above which will be truncated
+         */
+        static void
+        truncate_file(const std::filesystem::path &file, uint64_t offset)
+        {
+            int fd = ::open(file.c_str(), O_WRONLY);
+            if (fd == -1) {
+                LOG_ERROR("Failed to open file {} for truncation: {}", file, errno);
+                throw std::runtime_error(fmt::format("Failed to open file {} for truncation: {}", file, errno));
+            }
+
+            if (::ftruncate(fd, offset) == -1) {
+                LOG_ERROR("Failed to truncate file {} to offset {}: {}", file, offset, errno);
+                ::close(fd);
+                throw std::runtime_error(fmt::format("Failed to truncate file {} to offset {}: {}", file, offset, errno));
+            }
+
+            ::close(fd);
+        }
+
+        /**
+         * @brief Get the size of the given file
+         *
+         * @param file File to get its size
+         * @return File size
+         */
+        static int64_t
+        get_file_size(const std::filesystem::path& path) {
+            // Check if its regular file and get the size
+            // otherwise return -1
+            try {
+                if (std::filesystem::exists(path) && std::filesystem::is_regular_file(path)) {
+                    return static_cast<int64_t>(std::filesystem::file_size(path));
+                } else {
+                    LOG_ERROR("Given {} doesn't exist or not a regular file", path);
+                    return -1;
+                }
+            } catch (const std::filesystem::filesystem_error& e) {
+                LOG_WARN("_get_file_size exception: {}", e.what());
+                return -1;
+            }
+        }
+
+        /**
+         * @brief Get the number of blocks occupied by the given file
+         *
+         * @param file File to get its block count
+         * @return File block count
+         */
+        static uint64_t
+        get_block_count(const std::filesystem::path& path) {
+            struct stat st;
+            if (::stat(path.c_str(), &st) == 0) {
+                return static_cast<uint64_t>(st.st_blocks);
+            }
+            return 0;
+        }
+
+        /**
          * @brief This function removes all the files from directory with the timestamp id
          *          less than given timestamp limit
          *
@@ -288,6 +356,7 @@ namespace springtail {
                     // Extract the timestamp from the file name
                     auto timestamp = extract_timestamp_from_file(path, prefix, suffix);
                     if (timestamp.has_value() && Compare()(timestamp.value(), timestamp_limit)) {
+                        LOG_INFO("Removing file: {}", path.string());
                         if (!archive) {
                             std::filesystem::remove(path);
                         } else {

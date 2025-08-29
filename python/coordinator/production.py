@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import json
+import shutil
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
@@ -20,6 +21,8 @@ from common import (
 from aws import AwsHelper
 
 from postgres_component import PostgresComponent
+
+from properties import Properties
 
 S3_BIN_FOLDER = 'packages'
 S3_DOWNLOAD_PATH = '/tmp/'
@@ -42,7 +45,6 @@ ENV_VARS = [
     'LUSTRE_MOUNT_NAME',
     'MOUNT_POINT',
     'FDW_ID',
-    'FDW_USER_PASSWORD',
     'LD_LIBRARY_PATH'
 ]
 
@@ -91,6 +93,12 @@ class Production:
         """
         Install the springtail binaries on the local system.
         Current s3 bucket: s3://data-share.springtail.internal/packages/
+
+        We follow two steps for the installation process:
+
+          1. Download the latest package from S3 to a temporary location
+          2. Extract the package and check the config hash, if matches, copy over to the installation path.
+             Otherwise, clean up and error out.
         """
         global S3_DOWNLOAD_PATH, S3_BIN_FOLDER
 
@@ -110,27 +118,43 @@ class Production:
             self.send_sns('download_failed')
             raise ValueError("Failed to download springtail binaries")
 
+        # Extract the springtail_tgz to a temporary location (under S3_DOWNLOAD_PATH) and check the config hash
+        temp_dir = tempfile.mkdtemp(dir=S3_DOWNLOAD_PATH)
+        try:
+            run_command('tar', ['xzf', springtail_tgz, '-C', temp_dir])
+        except Exception as e:
+            self.logger.error("Failed to extract springtail binaries: %s", str(e))
+            self.send_sns('download_failed')
+            os.unlink(springtail_tgz)
+            shutil.rmtree(temp_dir)
+            raise e
+
+        package_config_sha = self.get_config_hash(os.path.join(temp_dir, 'INFO.txt'))
+        if package_config_sha != config_gitsha:
+            msg = f"Config Git SHA mismatch: expected {config_gitsha}, got {package_config_sha}"
+            self.logger.error(msg)
+            self.send_sns('config_git_sha_mismatch')
+            os.unlink(springtail_tgz)
+            shutil.rmtree(temp_dir)
+            raise ValueError(msg)
+
+        # Only send this if the config hash matches
         self.send_sns('download_complete', version=(os.path.basename(springtail_tgz)))
 
         try:
-            # Create the install directory if it doesn't exist
+            # Create the installation directory if it doesn't exist
             if not os.path.exists(self.install_path):
                 makedir(self.install_path)
 
             # set LD_LIBRARY_PATH
             os.environ['LD_LIBRARY_PATH'] = os.path.join(self.install_path, SPRINGTAIL_LIB_DIR)
 
-            # Install the binaries and shared libraries
-            run_command('sudo', ['tar', 'xzf', springtail_tgz, '-C', self.install_path])
+            # Install the binaries and shared libraries by moving the temp_dir contents to install_path
+            # Important: for rsync to work correctly, temp_dir and self.install_path must end with a '/'
+            run_command('sudo', ['rsync', '-a', os.path.join(temp_dir, ''), os.path.join(self.install_path, '')])
 
             # Make sure shared-lib is readable by all
             run_command('sudo', ['chmod', '-R', '755', os.path.join(self.install_path, SPRINGTAIL_LIB_DIR)])
-
-            package_config_sha = self.get_config_hash(os.path.join(self.install_path, 'INFO.txt'))
-            if package_config_sha != config_gitsha:
-                self.logger.error(f"Config Git SHA mismatch: expected {config_gitsha}, got {package_config_sha}")
-                raise ValueError("Config Git SHA mismatch")
-
             self.logger.info(f"Springtail binaries installed to {self.install_path}")
             self.send_sns('install_complete', version=os.path.basename(springtail_tgz))
 
@@ -138,13 +162,19 @@ class Production:
             self.logger.error(f"Failed to install springtail binaries: {str(e)}")
             self.send_sns('install_failed', version=os.path.basename(springtail_tgz))
             raise e
+        finally:
+            try:
+                os.unlink(springtail_tgz)
+                shutil.rmtree(temp_dir)
+            except Exception as e:
+                self.logger.warning("Failed to clean up temporary files: %s %s (%s)", springtail_tgz, temp_dir, str(e))
 
     def get_config_hash(self, file_path: str) -> str:
         """Read and extract Config Hash value from the version file.
-        
+
         Args:
             file_path: Path to the version file
-            
+
         Returns:
             String containing the config hash value
         """
@@ -159,11 +189,16 @@ class Production:
 
         raise ValueError("Config Hash not found in version file")
 
-    def install_pgfdw(self) -> None:
+    def install_pgfdw(self, props: Properties) -> str:
         """
         Install the postgres libraries on the local system for the FDW.
         Should be done prior to starting the ddl mgr.
+
+        Returns:
+            The path to the postmaster.pid file
         """
+        self.logger.info("Installing Postgres FDW")
+
         # Get the share and lib directories
         share_dir = run_command('pg_config', ['--sharedir'])
         lib_dir = run_command('pg_config', ['--pkglibdir'])
@@ -187,11 +222,16 @@ class Production:
         self.logger.info("Updating postgres environment file")
         version_str = run_command('pg_config', ['--version']).strip()
         version = version_str.split(' ')[1].split('.')[0]
-        env_file = f'/etc/postgresql/{version}/main/environment'
+
+        fdw_user = props.get_role(Properties.DB_USER_ROLE_FDW)[0]
+
+        env_file = f'/etc/postgresql/{version}/{fdw_user}/environment'
+        hba_file = f'/var/lib/postgresql/{version}/{fdw_user}/pg_hba.conf'
+        pid_file = f'/var/lib/postgresql/{version}/{fdw_user}/postmaster.pid'
 
         # Update the localhost socket connection to use scram-sha-256
         self.logger.info("Setting up pg_hba.conf")
-        run_command('sudo', ['sed', '-i', 's/^local[[:space:]]\\+all[[:space:]]\\+all[[:space:]]\\+\\(md5\\|peer\\)/local   all   all   scram-sha-256/', f'/etc/postgresql/{version}/main/pg_hba.conf'])
+        run_command('sudo', ['sed', '-i', 's/^local[[:space:]]\\+all[[:space:]]\\+all[[:space:]]\\+\\(md5\\|peer\\)/local   all   all   scram-sha-256/', hba_file])
 
         # Write the environment variables to a temporary file
         with tempfile.NamedTemporaryFile(delete=True, mode='w') as temp_file:
@@ -211,8 +251,11 @@ class Production:
         pg = PostgresComponent(name="postgres",
                                id="10",
                                path=bindir,
-                               pid_path=f'/var/run/postgresql/{version}-main.pid')
+                               pid_path=pid_file,
+                               props=props)
         pg.shutdown()
+
+        return pid_file
 
 
     def _extract_attributes(self) -> Dict[str, Any]:
@@ -272,6 +315,8 @@ class Production:
             subject = f"Instance startup: {srn}, {service_name} @{timestamp}"
         elif type == 'shutdown':
             subject = f"Instance shutdown: {srn}, {service_name} @{timestamp}"
+        elif type == 'warning':
+            subject = f"Warning detected: {srn}, {service_name}, {component} @{timestamp}"
         elif type == 'failure':
             subject = f"Failure detected: {srn}, {service_name}, {component} @{timestamp}"
         elif type == 'download_start':
@@ -296,6 +341,9 @@ class Production:
             subject = f"Maximum restart retries hit: {srn}, {service_name} @{timestamp}"
             msg = f"Component tried restarting, but couldn't restart after maximum retries: {component}"
             attributes['component'] = component
+        elif type == 'config_git_sha_mismatch':
+            subject = f"Config Git SHA mismatch: {srn}, {service_name} @{timestamp}"
+            msg = "The config git SHA of the downloaded package does not match the expected value in Redis."
         else:
             self.logger.error(f"Unknown SNS message type: {type}")
             return
@@ -306,25 +354,4 @@ class Production:
 
         self.aws.send_sns_notification(self.topic_arn, subject, message, attributes)
 
-    def get_replication_user(self) -> Optional[Dict[str, str]] :
-        """Retrieve replication user creds from AWS Secrets Manager."""
 
-        # construct the secret name
-        org_id = self.sns_attributes['organization_id']
-        account_id = self.sns_attributes['account_id']
-        db_instance_id = self.sns_attributes['database_instance_id']
-        secret_name = f"sk/{org_id}/{account_id}/aws/dbi/{db_instance_id}/primary_db_password"
-
-        self.logger.debug(f"Attempting to retrieve secret for: {secret_name}")
-
-        secret = self.aws.get_secret(secret_name)
-        if not secret:
-            self.logger.error(f"Secret not found for: {secret_name}")
-            return None
-
-        # find the replication user
-        for user in secret:
-            if user['role'] == 'replication':
-                return user
-
-        return None

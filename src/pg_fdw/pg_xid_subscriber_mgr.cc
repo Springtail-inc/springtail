@@ -11,10 +11,11 @@
 using namespace springtail;
 using namespace springtail::pg_fdw;
 
-PgXidSubscriberMgr::PgXidSubscriberMgr(size_t cache_size, size_t worker_count) :
-    _cache_size{cache_size},
-    _worker_count{worker_count}
+void
+PgXidSubscriberMgr::init(size_t cache_size, size_t worker_count)
 {
+    _cache_size = cache_size;
+    _worker_count = worker_count;
     LOG_DEBUG(LOG_XID_MGR, "PgXidSubscriberMgr creating {}, {}", _cache_size, _worker_count);
     _t = std::make_unique<std::jthread>([this](std::stop_token st) { task(st); });
 }
@@ -158,41 +159,27 @@ PgXidSubscriberMgr::_populate_worker(std::stop_token st)
     }
 }
 
-bool
-PgXidSubscriberRunner::start()
+void
+PgXidSubscriberMgr::start()
 {
     nlohmann::json json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
 
-    uint64_t roots_cache_size = 0;
-    Json::get_to<uint64_t>(json, "roots_shm_cache_size", roots_cache_size);
+    size_t roots_cache_size = 0;
+    Json::get_to<size_t>(json, "roots_shm_cache_size", roots_cache_size);
 
     LOG_DEBUG(LOG_XID_MGR, "PgXidSubscriberRunner starting with cache size {}", roots_cache_size);
 
-    if (!roots_cache_size) {
-        LOG_ERROR("Bad cache size, terminating PgXidSubscriberRunner");
-        return false;
-    }
+    CHECK(roots_cache_size) << "Bad cache size, terminating PgXidSubscriberRunner";
 
     json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
     nlohmann::json rpc_json;
 
     // fetch RPC properties for the sys_tbl_mgr server
-    if (!Json::get_to(json, "rpc_config", rpc_json)) {
-        LOG_ERROR("SysTblMgr RPC settings are not found, terminating PgXidSubscriberRunner");
-        return false;
-    }
+    CHECK(Json::get_to(json, "rpc_config", rpc_json)) << "SysTblMgr RPC settings are not found, terminating PgXidSubscriberRunner";
 
     // The worker threads as used to make RPC requests to the sys table service while
     // populate the cache. We use the same number or threads as there are in the RPC in service.
     auto worker_count = Json::get_or<size_t>(rpc_json, "server_worker_threads", 1);
 
-    _mgr = std::make_unique<PgXidSubscriberMgr>(roots_cache_size, worker_count);
-
-    return true;
-}
-
-void
-PgXidSubscriberRunner::stop()
-{
-    _mgr.reset();
+    get_instance()->init(roots_cache_size, worker_count);
 }

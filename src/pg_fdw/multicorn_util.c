@@ -115,10 +115,11 @@ findPaths(PlannerInfo *root,
     {
         List	   *item = lfirst(lc);
         List	   *attrnos = linitial(item);
-        ListCell   *attno_lc;
-        int			nbrows = ((Const *) lsecond(item))->constvalue;
+        uint64_t    nbrows = ((Const *) lsecond(item))->constvalue;
+        double		cost = (double)((Const *) lthird(item))->constvalue;
         List	   *allclauses = NULL;
         Bitmapset  *outer_relids = NULL;
+        ListCell   *attno_lc;
 
         /* Armed with this knowledge, look for a join condition */
         /* matching the path list. */
@@ -191,7 +192,8 @@ findPaths(PlannerInfo *root,
                 allclauses = list_concat(allclauses, clauses);
             }
         }
-        /* Every key has a corresponding restriction, we can build */
+
+         /* Every key has a corresponding restriction, we can build */
         /* the parameterized path and add it to the plan. */
         if (allclauses != NIL)
         {
@@ -212,7 +214,7 @@ findPaths(PlannerInfo *root,
                                                        NULL,  /* default pathtarget */
                                                       nbrows,
                                                       startupCost,
-                                                      nbrows * baserel->reltarget->width,
+                                                      (double)nbrows * baserel->reltarget->width * cost,
                                                       NIL, /* no pathkeys */
                                                       NULL,
                                                       NULL,
@@ -413,14 +415,15 @@ makeQual(AttrNumber varattno, char *opname, Expr *value, bool isarray,
             elog(DEBUG3, "T_Var");
             qual = palloc0(sizeof(VarQual));
             qual->right_type = T_Var;
+            qual->typeoid = ((Var *) value)->vartype;
             ((VarQual *) qual)->rightvarattno = ((Var *) value)->varattno;
             break;
         default:
             elog(DEBUG3, "default");
             qual = palloc0(sizeof(ParamQual));
             qual->right_type = T_Param;
+            qual->typeoid = ((Param *) value)->paramtype;
             ((ParamQual *) qual)->expr = value;
-            qual->typeoid = InvalidOid;
             break;
     }
     qual->varattno = varattno;
@@ -913,7 +916,26 @@ multicorn_getRelSize(PlannerInfo *root,
                             &planstate->qual_list);
     }
 
-    fdw_get_rel_size(planstate, planstate->target_list, planstate->qual_list, &rows, &width);
+    // Extract restrictions from potential join clauses 
+    List* join_quals = NIL;
+    foreach(lc, root->eq_classes)
+    {
+        EquivalenceClass *ec = (EquivalenceClass *) lfirst(lc);
+        if (ec->ec_members->length <= 1) {
+            continue;
+        }
+        ListCell   *ri_lc;
+        foreach(ri_lc, ec->ec_sources)
+        {
+            RestrictInfo *ri = (RestrictInfo *) lfirst(ri_lc);
+            // it must be a join related clause
+            if (ri->clause_relids && !bms_is_subset(ri->clause_relids, baserel->relids)) {
+                extractRestrictions(root, baserel->relids, ri->clause, &join_quals);
+            }
+        }
+    }
+
+    fdw_get_rel_size(planstate, planstate->target_list, planstate->qual_list, join_quals, &rows, &width);
 
     baserel->rows = rows;
     baserel->reltarget->width = width;
@@ -958,7 +980,7 @@ multicorn_getForeignPaths(PlannerInfo *root,
     /* Handle sort pushdown */
     if (root->query_pathkeys)
     {
-        List		*deparsed = deparse_sortgroup(root, foreigntableid, baserel);
+        List* deparsed = deparse_sortgroup(root, foreigntableid, baserel);
 
         if (deparsed)
         {
@@ -996,6 +1018,7 @@ multicorn_getForeignPaths(PlannerInfo *root,
         }
     }
 }
+
 
 ForeignScan *
 multicorn_getForeignPlan(PlannerInfo *root,

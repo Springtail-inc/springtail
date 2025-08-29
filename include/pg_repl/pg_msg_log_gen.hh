@@ -41,7 +41,9 @@ namespace springtail {
          * @param columns list of columns, and types
          * @return uint32_t table ID
          */
-        uint32_t create_table(const std::string &table_name, const std::vector<PgMsgSchemaColumn> &columns);
+        uint32_t create_table(const std::string &table_name,
+                              const std::vector<PgMsgSchemaColumn> &columns,
+                              const nlohmann::json &json);
 
         /**
          * @brief Create index
@@ -50,7 +52,7 @@ namespace springtail {
          * @return uint32_t index ID
          */
         uint32_t create_index(const std::string &index,
-            const std::string& table_name, 
+            const std::string& table_name,
             uint32_t table_oid, const std::vector<PgMsgSchemaIndexColumn> &columns);
 
         /**
@@ -58,7 +60,8 @@ namespace springtail {
          * @param table_id table id
          * @param columns list of columns, and types
          */
-        void alter_table(uint32_t table_id, const std::vector<PgMsgSchemaColumn> &columns);
+        void alter_table(uint32_t table_id, const std::vector<PgMsgSchemaColumn> &columns,
+                         const nlohmann::json &json);
 
         /**
          * @brief Drop a table
@@ -140,6 +143,20 @@ namespace springtail {
 
         /** Abort stream */
         void stream_abort();
+
+        /** Attach a partition */
+        void attach_partition(const std::string &table_name,
+                              uint32_t table_id,
+                              const std::string &schema,
+                              const std::string &partition_key,
+                              nlohmann::json partition_data);
+
+        /** Detach a partition */
+        void detach_partition(const std::string &table_name,
+                              uint32_t table_id,
+                              const std::string &schema,
+                              const std::string &partition_key,
+                              nlohmann::json partition_data);
 
         /** Get list of transaction start/end pairs */
         std::vector<PgTransactionPtr> get_xact_list() { return _xact_list; }
@@ -249,6 +266,8 @@ namespace springtail {
         static constexpr char PG_OP_STREAM_STOP[] = "stream stop";
         static constexpr char PG_OP_STREAM_COMMIT[] = "stream commit";
         static constexpr char PG_OP_STREAM_ABORT[] = "stream abort";
+        static constexpr char PG_OP_ATTACH_PARTITION[] = "attach partition";
+        static constexpr char PG_OP_DETACH_PARTITION[] = "detach partition";
 
         /**
          * @brief Construct a new Pg Log Gen Json object
@@ -338,5 +357,11 @@ namespace springtail {
 
         /** Parse stream abort op -- calls into _log_gen */
         void _parse_stream_abort(const nlohmann::json &json);
+
+        /** Parse attach partition op -- calls into _log_gen */
+        void _parse_attach_partition(const nlohmann::json &json);
+
+        /** Parse detach partition op -- calls into _log_gen */
+        void _parse_detach_partition(const nlohmann::json &json);
     };
 }

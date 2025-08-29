@@ -1,17 +1,27 @@
-#include <common/constants.hh>
 #include <memory>
+
+#include <common/constants.hh>
+#include <common/json.hh>
+#include <common/properties.hh>
+
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/schema_mgr.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
-#include <write_cache/write_cache_client.hh>
-#include <common/json.hh>
-#include <common/properties.hh>
 
 //#define SPRINGTAIL_INCLUDE_TIME_TRACES 1
 #include <common/time_trace.hh>
 
 namespace springtail {
+
+static auto get_max_extent_size() {
+    return constant::MAX_EXTENT_SIZE;
+}
+
+static auto get_max_extent_size_secondary() {
+    return constant::MAX_EXTENT_SIZE_SECONDARY;
+}
 
 namespace table_helpers {
 
@@ -44,7 +54,7 @@ namespace indexer_helpers {
             const std::vector<uint32_t>    &idx_cols,
             const ExtentSchemaPtr          &schema)
     {
-        /* 1. Column metadata is the same for every row – fetch it once. */
+        /* 1. Column metadata is the same for every row - fetch it once. */
         const auto column_names = schema->get_column_names(idx_cols);
         const auto key_fields   = schema->get_fields(column_names);
 
@@ -65,7 +75,7 @@ namespace indexer_helpers {
             ++row_id;
         }
 
-        LOG_DEBUG(LOG_BTREE, "{} {} secondary rows", 
+        LOG_DEBUG(LOG_BTREE, "{} {} secondary rows",
             (op == IndexOperation::Insert) ? "Populated"
             : "Invalidated",
             row_id);
@@ -120,7 +130,7 @@ namespace indexer_helpers {
             { "index_id", 2, SchemaType::UINT64, 20, false },
         };
 
-        std::shared_ptr<ExtentSchema> 
+        std::shared_ptr<ExtentSchema>
         _create_index_schema(ExtentSchemaPtr schema, const std::vector<uint32_t>& index_columns)
         {
 
@@ -219,7 +229,8 @@ namespace indexer_helpers {
         _primary_index = std::make_shared<BTree>(_table_dir / constant::INDEX_PRIMARY_FILE,
                                                  xid,
                                                  primary_schema,
-                                                 it->extent_id);
+                                                 it->extent_id,
+                                                 get_max_extent_size());
 
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
         _pkey_fields = primary_schema->get_fields();
@@ -233,6 +244,7 @@ namespace indexer_helpers {
 
             // work with the index
             std::vector<uint32_t> idx_cols;
+            idx_cols.reserve(idx_cols.size());
             for (auto const &col: idx.columns) {
                 idx_cols.push_back(col.position);
             }
@@ -274,20 +286,8 @@ namespace indexer_helpers {
         return _primary_extent_id_f->get_uint64(&row);
     }
 
-    ExtentSchemaPtr
-    Table::extent_schema() const
-    {
-        return SchemaMgr::get_instance()->get_extent_schema(_db_id, _id, XidLsn(_xid));
-    }
-
-    SchemaPtr
-    Table::schema(uint64_t extent_xid) const
-    {
-        return SchemaMgr::get_instance()->get_schema(_db_id, _id, XidLsn(extent_xid), XidLsn(_xid));
-    }
-
     Table::Iterator
-    Table::lower_bound(TuplePtr search_key, uint32_t index_id)
+    Table::lower_bound(TuplePtr search_key, uint64_t index_id, bool index_only)
     {
         // check if the table is vacant
         if (_primary_index == nullptr) {
@@ -297,15 +297,21 @@ namespace indexer_helpers {
         // check for secondary index lookup
         if (index_id != constant::INDEX_PRIMARY) {
             auto const& [btree, cols] = _secondary_indexes.at(index_id);
-            auto index_schema = _create_index_schema(_schema, cols);
 
             // find the extent that could contain the lower_bound() key
             auto &&i = btree->lower_bound(search_key);
             if (i == btree->end()) {
-                return end(index_id);
+                return end(index_id, index_only);
             }
-            return Iterator(this, btree, i, index_schema);
+
+            if (!index_only) {
+                auto index_schema = _create_index_schema(_schema, cols);
+                return Iterator(this, btree, i, index_schema);
+            }
+            return Iterator(this, btree, i);
         }
+
+        CHECK(!index_only);
 
         BTreePtr btree = index(index_id);
 
@@ -328,7 +334,7 @@ namespace indexer_helpers {
     }
 
     Table::Iterator
-    Table::upper_bound(TuplePtr search_key, uint32_t index_id)
+    Table::upper_bound(TuplePtr search_key, uint64_t index_id, bool index_only)
     {
         // check if the table is vacant
         if (_primary_index == nullptr) {
@@ -337,15 +343,21 @@ namespace indexer_helpers {
 
         if (index_id != constant::INDEX_PRIMARY) {
             auto const& [btree, cols] = _secondary_indexes.at(index_id);
-            auto index_schema = _create_index_schema(_schema, cols);
 
             // find the extent that could contain the lower_bound() key
             auto &&i = btree->upper_bound(search_key);
             if (i == btree->end()) {
-                return end(index_id);
+                return end(index_id, index_only);
             }
-            return Iterator(this, btree, i, index_schema);
+
+            if (!index_only) {
+                auto index_schema = _create_index_schema(_schema, cols);
+                return Iterator(this, btree, i, index_schema);
+            }
+            return Iterator(this, btree, i);
         }
+
+        CHECK(!index_only);
 
         // find the extent that could contain the upper_bound() key
         auto &&i = _primary_index->upper_bound(search_key);
@@ -366,7 +378,7 @@ namespace indexer_helpers {
     }
 
     Table::Iterator
-    Table::inverse_lower_bound(TuplePtr search_key, uint32_t index_id)
+    Table::inverse_lower_bound(TuplePtr search_key, uint64_t index_id, bool index_only)
     {
         // check if the table is vacant
         if (_primary_index == nullptr) {
@@ -381,14 +393,19 @@ namespace indexer_helpers {
             auto &&i = btree->inverse_lower_bound(search_key);
 
             if (i == btree->end()) {
-                return end(index_id);
+                return end(index_id, index_only);
             }
 
-            auto index_schema = _create_index_schema(_schema, cols);
-            return Iterator(this, btree, i, index_schema);
+            if (!index_only) {
+                auto index_schema = _create_index_schema(_schema, cols);
+                return Iterator(this, btree, i, index_schema);
+            }
+            return Iterator(this, btree, i);
         }
 
-        // if the priamry index is empty, return end()
+        CHECK(!index_only);
+
+        // if the primary index is empty, return end()
         if (_primary_index->empty()) {
             return end();
         }
@@ -431,7 +448,7 @@ namespace indexer_helpers {
     }
 
     Table::Iterator
-    Table::begin(uint32_t index_id)
+    Table::begin(uint64_t index_id, bool index_only)
     {
         // check if the table is vacant
         if (_primary_index == nullptr) {
@@ -439,6 +456,8 @@ namespace indexer_helpers {
         }
 
         if (index_id == constant::INDEX_PRIMARY) {
+            CHECK(!index_only);
+
             // check if the table is empty
             auto &&index_i = _primary_index->begin();
             if (index_i == _primary_index->end()) {
@@ -450,16 +469,34 @@ namespace indexer_helpers {
             return Iterator(this, _primary_index, index_i, std::move(page), begin);
         } else {
             auto const& [btree, cols] = _secondary_indexes.at(index_id);
-            auto index_schema = _create_index_schema(_schema, cols);
-
             // find the extent that could contain the lower_bound() key
             auto i = btree->begin();
             if (i == btree->end()) {
-                return end(index_id);
+                return end(index_id, index_only);
             }
+
+            if (index_only) {
+                return Iterator(this, btree, i);
+            }
+
+            auto index_schema = _create_index_schema(_schema, cols);
             return Iterator(this, btree, i, index_schema);
         }
     }
+
+    ExtentSchemaPtr
+    Table::get_index_schema(uint64_t index_id) const
+    {
+        auto const& [btree, cols] = _secondary_indexes.at(index_id);
+        return _create_index_schema(_schema, cols);
+    }
+
+    std::vector<std::string>
+    Table::get_index_column_names(uint64_t index_id) const
+    {
+        return _schema->get_column_names(_secondary_indexes.at(index_id).second);
+    }
+
 
     std::pair<std::shared_ptr<Extent>, uint64_t>
     Table::read_extent_from_disk(uint64_t extent_id) const
@@ -495,16 +532,17 @@ namespace indexer_helpers {
     StorageCache::SafePagePtr
     Table::_read_page(uint64_t extent_id) const
     {
-        return StorageCache::get_instance()->get(_table_dir / constant::DATA_FILE, extent_id, _xid);
+        return StorageCache::get_instance()->get(_table_dir / constant::DATA_FILE, extent_id, _xid, constant::LATEST_XID, get_max_extent_size());
     }
 
-    BTreePtr 
+    BTreePtr
     Table::_create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset)
     {
         auto index_schema = _create_index_schema(_schema, index_columns);
         auto btree = std::make_shared<BTree>(_table_dir / fmt::format(constant::INDEX_FILE, index_id),
                 _xid, index_schema,
-                offset);
+                offset,
+                index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary());
         return btree;
     }
 
@@ -576,7 +614,7 @@ namespace indexer_helpers {
         SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
         SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, 0, false);
 
-        
+
         ExtentSchemaPtr primary_schema;
         if (primary_key.empty()) {
             std::vector<std::string> non_primary_key = { constant::INDEX_EID_FIELD };
@@ -585,14 +623,14 @@ namespace indexer_helpers {
             _primary_index = std::make_shared<MutableBTree>(_table_dir / constant::INDEX_PRIMARY_FILE,
                                                             non_primary_key,
                                                             primary_schema,
-                                                            _target_xid);
+                                                            _target_xid, get_max_extent_size());
         } else {
             primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
 
             _primary_index = std::make_shared<MutableBTree>(_table_dir / constant::INDEX_PRIMARY_FILE,
                                                             primary_key,
                                                             primary_schema,
-                                                            _target_xid);
+                                                            _target_xid, get_max_extent_size());
         }
 
 
@@ -618,6 +656,7 @@ namespace indexer_helpers {
             assert(idx.id != constant::INDEX_PRIMARY);
             // work with the index
             std::vector<uint32_t> idx_cols;
+            idx_cols.reserve(idx.columns.size());
             for (auto const &col: idx.columns) {
                 idx_cols.push_back(col.position);
             }
@@ -727,35 +766,16 @@ namespace indexer_helpers {
         // note: no change in the stats.row_count
     }
 
-    void
-    MutableTable::truncate()
-    {
-        // remove any dirty cached pages for this table since they don't need to be written
-        StorageCache::get_instance()->drop_for_truncate(_data_file);
-
-        // clear the indexes
-        TableMetadata metadata;
-        metadata.snapshot_xid = _snapshot_xid;
-        metadata.roots = {{ constant::INDEX_PRIMARY, constant::UNKNOWN_EXTENT }};
-        _primary_index->truncate();
-
-        for (auto& [index_id, idx]: _secondary_indexes) {
-            idx.first->truncate();
-            metadata.roots.emplace_back(index_id, constant::UNKNOWN_EXTENT);
-        }
-
-        // update the roots and stats
-        sys_tbl_mgr::Client::get_instance()->update_roots(_db_id, _id, _target_xid, metadata);
-    }
-
     StorageCache::SafePagePtr
     MutableTable::read_page(uint64_t extent_id)
     {
         return StorageCache::get_instance()->get(_data_file, extent_id,
-                                                 _access_xid, _target_xid, false,
-                                                 [this](StorageCache::PagePtr page) {
-                                                     return _flush_handler(page);
-                                                 });
+                _access_xid, _target_xid,
+                get_max_extent_size(),
+                false,
+                [this](StorageCache::PagePtr page) {
+                return _flush_handler(page);
+                });
     }
 
     bool
@@ -782,10 +802,14 @@ namespace indexer_helpers {
         }
 
         // get the original page to use for index updates
-        auto orig_page = StorageCache::get_instance()->get(_data_file, old_eid, _access_xid);
+        auto orig_page = StorageCache::get_instance()->get(_data_file, old_eid, _access_xid, constant::LATEST_XID, get_max_extent_size());
+
 
         // INVALIDATE PRIMARY INDEX
         TuplePtr pkey;
+        Extent::Row row;
+        StorageCache::Page::Iterator itr;
+
         if (_primary_key.empty()) {
             // no primary key, so use the old extent ID as the primary key
             auto pkey_fields = std::make_shared<FieldArray>(1);
@@ -794,7 +818,8 @@ namespace indexer_helpers {
         } else {
             // has a primary key, get the last row of the original page for the primary index
             auto pkey_fields = _schema->get_fields(_primary_key);
-            auto &&row = *orig_page->last();
+            itr = orig_page->last();
+            row = *itr;
             pkey = std::make_shared<FieldTuple>(pkey_fields, &row);
         }
 
@@ -827,10 +852,12 @@ namespace indexer_helpers {
 
         auto value_fields = std::make_shared<FieldArray>(1);
         for (auto extent_id : offsets) {
-            auto new_page = StorageCache::get_instance()->get(_data_file, extent_id, _target_xid);
+            auto new_page = StorageCache::get_instance()->get(_data_file, extent_id, _target_xid, constant::LATEST_XID, get_max_extent_size());
 
             // POPULATE PRIMARY INDEX
             TuplePtr pkey;
+            Extent::Row row;
+            StorageCache::Page::Iterator itr;
 
             // create the new primary index entry
             (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
@@ -839,7 +866,8 @@ namespace indexer_helpers {
                 pkey = std::make_shared<FieldTuple>(value_fields, nullptr);
             } else {
                 // has a primary key, use the primary key fields
-                auto &&row = *new_page->last();
+                itr = new_page->last();
+                row = *itr;
                 pkey = std::make_shared<KeyValueTuple>(pkey_fields, value_fields, &row);
             }
 
@@ -872,7 +900,7 @@ namespace indexer_helpers {
         metadata.roots.push_back({constant::INDEX_PRIMARY, _primary_index->finalize()});
 
         // now flush the indexes, capturing the roots
-        for (auto secondary : _secondary_indexes) {
+        for (auto &secondary : _secondary_indexes) {
             metadata.roots.emplace_back(secondary.first, secondary.second.first->finalize());
         }
 
@@ -908,7 +936,7 @@ namespace indexer_helpers {
         return metadata;
     }
 
-    MutableBTreePtr 
+    MutableBTreePtr
     MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns)
     {
         // get the column names in the order they appear in the index
@@ -925,7 +953,9 @@ namespace indexer_helpers {
 
         auto btree = std::make_shared<MutableBTree>(_table_dir / fmt::format(constant::INDEX_FILE, index_id),
                 key, index_schema,
-                _target_xid);
+                _target_xid,
+                index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary()
+                );
         return btree;
     }
 
@@ -934,8 +964,10 @@ namespace indexer_helpers {
                                  uint64_t extent_id)
     {
         // get the page from the cache
-        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false, 
-                                                      [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
+        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
+                get_max_extent_size(),
+                false,
+                [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
         // check if we need to convert the page contents to a new schema
         _check_convert_page(page);
@@ -950,7 +982,7 @@ namespace indexer_helpers {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
             _empty_page = std::make_unique<StorageCache::SafePagePtr>(
-                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid));
+                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid, get_max_extent_size()));
         }
 
         // add the row to the page
@@ -963,7 +995,7 @@ namespace indexer_helpers {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
             _empty_page = std::make_unique<StorageCache::SafePagePtr>(
-                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid));
+                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid, get_max_extent_size()));
         }
 
         // add the row to the page
@@ -988,6 +1020,7 @@ namespace indexer_helpers {
 
         // get the page from the cache
         auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
+                get_max_extent_size(),
                 false,
                 [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
@@ -1012,11 +1045,7 @@ namespace indexer_helpers {
 
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_index->lower_bound(search_key, true);
-        auto &&row = *i;
-
-        // if the primary index is not empty, get the target extent
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
+        uint64_t extent_id = _get_extent_id(search_key);
 
         // then we can do a direct insert
         _insert_direct(value, extent_id);
@@ -1026,7 +1055,9 @@ namespace indexer_helpers {
     MutableTable::_upsert_direct(TuplePtr value, uint64_t extent_id)
     {
         // get the page from the cache
-        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false,
+        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
+                get_max_extent_size(),
+                false,
                 [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
         // check if we need to convert the page contents to a new schema
@@ -1043,8 +1074,8 @@ namespace indexer_helpers {
     {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
-            _empty_page = std::make_unique<StorageCache::SafePagePtr>( 
-                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid));
+            _empty_page = std::make_unique<StorageCache::SafePagePtr>(
+                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid, get_max_extent_size()));
         }
 
         // add the row to the page
@@ -1064,11 +1095,7 @@ namespace indexer_helpers {
 
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_index->lower_bound(search_key, true);
-        auto &&row = *i;
-
-        // if the primary index is not empty, get the target extent
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
+        uint64_t extent_id = _get_extent_id(search_key);
 
         // then we can do a direct insert
         return _upsert_direct(value, extent_id);
@@ -1078,7 +1105,9 @@ namespace indexer_helpers {
     MutableTable::_remove_direct(TuplePtr value, uint64_t extent_id)
     {
         // get the page from the cache
-        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false,
+        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
+                get_max_extent_size(),
+                false,
                 [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
         // check if we need to convert the page contents to a new schema
@@ -1110,11 +1139,7 @@ namespace indexer_helpers {
         }
 
         // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
-        auto i = _primary_index->lower_bound(key, true);
-        auto &&row = *i;
-
-        // if the primary index is not empty, get the target extent
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
+        uint64_t extent_id = _get_extent_id(key);
 
         // then we can do a direct removal
         _remove_direct(key, extent_id);
@@ -1149,7 +1174,9 @@ namespace indexer_helpers {
             // scan each extent, looking for a match
             uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
 
-            auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false,
+            auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
+                get_max_extent_size(),
+                false,
                 [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
             // check if we need to convert the page contents to a new schema
@@ -1169,6 +1196,7 @@ namespace indexer_helpers {
     {
         // get the page from the cache
         auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
+                get_max_extent_size(),
                 false,
                 [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
@@ -1186,7 +1214,7 @@ namespace indexer_helpers {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
             _empty_page = std::make_unique<StorageCache::SafePagePtr>(
-                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid));
+                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid, get_max_extent_size()));
         }
 
         // add the row to the page
@@ -1207,11 +1235,7 @@ namespace indexer_helpers {
 
         // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_index->lower_bound(search_key, true);
-        auto &&row = *i;
-
-        // if the primary index is not empty, get the target extent
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(&row);
+        uint64_t extent_id = _get_extent_id(search_key);
 
         // then we can do a direct update
         _update_direct(value, extent_id);
@@ -1236,6 +1260,15 @@ namespace indexer_helpers {
         // don't need to convert pages if we aren't supporting schema layout mutations
 #endif
     }
+
+uint64_t
+MutableTable::_get_extent_id(TuplePtr search_key) {
+    auto i = _primary_index->lower_bound(search_key, true);
+    auto &&row = *i;
+
+    // if the primary index is not empty, get the target extent
+    return _primary_extent_id_f->get_uint64(&row);
+}
 
     void Table::Iterator::Primary::next()
     {
@@ -1292,7 +1325,7 @@ namespace indexer_helpers {
     Table::Iterator::Secondary::Secondary(const Table *table,
             BTreePtr btree, const BTree::Iterator &btree_i,
             ExtentSchemaPtr schema )
-        : 
+        :
             Tracker{table, btree, btree_i},
             _cache_size{Json::get_or<uint64_t>(Properties::get(Properties::STORAGE_CONFIG), "page_cache_size", 16384)},
             _eid_buffer{_cache_size/2}
@@ -1363,22 +1396,27 @@ namespace indexer_helpers {
         _page_i += row_id;
     }
 
-    const Extent::Row& Table::Iterator::Secondary::row() const
-    {
-        return *_page_i;
-    }
+    Table::Iterator::SecondaryIndexOnly::SecondaryIndexOnly(const Table *table,
+            BTreePtr btree, const BTree::Iterator &btree_i)
+        :
+            Tracker{table, btree, btree_i}
+    {}
 
-    Table::Iterator::Iterator(const Table *table, uint32_t index_id)
-    { 
+    Table::Iterator::Iterator(const Table *table, uint32_t index_id, bool index_only)
+    {
         if (index_id == constant::INDEX_PRIMARY) {
-            _tracker.emplace<Primary>(table, table->_primary_index, 
-                    table->_primary_index->end(), 
-                    StorageCache::SafePagePtr{}, 
+            _tracker.emplace<Primary>(table, table->_primary_index,
+                    table->_primary_index->end(),
+                    StorageCache::SafePagePtr{},
                     StorageCache::Page::Iterator{});
+        } else if (index_only) {
+            auto const& [btree, _] = table->_secondary_indexes.at(index_id);
+            _tracker.emplace<SecondaryIndexOnly>(table, btree,
+                    btree->end());
         } else {
             auto const& [btree, cols] = table->_secondary_indexes.at(index_id);
             auto index_schema = _create_index_schema(table->_schema, cols);
-            _tracker.emplace<Secondary>(table, btree, 
+            _tracker.emplace<Secondary>(table, btree,
                     btree->end(), index_schema );
         }
     }

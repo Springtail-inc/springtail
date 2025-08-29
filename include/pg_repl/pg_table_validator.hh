@@ -115,7 +115,7 @@ namespace springtail
             */
             template<class T>
             nlohmann::json
-            validate_columns(const std::vector<T> &columns)
+            validate_columns(const std::vector<T> &columns, const std::vector<std::string>& namespaces)
             {
                 auto invalid_columns = nlohmann::json::array();
 
@@ -128,6 +128,17 @@ namespace springtail
                                                    {"collation", column.collation}});
                         LOG_DEBUG(LOG_PG_REPL, "VALIDATE_DDL: Invalid column: name={}",
                                   column.name);
+                    }
+                    // for user defined types, make sure that the type namespace
+                    // is included in the config
+                    if (column.is_user_defined_type && 
+                            !namespaces.empty() && std::ranges::find_if(namespaces,
+                                [&column](const auto& v){return column.type_namespace == v;}) == namespaces.end()) {
+                        invalid_columns.push_back({{"name", column.name},
+                                                   {"type_name", column.type_name},
+                                                   {"collation", column.collation}});
+                        LOG_DEBUG(LOG_PG_REPL, "VALIDATE_DDL: The column namespace is not included name={}",
+                                column.type_namespace);
                     }
                 }
 

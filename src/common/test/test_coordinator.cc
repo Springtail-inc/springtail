@@ -17,10 +17,16 @@ using namespace springtail;
 class CoordinatorTest : public ::testing::Test {
 protected:
     static void SetUpTestSuite() {
-        std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-        runners.emplace();
-        runners->emplace_back(std::make_unique<CoordinatorRunner>());
-        springtail_init_test(runners);
+        std::vector<std::unique_ptr<ServiceRunner>> service_runners;
+        service_runners.emplace_back(std::make_unique<DefaultLoggingRunner>());
+        service_runners.emplace_back(std::make_unique<ExceptionRunner>());
+        service_runners.emplace_back(std::make_unique<PropertiesRunner>(true));
+        service_runners.emplace_back(std::make_unique<LoggingRunner>(std::nullopt, std::nullopt, std::nullopt));
+        service_runners.emplace_back(std::make_unique<OpenTelemetryRunner>(std::nullopt));
+        service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
+        service_runners.emplace_back(std::make_unique<PropertiesCacheRunner>());
+        service_runners.emplace_back(std::make_unique<CoordinatorRunner>());
+        springtail_init_custom(service_runners);
     }
 
     static void TearDownTestSuite() {

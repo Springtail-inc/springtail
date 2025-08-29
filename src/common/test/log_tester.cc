@@ -1,6 +1,8 @@
 #include <common/init.hh>
 #include <common/logging.hh>
 #include <common/open_telemetry.hh>
+#include <assert.h>
+#include <thread>
 
 using namespace springtail;
 using namespace springtail::logging;
@@ -36,10 +38,10 @@ log_stuff()
     LOG_CRITICAL("One more time current: {}\n", std::this_thread::get_id());
 
     {
-        auto token1 = OpenTelemetry::set_context_variable("db_id", "1");
+        auto token1 = OpenTelemetry::get_instance()->set_context_variable("db_id", "1");
         LOG_INFO("Log something with token1");
         {
-            auto token2 = OpenTelemetry::set_context_variable("xact_id", "2");
+            auto token2 = OpenTelemetry::get_instance()->set_context_variable("xact_id", "2");
             LOG_INFO("Log something with token1 and token2");
         }
         LOG_INFO("Log something with token1 again");
@@ -65,23 +67,65 @@ main(int argc, char *argv[])
     log_stuff();
 
     // increment without context
-    OpenTelemetry::increment_counter(XID_MGR_COMMIT_XID_CALLS);
+    OpenTelemetry::get_instance()->increment_counter(XID_MGR_COMMIT_XID_CALLS);
 
     // increment with context
     {
-        auto token1 = OpenTelemetry::set_context_variable("db_id", "1");
-        OpenTelemetry::increment_counter(XID_MGR_COMMIT_XID_CALLS);
+        auto token1 = OpenTelemetry::get_instance()->set_context_variable("db_id", "1");
+        OpenTelemetry::get_instance()->increment_counter(XID_MGR_COMMIT_XID_CALLS);
         {
-            auto token2 = OpenTelemetry::set_context_variable("xact_id", "2");
-            OpenTelemetry::increment_counter(XID_MGR_COMMIT_XID_CALLS);
+            auto token2 = OpenTelemetry::get_instance()->set_context_variable("xact_id", "2");
+            OpenTelemetry::get_instance()->increment_counter(XID_MGR_COMMIT_XID_CALLS);
         }
-        OpenTelemetry::increment_counter(XID_MGR_COMMIT_XID_CALLS);
+        OpenTelemetry::get_instance()->increment_counter(XID_MGR_COMMIT_XID_CALLS);
     }
+
+    // asynchronous counters
+    {
+        struct Cnt1 {
+            static auto name() {
+                static char name[] = "Counter1";
+                return name;
+            }
+        };
+        struct Cnt2 {
+            static auto name() {
+                static char name[] = "Counter2";
+                return name;
+            }
+        };
+
+        // update counters every second.
+        OTelCounters<Cnt1, Cnt2> cnt({{"async_xid_id", "2"}}, 3);
+
+        assert(cnt.get<Cnt1>() == 0);
+        assert(cnt.get<Cnt2>() == 0);
+        cnt.increment<Cnt1>();
+        cnt.increment<Cnt2>();
+        cnt.increment<Cnt2>();
+
+        assert(cnt.get<Cnt1>() == 1);
+        assert(cnt.get<Cnt2>() == 2);
+
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+
+        // the update frequency is 3sec, we waited for 1sec
+        // the counters must stay the same
+        assert(cnt.get<Cnt1>() == 1);
+        assert(cnt.get<Cnt2>() == 2);
+
+        std::this_thread::sleep_for(std::chrono::seconds(3));
+
+        // wait for 3sec more, the counters must be back to 0
+        assert(cnt.get<Cnt1>() == 0);
+        assert(cnt.get<Cnt2>() == 0);
+    }
+
 
     // test tracers, spans, and scopes
     {
-        auto token2 = OpenTelemetry::set_context_variable("xact_id", "2");
-        auto tracer = open_telemetry::OpenTelemetry::tracer("test tracer");
+        auto token2 = OpenTelemetry::get_instance()->set_context_variable("xact_id", "2");
+        auto tracer = open_telemetry::OpenTelemetry::get_instance()->tracer("test tracer");
         auto span = tracer->StartSpan("Test Span", {
             {"span attribute 1", "value 1"},
             {"span attribute 2", "value 2"}});
@@ -89,7 +133,7 @@ main(int argc, char *argv[])
         LOG_INFO("Started span");
 
         {
-            auto token1 = OpenTelemetry::set_context_variable("db_id", "1");
+            auto token1 = OpenTelemetry::get_instance()->set_context_variable("db_id", "1");
             auto scope1 = tracer->WithActiveSpan(span);
             span->AddEvent("Span Event 1", {
                 {"Event 1 Attribute 1", "value 1"},
@@ -105,7 +149,7 @@ main(int argc, char *argv[])
         }
 
         {
-            auto token1 = OpenTelemetry::set_context_variable("db_id", "1");
+            auto token1 = OpenTelemetry::get_instance()->set_context_variable("db_id", "1");
             auto scope2 = tracer->WithActiveSpan(span);
             span->AddEvent("Span Event 2", {
                 {"Event 1 Attribute 1", "value 1"},

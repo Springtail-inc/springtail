@@ -3,7 +3,7 @@
 #include <memory>
 #include <string>
 
-#include <common/singleton.hh>
+#include <common/init.hh>
 #include <grpc/grpc_client.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <proto/sys_tbl_mgr.pb.h>
@@ -16,7 +16,8 @@
 
 namespace springtail::sys_tbl_mgr {
 
-class Client : public Singleton<Client> {
+class Client : public Singleton<Client>
+{
     friend class Singleton<Client>;
 public:
     void ping();
@@ -33,6 +34,9 @@ public:
     std::string create_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
     std::string alter_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
     std::string drop_usertype(uint64_t db_id, const XidLsn &xid, const PgMsgUserType &msg);
+
+    std::string attach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgAttachPartition &msg);
+    std::string detach_partition(uint64_t db_id, const XidLsn &xid, const PgMsgDetachPartition &msg);
 
     proto::IndexProcessRequest create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, sys_tbl::IndexNames::State state);
 
@@ -83,6 +87,12 @@ public:
 
     /** Drop user defined type stub */
     std::string drop_usertype(const proto::UserTypeRequest &request);
+
+    /** Attach partition to an existing partition table */
+    std::string attach_partition(const proto::AttachPartitionRequest &request);
+
+    /** Detach partition in an existing table */
+    std::string detach_partition(const proto::DetachPartitionRequest &request);
 
     /** Get user type at xid */
     std::shared_ptr<UserType> get_usertype(uint64_t db_id, uint64_t type_id, const XidLsn &xid);

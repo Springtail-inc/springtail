@@ -1,11 +1,13 @@
 #include <mutex>
 #include <stop_token>
 #include <algorithm>
-#include <pg_log_mgr/indexer.hh>
+
 #include <common/logging.hh>
 #include <common/properties.hh>
-#include <sys_tbl_mgr/table_mgr.hh>
+#include <pg_log_mgr/indexer.hh>
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/schema_mgr.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 
 namespace springtail::committer {
 
@@ -26,7 +28,7 @@ namespace springtail::committer {
         // Set counter for XID for ddls
         _xid_ddl_counter_map[xid].store(index_requests.size());
         for (auto const& index_request: index_requests) {
-            auto action = index_request.action();
+            auto &action = index_request.action();
             if (action == "create_index") {
                 build({db_id, xid, index_request});
             } else if (action == "drop_index") {
@@ -141,6 +143,7 @@ namespace springtail::committer {
                 .first->second.push_back(key);
             _work_set[key] = std::move(idx);
             _queue.push(key);
+            _redis_ddl.insert_index_xid(idx._db_id, idx._xid);
             // notify workers about new items
             _cv.notify_one();
         }
@@ -156,6 +159,7 @@ namespace springtail::committer {
             // it means to drop the index right away
             _work_set[key] = {db_id, xid, {}, IndexStatus::DELETING};
             _queue.push(key);
+            _redis_ddl.insert_index_xid(db_id, xid);
             _cv.notify_one();
         } else {
             // mark the status as ABORTING, it will tell the worker to
@@ -560,6 +564,9 @@ namespace springtail::committer {
             LOG_DEBUG(LOG_COMMITTER, "Initiating Index commit: {}:{}", db_id, index_id);
             _commit_build(idx_state._root, idx_state._key, idx_state._idx, end_xid);
         }
+
+        // Remove XID from the tracker
+        _redis_ddl.remove_index_xid(db_id, idx_state._idx._xid);
     }
 
     void Indexer::_remove_index_key(uint64_t db_id, uint64_t table_id, const Key& key)

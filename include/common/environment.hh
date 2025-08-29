@@ -16,6 +16,9 @@ namespace springtail::environment {
     /** Environment variable name for property overrides */
     static constexpr char ENV_OVERRIDE[]           = "SPRINGTAIL_PROPERTIES";
 
+    /** Environment variable name for property overrides using json format*/
+    static constexpr char ENV_OVERRIDE_JSON[]           = "SPRINGTAIL_PROPERTIES_JSON";
+
     /** Environment variable name for the properties file,
      * overrides reading config from redis
      */
@@ -48,7 +51,5 @@ namespace springtail::environment {
         {"LUSTRE_MOUNT_NAME", STR, "fs", "mount_name"},
         {"MOUNT_POINT", STR, "fs", "mount_point"},
         {"FDW_ID", STR, "org", "fdw_id"},
-        {"REPLICATION_USER_PASSWORD", STR, "org", "replication_user_password"},
-        {"FDW_USER_PASSWORD", STR, "org", "fdw_user_password"}
     };
 } // namespace springtail::environment

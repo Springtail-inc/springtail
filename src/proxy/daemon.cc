@@ -47,14 +47,14 @@ int main(int argc, char* argv[])
         pidfile = "proxy.pid";
     }
 
-    std::optional<std::vector<std::unique_ptr<ServiceRunner>>> runners;
-    runners.emplace();
-    runners->emplace_back(std::make_unique<DatabaseMgrRunner>());
-    runners->emplace_back(std::make_unique<UserMgrRunner>(UserMgr::USER_MGR_SLEEP_INTERVAL_SECS));
-    runners->emplace_back(std::make_unique<ProxyRunner>(force_shadow, force_primary));
+    springtail_store_arguments(ServiceId::ProxyServerId,
+        {
+            {"force_shadow", std::any(force_shadow)},
+            {"force_primary", std::any(force_primary)}
+        });
 
-    springtail_init_daemon(runners, "proxy", pidfile, LOG_PROXY);
-
+    springtail_init_daemon("proxy", pidfile, LOG_PROXY);
+    ProxyServer::start();
     springtail_daemon_run();
 
     springtail_shutdown();

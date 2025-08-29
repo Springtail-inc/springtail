@@ -17,7 +17,6 @@ set(PG_LOG_SOURCES
 add_library(springtail_pglog ${PG_LOG_SOURCES})
 target_include_directories(springtail_pglog
     PRIVATE ${CMAKE_SOURCE_DIR}/include
-    PRIVATE ${CMAKE_SOURCE_DIR}/src/xid_mgr/gen-cpp # for thrift headers
 )
 target_link_libraries(springtail_pglog
     PUBLIC springtail_pg
@@ -25,7 +24,7 @@ target_link_libraries(springtail_pglog
            springtail_redis
            springtail_xid_mgr
            springtail_storage
-           springtail_sys_tbl_mgr
+           springtail_sys_tbl_mgr_client
     PRIVATE nlohmann_json::nlohmann_json
     PRIVATE fmt::fmt)
 
@@ -56,7 +55,7 @@ springtail_unit_test(test_pg_log_redis
 springtail_unit_test(test_pg_log_indexer
   SOURCES test/test_indexer.cc
   INCLUDES ${CMAKE_SOURCE_DIR}/include
-  LIBS springtail_pglog springtail_test springtail_sys_tbl_mgr GTest::gtest_main
+  LIBS springtail_pglog springtail_test GTest::gtest_main
 )
 
 # dump_repl_log

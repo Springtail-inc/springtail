@@ -90,6 +90,17 @@ namespace springtail {
         }
 
         /**
+         * @brief Peek an item from the queue, doesnt move/remove it
+         */
+        std::shared_ptr<T> peek() const {
+            auto res = _redis->lindex(_key, -1);
+            if (res) {
+                return std::make_shared<T>(std::move(*res));
+            }
+            return nullptr;
+        }
+
+        /**
          * @brief Try to pop an item from queue (list).
          *
          * Operates identically to pop() except that if no elements exist in the list, it returns
@@ -300,6 +311,21 @@ namespace springtail {
         {
             sw::redis::BoundedInterval<double> interval(min, max, sw::redis::BoundType::CLOSED);
             RedisMgr::get_instance()->get_client()->zremrangebyscore(_key, interval);
+        }
+
+        /**
+         * @brief Get the first element sorted by the score
+         */
+        std::optional<T> get_first_by_score()
+        {
+            std::vector<std::string> result;
+            RedisMgr::get_instance()->get_client()->zrange(_key, 0, 0, std::back_inserter(result));
+
+            if (result.empty()) {
+                return std::nullopt;
+            } else {
+                return T(result.front());
+            }
         }
 
         /**

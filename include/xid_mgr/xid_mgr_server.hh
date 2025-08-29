@@ -3,8 +3,7 @@
 #include <shared_mutex>
 #include <filesystem>
 
-#include <common/service_register.hh>
-#include <common/singleton.hh>
+#include <common/init.hh>
 #include <grpc/grpc_server_manager.hh>
 #include <redis/redis_ddl.hh>
 #include <xid_mgr/pg_xact_log_writer.hh>
@@ -12,18 +11,13 @@
 
 namespace springtail::xid_mgr {
 
-class XidMgrServer : public SingletonWithThread<XidMgrServer> {
-    friend class SingletonWithThread<XidMgrServer>;
+class XidMgrServer : public Singleton<XidMgrServer>
+{
+    friend class Singleton<XidMgrServer>;
 
 public:
     /** SYNC interval */
     static constexpr int XIG_MGR_MIN_SYNC_MS = 500;
-
-    /**
-     * @brief Start xid manager
-     *
-     */
-    void startup();
 
     /**
      * @brief commit up to and including given xid
@@ -62,6 +56,12 @@ public:
      * @param timestamp timestamp id
      */
     void rotate(uint64_t db_id, uint64_t timestamp);
+
+    /**
+     * @brief Set clean up flag so that for cleaning up xid files.
+     *
+     */
+    void cleanup_on_shutdown() { _cleanup_on_shutdown = true; }
 
 private:
     XidMgrServer();
@@ -136,16 +136,41 @@ private:
         cleanup(uint64_t min_timestamp, bool archive_logs);
 
     private:
+        struct XactHistoryEntry {
+            uint64_t schema_xid;  ///< schema xid
+            uint64_t latest_real_commit_xid;  ///< latest real committted xid
+        };
+
+        struct XactHistoryComparator {
+            bool operator()(const XactHistoryEntry &lhs, const XactHistoryEntry &rhs) const {
+                return lhs.schema_xid < rhs.schema_xid;
+            }
+            bool operator()(uint64_t val, const XactHistoryEntry &rhs) const {
+                return val < rhs.schema_xid;
+            }
+            bool operator()(const XactHistoryEntry &lhs, uint64_t val) const {
+                return lhs.schema_xid < val;
+            }
+        };
+
         PgXactLogWriter _xact_log;              ///< log writer object
         std::shared_mutex _mutex;               ///< mutex for access control
-        std::vector<uint64_t> _xact_history;    ///< schema changes xids
+        std::vector<XactHistoryEntry> _xact_history;  ///< schema changes xids
         uint64_t _db_id;                        ///< database id
         bool _dirty_history{false};             ///< dirty history flag
+        uint64_t _last_committed_xid{0};        ///< last committed xid
     };
 
     std::shared_mutex _mutex;                   ///< mutex for access control to transaction log data
     std::map<uint64_t, DBXactLogData> _xact_log_data;   ///< map of database id to transaction log data
     bool _archive_logs;                         ///< log archiving flag
+    bool _cleanup_on_shutdown{false};           ///< clean up flag
+
+    /**
+     * @brief Start xid manager
+     *
+     */
+     void _startup();
 
     /**
      * @brief Record new xid for given database
@@ -181,22 +206,6 @@ private:
      *
      */
     void _internal_run() override;
-};
-
-class XidMgrRunner : public ServiceRunner {
-public:
-    XidMgrRunner() :
-        ServiceRunner("XidMgr") {}
-
-    bool start() override {
-        xid_mgr::XidMgrServer::get_instance()->startup();
-        return true;
-    }
-
-    void stop() override {
-        xid_mgr::XidMgrServer::get_instance()->stop_thread();
-        xid_mgr::XidMgrServer::shutdown();
-    }
 };
 
 }  // namespace springtail::xid_mgr

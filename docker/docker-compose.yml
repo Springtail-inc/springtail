@@ -1,0 +1,42 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: springtail 
+      POSTGRES_PASSWORD: springtail
+      POSTGRES_DB: springtail
+    ports:
+      - "5432:5432"
+    command: >
+      postgres -c wal_level=logical
+               -c max_wal_senders=10
+               -c max_replication_slots=10
+               -c max_connections=100
+               -c max_prepared_transactions=64
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  dev:
+    image: dev:snapshot
+    container_name: dev-snapshot
+    depends_on:
+      - postgres
+    privileged: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - seccomp=unconfined
+    stdin_open: true
+    tty: true
+    ports:
+      - "2222:22" # map host 2222 to container 22
+    volumes:
+      - ${SPRINGTAIL_SRC}:/home/dev/springtail
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  pgdata:

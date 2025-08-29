@@ -85,6 +85,3 @@ DROP TABLE IF EXISTS users CASCADE;
 ### switch_db parallel_db2
 DROP TABLE IF EXISTS products CASCADE;
 DROP TABLE IF EXISTS categories CASCADE;
-
-
-

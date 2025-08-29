@@ -5,11 +5,13 @@ namespace springtail {
     BTree::BTree(const std::filesystem::path &file,
                  uint64_t xid,
                  ExtentSchemaPtr schema,
-                 uint64_t root_offset)
+                 uint64_t root_offset,
+                 uint64_t max_extent_size)
         : _file(file),
           _xid(xid),
           _leaf_schema(schema),
-          _root_offset(root_offset)
+          _root_offset(root_offset),
+          _max_extent_size(max_extent_size)
     {
         // get the sort keys of the leaf extents
         auto keys = _leaf_schema->get_sort_keys();
@@ -37,7 +39,7 @@ namespace springtail {
 
         // read the root
         LOG_DEBUG(LOG_BTREE, "Get root page: {}", _root_offset);
-        auto root = StorageCache::get_instance()->get(_file, _root_offset, _xid);
+        auto root = StorageCache::get_instance()->get(_file, _root_offset, _xid, constant::LATEST_XID, _max_extent_size);
 
         // check if the root is empty
         if (root->empty()) {
@@ -55,7 +57,7 @@ namespace springtail {
 
             // read the extent
             LOG_DEBUG(LOG_BTREE, "Get child page: {}", child_id);
-            auto child = StorageCache::get_instance()->get(_file, child_id, _xid);
+            auto child = StorageCache::get_instance()->get(_file, child_id, _xid, constant::LATEST_XID, _max_extent_size);
 
             // create a node for the child an move to it
             auto begin = child->begin();
@@ -76,7 +78,7 @@ namespace springtail {
         }
 
         // read the root
-        auto current = StorageCache::get_instance()->get(_file, _root_offset, _xid);
+        auto current = StorageCache::get_instance()->get(_file, _root_offset, _xid, constant::LATEST_XID, _max_extent_size);
 
         // check if the root is empty
         if (current->empty()) {
@@ -100,7 +102,7 @@ namespace springtail {
             uint64_t extent_id = _branch_child_f->get_uint64(&*child_i);
 
             // read the child extent
-            auto child = StorageCache::get_instance()->get(_file, extent_id, _xid);
+            auto child = StorageCache::get_instance()->get(_file, extent_id, _xid, constant::LATEST_XID, _max_extent_size);
 
             // recurse to the child
             node = std::make_shared<Node>(std::move(current), child_i, node);
@@ -131,7 +133,7 @@ namespace springtail {
         }
 
         // read the root
-        auto current = StorageCache::get_instance()->get(_file, _root_offset, _xid);
+        auto current = StorageCache::get_instance()->get(_file, _root_offset, _xid, constant::LATEST_XID, _max_extent_size);
 
         // check if the root is empty
         if (current->empty()) {
@@ -155,7 +157,7 @@ namespace springtail {
             uint64_t extent_id = _branch_child_f->get_uint64(&*child_i);
 
             // read the child extent
-            auto child = StorageCache::get_instance()->get(_file, extent_id, _xid);
+            auto child = StorageCache::get_instance()->get(_file, extent_id, _xid, constant::LATEST_XID, _max_extent_size);
 
             // recurse to the child
             node = std::make_shared<Node>(std::move(current), child_i, node);

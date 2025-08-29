@@ -3,11 +3,20 @@ import io
 import logging
 from lxml import etree
 import os
+import shlex
 import psycopg2
 import springtail
 import time
-import common
 import threading
+import sys
+
+from typing import Optional
+
+# Get the parent directory of the current script (i.e., the project root directory)
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(project_root, 'shared')) # Add the /shared directory to the Python path
+
+import common
 
 _GLOBAL_CONFIG_FILE = '__config.sql'
 
@@ -33,6 +42,7 @@ class TestCase:
         self._error = ''
         self._log_errors = []
         self._logged_output = ''
+        self._overlays = []
 
         self._metadata = {
             'autocommit': True,
@@ -40,7 +50,8 @@ class TestCase:
             'default_txn': 'default',
             'query_timeout': 5,
             'live_startup': None,
-            'poll_interval': 0.001
+            'poll_interval': 0.001,
+            'disable_test': False
         }
 
         self._added_databases = []
@@ -74,6 +85,13 @@ class TestCase:
 
     def get_added_databases(self) -> list:
         return self._added_databases
+
+    def is_disabled(self) -> bool:
+        """Check if the test is disabled."""
+        return self._metadata['disable_test']
+
+    def get_required_overlays(self) -> list:
+        return self._overlays
 
     def _setup_default_fdw(self) -> None:
         if len(self._fdw) == 0:
@@ -136,6 +154,7 @@ class TestCase:
         line_num = 0
 
         with open(self._filename, 'r') as f:
+            section = ''
             for line in f:
                 line_num += 1
 
@@ -150,8 +169,7 @@ class TestCase:
                         self._raise_error(f'{line_num}: directives cannot be placed within a SQL statement')
 
                     # parse the directive
-                    directive = line[3:].split()
-                    logging.debug(f'directive: {directive}')
+                    directive = shlex.split(line[3:])
                     if directive[0] == 'parallel':
                         if section != 'test':
                             self._raise_error(f'{line_num}: "parallel" must be in the "test" section')
@@ -250,8 +268,8 @@ class TestCase:
                         }, section, is_threaded, cur_txn, line_num)
 
                     elif directive[0] == 'streaming':
-                        if section != 'test':
-                            self._raise_error(f'{line_num}: "streaming" must be part of the "test" section')
+                        if section != 'test' and section != 'cleanup':
+                            self._raise_error(f'{line_num}: "streaming" must be part of the "test" or "cleanup" section')
                         self._append_command({
                             'type': 'streaming',
                             'enable': directive[1] == 'true'
@@ -271,6 +289,33 @@ class TestCase:
                             'wait_for': int(directive[3]) if len(directive) > 3 else self._metadata['sync_timeout']
                         }, section, is_threaded, cur_txn, line_num)
 
+                    elif directive[0] == 'policy_sync':
+                        if section not in ('test', 'verify'):
+                            self._raise_error(f'{line_num}: "policy_sync" must be part of the "test" or "verify" section')
+
+                        if len(directive) < 1:
+                            self._raise_error(f'{line_num}: "policy_sync" must specify a policy name')
+
+                        self._append_command({
+                            'type': 'policy_sync',
+                            'policy_name': directive[1],
+                            'wait_for': int(directive[2]) if len(directive) > 2 else self._metadata['sync_timeout']
+                        }, section, is_threaded, cur_txn, line_num)
+
+                    elif directive[0] == 'policy_check':
+                        if section != 'verify':
+                            self._raise_error(f'{line_num}: "policy_check" must be part of the "verify" section')
+                        if len(directive) < 3:
+                            self._raise_error(f'{line_num}: "policy_check" must specify a schema, table, and policy name')
+
+                        self._append_command({
+                            'type': 'policy_check',
+                            'schema': directive[1],
+                            'table': directive[2],
+                            'policy_name': directive[3],
+                            'wait_for': int(directive[4]) if len(directive) > 4 else self._metadata['sync_timeout']
+                        }, section, is_threaded, cur_txn, line_num)
+
                     # Usage - table_exists <schema> <table> <replica_exists>
                     # Ex: ### table_exists public test_init true
                     # Determines if a specific table is present in the replica, used in scenarios where an valid table
@@ -286,6 +331,23 @@ class TestCase:
                             'schema': directive[1],
                             'table': directive[2],
                             'replica_exists': directive[3] == 'true'
+                        }, section, is_threaded, cur_txn, line_num)
+
+                    # Usage - benchmark <release_time_ms> <debug_time_ms> "<query sql>"
+                    # Ex: ### benchmark 1000 5000 "SELECT * FROM customers"
+                    # Measures the execution time of the query as reported by EXPLAIN ANALYZE
+                    # and compares it to release_time or debug_time respectively
+                    elif directive[0] == 'benchmark':
+                        if section != 'verify':
+                            self._raise_error(f'{line_num}: "benchmark" must be part of the "verify" section')
+                        if len(directive) < 3:
+                            self._raise_error(f'{line_num}: "benchmark" must specify the expected release and debug times')
+
+                        self._append_command({
+                            'type': 'benchmark',
+                            'query_time_release': directive[1],
+                            'query_time_debug': directive[2],
+                            'benchmark_query': directive[3]
                         }, section, is_threaded, cur_txn, line_num)
 
                     # Usage - index_exists <schema> <table> <index> <replica_exists>
@@ -305,6 +367,27 @@ class TestCase:
                             'index': directive[3],
                             'replica_exists': directive[4] == 'true'
                         }, section, is_threaded, cur_txn, line_num)
+
+                    # Usage - role_check <role_name>
+                    # Ex: ### role_check public test_init true
+                    # Determines if a specific role is present in the replica, also checks role flags
+                    elif directive[0] == 'role_check':
+                        if section != 'verify':
+                            self._raise_error(f'{line_num}: "role_check" must be part of the "verify" section')
+                        if len(directive) < 2:
+                            self._raise_error(f'{line_num}: "role_check" must specify a role_name value')
+
+                        self._append_command({
+                            'type': 'role_check',
+                            'role_name': directive[1],
+                            'wait_for': int(directive[2]) if len(directive) > 2 else self._metadata['sync_timeout']
+                        }, section, is_threaded, cur_txn, line_num)
+
+                    elif directive[0] == 'disable_test':
+                        if section != 'metadata':
+                            self._raise_error(f'{line_num}: "disable_test" must be specified in the "metadata" section')
+                        self._metadata['disable_test'] = True
+                        return
 
                     elif directive[0] == 'autocommit':
                         if section != 'metadata':
@@ -340,7 +423,7 @@ class TestCase:
 
                     elif directive[0] == 'add_db':
                         if section != 'setup':
-                            self._raise_error(f'{line_num}: "add_db" must be specified in the "metadata" section')
+                            self._raise_error(f'{line_num}: "add_db" must be specified in the "setup" section')
                         if not self._filename.endswith(_GLOBAL_CONFIG_FILE):
                             self._raise_error(f'{line_num}: "add_db" must be specified in the "{_GLOBAL_CONFIG_FILE}" file')
                         if len(directive) < 2:
@@ -361,6 +444,13 @@ class TestCase:
                             'type': 'switch_db',
                             'database_name': directive[1]
                         }, section, is_threaded, cur_txn, line_num)
+
+                    elif directive[0] == 'require_overlays':
+                        if section != 'metadata':
+                            self._raise_error(f'{line_num}: "require_overlays" must be specified in the "metadata" section')
+                        if len(directive) < 2:
+                            self._raise_error(f'{line_num}: "require_overlays" must specify an overlay name')
+                        self._overlays = directive[1:]
 
                     else:
                         self._raise_error(f'{line_num}: unknown directive "{directive[0]}"')
@@ -396,15 +486,20 @@ class TestCase:
         """Load the provided CSV file into the specified table."""
         logging.debug(f'Load CSV {filename} into {table}')
 
-        with open(filename, 'r') as f:
-            f.readline() # skip the header
-            cursor.copy_from(f, table, sep=',', null='')
+        try:
+            with open(filename, 'r') as f:
+                f.readline() # skip the header
+                cursor.copy_from(f, table, sep=',', null='')
+        except Exception as e:
+            logging.error(f"Failed to load CSV file {filename} into {table} \n\tError:{str(e)}")
+            self._raise_failure(f'Failed to load CSV file: {e}')
 
 
-    def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool, txn: str = 'replica', quiet: bool = False) -> list:
+    def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool, txn: str = 'replica', quiet: bool = False) -> Optional[list]:
         """Execute the provided SQL using the provided cursor."""
+        db_name = cursor.connection.info.dbname
         if not quiet:
-            logging.debug(f'Execute transaction {txn} SQL: {sql}')
+            logging.debug(f'Execute transaction \'{txn}\' database \'{db_name}\' SQL: {sql}')
         try:
             cursor.execute(sql)
 
@@ -414,11 +509,45 @@ class TestCase:
         except psycopg2.OperationalError as e:
             self._raise_failure(f'Query timed out: {e}')
         except Exception as e:
-            logging.error(f"Error executing SQL:\n{sql},\n\ttxn: {txn},\n\tError:{str(e)}")
+            logging.error(f"Error executing SQL:\n{sql},\n\ttxn: {txn},\n\tdatabse: {db_name}\n\tError:{str(e)}")
             self._raise_failure(f'Unknown error: {e}')
 
 
-    def _execute_command(self, command: dict, do_fetch: bool = False) -> list:
+    def _get_db_id(self, db_name: str) -> Optional[int]:
+        """Get database id from the configuration for the given database name."""
+        configs = self._props.get_db_configs()
+        for item in configs:
+            if item['name'] == db_name:
+                return int(item['id'])
+        return None
+
+    def _restart(self, recovery_point: Optional[str] = None) -> None:
+        target_db_id = None
+        target_xid = None
+        if recovery_point is not None:
+            # confirm we have a recorded recovery point
+            if recovery_point not in self._recovery_points:
+                self._raise_error(f'Tried to recover to undefined recovery point: {recovery_point}')
+
+            # check the current XID and revert to an earlier target XID
+            (target_db_id, target_xid) = self._recovery_points[recovery_point]
+            logging.debug(f'Force recovery to database: {target_db_id}, xid: {target_xid}')
+
+        # close all connections to the replica database before shutting down
+        self._cleanup_fdw_connections()
+
+        # restart Springtail at the target XID
+        try:
+            springtail.restart(self._props, self._build_dir,
+                            db_id=target_db_id, start_xid=target_xid, unarchive_logs=True)
+        except Exception as e:
+            self._raise_error(f'Failed to restart daemons')
+
+        # reconnect to the replica database
+        self._open_db_connections_for_fdw()
+
+
+    def _execute_command(self, command: dict, do_fetch: bool = False) -> Optional[list]:
         """Execute a sql command or test directive.  When executing a
         SQL statement, will use the "txn" key to determine which
         transaction to run the SQL statement within.
@@ -434,38 +563,19 @@ class TestCase:
 
         if command['type'] == 'recovery_point':
             # check the current XID and store it as a recovery point using the provided name
-            db_id = int(self._props.get_db_configs()[0]['id'])
+            txn = command['txn']
+            current_db = self._connections[txn]['current_db']
+            db_id = self._get_db_id(current_db)
             current_xid = springtail.current_xid(self._props, db_id)
-            self._recovery_points[command['name']] = current_xid
+            self._recovery_points[command['name']] = (db_id, current_xid)
 
         if command['type'] == 'force_recovery':
-            # confirm we have a recorded recovery point
-            if command['name'] not in self._recovery_points:
-                self._raise_error(f'Tried to recover to undefined recovery point: {command["name"]}')
-
-            # check the current XID and revert to an earlier target XID
-            target_xid = self._recovery_points[command['name']]
-            logging.debug(f'Force recovery to {target_xid}')
-
-            # restart Springtail at the target XID
-            springtail.restart(self._props, self._build_dir,
-                               start_xid=target_xid, unarchive_logs=True)
-
-            # reconnect to the replica database
-            self._cleanup_fdw_connections()
-            self._open_db_connections_for_fdw()
-
+            logging.debug(f'Execute command {command["type"]} from line {command["line"]}, name {command["name"]}')
+            self._restart(command["name"])
             return None
 
         if command['type'] == 'restart':
-            # restart Springtail at the target XID
-            springtail.restart(self._props, self._build_dir,
-                               start_xid=None, unarchive_logs=True)
-
-            # reconnect to the replica database
-            self._cleanup_fdw_connections()
-            self._open_db_connections_for_fdw()
-
+            self._restart()
             return None
 
         # handle SQL statements
@@ -494,6 +604,10 @@ class TestCase:
                 # execute a SQL command
                 return self._execute_sql(cursor, command['sql'], do_fetch, txn)
 
+            elif command['type'] == "benchmark":
+                sql = f"EXPLAIN (FORMAT JSON, ANALYZE) {command['benchmark_query']};"
+                return self._execute_sql(cursor, sql, do_fetch, txn)
+
         if command['type'] == 'sync':
             # insert a row to the sync_control table
             self._sync_step += 1
@@ -505,7 +619,7 @@ class TestCase:
                 # Wait for sync row to appear in replica
                 try:
                     replica_name = self._db_prefix + db_name
-                    sync_time = common.wait_for_replica_condition(
+                    common.wait_for_replica_condition(
                         self._fdw[replica_name],
                         f"SELECT MAX(sync) FROM sync_control WHERE test = '{self._name}'",
                         (self._sync_step,),
@@ -531,7 +645,7 @@ class TestCase:
 
                 sql = f""" SELECT a.attname AS name,
                                     CASE
-                                        WHEN t.oid = 1560 THEN 1562
+                                        WHEN t.oid = 1560 THEN 1562 --remap bitoid to varbitoid
                                         ELSE t.oid
                                     END AS pg_type,
                                     NOT a.attnotnull AS nullable,
@@ -541,11 +655,23 @@ class TestCase:
                             JOIN pg_type t ON a.atttypid = t.oid
                             JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
                             WHERE n.nspname = '{command["schema"]}' AND c.relname = '{command["table"]}'
-                                    AND c.relkind = 'r'
+                                    AND c.relkind IN ('r','p')
                                     AND a.attnum > 0
                                     AND NOT a.attisdropped
                             ORDER BY a.attnum ASC;"""
                 results['columns'] = self._execute_sql(cursor, sql, True, txn)
+
+                # retrieve the partition information for the table
+                sql = f"""SELECT
+                            CASE WHEN t.relispartition THEN
+                                (SELECT inhparent FROM pg_inherits WHERE inhrelid = t.oid)
+                            END as parent_oid,
+                            pg_get_expr(t.relpartbound, t.oid, TRUE) as partition_bound,
+                            pg_get_partkeydef(t.oid) as partition_key
+                        FROM pg_class t
+                        JOIN pg_catalog.pg_namespace n ON (t.relnamespace = n.oid)
+                        WHERE n.nspname = '{command["schema"]}' AND t.relname = '{command["table"]}';"""
+                results['partition_info'] = self._execute_sql(cursor, sql, True, txn)
 
                 # retrieve the primary index information for the table
                 sql = f"""SELECT unnest(conkey) AS column_id,
@@ -568,17 +694,70 @@ class TestCase:
                 """
                 results['secondary'] = self._execute_sql(cursor, sql, True, txn)
 
+                # get table info
+                sql = f"""SELECT c.relname as name,
+                                    c.relrowsecurity as row_security,
+                                    c.relforcerowsecurity as force_row_security
+                            FROM pg_class c
+                            JOIN pg_namespace n ON c.relnamespace = n.oid
+                            WHERE n.nspname = '{command["schema"]}' AND c.relname = '{command["table"]}';"""
+
+                results['table_info'] = self._execute_sql(cursor, sql, True, txn)
+
                 return results
 
-        if command['type'] == "add_db":
-            return None
+            elif command['type'] == "add_db":
+                return None
 
-        elif command['type'] == "switch_db":
-            self._connections[txn]['current_db'] = command['database_name']
-            return None
+            elif command['type'] == "switch_db":
+                self._connections[txn]['current_db'] = command['database_name']
+                return None
+
+            elif command['type'] == 'role_check':
+                results = {}
+
+                # check the role flags
+                sql = f"""SELECT rolname, rolcanlogin, rolinherit, (rolsuper or rolbypassrls) as rolbypassrls,
+                                 to_json(rolconfig)::text as rolconfig
+                          FROM pg_roles WHERE rolname = '{command["role_name"]}';"""
+
+                results['role'] = self._execute_sql(cursor, sql, True, txn)
+
+                # check if role is member of any other roles
+                # exclude pg_read_all_data role as it is assigned all roles in fdw
+                sql = f"""SELECT r.rolname AS role_name
+                          FROM pg_auth_members am
+                          JOIN pg_roles r ON am.roleid = r.oid
+                          JOIN pg_roles m ON am.member = m.oid
+                          WHERE m.rolname = '{command["role_name"]}' AND r.rolname <> 'pg_read_all_data';"""
+                results['role_membership'] = self._execute_sql(cursor, sql, True, txn)
+
+                return results
+
+            elif command['type'] == 'policy_sync':
+                return None
+
+            elif command['type'] == 'policy_check':
+                results = {}
+
+                # get the policies for the table
+                sql = f"""SELECT p.policyname AS name,
+                                 p.schemaname AS schema,
+                                 p.tablename AS table,
+                                 p.permissive AS permissive,
+                                 p.cmd AS command,
+                                 p.roles AS roles,
+                                 p.qual AS qual,
+                                 p.with_check AS with_check
+                          FROM pg_policies p
+                          WHERE p.schemaname = '{command["schema"]}' AND p.tablename = '{command["table"]}'
+                            AND p.policyname = '{command["policy_name"]}';"""
+                results['policies'] = self._execute_sql(cursor, sql, True, txn)
+
+                return results
 
 
-    def _wait_for_index_reconciliation(self, wait_for: int) -> bool:
+    def _wait_for_index_reconciliation(self, wait_for: int) -> None:
         query = """
             SELECT count(DISTINCT index_id)
             FROM __pg_springtail_catalog.index_names
@@ -601,6 +780,31 @@ class TestCase:
             self._raise_failure(f'Secondary indexes not in sync within {wait_for}s.')
 
 
+    def _wait_for_role(self, role_name: str, wait_for: int) -> None:
+        query = f"""
+            SELECT EXISTS (
+                SELECT 1 FROM pg_roles WHERE rolname = '{role_name}'
+            );
+        """
+
+        try:
+            common.wait_for_replica_condition(self._fdw[self._replica_name], query, (True,), timeout=wait_for)
+        except Exception as e:
+            self._raise_failure(f'Role {role_name} not found in replica within {wait_for}s.')
+
+    def _wait_for_policy(self, policy_name: str, wait_for: int) -> None:
+        query = f"""
+            SELECT EXISTS (
+                SELECT 1 FROM pg_policy WHERE polname = '{policy_name}'
+            );
+        """
+
+        try:
+            common.wait_for_replica_condition(self._fdw[self._replica_name], query, (True,), timeout=wait_for)
+        except Exception as e:
+            self._raise_failure(f'Policy {policy_name} not found in replica within {wait_for}s.')
+
+
     def _get_ranking_sql(self, is_index_query: bool = False) -> str:
         index_cond = 'AND n.index_id <> 0' if is_index_query is True else 'AND n.index_id = 0'
 
@@ -619,7 +823,7 @@ class TestCase:
 
         return ranking_sql
 
-    def _replica_command(self, command: dict) -> list:
+    def _replica_command(self, command: dict) -> Optional[dict]:
         """Runs a SQL command against the Springtail replica
         database.
 
@@ -655,6 +859,7 @@ class TestCase:
                 results['exists'] = replica_result
 
                 return results
+
             elif command['type'] == 'index_exists':
                 results = {}
                 replica_result = True
@@ -679,11 +884,14 @@ class TestCase:
                 results['exists'] = replica_result
 
                 return results
+
             elif command['type'] == 'schema_check':
                 results = {}
 
                 # retrieve the column data
-                with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists"
+                with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists",
+                                      "table_names"."name" as table_name, "table_names"."rls_enabled", "table_names"."rls_forced",
+                                      "table_names"."parent_table_id", "table_names"."partition_bound", "table_names"."partition_key"
                                 FROM "__pg_springtail_catalog"."table_names"
                                 JOIN "__pg_springtail_catalog"."namespace_names" ON "namespace_names"."namespace_id" = "table_names"."namespace_id"
                                 WHERE "namespace_names"."name" = '{command["schema"]}' AND "table_names"."name" = '{command["table"]}'
@@ -697,6 +905,19 @@ class TestCase:
                           SELECT name, pg_type, nullable, position FROM ranked_columns WHERE rn = 1 AND exists IS TRUE ORDER BY position ASC;"""
 
                 results['columns'] = self._execute_sql(cursor, sql, True, 'replica')
+
+                # retrieve info about the table, rls enabled and forced
+                sql = f"""WITH latest_table AS ({with_sql})
+                          SELECT table_name, rls_enabled, rls_forced FROM latest_table WHERE exists IS TRUE"""
+
+                results['table_info'] = self._execute_sql(cursor, sql, True, 'replica')
+
+                # retrieve the partition information for the table
+                sql = f"""WITH latest_table AS ({with_sql})
+                          SELECT parent_table_id AS parent_table_id,
+                                 partition_bound AS partition_bound,
+                                 partition_key AS partition_key FROM latest_table WHERE exists IS TRUE LIMIT 1;"""
+                results['partition_info'] = self._execute_sql(cursor, sql, True, 'replica')
 
                 # retrieve the primary key data
                 with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists"
@@ -720,6 +941,59 @@ class TestCase:
                 results['secondary'] = self._execute_sql(cursor, sql, True, 'replica')
 
                 return results
+
+            elif command['type'] == 'role_check':
+                results = {}
+
+                if command["wait_for"] > 0:
+                    self._wait_for_role(command["role_name"], command["wait_for"])
+
+                # check the role flags
+                sql = f"""SELECT rolname, rolcanlogin, rolinherit, rolbypassrls, to_json(rolconfig)::text as rolconfig
+                          FROM pg_roles WHERE rolname = '{command["role_name"]}';"""
+
+                results['role'] = self._execute_sql(cursor, sql, True, 'replica')
+
+                # check if role is member of any other roles
+                sql = f"""SELECT r.rolname AS role_name
+                          FROM pg_auth_members am
+                          JOIN pg_roles r ON am.roleid = r.oid
+                          JOIN pg_roles m ON am.member = m.oid
+                          WHERE m.rolname = '{command["role_name"]}' AND r.rolname <> 'pg_read_all_data';"""
+
+                results['role_membership'] = self._execute_sql(cursor, sql, True, txn)
+
+                return results
+
+            elif command['type'] == 'policy_sync':
+                self._wait_for_policy(command["policy_name"], command["wait_for"])
+                return None
+
+            elif command['type'] == 'policy_check':
+                results = {}
+
+                if command["wait_for"] > 0:
+                    self._wait_for_policy(command["policy_name"], command["wait_for"])
+
+                # get the policies for the table
+                sql = f"""SELECT p.policyname AS name,
+                                 p.schemaname AS schema,
+                                 p.tablename AS table,
+                                 p.permissive AS permissive,
+                                 p.cmd AS command,
+                                 p.roles AS roles,
+                                 p.qual AS qual,
+                                 p.with_check AS with_check
+                          FROM pg_policies p
+                          WHERE p.schemaname = '{command["schema"]}' AND p.tablename = '{command["table"]}'
+                            AND p.policyname = '{command["policy_name"]}';"""
+                results['policies'] = self._execute_sql(cursor, sql, True, 'replica')
+
+                return results
+
+            elif command['type'] == 'benchmark':
+                sql = f"EXPLAIN (FORMAT JSON, ANALYZE) {command['benchmark_query']};"
+                return self._execute_sql(cursor, sql, True, 'replica')
 
             else:
                 self._raise_error(f'Cannot execute "{command["type"]}" commands against the replica.')
@@ -759,13 +1033,16 @@ class TestCase:
             if db_name in self._connections[txn]['connections']:
                 self._connections[txn]['connections'][db_name].close()
 
-            if use_proxy:
-                logging.debug(f'Connecting to proxy for txn "{txn}" database "{db_name}"')
-                self._connections[txn]['connections'][db_name] = springtail.connect_proxy(self._props, db_name)
-            else:
-                logging.debug(f'Connecting to primary for txn "{txn}" database "{db_name}"')
-                self._connections[txn]['connections'][db_name] = springtail.connect_db_instance(self._props, db_name)
-            self._connections[txn]['connections'][db_name].autocommit = self._metadata['autocommit']
+            try:
+                if use_proxy:
+                    logging.debug(f'Connecting to proxy for txn "{txn}" database "{db_name}"')
+                    self._connections[txn]['connections'][db_name] = springtail.connect_proxy(self._props, db_name)
+                else:
+                    logging.debug(f'Connecting to primary for txn "{txn}" database "{db_name}"')
+                    self._connections[txn]['connections'][db_name] = springtail.connect_db_instance(self._props, db_name)
+                self._connections[txn]['connections'][db_name].autocommit = self._metadata['autocommit']
+            except Exception as e:
+                self._raise_error(f"Failed to connect to database")
 
     def _open_db_connections_for_fdw(self) -> None:
         for db_config in self._props.get_db_configs():
@@ -773,8 +1050,19 @@ class TestCase:
             db_name = self._db_prefix + db_config['name']
             if db_name in self._fdw:
                 self._fdw[db_name].close()
-            self._fdw[db_name] = springtail.connect_db_instance(self._props, db_name)
-            self._fdw[db_name].autocommit = True
+            connected = False
+            conn_attempts = 0
+            while not connected:
+                try:
+                    self._fdw[db_name] = springtail.connect_fdw_instance(self._props, db_name)
+                    self._fdw[db_name].autocommit = True
+                    connected = True
+                except Exception as e:
+                    conn_attempts += 1
+                    if conn_attempts == 5:
+                        logging.error("Tried to connect {conn_attempts} times")
+                        raise e
+                    time.sleep(2)
 
     def start_background(self) -> None:
         if self._metadata['live_startup'] is not None:
@@ -931,14 +1219,32 @@ class TestCase:
         for command in self._sections['verify'][0]['sequential']:
             primary_result = self._execute_command(command, True)
             replica_result = self._replica_command(command)
+            if command["type"] == "benchmark":
+                primary_time = primary_result[0][0][0]['Execution Time']
+                replica_time = replica_result[0][0][0]['Execution Time']
+                print(f"Benchmarks: primary:{primary_time}ms, replica:{replica_time}ms")
+                if "debug" in self._build_dir:
+                    expected_time = float(command['query_time_debug'])
+                else:
+                    expected_time = float(command['query_time_release'])
 
-            if primary_result != replica_result:
+                if replica_time > expected_time:
+                    self._raise_failure(
+                            f"Benchmark verification failed for {self._name}:\n"
+                            f"Statement: {command}\n"
+                            f"Main DB time: {primary_time}ms\n"
+                            f"Replica DB: {replica_time}ms\n"
+                            f"Expected time: {expected_time}ms\n"
+                        )
+                continue
+
+            if primary_result != replica_result and str(primary_result) != str(replica_result):
                 self._raise_failure(
-                    f"Verification failed for {self._name}:\n"
-                    f"Statement: {command}\n"
-                    f"Main DB: {primary_result}\n"
-                    f"Replica DB: {replica_result}"
-                )
+                        f"Verification failed for {self._name}:\n"
+                        f"Statement: {command}\n"
+                        f"Main DB: {primary_result}\n"
+                        f"Replica DB: {replica_result}"
+                    )
 
         self._result = 'SUCCESS'
         self._status = 'VERIFY_END'
