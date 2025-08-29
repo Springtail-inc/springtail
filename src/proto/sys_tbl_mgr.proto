@@ -40,6 +40,8 @@ message TableInfo {
   optional string partition_key = 6;
   optional string partition_bound = 7;
   repeated PartitionData partition_data = 8;
+  bool rls_enabled = 9;
+  bool rls_forced = 10;
 }
 
 message TableRequest {

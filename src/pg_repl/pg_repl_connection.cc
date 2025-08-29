@@ -822,7 +822,7 @@ namespace springtail
         // process results
         if (_connection->status() != PGRES_COMMAND_OK &&
             _connection->status() != PGRES_TUPLES_OK) {
-            LOG_ERROR("Error executing query: msg={}\n", _connection->error_message());
+            LOG_ERROR("Error executing query: msg={}\n", _connection->result_error_message());
             _connection->clear();
 
             throw PgQueryError();

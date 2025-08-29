@@ -355,9 +355,9 @@ namespace springtail::pg_fdw {
 
         /** Helper to generate a system table create foreign table sql */
         static std::string _gen_fdw_system_table(const std::string &server,
-                                                 const std::string &table,
-                                                 uint64_t tid,
-                                                 const std::vector<SchemaColumn> &columns);
+            const std::string &table,
+            uint64_t tid,
+            const std::vector<SchemaColumn> &columns);
 
         /** Helper to iterate through system tables to generate import command list */
         static List *_import_springtail_catalog(const std::string &server,

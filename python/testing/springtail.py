@@ -46,7 +46,8 @@ from sysutils import (
     start_daemons,
     check_daemons_running,
     check_backtrace,
-    extract_backtrace
+    extract_backtrace,
+    restart_container
 )
 
 from linear import Linear
@@ -55,6 +56,8 @@ from linear import Linear
 FDW_SERVER_NAME = 'springtail_fdw_server'
 FDW_WRAPPER = 'springtail_fdw'
 FDW_SYSTEM_CATALOG = '__pg_springtail_catalog'
+
+POSTGRES_CONTAINER = 'pg16' # Postgres primary container name
 
 # List of daemons to start tuple: (name, path, args)
 CORE_DAEMONS = [
@@ -75,9 +78,7 @@ ALL_DAEMONS = CORE_DAEMONS + FDW_DAEMONS + PROXY_DAEMONS
 
 ALL_DAEMONS_NAMES = [name[0] for name in ALL_DAEMONS]
 
-# paths for the postgres config updates
-POSTGRES_CONF_PATH = '/etc/postgresql/16/main/postgresql.conf'
-TMP_POSTGRES_CONF_PATH = '/tmp/postgresql.conf'
+PG_CONFIG_BACKUP_PATH = '/tmp/pg_config_backup.txt'
 
 def get_lib_ext() -> str:
     """Get the library extension for the current platform."""
@@ -148,8 +149,27 @@ def connect_proxy(props : Properties, db_name : str ='postgres') -> psycopg2.ext
 
     return conn
 
+def cleanup_db_users(props : Properties) -> None:
+    """Cleanup the database users."""
+    conn = connect_db_instance(props)
+    user = props.get_db_instance_config()['replication_user']
+
+    sql = f"""SELECT rolname
+              FROM pg_roles
+              WHERE rolname <> %s AND
+              rolname NOT IN (SELECT DISTINCT rolname FROM pg_roles JOIN pg_database ON pg_roles.oid = datdba) AND
+              rolname NOT LIKE 'pg_%%';"""
+
+    # Get users excluding super users and the fdw/replication user
+    users = execute_sql_select(conn, sql, user)
+
+    for row in users:
+        user_name = row[0]
+        execute_sql(conn, f"DROP ROLE IF EXISTS {quote_ident(user_name, conn)};")
+        logging.info(f"Dropped user {user_name}")
+
 def cleanup_db_instance(props : Properties) -> None:
-    """Cleanup the database instance.
+    """Cleanup the primary database instance.
        Drop and recreate the db and execute cleanup SQL statements.
     """
     if not check_postgres_running():
@@ -157,6 +177,8 @@ def cleanup_db_instance(props : Properties) -> None:
     for db_config in props.get_db_configs():
         cleanup_database(props, db_config)
 
+    # cleanup users
+    cleanup_db_users(props)
 
 def cleanup_database(props : Properties, db_config: Dict) -> None:
     drop_database(props, db_config)
@@ -216,53 +238,92 @@ def drop_database(props : Properties, db_config: Dict) -> None:
 
     conn.close()
 
+def cleanup_postgres_config(props: Properties) -> bool:
+    """
+    Cleanup the PostgreSQL configuration restoring values from the backup file.
+    """
+    try:
+        # Connect to the database ("postgres" database)
+        conn = connect_db_instance(props)
+        needed_cleanup = False
 
-def update_postgres_config(test_params: dict = {}):
-    # cleanup the config to ensure during restarts/crashes we always use the proper config
-    cleanup_postgres_config()
+        if not os.path.exists(PG_CONFIG_BACKUP_PATH):
+            # Backup file does not exist, nothing to restore
+            return True
 
-    postgres_config = test_params.get('postgres_config', {})
+        with open(PG_CONFIG_BACKUP_PATH, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line or '=' not in line:
+                    continue
+                param, value = line.split('=', 1)
+                param = param.strip()
+                value = value.strip()
 
-    # if there is no override config for test, skip doing anything
-    if not postgres_config:
-        return
+                # Restore the setting via ALTER SYSTEM
+                escaped_param = quote_ident(param, conn)
+                query = f"ALTER SYSTEM SET {escaped_param} = %s"
+                execute_sql(conn, query, (value,))
+                needed_cleanup = True
 
-    logging.info('Perform a local copy of the postgres conf file for modification(s)')
-    # perform a local copy to a /tmp path
-    run_command('cp', [POSTGRES_CONF_PATH, TMP_POSTGRES_CONF_PATH])
+        if needed_cleanup:
+            # Reload configuration
+            result = execute_sql_select(conn, "SELECT pg_reload_conf()")
+            success = result[0][0] if result else False
 
-    with open(TMP_POSTGRES_CONF_PATH, 'a') as f:
-        # add the keys with a TEST_REMOVE comment so we can cleanup once the tests are done
-        for key, value in postgres_config.items():
-            f.write(f"{key} = {value} #TEST_REMOVE#")
+            # Remove the file after successful reload
+            if success:
+                os.remove(PG_CONFIG_BACKUP_PATH)
+            else:
+                logging.error("Failed to reload PostgreSQL configuration after restoring settings.")
+                return False
 
-    logging.info('Replacing the postgres conf file with the updated tmp file')
-    run_command('sudo', ['cp', TMP_POSTGRES_CONF_PATH, POSTGRES_CONF_PATH])
+            restart_container(POSTGRES_CONTAINER)
 
-def cleanup_postgres_config():
-    if not os.path.exists(TMP_POSTGRES_CONF_PATH):
-        # tmp file not found, so no configs are overridden
-        return
+        return True
 
-    with open(TMP_POSTGRES_CONF_PATH, 'r') as f:
-        lines = f.readlines()
+    except Exception as e:
+        return False
 
-    filtered_lines = []
-    # filter out the lines that are added as part of the test
-    for line in lines:
-        if "#TEST_REMOVE#" not in line:
-            filtered_lines.append(line)
+def update_postgres_config(test_params: Dict[str, str], props: Properties) -> bool:
+    """
+    Update PostgreSQL configuration parameters using ALTER SYSTEM saving the original values to a file.
+    """
+    cleanup_postgres_config(props)
 
-    with open(TMP_POSTGRES_CONF_PATH, 'w') as f:
-        f.writelines(filtered_lines)
+    # Connect to the database ("postgres" database)
+    conn = connect_db_instance(props)
 
-    logging.info('Replacing the postgres conf file')
-    # copy the config file to the postgres conf path
-    run_command('sudo', ['cp', TMP_POSTGRES_CONF_PATH, POSTGRES_CONF_PATH])
-    # remove the tmp file
-    run_command('sudo', ['rm', TMP_POSTGRES_CONF_PATH])
+    # 1. Query current values
+    original_values = {}
+    for param in test_params:
+        result = execute_sql_select(conn, f"SHOW {param}")
+        if result:
+            original_values[param] = result[0][0]
 
-def install_fdw(build_dir : str) -> None:
+    # 2. Write original values to a file
+    with open(PG_CONFIG_BACKUP_PATH, "w") as f:
+        for param, value in original_values.items():
+            f.write(f"{param} = {value}\n")
+
+    # 3. Apply ALTER SYSTEM settings
+    for param, new_value in test_params.items():
+        escaped_param = quote_ident(param, conn)  # defensively quote identifier
+        query = f"ALTER SYSTEM SET {escaped_param} = %s"
+        with conn.cursor() as cursor:
+            cursor.execute(query, [new_value])
+        conn.commit()
+
+    # 4. Reload config
+    result = execute_sql_select(conn, "SELECT pg_reload_conf()")
+    success = result[0][0] if result else False
+
+    restart_container(POSTGRES_CONTAINER)
+
+    return success  # True if reload succeeded, False if not
+
+
+def install_fdw(props : Properties, build_dir : str) -> None:
     """Install the foreign data wrapper extension."""
     # Get the share and lib directories
     share_dir = run_command('pg_config', ['--sharedir'])
@@ -326,8 +387,11 @@ def _install_triggers(conn: psycopg2.extensions.connection, build_dir: str) -> N
     """Install the triggers in the database using an existing connection."""
     # Trigger scripts
     parent_dir = os.path.dirname(build_dir)
-    trigger_sql = os.path.join(parent_dir, 'scripts/triggers.sql')
-    execute_sql_script(conn, trigger_sql)
+
+    for script in ['triggers.sql', 'roles.sql', 'role_members.sql', 'policy.sql', 'table_owners.sql']:
+        script_path = os.path.join(parent_dir, 'scripts', script)
+        execute_sql_script(conn, script_path)
+
 
 def install_triggers(props: Properties, build_dir: str) -> None:
     """Install the triggers in the database."""
@@ -481,6 +545,14 @@ def check_config(props : Properties) -> None:
     # Check that the pid path exists; if not try to create it
     makedir(pid_path, '755')
 
+    # Check that the /var/run/docker.sock file exists
+    if not os.path.exists('/var/run/docker.sock'):
+        raise Exception("Docker socket file /var/run/docker.sock does not exist.  Please postgres container is running")
+
+    # Check if the docker socket file is writable
+    if not os.access('/var/run/docker.sock', os.W_OK):
+        run_command('sudo', ['chmod', 'a+w', '/var/run/docker.sock'])
+
 
 def check_log_writable(props : Properties) -> None:
     """Check the log path is writable."""
@@ -494,10 +566,12 @@ def check_log_writable(props : Properties) -> None:
 def fixup_log_perms(props : Properties) -> None:
     """Fix up permissions for the given mount path."""
     # Fix up permissions for the given mount path
-    if is_linux():
-        log_path = props.get_log_path()
-        for log in glob.glob(os.path.join(log_path, '*.log')):
-            run_command('sudo', ['chmod', 'a+r', log])
+    if not is_linux():
+        return
+
+    log_path = props.get_log_path()
+    for log in glob.glob(os.path.join(log_path, '*.log')):
+        run_command('sudo', ['chmod', 'a+r', log])
 
 
 def gen_dump_tarball(props : Properties, build_dir : str) -> str:
@@ -590,7 +664,7 @@ def restart(props: Properties,
 
     if db_id is not None and start_xid is not None:
         # roll start_xid back
-        ts = int(datetime.datetime.utcnow().timestamp())
+        ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
         log_file = "/tmp/roll_back_" + str(ts) + ".log"
         print(f"Running command: roll_back_xact_log; rolling back database {db_id} to xid: {start_xid}, output log: {log_file}")
         run_command(os.path.join(build_dir, 'src/xid_mgr/roll_back_xact_log'), ['-p', xact_path, '-d', str(db_id), '-a', 'true', '-x', str(start_xid)], log_file)
@@ -616,7 +690,7 @@ def restart(props: Properties,
 
 def start(config_file: str,
           build_dir: str,
-          sql_file: str = None,
+          sql_file: Optional[str] = None,
           do_cleanup: bool = True,
           do_init: bool = True,
           postgres_only: bool = False,
@@ -661,7 +735,7 @@ def start(config_file: str,
         if do_fdw_install:
             # install fdw
             print("\nInstalling foreign data wrapper...")
-            install_fdw(build_dir)
+            install_fdw(props, build_dir)
 
         # start replication on db instance
         print("\nStarting replication on database instance...")
@@ -689,7 +763,7 @@ def start(config_file: str,
         if do_fdw_install:
             # install fdw
             print("\nInstalling foreign data wrapper...")
-            install_fdw(build_dir)
+            install_fdw(props, build_dir)
 
         # start postgres
         print("Starting postgres...")

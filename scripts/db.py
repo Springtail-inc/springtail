@@ -77,17 +77,22 @@ def get_database_info(conn) -> dict:
     cursor.execute("""
         SELECT DISTINCT
             quote_ident(n.nspname) || '.' || quote_ident(t.typname) as schema_type_name,
-            CASE
-                WHEN t.typtype = 'e' THEN 'enum'
-                WHEN t.typtype = 'c' THEN 'composite'
-                WHEN t.typtype = 'r' THEN 'range'
-                WHEN t.typtype = 'd' THEN 'domain'
-                WHEN t.typtype = 'b' AND t.typname LIKE '%_%' ESCAPE '\' AND t.typelem != 0 THEN 'array'
-                WHEN t.typtype = 'b' THEN 'base'
-                WHEN t.typtype = 'p' THEN 'pseudo'
-                WHEN t.typtype = 'm' THEN 'multirange'
-                ELSE 'other'
-            END as type_category
+            CASE t.typcategory
+                WHEN 'A' THEN 'array'
+                WHEN 'B' THEN 'boolean'
+                WHEN 'C' THEN 'composite'
+                WHEN 'D' THEN 'date/time'
+                WHEN 'E' THEN 'enum'
+                WHEN 'G' THEN 'geometric'
+                WHEN 'I' THEN 'network address'
+                WHEN 'N' THEN 'numeric'
+                WHEN 'P' THEN 'pseudo-type'
+                WHEN 'S' THEN 'string'
+                WHEN 'T' THEN 'timespan'
+                WHEN 'U' THEN 'user-defined'
+                WHEN 'V' THEN 'bit-string'
+                ELSE 'unknown'
+            END as category
         FROM pg_type t
         LEFT JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
         WHERE (t.typrelid = 0 OR (SELECT c.relkind = 'c' FROM pg_catalog.pg_class c WHERE c.oid = t.typrelid))
@@ -96,7 +101,7 @@ def get_database_info(conn) -> dict:
         ORDER BY schema_type_name;
     """)
     types = cursor.fetchall()
-    database_info['custom_types'] = [f"{type[0]} ({type[1]})" for type in types]
+    database_info['custom_types'] = [f"{type[0]}: ({type[1]})" for type in types]
 
     # Query 8: Get active connections for this db
     cursor.execute("""
@@ -162,7 +167,7 @@ def get_database_info(conn) -> dict:
     database_info['collation'] = encoding_info[1]
     database_info['ctype'] = encoding_info[2]
 
-    # Query 13: Count of tables with policies
+    # Query 13: Tables with policies
     cursor.execute("""
         SELECT
         COUNT(DISTINCT p.polrelid) AS tables_with_policies

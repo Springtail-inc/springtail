@@ -130,7 +130,7 @@
     "db_instances": {
         "1234": {
             "primary_db": {
-                "host": "localhost",
+                "host": "pg16",
                 "port": 5432
             },
             "database_ids": ["1"],
@@ -152,7 +152,8 @@
         "1": {
             "host": "localhost",
             "port": 5432,
-            "db_prefix": "replica_"
+            "db_prefix": "replica_",
+            "sync_seconds": 4
         }
     },
     "otel": {

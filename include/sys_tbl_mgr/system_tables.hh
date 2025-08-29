@@ -35,6 +35,8 @@ public:
         static constexpr uint32_t PARENT_TABLE_ID = 6; ///< Parent table ID for partitioned tables
         static constexpr uint32_t PARTITION_KEY = 7;   ///< Partition key expression for partitioned tables
         static constexpr uint32_t PARTITION_BOUND = 8; ///< Partition bound expression for partitioned tables
+        static constexpr uint32_t RLS_ENABLED = 9; // Row Level Security enabled for this table
+        static constexpr uint32_t RLS_FORCED = 10; // Row Level Security force for table owner
 
         static const std::vector<SchemaColumn> SCHEMA;
 
@@ -46,9 +48,11 @@ public:
                               bool exists,
                               const std::optional<uint64_t> &parent_table_id,
                               const std::optional<std::string> &partition_key,
-                              const std::optional<std::string> &partition_bound)
+                              const std::optional<std::string> &partition_bound,
+                              bool rls_enabled,
+                              bool rls_forced)
         {
-            auto fields = std::make_shared<FieldArray>(9);
+            auto fields = std::make_shared<FieldArray>(11);
             fields->at(NAMESPACE_ID) = std::make_shared<ConstTypeField<uint64_t>>(namespace_id);
             fields->at(NAME) = std::make_shared<ConstTypeField<std::string>>(name);
             fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
@@ -70,6 +74,8 @@ public:
             } else {
                 fields->at(PARTITION_BOUND) = std::make_shared<ConstNullField>(SchemaType::TEXT);
             }
+            fields->at(RLS_ENABLED) = std::make_shared<ConstTypeField<bool>>(rls_enabled);
+            fields->at(RLS_FORCED) = std::make_shared<ConstTypeField<bool>>(rls_forced);
             return std::make_shared<FieldTuple>(fields, nullptr);
         }
     };
@@ -529,7 +535,6 @@ public:
         }
     };
 };
-
 
 static constexpr std::array<uint32_t, 8> TABLE_IDS = {
     TableNames::ID,

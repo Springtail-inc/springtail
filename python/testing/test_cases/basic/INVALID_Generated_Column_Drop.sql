@@ -21,4 +21,4 @@ ALTER TABLE invalid_table_with_generated_column_add_back_invalid ADD COLUMN area
 ### table_exists public invalid_table_with_generated_column_add_back_invalid false
 
 ## cleanup
--- DROP TABLE IF EXISTS invalid_table_with_generated_column_add_back_invalid;
+-- Nothing to do, as table should be dropped by the ALTER TABLE

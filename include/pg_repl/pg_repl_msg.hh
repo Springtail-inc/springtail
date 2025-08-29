@@ -187,6 +187,8 @@ namespace springtail
         LSN_t lsn;
         uint32_t oid;
         int32_t xid;        // proto vers 2+ only if streaming
+        bool rls_enabled;   // is row level security enabled
+        bool rls_forced;    // is row level security forced
         std::string namespace_name;
         uint32_t namespace_id;
         std::string table;
@@ -255,6 +257,8 @@ namespace springtail
         LSN_t lsn;
         int32_t xid;
         uint64_t table_id;
+        bool rls_enabled;   // is row level security enabled
+        bool rls_forced;    // is row level security forced
         std::string namespace_name;
         std::string table_name;
         std::string partition_key;
@@ -265,6 +269,8 @@ namespace springtail
         LSN_t lsn;
         int32_t xid;
         uint64_t table_id;
+        bool rls_enabled;   // is row level security enabled
+        bool rls_forced;    // is row level security forced
         std::string namespace_name;
         std::string table_name;
         std::string partition_key;

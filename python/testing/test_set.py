@@ -2,6 +2,7 @@ import logging
 from lxml import etree
 import os
 import springtail
+import traceback
 import time
 from typing import Optional
 
@@ -72,9 +73,12 @@ class TestSet:
                     self._tests[test_file].skip()
                     continue
 
-                # if only a subset of test cases was requsted, limit them here
+                # if only a subset of test cases was requested, limit them here
                 if test_files and test_file not in test_files:
                     logging.warning(f'skipping test file {test_file} -- not in the requested tests')
+                    self._tests[test_file].skip()
+                elif self._tests[test_file].is_disabled():
+                    logging.warning(f'skipping test file {test_file} -- test is disabled')
                     self._tests[test_file].skip()
                 else:
                     self._test_files.append(test_file)
@@ -162,11 +166,11 @@ class TestSet:
         self._apply_replica_full()
 
         # update postgres config to apply props for the test
-        springtail.update_postgres_config(self._test_params)
+        springtail.update_postgres_config(self._test_params, self._props)
 
         # install FDW with Postgres restart
         logging.debug("Installing foreign data wrapper...")
-        springtail.install_fdw(self._build_dir)
+        springtail.install_fdw(self._props, self._build_dir)
 
         # start background mutations
         self._config.start_background()
@@ -205,8 +209,9 @@ class TestSet:
                 if result == 'FAILED' or result == 'ERROR':
                     test_failed = True
                 else:
-                    logging.info(f'Skipping the test: {test_file}')
-                    self._tests[test_file].skip()
+                    logging.error(f'Error: exception: [{e}] result: {self._tests[test_file].get_result()["result"]}')
+                    traceback.print_exc()
+                    raise e
 
             # save the logs
             self._tests[test_file].stop_capture()
@@ -251,7 +256,7 @@ class TestSet:
         self._remove_databases()
 
         # cleanup custom postgres config
-        springtail.cleanup_postgres_config()
+        springtail.cleanup_postgres_config(self._props)
 
         return not test_failed
 

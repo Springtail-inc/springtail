@@ -1,0 +1,56 @@
+--- postgres-REL_16_9/src/backend/commands/policy.c	2025-05-05 20:30:08.000000000 +0000
++++ postgres-REL_16_9_new/src/backend/commands/policy.c	2025-05-29 02:18:34.644878593 +0000
+@@ -90,7 +90,7 @@
+ 						rv->relname)));
+ 
+ 	/* Relation type MUST be a table. */
+-	if (relkind != RELKIND_RELATION && relkind != RELKIND_PARTITIONED_TABLE)
++	if (relkind != RELKIND_RELATION && relkind != RELKIND_PARTITIONED_TABLE && relkind != RELKIND_FOREIGN_TABLE)
+ 		ereport(ERROR,
+ 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+ 				 errmsg("\"%s\" is not a table", rv->relname)));
+@@ -370,7 +370,8 @@
+ 
+ 	rel = table_open(relid, AccessExclusiveLock);
+ 	if (rel->rd_rel->relkind != RELKIND_RELATION &&
+-		rel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
++		rel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE &&
++		rel->rd_rel->relkind != RELKIND_FOREIGN_TABLE)
+ 		ereport(ERROR,
+ 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+ 				 errmsg("\"%s\" is not a table",
+--- postgres-REL_16_9/src/backend/commands/tablecmds.c	2025-05-05 20:30:08.000000000 +0000
++++ postgres-REL_16_9_new/src/backend/commands/tablecmds.c	2025-05-28 20:29:24.016153027 +0000
+@@ -4951,7 +4951,7 @@
+ 		case AT_DisableRowSecurity:
+ 		case AT_ForceRowSecurity:
+ 		case AT_NoForceRowSecurity:
+-			ATSimplePermissions(cmd->subtype, rel, ATT_TABLE);
++			ATSimplePermissions(cmd->subtype, rel, ATT_TABLE | ATT_FOREIGN_TABLE);
+ 			/* These commands never recurse */
+ 			/* No command-specific prep needed */
+ 			pass = AT_PASS_MISC;
+--- postgres-REL_16_9/src/backend/rewrite/rewriteHandler.c	2025-05-05 20:30:08.000000000 +0000
++++ postgres-REL_16_9_new/src/backend/rewrite/rewriteHandler.c	2025-05-28 21:53:16.371633191 +0000
+@@ -2207,7 +2207,8 @@
+ 		/* Only normal relations can have RLS policies */
+ 		if (rte->rtekind != RTE_RELATION ||
+ 			(rte->relkind != RELKIND_RELATION &&
+-			 rte->relkind != RELKIND_PARTITIONED_TABLE))
++			 rte->relkind != RELKIND_PARTITIONED_TABLE &&
++			 rte->relkind != RELKIND_FOREIGN_TABLE))
+ 			continue;
+ 
+ 		rel = table_open(rte->relid, NoLock);
+--- postgres-REL_16_9/src/backend/rewrite/rowsecurity.c	2025-05-05 20:30:08.000000000 +0000
++++ postgres-REL_16_9_new/src/backend/rewrite/rowsecurity.c	2025-05-29 21:45:46.624948885 +0000
+@@ -128,7 +128,8 @@
+ 
+ 	/* If this is not a normal relation, just return immediately */
+ 	if (rte->relkind != RELKIND_RELATION &&
+-		rte->relkind != RELKIND_PARTITIONED_TABLE)
++		rte->relkind != RELKIND_PARTITIONED_TABLE
++		rte->relkind != RELKIND_FOREIGN_TABLE)
+ 		return;
+ 
+ 	perminfo = getRTEPermissionInfo(root->rteperminfos, rte);

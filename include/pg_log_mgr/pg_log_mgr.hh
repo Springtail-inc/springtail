@@ -201,6 +201,10 @@ namespace springtail::pg_log_mgr {
         /** Setup streaming and startup threads */
         bool _start_streaming(uint64_t lsn = INVALID_LSN, bool do_init = false);
 
+        /** Handle database state changes from Redis */
+        void _on_database_state_changed(const std::string &path,
+                                        const nlohmann::json &new_value);
+
         ///// Stage 1 of pipeline, writing replication log to disk
         std::thread _writer_thread;           ///< log writer thread
         std::filesystem::path _repl_log_path; ///< replication log base path
