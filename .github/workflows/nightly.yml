@@ -41,7 +41,7 @@ jobs:
   release-build-with-time-traces:
     uses: ./.github/workflows/rw-build-container.yml
     with:
-      base_image_tag: ${{ vars.IMAGE_TAG_DEBUG }}
+      base_image_tag: ${{ vars.IMAGE_TAG_RELEASE }}
       build_type: "release"
       springtail_include_time_traces: true
     secrets:
