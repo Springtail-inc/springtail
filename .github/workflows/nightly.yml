@@ -123,7 +123,7 @@ jobs:
             },
             {
                 "title": "All Logs",
-                "value": "s3://dev-support-logs/nightly-testlogs/${{ needs.prepare.outputs.date_prefix }}/${{ needs.prepare.outputs.commit_sha }}",
+                "value": "s3://devsupport.springtail.internal/nightly-testlogs/${{ needs.prepare.outputs.date_prefix }}/${{ needs.prepare.outputs.commit_sha }}",
                 "short": false
             }
           ]
