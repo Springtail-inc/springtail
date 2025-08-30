@@ -63,14 +63,14 @@ jobs:
 
   multi-rounds-integration-test:
     uses: ./.github/workflows/rw-run-integration-test.yml
-    needs: [ release-build-with-time-traces, prepare ]
+    needs: [ debug-build, prepare ]
     with:
-      image_tag: ${{ needs.release-build-with-time-traces.outputs.output_image_tag }}
+      image_tag: ${{ needs.debug-build.outputs.output_image_tag }}
       s3_log_prefix: "nightly-testlogs/${{ needs.prepare.outputs.date_prefix }}/${{ needs.prepare.outputs.commit_sha }}"
       config_to_run: "nightly"
       system_settings_override: '.github/workflows/nightly.overrides.json'
       iterations: "1"
-      build_type: "release"
+      build_type: "debug"
       reuse_code: true
     secrets:
       aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
