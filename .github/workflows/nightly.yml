@@ -51,7 +51,6 @@ jobs:
   unit-test:
     uses: ./.github/workflows/rw-run-unit-test.yml
     needs: [ debug-build, prepare ]
-    if: ${{ github.event.pull_request.draft == false }}
     with:
       image_tag: ${{ needs.debug-build.outputs.output_image_tag }}
       s3_log_prefix: "nightly-testlogs/${{ needs.prepare.outputs.date_prefix }}/${{ needs.prepare.outputs.commit_sha }}"
