@@ -109,7 +109,7 @@ jobs:
             },
             {
               "title": "Multi-rounds Integration Test",
-              "value": "${{ needs..multi-rounds-integration-test.result }}; last logs: <${{ needs.multi-rounds-integration-test.outputs.test_log_s3_uri }}|here>; last springtail logs: <${{ needs.multi-rounds-integration-test.outputs.springtail_log_s3_uri }}|here>",
+              "value": "${{ needs.multi-rounds-integration-test.result }}; last logs: <${{ needs.multi-rounds-integration-test.outputs.test_log_s3_uri }}|here>; last springtail logs: <${{ needs.multi-rounds-integration-test.outputs.springtail_log_s3_uri }}|here>",
               "short": false
             },
             {
