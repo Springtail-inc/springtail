@@ -53,7 +53,7 @@ namespace springtail
                 }
                 if (pg_type_category == constant::USER_TYPE_EXTENSION) {
                     // extension types; treat as custom BINARY type
-                    return SchemaType::BINARY;
+                    return SchemaType::EXTENSION;
                 }
                 // put all other types into BINARY data for now
                 return SchemaType::BINARY;

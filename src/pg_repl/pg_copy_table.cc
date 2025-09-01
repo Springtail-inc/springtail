@@ -659,7 +659,11 @@ namespace springtail
             }
         }
 
-        auto schema = std::make_shared<ExtentSchema>(_schema.columns);
+        // XXX - EXTN - Plugin pg_ext
+        auto comparator_func = [this](const char *op_str, const std::span<const char> &lhs_value, const std::span<const char> &rhs_value) -> bool {
+            return true;
+        };
+        auto schema = std::make_shared<ExtentSchema>(_schema.columns, comparator_func);
         auto table = TableMgr::get_instance()->get_snapshot_table(db_id, _schema.table_oid, xid.xid,
                                                                   schema, _schema.secondary_keys);
 
@@ -893,6 +897,16 @@ namespace springtail
                 std::string_view tmp(row.data() + pos, length);
                 std::vector<char> data(tmp.begin(), tmp.end());
                 fields->push_back(std::make_shared<ConstTypeField<std::vector<char>>>(data));
+                pos += length;
+                break;
+            }
+
+            case (SchemaType::EXTENSION): {
+                std::string_view tmp(row.data() + pos, length);
+
+                LOG_DEBUG(LOG_PG_LOG_MGR, "Converting extension type '{}' into EXTENSION", pg_type);
+                std::vector<char> data(tmp.begin(), tmp.end());
+                fields->push_back(std::make_shared<ConstTypeField<std::vector<char>>>(data, true));
                 pos += length;
                 break;
             }

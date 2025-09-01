@@ -3,6 +3,14 @@
 #include <string>
 #include <limits>
 #include <cstdint>
+#include <functional>
+#include <span>
+
+namespace springtail {
+    using ComparatorFunc = std::function<bool(const char *op_str,
+                                              const std::span<const char> &lhs,
+                                              const std::span<const char> &rhs)>;
+}
 
 namespace springtail::constant {
     /** Used as an extent ID in situations where the extent ID is unknown. */

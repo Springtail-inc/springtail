@@ -4,7 +4,7 @@
 namespace springtail {
 
     void
-    ExtentSchema::_populate(const std::map<uint32_t, SchemaColumn>& columns)
+    ExtentSchema::_populate(const std::map<uint32_t, SchemaColumn>& columns, ComparatorFunc comparison_func)
     {
         // track how many primary key columns there are
         uint32_t pkey_count = 0;
@@ -22,6 +22,7 @@ namespace springtail {
             break;
 
             case (SchemaType::TEXT):
+            case (SchemaType::EXTENSION):
             case (SchemaType::BINARY):
             case (SchemaType::NUMERIC):
             case (SchemaType::UINT32):
@@ -103,6 +104,17 @@ namespace springtail {
             case (SchemaType::INT32):
             case (SchemaType::FLOAT32):
                 field = std::make_shared<ExtentField>(column.type, byte_pos);
+
+                if (column.nullable) {
+                    field->allow_null((bit_pos >> 3), (bit_pos & 0x7));
+                    ++bit_pos; // add the used null bit
+                }
+
+                byte_pos += 4; // add the used bytes
+                break;
+
+            case (SchemaType::EXTENSION):
+                field = std::make_shared<ExtentField>(column.type, byte_pos, comparison_func);
 
                 if (column.nullable) {
                     field->allow_null((bit_pos >> 3), (bit_pos & 0x7));

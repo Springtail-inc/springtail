@@ -326,6 +326,19 @@ namespace springtail::pg_fdw {
                                    Oid pg_oid,
                                    Oid label_oid);
 
+        /** Helper to convert a postgres extension data type to springtail extension data id (index/sortorder) */
+        std::vector<char>
+        _get_extension_data_from_pg(const PgFdwState *state,
+                                    Oid pg_oid,
+                                    Datum value);
+
+        /** Helper to convert a postgres extension data type to springtail extension data id (index/sortorder) */
+        bool _get_operator_details_for_extension(const PgFdwState *state,
+                                                 Oid pg_oid,
+                                                 char *op_str,
+                                                 const std::span<const char> &lhs_value,
+                                                 const std::span<const char> &rhs_value);
+
         /** Helper to convert field to PG Datum */
         Datum _get_datum_from_field(const PgFdwState *state,
                                     const Field *field,

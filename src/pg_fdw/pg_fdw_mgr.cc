@@ -36,8 +36,10 @@ extern "C" {
     #include <postgres_ext.h>
     #include <access/htup_details.h>
     #include <access/transam.h>
+    #include <catalog/namespace.h>
     #include <catalog/pg_type.h>
     #include <catalog/pg_enum.h>
+    #include <catalog/pg_operator.h>
     #include <utils/builtins.h>
     #include <utils/syscache.h>
     #include <utils/typcache.h>
@@ -279,8 +281,16 @@ namespace springtail::pg_fdw {
         // the type category doesn't matter for these checks since enum check is done above
         SchemaType pg_schema_type = convert_pg_type(pg_type, 'N');
         if (column.type == pg_schema_type) {
-            if (pg_schema_type == SchemaType::BINARY) {
-                return false;
+            if (pg_schema_type == SchemaType::BINARY || pg_schema_type == SchemaType::EXTENSION) {
+                // XXX - EXTN
+                if (pg_type == NUMERICOID &&
+                    (qual->base.op == QualOpName::EQUALS || qual->base.op == QualOpName::NOT_EQUALS)) {
+                    // only support equality of NUMERICOID binary types
+                    return true;
+                } else {
+                    // don't support comparisons of binary types
+                    return false;
+                }
             }
             return true;
         }
@@ -617,7 +627,10 @@ namespace springtail::pg_fdw {
         LOG_DEBUG(LOG_FDW, "fdw_create_state: db_id: {}, tid: {}, xid: {}, pg_xid: {}, schema_xid: {}",
                             db_id, tid, xid, pg_xid, schema_xid);
 
-        TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid);
+        auto comparator_func = [this](const char *op_str, const std::span<const char> &lhs_value, const std::span<const char> &rhs_value) -> bool {
+            return true;
+        };
+        TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid, comparator_func);
         PgFdwState *state = new PgFdwState{table, db_id, tid, xid};
 
         return state;
@@ -725,6 +738,7 @@ namespace springtail::pg_fdw {
         // the tuple always has at least the first qual field from the primary key
         // if additional fields are EQUALS, they are added to the tuple
         FieldArrayPtr fields = std::make_shared<FieldArray>();
+        LOG_INFO("Generating qual tuple for {} quals", quals.size());
         fields->push_back(qual_fields->at(0));
 
         // this is an optimzation where multiple keys are compared with EQUALS
@@ -779,6 +793,7 @@ namespace springtail::pg_fdw {
         LOG_DEBUG(LOG_FDW, "Setting up iterators for qual scan: tid: {}, index: {}, op: {}, fields: {}, index cols: {}",
                             state->tid, state->index->id, qual->base.opname, tuple->to_string(), state->index_only_scan);
 
+        LOG_INFO("[DEBUG] Op name: {}", (int)op);
         switch (op) {
             case LESS_THAN:
                 state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan));
@@ -933,6 +948,7 @@ namespace springtail::pg_fdw {
 
         // check iterator is valid
         if (!state->iter_start.has_value()) {
+            LOG_INFO("[DEBUG] fdw_iterate_scan: iter_start is not valid");
             *eos = true;
             return false;
         }
@@ -996,7 +1012,7 @@ namespace springtail::pg_fdw {
             auto attno = c.pg_attr.attnum;
             DCHECK_LE(attno, num_attrs);
 
-            LOG_DEBUG(LOG_FDW, "Fetching column: {}", attno);
+            LOG_DEBUG(LOG_FDW, "Fetching column: {}:{}", attno, c.name);
 
             // get field idx that matches this attrno, then fetch the field and data
             const FieldPtr& field = state->fields->at(c.field_idx);
@@ -1005,6 +1021,7 @@ namespace springtail::pg_fdw {
             if (c.filter.has_value()) {
                 TIME_TRACE_SCOPED(time_trace::traces, iterate_scan_compare);
                 // compare the qual field to the field in the row
+                LOG_INFO("[DEBUG] compare_field sp_pg_type: {}, pg_type: {}", c.sp_pg_type, c.pg_attr.atttypid);
                 bool res = _compare_field(&row, field, c.filter->field, c.filter->op);
                 if (!res) {
                     // qual doesn't match, so this row must be skipped
@@ -1204,7 +1221,7 @@ namespace springtail::pg_fdw {
             // note: state->rows has taken quals into account in fdw_get_rel_size
             auto rows = state->rows;
 
-            // The paths related to join clauses seem to be handled by PG 
+            // The paths related to join clauses seem to be handled by PG
             // differently. For example, if there are no normal quals,
             // it seems to be much better to give PG the full count of rows
             // from fdw_get_rel_size and then create a low cost path for the join index.
@@ -1435,6 +1452,98 @@ namespace springtail::pg_fdw {
         elog(ERROR, "Springtail exception: %s", error.what());
     }
 
+    std::vector<char>
+    PgFdwMgr::_get_extension_data_from_pg(const PgFdwState *state,
+                                Oid pg_oid,
+                                Datum value)
+    {
+        // Look up the type info
+        HeapTuple tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_oid));
+        if (!HeapTupleIsValid(tup))
+            elog(ERROR, "FDW: cache lookup failed for type %u", pg_oid);
+
+        Form_pg_type typ = (Form_pg_type) GETSTRUCT(tup);
+        Oid send_func_oid = typ->typsend;
+        ReleaseSysCache(tup);
+
+        if (!OidIsValid(send_func_oid))
+            elog(ERROR, "type %u has no typsend function", pg_oid);
+
+        // Call typsend
+        FmgrInfo flinfo;
+        fmgr_info(send_func_oid, &flinfo);
+
+        // typsend always returns a bytea Datum
+        Datum bytea_datum = FunctionCall1(&flinfo, value);
+        bytea *ba = DatumGetByteaP(bytea_datum);
+
+        int len = VARSIZE_ANY_EXHDR(ba);
+        char *raw = VARDATA_ANY(ba);
+
+        std::vector<char> bytes(raw, raw + len);
+        return bytes;
+    }
+
+    std::string
+    datum_to_string(Datum value, Oid pg_oid)
+    {
+        Oid out_func_oid;
+        bool is_varlena;
+        getTypeOutputInfo(pg_oid, &out_func_oid, &is_varlena);
+
+        char *cstring = OidOutputFunctionCall(out_func_oid, value);
+
+        std::string result(cstring);
+        pfree(cstring);
+        return result;
+    }
+
+    bool
+    PgFdwMgr::_get_operator_details_for_extension(const PgFdwState *state,
+                                                  Oid pg_oid,
+                                                  char *op_str,
+                                                  const std::span<const char> &lhs_value,
+                                                  const std::span<const char> &rhs_value)
+    {
+        // LOG_INFO("[DEBUG] Inside PgFdwMgr _get_operator_details_for_extension");
+        HeapTuple tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_oid));
+        if (!HeapTupleIsValid(tup)) {
+            elog(ERROR, "FDW: cache lookup failed for enum %u", pg_oid);
+        }
+        Form_pg_type typeForm = (Form_pg_type) GETSTRUCT(tup);
+        ReleaseSysCache(tup);
+
+        // LOG_INFO("[DEBUG] Type OID: {}", typeForm->oid);
+        Oid opOid = OpernameGetOprid(list_make1(makeString(op_str)), typeForm->oid, typeForm->oid);
+
+        // LOG_INFO("[DEBUG] Operator OID: {}", opOid);
+        HeapTuple tuple = SearchSysCache1(OPEROID, ObjectIdGetDatum(opOid));
+        if (!HeapTupleIsValid(tuple)) {
+            elog(ERROR, "cache lookup failed for operator %u", opOid);
+        }
+        Form_pg_operator oprForm = (Form_pg_operator) GETSTRUCT(tuple);
+        Oid funcOid = oprForm->oprcode;
+        std::string op_name = oprForm->oprname.data;
+        ReleaseSysCache(tuple);
+
+        // LOG_INFO("[DEBUG] Function OID: {}", funcOid);
+        // LOG_INFO("[DEBUG] Operator Name: {}", op_name);
+        FmgrInfo flinfo;
+        fmgr_info(funcOid, &flinfo);
+
+        Datum leftDatum = _binary_to_datum(lhs_value, pg_oid, typeForm->typmodin);
+        std::string stringLeftDatum = datum_to_string(leftDatum, pg_oid);
+        // LOG_INFO("[DEBUG] Left Datum String: {}", stringLeftDatum);
+
+        Datum rightDatum = _binary_to_datum(rhs_value, pg_oid, typeForm->typmodin);
+        std::string stringRightDatum = datum_to_string(rightDatum, pg_oid);
+        // LOG_INFO("[DEBUG] Right Datum String: {}", stringRightDatum);
+
+        Datum result = FunctionCall2(&flinfo, leftDatum, rightDatum);
+        LOG_INFO("[DEBUG] Operator = Result: {} {} {} = {}", stringLeftDatum, op_name, stringRightDatum, DatumGetBool(result));
+        return DatumGetBool(result);
+    }
+
     float
     PgFdwMgr::_get_enum_id_from_pg(const PgFdwState *state,
                                    int32_t springtail_oid,
@@ -1515,11 +1624,11 @@ namespace springtail::pg_fdw {
     {
         // check for user defined type
         if (springtail_oid >= FirstNormalObjectId) {
-            assert(field->get_type() == SchemaType::FLOAT32 || field->get_type() == SchemaType::BINARY);
+            assert(field->get_type() == SchemaType::FLOAT32 || field->get_type() == SchemaType::BINARY || field->get_type() == SchemaType::EXTENSION);
             if (field->get_type() == SchemaType::FLOAT32) {
                 return _get_enum_datum(state, springtail_oid, pg_oid, field->get_float32(&row));
             } else {
-                auto &&value = field->get_binary(&row);
+                auto &&value = field->get_extension(&row);
                 return _binary_to_datum(value, pg_oid, atttypmod);
             }
         }
@@ -1946,10 +2055,15 @@ namespace springtail::pg_fdw {
                 if (qual->base.typeoid >= FirstNormalObjectId) {
                     Oid oid = DatumGetObjectId(qual->value);
                     LOG_DEBUG(LOG_FDW, "Found user defined type datum qual field: {}", oid);
-
-                    // do reverse mapping lookup to get the enum idx from springtail
-                    float enum_id = _get_enum_id_from_pg(state, column.pg_type, qual->base.typeoid, oid);
-                    fields->at(idx) = std::make_shared<ConstTypeField<float>>(enum_id);
+                    if (column.type == SchemaType::EXTENSION) {
+                        // if the type is an extension type, get the extension value instead of the enum value
+                        std::vector<char> extension_value = _get_extension_data_from_pg(state, qual->base.typeoid, qual->value);
+                        fields->at(idx) = std::make_shared<ConstTypeField<std::vector<char>>>(extension_value, true);
+                    } else {
+                        // do reverse mapping lookup to get the enum idx from springtail
+                        float enum_id = _get_enum_id_from_pg(state, column.pg_type, qual->base.typeoid, oid);
+                        fields->at(idx) = std::make_shared<ConstTypeField<float>>(enum_id);
+                    }
                     break;
                 }
                 elog(ERROR, "Unsupported type for constant field: %d", qual->base.typeoid);
@@ -1963,6 +2077,7 @@ namespace springtail::pg_fdw {
                              const FieldPtr& key_field,
                              QualOpName op)
     {
+        LOG_INFO("[DEBUG] Op name: {}", (int)op);
         // determine how the val field (from the row) compares to the key field from the qual
         switch (op) {
             case EQUALS:

@@ -681,11 +681,9 @@ namespace springtail::pg_fdw {
             // only enums supported
             DCHECK(type == constant::USER_TYPE_ENUM || type == constant::USER_TYPE_EXTENSION);
 
-            if (type == constant::USER_TYPE_ENUM) {
-                // insert into map by namespace_id
-                LOG_DEBUG(LOG_FDW, "Adding user type: {}.{} = {}:{}", namespace_id, type_id, type_name, value_json);
-                usertype_map[namespace_id][type_id] = std::make_pair(type_name, value_json);
-            }
+            // insert into map by namespace_id
+            LOG_DEBUG(LOG_FDW, "Adding user type: {}.{} = {}:{}", namespace_id, type_id, type_name, value_json);
+            usertype_map[namespace_id][type_id] = std::make_pair(type_name, value_json);
         }
 
         return usertype_map;
@@ -1656,6 +1654,11 @@ namespace springtail::pg_fdw {
                     const std::string &value_json_str = entry.second.second;
                     std::string escaped_type = conn->escape_identifier(type_name);
                     LOG_DEBUG(LOG_FDW, "Creating user type: {}.{} = {}", escaped_schema, escaped_type, value_json_str);
+                    // If its an Extension type, the JSON would be empty, skip the create type
+                    if (value_json_str.empty() || value_json_str == "{}") {
+                        LOG_ERROR("Empty value for user type: {}.{}", escaped_schema, escaped_type);
+                        continue;
+                    }
                     std::string create_type_query = _get_create_type_query(escaped_schema, escaped_type, value_json_str, conn);
                     conn->exec(create_type_query);
                     conn->clear();

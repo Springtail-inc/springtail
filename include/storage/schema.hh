@@ -206,13 +206,23 @@ namespace springtail {
          * Construct the set of column fields based on the column definitions.
          * @param columns A map from column position to column definition.
          */
-        void _populate(const std::map<uint32_t, SchemaColumn>& columns);
+        void _populate(const std::map<uint32_t, SchemaColumn>& columns, ComparatorFunc comparison_func);
 
     public:
         /**
          * Constructor.
          * @param columns Map from column position to the SchemaColumn definition.
          */
+        explicit ExtentSchema(const std::vector<SchemaColumn> &columns, ComparatorFunc comparison_func) {
+            std::map<uint32_t, SchemaColumn> column_map;
+            for (auto &&column : columns) {
+                column_map.insert({column.position, column});
+            }
+
+            // populate the field map using the column definitions
+            _populate(column_map, comparison_func);
+        }
+
         explicit ExtentSchema(const std::vector<SchemaColumn> &columns) {
             std::map<uint32_t, SchemaColumn> column_map;
             for (auto &&column : columns) {
@@ -220,16 +230,16 @@ namespace springtail {
             }
 
             // populate the field map using the column definitions
-            _populate(column_map);
+            _populate(column_map, nullptr);
         }
 
         /**
          * Constructor.
          * @param columns Map from column position to the SchemaColumn definition.
          */
-        explicit ExtentSchema(const std::map<uint32_t, SchemaColumn> columns)
+        explicit ExtentSchema(const std::map<uint32_t, SchemaColumn> columns, ComparatorFunc comparison_func)
         {
-            _populate(columns);
+            _populate(columns, comparison_func);
         }
 
         /** Returns the fixed width for a single row. */

@@ -82,6 +82,30 @@ namespace springtail {
         return std::make_shared<VirtualSchema>(*meta);
     }
 
+    std::shared_ptr<Schema>
+    SchemaMgr::get_schema(uint64_t db_id,
+                          uint64_t table_id,
+                          const XidLsn &access_xid,
+                          const XidLsn &target_xid,
+                          ComparatorFunc comparator_func)
+    {
+        if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
+            return SystemTableMgr::get_instance()->_get_schema(table_id);
+        }
+
+        // XXX keep some kind of local cache?
+
+        // call into the SysTblMgr to get the schema at the given XID/LSN
+        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_target_schema(db_id, table_id, access_xid, target_xid);
+
+        // construct the schema object
+        if (meta->history.empty()) {
+            return std::make_shared<ExtentSchema>(meta->columns, comparator_func);
+        }
+
+        return std::make_shared<VirtualSchema>(*meta);
+    }
+
     std::shared_ptr<ExtentSchema>
     SchemaMgr::get_extent_schema(uint64_t db_id,
                                  uint64_t table_id,
@@ -98,6 +122,25 @@ namespace springtail {
 
         // construct the schema from the provided schema metadata
         return std::make_shared<ExtentSchema>(meta->columns);
+    }
+
+    std::shared_ptr<ExtentSchema>
+    SchemaMgr::get_extent_schema(uint64_t db_id,
+                                 uint64_t table_id,
+                                 const XidLsn &xid,
+                                 ComparatorFunc comparator_func)
+    {
+        if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
+            return SystemTableMgr::get_instance()->_get_extent_schema(table_id);
+        }
+
+        // XXX keep some kind of local cache?  how to keep it valid given the XID progression?
+
+        // call into the SysTblMgr to get the schema at the given XID/LSN
+        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, xid);
+
+        // construct the schema from the provided schema metadata
+        return std::make_shared<ExtentSchema>(meta->columns, comparator_func);
     }
 
     std::shared_ptr<UserType>
