@@ -66,7 +66,7 @@ jobs:
       image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
       credentials:
         username: AWS
-        password: ${{ secrets.DEV_SUPPORT_ECR_PW }}
+        password: ${{ secrets.aws_ecr_docker_password }}
       options: >-
         --init
         -v /var/run/docker.sock:/var/run/docker.sock
