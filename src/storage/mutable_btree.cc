@@ -234,7 +234,7 @@ MutableBTree::_next_leaf(NodePtr node)
     }
 
     // move up the tree
-    while (node != nullptr) {
+    while (node->page != _root) {
         // create the key for the current page
         auto value = std::make_shared<FieldArray>();
         value->push_back(std::make_shared<ConstTypeField<uint64_t>>(node->page->extent_id));
@@ -277,7 +277,7 @@ MutableBTree::_next_leaf(NodePtr node)
     }
 
     // if we were at the last leaf, return nullptr to indiciate end()
-    if (node == nullptr) {
+    if (node->page == _root) {
         return nullptr;
     }
 
