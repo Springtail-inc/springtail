@@ -1,0 +1,228 @@
+# A reusable workflow that runs tests on the code.
+name: Run Unit Test
+
+on:
+  workflow_call:
+    inputs:
+      image_tag:
+        description: 'The image tag for the base builder to pull. Excluding the REPO URI. Example: service-d09837a'
+        type: string
+        required: true
+      system_settings_override:
+        description: 'A JSON file that contains overrides for the system.json.settings file.'
+        type: string
+        required: false
+        default: '.github/workflows/ci-general.overrides.json'
+      s3_log_prefix:
+        description: 'The S3 prefix for logs. This is the folder inside the S3 bucket where logs will be stored.'
+        type: string
+        required: true
+      build_type:
+        description: 'The type of build to base the tests on. "release" or "debug". The type of build need to match the base image type.'
+        type: string
+        required: true
+        default: "debug"
+      num_procs:
+        description: 'The number of parallel processes to use for building. Only used if "reuse_code" is false.'
+        type: string
+        required: false
+        default: "4"
+      timeout_minutes:
+        description: 'The timeout in minutes for the entire job.'
+        type: number
+        required: false
+        default: 20
+      reuse_code:
+        description: 'Whether to reuse the existing code from /home/dev/springtail or do a fresh checkout.'
+        type: boolean
+        required: false
+    secrets:
+      aws_role_arn:
+        description: "The ARN of the role to assume."
+        required: true
+      aws_ecr_docker_password:
+        description: "The password for the ECR docker registry."
+        required: true
+    outputs:
+      test_log_s3_uri:
+        description: "The full S3 prefix where the test logs are stored."
+        value: ${{ jobs.test.outputs.test_log_s3_uri }}
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: unit-test
+    runs-on: warp-ubuntu-latest-arm64-4x
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    container:
+      image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ inputs.image_tag }}
+      credentials:
+        username: AWS
+        password: ${{ secrets.aws_ecr_docker_password }}
+      options: >-
+        --init
+        -v /var/run/docker.sock:/var/run/docker.sock        
+    outputs:
+      test_log_s3_uri: ${{ steps.run-test.outputs.test_log_s3_uri }}
+    env:
+      CI_WORKSPACE: /__w/springtail/springtail
+      CI_BUILD_TYPE: ${{ inputs.build_type }}
+      S3_LOGS_PREFIX_FULL: "s3://devsupport.springtail.internal/${{ inputs.s3_log_prefix }}"
+      ECR_REPO_URI: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}
+      IMAGE_TAG: ${{ inputs.image_tag }}
+      SYSTEM_SETTINGS_OVERRIDE: ${{ inputs.system_settings_override }}
+      VCPKG_FORCE_SYSTEM_BINARIES: 1
+      VCPKG_ROOT: /home/dev/external/vcpkg
+      DOCKER: 1
+      ZIC: true
+      USER: root
+      PYTHONUNBUFFERED: 1
+      GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+      GITHUB_LATEST_SHA: ${{ github.event.pull_request.head.sha }}
+      NUM_PROCS: ${{ inputs.num_procs }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        if: inputs.reuse_code == false
+        with:
+          clean: true
+
+      - name: Reuse existing code
+        if: inputs.reuse_code == true
+        run: |
+          echo "Reusing existing code from /home/dev/springtail"
+          rsync -a /home/dev/springtail/ .
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.aws_role_arn }}
+          role-session-name: tempSession
+          aws-region: us-east-1
+
+      - name: Prepare Tests
+        run: |
+          git config --global --add safe.directory ${CI_WORKSPACE}
+          # Override some settings in the config file
+          .github/workflows/scripts/merge_system_settings.py system.json.settings ${SYSTEM_SETTINGS_OVERRIDE} system.json.test
+
+          mkdir -p /opt/springtail/pids
+          # Make sure we are using the correct config for Redis
+          /usr/bin/redis-server /etc/redis/redis.conf --daemonize yes
+          
+          # Copy over the fdw_config file to the designated location
+          conf_file=/etc/postgresql/16/main/postgresql.conf
+          fdw_config_file_path=$(grep -E "^springtail_fdw.config_file_path" $conf_file | awk '{print $3}' | tr -d "'")
+          mkdir -p $(dirname $fdw_config_file_path)
+          cp system.json.test $fdw_config_file_path
+          
+          ln -s /home/dev/debug debug
+          ln -s /home/dev/release release
+          ln -s /home/dev/install install
+          ln -s /home/dev/external external
+
+      - name: Rebuild
+        if: inputs.reuse_code == false
+        run: |
+          cd ${CI_BUILD_TYPE}
+          make -j${NUM_PROCS} 
+          cd ..
+
+      - name: Prepare shared Docker network
+        run: |
+          docker network create ci_net || true
+          docker network connect ci_net $(hostname)           
+
+      - name: Start Postgres (Primary Database)
+        run: |
+          docker volume create pgdata 2>/dev/null || true
+          docker run -d \
+            --name pg16 \
+            --restart unless-stopped \
+            --network ci_net \
+            -p 5432:5432 \
+            -e POSTGRES_USER=springtail \
+            -e POSTGRES_PASSWORD=springtail \
+            -e POSTGRES_DB=springtail \
+            -v pgdata:/var/lib/postgresql/data \
+            postgres:16 \
+            postgres -c wal_level=logical \
+            -c max_wal_senders=10 \
+            -c max_replication_slots=10 \
+            -c max_connections=100 \
+            -c max_prepared_transactions=64
+          
+          # Wait for Postgres to be ready
+          if ! timeout 15s bash -c '
+            until PGPASSWORD=springtail psql -h pg16 -U springtail -d postgres -c "select 1" >/dev/null 2>&1; do
+            echo "Waiting for Postgres to be ready..."
+            sleep 3
+            done
+            '; then
+            echo "Postgres did not become ready within 15s" >&2
+            exit 1
+          fi
+          # Reset primary db
+          PGPASSWORD=springtail psql -h pg16 -U springtail -d postgres -c "DROP DATABASE IF EXISTS springtail;"
+          PGPASSWORD=springtail psql -h pg16 -U springtail -d postgres -c "CREATE DATABASE springtail;"
+          
+          # Starts FDW Postgres
+          service postgresql start
+          sleep 4
+
+      - name: Run Unit Tests
+        id: run-test
+        run: |
+          cd python/testing
+          python3 springtail.py -f ../../system.json.test --load-redis --build-dir ../../${CI_BUILD_TYPE}
+          python3 springtail.py -f ../../system.json.test --install-triggers --build-dir ../../${CI_BUILD_TYPE}
+          cd ../../${CI_BUILD_TYPE}
+          
+          set +e
+          _LOG_FLAG="failed"
+          # Per SPR-501: break upon test failures - "--gtest_break_on_failure"
+          make -j${NUM_PROCS} check ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose --stop-on-failure" 2>&1 | tee tmplog
+          # Grab the success/failure status of the unit tests
+          if [ $? -eq 0 ] &&  grep -qE "100% tests passed" tmplog
+          then 
+            _LOG_FLAG="succeeded"
+          fi
+          # List the open listening ports and processes info after tests are done
+          echo "==== Listening Ports ===="
+          netstat -tulnp
+          # Show the full launching command of each
+          netstat -tulnp | awk '{print $7}' | grep -o '[0-9]*' | while read pid; do
+            cmd=$(ps -p $pid -o args=)
+            echo "$pid - $cmd"
+          done
+          # Grab the short SHA
+          _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
+          
+          _TIMESTAMP=$(date +"%Y-%m-%d-%H-%M-%S")
+          log_file="unit-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log.tar.gz" 
+          tar zcvf $log_file tmplog
+          rm tmplog
+          
+          unit_test_log_s3key="${S3_LOGS_PREFIX_FULL}/$log_file"
+          aws s3 cp "$log_file" "$unit_test_log_s3key"
+          echo "*** Unit Test Log S3 Key: $unit_test_log_s3key"
+          echo "test_log_s3_uri=${unit_test_log_s3key}" >> $GITHUB_OUTPUT
+          
+          # Fail eventually
+          if [ "$_LOG_FLAG" = "failed" ]; then
+            exit 1
+          fi
+
+      - name: Unit Test Report
+        uses: dorny/test-reporter@v1
+        if: success() || failure()      # run this step even if previous step failed
+        with:
+          name: Unit Tests             # Name of the check run which will be created
+          path: ./${{ inputs.build_type }}/unit-test-report.xml
+          reporter: java-junit
+
+      - uses: actions/upload-artifact@v4
+        if: success() || failure()      # run this step even if previous step failed
+        with:
+          name: 'Unit Test Logs'
+          path: ./${{ inputs.build_type }}/unit-test-*.log.tar.gz
