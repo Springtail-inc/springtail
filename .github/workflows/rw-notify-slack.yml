@@ -1,0 +1,43 @@
+name: Notify via Slack
+on:
+  workflow_call:
+    inputs:
+      slack_webhook_url:
+        description: "The Slack webhook URL."
+        type: string
+        required: true
+      slack_channel:
+        description: "The Slack channel to send the notification to."
+        type: string
+        required: true
+      text:
+        description: "The text to include in the Slack message."
+        type: string
+        required: false
+      attachment:
+        description: "The attachment to include in the Slack message."
+        type: string
+        required: false
+        default: '{}'
+jobs:
+  notify-slack:
+    name: Notify via Slack
+    runs-on: ubuntu-latest
+    env:
+      SLACK_WEBHOOK_URL: ${{ inputs.slack_webhook_url }}
+      SLACK_CHANNEL: ${{ inputs.slack_channel }}
+      TEXT: ${{ inputs.text}}
+
+    steps:
+      - name: Notify Slack on success
+        if: success()
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ env.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "channel": "${{ env.SLACK_CHANNEL}}",
+              "text": "${{ env.TEXT }}",
+              "attachments": [${{ inputs.attachment }}]
+            }
