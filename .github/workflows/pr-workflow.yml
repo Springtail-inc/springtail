@@ -66,12 +66,12 @@ jobs:
       slack_webhook_url: ${{ vars.GENERIC_SLACK_WEBHOOK_URL }}
       # Need to create a new channel for PR notifications.
       slack_channel: "#github-prs"
-      text: >
+      text: >-
         PR #${{ github.event.pull_request.number }} (<${{ github.event.pull_request.html_url }}|${{ github.event.pull_request.title }}>) 
         by ${{ github.event.pull_request.user.login }} has completed the CI workflow
       attachment: |
         {
-          color": "${{ needs.unit-test.result == 'success' && needs.integration-test.result == 'success' && 'good' || 'danger' }}",
+          "color": "${{ needs.unit-test.result == 'success' && needs.integration-test.result == 'success' && 'good' || 'danger' }}",
           "fields": [
             {
               "title": "Unit Test",
