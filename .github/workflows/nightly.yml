@@ -92,6 +92,7 @@ jobs:
   slack-notification:
     uses: ./.github/workflows/rw-notify-slack.yml
     needs: [ prepare, unit-test, multi-rounds-integration-test, performance-test ]
+    if: always()
     with:
       slack_webhook_url: ${{ vars.GENERIC_SLACK_WEBHOOK_URL }}
       # Need to create a new channel for PR notifications.
