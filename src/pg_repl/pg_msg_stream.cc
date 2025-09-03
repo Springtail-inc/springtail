@@ -91,6 +91,9 @@ namespace springtail {
     void
     PgMsgStreamReader::_seek_stream(uint64_t file_offset)
     {
+        LOG_DEBUG(LOG_PG_REPL, "Seeking to offset: {}, current_offset: {}, xlog_msg_end_offset: {}",
+                  file_offset, _current_offset, _xlog_msg_end_offset);
+
         // jumping to next message, read in xlog header
         if (file_offset == _xlog_msg_end_offset) {
             if (_current_offset != _xlog_msg_end_offset) {
@@ -99,7 +102,9 @@ namespace springtail {
                 _check_fail();
                 _current_offset = _xlog_msg_end_offset;
             }
-            _read_header();
+
+            // no need to read the next header here, the next read_message will do that
+            // and we may be at the end of the file, which would complicate things
             return;
         }
 
@@ -138,7 +143,9 @@ namespace springtail {
             }
 
             // read the header of the next message
-            _read_header();
+            auto rc = _read_header();
+            CHECK(rc) << "Hit EOF reading header when seeking, path="
+                << _current_path << ", offset=" << _current_offset;
 
             if (file_offset <= _current_offset) {
                 // we've jumped to or just past the desired offset
@@ -164,7 +171,7 @@ namespace springtail {
         return;
     }
 
-    void
+    bool
     PgMsgStreamReader::_read_header()
     {
         if (!_stream.is_open()) {
@@ -175,6 +182,17 @@ namespace springtail {
         // read the header
         char header_buffer[PgMsgStreamHeader::SIZE];
         _stream.read(header_buffer, PgMsgStreamHeader::SIZE);
+        if (_stream.eof()) {
+            // hit eof
+            LOG_DEBUG(LOG_PG_REPL, "Hit EOF reading header, path={}, offset={}",
+                      _current_path, _current_offset);
+            return false;
+        }
+        DCHECK_EQ(_stream.gcount(), PgMsgStreamHeader::SIZE)
+            << "Failed to read full header, read " << _stream.gcount() << " bytes";
+
+        _check_fail();
+
         _header = PgMsgStreamHeader(header_buffer);
         _header.header_offset = _current_offset;
         _current_offset += PgMsgStreamHeader::SIZE;
@@ -190,6 +208,8 @@ namespace springtail {
 
         LOG_DEBUG(LOG_PG_REPL, "Read header: {}, current_offset: {}, xlog_msg_end_offset: {}",
                   _header.to_string(),  _current_offset, _xlog_msg_end_offset);
+
+        return true;
     }
 
     PgMsgPtr
@@ -214,7 +234,9 @@ namespace springtail {
 
         if (_current_offset == _xlog_msg_end_offset || _current_offset == 0) {
             // we've reached the end of the current xlog message, so read the next header
-            _read_header();
+            if (!_read_header()) {
+                return nullptr;
+            }
         }
 
         // record the message offset
@@ -1537,7 +1559,7 @@ namespace springtail {
 
             // read header at current offset and get next header offset
             // after reading the header, _current_offset is set to just after the header
-            _read_header();
+            CHECK(_read_header());
 
             // check if the full message fits in the file
             if (_xlog_msg_end_offset == file_end_offset) {

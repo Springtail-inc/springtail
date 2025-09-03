@@ -629,6 +629,8 @@ namespace springtail::pg_log_mgr {
         LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Processing data: type={}, length={}, msg_length={}, msg_offset={}, start_lsn={}, end_lsn={}",
                   (data.msg_offset == 0) ? data.buffer[0] : _current_msg_type, data.length, data.msg_length, data.msg_offset, data.starting_lsn, data.ending_lsn);
 
+        DCHECK_EQ(data.starting_lsn, data.ending_lsn);
+
         auto current_log_offset = logger->offset();
 
         // NOTE: the data.starting_lsn can be 0 (INVALID_LSN) if the message
@@ -778,6 +780,8 @@ namespace springtail::pg_log_mgr {
                 LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Received data in normal mode");
                 if (!_writer_read_data(data, logger,
                     [this](uint64_t start_offset, uint64_t end_offset, const std::filesystem::path &file_path) {
+                        LOG_DEBUG(LOG_PG_LOG_MGR, "Queueing log entry: start_offset={}, end_offset={}, file_path={}",
+                                  start_offset, end_offset, file_path);
                         _logger_queue.push(start_offset, end_offset, file_path);
                     }
                 )) {

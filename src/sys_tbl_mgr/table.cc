@@ -74,11 +74,6 @@ namespace indexer_helpers {
             }
             ++row_id;
         }
-
-        LOG_DEBUG(LOG_BTREE, "{} {} secondary rows",
-            (op == IndexOperation::Insert) ? "Populated"
-            : "Invalidated",
-            row_id);
     }
 
     /* ------------------------------  PAGE  ----------------------------------- */

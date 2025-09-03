@@ -248,8 +248,9 @@ namespace springtail {
         /**
          * @brief Read message header from stream
          * Fills in _header and sets _xlog_msg_end_offset and _current_offset
+         * @return true if header read, false if eof reached
          */
-        void _read_header();
+        bool _read_header();
 
         /** Helper to seek stream based on current offset */
         void _seek_stream(uint64_t file_offset);
