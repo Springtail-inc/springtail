@@ -142,8 +142,13 @@ jobs:
           ln -s /home/dev/install install
           ln -s /home/dev/external external
 
-          # Set the build dir to ../../$CI_BUILD_TYPE in test_runner_config.yaml
+          # Set the build dir to ../../$CI_BUILD_TYPE in 
+          # - python/testing/test_runner_config.yaml
+          # - python/performance/performance_config.yaml
+          # - python/benchmarks/config.yaml
           sed -i -e "s|^build_dir: .*|build_dir: ../../${CI_BUILD_TYPE}|" python/testing/test_runner_config.yaml
+          sed -i -e "s|^build_dir: .*|build_dir: ../../${CI_BUILD_TYPE}|" python/performance/performance_config.yaml
+          sed -i -e "s|^build_dir: .*|build_dir: ../../${CI_BUILD_TYPE}|" python/benchmarks/config.yaml
 
       - name: Rebuild
         if: inputs.reuse_code == false
