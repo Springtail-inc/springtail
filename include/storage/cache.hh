@@ -425,6 +425,8 @@ namespace springtail {
              */
             void flush(CacheExtentPtr extent);
 
+            std::optional<std::future<void>> async_flush(CacheExtentPtr extent);
+
             /**
              * Invalidates the provided DIRTY extent, ensuring that it is released without being
              * written to disk.
@@ -501,6 +503,8 @@ namespace springtail {
              * state after the flush() is complete.
              */
             void _flush(CacheExtentPtr extent);
+
+            std::optional<std::future<void>> _async_flush(CacheExtentPtr extent);
 
             /**
              * Helper to read a CLEAN extent into memory.  A callback is provided to be run after
@@ -945,6 +949,7 @@ namespace springtail {
              * new on-disk positions.
              */
             std::vector<uint64_t> _flush(const ExtentHeader &header);
+            std::future<std::vector<uint64_t>> _async_flush(const ExtentHeader &header);
 
         private:
             /** A count of the number of users of this page. */

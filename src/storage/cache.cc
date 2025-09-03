@@ -1412,6 +1412,15 @@ StorageCache::PageCache::background_cleaner()
         _flush(extent);
     }
 
+    std::optional<std::future<void>>
+    StorageCache::DataCache::async_flush(CacheExtentPtr extent)
+    {
+        boost::unique_lock lock(_mutex);
+
+        // call the internal flush() helper
+        return _async_flush(extent);
+    }
+
     void
     StorageCache::DataCache::drop_dirty(CacheExtentPtr extent)
     {
@@ -1511,8 +1520,8 @@ StorageCache::PageCache::background_cleaner()
         return extent;
     }
 
-    void
-    StorageCache::DataCache::_flush(CacheExtentPtr extent)
+    std::optional<std::future<void>>
+    StorageCache::DataCache::_async_flush(CacheExtentPtr extent)
     {
         // if already flushing, wait for completion
         if (extent->_state == CacheExtent::State::FLUSHING) {
@@ -1523,20 +1532,17 @@ StorageCache::PageCache::background_cleaner()
 
             // note: this doesn't unlock, just releases the adopt_lock
             lock.release();
-            return;
+            return std::nullopt;
         }
 
         // if the extent isn't DIRTY, don't need to flush
         if (extent->_state != CacheExtent::State::DIRTY) {
-            return;
+            return std::nullopt;
         }
 
         // mark the extent as FLUSHING so that other callers will block until flush complete
         extent->_state = CacheExtent::State::FLUSHING;
         extent->_flush_cv = std::make_shared<boost::condition_variable>();
-
-        // On-disk size of the originating extent
-        uint64_t prev_extent_size = extent->_extent_size;
 
         // perform the flush
         {
@@ -1544,34 +1550,47 @@ StorageCache::PageCache::background_cleaner()
             lock.unlock();
 
             auto handle = IOMgr::get_instance()->open(extent->_file, IOMgr::IO_MODE::APPEND, true);
-            auto response = extent->async_flush(handle);
-
-            // notify the vacuumer of the now-expired extent
-            if (extent->header().prev_offset != constant::UNKNOWN_EXTENT) {
-                Vacuumer::get_instance()->expire_extent(extent->_file, extent->header().prev_offset,
-                                                        prev_extent_size, extent->header().xid);
-            }
-
-            // XXX we could do this asynchronously and return a future that completes when the extent ID
-            //     becomes available... should be safe to do so since we are already putting the extent
-            //     into an exclusive FLUSHING state
-            auto&& flush_response = response.get();
-            extent->_extent_id = flush_response->offset;
-            extent->_extent_size = flush_response->next_offset - flush_response->offset;
-
+            auto async_flush_future = extent->async_flush(handle);
             lock.lock();
             lock.release();
+
+            return std::async(std::launch::async,
+                [flush_response_future = std::move(async_flush_future), extent, this]() mutable -> void
+                {
+                    // On-disk size of the originating extent
+                    uint64_t prev_extent_size = extent->_extent_size;
+
+                    // notify the vacuumer of the now-expired extent
+                    if (extent->header().prev_offset != constant::UNKNOWN_EXTENT) {
+                        Vacuumer::get_instance()->expire_extent(extent->_file, extent->header().prev_offset,
+                                                                prev_extent_size, extent->header().xid);
+                    }
+
+                    auto flush_response = flush_response_future.get();
+                    extent->_extent_id = flush_response->offset;
+                    extent->_extent_size = flush_response->next_offset - flush_response->offset;
+
+                    // update the cache ID as pointing to the new extent ID
+                    this->_cache_id_map[extent->_cache_id] = extent->key();
+
+                    // mark as MUTABLE, place on the clean LRU
+                    extent->_state = CacheExtent::State::MUTABLE;
+
+                    // notify anyone waiting
+                    extent->_flush_cv->notify_all();
+                    extent->_flush_cv = nullptr;
+                });
         }
 
-        // update the cache ID as pointing to the new extent ID
-        _cache_id_map[extent->_cache_id] = extent->key();
+    }
 
-        // mark as MUTABLE, place on the clean LRU
-        extent->_state = CacheExtent::State::MUTABLE;
-
-        // notify anyone waiting
-        extent->_flush_cv->notify_all();
-        extent->_flush_cv = nullptr;
+    void
+    StorageCache::DataCache::_flush(CacheExtentPtr extent)
+    {
+        auto async_flush_future = _async_flush(extent);
+        if (async_flush_future) {
+            async_flush_future.value().get();
+        }
     }
 
     void
