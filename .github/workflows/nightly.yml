@@ -1,5 +1,4 @@
-name: Nightly Build Workflow
-
+name: Nightly Build & Test
 on:
   schedule:
     # Runs at 07:00 UTC, which corresponds to 11:00 PM PT
@@ -11,432 +10,123 @@ permissions:
   contents: read
   checks: write
 
-
 jobs:
-  nightly_job:
-    name: Nightly Job
-    runs-on: warp-ubuntu-latest-arm64-4x
-    timeout-minutes: 180
-    container:
-      image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
-      credentials:
-        username: AWS
-        password: ${{ secrets.DEV_SUPPORT_ECR_PW }}
-
-    # You can use this environment variable to access the current working directory
-    env:
-      VCPKG_FORCE_SYSTEM_BINARIES: 1
-      VCPKG_ROOT: /home/dev/external/vcpkg
-      DOCKER: 1
-      ZIC: true
-      USER: root
-      PYTHONUNBUFFERED: 1
-      CWD: ${{ github.workspace }}
-      DATA_SHARE_BUCKET_NAME: data-share.springtail.internal
-      DEVSUPPORT_BUCKET_NAME: devsupport.springtail.internal
-      PACKAGES_S3_PREFIX: nightly-builds
-      TEST_LOGS_S3_PREFIX: nightly-testlogs
-      NUM_PROCS: ${{ vars.NUM_PROCS }}
-      INTEGRATION_TEST_ITERATIONS: ${{ vars.INTEGRATION_TEST_ITERATIONS || 1 }}
-      # The path to the Springtail logs, keep consistent with the `log_path` inside
-      # system.json.test
-      SPRINGTAIL_LOG_PATH: /opt/springtail/logs
-      SLACK_WEBHOOK_URL: ${{ vars.GENERIC_SLACK_WEBHOOK_URL }}
-      SLACK_CHANNEL: '#nightly-builds'
-
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      commit_sha: ${{ steps.get-metadata.outputs.commit_sha }}
+      date_prefix: ${{ steps.get-metadata.outputs.date_prefix }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: install-aws-cli-action
-        uses: unfor19/install-aws-cli-action@v1
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
-          version: 2                         # default
-          verbose: false                     # default
-          arch: arm64
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.DEV_AWS_ROLE_ARN }}
-          role-session-name: tempSession
-          role-duration-seconds: 12960
-          aws-region: us-east-1
-
-      - name: Prepare Tests
+          clean: true
+      - name: Get the commit SHA
+        id: get-metadata
         run: |
-          git config --global --add safe.directory ${GITHUB_WORKSPACE}
-          # Override some settings in the config file
-          .github/workflows/scripts/merge_system_settings.py system.json.settings .github/workflows/nightly.overrides.json system.json.test
+          git_short_sha=$(git rev-parse HEAD | cut -c1-7)
+          data_prefix=$(date +'%Y/%m/%d/%H')
+          echo "commit_sha=$git_short_sha" >> $GITHUB_OUTPUT
+          echo "date_prefix=$data_prefix" >> $GITHUB_OUTPUT
 
-          # Replace the correct `springtail` code directory
-          sed -i -e "s|/home/dev/springtail|${GITHUB_WORKSPACE}|g" system.json.test
-          mkdir -p /opt/springtail/pids
-          service redis-server start
-          
-          # Copy over the fdw_config file to the designated location
-          conf_file=/etc/postgresql/16/main/postgresql.conf
-          fdw_config_file_path=$(grep -E "^springtail_fdw.config_file_path" $conf_file | awk '{print $3}' | tr -d "'")
-          mkdir -p $(dirname $fdw_config_file_path)
-          cp system.json.test $fdw_config_file_path
+  debug-build:
+    uses: ./.github/workflows/rw-build-container.yml
+    with:
+      base_image_tag: ${{ vars.IMAGE_TAG_DEBUG }}
+      build_type: "debug"
+    secrets:
+      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
+      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
 
-      - name: Build
-        run: |
-          ln -s /home/dev/external external
-          ./vcpkg.sh
-          mkdir -p /home/dev/debug
-          mkdir -p /home/dev/install
-          ln -s /home/dev/debug debug
-          ln -s /home/dev/install install
-          
-          # Build with traces enabled
-          export SPRINGTAIL_INCLUDE_TIME_TRACES=1
-          cmake -B debug -S . -D'CMAKE_BUILD_TYPE=Debug' -DVCPKG_INSTALL_OPTIONS="--allow-unsupported"
+  release-build-with-time-traces:
+    uses: ./.github/workflows/rw-build-container.yml
+    with:
+      base_image_tag: ${{ vars.IMAGE_TAG_RELEASE }}
+      build_type: "release"
+      springtail_include_time_traces: true
+    secrets:
+      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
+      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
 
-          cd debug
-          make -j${NUM_PROCS}          
+  unit-test:
+    uses: ./.github/workflows/rw-run-unit-test.yml
+    needs: [ debug-build, prepare ]
+    with:
+      image_tag: ${{ needs.debug-build.outputs.output_image_tag }}
+      s3_log_prefix: "nightly-testlogs/${{ needs.prepare.outputs.date_prefix }}/${{ needs.prepare.outputs.commit_sha }}"
+      build_type: "debug"
+      reuse_code: true
+    secrets:
+      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
+      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
 
-      - name: Set common env vars
-        run: |
-          # This is the last path segment for on S3 for segmenting the logs
-          CURRENT_DATE=$(date +'%Y/%m/%d/%H')
-          echo "CURRENT_DATE=${CURRENT_DATE}" >> $GITHUB_ENV
-          echo "GITHUB_SHORT_SHA=$(echo $GITHUB_SHA | cut -c1-7)" >> $GITHUB_ENV
-          # This is the prefix for the logs on S3, including the S3 scheme, buket name all the way to the "folder"
-          echo "TEST_LOG_S3_FULL_PREFIX=s3://${DEVSUPPORT_BUCKET_NAME}/${TEST_LOGS_S3_PREFIX}/${CURRENT_DATE}" >> $GITHUB_ENV
+  multi-rounds-integration-test:
+    uses: ./.github/workflows/rw-run-integration-test.yml
+    needs: [ debug-build, prepare ]
+    with:
+      image_tag: ${{ needs.debug-build.outputs.output_image_tag }}
+      s3_log_prefix: "nightly-testlogs/${{ needs.prepare.outputs.date_prefix }}/${{ needs.prepare.outputs.commit_sha }}"
+      config_to_run: "nightly"
+      system_settings_override: '.github/workflows/nightly.overrides.json'
+      iterations: "1"
+      build_type: "debug"
+      reuse_code: true
+      timeout_minutes: 60
+    secrets:
+      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
+      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
 
-      - name: Prepare DB for Unit Tests
-        run: |
-          service postgresql start
-          USER_EXISTS=$(sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='springtail'")
-          if [ "$USER_EXISTS" != "1" ]; then
-            sudo -u postgres psql -c "CREATE USER springtail WITH PASSWORD 'springtail' SUPERUSER LOGIN" 
-          fi
-          sudo -u postgres psql -c "CREATE DATABASE springtail WITH OWNER springtail"
-          # Create triggers
-          sudo -u postgres psql -d springtail -f ${GITHUB_WORKSPACE}/scripts/triggers.sql
+  performance-test:
+    uses: ./.github/workflows/rw-run-performance-test.yml
+    needs: [ release-build-with-time-traces, prepare ]
+    with:
+      image_tag: ${{ needs.build-with-time-traces.outputs.output_image_tag }}
+      s3_log_prefix: "nightly-testlogs/${{ needs.prepare.outputs.date_prefix }}/${{ needs.prepare.outputs.commit_sha }}"
+      system_settings_override: '.github/workflows/nightly.overrides.json'
+      build_type: "release"
+      reuse_code: true
+    secrets:
+      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
+      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
 
-      - name: Run Unit Tests
-        if: success()
-        run: |
-          cd python/testing
-          python3 springtail.py -f ../../system.json.test --load-redis --build-dir ../../debug
-          cd ../../debug
-          
-          set +e
-          _LOG_FLAG="failed"
-          # Per SPR-501: break upon test failures - "--gtest_break_on_failure"
-          make check ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose --stop-on-failure" 2>&1 | tee tmplog
-          # Grab the success/failure status of the unit tests
-          if [ $? -eq 0 ] &&  grep -qE "100% tests passed" tmplog
-          then 
-            _LOG_FLAG="succeeded"
-          fi
-          # List the open listening ports and processes info after tests are done
-          echo "==== Listening Ports ===="
-          netstat -tulnp
-          # Show the full launching command of each
-          netstat -tulnp | awk '{print $7}' | grep -o '[0-9]*' | while read pid; do
-            cmd=$(ps -p $pid -o args=)
-            echo "$pid - $cmd"
-          done
-
-          # Grab the current PR ID
-          _LOG_PR_ID="${GITHUB_EVENT_PULL_REQUEST_NUMBER}"
-          # Grab the short SHA
-          _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
-          
-          _TIMESTAMP=$(date +"%Y-%m-%d-%H-%M-%S")
-          log_file="unit-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log.tar.gz" 
-          tar zcvf $log_file tmplog
-          rm tmplog
-          unit_test_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_PR_ID}/$log_file"
-          
-          aws s3 cp "$log_file" "$unit_test_log_s3key"
-          echo "*** Unit Test Log S3 Key: $unit_test_log_s3key"
-          
-          # Fail eventually
-          if [ "$_LOG_FLAG" = "failed" ]; then
-            exit 1
-          fi
-
-      - name: Cleanup Unit Test
-        if: success() || failure()      # run this step even if previous step failed
-        run: |
-          # Drop the springtail database 
-          sudo -u postgres psql -c "DROP DATABASE springtail"
-          service postgresql stop
-
-      - name: Unit Test Report
-        uses: dorny/test-reporter@v1
-        if: success() || failure()      # run this step even if previous step failed
-        with:
-          name: Unit Tests             # Name of the check run which will be created
-          path: ./debug/unit-test-report.xml
-          reporter: java-junit
-
-      - uses: actions/upload-artifact@v4
-        if: success() || failure()      # run this step even if previous step failed
-        with:
-          name: 'Unit Test Logs'
-          path: debug/unit-test-*.log
-
-      # Nightly run of integration tests, run N times in a loop.
-      - name: Create Superuser for test
-        if: success() || failure()      # run this step even if previous step failed
-        run: |
-          service postgresql start
-          USER_EXISTS=$(sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='springtail'")
-          if [ "$USER_EXISTS" != "1" ]; then
-            sudo -u postgres psql -c "CREATE USER springtail WITH PASSWORD 'springtail' SUPERUSER LOGIN" 
-          fi
-          service postgresql stop
-
-      - name: Run nightly tests
-        run: |
-          cd python/testing
-          service postgresql start
-          ./startup.sh -s data_init.sql
-          
-          # Run integration tests
-          set +e
-          for i in $(seq 1 ${INTEGRATION_TEST_ITERATIONS}) ; 
-          do
-            # Note: there might be discrepancies between the _LOG_TIMESTAMP and the _LOG_DATE due to the time it takes to run the integration tests
-            # it may run across a day. This is fine as long as the logs are grouped by _LOG_DATE
-          
-            _LOG_FLAG="failed"
-            echo "*** Starting iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
-            python3 test_runner.py -c nightly -j ${GITHUB_WORKSPACE}/integration-test-report.xml 2>&1 | tee tmplog
-            # Grab the success/failure status of the integration tests
-            if [ $? -eq 0 ] && ! grep -qE "Tests failed: [1-9][0-9]*" tmplog
-            then
-              _LOG_FLAG="succeeded"
-            fi
-            echo "*** Finished iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
-          
-            _TIMESTAMP=$(date +%s)
-          
-            # Test logs
-            log_file="integration-test-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}-${i}.log" 
-            log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${log_file}"
-            aws s3 cp tmplog $log_s3_key
-            echo "*** Integration Test Log S3 Key: $log_s3_key"
-            rm -f tmplog
-          
-            # Springtail service logs
-            springtail_log_file="springtail-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}-${i}.tar.gz"
-            output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../debug)
-            fname=$(echo $output  | cut -f2 -d':' | xargs | head -1)
-            springtail_log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${springtail_log_file}"
-            aws s3 cp $fname $springtail_log_s3_key
-            echo "*** Springtail Log S3 Key: $springtail_log_s3_key"
-            rm -f $fname
-          
-            # If the current iteration of test failed, break out of the loop for now
-            if [ "$_LOG_FLAG" = "failed" ]; then
-              echo "*** Integration test failed at iteration ${i}, breaking out of the loop"
-              exit 1
-            fi
-          done
-
-      - name: Run nightly performance test
-        if: success()
-        run: |
-          cd python/testing
-          python3 springtail.py -f ../../system.json.test --load-redis --build-dir ../../debug
-
-          cd ../performance
-
-          _LOG_FLAG="failed"
-          # Run performance tests
-          python3 performance_runner.py -c performance_config.yaml 2>&1 | tee tmplog
-
-          # Grab the success/failure status of the performance tests
-          if [ $? -eq 0 ] 
-          then 
-            _LOG_FLAG="succeeded"
-          fi
-
-          # Upload performance test logs
-          _TIMESTAMP=$(date +%s)
-          log_file="performance-test-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.log" 
-          log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${log_file}"
-          aws s3 cp tmplog $log_s3_key
-          echo "*** Performance Test Log S3 Key: $log_s3_key"
-          rm -f tmplog
-
-          # Go back to the testing folder to use the springtail.py to dump the logs
-          cd ../testing
-
-          # Springtail service logs
-          springtail_log_file="springtail-performance-${GITHUB_SHORT_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.tar.gz"
-          output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../debug)
-          log_dump_file_name=$(echo $output | cut -f2 -d':' | xargs | head -1)
-          springtail_log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${springtail_log_file}"
-          aws s3 cp $log_dump_file_name $springtail_log_s3_key
-          echo "*** Springtail Log S3 Key: $springtail_log_s3_key"
-          rm -f $log_dump_file_name
-
-          if [ "$_LOG_FLAG" = "failed" ]; then
-            echo "*** Performance test failed"
-            exit 1
-          fi
-          echo "*** Finished running performance tests"
-
-      - name: Run nightly build (if above tests pass)
-        if: success()
-        run: |
-          rm -rf releases
-          cd debug
-          make install -j ${NUM_PROCS}
-
-      # TODO: Re-enable when proxy tests are fixed ( https://linear.app/springtail/issue/SPR-955/fix-proxy-tests )
-      # - name: Run Proxy Tests
-      #   if: success()
-      #   env:
-      #     LD_LIBRARY_PATH: /usr/lib/springtail
-      #   run: |
-      #     # Make sure Proxy `enable_ssl` is on
-      #     sed -i 's/enable_ssl": false/enable_ssl": true/g' system.json.test
-
-      #     cd python/testing
-      #     python3 springtail.py -f ../../system.json.test --kill --build-dir ../../debug
-
-      #     if [ $? -ne 0 ]; then
-      #       exit 1
-      #     fi
-
-      #     cd proxy
-      #     # Do not break out if errors occur
-      #     set +e
-      #     _LOG_FLAG="failed"
-      #     python3 test_runner_new.py -t -s postgres_all -b ../../../debug
-      #     if [ $? -eq 0 ]; then
-      #         _LOG_FLAG="succeeded"
-      #     fi
-      #     set -e
-
-      #     _TIMESTAMP=$(date +%s)
-
-      #     # Test log
-      #     log_file="proxy-regress-${GITHUB_SHORT_SHA}-${_TIMESTAMP}-${_LOG_FLAG}.log"
-      #     log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${log_file}"
-      #     aws s3 cp proxy_regress.log $log_s3_key
-      #     echo "*** Proxy Test Log S3 Key: $log_s3_key"
-
-      #     # Springtail service logs (proxy)
-      #     springtail_proxy_log_file="proxy-springtail-svc-${GITHUB_SHORT_SHA}-${_TIMESTAMP}.tar.gz"
-      #     # tar all logs under the Springtail log path
-      #     # only do the taring and uploading if there are something inside the log path
-      #     # checks if the log path is empty
-      #     if [ "$(ls -A ${SPRINGTAIL_LOG_PATH})" ]; then
-      #       tar -czf $springtail_proxy_log_file ${SPRINGTAIL_LOG_PATH}/*
-      #       springtail_log_s3_key="${TEST_LOG_S3_FULL_PREFIX}/${springtail_proxy_log_file}"
-      #       aws s3 cp $springtail_proxy_log_file $springtail_log_s3_key
-      #       echo "*** Springtail Proxy Logs S3 Key: $springtail_log_s3_key"
-      #     else
-      #       echo "*** No Springtail Proxy Logs to found inside ${SPRINGTAIL_LOG_PATH}"
-      #     fi
-
-      #     # Find the file matching this name exactly: `regression.diff.pg.out`
-      #     # under the $TMPDIR directory (recursive) and upload it to S3
-      #     regression_pg_diff_file=$(find /tmp -name "regression.diff.pg.out")
-      #     # Only upload to S3 if the file exists
-      #     if [ -f "$regression_pg_diff_file" ]; then
-      #         regression_pg_diff_s3_key="${TEST_LOG_S3_FULL_PREFIX}/regression_pg.diff.${GITHUB_SHORT_SHA}-${_TIMESTAMP}.out"
-      #         aws s3 cp $regression_pg_diff_file $regression_pg_diff_s3_key
-      #         echo "*** PG Regression Diff S3 Key: $regression_pg_diff_s3_key"
-      #     fi
-      #     # Find the file matching this name exactly: `regression.diff.proxy.out`
-      #     # under the $TMPDIR directory (recursive) and upload it to S3
-      #     regression_proxy_diff_file=$(find /tmp -name "regression.diff.proxy.out")
-      #     # Only upload to S3 if the file exists
-      #     if [ -f "$regression_proxy_diff_file" ]; then
-      #         regression_proxy_diff_s3_key="${TEST_LOG_S3_FULL_PREFIX}/regression_proxy.diff.${GITHUB_SHORT_SHA}-${_TIMESTAMP}.out"
-      #         aws s3 cp $regression_proxy_diff_file $regression_proxy_diff_s3_key
-      #         echo "*** Proxy Regression Diff S3 Key: $regression_proxy_diff_s3_key"
-      #     fi
-      #     # Eventually fail the step
-      #     if [ "$_LOG_FLAG" = "failed" ]; then
-      #       # Find the file matching this name exactly: `regression.result.proxy.out`
-      #       # under the $TMPDIR directory (recursive) and upload it to S3
-      #       regression_result_diff_file=$(find /tmp -name "regression_result.diff.out")
-      #       # Only upload to S3 if the file exists
-      #       if [ -f "$regression_result_diff_file" ]; then
-      #           regression_result_diff_s3_key="${TEST_LOG_S3_FULL_PREFIX}/regression_result.diff.${GITHUB_SHORT_SHA}-${_TIMESTAMP}.out"
-      #           aws s3 cp $regression_result_diff_file $regression_result_diff_s3_key
-      #           echo "*** Proxy Regression Result Diff S3 Key: $regression_result_diff_s3_key"
-      #       fi
-      #       exit 1
-      #     fi
-
-      - name: Package and Upload Build artifacts to S3
-        if: success()
-        run: |
-          ./package.sh
-          cd releases
-          PKG_NAME=$(ls -t *.tgz | head -n1)
-          aws s3 cp $PKG_NAME s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/
-          echo "PACKAGE_NAME=s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/${PKG_NAME}" >> $GITHUB_ENV
-
-      - name: Notify Slack on success
-        if: success()
-        uses: slackapi/slack-github-action@v2.0.0
-        with:
-          webhook: ${{ env.SLACK_WEBHOOK_URL }}
-          webhook-type: incoming-webhook
-          payload: |
+  slack-notification:
+    uses: ./.github/workflows/rw-notify-slack.yml
+    needs: [ prepare, unit-test, multi-rounds-integration-test, performance-test ]
+    if: always()
+    with:
+      slack_webhook_url: ${{ vars.GENERIC_SLACK_WEBHOOK_URL }}
+      # Need to create a new channel for PR notifications.
+      slack_channel: "#nightly-builds"
+      text: >
+        Nightly builds has completed for ${{ needs.prepare.outputs.date_prefix }} - ${{ needs.prepare.outputs.commit_sha }}.
+      attachment: |
+        {
+          color": "${{ needs.unit-test.result == 'success' && needs.multi-rounds-integration-test.result == 'success' && needs.performance-test.result == 'success' && 'good' || 'danger' }}",
+          "fields": [
             {
-              "channel": "${{ env.SLACK_CHANNEL}}",
-              "text": ":tada: :tada: Nightly Build & Test Success",
-              "attachments": [
-                {
-                  "color": "#36a64f",
-                  "fields": [
-                    {
-                      "title": "Git SHA",
-                      "value": "${{ github.sha }}",
-                      "short": true
-                    },
-                    {
-                      "title": "Build Artifacts",
-                      "value": "${{ env.PACKAGE_NAME }}",
-                      "short": false
-                    },
-                    {
-                      "title": "Logs",
-                      "value": "s3://${{ env.DEVSUPPORT_BUCKET_NAME }}/${{ env.TEST_LOGS_S3_PREFIX }}/${{ env.CURRENT_DATE }}/"
-                    }
-                  ]
-                }
-              ]
-            }
-
-      - name: Notify Slack on failure
-        if: failure()
-        uses: slackapi/slack-github-action@v2.0.0
-        with:
-          webhook: ${{ env.SLACK_WEBHOOK_URL }}
-          webhook-type: incoming-webhook
-          payload: |
+              "title": "Unit Test",
+              "value": "${{ needs.unit-test.result }}; logs: <${{ needs.unit-test.outputs.test_log_s3_uri }}|here>",
+              "short": false
+            },
             {
-              "channel": "${{ env.SLACK_CHANNEL }}",
-              "text": ":crying_cat_face: Nightly Build & Test Failed ",
-              "attachments": [
-                {
-                  "color": "#DF3A01",
-                  "fields": [
-                    {
-                      "title": "Git SHA",
-                      "value": "${{ github.sha }}",
-                      "short": true
-                    },
-                    {
-                      "title": "Logs",
-                      "value": "s3://${{ env.DEVSUPPORT_BUCKET_NAME }}/${{ env.TEST_LOGS_S3_PREFIX }}/${{ env.CURRENT_DATE }}/"
-                    }
-                  ]
-                }
-              ]
+              "title": "Multi-rounds Integration Test",
+              "value": "${{ needs.multi-rounds-integration-test.result }}; last logs: <${{ needs.multi-rounds-integration-test.outputs.test_log_s3_uri }}|here>; last springtail logs: <${{ needs.multi-rounds-integration-test.outputs.springtail_log_s3_uri }}|here>",
+              "short": false
+            },
+            {
+              "title": "Performance Test",
+              "value": "${{ needs.performance-test.result }}; logs: <${{ needs.performance-test.outputs.test_log_s3_uri }}|here>",
+              "short": false
+            },
+            {
+                "title": "Commit SHA",
+                "value": "${{ needs.prepare.outputs.commit_sha }}",
+                "short": false
+            },
+            {
+                "title": "All Logs",
+                "value": "s3://devsupport.springtail.internal/nightly-testlogs/${{ needs.prepare.outputs.date_prefix }}/${{ needs.prepare.outputs.commit_sha }}",
+                "short": false
             }
+          ]
+        }
