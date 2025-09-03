@@ -28,6 +28,7 @@ namespace springtail::committer {
         // Set counter for XID for ddls
         _xid_ddl_counter_map[xid].store(index_requests.size());
         for (auto const& index_request: index_requests) {
+            LOG_INFO("Process index request {} for XID: {}@{}, table_id: {}", index_request.action(), db_id, xid, index_request.index().table_id());
             auto &action = index_request.action();
             if (action == "create_index") {
                 build({db_id, xid, index_request});

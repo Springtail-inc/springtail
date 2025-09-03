@@ -291,6 +291,10 @@ def update_postgres_config(test_params: Dict[str, str], props: Properties) -> bo
     """
     cleanup_postgres_config(props)
 
+    # nothing to do
+    if not test_params:
+        return True
+
     # Connect to the database ("postgres" database)
     conn = connect_db_instance(props)
 
