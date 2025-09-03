@@ -142,6 +142,14 @@ jobs:
           ln -s /home/dev/install install
           ln -s /home/dev/external external
 
+          # Set the build dir to ../../$CI_BUILD_TYPE in 
+          # - python/testing/test_runner_config.yaml
+          # - python/performance/performance_config.yaml
+          # - python/benchmarks/config.yaml
+          sed -i -e "s|^build_dir: .*|build_dir: ../../${CI_BUILD_TYPE}|" python/testing/test_runner_config.yaml
+          sed -i -e "s|^build_dir: .*|build_dir: ../../${CI_BUILD_TYPE}|" python/performance/performance_config.yaml
+          sed -i -e "s|^build_dir: .*|build_dir: ../../${CI_BUILD_TYPE}|" python/benchmarks/config.yaml
+
       - name: Rebuild
         if: inputs.reuse_code == false
         run: |
@@ -245,7 +253,7 @@ jobs:
             springtail_log_s3_key="${S3_LOGS_PREFIX_FULL}/${springtail_log_file}"
             aws s3 cp $fname $springtail_log_s3_key
             echo "*** Springtail Log S3 Key: $springtail_log_s3_key"
-            rm -f $fname
+            mv $fname springtail-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}-${i}.tar.gz
             echo "springtail_log_s3_uri=${springtail_log_s3_key}" >> $GITHUB_OUTPUT
           
             # If the current iteration of test failed, break out of the loop for now
@@ -267,7 +275,7 @@ jobs:
         if: success() || failure()      # Only upload the *last* log file
         with:
           name: 'Integration Test Logs'
-          path: ./python/testing/integration-test-*.log.tar.gz
+          path: ./python/testing/integration-test-*.log
 
       - uses: actions/upload-artifact@v4
         if: success() || failure()      # Only upload the *last* springtail log file
