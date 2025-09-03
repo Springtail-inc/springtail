@@ -80,7 +80,7 @@ jobs:
     uses: ./.github/workflows/rw-run-performance-test.yml
     needs: [ release-build-with-time-traces, prepare ]
     with:
-      image_tag: ${{ needs.build-with-time-traces.outputs.output_image_tag }}
+      image_tag: ${{ needs.release-build-with-time-traces.outputs.output_image_tag }}
       s3_log_prefix: "nightly-testlogs/${{ needs.prepare.outputs.date_prefix }}/${{ needs.prepare.outputs.commit_sha }}"
       system_settings_override: '.github/workflows/nightly.overrides.json'
       build_type: "release"
