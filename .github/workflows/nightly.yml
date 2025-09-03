@@ -71,6 +71,7 @@ jobs:
       iterations: "1"
       build_type: "debug"
       reuse_code: true
+      timeout_minutes: 60
     secrets:
       aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
       aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
@@ -91,6 +92,7 @@ jobs:
   slack-notification:
     uses: ./.github/workflows/rw-notify-slack.yml
     needs: [ prepare, unit-test, multi-rounds-integration-test, performance-test ]
+    if: always()
     with:
       slack_webhook_url: ${{ vars.GENERIC_SLACK_WEBHOOK_URL }}
       # Need to create a new channel for PR notifications.
