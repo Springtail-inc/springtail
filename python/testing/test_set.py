@@ -166,7 +166,10 @@ class TestSet:
         self._apply_replica_full()
 
         # update postgres config to apply props for the test
-        springtail.update_postgres_config(self._test_params, self._props)
+        postgres_config = {}
+        if 'postgres_config' in self._test_params:
+            postgres_config = self._test_params['postgres_config']
+        springtail.update_postgres_config(postgres_config, self._props)
 
         # install FDW with Postgres restart
         logging.debug("Installing foreign data wrapper...")
