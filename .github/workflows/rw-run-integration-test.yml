@@ -243,7 +243,7 @@ jobs:
             log_s3_key="${S3_LOGS_PREFIX_FULL}/${log_file}"
             aws s3 cp tmplog $log_s3_key
             echo "*** Integration Test Log S3 Key: $log_s3_key"
-            rm -f tmplog
+            mv tmplog integration-test-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}-${i}.log
             echo "test_log_s3_uri=${log_s3_key}" >> $GITHUB_OUTPUT
           
             # Springtail service logs
