@@ -356,10 +356,11 @@ namespace springtail {
                     // Extract the timestamp from the file name
                     auto timestamp = extract_timestamp_from_file(path, prefix, suffix);
                     if (timestamp.has_value() && Compare()(timestamp.value(), timestamp_limit)) {
-                        LOG_INFO("Removing file: {}", path.string());
                         if (!archive) {
+                            LOG_INFO("Removing file: {}", path.string());
                             std::filesystem::remove(path);
                         } else {
+                            LOG_INFO("Archiving file: {}", path.string());
                             std::filesystem::rename(path, dir / "archive" / filename);
                         }
                     }
