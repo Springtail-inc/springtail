@@ -485,7 +485,7 @@ namespace springtail
             LOG_ERROR("Mismatch in copy fields: {} != {}",
                       _connection.nfields(), _schema.columns.size());
             _connection.clear();
-            throw PgQueryError();
+            throw PgRetryError();
         }
 
         _connection.clear();
@@ -1069,6 +1069,9 @@ namespace springtail
                 // reset schema object for next table
                 copy_table._reset_schema();
 
+            } catch (PgRetryError &e) {
+                LOG_ERROR("Unexpected error, will retry table copy: {}", request->table_oid);
+                copy_queue->push(request);
             } catch (PgTableNotFoundError &e) {
                 LOG_ERROR("Table not found: oid {}", request->table_oid);
             } catch (PgQueryError &e) {
