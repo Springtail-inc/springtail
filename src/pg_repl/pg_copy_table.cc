@@ -1065,10 +1065,6 @@ namespace springtail
 
                 // add the table oid to the result
                 result->add_table(info);
-
-                // reset schema object for next table
-                copy_table._reset_schema();
-
             } catch (PgRetryError &e) {
                 LOG_ERROR("Unexpected error, will retry table copy: {}", request->table_oid);
                 copy_queue->push(request);
@@ -1079,6 +1075,9 @@ namespace springtail
                 LOG_ERROR("Error copying table: oid {}", request->table_oid);
                 assert(false);
             }
+
+            // reset schema object for next table
+            copy_table._reset_schema();
         }
 
         if (result->tids.size() > 0) {
