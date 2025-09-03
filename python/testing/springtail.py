@@ -667,7 +667,7 @@ def restart(props: Properties,
         ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
         log_file = "/tmp/roll_back_" + str(ts) + ".log"
         print(f"Running command: roll_back_xact_log; rolling back database {db_id} to xid: {start_xid}, output log: {log_file}")
-        run_command(os.path.join(build_dir, 'src/xid_mgr/roll_back_xact_log'), ['-p', xact_path, '-d', str(db_id), '-a', 'true', '-x', str(start_xid)], log_file)
+        run_command(os.path.join(build_dir, 'src/xid_mgr/roll_back_xact_log'), ['-p', xact_path, '-d', str(db_id), '-x', str(start_xid)], log_file)
 
     # start daemons with XID if specified
     print("\nStarting daemons...")
