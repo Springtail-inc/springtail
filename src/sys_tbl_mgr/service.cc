@@ -811,7 +811,7 @@ Service::DropTable(grpc::ServerContext* context,
 }
 
 nlohmann::json
-Service::_drop_table(const proto::DropTableRequest& request)
+Service::_drop_table(const proto::DropTableRequest& request, bool is_resync)
 {
     // retrieve the id of the namespace
     // DROP SCHEMA in PG will automatically drop all tables
@@ -859,10 +859,11 @@ Service::_drop_table(const proto::DropTableRequest& request)
     _read_schema_indexes(index_info, request.db_id(), request.table_id(), xid);
 
     for (auto const& idx : index_info->indexes()) {
-        // For secondary indexes, indexer will take care of marking them DELETED
-        if (idx.id() == constant::INDEX_PRIMARY) {
+        if (is_resync || idx.id() == constant::INDEX_PRIMARY) {
+            // If resync, all the indexes can be marked as dropped as new ones will be created while copying table
             _drop_index(xid, request.db_id(), idx.id(), request.table_id(), sys_tbl::IndexNames::State::DELETED);
         } else {
+            // For secondary indexes (actual drop index requests), indexer will take care of marking them DELETED
             _drop_index(xid, request.db_id(), idx.id(), request.table_id(), sys_tbl::IndexNames::State::BEING_DELETED);
         }
     }
@@ -1300,9 +1301,9 @@ Service::SwapSyncTable(grpc::ServerContext* context,
         LOG_DEBUG(LOG_SCHEMA, "Drop table: {}:{} @ {}:{}", drop.db_id(), drop.table_id(),
                             drop.xid(), drop.lsn());
 
-        auto&& drop_ddl = this->_drop_table(drop);
-        drop_ddl["is_resync"] = true;
         is_resync = true;
+        auto&& drop_ddl = this->_drop_table(drop, is_resync);
+        drop_ddl["is_resync"] = is_resync;
         ddls.push_back(drop_ddl);
     }
 
