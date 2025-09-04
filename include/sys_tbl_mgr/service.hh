@@ -565,8 +565,13 @@ private:
 
     /**
      * Performs a drop_table() assuming that the correct locks are already held.
+     *
+     * @param request   Drop table request
+     * @param is_resync To indicate if table drop is due to resync
+     *
+     * @return ddl to be applied
      */
-    nlohmann::json _drop_table(const proto::DropTableRequest& request);
+    nlohmann::json _drop_table(const proto::DropTableRequest& request, bool is_resync=false);
 
     /**
      * Performs an update_roots() assuming that the correct locks are already held.

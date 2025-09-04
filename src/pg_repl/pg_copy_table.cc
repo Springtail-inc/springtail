@@ -489,7 +489,7 @@ namespace springtail
                 LOG_ERROR("\t{}", column.name);
             }
             _connection.clear();
-            throw PgQueryError();
+            throw PgRetryError();
         }
 
         _connection.clear();
