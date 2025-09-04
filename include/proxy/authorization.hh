@@ -25,7 +25,10 @@ constexpr static int8_t MSG_AUTH_SASL_COMPLETE = 12;
 
 class ClientAuthorization {
 public:
-    ClientAuthorization(ProxyConnectionPtr connection, uint64_t id, int32_t pid, int32_t cancel_key)
+    ClientAuthorization(ProxyConnectionPtr connection,
+                        uint64_t id,
+                        int32_t pid,
+                        const std::vector<uint8_t> &cancel_key)
         : _state(STARTUP), _connection(connection), _id(id), _pid(pid), _cancel_key(cancel_key)
     {
     }
@@ -76,6 +79,18 @@ public:
      */
     const std::string &get_error_code() const { return _error_code; }
 
+    /**
+     * @brief Get the pid and cancel key pair object
+     *
+     * @return const std::pair<int32_t, std::vector<uint8_t>>
+     */
+    const std::pair<int32_t, std::vector<uint8_t>> get_pid_cancel_key_pair() const
+    {
+        return std::make_pair(_pid, _cancel_key);
+    }
+
+    bool is_cancel() const { return _is_cancel; }
+
 private:
     enum State : int8_t { STARTUP = 0, SSL_HANDSHAKE = 1, AUTH = 2, READY = 3, ERROR = 99 };
 
@@ -83,7 +98,8 @@ private:
     ProxyConnectionPtr _connection;
     uint64_t _id;
     int32_t _pid;
-    int32_t _cancel_key;
+    std::vector<uint8_t> _cancel_key;
+    bool _is_cancel;
 
     std::unordered_map<std::string, std::string> _parameters;
     std::string _database;
@@ -108,6 +124,8 @@ private:
     void _process_startup_msg(int32_t remaining, uint64_t seq_id);
     /** respond to ssl request */
     void _process_ssl_request();
+    /** respond to cancel request */
+    void _process_cancel(int32_t remaining);
 
     /** send auth request based on login type */
     void _send_auth_req(uint64_t seq_id);
@@ -178,6 +196,16 @@ public:
         return {_error_code, _error_message};
     }
 
+    /**
+     * @brief Get the pid and cancel key pair object
+     *
+     * @return const std::pair<int32_t, std::vector<uint8_t>>
+     */
+    const std::pair<int32_t, std::vector<uint8_t>> get_pid_cancel_key_pair() const
+    {
+        return std::make_pair(_pid, _cancel_key);
+    }
+
 private:
     /** internal server auth state */
     enum State : int8_t {
@@ -200,7 +228,7 @@ private:
     Session::Type _type;
 
     int32_t _pid;
-    int32_t _cancel_key;
+    std::vector<uint8_t> _cancel_key;
 
     std::string _error_code;
     std::string _error_message;

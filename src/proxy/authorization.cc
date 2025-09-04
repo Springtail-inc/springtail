@@ -99,6 +99,10 @@ ClientAuthorization::_handle_startup(uint64_t seq_id)
             _process_startup_msg(msg_length - 4, seq_id);
             break;
 
+        case MSG_CANCEL:
+            _process_cancel(msg_length - 4);
+            break;
+
         default:
             LOG_ERROR("Invalid startup message code: {}", code);
             _state = ERROR;
@@ -186,6 +190,21 @@ ClientAuthorization::_process_startup_msg(int32_t remaining, uint64_t seq_id)
 
     // handle authentication -- send auth request
     _send_auth_req(seq_id);
+}
+
+void
+ClientAuthorization::_process_cancel(int32_t remaining)
+{
+    char buffer[remaining];
+    ssize_t n = _connection->read(buffer, remaining, remaining);
+    CHECK_EQ(n, remaining);
+    CHECK_EQ(remaining, 8);
+
+    _pid = recvint32(buffer);
+    _cancel_key.resize(remaining - sizeof(_pid));
+    std::memcpy(reinterpret_cast<char *>(_cancel_key.data()), buffer + sizeof(_pid), _cancel_key.size());
+    _is_cancel = true;
+    _state = READY;
 }
 
 void
@@ -491,7 +510,7 @@ ClientAuthorization::send_auth_done(uint64_t seq_id,
     buffer->put('K');
     buffer->put32(12);
     buffer->put32(_pid);
-    buffer->put32(_cancel_key);
+    buffer->put_bytes(reinterpret_cast<const char *>(_cancel_key.data()), _cancel_key.size());
 
     // ready for query -- Idle state
     buffer->put('Z');
@@ -644,7 +663,8 @@ ServerAuthorization::_handle_message(uint64_t seq_id)
             CHECK_EQ(_state, AUTH_DONE);
             // get the backend pid and key for cancel
             _pid = buffer->get32();
-            _cancel_key = buffer->get32();
+            _cancel_key.resize(sizeof(uint32_t));
+            buffer->get_bytes(reinterpret_cast<char *>(_cancel_key.data()), sizeof(uint32_t));
             break;
 
         case 'Z': {

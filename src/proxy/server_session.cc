@@ -1,5 +1,3 @@
-#include <regex>
-
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
@@ -241,7 +239,7 @@ namespace springtail::pg_proxy {
         // called from _handle_error when the client is shutting down
         _seq_id = seq_id;
 
-        _wrap_error_handler([this, seq_id] {
+        _wrap_error_handler([this] {
 
             if (_state == RESET_SESSION || is_shutdown()) {
                 // if we are in reset session state, or shutdown return
@@ -549,7 +547,8 @@ namespace springtail::pg_proxy {
                 CHECK_EQ(_state, AUTH_DONE);
                 // get the backend pid and key for cancel
                 _pid = buffer->get32();
-                _cancel_key = buffer->get32();
+                _cancel_key.resize(sizeof(uint32_t));
+                buffer->get_bytes(reinterpret_cast<char *>(_cancel_key.data()), sizeof(uint32_t));
                 break;
 
             case 'E':
@@ -1097,5 +1096,42 @@ namespace springtail::pg_proxy {
         ProxyServer::get_instance()->log_connect(session);
 
         return session;
+    }
+
+    void
+    ServerSession::send_cancel()
+    {
+        struct sockaddr_storage addr;
+        socklen_t len = sizeof(addr);
+
+        // determine destination address from the existing connection
+        _connection->get_peer_address(&addr, &len);
+        CHECK(len != 0) << "Failed to get peer addresss of the server connection";
+
+        // create socket
+        int socket_fd = ::socket(addr.ss_family, SOCK_STREAM, 0);
+        PCHECK(socket_fd > -1) << "Failed to create socket";
+
+        // connect to the same destination address
+        const struct sockaddr *sock_addr = reinterpret_cast<struct sockaddr *>(&addr);
+        int ret = ::connect(socket_fd, sock_addr, len);
+        PCHECK(ret != -1) << "Failed to connect to the peer address";
+
+        // prepare cancel message
+        auto [pid, cancel_key] = _auth->get_pid_cancel_key_pair();
+        size_t msg_len = sizeof(uint32_t) * 2 + sizeof(pid) + sizeof(uint8_t) * cancel_key.size();
+        char buffer[msg_len];
+
+        sendint32(msg_len, buffer);
+        sendint32(MSG_CANCEL, buffer + sizeof(uint32_t));
+        sendint32(pid, buffer + 2 * sizeof(uint32_t));
+        std::memcpy(buffer + sizeof(uint32_t) * 2 + sizeof(pid), cancel_key.data(), sizeof(uint8_t) * cancel_key.size());
+
+        // send cancel message
+        ret = write(socket_fd, buffer, msg_len);
+        PCHECK(ret == msg_len) << "Failed to write " << msg_len << " bytes";
+
+        // close connection
+        ::close(socket_fd);
     }
 } // namespace springtail::pg_proxy

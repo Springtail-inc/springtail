@@ -340,7 +340,7 @@ namespace springtail::pg_proxy {
         Type         _type;                ///< type of session
 
         int32_t      _pid;                 ///< pid for cancel request
-        int32_t      _cancel_key;          ///< cancel key for cancel request
+        std::vector<uint8_t>  _cancel_key; ///< cancel key for cancel request
 
         UserPtr      _user;                ///< user
         uint32_t     _db_id;               ///< database id
