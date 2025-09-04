@@ -84,7 +84,7 @@ public:
      *
      * @return const std::pair<int32_t, std::vector<uint8_t>>
      */
-    const std::pair<int32_t, std::vector<uint8_t>> get_pid_cancel_key_pair() const
+    std::pair<int32_t, std::vector<uint8_t>> get_pid_cancel_key_pair() const
     {
         return std::make_pair(_pid, _cancel_key);
     }
@@ -201,7 +201,7 @@ public:
      *
      * @return const std::pair<int32_t, std::vector<uint8_t>>
      */
-    const std::pair<int32_t, std::vector<uint8_t>> get_pid_cancel_key_pair() const
+    std::pair<int32_t, std::vector<uint8_t>> get_pid_cancel_key_pair() const
     {
         return std::make_pair(_pid, _cancel_key);
     }
