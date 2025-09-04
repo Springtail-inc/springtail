@@ -368,7 +368,7 @@ class Test:
         self.run_regress_cmd(self._proxy_config['port'], schedule, test_files, 'proxy.out', False)
 
         # check the log files
-        springtail.check_logs(self._config_file_copy)
+        check_logs_result = springtail.check_logs(self._config_file_copy)
         if len(check_logs_result) != 0:
             logging.error("There were some failures; exiting")
             sys.exit(1)

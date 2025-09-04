@@ -64,6 +64,12 @@ namespace springtail {
         }
     };
 
+    class PgRetryError : public PgConnectionError {
+        const char *what() const noexcept {
+            return "An error occurred that should result in a retry of the operation";
+        }
+    };
+
     class PgStreamingError : public PgConnectionError {
         const char *what() const noexcept {
             return "Error connection is already streaming";

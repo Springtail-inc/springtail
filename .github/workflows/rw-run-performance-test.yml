@@ -133,6 +133,14 @@ jobs:
           ln -s /home/dev/release release
           ln -s /home/dev/install install
           ln -s /home/dev/external external
+          
+          # Set the build dir to ../../$CI_BUILD_TYPE in 
+          # - python/testing/test_runner_config.yaml
+          # - python/performance/performance_config.yaml
+          # - python/benchmarks/config.yaml
+          sed -i -e "s|^build_dir: .*|build_dir: ../../${CI_BUILD_TYPE}|" python/testing/test_runner_config.yaml
+          sed -i -e "s|^build_dir: .*|build_dir: ../../${CI_BUILD_TYPE}|" python/performance/performance_config.yaml
+          sed -i -e "s|^build_dir: .*|build_dir: ../../${CI_BUILD_TYPE}|" python/benchmarks/config.yaml
 
       - name: Rebuild
         if: inputs.reuse_code == false
@@ -218,7 +226,7 @@ jobs:
 
           # Springtail service logs
           springtail_log_file="springtail-performance-${_LOG_SHA}-${_LOG_FLAG}-${_TIMESTAMP}.tar.gz"
-          output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../debug)
+          output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../${CI_BUILD_TYPE}})
           log_dump_file_name=$(echo $output | cut -f2 -d':' | xargs | head -1)
           springtail_log_s3_key="${S3_LOGS_PREFIX_FULL}/${springtail_log_file}"
           aws s3 cp $log_dump_file_name $springtail_log_s3_key
