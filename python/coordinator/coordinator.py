@@ -1,12 +1,12 @@
-import os
-import sys
-import yaml
-import logging
 import argparse
+import logging
+import os
 import signal
-import time
+import sys
 import threading
+import time
 import traceback
+import yaml
 from typing import Optional
 
 # Get the parent directory of the current script (i.e., the project root directory)
@@ -33,6 +33,7 @@ from sys_tbl_mgr import SysTblMgrClient
 from otel_logger import init_logging
 
 ALL_DAEMONS = ['sys_tbl_mgr_daemon', 'pg_log_mgr_daemon', 'pg_ddl_daemon', 'proxy', 'pg_xid_subscriber_daemon']
+
 
 class Coordinator:
     """The Coordinator class to manage the components of the system."""
@@ -65,7 +66,7 @@ class Coordinator:
             os.environ['IS_DEPLOYED'] = 'true'
 
         # Get the service type
-        self.service_name : str = service_name
+        self.service_name: str = service_name
         if not self.service_name:
             sn_env = os.environ.get('SERVICE_NAME')
             if not sn_env:
@@ -91,10 +92,12 @@ class Coordinator:
             self.logger.debug("Checking properties for production")
             self.production = Production(self.install_path)
 
-
     def startup(self):
         """
-        Start the coordinator.
+        Start the coordinator. Download and install binaries if the state is STARTUP or RELOAD.
+
+        If STARTUP, install binaries and start the coordinator, then immediately exit, waiting for a manual restart.
+        If RELOAD, install binaries and restart the coordinator, then continue.
 
         Blocks while running.
         """
@@ -103,12 +106,9 @@ class Coordinator:
         config_gitsha = self.props.get_config_gitsha()
 
         if self.production:
-            # Send SNS message
-            self.production.send_sns('startup')
-
             # Install binaries
             try:
-                if state == CoordinatorState.STARTUP:
+                if state == CoordinatorState.STARTUP or state == CoordinatorState.RELOAD:
                     # Install binaries
                     self.logger.debug("Installing binaries")
                     self.production.install_binaries(config_gitsha)
@@ -117,7 +117,8 @@ class Coordinator:
                     self.props.set_coordinator_state(CoordinatorState.RELOADING)
 
                     # loader will restart the coordinator when ready
-                    sys.exit(0)
+                    if state == CoordinatorState.STARTUP:
+                        sys.exit(0)
             except Exception as e:
                 raise ValueError("Failed to install binaries: " + str(e))
 
@@ -208,7 +209,6 @@ class Coordinator:
         self.logger.info("Shutting down all components")
         self.scheduler.shutdown()
 
-
     def shutdown(self, signum: int = 0):
         """
         Shutdown the coordinator.
@@ -232,7 +232,6 @@ class Coordinator:
         if self.production:
             self.production.send_sns('shutdown')
 
-
     def _check_properties(self, props: Properties) -> None:
         """
         Check the properties; check paths exist.
@@ -253,7 +252,6 @@ class Coordinator:
         # check log path is writable
         if not ((os.stat(log_path).st_mode & 0o777) & 0o002):
             raise ValueError(f"Log path is not writable: {log_path}")
-
 
     def _wait_for_ingestion(self, props: Properties) -> None:
         """
@@ -303,7 +301,8 @@ def parse_arguments():
 
     # Add arguments -f for config file and -b for build directory
     parser.add_argument('-c', '--config-file', type=str, default='config.yaml', help='Path to the configuration file')
-    parser.add_argument('-s', '--service', type=str, required=False, help='Name of the service: ingestion, fdw, or proxy')
+    parser.add_argument('-s', '--service', type=str, required=False,
+                        help='Name of the service: ingestion, fdw, or proxy')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
 
     # Parse the arguments and return them
@@ -359,16 +358,18 @@ if __name__ == "__main__":
         log_rotation_count = yaml_config['log_rotation_count']
 
     init_logging(props.get_otel_config(), props.get_log_path(), debug=args.debug,
-                log_rotation_size=log_rotation_size, log_rotation_count=log_rotation_count)
+                 log_rotation_size=log_rotation_size, log_rotation_count=log_rotation_count)
 
     logger = logging.getLogger('springtail')
 
     coordinator = Coordinator(props, args.debug, yaml_config.get('production'),
                               yaml_config.get('install_dir'), args.service)
 
+
     # Set up signal handlers
     def signal_handler(signum, frame):
         coordinator.shutdown(signum)
+
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -380,5 +381,3 @@ if __name__ == "__main__":
         logger.error(f"An error occurred during startup: {e}")
         logger.error(f"Error details: {error_details}")
         coordinator.shutdown(0)
-
-

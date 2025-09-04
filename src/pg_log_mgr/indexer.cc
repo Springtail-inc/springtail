@@ -389,35 +389,44 @@ namespace springtail::committer {
         auto client = sys_tbl_mgr::Client::get_instance();
         proto::IndexInfo index_info = client->get_index_info(db_id, index_id, xid);
 
-        // Index should be at NOT_READY / BEING_DELETED to be processed
-        DCHECK(static_cast<sys_tbl::IndexNames::State>(index_info.state()) == sys_tbl::IndexNames::State::BEING_DELETED ||
-                static_cast<sys_tbl::IndexNames::State>(index_info.state()) == sys_tbl::IndexNames::State::NOT_READY);
-
-        if (!root) {
-            // if IndexStatus is BUILDING - stop could have got requested, so the index
-            //                              will be rebuilt during restart
-            // If IndexStatus is ABORTING - Drop came before build was even picked,
-            //                              mark the state as DELETED
-
-            if (work_item.is_status(IndexStatus::ABORTING)) {
-                client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
-            }
-        } else {
-            // Index building was attempted, finalize and process build/abort
-            auto extent_id = root->finalize();
-            if (work_item.is_status(IndexStatus::BUILDING)) {
-                auto meta = client->get_roots(db_id, tid, end_xid);
-                meta->roots.clear();
-                meta->roots.emplace_back(key.second, extent_id);
-                client->update_roots(db_id, tid, end_xid, *meta);
-                client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::READY);
-            } else if (work_item.is_status(IndexStatus::ABORTING)) {
-                // the index was deleted while we were building it
-                // lets also finalize here as part of the tree
-                // may have got finalized while we were building.
+        // Table resync will cause index to be marked as deleted
+        if (static_cast<sys_tbl::IndexNames::State>(index_info.state()) == sys_tbl::IndexNames::State::DELETED) {
+            // Index building was attempted, truncate and finalize
+            if (root) {
                 root->truncate();
                 root->finalize();
-                client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
+            }
+        } else {
+            // Index should be at NOT_READY / BEING_DELETED to be processed
+            DCHECK(static_cast<sys_tbl::IndexNames::State>(index_info.state()) == sys_tbl::IndexNames::State::BEING_DELETED ||
+                    static_cast<sys_tbl::IndexNames::State>(index_info.state()) == sys_tbl::IndexNames::State::NOT_READY);
+
+            if (!root) {
+                // if IndexStatus is BUILDING - stop could have got requested, so the index
+                //                              will be rebuilt during restart
+                // If IndexStatus is ABORTING - Drop came before build was even picked,
+                //                              mark the state as DELETED
+
+                if (work_item.is_status(IndexStatus::ABORTING)) {
+                    client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
+                }
+            } else {
+                // Index building was attempted, finalize and process build/abort
+                auto extent_id = root->finalize();
+                if (work_item.is_status(IndexStatus::BUILDING)) {
+                    auto meta = client->get_roots(db_id, tid, end_xid);
+                    meta->roots.clear();
+                    meta->roots.emplace_back(key.second, extent_id);
+                    client->update_roots(db_id, tid, end_xid, *meta);
+                    client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::READY);
+                } else if (work_item.is_status(IndexStatus::ABORTING)) {
+                    // the index was deleted while we were building it
+                    // lets also finalize here as part of the tree
+                    // may have got finalized while we were building.
+                    root->truncate();
+                    root->finalize();
+                    client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
+                }
             }
         }
 
