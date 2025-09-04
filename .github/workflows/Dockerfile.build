@@ -5,7 +5,7 @@ FROM ${BASE_IMAGE}
 ARG CI_BUILD_TYPE
 ARG NCORES=4
 ARG CI_WORKSPACE=/__w/springtail/springtail
-ARG INCLUDE_TIME_TRACES=false
+ARG SPRINGTAIL_INCLUDE_TIME_TRACES=true
 ENV TINI_VERSION=v0.19.0 \
     ZIC=true \
     VCPKG_FORCE_SYSTEM_BINARIES=1 \
@@ -24,10 +24,10 @@ RUN ln -s /home/dev/debug debug && \
     ln -s /home/dev/external external && \
     ./vcpkg.sh
 
-RUN if [ "$CI_BUILD_TYPE" = "debug" ]; then \
+RUN if [ "$SPRINGTAIL_INCLUDE_TIME_TRACES" = "false" ]; then unset SPRINGTAIL_INCLUDE_TIME_TRACES ; fi && \
+    if [ "$CI_BUILD_TYPE" = "debug" ]; then \
         cmake -B "debug" -S . -D'CMAKE_BUILD_TYPE=Debug' -DVCPKG_INSTALL_OPTIONS="--allow-unsupported;--clean-after-build";  \
     else \
-        if [ "$INCLUDE_TIME_TRACES" = "true" ]; then SPRINGTAIL_INCLUDE_TIME_TRACES=1 ; fi && \
         cmake -B "release" -S . -D'CMAKE_BUILD_TYPE=Release' -DCMAKE_BUILD_TYPE=RelWithDebInfo -DNDEBUG=1 -DVCPKG_INSTALL_OPTIONS="--allow-unsupported;--clean-after-build";  \
     fi && \
     rm -rf  /home/dev/external/vcpkg/buildtrees /home/dev/external/vcpkg/packages /home/dev/external/vcpkg/downloads

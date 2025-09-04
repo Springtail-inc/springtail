@@ -84,10 +84,10 @@ jobs:
           # Figure out the build args (line separated for later use)
           if ${{ inputs.springtail_include_time_traces }}; then
             echo "Including time traces in Springtail build."
-            echo "springtail_include_time_traces=INCLUDE_TIME_TRACES=true" >> $GITHUB_OUTPUT
+            echo "springtail_include_time_traces=SPRINGTAIL_INCLUDE_TIME_TRACES=true" >> $GITHUB_OUTPUT
           else
             echo "Time traces not included in Springtail build."
-            echo "springtail_include_time_traces=INCLUDE_TIME_TRACES=false" >> $GITHUB_OUTPUT
+            echo "springtail_include_time_traces=SPRINGTAIL_INCLUDE_TIME_TRACES=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Docker Build Push Action
