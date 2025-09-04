@@ -547,8 +547,8 @@ namespace springtail::pg_proxy {
                 CHECK_EQ(_state, AUTH_DONE);
                 // get the backend pid and key for cancel
                 _pid = buffer->get32();
-                _cancel_key.resize(sizeof(uint32_t));
-                buffer->get_bytes(reinterpret_cast<char *>(_cancel_key.data()), sizeof(uint32_t));
+                _cancel_key.resize(buffer->remaining());
+                buffer->get_bytes(reinterpret_cast<char *>(_cancel_key.data()), buffer->remaining());
                 break;
 
             case 'E':
@@ -1106,16 +1106,29 @@ namespace springtail::pg_proxy {
 
         // determine destination address from the existing connection
         _connection->get_peer_address(&addr, &len);
-        CHECK(len != 0) << "Failed to get peer addresss of the server connection";
+        DCHECK(len != 0) << "Failed to get peer addresss of the server connection";
+        if (len == 0) {
+            LOG_ERROR( "Failed to get peer addresss of the server connection");
+            return;
+        }
 
         // create socket
         int socket_fd = ::socket(addr.ss_family, SOCK_STREAM, 0);
-        PCHECK(socket_fd > -1) << "Failed to create socket";
+        DCHECK(socket_fd > -1) << "Failed to create a socket";
+        if (socket_fd == -1) {
+            LOG_ERROR("Failed to creat a socket: error code: {}, error string {}", errno, strerror(errno));
+            return;
+        }
 
         // connect to the same destination address
         const struct sockaddr *sock_addr = reinterpret_cast<struct sockaddr *>(&addr);
         int ret = ::connect(socket_fd, sock_addr, len);
-        PCHECK(ret != -1) << "Failed to connect to the peer address";
+        DCHECK(ret != -1) << "Failed to connect to the peer address";
+        if (ret == -1) {
+            LOG_ERROR("Failed to connect to the peer address: error code: {}, error string {}", errno, strerror(errno));
+            ::close(socket_fd);
+            return;
+        }
 
         // prepare cancel message
         auto [pid, cancel_key] = _auth->get_pid_cancel_key_pair();
@@ -1129,7 +1142,13 @@ namespace springtail::pg_proxy {
 
         // send cancel message
         ret = write(socket_fd, buffer, msg_len);
-        PCHECK(ret == msg_len) << "Failed to write " << msg_len << " bytes";
+        DCHECK(ret == msg_len) << "Failed to write " << msg_len << " bytes";
+        if (ret != msg_len) {
+            LOG_ERROR("Failed to write {} bytes: bytes written {}", msg_len, ret);
+            if (ret == -1) {
+                LOG_ERROR("Failed to write to the socker: error code: {}, error string {}", errno, strerror(errno));
+            }
+        }
 
         // close connection
         ::close(socket_fd);

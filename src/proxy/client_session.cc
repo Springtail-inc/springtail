@@ -22,10 +22,12 @@
 
 namespace springtail::pg_proxy {
 
+    /** unique session id counter */
+    static std::atomic<uint32_t> process_id(1);
+
     std::unordered_map<
-        std::pair<int32_t, std::vector<uint8_t>>,
-        std::shared_ptr<ClientSession>,
-        ClientSession::CancelKeyHash
+        int32_t,
+        std::pair<std::vector<uint8_t>, std::shared_ptr<ClientSession>>
     > ClientSession::_cancel_map{};
 
     ClientSession::ClientSession(ProxyConnectionPtr connection)
@@ -36,11 +38,12 @@ namespace springtail::pg_proxy {
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client connected: endpoint={}", _id, connection->endpoint());
 
-        // TODO: although this is random, it does not guarantee uniqueness
-        // initialize pid and key for cancellation
-        get_random_bytes(reinterpret_cast<uint8_t*>(&_pid), 4);
-        // clear top bit to make pid not signed, some historic issue
-        _pid &= 0x7FFFFFFF;
+        // NOTE: the assumption here is that by the time we wrap around,
+        //  the earliest sessions would be long gone
+        _pid = process_id;
+        process_id = (process_id + 1) & 0x7FFFFFFF;
+
+        // generate random cancel key
         _cancel_key.resize(sizeof(uint32_t));
         get_random_bytes(_cancel_key.data(), sizeof(uint32_t));
 
@@ -164,13 +167,14 @@ namespace springtail::pg_proxy {
             auto pid_cancel_key_pair = _auth->get_pid_cancel_key_pair();
 
             // 1. Find ClientSession with the given pid and cancel_key
-            auto it = _cancel_map.find(pid_cancel_key_pair);
+            auto it = _cancel_map.find(pid_cancel_key_pair.first);
             CHECK(it != _cancel_map.end());
 
             // 2. Request cancel on this client session
-            it->second->_handle_cancel();
+            const std::vector<uint8_t>& cancel_key = pid_cancel_key_pair.second;
+            it->second.second->_handle_cancel(pid_cancel_key_pair.first, cancel_key);
 
-            // 3. Terminaate current connection
+            // 3. Terminate current connection
             _connection->close();
             return;
         }
@@ -194,7 +198,7 @@ namespace springtail::pg_proxy {
         }
 
         if (auth_done) {
-            _cancel_map.emplace(std::make_pair(_pid, _cancel_key), shared_from_this());
+            _cancel_map.emplace(_pid, std::make_pair(_cancel_key, shared_from_this()));
 
             // auth done, haven't sent ready for query yet
             // need to finish server authentication
@@ -217,8 +221,14 @@ namespace springtail::pg_proxy {
 
 
     void
-    ClientSession::_handle_cancel()
+    ClientSession::_handle_cancel(int pid, const std::vector<uint8_t> &cancel_key)
     {
+        DCHECK(pid == _pid) << "Process id does not match";
+        if (cancel_key != _cancel_key) {
+            LOG_WARN("Invalid cancel key for cancel request");
+            return;
+        }
+
         if (_primary_session != nullptr) {
             // send cancel
             _primary_session->send_cancel();
@@ -355,7 +365,7 @@ namespace springtail::pg_proxy {
         }
 
         // clean up cancel map
-        _cancel_map.erase(std::make_pair(_pid, _cancel_key));
+        _cancel_map.erase(_pid);
 
         // clear all internal data structures; clears associated session
         reset_session();

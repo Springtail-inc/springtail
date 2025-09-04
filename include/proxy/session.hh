@@ -349,7 +349,7 @@ namespace springtail::pg_proxy {
 
         std::unordered_map<std::string, std::string> _parameters; ///< startup parameters
 
-        uint32_t _id;                      ///< unique id for session
+        uint64_t _id;                      ///< unique id for session
 
         bool _in_transaction = false;      ///< is this session in a transaction
 

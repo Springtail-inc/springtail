@@ -663,8 +663,8 @@ ServerAuthorization::_handle_message(uint64_t seq_id)
             CHECK_EQ(_state, AUTH_DONE);
             // get the backend pid and key for cancel
             _pid = buffer->get32();
-            _cancel_key.resize(sizeof(uint32_t));
-            buffer->get_bytes(reinterpret_cast<char *>(_cancel_key.data()), sizeof(uint32_t));
+            _cancel_key.resize(buffer->remaining());
+            buffer->get_bytes(reinterpret_cast<char *>(_cancel_key.data()), buffer->remaining());
             break;
 
         case 'Z': {

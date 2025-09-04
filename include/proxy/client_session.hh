@@ -141,47 +141,10 @@ namespace springtail::pg_proxy {
 
     private:
 
-        /** Custom hash function for hashing pid and cancel key pair as the key of unordered map */
-        struct CancelKeyHash {
-            std::size_t
-            operator()(const std::pair<int32_t, std::vector<uint8_t>>& p) const noexcept
-            {
-                constexpr uint64_t fnv_offset = 1469598103934665603ULL;
-                constexpr uint64_t fnv_prime  = 1099511628211ULL;
-
-                size_t h_val = fnv_offset;
-
-                // --- Mix in the int32_t first ---
-                h_val ^= p.first;
-                h_val *= fnv_prime;
-
-                // --- Mix in the vector contents in 64-bit chunks ---
-                const auto& v = p.second;
-                size_t i = 0;
-                for (; i + 8 <= v.size(); i += 8) {
-                    uint64_t word;
-                    std::memcpy(&word, v.data() + i, sizeof(word));
-                    h_val ^= word;
-                    h_val *= fnv_prime;
-                }
-
-                // --- Mix in the left over chunk ---
-                if (i < v.size()) {
-                    uint64_t word = 0;
-                    std::memcpy(&word, v.data() + i, v.size() - i);
-                    h_val ^= word;
-                    h_val *= fnv_prime;
-                }
-
-                return h_val;
-            }
-        };
-
         /** map of pid amd cancel key pair to the corresponding ClientSession */
         static std::unordered_map<
-            std::pair<int32_t, std::vector<uint8_t>>,
-            std::shared_ptr<ClientSession>,
-            CancelKeyHash
+            int32_t,
+            std::pair<std::vector<uint8_t>, std::shared_ptr<ClientSession>>
         > _cancel_map;
 
         /** cache of statements, transaction history and session history */
@@ -231,7 +194,7 @@ namespace springtail::pg_proxy {
         void _handle_auth();
 
         /** Handle cancel request */
-        void _handle_cancel();
+        void _handle_cancel(int pid, const std::vector<uint8_t> &cancel_key);
 
         /** Handle simple query request */
         void _handle_simple_query(BufferPtr buffer, uint64_t seq_id);
