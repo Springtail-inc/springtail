@@ -1442,7 +1442,8 @@ namespace springtail {
 
         _seek_stream(_current_offset + (1 + 8)); // flags + lsn
         _skip_string(); // prefix
-        _seek_stream(_current_offset + _recvint32()); // msg len + msg
+        auto len = _recvint32();
+        _seek_stream(_current_offset + len); // msg len + msg
     }
 
     PgMsgPtr
@@ -1551,32 +1552,42 @@ namespace springtail {
             return INVALID_LSN;
         }
 
-        uint64_t last_msg_end_offset = 0;
-        LSN_t last_valid_end_lsn = INVALID_LSN;
+        uint64_t current_lsn_msg_start = 0;
+        LSN_t current_start_lsn = INVALID_LSN;
+        LSN_t last_valid_start_lsn = INVALID_LSN;
+        char current_msg_type = 0;
 
-        // Make sure we have room for at least a header
-        while (_current_offset + PgMsgStreamHeader::SIZE <= file_end_offset) {
+        // Make sure we have room for at least a header + type
+        while (_current_offset + PgMsgStreamHeader::SIZE + 1 <= file_end_offset) {
 
             // read header at current offset and get next header offset
             // after reading the header, _current_offset is set to just after the header
             CHECK(_read_header());
+            current_msg_type = _stream.peek();
+
+            // check if the LSN has changed, if so record it
+            if (current_start_lsn != _header.start_lsn) {
+                last_valid_start_lsn = current_start_lsn;
+                current_start_lsn = _header.start_lsn;
+                current_lsn_msg_start = _current_offset - PgMsgStreamHeader::SIZE;
+            }
 
             // check if the full message fits in the file
             if (_xlog_msg_end_offset == file_end_offset) {
-                // last full message, restart after this message
-                return _header.end_lsn;
+                // last full message of the file
+                 if (current_msg_type == pg_msg::MSG_COMMIT ||
+                     current_msg_type == pg_msg::MSG_STREAM_COMMIT ||
+                     current_msg_type == pg_msg::MSG_STREAM_ABORT) {
+                    return _header.end_lsn+1;
+                }
+                // otherwise truncate to start of this lsn message
+                break;
             }
 
             if (_xlog_msg_end_offset < file_end_offset) {
                 // safe message, seek to next message
                 _stream.seekg(_xlog_msg_end_offset, std::fstream::beg);
                 _current_offset = _xlog_msg_end_offset;
-
-                // remember this as the last valid message
-                // if we need to truncate, we truncate to just after this message
-                last_msg_end_offset = _xlog_msg_end_offset;
-                last_valid_end_lsn = _header.end_lsn;
-
                 continue;
             }
 
@@ -1586,14 +1597,21 @@ namespace springtail {
             break;
         }
 
+        if (current_lsn_msg_start == 0) {
+            // need to restart from previous log file's end LSN
+            // return INVALID_LSN and caller will remove file and
+            // examine previous file
+            return INVALID_LSN;
+        }
+
         // partial message detected; _xlog_msg_end_offset > file_end_offset
         // truncate to just before this message header
         if (truncate) {
-            _truncate_file(file, last_msg_end_offset);
+            _truncate_file(file, current_lsn_msg_start);
         }
 
-        // replay this message, if there was one
-        return last_valid_end_lsn;
+        // replay this message (LSN)
+        return last_valid_start_lsn;
     }
 
     bool

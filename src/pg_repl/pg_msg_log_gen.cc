@@ -37,7 +37,7 @@ namespace springtail {
     {
         if (_buffer_offset > 0) {
             // encode and write the header
-            PgMsgStreamHeader header{_buffer_offset, _lsn - 1, _lsn};
+            PgMsgStreamHeader header{_buffer_offset, _lsn - 1, _lsn - 1};
             char header_buf[PgMsgStreamHeader::SIZE];
             header.encode_header(header_buf);
             if (::fwrite(header_buf, sizeof(header_buf), 1, _fp) < 0) {

@@ -23,7 +23,7 @@ namespace {
         static void SetUpTestSuite()
         {
             // Add two fake databeses with custom include.schemas config
-            std::string js = 
+            std::string js =
             "{ "
             "\"db_instances\": {"
                 "\"1234\": {"
@@ -68,7 +68,7 @@ namespace {
             // ok to through exceptions from here if need be
 
             // remove the log file
-            std::filesystem::remove(_log_file);
+            //std::filesystem::remove(_log_file);
         }
 
         /** Process json command file stored into log file*/
@@ -114,7 +114,7 @@ namespace {
         // read next message
         PgMsgPtr msg = reader.read_message({}, eos);
         EXPECT_EQ(msg, nullptr);
-        EXPECT_EQ(reader.message_offset(), 0);
+        EXPECT_EQ(reader.message_offset(), PgMsgStreamHeader::SIZE);
     }
 
     TEST_F(MsgStreamReader_Test, SkipStream)
