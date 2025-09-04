@@ -2217,6 +2217,8 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
                 ri.set_index_id(idx.id());
                 ri.set_extent_id(*extent_id);
                 *roots_info->add_roots() = ri;
+
+                LOG_DEBUG(LOG_SCHEMA, "Found cached root: {} {}", idx.id(), extent_id);
                 continue; // use cached data and go to the next index
             }
         }
@@ -2246,6 +2248,8 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
         ri.set_index_id(idx.id());
         ri.set_extent_id(eid_f->get_uint64(&row));
         *roots_info->add_roots() = ri;
+
+        LOG_DEBUG(LOG_SCHEMA, "Found root in table: {} {}", idx.id(), eid_f->get_uint64(&row));
 
         // use snapshot_xid of the last row
         snapshot_xid = sxid_f->get_uint64(&row);
