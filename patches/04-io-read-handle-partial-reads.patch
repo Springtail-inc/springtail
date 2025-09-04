@@ -1,0 +1,48 @@
+diff --git a/src/storage/io_file.cc b/src/storage/io_file.cc
+index ffffff0..ffffff1 100644
+--- a/src/storage/io_file.cc
++++ b/src/storage/io_file.cc
+@@ -237,12 +237,49 @@ IOSysFH::read(IORequestRead * const request,
+ 
+         // issue the read
+ -        int bytes_read = preadv(_fd, iov, count, request->offset + hdr_off);
+ -        if (bytes_read == -1) {
+ +        const off_t data_off = request->offset + hdr_off;
+ +        ssize_t bytes_read = preadv(_fd, iov, count, data_off);
+ +        if (bytes_read == -1) {
+             request->complete(response, errno);
+             return;
+         }
+ -        CHECK_EQ(bytes_read, total_size);
+ +        if (bytes_read < static_cast<ssize_t>(total_size)) {
+ +            // Top up remaining bytes with a fallback pread into a temporary buffer
+ +            size_t remain = total_size - bytes_read;
+ +            std::vector<char> tmp(remain);
+ +            ssize_t n2 = ::pread(_fd, tmp.data(), remain, data_off + bytes_read);
+ +            if (n2 < 0) {
+ +                request->complete(response, errno);
+ +                return;
+ +            }
+ +            if (n2 != static_cast<ssize_t>(remain)) {
+ +                request->complete(response, IOStatus::ERROR);
+ +                return;
+ +            }
+ +            // Scatter-copy tmp back into the iovecs starting at bytes_read
+ +            size_t filled = 0;
+ +            size_t cursor = bytes_read;
+ +            for (int i = 0; i < count && filled < remain; ++i) {
+ +                char* base = static_cast<char*>(iov[i].iov_base);
+ +                size_t seg_len = iov[i].iov_len;
+ +                if (cursor >= seg_len) {
+ +                    cursor -= seg_len;
+ +                    continue;
+ +                }
+ +                size_t tocopy = std::min(seg_len - cursor, remain - filled);
+ +                std::memcpy(base + cursor, tmp.data() + filled, tocopy);
+ +                filled += tocopy;
+ +                cursor = 0;
+ +            }
+ +            bytes_read = total_size;
+ +        }
+ 
+         LOG_DEBUG(LOG_STORAGE, "IOSysFH::read bytes read={}, hdr_off={}", bytes_read, hdr_off);

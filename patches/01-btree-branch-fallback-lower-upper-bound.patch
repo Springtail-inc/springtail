@@ -1,0 +1,42 @@
+diff --git a/src/storage/btree.cc b/src/storage/btree.cc
+index 9e8f000..9e8f001 100644
+--- a/src/storage/btree.cc
++++ b/src/storage/btree.cc
+@@ -54,13 +54,10 @@ BTree::lower_bound(TuplePtr search_key,
+         while (current->header().type.is_branch()) {
+             // perform a lower-bound check to find the appropriate child branch
+             auto child_i = current->lower_bound(search_key, this->_branch_schema);
+ -            if (child_i == current->end()) {
+ -                if (for_update) {
+ -                    child_i = current->last();
+ -                } else {
+ -                    return end();
+ -                }
+ -            }
+ +            // If the key falls beyond all branch keys, traverse the last child
+ +            if (child_i == current->end()) {
+ +                child_i = current->last();
+ +            }
+ 
+             // retrieve the child offset
+             uint64_t extent_id = _branch_child_f->get_uint64(&*child_i);
+ 
+@@ -96,13 +93,10 @@ BTree::upper_bound(TuplePtr search_key,
+         while (current->header().type.is_branch()) {
+             // perform a lower-bound check to find the appropriate child branch
+             auto child_i = current->upper_bound(search_key, this->_branch_schema);
+ -            if (child_i == current->end()) {
+ -                if (for_update) {
+ -                    child_i = current->last();
+ -                } else {
+ -                    return end();
+ -                }
+ -            }
+ +            // If the key falls beyond all branch keys, traverse the last child
+ +            if (child_i == current->end()) {
+ +                child_i = current->last();
+ +            }
+ 
+             // retrieve the child offset
+             uint64_t extent_id = _branch_child_f->get_uint64(&*child_i);
+ 

@@ -1,0 +1,168 @@
+diff --git a/src/storage/cache.cc b/src/storage/cache.cc
+index aaaaaaa..bbbbbbb 100644
+--- a/src/storage/cache.cc
++++ b/src/storage/cache.cc
+@@ -458,7 +458,7 @@ StorageCache::PageCache::_try_evict_dirty(PagePtr page)
+         bool success = true;
+         if (page->_flush_callback && page->_is_dirty) {
+ -            boost::unique_lock lock(_mutex, boost::adopt_lock);
+ +            boost::unique_lock lock(_mutex);
+ 
+             // check if the page is currently flushing
+             if (page->_is_flushing) {
+                 // wait for the flushing to complete
+                 page->_flush_cond.wait(lock, [&page](){ return !page->_is_flushing; });
+             } else {
+                 // mark the page as flushing
+                 page->_is_flushing = true;
+                 auto callback = page->_flush_callback;
+ 
+                 // mark the page as clean pre-emptively in case someone else gets the page after
+                 // flush and re-dirties it
+                 page->_is_dirty = false;
+                 lock.unlock();
+ 
+                 success = callback(page);
+ 
+ -                lock.lock();
+ -                lock.release();
+ +                lock.lock();
+ 
+                 // clear the page from the flush list
+                 _flush_list[page->_file].erase(page->_flush_pos);
+                 page->_register_flush(nullptr);
+@@ -520,10 +520,10 @@ StorageCache::PageCache::_make_page_space()
+                 // if we have to wait, block until the cleaner wakes us
+                 if (_waiting_for_cleaner) {
+ -                    boost::unique_lock lock(_mutex, boost::adopt_lock);
+ +                    boost::unique_lock lock(_mutex);
+                     _cleaner_block.wait(lock, [this]() { return !_waiting_for_cleaner; });
+ -                    lock.release(); // release the lock so it doesn't get unlocked
+                 }
+             }
+         }
+@@ -1226,12 +1226,12 @@ StorageCache::DataCache::_get(uint64_t cache_id,
+             if (extent->_state == CacheExtent::State::FLUSHING) {
+                 // mark ourselves as a user of the extent to prevent eviction post-flush()
+                 ++(extent->_use_count);
+ 
+                 // wait for the flush to complete and then return the extent
+ -                boost::unique_lock lock(_mutex, boost::adopt_lock);
+ +                boost::unique_lock lock(_mutex);
+                 auto cv = extent->_flush_cv;
+                 cv->wait(lock, [&extent](){ return extent->_state != CacheExtent::State::FLUSHING; });
+ -                lock.release();
+ 
+                 return extent;
+             }
+@@ -1456,37 +1456,41 @@ StorageCache::DataCache::_get_clean(const std::filesystem::path& file, uint64_t extent_id)
+     }
+ 
+     StorageCache::CacheExtentPtr
+     StorageCache::DataCache::_read_extent(const std::filesystem::path& file, uint64_t extent_id,
+                                           std::function<void(CacheExtentPtr)> callback)
+     {
+         std::pair<uint64_t, const std::string&> key{extent_id, file.native()};
+ 
+         // extent not cached, check if someone is reading it from disk
+ -        auto io_i = _io_map.find(key);
+ -        if (io_i != _io_map.end()) {
+ -            boost::unique_lock lock(_mutex, boost::adopt_lock);
+ +        boost::unique_lock lk(_mutex);
+ +        auto io_i = _io_map.find(key);
+ +        if (io_i != _io_map.end()) {
+ 
+             // wait for the read to complete
+             auto entry = io_i->second;
+ -            entry->cv.wait(lock, [&entry](){ return entry->signaled; });
+ +            entry->cv.wait(lk, [&entry](){ return entry->signaled; });
+ 
+             // see if we should remove the entry
+             --entry->counter;
+             if (entry->counter == 0) {
+                 _io_map.erase(io_i);
+             }
+ 
+             // note: try to retrieve from the cache again
+ -            lock.release();
+             return nullptr;
+         }
+ 
+         // add the condition variable to the IO map
+         auto entry = std::make_shared<IoCv>();
+         _io_map[key] = entry;
+ 
+         // make space for a new extent in the cache
+         _make_extent_space();
+ 
+         // unlock before IO
+ -        boost::unique_lock lock(_mutex, boost::adopt_lock);
+ -        lock.unlock();
+ +        lk.unlock();
+ 
+         // read the extent
+         auto handle = IOMgr::get_instance()->open(file, IOMgr::READ, true);
+         auto response = handle->read(extent_id);
+         auto extent = std::make_shared<CacheExtent>(response->data, file, extent_id,
+                                                     response->next_offset - response->offset);
+ 
+         // reacquire the lock once IO complete
+ -        lock.lock();
+ -        lock.release();
+ +        lk.lock();
+ 
+         // callback to initialize state before returning the extent to the callers
+         callback(extent);
+ 
+         // notify the other callers waiting for this extent
+ -        entry->cv.notify_all();
+ -
+         // remove the condition variable from the map
+         entry->signaled = true;
+ +        entry->cv.notify_all();
+         --entry->counter;
+         if (entry->counter == 0) {
+             _io_map.erase(key);
+         }
+ 
+         return extent;
+     }
+ 
+@@ -1501,14 +1505,12 @@ StorageCache::DataCache::_flush(CacheExtentPtr extent)
+         // if already flushing, wait for completion
+         if (extent->_state == CacheExtent::State::FLUSHING) {
+ -            boost::unique_lock lock(_mutex, boost::adopt_lock);
+ +            boost::unique_lock lock(_mutex);
+ 
+             auto cv = extent->_flush_cv;
+             cv->wait(lock, [&extent](){ return extent->_state != CacheExtent::State::FLUSHING; });
+ 
+ -            // note: this doesn't unlock, just releases the adopt_lock
+ -            lock.release();
+             return;
+         }
+ 
+         // if the extent isn't DIRTY, don't need to flush
+         if (extent->_state != CacheExtent::State::DIRTY) {
+             return;
+         }
+@@ -1519,10 +1521,10 @@ StorageCache::DataCache::_flush(CacheExtentPtr extent)
+         // perform the flush
+         {
+ -            boost::unique_lock lock(_mutex, boost::adopt_lock);
+ -            lock.unlock();
+ +            boost::unique_lock lock(_mutex);
+ +            lock.unlock();
+ 
+             auto handle = IOMgr::get_instance()->open(extent->_file, IOMgr::IO_MODE::APPEND, true);
+             auto response = extent->async_flush(handle);
+@@ -1543,8 +1545,7 @@ StorageCache::DataCache::_flush(CacheExtentPtr extent)
+             extent->_extent_size = flush_response->next_offset - flush_response->offset;
+ 
+ -            lock.lock();
+ -            lock.release();
+ +            lock.lock();
+         }
+ 
+         // update the cache ID as pointing to the new extent ID
+         _cache_id_map[extent->_cache_id] = extent->key();

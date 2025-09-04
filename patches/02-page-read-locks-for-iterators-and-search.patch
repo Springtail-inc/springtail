@@ -1,0 +1,62 @@
+diff --git a/include/storage/cache.hh b/include/storage/cache.hh
+index 1111111..2222222 100644
+--- a/include/storage/cache.hh
++++ b/include/storage/cache.hh
+@@ -780,6 +780,7 @@ class StorageCache : public Singleton<StorageCache>
+             /**
+              * Returns an iterator to the first row of the page.
+              */
+             Iterator begin() {
+ +                boost::shared_lock lock(_mutex);
+                 return Iterator(this, _extents.begin());
+             }
+ 
+             /**
+              * Returns an iterator to the last row of the page.
+              */
+             Iterator last() {
+ -                assert(!_extents.empty());
+ +                boost::shared_lock lock(_mutex);
+ +                assert(!_extents.empty());
+                 SafeExtent extent{ _extents.back().make_safe_extent(_file) };
+                 auto row_i = (*extent)->last();
+                 return Iterator(this, --_extents.end(), std::move(extent), row_i);
+             }
+ 
+             /**
+              * Returns an iterator past the last row of the page.
+              */
+             Iterator end() {
+                 return Iterator(this, _extents.end());
+             }
+diff --git a/src/storage/cache.cc b/src/storage/cache.cc
+index 3333333..4444444 100644
+--- a/src/storage/cache.cc
++++ b/src/storage/cache.cc
+@@ -688,6 +688,8 @@ StorageCache::Page::lower_bound(TuplePtr tuple, ExtentSchemaPtr schema)
+     StorageCache::Page::Iterator
+     StorageCache::Page::lower_bound(TuplePtr tuple, ExtentSchemaPtr schema)
+     {
+ +        boost::shared_lock lock(_mutex);
+ +
+         // perform a lower-bound check to find the appropriate extent
+         // note: we don't use std::ranges::lower_bound() here because the projection causes the
+         //       SafeExtent to go out of scope before it is used in the comparison
+@@ -724,6 +726,8 @@ StorageCache::Page::upper_bound(TuplePtr tuple, ExtentSchemaPtr schema)
+     StorageCache::Page::Iterator
+     StorageCache::Page::upper_bound(TuplePtr tuple, ExtentSchemaPtr schema)
+     {
+ +        boost::shared_lock lock(_mutex);
+ +
+         // perform a upper-bound check to find the appropriate extent
+         // note: we don't use std::ranges::upper_bound() here because the projection causes the
+         //       SafeExtent to go out of scope before it is used in the comparison
+@@ -788,6 +792,8 @@ StorageCache::Page::at(uint32_t index)
+     StorageCache::Page::Iterator
+     StorageCache::Page::at(uint32_t index)
+     {
+ +        boost::shared_lock lock(_mutex);
+ +
+         // iterate through the extents to find the requested index in the page
+         for (auto extent_i = _extents.begin(); extent_i != _extents.end(); ++extent_i) {
+             auto extent = extent_i->make_safe_extent(_file);
