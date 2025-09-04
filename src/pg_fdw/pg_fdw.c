@@ -20,11 +20,10 @@ PG_MODULE_MAGIC;
 #define INVALID_TABLE 0
 
 // exposed from and defined in multicorn_util.c
-extern List *
+extern void
 multicorn_getForeignPaths(PlannerInfo *root,
                           RelOptInfo *baserel,
-                          Oid foreigntableid,
-                          SpringtailPlanState *planstate);
+                          Oid foreigntableid);
 
 extern ForeignScan *
 multicorn_getForeignPlan(PlannerInfo *root,
@@ -33,14 +32,12 @@ multicorn_getForeignPlan(PlannerInfo *root,
                          ForeignPath *best_path,
                          List *tlist,
                          List *scan_clauses,
-                         Plan *outer_plan,
-                         SpringtailPlanState *planstate);
+                         Plan *outer_plan);
 
 extern void
 multicorn_getRelSize(PlannerInfo *root,
                      RelOptInfo *baserel,
-                     Oid foreigntableid,
-                     SpringtailPlanState *planstate);
+                     Oid foreigntableid);
 
 extern List *
 multicorn_buildSimpleQualList(ForeignScanState *node);
@@ -343,13 +340,16 @@ springtail_GetForeignRelSize(PlannerInfo *root,
 
     // Get the postgres transaction id, and create the internal state
     FullTransactionId pg_xid = GetCurrentFullTransactionId();
-    planstate->pg_fdw_state = fdw_create_state(db_id, tid, pg_xid.value, schema_xid);
+    baserel->fdw_private = fdw_create_state(planstate, db_id, tid, pg_xid.value, schema_xid);
+
 
     // store the plan state in the baserel
-    baserel->fdw_private = planstate;
+    //baserel->fdw_private = planstate;
 
     // get the estimate of the number of rows and width of the table
-    multicorn_getRelSize(root, baserel, foreigntableid, planstate);
+    multicorn_getRelSize(root, baserel, foreigntableid);
+
+    elog(INFO, "Iron --- create: %s\n", nodeToString(baserel->fdw_private));
 }
 
 /**
@@ -366,10 +366,13 @@ springtail_GetForeignPaths(PlannerInfo *root,
                            RelOptInfo *baserel,
                            Oid foreigntableid)
 {
-    SpringtailPlanState *state = (SpringtailPlanState *)baserel->fdw_private;
+    elog(INFO, "Iron 0000 --- get\n");
+    elog(INFO, "Iron 0000 --- get: %s\n", nodeToString(baserel->fdw_private));
+    //SpringtailPlanState *state = (SpringtailPlanState *)baserel->fdw_private;
+    SpringtailPlanState *state = (SpringtailPlanState *)get_plan_state(baserel->fdw_private);
 
     // get the foreign paths -- call helper to set them up
-    multicorn_getForeignPaths(root, baserel, foreigntableid, state);
+    multicorn_getForeignPaths(root, baserel, foreigntableid);
 }
 
 /**
@@ -394,11 +397,14 @@ springtail_GetForeignPlan(PlannerInfo *root,
                           List *scan_clauses,
                           Plan *outer_plan)
 {
-    SpringtailPlanState *planstate = (SpringtailPlanState *)baserel->fdw_private;
+    elog(INFO, "Iron 33333 --- get: %s\n", nodeToString(baserel->fdw_private));
+
+    //SpringtailPlanState *planstate = (SpringtailPlanState *)baserel->fdw_private;
+    SpringtailPlanState *planstate = (SpringtailPlanState *)get_plan_state(baserel->fdw_private);
 
     // call into helper to set the foreign plan
     return multicorn_getForeignPlan(root, baserel, foreigntableid, best_path,
-                                    tlist, scan_clauses, outer_plan, planstate);
+                                    tlist, scan_clauses, outer_plan);
 }
 
 /**
@@ -411,10 +417,6 @@ springtail_BeginForeignScan(ForeignScanState *node, int eflags)
 {
     // extract plan state and set the fdw state on the scan node
     ForeignScan *fs = (ForeignScan *)node->ss.ps.plan;
-    List *fdw_private = fs->fdw_private;
-    SpringtailPlanState *planstate = (SpringtailPlanState *)linitial(fdw_private);
-
-    node->fdw_state = planstate->pg_fdw_state;
 
     TupleTableSlot *slot = node->ss.ss_ScanTupleSlot;
     Form_pg_attribute attrs[slot->tts_tupleDescriptor->natts];
@@ -430,14 +432,9 @@ springtail_BeginForeignScan(ForeignScanState *node, int eflags)
     }
 
     // build a simple qual list against constants only
-    List *qual_list = multicorn_buildSimpleQualList(node);
+    List *quals = multicorn_buildSimpleQualList(node);
 
-    /* NOTE from Multicorn multicorn.c */
-    /* Those list must be copied, because their memory context can become */
-    /* invalid during the execution (in particular with the cursor interface) */
-    /* The copy occurs within the fdw_begin_scan() call */
-    fdw_begin_scan(planstate->pg_fdw_state, slot->tts_tupleDescriptor->natts,
-            attrs, planstate->target_list, qual_list);
+    node->fdw_state = fdw_begin_scan_x(fs->fdw_private, slot->tts_tupleDescriptor->natts, attrs, quals);
 
     return;
 }
@@ -503,7 +500,6 @@ springtail_EndForeignScan(ForeignScanState *node)
 static void
 springtail_ExplainForeignScan(ForeignScanState *node, ExplainState *es)
 {
-
     fdw_explain_scan(node, es);
 }
 

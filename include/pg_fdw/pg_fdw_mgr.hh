@@ -22,6 +22,7 @@
 #include <xid_mgr/xid_mgr_client.hh>
 
 #include <pg_fdw/pg_fdw_ddl_common.hh>
+#include <pg_fdw/pg_fdw_plan_state.hh>
 #include <pg_fdw/pg_xid_collector_client.hh>
 
 extern "C" {
@@ -152,7 +153,7 @@ namespace springtail::pg_fdw {
          * @param pg_xid Postgres XID of current transaction
          * @param schema_xid Schema XID optained from the foreign table import option
          */
-        PgFdwState *fdw_create_state(uint64_t db_id,
+        List* fdw_create_state(SpringtailPlanState* planstate, uint64_t db_id,
                                      uint64_t tid,
                                      uint64_t pg_xid,
                                      uint64_t schema_xid);
@@ -169,6 +170,11 @@ namespace springtail::pg_fdw {
                             const Form_pg_attribute* attrs,
                             List *target_list,
                             List *qual_list);
+
+        PgFdwState* fdw_begin_scan_x(FdwPlanState *planstate,
+                int num_attrs,
+                const Form_pg_attribute* attrs,
+                List *quals);
 
         /** Iterate scan -- get next row
          * @param state PgFdwState
@@ -205,13 +211,19 @@ namespace springtail::pg_fdw {
          * @param use_secondary Make use the secondary indexes to match the sortgroup
          * @return List or sublist of path keys based on sort group
          */
-        List *fdw_can_sort(SpringtailPlanState *state, List *sortgroup, bool use_secondary = false);
+        List* fdw_can_sort(FdwPlanState* planstate, PgFdwState* pg_state, List *sortgroup, List* quals, bool use_secondary = false);
 
         /** Get list of path keys -- indexes
          * @param state Planstate
          * @return List of a List of path keys (key attnum, num rows)
          */
         List *fdw_get_path_keys(SpringtailPlanState *state);
+
+        List *fdw_get_path_keys_x(FdwPlanState *planstate, PgFdwState* state);
+
+        /**
+         */
+        PgFdwState* create_scan_state(FdwPlanState *state, List* qual_indexes, List* join_quals);
 
         /** Get estimate of row width/number of rows
          * @param planstate Plan state
@@ -220,6 +232,7 @@ namespace springtail::pg_fdw {
          * @param join_quals List of predicate clauses (BaseQual) that are part of join clauses
          */
         void fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, List* join_quals, double *rows, int *width);
+        void fdw_get_rel_size_x(FdwPlanState *state, List *qual_list, List* join_quals, double *rows, int *width);
 
         /** Commit or rollback a transaction, remove the XID mappings
          * @param pg_xid Postgres XID

@@ -186,7 +186,10 @@ dump_table(uint64_t db_id,
     PgFdwMgr *mgr = PgFdwMgr::get_instance();
 
     // create the fdw state for the table @xid and begin the scan
-    PgFdwState *state = mgr->fdw_create_state(db_id, tid, xid, xid);
+    SpringtailPlanState planstate;
+    mgr->fdw_create_state(&planstate, db_id, tid, xid, xid);
+
+    PgFdwState *state = (PgFdwState*)planstate.pg_fdw_state;
     mgr->fdw_begin_scan(state, fields->size(), attrs, target_list, nullptr);
 
     // iterate through the table and print the values
