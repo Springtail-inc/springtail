@@ -636,6 +636,7 @@ namespace springtail::pg_fdw {
                                uint64_t pg_xid,
                                uint64_t schema_xid)
     {
+        LOG_DEBUG(LOG_FDW, "Create state: {}, {}, {}, {}, {}", _db_id, db_id, tid, pg_xid, schema_xid);
         _in_transaction = true;
         DCHECK(db_id == _db_id);
         uint64_t xid; // springtail xid

@@ -293,7 +293,7 @@ namespace springtail::pg_fdw {
         PgXidCollectorClient _xid_collector_client;    ///< xid collector client
         std::string _fdw_id;                           ///< fdw id
         std::mutex _xid_update_mutex;                  ///< mutex for updating xid
-        uint64_t _db_id;                               ///< database id
+        uint64_t _db_id{0};                            ///< database id
         uint64_t _schema_xid{0};        ///< The most recently seen schema XID
         uint64_t _last_xid{0};          ///< last known xid
         uint64_t _trans_xid{0};         ///< current transaction XID
