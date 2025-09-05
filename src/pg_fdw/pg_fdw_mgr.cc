@@ -403,8 +403,6 @@ namespace springtail::pg_fdw {
 
         std::unique_ptr<PgFdwState> state = std::make_unique<PgFdwState>(table, tr.db_id, tr.tid, tr.xid);
 
-        LOG_INFO("Iron columns: {}", state->name_map.size());
-
         // fetch stats from state for row count
         *rows = state->stats.row_count;
 
@@ -715,6 +713,16 @@ namespace springtail::pg_fdw {
         for (size_t i = 0; i != num_attrs; ++i) {
             state->_attrs.emplace_back(attrs[i]->atttypid, attrs[i]->atttypmod, attrs[i]->attnum);
         }
+        state->scan_asc = planstate->is_scan_asc();
+
+        // do we have sort index
+        auto sort_index_id = planstate->get_sort_index();
+        if (sort_index_id.has_value()) {
+            auto it = std::ranges::find_if(state->indexes, [sort_index_id](const auto& v) {return v.id == *sort_index_id;});
+            CHECK(it != state->indexes.end());
+            state->sortgroup_index = *it;
+        }
+
 
         // copy lists into state structure in a more CPP friendly way
 
@@ -738,8 +746,6 @@ namespace springtail::pg_fdw {
             target_colnames.push_back(column.name);
             state->target_columns.emplace_back(
                    col_ind++, column.pg_type, state->_attrs[attno-1], column.name, std::move(filter));
-            LOG_DEBUG(LOG_FDW, "Iron 0000 Target list column: {}:{}",
-                                attno, column.name);
         }
 
         col_ind = state->target_columns.size();
@@ -748,8 +754,6 @@ namespace springtail::pg_fdw {
             //       column ID on the primary.  We need to map the local attnum to the primary's column ID.
             auto column = planstate->get_target_column(i);
             int attno = column.attrno;
-            LOG_DEBUG(LOG_FDW, "Iron Target list column: {}:{}",
-                                attno, column.name);
 
             auto it = std::ranges::find_if(state->target_columns,
                     [attno](auto v) {return v == attno;},
@@ -1228,6 +1232,25 @@ namespace springtail::pg_fdw {
     {
         LOG_DEBUG(LOG_FDW, "fdw_can_sort");
 
+        struct FinalizePlanState
+        {
+            FdwPlanState* _planstate;
+            PgFdwState* _pg_state;
+
+            FinalizePlanState(FdwPlanState* planstate, PgFdwState* pg_state)
+                :_planstate{planstate}, _pg_state{pg_state}
+            {}
+            ~FinalizePlanState()
+            {
+                _planstate->set_scan_direction(_pg_state->scan_asc);
+                if (_pg_state->sortgroup_index.has_value()) {
+                    _planstate->set_sort_index(_pg_state->sortgroup_index->id);
+                }
+            }
+        };
+
+        FinalizePlanState fp{planstate, pg_state};
+
         // verify that the sort order is the same for all attributes
         // and null_first/reverse combination is supported
         {
@@ -1236,7 +1259,6 @@ namespace springtail::pg_fdw {
             bool reversed = false;
             foreach(lc, sortgroup) {
                 DeparsedSortGroup *pathkey = static_cast<DeparsedSortGroup *>(lfirst(lc));
-
                 if (i == 0) {
                     reversed = pathkey->reversed;
                 } else if (reversed != pathkey->reversed) {
@@ -1330,13 +1352,11 @@ namespace springtail::pg_fdw {
             sort_list = check_index(idx, sortgroup);
             if (sort_list) {
                 pg_state->sortgroup_index = idx;
-                planstate->set_sort_index(idx.id);
                 break;
             }
         }
 
         if (!sort_list) {
-            planstate->remove_sort_index();
             return {};
         }
 
@@ -1361,7 +1381,6 @@ namespace springtail::pg_fdw {
 
             if (it == pg_state->sortgroup_index->columns.end()) {
                 pg_state->sortgroup_index = {};
-                planstate->remove_sort_index();
                 return {};
             }
         }
@@ -1389,72 +1408,6 @@ namespace springtail::pg_fdw {
             // Only check the index to be join_indexes if it isn't already in quals
             if (std::ranges::find(state->qual_indexes, idx.id) == state->qual_indexes.end() &&
                 std::ranges::find(state->join_indexes, idx.id) != state->join_indexes.end()) {
-                if (idx.is_unique) {
-                    rows = 1;
-                } else {
-                    rows /= 100;
-                    if (!rows) {
-                        rows = 2;
-                    }
-                }
-            }
-
-            List      *attnums = NULL;
-            List      *item = NULL;
-            LOG_DEBUG(LOG_FDW, "adding index path: {}", idx.id);
-            for (const auto col: idx.columns) {
-                LOG_DEBUG(LOG_FDW, "adding pathkey attnum: {}", col.position);
-                attnums = list_append_unique_int(attnums, col.position);
-            }
-            item = lappend(item, attnums);
-
-            // cost multiplier
-            auto cost = SPRINGTAIL_PRIMARY_COST;
-            if (idx.id != constant::INDEX_PRIMARY) {
-                if (idx.is_unique) {
-                    cost = SPRINGTAIL_SECONDARY_LOOKUP_COST;
-                } else {
-                    cost = SPRINGTAIL_SECONDARY_SCAN_COST;
-                }
-            }
-
-            item = lappend(item, makeConst(INT8OID,
-                        -1, InvalidOid, 8, rows, false, true));
-            item = lappend(item, makeConst(INT4OID,
-                        -1, InvalidOid, 4, cost, false, true));
-            result = lappend(result, item);
-        }
-
-        return result;
-    }
-
-    List *
-    PgFdwMgr::fdw_get_path_keys(SpringtailPlanState *state)
-    {
-        List      *result = NULL;
-
-        PgFdwState *pg_state = static_cast<PgFdwState *>(state->pg_fdw_state);
-
-        LOG_DEBUG(LOG_FDW, "fdw_get_path_keys");
-
-        // generate list of elements, each element is: list of attnums, followed by row count
-        // and cost multiplier
-        // [(('id',),1,100)]
-
-        for (auto const& idx: pg_state->indexes) {
-            // note: state->rows has taken quals into account in fdw_get_rel_size
-            auto rows = state->rows;
-
-            // The paths related to join clauses seem to be handled by PG 
-            // differently. For example, if there are no normal quals,
-            // it seems to be much better to give PG the full count of rows
-            // from fdw_get_rel_size and then create a low cost path for the join index.
-            // TODO: consider removing paths that are not present in baserel completely
-            // from fdw_get_path_keys.
-            //
-            // Only check the index to be join_indexes if it isn't already in quals
-            if (std::ranges::find(pg_state->qual_indexes, idx.id) == pg_state->qual_indexes.end() &&
-                std::ranges::find(pg_state->join_indexes, idx.id) != pg_state->join_indexes.end()) {
                 if (idx.is_unique) {
                     rows = 1;
                 } else {

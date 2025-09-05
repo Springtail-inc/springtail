@@ -59,7 +59,7 @@ void fdw_get_rel_size(SpringtailPlanState *state, List *target_list, List *qual_
 List *fdw_can_sort(List* state, void* scan_state, List *sortgroup, List* quals);
 
 /** Helper to get list of path keys (key name, num rows) */
-List *fdw_get_path_keys(SpringtailPlanState *state);
+List * fdw_get_path_keys_x(List* state, void* scan_state);
 
 /** Explain scan */
 void fdw_explain_scan(ForeignScanState *node, struct ExplainState *es);
@@ -74,8 +74,6 @@ uint64_t fdw_get_rel_width(void* state);
 
 /** Helper to get estimate of row width/number of rows */
 void fdw_get_rel_size_x(List *state, List *qual_list, List* join_quals, double *rows, int *width);
-
-List * fdw_get_path_keys_x(List* state, void* scan_state);
 
 void fdw_set_qual_state(List* state, int i, bool ignore);
 bool fdw_is_qual_ignored(List* state, int i);

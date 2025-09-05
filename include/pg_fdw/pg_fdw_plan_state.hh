@@ -132,8 +132,10 @@ namespace springtail::pg_fdw {
         bool get_qual_state(size_t i);
 
         void set_sort_index(uint64_t id);
-        void remove_sort_index();
         std::optional<uint64_t> get_sort_index();
+
+        void set_scan_direction(bool scan_asc);
+        bool is_scan_asc();
 
         void set_rel_size(uint64_t rows, uint64_t width);
         uint64_t get_rel_rows();
@@ -151,6 +153,8 @@ namespace springtail::pg_fdw {
             QUAL_STATE, 
             // sort index
             SORT_INDEX,
+            // scan direction
+            SCAN_DIRECTION,
             PLANSTATE
         };
 

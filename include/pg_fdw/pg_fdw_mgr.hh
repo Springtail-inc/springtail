@@ -217,8 +217,6 @@ namespace springtail::pg_fdw {
          * @param state Planstate
          * @return List of a List of path keys (key attnum, num rows)
          */
-        List *fdw_get_path_keys(SpringtailPlanState *state);
-
         List *fdw_get_path_keys_x(FdwPlanState *planstate, PgFdwState* state);
 
         /**

@@ -57,6 +57,12 @@ FdwPlanState::FdwPlanState(uint64_t db_id, uint64_t tid, uint64_t xid)
         _state.push_back(v);
     }
 
+    // scan direction
+    {
+        PgVector<uint64_t> v;
+        _state.push_back(v);
+    }
+
     // planstate
     {
         PgVector<std::string> v;
@@ -127,25 +133,36 @@ bool FdwPlanState::get_qual_state(size_t i)
 
 void FdwPlanState::set_sort_index(uint64_t id)
 {
-    PgVector<int16_t> v{_state[RootIndex::SORT_INDEX]};
+    PgVector<uint64_t> v{_state[RootIndex::SORT_INDEX]};
     v._l = NIL;
     v.push_back(id);
-    _state.replace(RootIndex::SORT_INDEX, v);
-}
-void FdwPlanState::remove_sort_index()
-{
-    PgVector<int16_t> v{_state[RootIndex::SORT_INDEX]};
-    v._l = NIL;
     _state.replace(RootIndex::SORT_INDEX, v);
 }
 std::optional<uint64_t> 
 FdwPlanState::get_sort_index()
 {
-    PgVector<int16_t> v{_state[RootIndex::SORT_INDEX]};
+    PgVector<uint64_t> v{_state[RootIndex::SORT_INDEX]};
     if (!v.size()) {
         return {};
     }
     return v[0];
+}
+void
+FdwPlanState::set_scan_direction(bool scan_asc)
+{
+    PgVector<uint64_t> v{_state[RootIndex::SCAN_DIRECTION]};
+    v._l = NIL;
+    v.push_back(scan_asc?1:0);
+    _state.replace(RootIndex::SCAN_DIRECTION, v);
+}
+bool 
+FdwPlanState::is_scan_asc()
+{
+    PgVector<int16_t> v{_state[RootIndex::SCAN_DIRECTION]};
+    if (!v.size()) {
+        return true;
+    }
+    return v[0]?true:false;
 }
 
 void FdwPlanState::set_planstate(void* p) {
