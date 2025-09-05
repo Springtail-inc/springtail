@@ -168,11 +168,14 @@ namespace springtail::pg_proxy {
 
             // 1. Find ClientSession with the given pid and cancel_key
             auto it = _cancel_map.find(pid_cancel_key_pair.first);
-            CHECK(it != _cancel_map.end());
+            if (it != _cancel_map.end()) {
 
-            // 2. Request cancel on this client session
-            const std::vector<uint8_t>& cancel_key = pid_cancel_key_pair.second;
-            it->second.second->_handle_cancel(pid_cancel_key_pair.first, cancel_key);
+                // 2. Request cancel on this client session
+                const std::vector<uint8_t>& cancel_key = pid_cancel_key_pair.second;
+                it->second.second->_handle_cancel(pid_cancel_key_pair.first, cancel_key);
+            } else {
+                LOG_ERROR("[C:{}] Client session for process id {} is not found", _id, pid_cancel_key_pair.first);
+            }
 
             // 3. Terminate current connection
             _connection->close();
