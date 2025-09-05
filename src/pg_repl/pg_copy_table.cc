@@ -77,6 +77,7 @@ namespace springtail
         "LEFT JOIN pg_type t ON pga.atttypid = t.oid "
         "LEFT JOIN pg_catalog.pg_namespace nsp ON nsp.oid = t.typnamespace "
         "WHERE pga.attrelid={} "
+        "AND pga.attisdropped IS FALSE "
         "AND table_schema='{}' "
         "AND table_name='{}' "
         "ORDER BY ordinal_position";
@@ -484,6 +485,9 @@ namespace springtail
         if (static_cast<std::size_t>(_connection.nfields()) != _schema.columns.size()) {
             LOG_ERROR("Mismatch in copy fields: {} != {}",
                       _connection.nfields(), _schema.columns.size());
+            for (auto &column : _schema.columns) {
+                LOG_ERROR("\t{}", column.name);
+            }
             _connection.clear();
             throw PgRetryError();
         }

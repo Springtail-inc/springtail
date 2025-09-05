@@ -1083,6 +1083,9 @@ namespace springtail {
                     break;
             }
         }
+        if (n == 0) {
+            errno = ECONNRESET; // this indicates a closed connection
+        }
         return n;
     }
 
