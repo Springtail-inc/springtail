@@ -811,7 +811,7 @@ Service::DropTable(grpc::ServerContext* context,
 }
 
 nlohmann::json
-Service::_drop_table(const proto::DropTableRequest& request)
+Service::_drop_table(const proto::DropTableRequest& request, bool is_resync)
 {
     // retrieve the id of the namespace
     // DROP SCHEMA in PG will automatically drop all tables
@@ -859,10 +859,11 @@ Service::_drop_table(const proto::DropTableRequest& request)
     _read_schema_indexes(index_info, request.db_id(), request.table_id(), xid);
 
     for (auto const& idx : index_info->indexes()) {
-        // For secondary indexes, indexer will take care of marking them DELETED
-        if (idx.id() == constant::INDEX_PRIMARY) {
+        if (is_resync || idx.id() == constant::INDEX_PRIMARY) {
+            // If resync, all the indexes can be marked as dropped as new ones will be created while copying table
             _drop_index(xid, request.db_id(), idx.id(), request.table_id(), sys_tbl::IndexNames::State::DELETED);
         } else {
+            // For secondary indexes (actual drop index requests), indexer will take care of marking them DELETED
             _drop_index(xid, request.db_id(), idx.id(), request.table_id(), sys_tbl::IndexNames::State::BEING_DELETED);
         }
     }
@@ -1157,7 +1158,7 @@ Service::GetRoots(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "GetRoots");
 
-    LOG_INFO("got GetRoots()");
+    LOG_INFO("got GetRoots(): db {} tid {} xid {}", request->db_id(), request->table_id(), request->xid());
 
     boost::shared_lock lock(_read_mutex);
 
@@ -1300,9 +1301,9 @@ Service::SwapSyncTable(grpc::ServerContext* context,
         LOG_DEBUG(LOG_SCHEMA, "Drop table: {}:{} @ {}:{}", drop.db_id(), drop.table_id(),
                             drop.xid(), drop.lsn());
 
-        auto&& drop_ddl = this->_drop_table(drop);
-        drop_ddl["is_resync"] = true;
         is_resync = true;
+        auto&& drop_ddl = this->_drop_table(drop, is_resync);
+        drop_ddl["is_resync"] = is_resync;
         ddls.push_back(drop_ddl);
     }
 
@@ -2216,6 +2217,8 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
                 ri.set_index_id(idx.id());
                 ri.set_extent_id(*extent_id);
                 *roots_info->add_roots() = ri;
+
+                LOG_DEBUG(LOG_SCHEMA, "Found cached root: {} {}", idx.id(), extent_id);
                 continue; // use cached data and go to the next index
             }
         }
@@ -2225,19 +2228,23 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
         auto row_i = roots_t->inverse_lower_bound(search_key);
 
         if (row_i == roots_t->end()) {
+            LOG_DEBUG(LOG_SCHEMA, "Couldn't find search key: {} {} {}", table_id, idx.id(), xid.xid);
             continue;
         }
 
         auto &&row = *row_i;
         if (table_id_f->get_uint64(&row) != table_id) {
+            LOG_DEBUG(LOG_SCHEMA, "Wrong table ID: {} != {}", table_id_f->get_uint64(&row), table_id);
             continue;
         }
         if (index_id_f->get_uint64(&row) != idx.id()) {
+            LOG_DEBUG(LOG_SCHEMA, "Wrong index ID: {} != {}", index_id_f->get_uint64(&row), idx.id());
             continue;
         }
 
         auto record_xid = xid_f->get_uint64(&row);
         if (record_xid > xid.xid) {
+            LOG_DEBUG(LOG_SCHEMA, "Wrong XID: {} > {}", record_xid, xid.xid);
             continue;
         }
 
@@ -2245,6 +2252,8 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
         ri.set_index_id(idx.id());
         ri.set_extent_id(eid_f->get_uint64(&row));
         *roots_info->add_roots() = ri;
+
+        LOG_DEBUG(LOG_SCHEMA, "Found root in table: {} {}", idx.id(), eid_f->get_uint64(&row));
 
         // use snapshot_xid of the last row
         snapshot_xid = sxid_f->get_uint64(&row);

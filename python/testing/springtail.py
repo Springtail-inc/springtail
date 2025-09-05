@@ -75,8 +75,8 @@ PROXY_DAEMONS = [
 ]
 
 ALL_DAEMONS = CORE_DAEMONS + FDW_DAEMONS + PROXY_DAEMONS
-
 ALL_DAEMONS_NAMES = [name[0] for name in ALL_DAEMONS]
+ALL_DAEMONS_SHUTDOWN = ALL_DAEMONS_NAMES[::-1]
 
 PG_CONFIG_BACKUP_PATH = '/tmp/pg_config_backup.txt'
 
@@ -636,7 +636,7 @@ def restart(props: Properties,
             unarchive_logs: bool = False) -> None:
     # Stop the daemons
     print("\nStopping daemons...")
-    stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
+    stop_daemons(props.get_pid_path(), ALL_DAEMONS_SHUTDOWN)
 
     config = props.get_system_config()
     base_dir = props.get_mount_path()
@@ -715,7 +715,7 @@ def start(config_file: str,
 
     # Stop the daemons
     print("\nStopping daemons...")
-    stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
+    stop_daemons(props.get_pid_path(), ALL_DAEMONS_SHUTDOWN)
 
     if do_cleanup:
         # Clear file system data
@@ -799,7 +799,7 @@ def stop(config_file: str, do_cleanup: bool = False) -> None:
 def stop_with_properties(props: Properties, do_cleanup: bool = False) -> None:
     # Stop the daemons
     print("\nStopping daemons...")
-    stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
+    stop_daemons(props.get_pid_path(), ALL_DAEMONS_SHUTDOWN)
 
     if do_cleanup:
         # Cleanup db instance
