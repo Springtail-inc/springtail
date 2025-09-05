@@ -426,6 +426,7 @@ namespace indexer_helpers {
         }
 
         // not in the lower_bound() entry, go to the last entry of the inverse_lower_bound() entry
+        // note: if the iterator is pointing to begin(), this decrement will set it to end()
         --i;
 
         // if that was the first entry of the index, then inverse_lower_bound() isn't present
