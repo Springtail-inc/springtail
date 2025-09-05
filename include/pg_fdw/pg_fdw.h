@@ -26,10 +26,9 @@ void fdw_start(const char *db_name, bool ddl_connection);
 void fdw_exit();
 
 /** Create state */
-void *fdw_create_state(void* planstate, uint64_t db_id, uint64_t tid, uint64_t pg_xid, uint64_t schema_xid);
+void *fdw_create_state(uint64_t db_id, uint64_t tid, uint64_t pg_xid, uint64_t schema_xid);
 
 /** Begin scan */
-void *fdw_begin_scan(void *stat, int num_attrs, Form_pg_attribute* attrs,  List *target_list, List *qual_list);
 void* fdw_begin_scan_x(List* state, int num_attrs, Form_pg_attribute* attrs,  List *quals);
 
 /** End scan -- cleanup state */
@@ -51,9 +50,9 @@ void fdw_commit_rollback(uint64_t pg_xid, bool commit);
 
 
 //// Called from path_util.c
-
+///
 /** Helper to get estimate of row width/number of rows */
-void fdw_get_rel_size(SpringtailPlanState *state, List *target_list, List *qual_list, List* join_quals, double *rows, int *width);
+void fdw_get_rel_size_x(List *state, List *qual_list, List* join_quals, double *rows, int *width);
 
 /** Helper return sub-list of sortable columns if table is sortable by sort group */
 List *fdw_can_sort(List* state, void* scan_state, List *sortgroup, List* quals);
@@ -64,16 +63,11 @@ List * fdw_get_path_keys_x(List* state, void* scan_state);
 /** Explain scan */
 void fdw_explain_scan(ForeignScanState *node, struct ExplainState *es);
 
-void* get_plan_state(void* p);
-
 /** Add a target column to the state */
 void fdw_add_target(void* state, char* name, int16 attr);
 
 /** Get the relation width in bytes */
 uint64_t fdw_get_rel_width(void* state);
-
-/** Helper to get estimate of row width/number of rows */
-void fdw_get_rel_size_x(List *state, List *qual_list, List* join_quals, double *rows, int *width);
 
 void fdw_set_qual_state(List* state, int i, bool ignore);
 bool fdw_is_qual_ignored(List* state, int i);

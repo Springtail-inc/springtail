@@ -395,9 +395,12 @@ namespace springtail::pg_fdw {
         return quals;
     }
 
-    std::unique_ptr<PgFdwState> build_scan_state(FdwPlanState *planstate, List *qual_list, List* join_quals, double *rows)
+    std::unique_ptr<PgFdwState> _create_scan_state(SpringtailPlanState *planstate, List *qual_list, List* join_quals, double *rows)
     {
-        FdwPlanState::TableRef tr = planstate->get_table_ref();
+        // we create a temporary scan state here because for historical reasons
+        // it has some API's need by this function. The state will be deleted
+        // when the function exist.
+        SpringtailPlanState::TableRef tr = planstate->get_table_ref();
 
         TablePtr table = TableMgr::get_instance()->get_table(tr.db_id, tr.tid, tr.xid);
 
@@ -628,7 +631,7 @@ namespace springtail::pg_fdw {
     }
 
     List*
-    PgFdwMgr::fdw_create_state(SpringtailPlanState* planstate, uint64_t db_id,
+    PgFdwMgr::fdw_create_state(uint64_t db_id,
                                uint64_t tid,
                                uint64_t pg_xid,
                                uint64_t schema_xid)
@@ -682,32 +685,29 @@ namespace springtail::pg_fdw {
         LOG_DEBUG(LOG_FDW, "fdw_create_state: db_id: {}, tid: {}, xid: {}, pg_xid: {}, schema_xid: {}",
                             db_id, tid, xid, pg_xid, schema_xid);
 
-        TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid);
-        PgFdwState *state = new PgFdwState{table, db_id, tid, xid};
-        planstate->pg_fdw_state = state;
-
-        FdwPlanState ps{db_id, tid, xid};
-        ps.set_planstate(planstate);
-
+        SpringtailPlanState ps{db_id, tid, xid};
         return ps.fdw_private();
     }
 
     PgFdwState* 
-    PgFdwMgr::create_scan_state(FdwPlanState *planstate, List* quals, List* join_quals)
+    PgFdwMgr::create_scan_state(SpringtailPlanState *planstate, List* quals, List* join_quals)
     {
         double dummy = 0; 
-        auto state = build_scan_state(planstate, quals, join_quals, &dummy);
+        auto state = _create_scan_state(planstate, quals, join_quals, &dummy);
         return state.release();
     }
 
     PgFdwState*
-    PgFdwMgr::fdw_begin_scan_x(FdwPlanState *planstate,
+    PgFdwMgr::fdw_begin_scan_x(SpringtailPlanState *planstate,
             int num_attrs,
             const Form_pg_attribute* attrs,
             List *quals)
     {
+        // we create a temporary scan state here because for historical reasons
+        // it has some API's need by this function. The state will be deleted
+        // when the function exist.
         double dummy = 0; 
-        auto state = build_scan_state(planstate, quals, NIL, &dummy);
+        auto state = _create_scan_state(planstate, quals, NIL, &dummy);
         LOG_DEBUG(LOG_FDW, "fdw_begin_scan: tid: {}, {}", state->tid, num_attrs);
 
         for (size_t i = 0; i != num_attrs; ++i) {
@@ -808,101 +808,6 @@ namespace springtail::pg_fdw {
         time_trace::traces.reset();
         return state.release();
     }
-
-    void
-    PgFdwMgr::fdw_begin_scan(PgFdwState *state, int num_attrs, const Form_pg_attribute* attrs,
-            List *target_list, List *qual_list)
-    {
-        LOG_DEBUG(LOG_FDW, "fdw_begin_scan: tid: {}, {}", state->tid, num_attrs);
-        for (size_t i = 0; i != num_attrs; ++i) {
-            state->_attrs.emplace_back(attrs[i]->atttypid, attrs[i]->atttypmod, attrs[i]->attnum);
-        }
-
-        // copy lists into state structure in a more CPP friendly way
-
-        // init target list vector
-        ListCell *lc;
-        std::vector<std::string> target_colnames;
-
-        // reset quals
-        _init_quals(state, qual_list);
-
-        int i = 0;
-        // we add filters at the beginning so that iterate_scan checks them first
-        // note: it is possible state->filtered_quals is empty if no quals are usable
-        // go through qual columns and make sure they are part of the target columns
-        for (int j = 0; j < state->filtered_quals.size(); j++) {
-            int attno = state->filtered_quals[j]->base.varattno;
-
-            PgFdwState::TargetColumn::Filter filter{state->filtered_quals[i]->base.op,
-                state->qual_fields->at(j)};
-
-            auto column = state->columns.at(state->attr_map.at(attno));
-            target_colnames.push_back(column.name);
-            state->target_columns.emplace_back(
-                   i++, column.pg_type, state->_attrs[attno-1], column.name, std::move(filter));
-        }
-
-        i = state->target_columns.size();
-        foreach(lc, target_list) {
-            // note: This is the attnum from the FDW's representation of the external table, not the
-            //       column ID on the primary.  We need to map the local attnum to the primary's column ID.
-            auto column = (SpringtailTargetColumn *)lfirst(lc);
-            int attno = column->attnum;
-
-            auto it = std::ranges::find_if(state->target_columns,
-                    [attno](auto v) {return v == attno;},
-                    [](const auto& c) {return c.pg_attr.attnum;}
-            );
-
-            if (it != state->target_columns.end()) {
-                continue;
-            }
-
-            auto col_i = state->columns.find(state->attr_map.at(attno));
-            if (col_i == state->columns.end()) {
-                LOG_WARN("Couldn't find FDW attribute number: {}", attno);
-                continue;
-            }
-
-            target_colnames.push_back(col_i->second.name);
-            DCHECK_GT(attno, 0);
-            DCHECK_LE(attno, state->_attrs.size());
-
-            state->target_columns.emplace_back(
-                    i++, col_i->second.pg_type, state->_attrs[attno-1], col_i->second.name);
-
-            LOG_DEBUG(LOG_FDW, "Target list column: {}:{}",
-                                attno, col_i->second.name);
-        }
-
-        // set target columns; will contain filtered qual columns as well
-        if (!target_colnames.empty() && state->index.has_value() && state->index->id != constant::INDEX_PRIMARY) {
-            // check if all target columns are part of the index
-            auto index_colnames = state->table->get_index_column_names(state->index->id);
-            if (std::ranges::all_of(target_colnames, [&index_colnames](const auto& n) ->bool {
-                        return std::ranges::find(index_colnames, n) != index_colnames.end();
-                        })) {
-                auto ind_schema = state->table->get_index_schema(state->index->id);
-                state->fields = ind_schema->get_fields(target_colnames);
-                state->index_only_scan  = true;
-            }
-        }
-
-        if (!state->fields) {
-            state->fields = state->table->extent_schema()->get_fields(target_colnames);
-        }
-
-        // set the iterators for the scan taking quals into consideration
-        _set_scan_iterators(state);
-
-        // reset the user type cache since cached types may have changed
-        _user_type_cache.clear();
-
-        // reset the timer stats
-        time_trace::traces.reset();
-    }
-
 
     FieldTuplePtr
     PgFdwMgr::_gen_qual_tuple(const std::vector<ConstQualPtr> &quals, const FieldArrayPtr qual_fields)
@@ -1228,16 +1133,16 @@ namespace springtail::pg_fdw {
     }
 
     List *
-    PgFdwMgr::fdw_can_sort(FdwPlanState* planstate, PgFdwState* pg_state, List *sortgroup, List* quals, bool use_secondary)
+    PgFdwMgr::fdw_can_sort(SpringtailPlanState* planstate, PgFdwState* pg_state, List *sortgroup, List* quals, bool use_secondary)
     {
         LOG_DEBUG(LOG_FDW, "fdw_can_sort");
 
         struct FinalizePlanState
         {
-            FdwPlanState* _planstate;
+            SpringtailPlanState* _planstate;
             PgFdwState* _pg_state;
 
-            FinalizePlanState(FdwPlanState* planstate, PgFdwState* pg_state)
+            FinalizePlanState(SpringtailPlanState* planstate, PgFdwState* pg_state)
                 :_planstate{planstate}, _pg_state{pg_state}
             {}
             ~FinalizePlanState()
@@ -1389,7 +1294,7 @@ namespace springtail::pg_fdw {
     }
 
     List *
-    PgFdwMgr::fdw_get_path_keys_x(FdwPlanState *planstate, PgFdwState* state)
+    PgFdwMgr::fdw_get_path_keys_x(SpringtailPlanState *planstate, PgFdwState* state)
     {
         List* result = NULL;
         uint64_t rel_rows = planstate->get_rel_rows();
@@ -1447,9 +1352,13 @@ namespace springtail::pg_fdw {
         return result;
     }
 
-    void PgFdwMgr::fdw_get_rel_size_x(FdwPlanState *planstate, List *qual_list, List* join_quals, double *rows, int *width)
+    void PgFdwMgr::fdw_get_rel_size_x(SpringtailPlanState *planstate, List *qual_list, List* join_quals, double *rows, int *width)
     {
-        auto state = build_scan_state(planstate, qual_list, join_quals, rows);
+        // TODO: we create a temporary scan state here because for historical reasons
+        // it has some API's need by this function. The state will be deleted
+        // when the function exist.
+        // 
+        auto state = _create_scan_state(planstate, qual_list, join_quals, rows);
         // estimate width based on target list using most common types
         *width = 0;
         for (size_t i = 0; i != planstate->count_target_columns(); ++i) {
@@ -1500,104 +1409,6 @@ namespace springtail::pg_fdw {
         }
         //planstate->set_rel_size(static_cast<uint64_t>(*rows), static_cast<uint64_t>(*width));
         planstate->set_rel_size(static_cast<uint64_t>(*rows), static_cast<uint64_t>(*width));
-    }
-
-    void
-    PgFdwMgr::fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, List* join_quals, double *rows, int *width)
-    {
-        // fetch stats from state for row count
-        PgFdwState *state = static_cast<PgFdwState *>(planstate->pg_fdw_state);
-        *rows = state->stats.row_count;
-
-        // let's see if we have an unique index in qual_list
-        for (auto const& idx: state->indexes) {
-            // primary indexes could have no user columns
-            DCHECK(idx.columns.size() || idx.id == constant::INDEX_PRIMARY);
-            auto index_quals = _get_index_quals(state, idx, qual_list);
-            // check for the full match
-            if (index_quals.size() == idx.columns.size() &&
-                    // ... and all must be EQUALS
-                std::ranges::find_if(index_quals, [](const auto& v) {return v->base.op != EQUALS;}) == index_quals.end()) {
-                state->qual_indexes.push_back(idx.id);
-
-                if (!idx.is_unique) {
-                    if (*rows >= state->stats.row_count) {
-                        // We don't know cardinality stats. Just set to a number that
-                        // is less than the total rows.
-                        *rows = *rows/10;
-                        if (*rows == 0) {
-                            *rows = 2;
-                        }
-                    }
-                } else {
-                    *rows = 1;
-                }
-            }
-        }
-        planstate->rows = *rows;
-
-        // Now let's see if we have joinable indexes, that are delayed.
-        for (auto const& idx: state->indexes) {
-            auto index_quals = _get_index_quals(state, idx, join_quals);
-            // check for the full match
-            if (index_quals.size() == idx.columns.size() &&
-                    // ... and all must be EQUALS
-                std::ranges::find_if(index_quals, [](const auto& v) {return v->base.op != EQUALS;}) == index_quals.end()) {
-
-                state->join_indexes.push_back(idx.id);
-            }
-        }
-
-        // estimate width based on target list using most common types
-        ListCell *lc;
-        *width = 0;
-        foreach(lc, target_list) {
-            auto column = (SpringtailTargetColumn *)lfirst(lc);
-
-            auto name_i = state->name_map.find(strVal(column->attname));
-            if (name_i == state->name_map.end()) {
-                LOG_WARN("Couldn't find column: {}", strVal(column->attname));
-                continue;
-            }
-            state->attr_map.try_emplace(column->attnum, name_i->second);
-
-            auto col_i = state->columns.find(name_i->second);
-            if (col_i == state->columns.end()) {
-                LOG_ERROR("Couldn't find column position: {}", name_i->second);
-                continue;
-            }
-
-            switch (col_i->second.pg_type) {
-                case FLOAT8OID:
-                case INT8OID:
-                case TIMESTAMPOID:
-                case TIMESTAMPTZOID:
-                case TIMEOID:
-                    *width += 8;
-                    break;
-                case DATEOID:
-                case FLOAT4OID:
-                case INT4OID:
-                    *width += 4;
-                    break;
-                case INT2OID:
-                    *width += 2;
-                    break;
-                case BOOLOID:
-                case CHAROID:
-                    *width += 1;
-                    break;
-                case UUIDOID:
-                case VARCHAROID:
-                case TEXTOID:
-                    *width += 16; // estimate
-                    break;
-                default:
-                    // XXX need to handle binary types
-                    *width += 8;
-                    break;
-            }
-        }
     }
 
     void

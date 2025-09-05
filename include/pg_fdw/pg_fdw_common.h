@@ -22,17 +22,6 @@ typedef struct SpringtailTargetColumn {
     int attnum; ///< The FDW's attribute number for the column
 } SpringtailTargetColumn;
 
-/** Plan state created in get rel size */
-typedef struct SpringtailPlanState {
-    uint64_t tid;
-    double   width;
-    uint64_t rows;
-    List    *target_list;       ///< List of target columns (SpringtailTargetColumn)
-  //  List    *pathkeys;          ///< List of de-parsed path keys (DeparsedSortGroup)
-    List    *qual_list;         ///< List of predicate clauses (BaseQual)
-    void    *pg_fdw_state;
-} SpringtailPlanState;
-
 /** Sort group */
 typedef struct DeparsedSortGroup
 {

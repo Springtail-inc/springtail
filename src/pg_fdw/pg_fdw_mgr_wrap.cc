@@ -39,23 +39,16 @@ extern "C" {
 
     /** Create state for this table and transaction */
     void *
-    fdw_create_state(void* planstate, uint64_t db_id, uint64_t tid, uint64_t pg_xid, uint64_t schema_xid)
+    fdw_create_state(uint64_t db_id, uint64_t tid, uint64_t pg_xid, uint64_t schema_xid)
     {
-        return get_fdw_mgr()->fdw_create_state((SpringtailPlanState*)planstate, db_id, tid, pg_xid, schema_xid);
+        return get_fdw_mgr()->fdw_create_state(db_id, tid, pg_xid, schema_xid);
     }
 
     /** Begin scan wrapper */
-    void
-    fdw_begin_scan(void *state, int num_attrs, Form_pg_attribute* attrs, List *target_list, List *qual_list)
-    {
-        if (state) {
-            return get_fdw_mgr()->fdw_begin_scan(static_cast<PgFdwState*>(state), num_attrs, attrs, target_list, qual_list);
-        }
-    }
     void*
     fdw_begin_scan_x(List* state, int num_attrs, Form_pg_attribute* attrs,  List *quals)
     {
-        FdwPlanState ps{state};
+        SpringtailPlanState ps{state};
         return get_fdw_mgr()->fdw_begin_scan_x(&ps, num_attrs, attrs, quals);
     }
 
@@ -102,7 +95,7 @@ extern "C" {
     List *
     fdw_can_sort(List* planstate, void* state, List *sortgroup, List* quals)
     {
-        FdwPlanState ps{planstate};
+        SpringtailPlanState ps{planstate};
         return get_fdw_mgr()->fdw_can_sort(&ps, (PgFdwState*)state, sortgroup, quals);
     }
 
@@ -110,14 +103,8 @@ extern "C" {
     List* 
     fdw_get_path_keys_x(List* planstate, void *scan_state)
     {
-        FdwPlanState ps{planstate};
+        SpringtailPlanState ps{planstate};
         return get_fdw_mgr()->fdw_get_path_keys_x(&ps, (PgFdwState*)scan_state);
-    }
-
-    void
-    fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, List* join_quals, double *rows, int *width)
-    {
-        get_fdw_mgr()->fdw_get_rel_size(planstate, target_list, qual_list, join_quals, rows, width);
     }
 
     void
@@ -137,55 +124,45 @@ extern "C" {
         }
     }
 
-    void*
-    get_plan_state(void* p) 
-    {
-        FdwPlanState ps{(List*)p};
-        std::istringstream ss(ps._planstate);
-        uint64_t t;
-        ss >> t;
-        return (void*)t;
-    }
-
     uint64_t
     fdw_get_rel_width(void* state)
     {
-        FdwPlanState ps{(List*)state};
+        SpringtailPlanState ps{(List*)state};
         return ps.get_rel_width();
     }
 
     void
     fdw_add_target(void* state, char* name, int16 attr)
     {
-        FdwPlanState ps{(List*)state};
-        ps.add_target_colum(std::string(name), attr); 
+        SpringtailPlanState ps{(List*)state};
+        ps.add_target_column(std::string(name), attr); 
     }
 
     void
     fdw_get_rel_size_x(List *state, List *qual_list, List* join_quals, double *rows, int *width)
     {
-        FdwPlanState ps{state};
+        SpringtailPlanState ps{state};
         get_fdw_mgr()->fdw_get_rel_size_x(&ps, qual_list, join_quals, rows, width);
     }
 
     void 
     fdw_set_qual_state(List* state, int i, bool ignore)
     {
-        FdwPlanState ps{state};
+        SpringtailPlanState ps{state};
         ps.set_qual_state(i, ignore);
     }
 
     bool
     fdw_is_qual_ignored(List* state, int i)
     {
-        FdwPlanState ps{state};
+        SpringtailPlanState ps{state};
         return ps.get_qual_state(i) == 0?true:false;
     }
 
     void* 
     fdw_create_scan_state(List* planstate, List *qual_list, List* join_quals)
     {
-        FdwPlanState ps{planstate};
+        SpringtailPlanState ps{planstate};
         return get_fdw_mgr()->create_scan_state(&ps, qual_list, join_quals);
     }
 

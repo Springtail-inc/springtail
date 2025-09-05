@@ -8,104 +8,77 @@ extern "C" {
 
 using namespace springtail::pg_fdw;
 
-FdwPlanState::FdwPlanState(uint64_t db_id, uint64_t tid, uint64_t xid)
+
+SpringtailPlanState::SpringtailPlanState(uint64_t db_id, uint64_t tid, uint64_t xid)
 {
-    // we build a fixed structure of the plan state
-    // * {db_id, tid, xid} - identifiers
-    // * [{target_column_name, attr}] - target columns
-    // table info
-    {
-        PgVector<uint64_t> v;
-        v.push_back(db_id);
-        v.push_back(tid);
-        v.push_back(xid);
-
-        _state.push_back(v);
+    // init state List's
+    for (int i = 0; i != RootIndex::LAST; ++i) {
+        if (i == RootIndex::TARGET_COL_NAME) {
+            PgVector<ListValueType<RootIndex::TARGET_COL_NAME>::type> v;
+            _state.push_back(v);
+        } 
+        else if (i == RootIndex::TARGET_COL_ATTR) {
+            PgVector<ListValueType<RootIndex::TARGET_COL_ATTR>::type> v;
+            _state.push_back(v);
+        } else {
+            PgVector<uint64_t> v;
+            _state.push_back(v);
+        }
     }
 
-
-    // rel size
+    // set table ids
     {
-        // column names
-        PgVector<uint64_t> v;
-        _state.push_back(v);
+        constexpr auto ind = RootIndex::TABLE_REF;
+        PgVector<ListValueType<ind>::type> t{_state[ind]};
+
+        t.push_back(db_id);
+        t.push_back(tid);
+        t.push_back(xid);
+        _state.replace(ind, t);
     }
 
-    // target list
-    {
-        // column names
-        PgVector<std::string> v;
-        _state.push_back(v);
-    }
-
-    {
-        // column attributes
-        PgVector<int16_t> v;
-        _state.push_back(v);
-    }
-
-    // qual states
-    {
-        // LHS attrno
-        PgVector<int16_t> v;
-        _state.push_back(v);
-    }
-
-    // sort index id
-    {
-        PgVector<uint64_t> v;
-        _state.push_back(v);
-    }
-
-    // scan direction
-    {
-        PgVector<uint64_t> v;
-        _state.push_back(v);
-    }
-
-    // planstate
-    {
-        PgVector<std::string> v;
-        _state.push_back(v);
-    }
+    CHECK(_state.size() == RootIndex::LAST);
 }
 
-FdwPlanState::FdwPlanState(List* s) : _state{s}
+SpringtailPlanState::SpringtailPlanState(List* s) : _state{s}
 {
     DCHECK(_state._l);
-
-    PgVector<std::string> t{_state[RootIndex::PLANSTATE]};
-    _planstate = t[0];
-
-    DCHECK(!_planstate.empty());
 }
 
-FdwPlanState::TableRef FdwPlanState::get_table_ref() const
+SpringtailPlanState::TableRef
+SpringtailPlanState::get_table_ref() const
 {
-    PgVector<uint64_t> t{_state[RootIndex::TABLE_REF]};
+    constexpr auto ind = RootIndex::TABLE_REF;
+
+    PgVector<ListValueType<ind>::type> t{_state[ind]};
+
     return TableRef{t[TableIdIndex::DB_ID],
         t[TableIdIndex::TID],
         t[TableIdIndex::XID]};
 
 }
 
-size_t FdwPlanState::count_target_columns() 
+size_t 
+SpringtailPlanState::count_target_columns() const
 {
-    PgVector<std::string> names{_state[RootIndex::TARGET_COL_NAME]};
+    constexpr auto ind = RootIndex::TARGET_COL_NAME;
+    PgVector<ListValueType<ind>::type> names{_state[ind]};
     return names.size();
 }
 
-FdwPlanState::ColumnInfo FdwPlanState::get_target_column(size_t i) 
+SpringtailPlanState::ColumnInfo
+SpringtailPlanState::get_target_column(size_t i) const
 {
-    PgVector<std::string> names{_state[RootIndex::TARGET_COL_NAME]};
-    PgVector<int16_t> attr{_state[RootIndex::TARGET_COL_ATTR]};
+    PgVector<ListValueType<RootIndex::TARGET_COL_NAME>::type> names{_state[RootIndex::TARGET_COL_NAME]};
+    PgVector<ListValueType<RootIndex::TARGET_COL_ATTR>::type> attr{_state[RootIndex::TARGET_COL_ATTR]};
     return {names[i], attr[i]};
 }
 
-void FdwPlanState::add_target_colum(const std::string& name, int16_t attrno) 
+void
+SpringtailPlanState::add_target_column(const std::string& name, int16_t attrno) 
 {
-    PgVector<std::string> names{_state[RootIndex::TARGET_COL_NAME]};
-    PgVector<int16_t> attr{_state[RootIndex::TARGET_COL_ATTR]};
+    PgVector<ListValueType<RootIndex::TARGET_COL_NAME>::type> names{_state[RootIndex::TARGET_COL_NAME]};
+    PgVector<ListValueType<RootIndex::TARGET_COL_ATTR>::type> attr{_state[RootIndex::TARGET_COL_ATTR]};
 
     DCHECK(names.size() == attr.size());
 
@@ -117,79 +90,83 @@ void FdwPlanState::add_target_colum(const std::string& name, int16_t attrno)
     _state.replace(RootIndex::TARGET_COL_ATTR, attr);
 }
 
-void FdwPlanState::set_qual_state(size_t i, bool ignore)
+void
+SpringtailPlanState::set_qual_state(size_t i, bool ignore)
 {
-    PgVector<int16_t> v{_state[RootIndex::QUAL_STATE]};
+    constexpr auto ind = RootIndex::QUAL_STATE;
+    PgVector<ListValueType<ind>::type> v{_state[ind]};
     DCHECK(i == v.size()); //must be adding to the end
     v.push_back(ignore?0:1);
-    _state.replace(RootIndex::QUAL_STATE, v);
+    _state.replace(ind, v);
 }
 
-bool FdwPlanState::get_qual_state(size_t i)
+bool
+SpringtailPlanState::get_qual_state(size_t i) const
 {
-    PgVector<int16_t> v{_state[RootIndex::QUAL_STATE]};
+    constexpr auto ind = RootIndex::QUAL_STATE;
+    PgVector<ListValueType<ind>::type> v{_state[ind]};
     return v[i];
 }
 
-void FdwPlanState::set_sort_index(uint64_t id)
+void
+SpringtailPlanState::set_sort_index(uint64_t id)
 {
-    PgVector<uint64_t> v{_state[RootIndex::SORT_INDEX]};
+    constexpr auto ind = RootIndex::SORT_INDEX;
+    PgVector<ListValueType<ind>::type> v{_state[ind]};
     v._l = NIL;
     v.push_back(id);
-    _state.replace(RootIndex::SORT_INDEX, v);
+    _state.replace(ind, v);
 }
+
 std::optional<uint64_t> 
-FdwPlanState::get_sort_index()
+SpringtailPlanState::get_sort_index() const
 {
-    PgVector<uint64_t> v{_state[RootIndex::SORT_INDEX]};
+    constexpr auto ind = RootIndex::SORT_INDEX;
+    PgVector<ListValueType<ind>::type> v{_state[ind]};
     if (!v.size()) {
         return {};
     }
     return v[0];
 }
 void
-FdwPlanState::set_scan_direction(bool scan_asc)
+SpringtailPlanState::set_scan_direction(bool scan_asc)
 {
-    PgVector<uint64_t> v{_state[RootIndex::SCAN_DIRECTION]};
+    constexpr auto ind = RootIndex::SCAN_DIRECTION;
+    PgVector<ListValueType<ind>::type> v{_state[ind]};
     v._l = NIL;
     v.push_back(scan_asc?1:0);
-    _state.replace(RootIndex::SCAN_DIRECTION, v);
+    _state.replace(ind, v);
 }
 bool 
-FdwPlanState::is_scan_asc()
+SpringtailPlanState::is_scan_asc() const
 {
-    PgVector<int16_t> v{_state[RootIndex::SCAN_DIRECTION]};
+    constexpr auto ind = RootIndex::SCAN_DIRECTION;
+    PgVector<ListValueType<ind>::type> v{_state[ind]};
     if (!v.size()) {
         return true;
     }
     return v[0]?true:false;
 }
 
-void FdwPlanState::set_planstate(void* p) {
-    PgVector<std::string> v;
-    std::ostringstream ss;
-    ss << (uint64_t)p;
-    auto s = ss.str();
-    v.push_back(ss.str());
-    _state.replace(RootIndex::PLANSTATE, v);
-}
-
-void FdwPlanState::set_rel_size(uint64_t rows, uint64_t width) 
+void SpringtailPlanState::set_rel_size(uint64_t rows, uint64_t width) 
 {
-    PgVector<uint64_t> v{_state[RootIndex::REL_SIZE]};
+    constexpr auto ind = RootIndex::REL_SIZE;
+    PgVector<ListValueType<ind>::type> v{_state[ind]};
     v.push_back(rows);
     v.push_back(width);
-    _state.replace(RootIndex::REL_SIZE, v);
+    _state.replace(ind, v);
 }
 
-uint64_t FdwPlanState::get_rel_rows() 
+uint64_t SpringtailPlanState::get_rel_rows() const
 {
-    PgVector<uint64_t> v{_state[RootIndex::REL_SIZE]};
+    constexpr auto ind = RootIndex::REL_SIZE;
+    PgVector<ListValueType<ind>::type> v{_state[ind]};
     return v[RelSizeIndex::ROWS];
 }
 
-uint64_t FdwPlanState::get_rel_width()
+uint64_t SpringtailPlanState::get_rel_width() const
 {
-    PgVector<uint64_t> v{_state[RootIndex::REL_SIZE]};
+    constexpr auto ind = RootIndex::REL_SIZE;
+    PgVector<ListValueType<ind>::type> v{_state[ind]};
     return v[RelSizeIndex::WIDTH];
 }

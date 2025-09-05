@@ -11,8 +11,7 @@ extern "C" {
 
 namespace springtail::pg_fdw {
 
-    // C++ helpers for List*
-
+    /** Type to hold List* pointers */
     struct PgList {
         PgList() 
         {
@@ -27,6 +26,8 @@ namespace springtail::pg_fdw {
         List* _l;
     };
 
+
+    /** Vector-style representation of List */
     template<typename T, bool is_integral=std::is_integral<T>::value> struct PgVector;
 
     // vector of integrals
@@ -93,9 +94,22 @@ namespace springtail::pg_fdw {
     };
 
     /** Serializable internal state to be passed between FDW callbacks
-     * as fdw_private. 
+     * as fdw_private. The state is a list of List's with the following structure:
+     *
+     * root list
+     * (
+     *      (1 192464 24) - (db_id, tid, xid)
+     *      (1 4) - (relation_rows relation_width)
+     *      ("a" "b") - target column names (could be empty)
+     *      (1, 2) - corresponding target column attributes (could be empty)
+     *      (0 1) - this is to indicate quals that are to be ignored =0.
+     *              For example self-referencing quals or unsupported functions.
+     *      (42) - sort index if any
+     *      (1) - scan direction 1-DESC, 0-ASC.
+     * )
+     *
      */
-    struct FdwPlanState {
+    struct SpringtailPlanState {
         struct TableRef {
             uint64_t db_id;
             uint64_t tid;
@@ -107,43 +121,43 @@ namespace springtail::pg_fdw {
             int16_t attrno;
         };
 
-        std::string _planstate;
+        SpringtailPlanState() = default;
+        SpringtailPlanState( uint64_t db_id, uint64_t tid, uint64_t xid);
+        explicit SpringtailPlanState(List* s);
 
-        FdwPlanState() = default;
+        SpringtailPlanState(const SpringtailPlanState&) = delete;
+        SpringtailPlanState& operator=(const SpringtailPlanState&) = delete;
 
-        FdwPlanState( uint64_t db_id, uint64_t tid, uint64_t xid);
-        explicit FdwPlanState(List* s);
-
-        FdwPlanState(const FdwPlanState&) = delete;
-        FdwPlanState& operator=(const FdwPlanState&) = delete;
-
+        /** Get the table ids. */
         TableRef get_table_ref() const;
-
 
         List* fdw_private() const {
             return _state._l;
         }
 
-        void add_target_colum(const std::string& name, int16_t attrno);
-        size_t count_target_columns();
-        ColumnInfo get_target_column(size_t i);
+        // methods to access the TARGET_COL_x lists
+        void add_target_column(const std::string& name, int16_t attrno);
+        size_t count_target_columns() const;
+        ColumnInfo get_target_column(size_t i) const;
 
+        // methods to access with the QUAL_STATE list
         void set_qual_state(size_t i, bool ignore);
-        bool get_qual_state(size_t i);
+        bool get_qual_state(size_t i) const;
 
+        // methods to access the SORT_INDEX list
         void set_sort_index(uint64_t id);
-        std::optional<uint64_t> get_sort_index();
+        std::optional<uint64_t> get_sort_index() const;
 
+        // methods to access the SCAN_DIRECTION list
         void set_scan_direction(bool scan_asc);
-        bool is_scan_asc();
+        bool is_scan_asc() const;
 
+        // methods to access the REL_SIZE list
         void set_rel_size(uint64_t rows, uint64_t width);
-        uint64_t get_rel_rows();
-        uint64_t get_rel_width();
+        uint64_t get_rel_rows() const;
+        uint64_t get_rel_width() const;
         
-        void set_planstate(void*);
-
-    private:
+        /** Indexes of various List's in the root list of the state */
         enum RootIndex {
             TABLE_REF,
             REL_SIZE,
@@ -155,21 +169,43 @@ namespace springtail::pg_fdw {
             SORT_INDEX,
             // scan direction
             SCAN_DIRECTION,
-            PLANSTATE
+
+            LAST
         };
 
+    private:
+        // indexes in TABLE_REF
         enum TableIdIndex {
             DB_ID,
             TID,
             XID
         };
-
+        // indexes in REL_SIZE
         enum RelSizeIndex {
             ROWS,
             WIDTH
         };
 
+        // the root list
         PgVector<List*> _state;
+    };
+
+
+    // this is to map List indexes to the corresponding value types
+    template<int ListIndex>
+    struct ListValueType {
+        using type = uint64_t;
+    };
+    template<> 
+    struct ListValueType<SpringtailPlanState::RootIndex::TARGET_COL_NAME>
+    {
+        using type = std::string;
+    };
+    template<>
+    struct ListValueType<SpringtailPlanState::RootIndex::TARGET_COL_ATTR>
+    {
+        // type used by PG for attribute numbers
+        using type = int16_t;
     };
 }
 

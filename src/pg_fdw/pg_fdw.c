@@ -334,17 +334,9 @@ springtail_GetForeignRelSize(PlannerInfo *root,
 
     get_foreign_server_options(serverid, &schema_xid, &db_id);
 
-    // create the plan state
-    SpringtailPlanState *planstate = (SpringtailPlanState *)palloc0(sizeof(SpringtailPlanState));
-    planstate->tid = tid;
-
     // Get the postgres transaction id, and create the internal state
     FullTransactionId pg_xid = GetCurrentFullTransactionId();
-    baserel->fdw_private = fdw_create_state(planstate, db_id, tid, pg_xid.value, schema_xid);
-
-
-    // store the plan state in the baserel
-    //baserel->fdw_private = planstate;
+    baserel->fdw_private = fdw_create_state(db_id, tid, pg_xid.value, schema_xid);
 
     // get the estimate of the number of rows and width of the table
     multicorn_getRelSize(root, baserel, foreigntableid);
@@ -368,8 +360,6 @@ springtail_GetForeignPaths(PlannerInfo *root,
 {
     elog(INFO, "Iron 0000 --- get\n");
     elog(INFO, "Iron 0000 --- get: %s\n", nodeToString(baserel->fdw_private));
-    //SpringtailPlanState *state = (SpringtailPlanState *)baserel->fdw_private;
-    SpringtailPlanState *state = (SpringtailPlanState *)get_plan_state(baserel->fdw_private);
 
     // get the foreign paths -- call helper to set them up
     multicorn_getForeignPaths(root, baserel, foreigntableid);
@@ -398,9 +388,6 @@ springtail_GetForeignPlan(PlannerInfo *root,
                           Plan *outer_plan)
 {
     elog(INFO, "Iron 33333 --- get: %s\n", nodeToString(baserel->fdw_private));
-
-    //SpringtailPlanState *planstate = (SpringtailPlanState *)baserel->fdw_private;
-    SpringtailPlanState *planstate = (SpringtailPlanState *)get_plan_state(baserel->fdw_private);
 
     // call into helper to set the foreign plan
     return multicorn_getForeignPlan(root, baserel, foreigntableid, best_path,
