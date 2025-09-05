@@ -535,7 +535,19 @@ private:
     /**
      * Performs a create_index() assuming that the correct locks are already held.
      */
-    proto::IndexInfo _create_index(const proto::IndexRequest& request);
+    proto::IndexInfo _create_index(const proto::IndexRequest& request, bool &created);
+
+    /**
+     * @brief Check the collumns of an index to ensure they have suppoerted type.
+     *
+     * @param db_id - database id
+     * @param index_info - index information
+     * @param keys - list of index keys
+     * @param xid - transaction id
+     * @return true - all index keys have supported type
+     * @return false - some index keys have unsupported type
+     */
+    bool _check_index_collumns(uint64_t db_id, const proto::IndexInfo & index_info, const std::map<uint32_t, uint32_t> & keys, XidLsn xid);
 
     /**
      * Performs a drop_index() assuming that the correct locks are already held.
