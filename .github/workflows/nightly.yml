@@ -71,7 +71,7 @@ jobs:
       iterations: "1"
       build_type: "debug"
       reuse_code: true
-      timeout_minutes: 60
+      timeout_minutes: 120
     secrets:
       aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
       aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
