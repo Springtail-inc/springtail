@@ -4,7 +4,8 @@
 namespace springtail {
 
     void
-    ExtentSchema::_populate(const std::map<uint32_t, SchemaColumn>& columns)
+    ExtentSchema::_populate(const std::map<uint32_t, SchemaColumn>& columns,
+                            bool allow_undefined)
     {
         // track how many primary key columns there are
         uint32_t pkey_count = 0;
@@ -82,17 +83,12 @@ namespace springtail {
 
             // construct based on the column type
             std::shared_ptr<ExtentField> field;
+
             switch (column.type) {
             case (SchemaType::UINT64):
             case (SchemaType::INT64):
             case (SchemaType::FLOAT64):
                 field = std::make_shared<ExtentField>(column.type, byte_pos);
-
-                if (column.nullable) {
-                    field->allow_null((bit_pos >> 3), (bit_pos & 0x7));
-                    ++bit_pos; // add the used null bit
-                }
-
                 byte_pos += 8; // add the used bytes
                 break;
 
@@ -103,54 +99,41 @@ namespace springtail {
             case (SchemaType::INT32):
             case (SchemaType::FLOAT32):
                 field = std::make_shared<ExtentField>(column.type, byte_pos);
-
-                if (column.nullable) {
-                    field->allow_null((bit_pos >> 3), (bit_pos & 0x7));
-                    ++bit_pos; // add the used null bit
-                }
-
                 byte_pos += 4; // add the used bytes
                 break;
 
             case (SchemaType::UINT16):
             case (SchemaType::INT16):
                 field = std::make_shared<ExtentField>(column.type, byte_pos);
-
-                if (column.nullable) {
-                    field->allow_null((bit_pos >> 3), (bit_pos & 0x7));
-                    ++bit_pos; // add the used null bit
-                }
-
                 byte_pos += 2; // add the used bytes
                 break;
 
             case (SchemaType::UINT8):
             case (SchemaType::INT8):
                 field = std::make_shared<ExtentField>(column.type, byte_pos);
-
-                if (column.nullable) {
-                    field->allow_null((bit_pos >> 3), (bit_pos & 0x7));
-                    ++bit_pos; // add the used null bit
-                }
-
                 byte_pos += 1; // add the used bytes
                 break;
 
             case (SchemaType::BOOLEAN): {
                 // save the bool position, and count it's bit
                 uint64_t bool_pos = bit_pos++;
-
                 field = std::make_shared<ExtentField>(column.type, (bool_pos >> 3), (bool_pos & 0x7));
-
-                if (column.nullable) {
-                    field->allow_null((bit_pos >> 3), (bit_pos & 0x7));
-                    ++bit_pos; // add the used null bit
-                }
                 break;
             }
 
             default:
                 throw TypeError();
+            }
+
+            // update the field to be nullable if applicable
+            if (column.nullable) {
+                field->allow_null((bit_pos >> 3), (bit_pos & 0x7));
+                ++bit_pos; // increment for the null bit
+            }
+
+            if (allow_undefined && !column.pkey_position) {
+                field->allow_undefined((bit_pos >> 3), (bit_pos & 0x7));
+                ++bit_pos; // increment for the undefined bit
             }
 
             // store the field into the base map
@@ -179,7 +162,8 @@ namespace springtail {
     std::shared_ptr<ExtentSchema>
     ExtentSchema::create_schema(const std::vector<std::string> &old_columns,
                                 const std::vector<SchemaColumn> &new_columns,
-                                const std::vector<std::string> &sort_columns) const
+                                const std::vector<std::string> &sort_columns,
+                                bool allow_undefined) const
     {
         // create SchemaColumn entries for the existing fields
         std::vector<SchemaColumn> all_columns;
@@ -222,7 +206,7 @@ namespace springtail {
         }
 
         // create the new ExtentSchema
-        return std::make_shared<ExtentSchema>(all_columns);
+        return std::make_shared<ExtentSchema>(all_columns, allow_undefined);
     }
 
     std::shared_ptr<std::vector<FieldPtr>>

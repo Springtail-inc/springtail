@@ -141,6 +141,12 @@ namespace springtail::pg_proxy {
 
     private:
 
+        /** map of pid amd cancel key pair to the corresponding ClientSession */
+        static std::unordered_map<
+            int32_t,
+            std::pair<std::vector<uint8_t>, std::shared_ptr<ClientSession>>
+        > _cancel_map;
+
         /** cache of statements, transaction history and session history */
         StatementCache _stmt_cache;
 
@@ -186,6 +192,9 @@ namespace springtail::pg_proxy {
 
         /** Handle authentication request */
         void _handle_auth();
+
+        /** Handle cancel request */
+        void _handle_cancel(int pid, const std::vector<uint8_t> &cancel_key);
 
         /** Handle simple query request */
         void _handle_simple_query(BufferPtr buffer, uint64_t seq_id);

@@ -49,41 +49,53 @@ def restart_container(container_name: str) -> bool:
 
 
 def stop_daemons(pid_path : str, daemons : List[tuple] = []) -> None:
-    """Stop all daemons."""
+    """Stop all daemons in the order specified by the daemons list, waiting for each to shutdown before proceeding."""
     # Stop the daemons
     if not os.path.exists(pid_path):
         print(f"PID path: {pid_path} does not exist")
         return
 
-    found_pids = []
+    all_found_pids = []
 
-    # for each .pid file in the pid_path run kill -2 (SIGINT) on the pid in that file
-    for file in os.listdir(pid_path):
-        daemon_name = file.split('.')[0]
-        file = os.path.join(pid_path, file)
-        if file.endswith(".pid"):
-            with open(file, 'r') as f:
+    # Stop daemons in the order specified by the daemons list, waiting for each to complete
+    for daemon in daemons:
+        daemon_name = daemon[0] if daemon else None
+        if not daemon_name:
+            continue
+
+        pid_file = os.path.join(pid_path, f"{daemon_name}.pid")
+        if os.path.exists(pid_file):
+            with open(pid_file, 'r') as f:
                 pid = f.read().strip()
-                found_pids.append(pid)
+                all_found_pids.append(pid)
                 print(f"Stopping daemon {daemon_name} with pid: {pid}")
                 try:
                     run_command('kill', ['-s', 'TERM', pid])
                 except Exception as e:
                     # most likely the process is already dead
                     pass
-                run_command('rm', [file])
+                run_command('rm', [pid_file])
 
-    # kill any lingering daemons after waiting a bit
-    retry = 20
-    while (retry > 0):
-        (pids, _) = running_pids(daemons, found_pids)
-        print(f"Waiting for daemons with pids: {pids}")
-        if pids is None or len(pids) == 0:
-            return
-        time.sleep(1)
-        retry = retry - 1
+                # Wait for this specific daemon to shutdown before proceeding to next
+                retry = 20
+                while retry > 0:
+                    (pids, _) = running_pids([daemon], [pid])
+                    if pids is None or len(pids) == 0:
+                        print(f"Daemon {daemon_name} has stopped")
+                        break
+                    time.sleep(1)
+                    retry -= 1
 
-    kill_processes(daemons)
+                # If daemon didn't stop gracefully, force kill it before proceeding
+                if retry == 0:
+                    print(f"Force killing daemon {daemon_name}")
+                    kill_processes([daemon])
+
+    # Final check for any remaining processes
+    (remaining_pids, _) = running_pids(daemons, all_found_pids)
+    if remaining_pids and len(remaining_pids) > 0:
+        print(f"Force killing remaining daemons with pids: {remaining_pids}")
+        kill_processes(daemons)
 
 
 def check_daemons_running(daemons : List[tuple]) -> tuple:

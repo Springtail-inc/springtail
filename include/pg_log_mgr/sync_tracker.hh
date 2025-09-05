@@ -76,7 +76,7 @@ namespace springtail::pg_log_mgr {
         private:
             bool _is_syncing;
             bool _should_skip;
-            std::shared_ptr<ExtentSchema> _schema;
+            std::shared_ptr<ExtentSchema> _schema; ///< The "update" schema -- which may include undefined columns
         };
 
     public:
@@ -250,7 +250,7 @@ namespace springtail::pg_log_mgr {
             }
 
         private:
-            ExtentSchemaPtr _schema; ///< Schema of the table being synced
+            ExtentSchemaPtr _schema; ///< The "update" schema of the table being synced; may include undefined columns
         };
 
         /** Helper object for notifying the log reader. */

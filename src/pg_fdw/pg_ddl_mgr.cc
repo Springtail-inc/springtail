@@ -116,7 +116,9 @@ namespace springtail::pg_fdw {
     static constexpr char CREATE_USER[] =
         "CREATE USER {} WITH LOGIN PASSWORD '{}' IN ROLE pg_read_all_data;";
 
-    PgDDLMgr::PgDDLMgr() : _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE)
+    PgDDLMgr::PgDDLMgr()
+        : Singleton<PgDDLMgr>(ServiceId::PgDDLMgrId),
+          _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE)
     {
         // initialize the cache watcher
         _cache_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(

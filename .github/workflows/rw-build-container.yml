@@ -1,0 +1,106 @@
+name: Build Springtail Container
+on:
+  workflow_call:
+    inputs:
+      base_image_tag:
+        description: 'The image version tag for the base image to pull. Excluding the REPO URI. Example: service-d09837a'
+        type: string
+        required: true
+      build_type:
+        description: 'The type of build to perform. "release" or "debug". The type of build need to match the base image type.'
+        type: string
+        required: true
+        default: "debug"
+      num_procs:
+        description: 'The number of parallel processes to use for building and testing.'
+        type: string
+        required: false
+        default: "4"
+      output_image_tag:
+        description: 'The tag to apply to the built image. Excluding the REPO URI. Example: service-1239837a'
+        type: string
+        required: false
+        default: ""
+      springtail_include_time_traces:
+        description: 'Whether to include time traces in the Springtail build. This can be useful for performance analysis and debugging.'
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      aws_role_arn:
+        description: "The ARN of the role to assume."
+        required: true
+      aws_ecr_docker_password:
+        description: "The password for the ECR docker registry."
+        required: true
+    outputs:
+      output_image_tag:
+        description: "The tag of the built image. Ready to use for the next steps."
+        value: ${{ jobs.build-container.outputs.output_image_tag }}
+jobs:
+  build-container:
+    name: Build Springtail Container
+    runs-on: warp-ubuntu-latest-arm64-4x
+    timeout-minutes: 15
+    env:
+      CI_BUILD_TYPE: ${{ inputs.build_type }}
+      ECR_REPO_URI: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}
+      VCPKG_FORCE_SYSTEM_BINARIES: 1
+      ZIC: true
+      USER: root
+      PYTHONUNBUFFERED: 1
+      BASE_IMAGE_TAG: ${{ inputs.base_image_tag }}
+      OUTPUT_IMAGE_TAG: ${{ inputs.output_image_tag }}
+    outputs:
+      output_image_tag: ${{ steps.prepare-build.outputs.output_image_tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          clean: true
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.aws_role_arn }}
+          role-session-name: tempSession
+          aws-region: us-east-1
+
+      - name: Prepare Build
+        id: prepare-build
+        run: |
+          # Tag image with the run ID for uniqueness
+          output_image_tag="${OUTPUT_IMAGE_TAG}"
+          if [ -z "${OUTPUT_IMAGE_TAG}" ]; then
+            # Generate a unique short random tag
+            r=$(head /dev/urandom | tr -dc a-f0-9 | head -c6)
+            output_image_tag="${BASE_IMAGE_TAG}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${r}"
+          fi
+          
+          # Logs in ECR
+          aws ecr get-login-password | docker login --username AWS --password-stdin ${ECR_REPO_URI}
+          echo "output_image_tag=$output_image_tag" >> $GITHUB_OUTPUT
+          
+          # Figure out the build args (line separated for later use)
+          if ${{ inputs.springtail_include_time_traces }}; then
+            echo "Including time traces in Springtail build."
+            echo "springtail_include_time_traces=SPRINGTAIL_INCLUDE_TIME_TRACES=true" >> $GITHUB_OUTPUT
+          else
+            echo "Time traces not included in Springtail build."
+            echo "springtail_include_time_traces=SPRINGTAIL_INCLUDE_TIME_TRACES=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Docker Build Push Action
+        uses: Warpbuilds/build-push-action@v6
+        with:
+          profile-name: "Springtail-CI"
+          context: .
+          push: true
+          file: .github/workflows/Dockerfile.build
+          tags: |
+            ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ steps.prepare-build.outputs.output_image_tag }}
+          build-args: |
+            BASE_IMAGE=${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ inputs.base_image_tag }}
+            CI_BUILD_TYPE=${{ inputs.build_type }}
+            NCORES=${{ inputs.num_procs }}
+            ${{ steps.prepare-build.outputs.springtail_include_time_traces }}

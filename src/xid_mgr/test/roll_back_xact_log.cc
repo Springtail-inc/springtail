@@ -16,7 +16,6 @@ main(int argc, char **argv)
     std::string base_dir;
     uint64_t db_id = 0;
     uint64_t xid = 0;
-    bool archive = true;
 
     // parse the arguments
     namespace po = boost::program_options;
@@ -25,7 +24,6 @@ main(int argc, char **argv)
     desc.add_options()("path,p", po::value<std::string>(&base_dir)->required(), "Path for Xid logs storage directory");
     desc.add_options()("dbid,d", po::value<uint64_t>(&db_id)->default_value(1), "DB ID.");
     desc.add_options()("xid,x", po::value<uint64_t>(&xid)->required(), "Xid to set");
-    desc.add_options()("archive,a", po::value<bool>(&archive)->default_value(true), "Archive removed logs flag");
 
     try {
         po::variables_map vm;
@@ -52,7 +50,7 @@ main(int argc, char **argv)
 
     std::filesystem::path db_path = base_dir + "/" + std::to_string(db_id);
 
-    PgXactLogWriter::set_last_xid_in_storage(db_path, xid, archive);
+    PgXactLogWriter::set_last_xid_in_storage(db_path, xid, false);
 
     // verify xid logs
     PgXactLogReader reader(db_path);
