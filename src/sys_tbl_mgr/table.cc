@@ -375,8 +375,8 @@ namespace indexer_helpers {
     Table::Iterator
     Table::inverse_lower_bound(TuplePtr search_key, uint64_t index_id, bool index_only)
     {
-        // check if the table is vacant
-        if (_primary_index == nullptr) {
+        // check if the table is vacant or empty
+        if (_primary_index == nullptr || _primary_index->empty()) {
             return end(index_id);
         }
 
@@ -400,28 +400,38 @@ namespace indexer_helpers {
 
         CHECK(!index_only);
 
-        // if the primary index is empty, return end()
-        if (_primary_index->empty()) {
-            return end();
-        }
-
-        // find the extent that could contain the inverse_lower_bound() key
+        // the table's inverse_lower_bound() record may be the last record in the extent referenced
+        // by the index's inverse_lower_bound() or anywhere in the extent referenced by the index's
+        // lower_bound() -- so we first search the lower_bound() entry and then if we don't find it
+        // we check the inverse_lower_bound() entry
         auto &&i = _primary_index->lower_bound(search_key);
-        if (i == _primary_index->end()) {
-            --i;
+
+        // check the lower_bound() entry
+        if (i != _primary_index->end()) {
+            // read the extent and find the inverse_lower_bound() of the key within it
+            auto page = _read_page_via_primary(i);
+
+            // find the inverse_lower_bound() of the key within the data extent
+            auto &&j = page->inverse_lower_bound(search_key, _schema);
+
+            // if we found it, return it
+            if (j != page->end()) {
+                return Iterator(this, _primary_index, i, std::move(page), j);
+            }
         }
 
-        // read the extent and find the inverse_lower_bound() of the key within it
-        auto page = _read_page_via_primary(i);
+        // not in the lower_bound() entry, go to the last entry of the inverse_lower_bound() entry
+        // note: if the iterator is pointing to begin(), this decrement will set it to end()
+        --i;
 
-        // find the inverse_lower_bound() of the key within the data extent
-        auto &&j = page->inverse_lower_bound(search_key, _schema);
-
-        // note: the index found this page, but if it's the first page in the table, the key may be
-        //       less than the first entry, meaning no such inverse_lower_bound() exists
-        if (j == page->end()) {
+        // if that was the first entry of the index, then inverse_lower_bound() isn't present
+        if (i == _primary_index->end()) {
             return end();
         }
+
+        // read the extent and find the last entry within it, since it's guaranteed to be less than the search key
+        auto page = _read_page_via_primary(i);
+        auto &&j = page->last();
 
         return Iterator(this, _primary_index, i, std::move(page), j);
     }
@@ -636,8 +646,10 @@ namespace indexer_helpers {
 
         // initialize the primary index
         if (it->extent_id != constant::UNKNOWN_EXTENT) {
+            LOG_DEBUG(LOG_BTREE, "Primary init with root: {}", it->extent_id);
             _primary_index->init(it->extent_id);
         } else {
+            LOG_DEBUG(LOG_BTREE, "Primary init empty");
             _primary_index->init_empty();
         }
         _use_empty = _primary_index->empty();
@@ -663,8 +675,10 @@ namespace indexer_helpers {
                 assert(it != roots.end());
 
                 if (it->extent_id != constant::UNKNOWN_EXTENT) {
+                    LOG_DEBUG(LOG_BTREE, "Secondary {} init with root: {}", idx.id, it->extent_id);
                     btree->init(it->extent_id);
                 } else {
+                    LOG_DEBUG(LOG_BTREE, "Secondary {} init empty", idx.id);
                     btree->init_empty();
                 }
                 assert(_secondary_indexes.find(idx.id) == _secondary_indexes.end());

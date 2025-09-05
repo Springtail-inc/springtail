@@ -340,7 +340,7 @@ namespace springtail::pg_proxy {
         Type         _type;                ///< type of session
 
         int32_t      _pid;                 ///< pid for cancel request
-        int32_t      _cancel_key;          ///< cancel key for cancel request
+        std::vector<uint8_t>  _cancel_key; ///< cancel key for cancel request
 
         UserPtr      _user;                ///< user
         uint32_t     _db_id;               ///< database id
@@ -349,7 +349,7 @@ namespace springtail::pg_proxy {
 
         std::unordered_map<std::string, std::string> _parameters; ///< startup parameters
 
-        uint32_t _id;                      ///< unique id for session
+        uint64_t _id;                      ///< unique id for session
 
         bool _in_transaction = false;      ///< is this session in a transaction
 

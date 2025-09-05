@@ -195,6 +195,7 @@ BEGIN
         FROM pg_attribute pga
         WHERE
             pga.attrelid=ind_obj.table_oid
+            AND pga.attisdropped IS FALSE
             AND (array_position(ind_obj.indkey, pga.attnum) IS NOT NULL)
             AND attisdropped=false
     ) AS obj_select
@@ -323,6 +324,7 @@ BEGIN
         LEFT JOIN pg_collation col ON pga.attcollation = col.oid AND pga.attcollation <> 0
         LEFT JOIN pg_catalog.pg_namespace nsp ON nsp.oid = t.typnamespace
         WHERE pga.attrelid=obj_id
+            AND pga.attisdropped IS FALSE
             AND quote_literal(table_schema) = quote_literal(schema_name)
             AND quote_literal(table_name) = quote_literal(table_relname)
             AND atttypid > 0
@@ -458,6 +460,7 @@ BEGIN
                     FROM pg_attribute pga
                     WHERE
                         pga.attrelid=obj.objid
+                        AND pga.attisdropped IS FALSE
                         AND (array_position(ind_obj.indkey, pga.attnum) IS NOT NULL)
                         AND attisdropped=false
                 ) AS obj_select
