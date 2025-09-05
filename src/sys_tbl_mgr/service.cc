@@ -1158,7 +1158,7 @@ Service::GetRoots(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "GetRoots");
 
-    LOG_INFO("got GetRoots()");
+    LOG_INFO("got GetRoots(): db {} tid {} xid {}", request->db_id(), request->table_id(), xid);
 
     boost::shared_lock lock(_read_mutex);
 
@@ -2228,19 +2228,23 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
         auto row_i = roots_t->inverse_lower_bound(search_key);
 
         if (row_i == roots_t->end()) {
+            LOG_DEBUG(LOG_SCHEMA, "Couldn't find search key: {} {} {}", table_id, idx.id(), xid.xid);
             continue;
         }
 
         auto &&row = *row_i;
         if (table_id_f->get_uint64(&row) != table_id) {
+            LOG_DEBUG(LOG_SCHEMA, "Wrong table ID: {} != {}", table_id_f->get_uint64(&row), table_id);
             continue;
         }
         if (index_id_f->get_uint64(&row) != idx.id()) {
+            LOG_DEBUG(LOG_SCHEMA, "Wrong index ID: {} != {}", index_id_f->get_uint64(&row), idx.id());
             continue;
         }
 
         auto record_xid = xid_f->get_uint64(&row);
         if (record_xid > xid.xid) {
+            LOG_DEBUG(LOG_SCHEMA, "Wrong XID: {} > {}", record_xid, xid.xid);
             continue;
         }
 
