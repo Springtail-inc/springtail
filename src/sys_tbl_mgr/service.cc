@@ -1158,7 +1158,7 @@ Service::GetRoots(grpc::ServerContext* context,
 {
     ServerSpan span(context, "SysTblMgrService", "GetRoots");
 
-    LOG_INFO("got GetRoots(): db {} tid {} xid {}", request->db_id(), request->table_id(), xid);
+    LOG_INFO("got GetRoots(): db {} tid {} xid {}", request->db_id(), request->table_id(), request->xid());
 
     boost::shared_lock lock(_read_mutex);
 
