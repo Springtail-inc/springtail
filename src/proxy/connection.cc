@@ -48,6 +48,15 @@ namespace springtail::pg_proxy {
     }
 
     void
+    ProxyConnection::get_peer_address(struct sockaddr_storage *addr, socklen_t *len)
+    {
+        if (getpeername(_socket, (struct sockaddr *)addr, len) == -1) {
+            LOG_ERROR("Error getting peer name: {}", strerror(errno));
+            *len = 0;
+        }
+    }
+
+    void
     ProxyConnection::close()
     {
         if (_closed.test_and_set()) {

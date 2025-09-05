@@ -199,6 +199,9 @@ namespace springtail::pg_proxy {
                Session::Type type,
                const std::unordered_map<std::string, std::string> &parameters);
 
+        /** send cancel request to Postgres */
+        void send_cancel();
+
     private:
 
         bool _is_pinned = false;

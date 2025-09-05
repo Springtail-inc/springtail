@@ -90,6 +90,9 @@ namespace springtail::pg_proxy {
         /** Does connection have pending data */
         bool has_pending();
 
+        /** Get peer address of the connection socket */
+        void get_peer_address(struct sockaddr_storage *addr, socklen_t *len);
+
         /** factory method to create a connection */
         static ProxyConnectionPtr create(const std::string &hostname, int port);
 
