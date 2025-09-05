@@ -139,7 +139,7 @@ extern "C" {
     }
 
     void
-    fdw_get_rel_size_x(List *state, List *qual_list, List* join_quals, double *rows, int *width)
+    fdw_get_rel_size(List *state, List *qual_list, List* join_quals, double *rows, int *width)
     {
         SpringtailPlanState ps{state};
         get_fdw_mgr()->fdw_get_rel_size(&ps, qual_list, join_quals, rows, width);
