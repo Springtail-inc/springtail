@@ -629,8 +629,6 @@ namespace springtail::pg_log_mgr {
         LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Processing data: type={}, length={}, msg_length={}, msg_offset={}, start_lsn={}, end_lsn={}",
                   (data.msg_offset == 0) ? data.buffer[0] : _current_msg_type, data.length, data.msg_length, data.msg_offset, data.starting_lsn, data.ending_lsn);
 
-        DCHECK_EQ(data.starting_lsn, data.ending_lsn);
-
         auto current_log_offset = logger->offset();
 
         // NOTE: the data.starting_lsn can be 0 (INVALID_LSN) if the message

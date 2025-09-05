@@ -187,6 +187,7 @@ namespace springtail {
 
         char _buffer[8192];               ///< buffer for building messages
         uint32_t _buffer_offset = 0;      ///< current offset in buffer
+        uint32_t _log_written = 0;        ///< number of message bytes written
 
         PgTransactionPtr _current_xact;   ///< current transaction
         std::vector<PgTransactionPtr> _xact_list; ///< transaction list

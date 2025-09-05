@@ -1538,8 +1538,10 @@ namespace springtail {
             LOG_ERROR("Unable to open file: {}", file);
             throw PgIOError();
         }
+
         _current_path = file;
         _current_offset = 0;
+        _xlog_msg_end_offset = 0;
 
         // get file size
         auto file_end_offset = std::filesystem::file_size(file);
@@ -1552,66 +1554,78 @@ namespace springtail {
             return INVALID_LSN;
         }
 
-        uint64_t current_lsn_msg_start = 0;
         LSN_t current_start_lsn = INVALID_LSN;
-        LSN_t last_valid_start_lsn = INVALID_LSN;
         char current_msg_type = 0;
 
+        uint64_t truncate_offset = 0;
+        LSN_t restart_lsn = INVALID_LSN;
+
         // Make sure we have room for at least a header + type
-        while (_current_offset + PgMsgStreamHeader::SIZE + 1 <= file_end_offset) {
+        while (_current_offset + PgMsgStreamHeader::SIZE <= file_end_offset) {
 
             // read header at current offset and get next header offset
             // after reading the header, _current_offset is set to just after the header
             CHECK(_read_header());
             current_msg_type = _stream.peek();
 
+            // XXX handle 0 LSN for stream start/end/relation, etc
+
             // check if the LSN has changed, if so record it
             if (current_start_lsn != _header.start_lsn) {
-                last_valid_start_lsn = current_start_lsn;
                 current_start_lsn = _header.start_lsn;
-                current_lsn_msg_start = _current_offset - PgMsgStreamHeader::SIZE;
+                truncate_offset = _current_offset - PgMsgStreamHeader::SIZE;
+                restart_lsn = current_start_lsn;
             }
 
-            // check if the full message fits in the file
-            if (_xlog_msg_end_offset == file_end_offset) {
-                // last full message of the file
-                 if (current_msg_type == pg_msg::MSG_COMMIT ||
-                     current_msg_type == pg_msg::MSG_STREAM_COMMIT ||
-                     current_msg_type == pg_msg::MSG_STREAM_ABORT) {
-                    return _header.end_lsn+1;
-                }
-                // otherwise truncate to start of this lsn message
+            // try and peek at the current message type
+            current_msg_type = _stream.peek();
+            if (current_msg_type == EOF) {
+                // end of file
                 break;
             }
 
-            if (_xlog_msg_end_offset < file_end_offset) {
-                // safe message, seek to next message
-                _stream.seekg(_xlog_msg_end_offset, std::fstream::beg);
-                _current_offset = _xlog_msg_end_offset;
-                continue;
+            if (_xlog_msg_end_offset > file_end_offset) {
+                // partial message at end of file
+                break;
             }
 
-            DCHECK_GT(_xlog_msg_end_offset, file_end_offset);
-            // if we reach here, we have a partial message at the end of the file
+            // the current message fits in the file
 
-            break;
+            // see if this is last message of LSN,
+            // check for commit or abort message
+            if (current_msg_type == pg_msg::MSG_COMMIT ||
+                current_msg_type == pg_msg::MSG_STREAM_COMMIT ||
+                current_msg_type == pg_msg::MSG_STREAM_ABORT) {
+
+                truncate_offset = _xlog_msg_end_offset;
+                restart_lsn = _header.end_lsn + 1;
+            }
+
+            if (_xlog_msg_end_offset == file_end_offset) {
+                // last full message of the file
+                break;
+            }
+
+            // move to next message header
+            _stream.seekg(_xlog_msg_end_offset, std::fstream::beg);
+            _current_offset = _xlog_msg_end_offset;
         }
 
-        if (current_lsn_msg_start == 0) {
-            // need to restart from previous log file's end LSN
+        if (truncate_offset == 0) {
+            // we may have a partial message or header, but easier to
             // return INVALID_LSN and caller will remove file and
-            // examine previous file
+            // examine previous file for LSN
             return INVALID_LSN;
         }
 
         // partial message detected; _xlog_msg_end_offset > file_end_offset
-        // truncate to just before this message header
-        if (truncate) {
-            _truncate_file(file, current_lsn_msg_start);
+        // truncate to truncation offset
+        if (truncate && truncate_offset != file_end_offset) {
+            _truncate_file(file, truncate_offset);
         }
 
         // replay this message (LSN)
-        return last_valid_start_lsn;
+        return restart_lsn;
     }
 
     bool

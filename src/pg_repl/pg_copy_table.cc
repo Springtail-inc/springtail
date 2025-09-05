@@ -79,7 +79,6 @@ namespace springtail
         "WHERE pga.attrelid={} "
         "AND table_schema='{}' "
         "AND table_name='{}' "
-        "AND pga.attisdropped = false "
         "ORDER BY ordinal_position";
 
     static constexpr char SECONDARY_INDEX_QUERY[] =
@@ -98,7 +97,6 @@ namespace springtail
         "LEFT JOIN pg_constraint c ON c.conindid = idx.indexrelid AND c.contype = 'p' "
         "WHERE idx.indrelid = {} "
         "  AND c.conname IS NULL "
-        "  AND a.attisdropped = false "
         "ORDER BY i.relname, index_name, s.snum ";
 
     /** select current xmin:xmax:list of xids in progress from DB as start of this transaction;

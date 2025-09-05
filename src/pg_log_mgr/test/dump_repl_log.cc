@@ -76,7 +76,11 @@ int main(int argc, char *argv[])
                                          header.msg_length + header.header_offset + PgMsgStreamHeader::SIZE);
 
                 auto hdr_lsn = header.start_lsn;
-                DCHECK_EQ(header.start_lsn, header.end_lsn);
+                if (header.start_lsn != header.end_lsn) {
+                    std::cerr << std::format("Warning: start_lsn {} != end_lsn {}\n",
+                                             header.start_lsn, header.end_lsn);
+                }
+
                 if (last_lsn != INVALID_LSN && hdr_lsn != last_lsn) {
                     std::cout << std::format("LSN jump from {} to {}\n", last_lsn, hdr_lsn);
                 }
@@ -102,6 +106,11 @@ int main(int argc, char *argv[])
             if (reader.offset() == fsize) {
                 eos = true;
             }
+        }
+
+        if (reader.offset() != fsize) {
+            std::cout << std::format("Warning: did not reach end of file, offset: {}, file size: {}\n",
+                                     reader.offset(), fsize);
         }
 
         if (scan_all_files) {

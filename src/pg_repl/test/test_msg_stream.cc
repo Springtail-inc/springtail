@@ -22,7 +22,7 @@ namespace {
         static constexpr char const * const LOG_FILE = "/tmp/test_log_reader.log";
         static void SetUpTestSuite()
         {
-            // Add two fake databeses with custom include.schemas config
+            // Add two fake databases with custom include.schemas config
             std::string js =
             "{ "
             "\"db_instances\": {"
@@ -68,7 +68,7 @@ namespace {
             // ok to through exceptions from here if need be
 
             // remove the log file
-            //std::filesystem::remove(_log_file);
+            std::filesystem::remove(_log_file);
         }
 
         /** Process json command file stored into log file*/

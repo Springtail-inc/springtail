@@ -108,7 +108,7 @@ namespace {
 
         // repair the log file
         auto last_lsn = PgMsgStreamReader::scan_log(1, LOG_FILE, false);
-        ASSERT_EQ(last_lsn, header.end_lsn);
+        ASSERT_EQ(last_lsn, header.end_lsn + 1);
     }
 
     TEST_F(LogRepair_Test, RepairTruncateLogFile)
