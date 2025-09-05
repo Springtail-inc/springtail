@@ -988,12 +988,10 @@ multicorn_getRelSize(PlannerInfo *root,
     List* quals = NIL;
     _get_relation_quals(root, baserel, true, &quals, &join_quals);
 
-//    fdw_get_rel_size(planstate, planstate->target_list, planstate->qual_list, join_quals, &rows, &width);
     fdw_get_rel_size(baserel->fdw_private, quals, join_quals, &rows, &width);
 
     baserel->rows = rows;
     baserel->reltarget->width = width;
- //   planstate->width = width;
 }
 
 void
