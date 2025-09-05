@@ -421,7 +421,7 @@ springtail_BeginForeignScan(ForeignScanState *node, int eflags)
     // build a simple qual list against constants only
     List *quals = multicorn_buildSimpleQualList(node);
 
-    node->fdw_state = fdw_begin_scan_x(fs->fdw_private, slot->tts_tupleDescriptor->natts, attrs, quals);
+    node->fdw_state = fdw_begin_scan(fs->fdw_private, slot->tts_tupleDescriptor->natts, attrs, quals);
 
     return;
 }

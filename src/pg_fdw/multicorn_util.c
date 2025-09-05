@@ -989,7 +989,7 @@ multicorn_getRelSize(PlannerInfo *root,
     _get_relation_quals(root, baserel, true, &quals, &join_quals);
 
 //    fdw_get_rel_size(planstate, planstate->target_list, planstate->qual_list, join_quals, &rows, &width);
-    fdw_get_rel_size_x(baserel->fdw_private, quals, join_quals, &rows, &width);
+    fdw_get_rel_size(baserel->fdw_private, quals, join_quals, &rows, &width);
 
     baserel->rows = rows;
     baserel->reltarget->width = width;
@@ -1015,7 +1015,7 @@ multicorn_getForeignPaths(PlannerInfo *root,
     // this will create PgFdwState
     void *state = fdw_create_scan_state(baserel->fdw_private, quals, join_quals);
 
-    List *possiblePaths = fdw_get_path_keys_x(baserel->fdw_private, state); // see pathKeys()
+    List *possiblePaths = fdw_get_path_keys(baserel->fdw_private, state); // see pathKeys()
 
     /* Try to find parameterized paths */
     paths = findPaths(root, baserel, possiblePaths, SPRINGTAIL_STARTUP_COST,

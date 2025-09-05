@@ -160,13 +160,13 @@ namespace springtail::pg_fdw {
                 uint64_t schema_xid);
 
         /** Begin scan
-         * @param state PgFdwState
+         * @param planstate plan state
          * @param num_attrs Number of attributes
          * @param attrs Array of pg attributes
          * @param target_list List of target columns (Value or String)
          * @param qual_list List of predicate clauses (BaseQual)
          */
-        PgFdwState* fdw_begin_scan_x(SpringtailPlanState *planstate,
+        PgFdwState* fdw_begin_scan(SpringtailPlanState *planstate,
                 int num_attrs,
                 const Form_pg_attribute* attrs,
                 List *quals);
@@ -209,10 +209,11 @@ namespace springtail::pg_fdw {
         List* fdw_can_sort(SpringtailPlanState* planstate, PgFdwState* pg_state, List *sortgroup, List* quals, bool use_secondary = false);
 
         /** Get list of path keys -- indexes
-         * @param state Planstate
+         * @param planstate Planstate
+         * @param state Scan state
          * @return List of a List of path keys (key attnum, num rows)
          */
-        List *fdw_get_path_keys_x(SpringtailPlanState *planstate, PgFdwState* state);
+        List *fdw_get_path_keys(SpringtailPlanState *planstate, PgFdwState* state);
 
         /**
          */
@@ -220,11 +221,10 @@ namespace springtail::pg_fdw {
 
         /** Get estimate of row width/number of rows
          * @param planstate Plan state
-         * @param target_list List of target columns (String or Value)
          * @param qual_list List of predicate clauses (BaseQual)
          * @param join_quals List of predicate clauses (BaseQual) that are part of join clauses
          */
-        void fdw_get_rel_size_x(SpringtailPlanState *state, List *qual_list, List* join_quals, double *rows, int *width);
+        void fdw_get_rel_size(SpringtailPlanState *planstate, List *qual_list, List* join_quals, double *rows, int *width);
 
         /** Commit or rollback a transaction, remove the XID mappings
          * @param pg_xid Postgres XID

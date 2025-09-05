@@ -46,10 +46,10 @@ extern "C" {
 
     /** Begin scan wrapper */
     void*
-    fdw_begin_scan_x(List* state, int num_attrs, Form_pg_attribute* attrs,  List *quals)
+    fdw_begin_scan(List* state, int num_attrs, Form_pg_attribute* attrs,  List *quals)
     {
         SpringtailPlanState ps{state};
-        return get_fdw_mgr()->fdw_begin_scan_x(&ps, num_attrs, attrs, quals);
+        return get_fdw_mgr()->fdw_begin_scan(&ps, num_attrs, attrs, quals);
     }
 
     /** Iterate scan wrapper */
@@ -101,10 +101,10 @@ extern "C" {
 
     /** Get list of path keys (key name, num rows) */
     List* 
-    fdw_get_path_keys_x(List* planstate, void *scan_state)
+    fdw_get_path_keys(List* planstate, void *scan_state)
     {
         SpringtailPlanState ps{planstate};
-        return get_fdw_mgr()->fdw_get_path_keys_x(&ps, (PgFdwState*)scan_state);
+        return get_fdw_mgr()->fdw_get_path_keys(&ps, (PgFdwState*)scan_state);
     }
 
     void
@@ -142,7 +142,7 @@ extern "C" {
     fdw_get_rel_size_x(List *state, List *qual_list, List* join_quals, double *rows, int *width)
     {
         SpringtailPlanState ps{state};
-        get_fdw_mgr()->fdw_get_rel_size_x(&ps, qual_list, join_quals, rows, width);
+        get_fdw_mgr()->fdw_get_rel_size(&ps, qual_list, join_quals, rows, width);
     }
 
     void 

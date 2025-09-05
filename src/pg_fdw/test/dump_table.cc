@@ -186,7 +186,7 @@ dump_table(uint64_t db_id,
         }
     }
 
-    PgFdwState* state = mgr->fdw_begin_scan_x(&ps, fields->size(), attrs, nullptr);
+    PgFdwState* state = mgr->fdw_begin_scan(&ps, fields->size(), attrs, nullptr);
 
     // iterate through the table and print the values
     Datum values[fields->size()];

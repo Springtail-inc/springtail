@@ -699,7 +699,7 @@ namespace springtail::pg_fdw {
     }
 
     PgFdwState*
-    PgFdwMgr::fdw_begin_scan_x(SpringtailPlanState *planstate,
+    PgFdwMgr::fdw_begin_scan(SpringtailPlanState *planstate,
             int num_attrs,
             const Form_pg_attribute* attrs,
             List *quals)
@@ -1295,7 +1295,7 @@ namespace springtail::pg_fdw {
     }
 
     List *
-    PgFdwMgr::fdw_get_path_keys_x(SpringtailPlanState *planstate, PgFdwState* state)
+    PgFdwMgr::fdw_get_path_keys(SpringtailPlanState *planstate, PgFdwState* state)
     {
         List* result = NULL;
         uint64_t rel_rows = planstate->get_rel_rows();
@@ -1353,7 +1353,7 @@ namespace springtail::pg_fdw {
         return result;
     }
 
-    void PgFdwMgr::fdw_get_rel_size_x(SpringtailPlanState *planstate, List *qual_list, List* join_quals, double *rows, int *width)
+    void PgFdwMgr::fdw_get_rel_size(SpringtailPlanState *planstate, List *qual_list, List* join_quals, double *rows, int *width)
     {
         // TODO: we create a temporary scan state here because for historical reasons
         // it has some API's need by this function. The state will be deleted

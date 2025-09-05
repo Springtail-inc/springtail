@@ -273,7 +273,7 @@ namespace {
             delete state;
 
             // begin the scan
-            state = mgr->fdw_begin_scan_x(&plan, _columns.size(), _attrs, qual_list);
+            state = mgr->fdw_begin_scan(&plan, _columns.size(), _attrs, qual_list);
 
             if (state->sortgroup_index.has_value()) {
                 ASSERT_EQ(state->sortgroup_index->id, state->index->id);
