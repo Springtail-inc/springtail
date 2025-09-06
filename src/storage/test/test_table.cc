@@ -1262,6 +1262,108 @@ namespace {
         ASSERT_GT(size_pre_vacuum, size_post_vacuum);
     }
 
+    TEST_P(Table_Test, InverseLowerBoundLastEntry) {
+        auto client = XidMgrClient::get_instance();
+        auto server = xid_mgr::XidMgrServer::get_instance();
+        uint64_t access_xid = client->get_committed_xid(1, 0);
+        uint64_t target_xid = access_xid + 1;
+
+        // create the namespace and table in the sys_tbl_mgr
+        _init_sys_tbls(target_xid, 1008, "test_inverse_lower_bound_last_entry");
+
+        // create a mutable table with very small cache to force multiple extents
+        TableMetadata metadata;
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
+        auto mtable = _create_mtable(1008, target_xid, metadata.roots);
+
+        // insert a number of rows to create multiple extents
+        _populate_table(mtable);
+
+        // finalize the table
+        metadata = mtable->finalize();
+        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        server->commit_xid(1, 1, target_xid, false);
+
+        // create an access table
+        access_xid = target_xid;
+        auto table = _create_table(1008, access_xid, metadata.roots);
+
+        // iterate through the data to find entries that are likely to be at extent boundaries
+        // we'll test with several names that should be at the end of their respective extents
+        std::vector<std::string> test_names;
+
+        // collect every 100th name to have good coverage across extents
+        int count = 0;
+        for (auto &row : *table) {
+            if (count % 100 == 99) {  // every 100th row (0-indexed)
+                std::string name(_fields->at(1)->get_text(&row));
+                test_names.push_back(name);
+            }
+            count++;
+        }
+
+        // for each test name, verify that inverse_lower_bound works correctly
+        // this tests the specific bug case where the searched value is the last entry in a data extent
+        for (const auto& test_name : test_names) {
+            auto search_key = _create_key(test_name);
+
+            // get the inverse_lower_bound iterator
+            auto inv_it = table->inverse_lower_bound(search_key);
+
+            // the inverse_lower_bound should return an iterator to the first row that is <= search_key
+            ASSERT_NE(inv_it, table->end());
+
+            auto result_row = *inv_it;
+            auto result_name = _fields->at(1)->get_text(&result_row);
+
+            // the result should be <= search_key (lexicographically)
+            ASSERT_LE(result_name, test_name);
+
+            // verify that this is indeed the correct inverse_lower_bound by checking
+            // that the next row (if it exists) is > search_key
+            ++inv_it;
+            if (inv_it != table->end()) {
+                auto next_row = *inv_it;
+                auto next_name = _fields->at(1)->get_text(&next_row);
+                ASSERT_GT(next_name, test_name);
+            }
+        }
+
+        // test edge case: use the BTree directly to find an existing key, then search for key+1
+        // this specifically tests the bug where the searched value would be the last entry in a data extent
+        auto primary_index = table->index(constant::INDEX_PRIMARY);
+        if (primary_index && !primary_index->empty()) {
+            // find an existing key in the BTree using lower_bound
+            auto existing_key = _create_key("m");  // pick a key that should exist in middle of data
+            auto btree_it = primary_index->lower_bound(existing_key);
+
+            if (btree_it != primary_index->end()) {
+                // get the actual key from the BTree entry
+                auto btree_row = *btree_it;
+                std::string found_name(_fields->at(1)->get_text(&btree_row));
+
+                // create a new key that is one character larger than the found key
+                std::string target_name = found_name + "a";  // append 'a' to make it larger
+                auto target_key = _create_key(target_name);
+
+                // perform inverse_lower_bound with the target key
+                // this should return the found_name since it's the largest key <= target_name
+                auto inv_it = table->inverse_lower_bound(target_key);
+                ASSERT_NE(inv_it, table->end());
+
+                auto result_row = *inv_it;
+                auto result_name = _fields->at(1)->get_text(&result_row);
+
+                // the result should be <= target_name and should be the found_name or something close
+                ASSERT_LE(result_name, target_name);
+
+                // since target_name doesn't exist, inverse_lower_bound should return 
+                // the largest key that is <= target_name, which should be >= found_name
+                ASSERT_GE(result_name, found_name);
+            }
+        }
+    }
+
     INSTANTIATE_TEST_CASE_P(Table_Test,
                             Table_Test,
                             ::testing::Values(CacheSize{ 16384, 16384, 512, 16 },
