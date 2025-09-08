@@ -111,7 +111,7 @@ namespace {
                 _attrs[i]->attnum = _columns[i].position;
                 strncpy(_attrs[i]->attname.data, _columns[i].name.c_str(), NAMEDATALEN - 1);
 
-                _target_list.push_back({_columns[i].name, _columns[i].position});
+                _target_list.emplace_back(_columns[i].name, _columns[i].position);
             }
         }
 

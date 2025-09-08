@@ -13,10 +13,8 @@ namespace springtail::pg_fdw {
 
     /** Type to hold List* pointers */
     struct PgList {
-        PgList() 
-        {
-            _l = NIL;
-        }
+        PgList() : _l{NIL}
+        {}
         explicit PgList(List* l) : _l{l} {}
 
         size_t size() const {
@@ -28,7 +26,7 @@ namespace springtail::pg_fdw {
 
 
     /** Vector-style representation of List */
-    template<typename T, bool is_integral=std::is_integral<T>::value> struct PgVector;
+    template<typename T, bool is_integral=std::is_integral_v<T>> struct PgVector;
 
     // vector of integrals
     template <typename T>
@@ -83,7 +81,7 @@ namespace springtail::pg_fdw {
         void replace(size_t i, const PgVector<T>& v) {
             DCHECK(i < size());
             size_t pos = 0; 
-            ListCell *lc;
+            ListCell *lc = nullptr;
             foreach(lc, _l) {
                 if (i == pos) {
                     lfirst(lc) = v._l;
