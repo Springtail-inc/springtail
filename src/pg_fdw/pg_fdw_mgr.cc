@@ -395,7 +395,7 @@ namespace springtail::pg_fdw {
         return quals;
     }
 
-    std::unique_ptr<PgFdwState> _create_scan_state(SpringtailPlanState *planstate, List *qual_list, List* join_quals, double *rows)
+    std::unique_ptr<PgFdwState> _create_scan_state(const SpringtailPlanState *planstate, const List *qual_list, const List* join_quals, double *rows)
     {
         // we create a temporary scan state here because for historical reasons
         // it has some API's need by this function. The state will be deleted
@@ -1134,7 +1134,7 @@ namespace springtail::pg_fdw {
     }
 
     List *
-    PgFdwMgr::fdw_can_sort(SpringtailPlanState* planstate, PgFdwState* pg_state, List *sortgroup, List* quals, bool use_secondary)
+    PgFdwMgr::fdw_can_sort(SpringtailPlanState* planstate, PgFdwState* pg_state, const List *sortgroup, List* quals, bool use_secondary)
     {
         LOG_DEBUG(LOG_FDW, "fdw_can_sort");
 
@@ -1295,7 +1295,7 @@ namespace springtail::pg_fdw {
     }
 
     List *
-    PgFdwMgr::fdw_get_path_keys(SpringtailPlanState *planstate, PgFdwState* state)
+    PgFdwMgr::fdw_get_path_keys(const SpringtailPlanState *planstate, PgFdwState* state)
     {
         List* result = NULL;
         uint64_t rel_rows = planstate->get_rel_rows();

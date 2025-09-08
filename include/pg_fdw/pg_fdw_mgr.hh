@@ -206,14 +206,14 @@ namespace springtail::pg_fdw {
          * @param use_secondary Make use the secondary indexes to match the sortgroup
          * @return List or sublist of path keys based on sort group
          */
-        List* fdw_can_sort(SpringtailPlanState* planstate, PgFdwState* pg_state, List *sortgroup, List* quals, bool use_secondary = false);
+        List* fdw_can_sort(SpringtailPlanState* planstate, PgFdwState* pg_state, const List *sortgroup, List* quals, bool use_secondary = false);
 
         /** Get list of path keys -- indexes
          * @param planstate Planstate
          * @param state Scan state
          * @return List of a List of path keys (key attnum, num rows)
          */
-        List *fdw_get_path_keys(SpringtailPlanState *planstate, PgFdwState* state);
+        List *fdw_get_path_keys(const SpringtailPlanState *planstate, PgFdwState* state);
 
         /**
          */
