@@ -609,6 +609,7 @@ namespace springtail
         dataOut.msg_length = _copy_msg_length;
         dataOut.starting_lsn = _message_start_lsn;
         dataOut.ending_lsn = _message_end_lsn; // this is believed to be the end lsn for this message
+        dataOut.server_time = _message_send_time;
 
         // copy msg offset is ahead by the length of data we just read
         // but dataOut.msg_offset points to where the consumer is in the stream
@@ -678,12 +679,14 @@ namespace springtail
         LSN_t wal_end = recvint64(&buffer[pos]);
         pos += 8;
 
+        // send time is in millis since 2000-01-01
         int64_t send_time = recvint64(&buffer[pos]);
         pos += 8;
 
         _last_received_time = send_time / 1000;
         _message_start_lsn = wal_start;
         _message_end_lsn = wal_end;
+        _message_send_time = send_time + MSEC_SINCE_Y2K;
 
         LOG_DEBUG(LOG_PG_REPL, "XLOG data msg recvd: wal_start={}, wal_end={}, send_time={}",
                             wal_start, wal_end, send_time);

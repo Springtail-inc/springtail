@@ -24,6 +24,7 @@ namespace springtail
         LSN_t starting_lsn;  // starting LSN for message buffer
         LSN_t ending_lsn;    // end LSN for message
         int proto_version;   // protocol version
+        uint64_t server_time; // server time in epoch millis when message was sent
     };
 
     /**
@@ -134,6 +135,8 @@ namespace springtail
         LSN_t _message_end_lsn = INVALID_LSN;
         /** server's latest lsn (from wal_end or keep alive) */
         LSN_t _server_latest_lsn = INVALID_LSN;
+        /** message send time (from xlog message -- send_time) */
+        uint64_t _message_send_time = 0;
 
         /** last time copy data received
          * determines when to fast forward stream based on idle time */
