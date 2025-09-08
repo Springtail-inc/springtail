@@ -1078,13 +1078,11 @@ multicorn_getForeignPaths(PlannerInfo *root,
 
 
 ForeignScan *
-multicorn_getForeignPlan(PlannerInfo *root,
-                         RelOptInfo *baserel,
+multicorn_getForeignPlan(RelOptInfo *baserel,
                          Oid foreigntableid,
                          ForeignPath *best_path,
                          List *tlist,
-                         List *scan_clauses,
-                         Plan *outer_plan)
+                         List *scan_clauses)
 {
     Index scan_relid = baserel->relid;
     best_path->path.pathtarget->width = fdw_get_rel_width(baserel->fdw_private);

@@ -691,7 +691,7 @@ namespace springtail::pg_fdw {
     }
 
     PgFdwState* 
-    PgFdwMgr::create_scan_state(SpringtailPlanState *planstate, List* quals, List* join_quals)
+    PgFdwMgr::create_scan_state(const SpringtailPlanState *planstate, const List* quals, const List* join_quals)
     {
         double dummy = 0; 
         auto state = _create_scan_state(planstate, quals, join_quals, &dummy);
@@ -699,10 +699,10 @@ namespace springtail::pg_fdw {
     }
 
     PgFdwState*
-    PgFdwMgr::fdw_begin_scan(SpringtailPlanState *planstate,
+    PgFdwMgr::fdw_begin_scan(const SpringtailPlanState *planstate,
             int num_attrs,
             const Form_pg_attribute* attrs,
-            List *quals)
+            const List *quals)
     {
         // we create a temporary scan state here because for historical reasons
         // it has some API's need by this function. The state will be deleted
@@ -908,7 +908,7 @@ namespace springtail::pg_fdw {
     }
 
     void
-    PgFdwMgr::_init_quals(PgFdwState *state, List *qual_list)
+    PgFdwMgr::_init_quals(PgFdwState *state, const List *qual_list)
     {
         if (!state->sortgroup_index) {
             // If the sortgroup index isn't set, select the best index to use from quals.
@@ -974,7 +974,7 @@ namespace springtail::pg_fdw {
     }
 
     void
-    PgFdwMgr::fdw_reset_scan(PgFdwState *state, List *qual_list)
+    PgFdwMgr::fdw_reset_scan(PgFdwState *state, const List *qual_list)
     {
         LOG_DEBUG(LOG_FDW, "fdw_reset_scan: tid: {}", state->tid);
 
@@ -1134,7 +1134,7 @@ namespace springtail::pg_fdw {
     }
 
     List *
-    PgFdwMgr::fdw_can_sort(SpringtailPlanState* planstate, PgFdwState* pg_state, const List *sortgroup, List* quals, bool use_secondary)
+    PgFdwMgr::fdw_can_sort(SpringtailPlanState* planstate, PgFdwState* pg_state, const List *sortgroup, const List* quals, bool use_secondary)
     {
         LOG_DEBUG(LOG_FDW, "fdw_can_sort");
 
@@ -1353,7 +1353,7 @@ namespace springtail::pg_fdw {
         return result;
     }
 
-    void PgFdwMgr::fdw_get_rel_size(SpringtailPlanState *planstate, List *qual_list, List* join_quals, double *rows, int *width)
+    void PgFdwMgr::fdw_get_rel_size(SpringtailPlanState *planstate, const List *qual_list, const List* join_quals, double *rows, int *width)
     {
         // TODO: we create a temporary scan state here because for historical reasons
         // it has some API's need by this function. The state will be deleted
@@ -1408,7 +1408,6 @@ namespace springtail::pg_fdw {
                     break;
             }
         }
-        //planstate->set_rel_size(static_cast<uint64_t>(*rows), static_cast<uint64_t>(*width));
         planstate->set_rel_size(static_cast<uint64_t>(*rows), static_cast<uint64_t>(*width));
     }
 

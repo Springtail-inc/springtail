@@ -166,10 +166,10 @@ namespace springtail::pg_fdw {
          * @param target_list List of target columns (Value or String)
          * @param qual_list List of predicate clauses (BaseQual)
          */
-        PgFdwState* fdw_begin_scan(SpringtailPlanState *planstate,
+        PgFdwState* fdw_begin_scan(const SpringtailPlanState *planstate,
                 int num_attrs,
                 const Form_pg_attribute* attrs,
-                List *quals);
+                const List *quals);
 
         /** Iterate scan -- get next row
          * @param state PgFdwState
@@ -187,7 +187,7 @@ namespace springtail::pg_fdw {
         void fdw_end_scan(PgFdwState *state);
 
         /** Reset scan -- set iterator to beginning */
-        void fdw_reset_scan(PgFdwState *state, List *qual_list);
+        void fdw_reset_scan(PgFdwState *state, const List *qual_list);
 
         /** Import foreign schema -- scan through system table generating sql for create foreign table */
         List *fdw_import_foreign_schema(const std::string &server,
@@ -206,7 +206,7 @@ namespace springtail::pg_fdw {
          * @param use_secondary Make use the secondary indexes to match the sortgroup
          * @return List or sublist of path keys based on sort group
          */
-        List* fdw_can_sort(SpringtailPlanState* planstate, PgFdwState* pg_state, const List *sortgroup, List* quals, bool use_secondary = false);
+        List* fdw_can_sort(SpringtailPlanState* planstate, PgFdwState* pg_state, const List *sortgroup, const List* quals, bool use_secondary = false);
 
         /** Get list of path keys -- indexes
          * @param planstate Planstate
@@ -217,14 +217,14 @@ namespace springtail::pg_fdw {
 
         /**
          */
-        PgFdwState* create_scan_state(SpringtailPlanState *state, List* qual_indexes, List* join_quals);
+        PgFdwState* create_scan_state(const SpringtailPlanState *state, const List* qual_indexes, const List* join_quals);
 
         /** Get estimate of row width/number of rows
          * @param planstate Plan state
          * @param qual_list List of predicate clauses (BaseQual)
          * @param join_quals List of predicate clauses (BaseQual) that are part of join clauses
          */
-        void fdw_get_rel_size(SpringtailPlanState *planstate, List *qual_list, List* join_quals, double *rows, int *width);
+        void fdw_get_rel_size(SpringtailPlanState *planstate, const List *qual_list, const List* join_quals, double *rows, int *width);
 
         /** Commit or rollback a transaction, remove the XID mappings
          * @param pg_xid Postgres XID
@@ -340,7 +340,7 @@ namespace springtail::pg_fdw {
                                     int32_t atttypmod);
 
         /** Helper to setup quals and scan iterator in state, called from begin_scan */
-        void _init_quals(PgFdwState *state, List *qual_list);
+        void _init_quals(PgFdwState *state, const List *qual_list);
 
         /** Helper to create constant field from qual and add to field array */
         void _make_const_field(const PgFdwState *state, const SchemaColumn &column, int idx, const ConstQual *qual);

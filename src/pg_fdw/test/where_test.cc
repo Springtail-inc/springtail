@@ -249,9 +249,9 @@ namespace {
         }
 
         void
-        _run_scan(List *qual_list, const std::vector<std::vector<int32_t>> &filtered_data,
+        _run_scan(const List *qual_list, const std::vector<std::vector<int32_t>> &filtered_data,
                 uint32_t index_id = constant::INDEX_PRIMARY,
-                List *sortgroup = NIL)
+                const List *sortgroup = NIL)
         {
             // get the fdw mgr
             PgFdwMgr *mgr = PgFdwMgr::get_instance();

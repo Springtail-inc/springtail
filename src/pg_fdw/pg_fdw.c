@@ -26,13 +26,11 @@ multicorn_getForeignPaths(PlannerInfo *root,
                           Oid foreigntableid);
 
 extern ForeignScan *
-multicorn_getForeignPlan(PlannerInfo *root,
-                         RelOptInfo *baserel,
+multicorn_getForeignPlan(RelOptInfo *baserel,
                          Oid foreigntableid,
                          ForeignPath *best_path,
                          List *tlist,
-                         List *scan_clauses,
-                         Plan *outer_plan);
+                         List *scan_clauses);
 
 extern void
 multicorn_getRelSize(PlannerInfo *root,
@@ -390,8 +388,8 @@ springtail_GetForeignPlan(PlannerInfo *root,
     elog(INFO, "Iron 33333 --- get: %s\n", nodeToString(baserel->fdw_private));
 
     // call into helper to set the foreign plan
-    return multicorn_getForeignPlan(root, baserel, foreigntableid, best_path,
-                                    tlist, scan_clauses, outer_plan);
+    return multicorn_getForeignPlan(baserel, foreigntableid, best_path,
+                                    tlist, scan_clauses);
 }
 
 /**
