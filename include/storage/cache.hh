@@ -593,6 +593,8 @@ namespace springtail {
              */
             std::vector<uint64_t> flush(const ExtentHeader &header);
 
+            std::future<std::vector<uint64_t>> async_flush(const ExtentHeader &header);
+
             /**
              * Flushes an empty page to disk by creating an empty extent and flushing that to disk,
              * returning the single extent offset of that empty extent.

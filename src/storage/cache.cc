@@ -551,6 +551,10 @@ StorageCache::PageCache::background_cleaner()
             }
         }
 
+        //XXX: Fix IO queuing limit and remove this
+        if (_clean_lru.empty()) {
+            return;
+        }
         // evict a page from the LRU
         auto page = _clean_lru.front();
         _clean_lru.pop_front();
@@ -665,8 +669,9 @@ StorageCache::PageCache::background_cleaner()
         return offsets[0];
     }
 
-    std::vector<uint64_t>
-    StorageCache::Page::flush(const ExtentHeader &header)
+
+    std::future<std::vector<uint64_t>>
+    StorageCache::Page::async_flush(const ExtentHeader &header)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = false;
@@ -674,8 +679,14 @@ StorageCache::PageCache::background_cleaner()
         // note: if the page is empty, we should be calling flush_empty()
         CHECK(!_extents.empty());
 
-        // perform the usual flush()
-        return _flush(header);
+        return _async_flush(std::move(header));
+    }
+
+    std::vector<uint64_t>
+    StorageCache::Page::flush(const ExtentHeader &header)
+    {
+        auto flush_future = async_flush(std::move(header));
+        return flush_future.get();
     }
 
     StorageCache::Page::Iterator
@@ -1647,6 +1658,10 @@ StorageCache::PageCache::background_cleaner()
 
         // if the clean LRU list is empty, need to clean a page
         while (_clean_lru.empty()) {
+            //XXX: Fix IO queuing limit and remove this
+            if (_dirty_lru.empty()) {
+                break;
+            }
             // choose an extent we can clean
             auto dirty = _dirty_lru.front();
             _dirty_lru.pop_front();
@@ -1659,6 +1674,11 @@ StorageCache::PageCache::background_cleaner()
 
             // release the extent back to the cache
             _release(dirty);
+        }
+
+        //XXX: Fix IO queuing limit and remove this
+        if (_clean_lru.empty()) {
+            return;
         }
 
         // evict an extent to make space

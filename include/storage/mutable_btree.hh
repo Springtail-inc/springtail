@@ -279,6 +279,8 @@ namespace springtail {
              */
             std::vector<std::shared_ptr<Page>> flush(uint64_t xid);
 
+            std::future<std::vector<std::shared_ptr<Page>>> async_flush(uint64_t xid);
+
             /**
              * Specialized case for flushing an empty root page.  Assumes that the caller is holding
              * an exclusive lock on the page.
@@ -315,7 +317,7 @@ namespace springtail {
              * Returns the parent of the page, if one is set.  Otherwise returns nullptr.
              */
             std::shared_ptr<Page> parent() const {
-                boost::unique_lock lock(_children_mutex);
+                boost::unique_lock lock(children_mutex);
                 return _parent;
             }
 
@@ -325,7 +327,7 @@ namespace springtail {
              * @param parent The parent of the page.
              */
             void set_parent(std::shared_ptr<Page> parent) {
-                boost::unique_lock lock(_children_mutex);
+                boost::unique_lock lock(children_mutex);
                 _parent = parent;
             }
 
@@ -336,7 +338,7 @@ namespace springtail {
              * @param child A child of this page.
              */
             void add_child(std::shared_ptr<Page> child) {
-                boost::unique_lock lock(_children_mutex);
+                boost::unique_lock lock(children_mutex);
                 _children[child->extent_id] = child;
                 assert(!child->flushed);
             }
@@ -347,7 +349,7 @@ namespace springtail {
              * @param extent_id The extent ID of the page to be removed.
              */
             void remove_child(uint64_t extent_id) {
-                boost::unique_lock lock(_children_mutex);
+                boost::unique_lock lock(children_mutex);
                 _children.erase(extent_id);
             }
 
@@ -355,8 +357,13 @@ namespace springtail {
              * Checks if the page has children.
              */
             bool has_children() const {
-                boost::unique_lock lock(_children_mutex);
+                boost::unique_lock lock(children_mutex);
                 return !_children.empty();
+            }
+
+            std::map<uint64_t, std::shared_ptr<Page>>& get_children() {
+                // Caller should have acquired the children_mutex
+                return _children;
             }
 
             /**
@@ -367,7 +374,7 @@ namespace springtail {
                 // note: must be called when there are children
                 assert(!_children.empty());
 
-                boost::unique_lock lock(_children_mutex);
+                boost::unique_lock lock(children_mutex);
                 return _children.begin()->second;
             }
 
@@ -408,6 +415,7 @@ namespace springtail {
 
             mutable boost::shared_mutex disk_mutex; ///< A shared mutex that acts as a barrier for disk reads / writes.
             mutable boost::shared_mutex mutex; ///< A shared mutex for access to the in-memory data.
+            mutable boost::shared_mutex children_mutex; ///< A mutex to protect the map of children.  Can be acquired unique while sharing the primary mutex.
 
 
         private:
@@ -419,7 +427,6 @@ namespace springtail {
             StoragePagePtr _cache_page; ///< The backing page in the cache for the contents of this BTree page.
 
             // the following are protected by a separate mutex, must be holding the primary mutex at least shared.
-            mutable boost::shared_mutex _children_mutex; ///< A mutex to protect the map of children.  Can be acquired unique while sharing the primary mutex.
             std::map<uint64_t, std::shared_ptr<Page>> _children; ///< The set of children of this page that are part of a modified path through the tree.
             std::shared_ptr<Page> _parent; ///< Pointer to the parent page.  Won't change once the page is fully constructed.
         };
@@ -615,6 +622,7 @@ namespace springtail {
          */
         std::vector<PagePtr> _flush_page_internal(PagePtr page, PagePtr parent);
 
+        std::future<std::vector<PagePtr>> _async_flush_page_internal(PagePtr page, PagePtr parent);
         /**
          * Flushes the provided Page to disk.  Also ensures that any children of the page are
          * flushed first so that the corrected CoW extent offsets are recorded in this page.  The
@@ -624,7 +632,8 @@ namespace springtail {
          * @param page The page being flushed.
          * @param parent The parent of the page being flushed.
          */
-        void _flush_page(PagePtr page, PagePtr parent);
+
+        std::optional<std::future<void>> _flush_page(PagePtr page, PagePtr parent);
 
         /**
          * Flushes the root of the tree to disk, also ensuring that any childen of the root are also
