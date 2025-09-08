@@ -1568,10 +1568,13 @@ namespace springtail {
             CHECK(_read_header());
             current_msg_type = _stream.peek();
 
-            // XXX handle 0 LSN for stream start/end/relation, etc
+            // make sure we don't go backwards
+            CHECK(current_start_lsn <= _header.start_lsn ||
+                  _header.start_lsn == 0);
 
             // check if the LSN has changed, if so record it
-            if (current_start_lsn != _header.start_lsn) {
+            // ignore start_lsn of 0 used for pgoutput generated messages
+            if (current_start_lsn != _header.start_lsn && _header.start_lsn != INVALID_LSN) {
                 current_start_lsn = _header.start_lsn;
                 truncate_offset = _current_offset - PgMsgStreamHeader::SIZE;
                 restart_lsn = current_start_lsn;

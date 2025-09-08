@@ -40,6 +40,7 @@ def insert_worker(db_name : str, props : Properties, stop_event : threading.Even
     print(f"Insert worker started for database: {db_name} with batch size: {batch_size}")
 
     itr = 0
+    count = 0
     while not stop_event.is_set():
         try:
             if cursor is None or conn is None or conn.closed:
@@ -47,8 +48,9 @@ def insert_worker(db_name : str, props : Properties, stop_event : threading.Even
                 cursor = conn.cursor()
             cursor.execute("BEGIN")
             cursor.execute(
-                f"""INSERT INTO test_table (email, name, age)
+                f"""INSERT INTO test_table (count, email, name, age)
                     SELECT
+                        {count} + s,
                         md5(random()::text) || '@example.com',
                         md5(random()::text),
                         (random() * 52 + 18)::BIGINT
@@ -56,6 +58,7 @@ def insert_worker(db_name : str, props : Properties, stop_event : threading.Even
             )
             cursor.execute("COMMIT")
             itr += 1
+            count += batch_size
             print(f"Inserted batch {itr} into test_table")
             time.sleep(0.2)
 
@@ -160,7 +163,7 @@ def main():
     conn = connect_db_instance(props, db_name)
     cursor = conn.cursor()
     cursor.execute("""CREATE TABLE IF NOT EXISTS test_table
-                      (id SERIAL PRIMARY KEY, email TEXT, name TEXT, age BIGINT);""")
+                      (id SERIAL PRIMARY KEY, count BIGINT, email TEXT, name TEXT, age BIGINT);""")
     conn.commit()
     cursor.close()
     conn.close()
@@ -194,6 +197,9 @@ def main():
             check_logs(system_json_path)
             raise Exception(f"Not all core daemons running: {not_running}")
         repeat_restarts -= 1;
+        check_logs(system_json_path)
+
+        time.sleep(5)
 
     stop_event.set()
     insert_thread.join(timeout=2)

@@ -422,11 +422,27 @@ def start_replication(props : Properties, build_dir : str) -> None:
         conn = connect_db_instance(props, db_name)
 
         # Create the publication
-        execute_sql(conn, f"CREATE PUBLICATION {quote_ident(pub_name, conn)} FOR ALL TABLES")
+        try:
+            execute_sql(conn, f"CREATE PUBLICATION {quote_ident(pub_name, conn)} FOR ALL TABLES")
+        except Exception as e:
+            # check if publication already exists, of if --no-cleanup used
+            if 'already exists' in str(e):
+                logging.info(f"Publication {pub_name} already exists, skipping creation.")
+                pass
+            else:
+                logging.error(f"Error creating publication {pub_name}: {e}")
 
         # Create the replication slot;
         # NOTE: it the slot name needs to be globally unique
-        execute_sql(conn, "SELECT pg_create_logical_replication_slot(%s, 'pgoutput');", slot_name)
+        try:
+            execute_sql(conn, "SELECT pg_create_logical_replication_slot(%s, 'pgoutput');", slot_name)
+        except Exception as e:
+            # check if slot already exists, ok if --no-cleanup used
+            if 'already exists' in str(e):
+                logging.info(f"Replication slot {slot_name} already exists, skipping creation.")
+                pass
+            else:
+                logging.error(f"Error creating replication slot {slot_name}: {e}")
 
         # Install triggers using existing connection
         _install_triggers(conn, build_dir)
