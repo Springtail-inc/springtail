@@ -42,12 +42,12 @@ namespace springtail {
         PgMsgStreamHeader header{_buffer_offset, _lsn, _lsn};
         char header_buf[PgMsgStreamHeader::SIZE];
         header.encode_header(header_buf);
-        if (::fwrite(header_buf, sizeof(header_buf), 1, _fp) < 0) {
+        if (::fwrite(header_buf, sizeof(header_buf), 1, _fp) != 1) {
             throw Error("Failed to write to file: " + _file_name.string());
         }
 
         // write the buffer
-        if (::fwrite(_buffer, _buffer_offset, 1, _fp) < 0) {
+        if (::fwrite(_buffer, _buffer_offset, 1, _fp) != 1) {
             throw Error("Failed to write to file: " + _file_name.string());
         }
 

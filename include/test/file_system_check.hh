@@ -11,7 +11,7 @@ namespace springtail::test {
     class FSCheck
     {
     public:
-        FSCheck(std::optional<uint64_t> db_id, uint64_t max_xid = constant::LATEST_XID, bool all_xids = false);
+        explicit FSCheck(std::optional<uint64_t> db_id, uint64_t max_xid = constant::LATEST_XID, bool all_xids = false);
         ~FSCheck() = default;
 
         /**
