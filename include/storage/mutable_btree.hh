@@ -274,11 +274,19 @@ namespace springtail {
              * that the caller is holding an exclusive lock on both this page and it's parent and
              * that neither are marked flushed.
              *
-             * @param handle The file handle for access to write data.
              * @param xid The XID at which the page is being written.
              */
             std::vector<std::shared_ptr<Page>> flush(uint64_t xid);
 
+            /**
+             * @brief Returns a future which flushes the contents of the page and updates the parent with the new pages.
+             * Assumes that the caller is holding an exclusive lock on both this page and it's parent and
+             * that neither are marked flushed.
+             *
+             * @param xid The XID at which the page is being written.
+             *
+             * @returns future which in turn returns vector of PagePtr
+             */
             std::future<std::vector<std::shared_ptr<Page>>> async_flush(uint64_t xid);
 
             /**
@@ -402,6 +410,9 @@ namespace springtail {
                 return _cache_page->header().xid;
             }
 
+            /**
+             * @brief Flushes page's children, assuming the caller holds exclusive lock on the page.
+             */
             void flush_children()
             {
                 boost::unique_lock children_lock(_children_mutex);
@@ -643,7 +654,17 @@ namespace springtail {
          */
         std::vector<PagePtr> _flush_page_internal(PagePtr page, PagePtr parent);
 
+        /**
+         * @brief Returns a future which flushes the provided page to disk, updating the parent with the corrected pointers after
+         * the CoW and removes the child/parent references.  Requires that exclusive locks be held
+         * on both the parent and the page being flushed.
+         *
+         * @param page The page being flushed.
+         * @param parent The parent of the page being flushed.
+         * @returns future which in turn returns vector of PagePtr
+         */
         std::future<std::vector<PagePtr>> _async_flush_page_internal(PagePtr page, PagePtr parent);
+
         /**
          * Flushes the provided Page to disk.  Also ensures that any children of the page are
          * flushed first so that the corrected CoW extent offsets are recorded in this page.  The
@@ -652,8 +673,9 @@ namespace springtail {
          *
          * @param page The page being flushed.
          * @param parent The parent of the page being flushed.
+         *
+         * @returns optional future as the actual flush happens async
          */
-
         std::optional<std::future<void>> _flush_page(PagePtr page, PagePtr parent);
 
         /**

@@ -425,6 +425,10 @@ namespace springtail {
              */
             void flush(CacheExtentPtr extent);
 
+            /**
+             * @brief Returns a future which writes the provided DIRTY extent to disk.  Extent is returned to the MUTABLE state
+             * after the flush() is complete.
+             */
             std::optional<std::future<void>> async_flush(CacheExtentPtr extent);
 
             /**
@@ -504,6 +508,12 @@ namespace springtail {
              */
             void _flush(CacheExtentPtr extent);
 
+            /**
+             * @brief Helper that returns a future which writes the provided DIRTY extent to disk.  Extent is returned to the MUTABLE
+             * state after the flush() is complete.
+             *
+             * @returns optional future which is nullopt if flush is not needed (not dirty)
+             */
             std::optional<std::future<void>> _async_flush(CacheExtentPtr extent);
 
             /**
@@ -587,12 +597,20 @@ namespace springtail {
              * Writes all of the dirty in-memory extents to disk and returns the full set of extent
              * IDs for the page.
              *
-             * @param flush_xid The XID at which this page is being written out.  The page is
-             *                  considered valid from this XID forward.
+             * @param header  Extent header which will be used as header for all the in-memory extents
+             *
              * @return The ordered list of extent IDs that represent the data of the Page.
              */
             std::vector<uint64_t> flush(const ExtentHeader &header);
 
+            /**
+             * @brief Returns a future that writes all of the dirty in-memory extents to disk and returns
+             * the full set of extent IDs for the page.
+             *
+             * @param header  Extent header which will be used as header for all the in-memory extents
+             *
+             * @return future that returns ordered list of extent IDs that represent the data of the Page.
+             */
             std::future<std::vector<uint64_t>> async_flush(const ExtentHeader &header);
 
             /**
@@ -951,6 +969,15 @@ namespace springtail {
              * new on-disk positions.
              */
             std::vector<uint64_t> _flush(const ExtentHeader &header);
+
+            /**
+             * @brief Helper that returns future which flushs the underlying extents of a Page and
+             * to return the extent IDs of the new on-disk positions.
+             *
+             * @param header  Extent header which will be used as header for all the in-memory extents
+             *
+             * @return future that returns ordered list of extent IDs that represent the data of the Page.
+             */
             std::future<std::vector<uint64_t>> _async_flush(const ExtentHeader &header);
 
         private:
