@@ -181,5 +181,5 @@ namespace {
     INSTANTIATE_TEST_CASE_P(StorageCache_Test,
                             StorageCache_Test,
                             ::testing::Values(CacheSize{ 16384, 16384, 512, 16 },
-                                              CacheSize{ 32, 32, 4, 4 }));
+                                              CacheSize{ 32, 32, 2, 4 }));
 }
