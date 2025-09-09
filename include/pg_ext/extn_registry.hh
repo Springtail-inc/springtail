@@ -61,22 +61,19 @@ public:
         ") "
         "ORDER BY t.typname;";
 
-    PGFunction _load_extn_function(void* library, const std::string_view oper_name);
-    void* _load_library(const std::string_view lib_path);
-
-    std::string _get_type_name(uint32_t oid) const;
-    std::string _get_oper_name(uint32_t oid) const;
-
+    void init_libraries(uint64_t db_id, const std::string& extension, const std::string& extension_lib_path);
     PgType get_type_by_oid(uint32_t oid) const;
-
-    void add_type(uint32_t oid, const std::string& typinput, const std::string& typoutput, const std::string& typreceive, const std::string& typsend);
-    void add_operator(uint32_t oid, const std::string& oper_name, const std::string& oper_proc);
+    void add_type(const std::string& extension, uint32_t oid, const std::string& typinput, const std::string& typoutput, const std::string& typreceive, const std::string& typsend);
+    void add_operator(const std::string& extension, uint32_t oid, const std::string& oper_name, const std::string& oper_proc);
 
     PGFunction get_operator_func_by_oid(uint32_t oid) const;
     PGFunction get_operator_func_by_oper_name(const std::string& oper_name) const;
     PGFunction get_operator_func_by_proc_name(const std::string& proc_name) const;
     PGFunction get_type_func_by_type_name(const std::string& type_name) const;
 private:
+    PGFunction _load_extn_function(void* library, const std::string_view oper_name);
+    void* _load_library(const std::string_view lib_path);
+
     PgExtnRegistry() {}
     uint64_t _db_id;
     uint64_t _xid;
@@ -88,5 +85,7 @@ private:
     std::unordered_map<std::string, PGFunction> _oper_name_to_func;
     std::unordered_map<std::string, PGFunction> _proc_name_to_func;
     std::unordered_map<std::string, PGFunction> _type_func_name_to_func;
+
+    std::unordered_map<std::string, void*> _library_map;
 };
 }  // namespace springtail

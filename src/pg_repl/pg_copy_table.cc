@@ -1367,7 +1367,7 @@ namespace springtail
     }
 
     void
-    PgCopyTable::_load_extn_types(uint64_t db_id)
+    PgCopyTable::_load_extn_types(uint64_t db_id, const std::string& extension)
     {
         auto extn_registry = PgExtnRegistry::get_instance();
         PgCopyTable copy_table;
@@ -1375,7 +1375,7 @@ namespace springtail
         // connect to the database
         copy_table.connect(db_id);
 
-        copy_table._connection.exec(fmt::format(PgExtnRegistry::TYPE_QUERY, "cube"));
+        copy_table._connection.exec(fmt::format(PgExtnRegistry::TYPE_QUERY, extension));
 
         for (int i = 0; i < copy_table._connection.ntuples(); i++) {
             uint32_t type_oid = copy_table._connection.get_int32(i, 0);
@@ -1384,15 +1384,15 @@ namespace springtail
             std::string type_receive = copy_table._connection.get_string(i, 3);
             std::string type_send = copy_table._connection.get_string(i, 4);
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Adding type: {}, input: {}, output: {}, receive: {}, send: {}", type_oid, type_input, type_output, type_receive, type_send);
-            extn_registry->add_type(type_oid, type_input, type_output, type_receive, type_send);
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Adding type: {}, input: {}, output: {}, receive: {}, send: {} for extension: {}", type_oid, type_input, type_output, type_receive, type_send, extension);
+            extn_registry->add_type(extension, type_oid, type_input, type_output, type_receive, type_send);
         }
 
         copy_table.disconnect();
     }
 
     void
-    PgCopyTable::_load_extn_operators(uint64_t db_id)
+    PgCopyTable::_load_extn_operators(uint64_t db_id, const std::string& extension)
     {
         auto extn_registry = PgExtnRegistry::get_instance();
         PgCopyTable copy_table;
@@ -1400,7 +1400,7 @@ namespace springtail
         // connect to the database
         copy_table.connect(db_id);
 
-        copy_table._connection.exec(fmt::format(PgExtnRegistry::OPER_QUERY, "cube"));
+        copy_table._connection.exec(fmt::format(PgExtnRegistry::OPER_QUERY, extension));
 
         for (int i = 0; i < copy_table._connection.ntuples(); i++) {
             uint32_t oper_oid = copy_table._connection.get_int32(i, 0);
@@ -1408,8 +1408,8 @@ namespace springtail
             std::string oper_proc = copy_table._connection.get_string(i, 2);
             std::string proc_name = copy_table._connection.get_string(i, 3);
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Adding operator: {}, name: {}, proc: {}", oper_oid, oper_name, proc_name);
-            extn_registry->add_operator(oper_oid, oper_name, proc_name);
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Adding operator: {}, name: {}, proc: {} for extension: {}", oper_oid, oper_name, proc_name, extension);
+            extn_registry->add_operator(extension, oper_oid, oper_name, proc_name);
         }
 
         copy_table.disconnect();
@@ -1418,8 +1418,31 @@ namespace springtail
     void
     PgCopyTable::init_pg_extn_registry(uint64_t db_id, uint64_t xid)
     {
-        _load_extn_types(db_id);
-        _load_extn_operators(db_id);
+        nlohmann::json extension_config_json = Properties::get(Properties::EXTENSION_CONFIG);
+        if (extension_config_json.is_null()) {
+            LOG_WARN("No extension configuration found for database {}", db_id);
+            return;
+        }
+
+        // Get the extensions for this specific database ID
+        std::string db_id_str = std::to_string(db_id);
+        if (!extension_config_json.contains(db_id_str)) {
+            LOG_WARN("No extensions configured for database {}", db_id);
+            return;
+        }
+
+        auto db_extensions = extension_config_json[db_id_str];
+        std::string lib_path = extension_config_json.value("lib_path", "/usr/lib/postgresql/16/lib/");
+
+        for (auto& ext : db_extensions.items()) {
+            auto extension_name = ext.key();
+            std::string extension_lib_path = fmt::format("{}{}.so", lib_path, extension_name);
+
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Initializing library for extension: {} for db_id: {}", extension_name, db_id);
+            PgExtnRegistry::get_instance()->init_libraries(db_id, extension_name, extension_lib_path);
+            _load_extn_types(db_id, extension_name);
+            _load_extn_operators(db_id, extension_name);
+        }
     }
 
     void

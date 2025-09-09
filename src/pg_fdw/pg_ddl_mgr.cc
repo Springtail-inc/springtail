@@ -1595,6 +1595,34 @@ namespace springtail::pg_fdw {
     }
 
     void
+    PgDDLMgr::_create_extensions(LibPqConnectionPtr conn,
+                                 const uint64_t db_id)
+    {
+        nlohmann::json extension_config_json = Properties::get(Properties::EXTENSION_CONFIG);
+        if (extension_config_json.is_null()) {
+            LOG_WARN("No extension configuration found for database {}", db_id);
+            return;
+        }
+
+        // Get the extensions for this specific database ID
+        std::string db_id_str = std::to_string(db_id);
+        if (!extension_config_json.contains(db_id_str)) {
+            LOG_WARN("No extensions configured for database {}", db_id);
+            return;
+        }
+
+        auto db_extensions = extension_config_json[db_id_str];
+        std::string lib_path = extension_config_json.value("lib_path", "/usr/lib/postgresql/16/lib/");
+
+        for (auto& ext : db_extensions.items()) {
+            auto extension_name = ext.key();
+            LOG_DEBUG(LOG_FDW, "Creating extension: {} for db_id: {}", extension_name, db_id);
+            conn->exec(fmt::format("CREATE EXTENSION IF NOT EXISTS {} WITH SCHEMA PUBLIC", extension_name));
+            conn->clear();
+        }
+    }
+
+    void
     PgDDLMgr::_create_schemas(const uint64_t db_id,
                               const std::string &db_name)
     {
@@ -1613,15 +1641,8 @@ namespace springtail::pg_fdw {
         // connect to the database on the fdw
         auto conn = _get_fdw_connection(db_id, db_name);
 
-        // XXX - EXTN - Fetch this information from the extn cache
-        conn->exec("CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA PUBLIC");
-        conn->clear();
-        conn->exec("CREATE EXTENSION IF NOT EXISTS cube WITH SCHEMA PUBLIC");
-        conn->clear();
-        conn->exec("CREATE EXTENSION IF NOT EXISTS ltree WITH SCHEMA PUBLIC");
-        conn->clear();
-        conn->exec("CREATE EXTENSION IF NOT EXISTS hstore WITH SCHEMA PUBLIC");
-        conn->clear();
+        // create the extensions enabled for this DB
+        _create_extensions(conn, db_id);
 
         // drop and create the fdw extension
         conn->exec(fmt::format("DROP EXTENSION IF EXISTS {} CASCADE", SPRINGTAIL_FDW_EXTENSION));

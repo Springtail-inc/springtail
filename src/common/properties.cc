@@ -20,6 +20,7 @@ namespace springtail {
     {
         if (get_instance()->_json.contains(key) == false) {
             LOG_WARN("Key '{}' not found in properties", key);
+            LOG_INFO("Properties: {}", get_instance()->_json.dump());
             // return null
             return nlohmann::json::value_t::null;
         }
@@ -141,6 +142,8 @@ namespace springtail {
             throw Error("Error missing system settings in redis");
         }
 
+        LOG_INFO("System settings value: {}", system_value.value());
+
         // convert system_value to json and merge to _json
         nlohmann::json system_json = nlohmann::json::parse(system_value.value());
 
@@ -159,6 +162,8 @@ namespace springtail {
         std::ifstream file(config_file);
         nlohmann::json system_json;
         file >> system_json;
+
+        LOG_INFO("System settings: {}", system_json.dump(2));
 
         // patch the config
         const char *patch = std::getenv(environment::ENV_OVERRIDE_JSON);
@@ -181,6 +186,7 @@ namespace springtail {
         _json[FS_CONFIG] = system_json["fs"];
         _json[PROXY_CONFIG] = system_json["proxy"];
         _json[OTEL_CONFIG] = system_json["otel"];
+        _json[EXTENSION_CONFIG] = system_json["extension_config"];
 
         if (system_json.contains("aws_users_override")) {
             // If aws_users_override is present, use it instead of aws secrets mgr
@@ -248,6 +254,8 @@ namespace springtail {
         std::ifstream file(config_file);
         nlohmann::json system_json;
         file >> system_json;
+
+        LOG_INFO("System settings: {}", system_json.dump());
 
         // iterate through the environment and add to json config
         for (auto &variable: environment::Variables) {

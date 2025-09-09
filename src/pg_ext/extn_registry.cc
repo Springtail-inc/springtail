@@ -8,22 +8,10 @@
 #include <dlfcn.h>
 
 namespace springtail {
-
-PGFunction
-PgExtnRegistry::_load_extn_function(void* library, const std::string_view func_name)
-{
-    PGFunction extn_function = (PGFunction)dlsym(library, func_name.data());
-    if (!extn_function) {
-        LOG_ERROR("Failed to find function PGFunction {}", func_name);
-        return nullptr;
-    }
-    return extn_function;
-}
-
 void
-PgExtnRegistry::add_type(uint32_t oid, const std::string& typinput, const std::string& typoutput, const std::string& typreceive, const std::string& typsend)
+PgExtnRegistry::add_type(const std::string& extension, uint32_t oid, const std::string& typinput, const std::string& typoutput, const std::string& typreceive, const std::string& typsend)
 {
-    void* library = _load_library("/usr/lib/postgresql/16/lib/cube.so");
+    auto library = _library_map.at(extension);
 
     _type_func_name_to_func.insert({typreceive, _load_extn_function(library, typreceive)});
     _type_func_name_to_func.insert({typsend, _load_extn_function(library, typsend)});
@@ -34,9 +22,9 @@ PgExtnRegistry::add_type(uint32_t oid, const std::string& typinput, const std::s
 }
 
 void
-PgExtnRegistry::add_operator(uint32_t oid, const std::string& oper_name, const std::string& proc_name)
+PgExtnRegistry::add_operator(const std::string& extension, uint32_t oid, const std::string& oper_name, const std::string& proc_name)
 {
-    void* library = _load_library("/usr/lib/postgresql/16/lib/cube.so");
+    auto library = _library_map.at(extension);
 
     auto extn_function = _load_extn_function(library, proc_name);
     _oper_name_to_func.insert({oper_name, extn_function});
@@ -100,6 +88,30 @@ PgExtnRegistry::get_type_by_oid(uint32_t oid) const
     }
     return it->second;
 }
+
+void
+PgExtnRegistry::init_libraries(uint64_t db_id,
+                               const std::string& extension,
+                               const std::string& extension_lib_path)
+{
+    LOG_DEBUG(LOG_FDW, "Creating extension: {} from lib_path: {} for db_id: {}", extension, extension_lib_path, db_id);
+
+    auto library = _load_library(extension_lib_path);
+
+    _library_map.insert({extension, library});
+}
+
+PGFunction
+PgExtnRegistry::_load_extn_function(void* library, const std::string_view func_name)
+{
+    PGFunction extn_function = (PGFunction)dlsym(library, func_name.data());
+    if (!extn_function) {
+        LOG_ERROR("Failed to find function PGFunction {}", func_name);
+        return nullptr;
+    }
+    return extn_function;
+}
+
 void*
 PgExtnRegistry::_load_library(const std::string_view lib_path)
 {

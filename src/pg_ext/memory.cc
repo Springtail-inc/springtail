@@ -3,145 +3,145 @@
 
 #include <pg_ext/memory.hh>
 
-// namespace pgext {
+namespace pgext {
 
-// // Define the global memory context
-// MemoryContext TopMemoryContext(nullptr, "TopMemoryContext", 8192, 1048576);
+// Define the global memory context
+MemoryContext TopMemoryContext(nullptr, "TopMemoryContext", 8192, 1048576);
 
-// MemoryContext::MemoryContext(MemoryContext* parent,
-//                              std::string_view name,
-//                              size_t init_size,
-//                              size_t max_size)
-//     : _name(name),
-//       _init_size(init_size),
-//       _max_size(max_size),
-//       _parent(parent)
-// {
-//     // Create the initial block
-//     auto block = std::make_unique<MemoryBlock>(init_size);
-//     _blocks[block->remaining()] = std::move(block);
-// }
+MemoryContext::MemoryContext(MemoryContext* parent,
+                             std::string_view name,
+                             size_t init_size,
+                             size_t max_size)
+    : _name(name),
+      _init_size(init_size),
+      _max_size(max_size),
+      _parent(parent)
+{
+    // Create the initial block
+    auto block = std::make_unique<MemoryBlock>(init_size);
+    _blocks[block->remaining()] = std::move(block);
+}
 
-// void*
-// MemoryContext::_alloc_large(size_t size)
-// {
-//     auto block = std::make_unique<MemoryBlock>(size);
-//     block->pos = size; // Mark as fully used
+void*
+MemoryContext::_alloc_large(size_t size)
+{
+    auto block = std::make_unique<MemoryBlock>(size);
+    block->pos = size; // Mark as fully used
 
-//     char* memory = block->memory;
-//     _large_allocs[memory] = std::move(block);
-//     return memory;
-// }
+    char* memory = block->memory;
+    _large_allocs[memory] = std::move(block);
+    return memory;
+}
 
-// void*
-// MemoryContext::alloc(size_t size)
-// {
-//     void *ptr;
+void*
+MemoryContext::alloc(size_t size)
+{
+    void *ptr;
 
-//     // check if it's a large block
-//     if (size > _max_size) {
-//         return _alloc_large(size);
-//     }
+    // check if it's a large block
+    if (size > _max_size) {
+        return _alloc_large(size);
+    }
 
-//     // Pad size to be a multiple of sizeof(size_t) for proper alignment
-//     size_t aligned_size = (size + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1);
+    // Pad size to be a multiple of sizeof(size_t) for proper alignment
+    size_t aligned_size = (size + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1);
 
-//     // Try to find a block with enough space
-//     auto it = _blocks.lower_bound(aligned_size);
-//     if (it != _blocks.end()) {
-//         auto& block = it->second;
-//         ptr = block->memory + block->pos;
-//         block->pos += aligned_size;
-//         CHECK(block->pos <= block->size);
+    // Try to find a block with enough space
+    auto it = _blocks.lower_bound(aligned_size);
+    if (it != _blocks.end()) {
+        auto& block = it->second;
+        ptr = block->memory + block->pos;
+        block->pos += aligned_size;
+        CHECK(block->pos <= block->size);
 
-//         // If block is now full, move it to _full_blocks
-//         if (block->pos == block->size) {
-//             _full_blocks.push_back(std::move(block));
-//             _blocks.erase(it);
-//         } else {
-//             // Update the block's position in the map using node handle
-//             auto node = _blocks.extract(it);
-//             node.key() = block->remaining();
-//             _blocks.insert(std::move(node));
-//         }
-//         return ptr;
-//     }
+        // If block is now full, move it to _full_blocks
+        if (block->pos == block->size) {
+            _full_blocks.push_back(std::move(block));
+            _blocks.erase(it);
+        } else {
+            // Update the block's position in the map using node handle
+            auto node = _blocks.extract(it);
+            node.key() = block->remaining();
+            _blocks.insert(std::move(node));
+        }
+        return ptr;
+    }
 
-//     // Allocate a new block
-//     size_t new_size = std::max(_init_size, aligned_size);
-//     auto block = std::make_unique<MemoryBlock>(new_size);
-//     block->pos = aligned_size;
-//     ptr = block->memory;
-//     CHECK(block->pos <= block->size);
+    // Allocate a new block
+    size_t new_size = std::max(_init_size, aligned_size);
+    auto block = std::make_unique<MemoryBlock>(new_size);
+    block->pos = aligned_size;
+    ptr = block->memory;
+    CHECK(block->pos <= block->size);
 
-//     // If the new block is immediately full, move it to _full_blocks
-//     if (block->pos == block->size) {
-//         _full_blocks.push_back(std::move(block));
-//     } else {
-//         _blocks[block->remaining()] = std::move(block);
-//     }
+    // If the new block is immediately full, move it to _full_blocks
+    if (block->pos == block->size) {
+        _full_blocks.push_back(std::move(block));
+    } else {
+        _blocks[block->remaining()] = std::move(block);
+    }
 
-//     return ptr;
-// }
+    return ptr;
+}
 
-// void*
-// MemoryContext::alloc0(size_t size)
-// {
-//     auto ptr = this->alloc(size);
-//     if (ptr != nullptr) {
-//         std::memset(ptr, 0, size);
-//     }
-//     return ptr;
-// }
+void*
+MemoryContext::alloc0(size_t size)
+{
+    auto ptr = this->alloc(size);
+    if (ptr != nullptr) {
+        std::memset(ptr, 0, size);
+    }
+    return ptr;
+}
 
-// MemoryContext*
-// MemoryContext::create_child(std::string_view name, size_t init_size, size_t max_size)
-// {
-//     auto new_ctx = std::make_unique<MemoryContext>(this, name, init_size, max_size);
-//     auto raw_ptr = new_ctx.get();
-//     _children.push_back(std::move(new_ctx));
-//     return raw_ptr;
-// }
+MemoryContext*
+MemoryContext::create_child(std::string_view name, size_t init_size, size_t max_size)
+{
+    auto new_ctx = std::make_unique<MemoryContext>(this, name, init_size, max_size);
+    auto raw_ptr = new_ctx.get();
+    _children.push_back(std::move(new_ctx));
+    return raw_ptr;
+}
 
-// void
-// MemoryContext::clear()
-// {
-//     _blocks.clear();
-//     _full_blocks.clear();
-//     _large_allocs.clear();
-//     _children.clear();
-// }
+void
+MemoryContext::clear()
+{
+    _blocks.clear();
+    _full_blocks.clear();
+    _large_allocs.clear();
+    _children.clear();
+}
 
-// void
-// MemoryContext::remove_child(MemoryContext* child)
-// {
-//     for (auto it = _children.begin(); it != _children.end(); ++it) {
-//         if (it->get() == child) {
-//             _children.erase(it);
-//             return;
-//         }
-//     }
-// }
+void
+MemoryContext::remove_child(MemoryContext* child)
+{
+    for (auto it = _children.begin(); it != _children.end(); ++it) {
+        if (it->get() == child) {
+            _children.erase(it);
+            return;
+        }
+    }
+}
 
-// bool
-// MemoryContext::free(void* ptr)
-// {
-//     if (ptr == nullptr) {
-//         return false;
-//     }
+bool
+MemoryContext::free(void* ptr)
+{
+    if (ptr == nullptr) {
+        return false;
+    }
 
-//     auto it = _large_allocs.find(static_cast<char*>(ptr));
-//     if (it != _large_allocs.end()) {
-//         _large_allocs.erase(it);
-//         return true;
-//     }
-//     return false;
-// }
+    auto it = _large_allocs.find(static_cast<char*>(ptr));
+    if (it != _large_allocs.end()) {
+        _large_allocs.erase(it);
+        return true;
+    }
+    return false;
+}
 
-// } // namespace pgext
+} // namespace pgext
 
 // // Global memory context pointer
-// void* CurrentMemoryContext = &pgext::TopMemoryContext;
+void* CurrentMemoryContext = &pgext::TopMemoryContext;
 
 // // Implementation of exported functions
 // void*
