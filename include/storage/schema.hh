@@ -213,7 +213,7 @@ namespace springtail {
          * Constructor.
          * @param columns Map from column position to the SchemaColumn definition.
          */
-        explicit ExtentSchema(const std::vector<SchemaColumn> &columns, bool allow_undefined = false, ComparatorFunc comparator_func) {
+        explicit ExtentSchema(const std::vector<SchemaColumn> &columns, ComparatorFunc comparator_func, bool allow_undefined = false) {
             std::map<uint32_t, SchemaColumn> column_map;
             for (auto &&column : columns) {
                 column_map.insert({column.position, column});
@@ -230,7 +230,7 @@ namespace springtail {
             }
 
             // populate the field map using the column definitions
-            _populate(column_map, allow_undefined);
+            _populate(column_map, allow_undefined, nullptr);
         }
 
         /**
@@ -239,7 +239,7 @@ namespace springtail {
          */
         explicit ExtentSchema(const std::map<uint32_t, SchemaColumn> columns, bool allow_undefined = false)
         {
-            _populate(columns, allow_undefined);
+            _populate(columns, allow_undefined, nullptr);
         }
 
         /** Returns the fixed width for a single row. */
@@ -302,7 +302,8 @@ namespace springtail {
          create_schema(const std::vector<std::string> &old_columns,
                        const std::vector<SchemaColumn> &new_columns,
                        const std::vector<std::string> &sort_columns,
-                       ComparatorFunc comparator_func) const;
+                       ComparatorFunc comparator_func,
+                       bool allow_undefined = false) const;
 
         /**
          * Retrieve the list of column pg types.

@@ -1296,7 +1296,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
         // construct the schema for the branches
         // note: don't need a valid sql_type for the internal nodes since they aren't exposed
         SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, 0, false);
-        _branch_schema = _leaf_schema->create_schema(keys, { child }, keys, comparator_func);
+        _branch_schema = _leaf_schema->create_schema(keys, { child }, keys, comparator_func, false);
 
         // construct the field tuples for the branch nodes
         _branch_keys = _branch_schema->get_mutable_fields(keys);

@@ -585,7 +585,7 @@ namespace springtail::pg_log_mgr {
                 return true;
             };
 
-            entry.table_schema = std::make_shared<ExtentSchema>(columns, true, comparator_func);
+            entry.table_schema = std::make_shared<ExtentSchema>(columns, comparator_func, true);
             entry.update_schema();
         } else if (msg->msg_type == PgMsgEnum::DROP_TABLE) {
             // XXX should we do a truncate here?  it could improve performance if this follows a set

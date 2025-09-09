@@ -72,7 +72,8 @@ namespace springtail {
          get_extent_schema(uint64_t db_id,
                            uint64_t table_id,
                            const XidLsn &xid,
-                           ComparatorFunc comparator_func);
+                           ComparatorFunc comparator_func,
+                           bool allow_undefined = false);
 
         /**
          * @brief Get the usertype object

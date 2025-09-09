@@ -192,14 +192,15 @@ namespace springtail {
                                 const std::vector<std::string> &sort_columns,
                                 bool allow_undefined) const
     {
-        return create_schema(old_columns, new_columns, sort_columns, nullptr);
+        return create_schema(old_columns, new_columns, sort_columns, nullptr, allow_undefined);
     }
 
     std::shared_ptr<ExtentSchema>
     ExtentSchema::create_schema(const std::vector<std::string> &old_columns,
                                 const std::vector<SchemaColumn> &new_columns,
                                 const std::vector<std::string> &sort_columns,
-                                ComparatorFunc comparator_func) const
+                                ComparatorFunc comparator_func,
+                                bool allow_undefined) const
     {
         // create SchemaColumn entries for the existing fields
         std::vector<SchemaColumn> all_columns;
@@ -242,7 +243,7 @@ namespace springtail {
         }
 
         // create the new ExtentSchema
-        return std::make_shared<ExtentSchema>(all_columns, allow_undefined, comparator_func);
+        return std::make_shared<ExtentSchema>(all_columns, comparator_func, allow_undefined);
     }
 
     std::shared_ptr<std::vector<FieldPtr>>
@@ -316,7 +317,7 @@ namespace springtail {
         std::map<uint32_t, std::string> name_map;
 
         // generate the extent schema from the base columns
-        _extent_schema = std::make_shared<ExtentSchema>(meta.columns, comparator_func);
+        _extent_schema = std::make_shared<ExtentSchema>(meta.columns, comparator_func, false);
 
         // get a copy of the fields from the extent schema
         for (auto &column : meta.columns) {
