@@ -144,6 +144,10 @@ private:
             return opentelemetry::sdk::common::ExportResult::kSuccess;
         }
 
+        bool ForceFlush(std::chrono::microseconds timeout = (std::chrono::microseconds::max)()) noexcept override
+            { return true; }
+
+
     private:
         void _log_span(const opentelemetry::sdk::trace::SpanData& span);
     };
