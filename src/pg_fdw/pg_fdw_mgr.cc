@@ -2096,7 +2096,12 @@ namespace springtail::pg_fdw {
                     if (column.type == SchemaType::EXTENSION) {
                         // if the type is an extension type, get the extension value instead of the enum value
                         std::vector<char> extension_value = _get_extension_data_from_pg(state, qual->base.typeoid, qual->value);
-                        fields->at(idx) = std::make_shared<ConstTypeField<std::vector<char>>>(extension_value, true);
+                        auto comparator_func = [this, state, column](std::string_view op_str,
+                                                             const std::span<const char> &lhval,
+                                                             const std::span<const char> &rhval) -> bool {
+                            return _comparator_function(state->db_id, state->xid, column.pg_type, op_str, lhval, rhval);
+                        };
+                        fields->at(idx) = std::make_shared<ConstTypeField<std::vector<char>>>(extension_value, true, comparator_func);
                     } else {
                         Oid oid = DatumGetObjectId(qual->value);
                         LOG_DEBUG(LOG_FDW, "Found user defined type datum qual field: {}", oid);
