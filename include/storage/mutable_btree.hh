@@ -161,7 +161,7 @@ namespace springtail {
          * dirty, indicating that they need to be written to a new location and update their parent
          * branch pointers accordingly.
          */
-        class Page {
+        class Page: public std::enable_shared_from_this<Page> {
         public:
             using Iterator = StorageCache::Page::Iterator;
             using StoragePagePtr = StorageCache::SafePagePtr;
@@ -317,7 +317,7 @@ namespace springtail {
              * Returns the parent of the page, if one is set.  Otherwise returns nullptr.
              */
             std::shared_ptr<Page> parent() const {
-                boost::unique_lock lock(children_mutex);
+                boost::unique_lock lock(_children_mutex);
                 return _parent;
             }
 
@@ -327,7 +327,7 @@ namespace springtail {
              * @param parent The parent of the page.
              */
             void set_parent(std::shared_ptr<Page> parent) {
-                boost::unique_lock lock(children_mutex);
+                boost::unique_lock lock(_children_mutex);
                 _parent = parent;
             }
 
@@ -338,7 +338,7 @@ namespace springtail {
              * @param child A child of this page.
              */
             void add_child(std::shared_ptr<Page> child) {
-                boost::unique_lock lock(children_mutex);
+                boost::unique_lock lock(_children_mutex);
                 _children[child->extent_id] = child;
                 assert(!child->flushed);
             }
@@ -349,7 +349,7 @@ namespace springtail {
              * @param extent_id The extent ID of the page to be removed.
              */
             void remove_child(uint64_t extent_id) {
-                boost::unique_lock lock(children_mutex);
+                boost::unique_lock lock(_children_mutex);
                 _children.erase(extent_id);
             }
 
@@ -357,13 +357,8 @@ namespace springtail {
              * Checks if the page has children.
              */
             bool has_children() const {
-                boost::unique_lock lock(children_mutex);
+                boost::unique_lock lock(_children_mutex);
                 return !_children.empty();
-            }
-
-            std::map<uint64_t, std::shared_ptr<Page>>& get_children() {
-                // Caller should have acquired the children_mutex
-                return _children;
             }
 
             /**
@@ -374,9 +369,10 @@ namespace springtail {
                 // note: must be called when there are children
                 assert(!_children.empty());
 
-                boost::unique_lock lock(children_mutex);
+                boost::unique_lock lock(_children_mutex);
                 return _children.begin()->second;
             }
+
 
             /**
              * Check if the page should be flushed based on the number of extents it contains.
@@ -406,6 +402,31 @@ namespace springtail {
                 return _cache_page->header().xid;
             }
 
+            void flush_children()
+            {
+                boost::unique_lock children_lock(_children_mutex);
+
+                if (_children.empty()) {
+                    return;
+                }
+
+                std::vector<std::future<void>> child_page_futures;
+                for (auto& [_, child]: _children) {
+                    auto flush_future_opt = _btree->_flush_page(child, shared_from_this());
+                    if (flush_future_opt) {
+                        child_page_futures.push_back(std::move(flush_future_opt.value()));
+                    }
+                }
+
+                //unlock children mutex so the following removal will be unblocked
+                children_lock.unlock();
+
+                // this will remove the child from the page's children during the flush
+                for (auto& child_future: child_page_futures) {
+                    child_future.get();
+                }
+            }
+
         public:
             uint64_t extent_id; ///< The offset of the previous extent this page is based on.  Won't change once the page is fully constructed.
             ExtentType type; ///< The type of this page.  Won't change once the page is fully constructed, so safe to read without holding the mutex.
@@ -415,7 +436,6 @@ namespace springtail {
 
             mutable boost::shared_mutex disk_mutex; ///< A shared mutex that acts as a barrier for disk reads / writes.
             mutable boost::shared_mutex mutex; ///< A shared mutex for access to the in-memory data.
-            mutable boost::shared_mutex children_mutex; ///< A mutex to protect the map of children.  Can be acquired unique while sharing the primary mutex.
 
 
         private:
@@ -427,6 +447,7 @@ namespace springtail {
             StoragePagePtr _cache_page; ///< The backing page in the cache for the contents of this BTree page.
 
             // the following are protected by a separate mutex, must be holding the primary mutex at least shared.
+            mutable boost::shared_mutex _children_mutex; ///< A mutex to protect the map of children.  Can be acquired unique while sharing the primary mutex.
             std::map<uint64_t, std::shared_ptr<Page>> _children; ///< The set of children of this page that are part of a modified path through the tree.
             std::shared_ptr<Page> _parent; ///< Pointer to the parent page.  Won't change once the page is fully constructed.
         };

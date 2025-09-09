@@ -558,10 +558,6 @@ MutableBTree::lower_bound(TuplePtr search_key,
                 new_pages = std::move(new_pages), this]() mutable
                 -> std::vector<std::shared_ptr<MutableBTree::Page>>
         {
-
-            // acquire exclusive access to the page
-            //boost::unique_lock lock(this->disk_mutex);
-
             auto ids = flush_future.get();
             for (auto id : ids) {
                 // XXX how to handle XIDs?
@@ -1012,28 +1008,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
         // flush the children first
         // note: safe to traverse the children like this because we are holding exclusive lock
         //       on the page
-        if (page->has_children()) {
-            boost::unique_lock children_lock(page->children_mutex);
-            auto& child_pages = page->get_children();
-            std::vector<std::future<void>> child_page_futures;
-            for (auto& [_, child]: child_pages) {
-                auto flush_future_opt = _flush_page(child, page);
-                if (flush_future_opt) {
-                    child_page_futures.push_back(std::move(flush_future_opt.value()));
-                }
-            }
-
-            //unlock children mutex so the following removal will be unblocked
-            children_lock.unlock();
-
-            // this will remove the child from the page's children during the flush
-            // note: we are currently holding an exlusive lock on the child's parent (this
-            //       page), so safe to call
-
-            for (auto& child_future: child_page_futures) {
-                child_future.get();
-            }
-        }
+        page->flush_children();
 
         // if the page was not modified while flushing children, then no need to flush it
         // note: this could occur if pages were accessed for read
@@ -1087,29 +1062,7 @@ MutableBTree::lower_bound(TuplePtr search_key,
         // flush the children first
         // note: safe to traverse the children like this because we are holding
         //       exclusive lock on the page
-
-        if (page->has_children()) {
-            boost::unique_lock children_lock(page->children_mutex);
-            auto& child_pages = page->get_children();
-            std::vector<std::future<void>> child_page_futures;
-            for (auto& [_, child]: child_pages) {
-                auto flush_future_opt = _flush_page(child, page);
-                if (flush_future_opt) {
-                    child_page_futures.push_back(std::move(flush_future_opt.value()));
-                }
-            }
-
-            //unlock children mutex so the following removal will be unblocked
-            children_lock.unlock();
-
-            // this will remove the child from the page's children during the flush
-            // note: we are currently holding an exlusive lock on the child's parent (this
-            //       page), so safe to call
-
-            for (auto& child_future: child_page_futures) {
-                child_future.get();
-            }
-        }
+        page->flush_children();
 
         // check if this page has actually been modified by the child flushes
         if (!page->is_dirty()) {
