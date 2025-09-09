@@ -22,36 +22,6 @@ namespace springtail {
     }
 
     TablePtr
-    TableMgr::get_table(uint64_t db_id,
-                        uint64_t table_id,
-                        uint64_t xid)
-    {
-        boost::shared_lock lock(_mutex);
-
-        // check the system tables
-        if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
-            return SystemTableMgr::get_instance()->get_system_table(db_id, table_id, xid);
-        }
-
-        // retrieve the roots and stats of the table
-        auto &&tbl_meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, table_id, xid);
-
-        // construct the table and return it
-        auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id,
-                                                                   {xid, constant::MAX_LSN});
-
-        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
-
-        // pass secondary indexes only
-        auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY; });
-        std::vector<Index> secondary_indexes(filtered.begin(), filtered.end());
-
-        return std::make_shared<UserTable>(db_id, table_id, xid, _table_base,
-                                           schema->get_sort_keys(), secondary_indexes,
-                                           *tbl_meta, schema);
-    }
-
-    TablePtr
     TableMgr::get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, ComparatorFunc comparator_func)
     {
         boost::shared_lock lock(_mutex);

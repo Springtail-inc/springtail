@@ -63,34 +63,9 @@ namespace springtail {
     SchemaMgr::get_schema(uint64_t db_id,
                           uint64_t table_id,
                           const XidLsn &access_xid,
-                          const XidLsn &target_xid)
-    {
-        if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
-            return SystemTableMgr::get_instance()->_get_schema(table_id);
-        }
-
-        // XXX keep some kind of local cache?
-
-        // call into the SysTblMgr to get the schema at the given XID/LSN
-        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_target_schema(db_id, table_id, access_xid, target_xid);
-
-        LOG_INFO("[DEBUG] Getting schema without a comparator_func");
-        // construct the schema object
-        if (meta->history.empty()) {
-            return std::make_shared<ExtentSchema>(meta->columns, nullptr);
-        }
-
-        return std::make_shared<VirtualSchema>(*meta, nullptr);
-    }
-
-    std::shared_ptr<Schema>
-    SchemaMgr::get_schema(uint64_t db_id,
-                          uint64_t table_id,
-                          const XidLsn &access_xid,
                           const XidLsn &target_xid,
                           ComparatorFunc comparator_func)
     {
-        LOG_INFO("[DEBUG] Getting schema with a comparator_func");
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
             return SystemTableMgr::get_instance()->_get_schema(table_id);
         }
@@ -106,25 +81,6 @@ namespace springtail {
         }
 
         return std::make_shared<VirtualSchema>(*meta, comparator_func);
-    }
-
-    std::shared_ptr<ExtentSchema>
-    SchemaMgr::get_extent_schema(uint64_t db_id,
-                                 uint64_t table_id,
-                                 const XidLsn &xid,
-                                 bool allow_undefined)
-    {
-        if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
-            return SystemTableMgr::get_instance()->_get_extent_schema(table_id);
-        }
-
-        // XXX keep some kind of local cache?  how to keep it valid given the XID progression?
-
-        // call into the SysTblMgr to get the schema at the given XID/LSN
-        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, xid);
-
-        // construct the schema from the provided schema metadata
-        return std::make_shared<ExtentSchema>(meta->columns, nullptr, allow_undefined);
     }
 
     std::shared_ptr<ExtentSchema>

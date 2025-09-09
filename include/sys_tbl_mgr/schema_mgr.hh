@@ -32,19 +32,9 @@ namespace springtail {
          * @param table_id The ID of the table being requested.
          * @param extent_xid The XID of the extent being processed.
          * @param target_xid The XID that the query is executing at.
-         * @param lsn An optional LSN (logical sequence number) which tells you which schema changes within a given XID to apply up through.
-         */
-        std::shared_ptr<Schema> get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
-
-        /**
-         * Retrieve the schema for a given table at a given point in time.
-         * @param db_id The database ID of the table.
-         * @param table_id The ID of the table being requested.
-         * @param extent_xid The XID of the extent being processed.
-         * @param target_xid The XID that the query is executing at.
          * @param comparator_func The comparator function to use for comparing values.
          */
-         std::shared_ptr<Schema> get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid, ComparatorFunc comparator_func);
+         std::shared_ptr<Schema> get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid, ComparatorFunc comparator_func = nullptr);
 
         /**
          * Retrieve an ExtentSchema for a given table at a given XID that can be used for writing /
@@ -54,26 +44,14 @@ namespace springtail {
          * @param table_id The table we need the schema for.
          * @param xid The XID/LSN that we need the schema at. Defaults to the MAX_LSN, providing the
          *            schema at the point after all changes in the XID have been applied.
+         * @param comparator_func The comparator function to use for comparing values.
+         * @param allow_undefined Whether to allow undefined columns.
          */
-        std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid,
+        std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t db_id,
+                                                        uint64_t table_id,
+                                                        const XidLsn &xid,
+                                                        ComparatorFunc comparator_func = nullptr,
                                                         bool allow_undefined = false);
-
-        /**
-         * Retrieve an ExtentSchema for a given table at a given XID that can be used for writing /
-         * updating the extent.  This function assumes we are retrieving the schema of the table's
-         * underlying data.
-         * @param db_id The database ID of the table.
-         * @param table_id The table we need the schema for.
-         * @param xid The XID/LSN that we need the schema at. Defaults to the MAX_LSN, providing the
-         *            schema at the point after all changes in the XID have been applied.
-         * @param comparator_func The comparator function to use for comparing values.
-         */
-         std::shared_ptr<ExtentSchema>
-         get_extent_schema(uint64_t db_id,
-                           uint64_t table_id,
-                           const XidLsn &xid,
-                           ComparatorFunc comparator_func,
-                           bool allow_undefined = false);
 
         /**
          * @brief Get the usertype object

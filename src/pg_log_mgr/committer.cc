@@ -553,7 +553,8 @@ namespace springtail::committer {
         SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
         std::vector<SchemaColumn> new_columns{op, lsn};
 
-        auto wc_schema = schema->create_schema(columns, new_columns, sort_keys, true);
+        // XXX Plugin pg_ext
+        auto wc_schema = schema->create_schema(columns, new_columns, sort_keys, nullptr, true);
 
         time_trace::Trace process_extent_trace;
         TIME_TRACE_START(process_extent_trace);

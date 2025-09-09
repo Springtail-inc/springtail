@@ -428,15 +428,6 @@ namespace indexer_helpers {
          * Table constructor.
          */
         Table(uint64_t db_id,
-              uint64_t table_id,
-              uint64_t xid,
-              const std::filesystem::path &table_base,
-              const std::vector<std::string> &primary_key,
-              const std::vector<Index> &secondary,
-              const TableMetadata &metadata,
-              ExtentSchemaPtr schema);
-
-        Table(uint64_t db_id,
             uint64_t table_id,
             uint64_t xid,
             const std::filesystem::path &table_base,
@@ -444,7 +435,7 @@ namespace indexer_helpers {
             const std::vector<Index> &secondary,
             const TableMetadata &metadata,
             ExtentSchemaPtr schema,
-            ComparatorFunc comparator_func);
+            ComparatorFunc comparator_func = nullptr);
 
         /** Returns true if the table has a primary key.  False otherwise. */
         bool has_primary();
@@ -604,7 +595,7 @@ namespace indexer_helpers {
          * Creates read-only index of the table.
          */
         BTreePtr
-        _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset, ComparatorFunc comparator_func);
+        _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset, ComparatorFunc comparator_func = nullptr);
 
     protected:
         uint64_t _db_id; ///< The ID of the database containing this table.
@@ -646,17 +637,6 @@ namespace indexer_helpers {
         /**
          * Mutable table constructor.
          */
-        MutableTable(uint64_t db_id,
-                     uint64_t table_id,
-                     uint64_t access_xid,
-                     uint64_t target_xid,
-                     const std::filesystem::path &table_base,
-                     const std::vector<std::string> &primary_key,
-                     const std::vector<Index> &secondary,
-                     const TableMetadata &metadata,
-                     ExtentSchemaPtr schema,
-                     bool for_gc = false);
-
         MutableTable(uint64_t db_id,
             uint64_t table_id,
             uint64_t access_xid,

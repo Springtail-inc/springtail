@@ -161,16 +161,6 @@ namespace indexer_helpers {
                  const std::vector<std::string> &primary_key,
                  const std::vector<Index> &secondary,
                  const TableMetadata &metadata,
-                 ExtentSchemaPtr schema)
-    : Table(db_id, table_id, xid, table_base, primary_key, secondary, metadata, schema, nullptr) {}
-
-    Table::Table(uint64_t db_id,
-                 uint64_t table_id,
-                 uint64_t xid,
-                 const std::filesystem::path &table_base,
-                 const std::vector<std::string> &primary_key,
-                 const std::vector<Index> &secondary,
-                 const TableMetadata &metadata,
                  ExtentSchemaPtr schema,
                  ComparatorFunc comparator_func)
         : _db_id(db_id),
@@ -575,19 +565,6 @@ namespace indexer_helpers {
                 comparator_func);
         return btree;
     }
-
-    MutableTable::MutableTable(uint64_t db_id,
-        uint64_t table_id,
-        uint64_t access_xid,
-        uint64_t target_xid,
-        const std::filesystem::path &table_base,
-        const std::vector<std::string> &primary_key,
-        const std::vector<Index> &secondary,
-        const TableMetadata &metadata,
-        ExtentSchemaPtr schema,
-        bool for_gc)
-    : MutableTable(db_id, table_id, access_xid, target_xid, table_base, primary_key, secondary, metadata, schema, for_gc, nullptr)
-    {}
 
     MutableTable::MutableTable(uint64_t db_id,
                                uint64_t table_id,

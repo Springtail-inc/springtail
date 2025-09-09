@@ -5,8 +5,8 @@ namespace springtail {
 
     void
     ExtentSchema::_populate(const std::map<uint32_t, SchemaColumn>& columns,
-                            bool allow_undefined,
-                            ComparatorFunc comparator_func)
+                            ComparatorFunc comparator_func,
+                            bool allow_undefined)
     {
         // track how many primary key columns there are
         uint32_t pkey_count = 0;
@@ -184,15 +184,6 @@ namespace springtail {
     ExtentSchema::get_field(const std::string &name) const
     {
         return get_mutable_field(name);
-    }
-
-    std::shared_ptr<ExtentSchema>
-    ExtentSchema::create_schema(const std::vector<std::string> &old_columns,
-                                const std::vector<SchemaColumn> &new_columns,
-                                const std::vector<std::string> &sort_columns,
-                                bool allow_undefined) const
-    {
-        return create_schema(old_columns, new_columns, sort_columns, nullptr, allow_undefined);
     }
 
     std::shared_ptr<ExtentSchema>

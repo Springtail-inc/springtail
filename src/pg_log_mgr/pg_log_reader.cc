@@ -159,7 +159,8 @@ namespace springtail::pg_log_mgr {
 
         std::vector<SchemaColumn> new_columns{op, lsn};
 
-        schema = table_schema->create_schema(columns, new_columns, sort_keys, true);
+        // XXX Plugin pg_ext
+        schema = table_schema->create_schema(columns, new_columns, sort_keys, nullptr, true);
 
         op_f = schema->get_mutable_field("__springtail_op");
         lsn_f = schema->get_mutable_field("__springtail_lsn");
@@ -266,7 +267,8 @@ namespace springtail::pg_log_mgr {
             if (entry.schema == nullptr) {
                 entry.table_schema = sync_skip.schema();
                 if (entry.table_schema == nullptr) {
-                    entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, xidlsn, true);
+                    // XXX Plugin pg_ext
+                    entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, xidlsn, nullptr, true);
                 }
                 entry.update_schema();
             }
@@ -354,7 +356,8 @@ namespace springtail::pg_log_mgr {
                 XidLsn current(current_xid);
                 entry.table_schema = sync_skip.schema();
                 if (entry.table_schema == nullptr) {
-                    entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, current, true);
+                    // XXX Plugin pg_ext
+                    entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, current, nullptr, true);
                 }
                 entry.update_schema();
             }

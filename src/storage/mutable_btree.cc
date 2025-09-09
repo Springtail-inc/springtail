@@ -7,15 +7,10 @@
 namespace springtail {
 
     MutableBTree::MutableBTree(const std::filesystem::path &file,
-        const std::vector<std::string> &keys,
-        ExtentSchemaPtr schema,
-        uint64_t xid, uint64_t max_extent_size):
-    MutableBTree(file, keys, schema, xid, max_extent_size, nullptr) {}
-
-    MutableBTree::MutableBTree(const std::filesystem::path &file,
                                const std::vector<std::string> &keys,
                                ExtentSchemaPtr schema,
-                               uint64_t xid, uint64_t max_extent_size,
+                               uint64_t xid,
+                               uint64_t max_extent_size,
                                ComparatorFunc comparator_func)
         : _file(file),
           _sort_keys(keys),
