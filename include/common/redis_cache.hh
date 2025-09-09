@@ -9,6 +9,7 @@
 #include <sw/redis++/redis++.h>
 
 #include <common/common.hh>
+#include <common/logging.hh>
 #include <common/prefix_tree.hh>
 #include <common/redis.hh>
 

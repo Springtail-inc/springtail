@@ -1,5 +1,9 @@
 #pragma once
 
+#pragma push_macro("DELETE")
+#include <admin_http/admin_server.hh>
+#pragma pop_macro("DELETE")
+
 #include <common/exception.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
@@ -82,6 +86,18 @@ springtail_store_arguments(ServiceId service_id, const std::map<std::string, std
  *
  */
 void springtail_shutdown();
+
+class AdminServerRunner : public ServiceRunner {
+public:
+    AdminServerRunner() : ServiceRunner("AdminService") {}
+    bool start() {
+        AdminServer::get_instance();
+        return true;
+    }
+    void stop() {
+        AdminServer::shutdown();
+    }
+};
 
 /**
  * Intialize the exception and backtrace handling.

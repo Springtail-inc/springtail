@@ -87,10 +87,26 @@ namespace springtail {
          */
         void init_cache() { _cache = std::make_shared<RedisCache>(true); }
 
+        /**
+         * @brief Get the all configuration settings from redis
+         */
+        static inline nlohmann::json get_all_settings() {
+            _assert_instance();
+            return  get_instance()->_json;
+        }
+
         /** Helper to get db instance id */
         static inline uint64_t get_db_instance_id() {
             _assert_instance();
             return  get_instance()->_get_db_instance_id();
+        }
+
+        /**
+         * @brief Get the instance key of the process
+         */
+        static inline std::string get_instance_key() {
+            _assert_instance();
+            return  get_instance()->_get_instance_key();
         }
 
         /** Helper to get organization id */
@@ -319,6 +335,18 @@ namespace springtail {
         _make_absolute_path(const std::string &path) {
             assert (!_get_mount_point().empty());
             return std::filesystem::path(_get_mount_point()) / path;
+        }
+
+        /**
+         * @brief Get instance key of the process
+         *
+         * @return std::string - a string representing instance key
+         */
+        std::string
+        _get_instance_key() {
+            assert (_json.contains(ORG_CONFIG));
+            assert (_json[ORG_CONFIG].contains("instance_key"));
+            return _json[ORG_CONFIG]["instance_key"];
         }
 
         /**

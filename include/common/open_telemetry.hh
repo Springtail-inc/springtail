@@ -31,7 +31,7 @@ public:
     static void flush();
     static void shutdown_instance()
     {
-        if (_has_instance()) {
+        if (has_instance()) {
             shutdown();
         }
     }
