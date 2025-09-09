@@ -398,8 +398,8 @@ namespace springtail::pg_fdw {
     std::unique_ptr<PgFdwState> _create_scan_state(const SpringtailPlanState *planstate, const List *qual_list, const List* join_quals, double *rows)
     {
         // we create a temporary scan state here because for historical reasons
-        // it has some API's need by this function. The state will be deleted
-        // when the function exist.
+        // it has some API's needed by this function. The state will be deleted
+        // when the function exits.
         SpringtailPlanState::TableRef tr = planstate->get_table_ref();
 
         TablePtr table = TableMgr::get_instance()->get_table(tr.db_id, tr.tid, tr.xid);

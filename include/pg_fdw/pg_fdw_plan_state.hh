@@ -107,7 +107,8 @@ namespace springtail::pg_fdw {
      * )
      *
      */
-    struct SpringtailPlanState {
+    class SpringtailPlanState {
+    public:
         struct TableRef {
             uint64_t db_id;
             uint64_t tid;

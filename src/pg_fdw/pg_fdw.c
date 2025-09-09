@@ -338,8 +338,6 @@ springtail_GetForeignRelSize(PlannerInfo *root,
 
     // get the estimate of the number of rows and width of the table
     multicorn_getRelSize(root, baserel, foreigntableid);
-
-    elog(INFO, "Iron --- create: %s\n", nodeToString(baserel->fdw_private));
 }
 
 /**
@@ -356,9 +354,6 @@ springtail_GetForeignPaths(PlannerInfo *root,
                            RelOptInfo *baserel,
                            Oid foreigntableid)
 {
-    elog(INFO, "Iron 0000 --- get\n");
-    elog(INFO, "Iron 0000 --- get: %s\n", nodeToString(baserel->fdw_private));
-
     // get the foreign paths -- call helper to set them up
     multicorn_getForeignPaths(root, baserel, foreigntableid);
 }
@@ -385,8 +380,6 @@ springtail_GetForeignPlan(PlannerInfo *root,
                           List *scan_clauses,
                           Plan *outer_plan)
 {
-    elog(INFO, "Iron 33333 --- get: %s\n", nodeToString(baserel->fdw_private));
-
     // call into helper to set the foreign plan
     return multicorn_getForeignPlan(baserel, foreigntableid, best_path,
                                     tlist, scan_clauses);
