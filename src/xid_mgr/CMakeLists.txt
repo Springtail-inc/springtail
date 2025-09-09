@@ -2,7 +2,6 @@ find_package(Boost COMPONENTS program_options REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
 find_package(Protobuf CONFIG REQUIRED)
-find_package(PostgreSQL REQUIRED)
 
 # source files
 set(XID_MGR_SOURCES
@@ -44,7 +43,6 @@ target_include_directories(springtail_xid_mgr
     ${CMAKE_BINARY_DIR}/src  # For generated protobuf files
     PRIVATE
     ${CMAKE_SOURCE_DIR}/include
-    ${PostgreSQL_INCLUDE_DIRS}  # Add PostgreSQL include directories
 )
 target_link_libraries(springtail_xid_mgr
     PUBLIC
@@ -56,23 +54,15 @@ target_link_libraries(springtail_xid_mgr
     nlohmann_json::nlohmann_json
     gRPC::grpc++
     protobuf::libprotobuf
-    pgext
-    ${PostgreSQL_LIBRARIES}  # Add PostgreSQL libraries
 )
 
 ## helpers
 add_executable(xid_client test/xid_client.cc)
-target_include_directories(xid_client 
-    PRIVATE 
-    ${CMAKE_SOURCE_DIR}/include 
-    ${VCPKG_INCLUDE_PATH}
-    ${PostgreSQL_INCLUDE_DIRS}  # Add PostgreSQL include directories
-)
+target_include_directories(xid_client PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
 target_link_libraries(xid_client
     PUBLIC springtail_common
            springtail_xid_mgr_client
     PRIVATE Boost::program_options
-    PRIVATE ${PostgreSQL_LIBRARIES}  # Add PostgreSQL libraries
 )
 add_dsymutil_command(xid_client)
 

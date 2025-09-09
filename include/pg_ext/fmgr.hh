@@ -1,50 +1,7 @@
 #pragma once
 
-// XXX Temp fix
-#pragma push_macro("strerror")
-#undef strerror
-
-#define HAVE_STRERROR_R 1
-// Isolate PostgreSQL includes
-extern "C" {
-	#include <postgres.h>
-}
-
-#ifdef strerror_r
-#undef strerror_r
-#endif
-#ifdef pg_strerror_r
-#undef pg_strerror_r
-#endif
-
-#ifdef gettext
-#undef gettext
-#endif
-#ifdef dgettext
-#undef dgettext
-#endif
-#ifdef ngettext
-#undef ngettext
-#endif
-#ifdef dngettext
-#undef dngettext
-#endif
-
-#include <libintl.h>
-
-#ifdef snprintf
-#undef snprintf
-#endif
-#ifdef vsnprintf
-#undef vsnprintf
-#endif
-
-#include <cstdio>
-
-// Restore strerror
-#pragma pop_macro("strerror")
-
 #include <pg_ext/export.hh>
+#include <pg_ext/memory.hh>
 
 #include <cstdint>
 #include <unordered_map>
@@ -152,6 +109,27 @@ static std::unordered_map<Oid, TypeInfo> _type_output_registry = {
 };
 // XXX Add support for User defined types
 
+namespace pgext {
+    struct NullableDatum {
+        Datum value;
+        bool  isnull;
+        // due to alignment padding this could be used for flags for free
+    };
+
+	typedef char *Pointer;
+	static inline Pointer
+	DatumGetPointer(Datum X)
+	{
+		return (Pointer) X;
+	}
+
+	static inline char *
+	DatumGetCString(Datum X)
+	{
+		return (char *) DatumGetPointer(X);
+	}
+} // namespace pgext
+
 typedef struct Node *fmNodePtr;
 typedef struct FmgrInfo
 {
@@ -162,7 +140,7 @@ typedef struct FmgrInfo
 	bool		fn_retset;		/* function returns a set */
 	unsigned char fn_stats;		/* collect stats if track_functions > this */
 	void	   *fn_extra;		/* extra space for use by handler */
-	MemoryContext fn_mcxt;		/* memory context to store fn_extra in */
+	pgext::MemoryContext fn_mcxt;		/* memory context to store fn_extra in */
 	fmNodePtr	fn_expr;		/* expression parse tree for call, or NULL */
 } FmgrInfo;
 
@@ -178,7 +156,7 @@ typedef struct FunctionCallInfoBaseData
 	bool		isnull;			/* function must set true if result is NULL */
 	short		nargs;			/* # arguments actually passed */
 #define FIELDNO_FUNCTIONCALLINFODATA_ARGS 6
-	NullableDatum args[FLEXIBLE_ARRAY_MEMBER];
+	pgext::NullableDatum args[FLEXIBLE_ARRAY_MEMBER];
 } FunctionCallInfoBaseData;
 
 struct FunctionCallInfoData
@@ -194,7 +172,7 @@ struct FunctionCallInfoData
 
 #define SizeForFunctionCallInfo(nargs) \
 	(offsetof(FunctionCallInfoBaseData, args) + \
-	 sizeof(NullableDatum) * (nargs))
+	 sizeof(pgext::NullableDatum) * (nargs))
 
 #define LOCAL_FCINFO(name, nargs) \
 	/* use union with FunctionCallInfoBaseData to guarantee alignment */ \

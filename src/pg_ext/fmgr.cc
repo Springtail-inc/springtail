@@ -249,7 +249,7 @@ FunctionCall1(FmgrInfo *flinfo, Datum arg1)
 char *
 OutputFunctionCall(FmgrInfo *flinfo, Datum val)
 {
-	return DatumGetCString(FunctionCall1(flinfo, val));
+	return pgext::DatumGetCString(FunctionCall1(flinfo, val));
 }
 
 /**
