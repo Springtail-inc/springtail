@@ -1,5 +1,5 @@
 # The Dockerfile for CI build & tests (for GitHub Actions)
-ARG BASE_IMAGE
+ARG BASE_IMAGE=381492230138.dkr.ecr.us-east-1.amazonaws.com/devsupport:invalid
 FROM ${BASE_IMAGE}
 
 ARG CI_BUILD_TYPE
