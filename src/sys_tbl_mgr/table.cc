@@ -131,7 +131,7 @@ namespace indexer_helpers {
         };
 
         std::shared_ptr<ExtentSchema>
-        _create_index_schema(ExtentSchemaPtr schema, const std::vector<uint32_t>& index_columns, ComparatorFunc comparator_func)
+        _create_index_schema(ExtentSchemaPtr schema, const std::vector<uint32_t>& index_columns, ComparatorFunc comparator_func = nullptr)
         {
 
             // get the column names in the order they appear in the index
@@ -145,12 +145,6 @@ namespace indexer_helpers {
             key.push_back(constant::INDEX_RID_FIELD);
 
             return schema->create_schema(col_names, { extent_c, row_c }, key, comparator_func);
-        }
-
-        std::shared_ptr<ExtentSchema>
-        _create_index_schema(ExtentSchemaPtr schema, const std::vector<uint32_t>& index_columns)
-        {
-            return _create_index_schema(schema, index_columns, nullptr);
         }
     }
 

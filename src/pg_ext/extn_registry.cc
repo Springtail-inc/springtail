@@ -1,4 +1,6 @@
 #include <nlohmann/json.hpp>
+#include <pg_ext/fmgr.hh>
+#include <pg_ext/string.hh>
 #include <pg_ext/extn_registry.hh>
 #include <pg_repl/exception.hh>
 
@@ -100,6 +102,41 @@ PgExtnRegistry::init_libraries(uint64_t db_id,
 
     _library_map.insert({extension, library});
 }
+
+std::string
+PgExtnRegistry::datum_to_string(Datum value, Oid pg_oid){
+    auto type = get_type_by_oid(pg_oid);
+    auto typoutput = get_type_func_by_type_name(type.typoutput);
+
+    DCHECK(typoutput);
+
+    // call the output function
+    Datum result = DirectFunctionCall1(typoutput, value);
+    const char* str = pgext::DatumGetCString(result);
+
+    return std::string(str);
+}
+
+Datum
+PgExtnRegistry::binary_to_datum(const std::span<const char> &value,
+                                Oid pg_oid,
+                                int32_t atttypmod)
+{
+    auto type = get_type_by_oid(pg_oid);
+    auto typreceive = get_type_func_by_type_name(type.typreceive);
+
+    DCHECK(typreceive);
+
+    StringInfoData string;
+    initStringInfo(&string);
+
+    appendBinaryStringInfoNT(&string, value.data(), value.size());
+    Datum datum = pgext::PointerGetDatum(&string);
+
+    // call the receive function
+    Datum result = DirectFunctionCall3(typreceive, datum, pgext::ObjectIdGetDatum(0), pgext::Int32GetDatum(atttypmod));
+    return result;
+};
 
 PGFunction
 PgExtnRegistry::_load_extn_function(void* library, const std::string_view func_name)

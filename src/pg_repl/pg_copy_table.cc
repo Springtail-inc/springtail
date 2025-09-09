@@ -681,58 +681,29 @@ namespace springtail
             }
         }
 
-        auto datum_to_string = [](Datum value, Oid pg_oid)
+        auto comparator_func = [](uint64_t type_oid,
+                                  std::string_view op_str,
+                                  const std::span<const char> &lhval,
+                                  const std::span<const char> &rhval) -> bool
         {
-            auto extn_registry = PgExtnRegistry::get_instance();
-            auto type = extn_registry->get_type_by_oid(pg_oid);
-            auto typoutput = extn_registry->get_type_func_by_type_name(type.typoutput);
-
-            DCHECK(typoutput);
-
-            // call the output function
-            Datum result = DirectFunctionCall1(typoutput, value);
-            const char* str = DatumGetCString(result);
-
-            LOG_INFO("[DEBUG] Raw output: {}", str ? str : "(null)");
-            return std::string(str ? str : "");
-        };
-
-        auto binary_to_datum = [](const std::span<const char> &value,
-                                Oid pg_oid,
-                                int32_t atttypmod)
-        {
-            auto extn_registry = PgExtnRegistry::get_instance();
-            auto type = extn_registry->get_type_by_oid(pg_oid);
-            auto typreceive = extn_registry->get_type_func_by_type_name(type.typreceive);
-
-            DCHECK(typreceive);
-
-            StringInfoData string;
-            initStringInfo(&string);
-
-            appendBinaryStringInfoNT(&string, value.data(), value.size());
-            Datum datum = PointerGetDatum(&string);
-
-            // call the receive function
-            Datum result = DirectFunctionCall3(typreceive, datum, ObjectIdGetDatum(0), Int32GetDatum(atttypmod));
-            return result;
-        };
-
-        // XXX - EXTN - Plugin pg_ext
-        auto comparator_func = [binary_to_datum, datum_to_string](uint64_t type_oid,
-                                                std::string_view op_str,
-                                                const std::span<const char> &lhval,
-                                                const std::span<const char> &rhval) -> bool {
             auto extn_registry = PgExtnRegistry::get_instance();
 
             auto type = extn_registry->get_type_by_oid(type_oid);
 
-            Datum leftDatum = binary_to_datum(lhval, type_oid, -1);
-            Datum rightDatum = binary_to_datum(rhval, type_oid, -1);
+            Datum leftDatum = extn_registry->binary_to_datum(lhval, type_oid, -1);
+            Datum rightDatum = extn_registry->binary_to_datum(rhval, type_oid, -1);
+
             auto comparator_func = extn_registry->get_operator_func_by_oper_name(op_str.data());
 
             Datum result = DirectFunctionCall3(comparator_func, leftDatum, rightDatum, ObjectIdGetDatum(0));
-            return DatumGetBool(result);
+
+            auto leftDatumString = extn_registry->datum_to_string(leftDatum, type_oid);
+            auto rightDatumString = extn_registry->datum_to_string(rightDatum, type_oid);
+            bool comparatorResult = DatumGetBool(result);
+
+            LOG_DEBUG(LOG_PG_REPL, "Operator = Result: {} {} {} = {}", leftDatumString, op_str, rightDatumString, comparatorResult);
+
+            return comparatorResult;
         };
 
         auto schema = std::make_shared<ExtentSchema>(_schema.columns, comparator_func);

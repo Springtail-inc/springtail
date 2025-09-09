@@ -70,6 +70,11 @@ public:
     PGFunction get_operator_func_by_oper_name(const std::string& oper_name) const;
     PGFunction get_operator_func_by_proc_name(const std::string& proc_name) const;
     PGFunction get_type_func_by_type_name(const std::string& type_name) const;
+
+    std::string datum_to_string(Datum value, Oid pg_oid);
+    Datum binary_to_datum(const std::span<const char> &value,
+                          Oid pg_oid,
+                          int32_t atttypmod);
 private:
     PGFunction _load_extn_function(void* library, const std::string_view oper_name);
     void* _load_library(const std::string_view lib_path);

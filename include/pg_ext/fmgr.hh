@@ -117,6 +117,7 @@ namespace pgext {
     };
 
 	typedef char *Pointer;
+
 	static inline Pointer
 	DatumGetPointer(Datum X)
 	{
@@ -127,6 +128,24 @@ namespace pgext {
 	DatumGetCString(Datum X)
 	{
 		return (char *) DatumGetPointer(X);
+	}
+
+	static inline Datum
+	PointerGetDatum(const void *X)
+	{
+		return (Datum) X;
+	}
+
+	static inline Datum
+	Int32GetDatum(uint32_t X)
+	{
+		return (Datum) X;
+	}
+
+	static inline Datum
+	ObjectIdGetDatum(Oid X)
+	{
+		return (Datum) X;
 	}
 } // namespace pgext
 

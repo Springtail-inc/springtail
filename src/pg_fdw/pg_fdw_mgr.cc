@@ -1554,10 +1554,13 @@ namespace springtail::pg_fdw {
                                    const std::span<const char> &lhs_value,
                                    const std::span<const char> &rhs_value)
     {
+        // Resolve the Oid of the field type
         Oid oid = _get_type_oid(db_id, xid, type_oid);
 
+        // Get the pgForm for the type
         Form_pg_type typeForm = _resolve_type_information(oid);
 
+        // Get the Oid of the operator
         char *op_str_c = const_cast<char*>(op_str.data());
         Oid opOid = OpernameGetOprid(list_make1(makeString(op_str_c)), typeForm->oid, typeForm->oid);
 
@@ -1570,9 +1573,11 @@ namespace springtail::pg_fdw {
         std::string op_name = oprForm->oprname.data;
         ReleaseSysCache(tuple);
 
+        // Get the function info
         FmgrInfo flinfo;
         fmgr_info(funcOid, &flinfo);
 
+        // Convert the values to Datum
         Datum leftDatum = _binary_to_datum(lhs_value, oid, typeForm->typmodin);
         std::string stringLeftDatum = datum_to_string(leftDatum, oid);
 
@@ -1580,7 +1585,7 @@ namespace springtail::pg_fdw {
         std::string stringRightDatum = datum_to_string(rightDatum, oid);
 
         Datum result = FunctionCall2(&flinfo, leftDatum, rightDatum);
-        LOG_INFO("[DEBUG] Operator = Result: {} {} {} = {}", stringLeftDatum, op_name, stringRightDatum, DatumGetBool(result));
+        LOG_DEBUG(LOG_FDW, "Operator = Result: {} {} {} = {}", stringLeftDatum, op_name, stringRightDatum, DatumGetBool(result));
         return DatumGetBool(result);
     }
 
