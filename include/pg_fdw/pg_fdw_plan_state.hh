@@ -106,6 +106,8 @@ namespace springtail::pg_fdw {
      *      (1) - scan direction 1-DESC, 0-ASC.
      * )
      *
+     * note: Even so SpringtailPlanState is wrapper around a pointer to List*, it doesn't manage
+     * the lifespan of the memory pointed by List*. It is managed by the PG executor.
      */
     class SpringtailPlanState {
     public:

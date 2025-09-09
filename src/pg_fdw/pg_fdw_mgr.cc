@@ -686,6 +686,13 @@ namespace springtail::pg_fdw {
         LOG_DEBUG(LOG_FDW, "fdw_create_state: db_id: {}, tid: {}, xid: {}, pg_xid: {}, schema_xid: {}",
                             db_id, tid, xid, pg_xid, schema_xid);
 
+        // This c'tor uses PG memory API's to allocate List
+        // and adds db_id, tid and xid to it. SpringtailPlanState
+        // never deletes the PG List object. It's safe because 
+        // the lifespan of the allocated List is managed 
+        // by the PG executor. fdw_private() return the List pointer
+        // that we can pass around FDW callbacks as a collection of
+        // our private data.
         SpringtailPlanState ps{db_id, tid, xid};
         return ps.fdw_private();
     }
@@ -1356,8 +1363,8 @@ namespace springtail::pg_fdw {
     void PgFdwMgr::fdw_get_rel_size(SpringtailPlanState *planstate, const List *qual_list, const List* join_quals, double *rows, int *width)
     {
         // TODO: we create a temporary scan state here because for historical reasons
-        // it has some API's need by this function. The state will be deleted
-        // when the function exist.
+        // it has some API's needed by this function. The state will be deleted
+        // when the function exits
         // 
         auto state = _create_scan_state(planstate, qual_list, join_quals, rows);
         // estimate width based on target list using most common types
