@@ -1,26 +1,53 @@
 #pragma once
 
 #include <pg_ext/export.hh>
-#include <pg_ext/memory.hh>
-#include <pg_ext/fmgr.hh>
-
 #include <cstddef>
 
+#ifdef strerror_r
+#undef strerror_r
+#endif
+#ifdef pg_strerror_r
+#undef pg_strerror_r
+#endif
+
+typedef struct StringInfoData
+{
+	char	   *data;
+	int			len;
+	int			maxlen;
+	int			cursor;
+} StringInfoData;
+
+typedef StringInfoData *StringInfo;
+typedef struct varlena bytea;
+
 //// EXPORTED INTERFACES
-extern "C" PGEXT_API char *lowerstr(const char *str);
-extern "C" PGEXT_API char *lowerstr_with_len(const char *str, int len);
-extern "C" PGEXT_API char *upperstr(const char *str);
-extern "C" PGEXT_API char *upperstr_with_len(const char *str, int len);
-extern "C" PGEXT_API int pg_snprintf(char *str, size_t count, const char *fmt, ...);
-extern "C" PGEXT_API int pg_database_encoding_max_length(void);
-extern "C" PGEXT_API int pg_mblen(const char *mbstr);
-extern "C" PGEXT_API int pg_mbstrlen_with_len(const char *mbstr, int len);
-extern "C" PGEXT_API int pg_mb2wchar_with_len(const char *mbstr, wchar_t *wstr, int len);
-extern "C" PGEXT_API int pg_wchar2mb_with_len(const wchar_t *wstr, char *mbstr, int len);
-extern "C" PGEXT_API int t_isalnum(const char *ptr);
-extern "C" PGEXT_API int t_isspace(const char *p);
-extern "C" PGEXT_API int t_isdigit(const char *p);
-extern "C" PGEXT_API int t_isalpha(const char *p);
-extern "C" PGEXT_API char *str_tolower(const char *buff, size_t nbytes, Oid collid);
-extern "C" PGEXT_API char *str_toupper(const char *buff, size_t nbytes, Oid collid);
+extern "C" PGEXT_API void initStringInfo(StringInfo str);
+extern "C" PGEXT_API void appendBinaryStringInfoNT(StringInfo str, const void *data, int datalen);
+extern "C" PGEXT_API void appendStringInfoChar(StringInfo str, char ch);
+extern "C" PGEXT_API char *pg_strerror_r(int errnum, char *buf, size_t buflen);
+extern "C" PGEXT_API void enlargeStringInfo(StringInfo str, int needed);
+extern "C" PGEXT_API int pq_getmsgint(StringInfo str, int size);
+extern "C" PGEXT_API void pq_begintypsend(StringInfo str);
+extern "C" PGEXT_API double pq_getmsgfloat8(StringInfo msg);
+extern "C" PGEXT_API void pq_sendfloat8(StringInfo str, double value);
+extern "C" PGEXT_API bytea *pq_endtypsend(StringInfo buf);
+extern "C" PGEXT_API void appendStringInfoString(StringInfo str, const char *s);
+
+// extern "C" PGEXT_API char *lowerstr(const char *str);
+// extern "C" PGEXT_API char *lowerstr_with_len(const char *str, int len);
+// extern "C" PGEXT_API char *upperstr(const char *str);
+// extern "C" PGEXT_API char *upperstr_with_len(const char *str, int len);
+// extern "C" PGEXT_API int pg_snprintf(char *str, size_t count, const char *fmt, ...);
+// extern "C" PGEXT_API int pg_database_encoding_max_length(void);
+// extern "C" PGEXT_API int pg_mblen(const char *mbstr);
+// extern "C" PGEXT_API int pg_mbstrlen_with_len(const char *mbstr, int len);
+// extern "C" PGEXT_API int pg_mb2wchar_with_len(const char *mbstr, wchar_t *wstr, int len);
+// extern "C" PGEXT_API int pg_wchar2mb_with_len(const wchar_t *wstr, char *mbstr, int len);
+// extern "C" PGEXT_API int t_isalnum(const char *ptr);
+// extern "C" PGEXT_API int t_isspace(const char *p);
+// extern "C" PGEXT_API int t_isdigit(const char *p);
+// extern "C" PGEXT_API int t_isalpha(const char *p);
+// extern "C" PGEXT_API char *str_tolower(const char *buff, size_t nbytes, Oid collid);
+// extern "C" PGEXT_API char *str_toupper(const char *buff, size_t nbytes, Oid collid);
 extern "C" PGEXT_API char *pstrdup(const char *in);

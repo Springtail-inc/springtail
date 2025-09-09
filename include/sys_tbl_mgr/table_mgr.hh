@@ -38,6 +38,12 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base,
         TablePtr get_table(uint64_t db_id, uint64_t table_id, uint64_t xid);
 
         /**
+         * Read the table metadata for the requested table ID.  Note that Table objects's are always
+         * constructed at lsn == MAX_LSN within the provided xid.
+         */
+        TablePtr get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, ComparatorFunc comparator_func);
+
+        /**
          * Returns a boolean indicating if the table exists at a given xid/lsn.
          */
         bool exists(uint64_t db_id, uint64_t table_id, uint64_t xid, uint64_t lsn=constant::MAX_LSN);
@@ -56,7 +62,7 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base,
          *                     available until a later stable XID.
          * @param schema The ExtentSchema of the table.
          */
-        MutableTablePtr get_snapshot_table(uint64_t db_id, uint64_t table_id, uint64_t snapshot_xid, ExtentSchemaPtr schema, const std::vector<Index>& secondary_keys);
+        MutableTablePtr get_snapshot_table(uint64_t db_id, uint64_t table_id, uint64_t snapshot_xid, ExtentSchemaPtr schema, const std::vector<Index>& secondary_keys, ComparatorFunc comparator_func = nullptr);
 
         // Functions for managing system metadata
 

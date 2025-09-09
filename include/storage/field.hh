@@ -104,7 +104,10 @@ namespace springtail {
             throw TypeError("Getting extension type unsupported for this field.");
         }
 
-        virtual bool compare_extension(const char *op_str, const std::span<const char> &lhval, const std::span<const char> &rhval) const {
+        virtual bool compare_extension(std::string_view op_str,
+                                       const std::span<const char> &lhval,
+                                       const std::span<const char> &rhval) const
+        {
             throw TypeError("Comparing extension type unsupported for this field.");
         }
 
@@ -510,21 +513,21 @@ namespace springtail {
               _bool_bitmask(static_cast<char>(1) << bool_bit)
         { }
 
-        ExtentField(SchemaType type, uint32_t offset, std::function<bool(const char *op_str, const std::span<const char> &lhs, const std::span<const char> &rhs)> comparison_func)
+        ExtentField(SchemaType type, uint32_t offset, FieldComparisonFunc comparator_func)
             : _type(type),
               _can_null(false),
               _can_undefined(false),
               _offset(offset),
-              _comparison_func(comparison_func)
+              _comparator_func(comparator_func)
         { }
 
-        ExtentField(SchemaType type, uint32_t offset, uint8_t bool_bit, std::function<bool(const char *op_str, const std::span<const char> &lhs, const std::span<const char> &rhs)> comparison_func)
+        ExtentField(SchemaType type, uint32_t offset, uint8_t bool_bit, FieldComparisonFunc comparator_func)
             : _type(type),
               _can_null(false),
               _can_undefined(false),
               _offset(offset),
               _bool_bitmask(static_cast<char>(1) << bool_bit),
-              _comparison_func(comparison_func)
+              _comparator_func(comparator_func)
         { }
 
         void
@@ -811,13 +814,17 @@ namespace springtail {
             std::memcpy(e_row->data() + _offset, &offset, sizeof(uint32_t));
         }
 
-        bool compare_extension(const char *op_str, const std::span<const char> &lhval, const std::span<const char> &rhval) const override {
-            if (!_comparison_func) {
-                LOG_DEBUG(LOG_STORAGE, "Comparison function not set for extension type");
+        bool
+        compare_extension(std::string_view op_str,
+                          const std::span<const char> &lhval,
+                          const std::span<const char> &rhval) const override
+        {
+            if (!_comparator_func){
+                LOG_DEBUG(LOG_STORAGE,"ExtentField -- Comparator function not set for: {}", op_str);
                 return false;
             }
-            LOG_DEBUG(LOG_STORAGE, "Comparison for extension: {}", op_str);
-            return _comparison_func(op_str, lhval, rhval);
+
+            return _comparator_func(op_str, lhval, rhval);
         }
 
     private:
@@ -860,7 +867,7 @@ namespace springtail {
         uint32_t _undefined_offset;
         uint8_t _undefined_bitmask;
 
-        ComparatorFunc _comparison_func;
+        FieldComparisonFunc _comparator_func;
     };
     using ExtentFieldPtr = std::shared_ptr<ExtentField>;
 
@@ -882,6 +889,7 @@ namespace springtail {
     private:
         T _value;
         bool is_extn;
+        FieldComparisonFunc _comparator_func;
 
     public:
         explicit ConstTypeField(const T &value)
@@ -892,12 +900,20 @@ namespace springtail {
             : _value(value), is_extn(is_extn)
         { }
 
+        explicit ConstTypeField(const T &value, bool is_extn, FieldComparisonFunc comparator_func)
+            : _value(value), is_extn(is_extn), _comparator_func(comparator_func)
+        { }
+
         explicit ConstTypeField(T &&value)
             : _value(std::move(value))
         { }
 
         explicit ConstTypeField(T &&value, bool is_extn)
             : _value(std::move(value)), is_extn(is_extn)
+        { }
+
+        explicit ConstTypeField(T &&value, bool is_extn, FieldComparisonFunc comparator_func)
+            : _value(std::move(value)), is_extn(is_extn), _comparator_func(comparator_func)
         { }
 
         SchemaType get_type() const override {
@@ -1044,6 +1060,18 @@ namespace springtail {
             } else {
                 throw TypeError();
             }
+        }
+
+        bool compare_extension(std::string_view op_str,
+                               const std::span<const char> &lhval,
+                               const std::span<const char> &rhval) const override
+        {
+            if (!_comparator_func){
+                LOG_DEBUG(LOG_STORAGE,"ConstTypeField -- Comparator function not set for: {}", op_str);
+                return false;
+            }
+
+            return _comparator_func(op_str, lhval, rhval);
         }
     };
 

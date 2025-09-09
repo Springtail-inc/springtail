@@ -7,9 +7,13 @@
 #include <span>
 
 namespace springtail {
-    using ComparatorFunc = std::function<bool(const char *op_str,
-                                              const std::span<const char> &lhs,
-                                              const std::span<const char> &rhs)>;
+    using FieldComparisonFunc = std::function<bool(std::string_view op_str,
+                                                   const std::span<const char> &lhval,
+                                                   const std::span<const char> &rhval)>;
+    using ComparatorFunc = std::function<bool(uint64_t type_oid,
+                                              std::string_view op_str,
+                                              const std::span<const char> &lhval,
+                                              const std::span<const char> &rhval)>;
 }
 
 namespace springtail::constant {

@@ -71,7 +71,7 @@ namespace springtail::pg_log_mgr {
         std::vector<std::string> path_parts;
         common::split_string("/", path, path_parts);
         CHECK_EQ(path_parts.size(), 2);
-        
+
         uint64_t db_id = stoull(path_parts[1]);
         CHECK_EQ(db_id, _db_id);
 
@@ -302,6 +302,7 @@ namespace springtail::pg_log_mgr {
             auto xid = _pg_log_reader->get_next_xid();
             auto token_init = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"db_id", std::to_string(_db_id)}, {"xid", std::to_string(xid)}});
 
+            PgCopyTable::init_pg_extn_registry(_db_id, xid);
             PgCopyTable::create_namespaces(_db_id, xid);
             PgCopyTable::create_usertypes(_db_id, xid);
             PgCopyTable::create_extn_types(_db_id, xid);

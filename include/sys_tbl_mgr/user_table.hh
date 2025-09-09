@@ -24,11 +24,25 @@ namespace springtail {
             Table(db_id, table_id, xid, table_base, primary_key, secondary, metadata, schema) {}
 
         /**
+         * UserTable constructor.
+         */
+         UserTable(uint64_t db_id,
+            uint64_t table_id,
+            uint64_t xid,
+            const std::filesystem::path &table_base,
+            const std::vector<std::string> &primary_key,
+            const std::vector<Index> &secondary,
+            const TableMetadata &metadata,
+            ExtentSchemaPtr schema,
+            ComparatorFunc comparator_func) :
+            Table(db_id, table_id, xid, table_base, primary_key, secondary, metadata, schema, comparator_func) {}
+
+        /**
          * Retrieves the schema for the table at a given XID.
          */
         virtual ExtentSchemaPtr extent_schema() const override
         {
-            return SchemaMgr::get_instance()->get_extent_schema(_db_id, _id, XidLsn(_xid));
+            return SchemaMgr::get_instance()->get_extent_schema(_db_id, _id, XidLsn(_xid), _comparator_func);
         }
 
         /**
@@ -36,7 +50,7 @@ namespace springtail {
          */
         virtual SchemaPtr schema(uint64_t extent_xid) const override
         {
-            return SchemaMgr::get_instance()->get_schema(_db_id, _id, XidLsn(extent_xid), XidLsn(_xid));
+            return SchemaMgr::get_instance()->get_schema(_db_id, _id, XidLsn(extent_xid), XidLsn(_xid), _comparator_func);
         }
 
     };
@@ -57,9 +71,10 @@ namespace springtail {
                          const std::vector<Index> &secondary,
                          const TableMetadata &metadata,
                          ExtentSchemaPtr schema,
-                         bool for_gc = false) :
+                         bool for_gc = false,
+                         ComparatorFunc comparator_func = nullptr) :
             MutableTable(db_id, table_id, access_xid, target_xid, table_base, primary_key,
-                         secondary, metadata, schema, for_gc) {}
+                         secondary, metadata, schema, for_gc, comparator_func) {}
 
         /**
          * Truncates the table, removing the callback of any mutated pages in the cache, clearing

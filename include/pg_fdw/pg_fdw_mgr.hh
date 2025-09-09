@@ -27,6 +27,7 @@
 extern "C" {
     #include <postgres.h>
     #include <nodes/pg_list.h>
+    #include <catalog/pg_type.h>
     #include <c.h>
     #include <utils/builtins.h>
     #include <libpq-fe.h>
@@ -332,12 +333,27 @@ namespace springtail::pg_fdw {
                                     Oid pg_oid,
                                     Datum value);
 
-        /** Helper to convert a postgres extension data type to springtail extension data id (index/sortorder) */
-        bool _get_operator_details_for_extension(const PgFdwState *state,
-                                                 Oid pg_oid,
-                                                 char *op_str,
-                                                 const std::span<const char> &lhs_value,
-                                                 const std::span<const char> &rhs_value);
+        /** Helper to get type oid */
+        Oid _get_type_oid(uint64_t db_id,
+                          uint64_t xid,
+                          uint64_t type_oid);
+
+        /** Helper to resolve type information */
+        Form_pg_type _resolve_type_information(Oid oid);
+
+        /** Helper to convert a postgres extension data type to string */
+        std::string _print_function(uint64_t db_id,
+                                    uint64_t xid,
+                                    uint64_t type_oid,
+                                    const std::span<const char> &val);
+
+        /** Helper to perform the comparator function based on the extension type oid */
+        bool _comparator_function(uint64_t db_id,
+                                  uint64_t xid,
+                                  uint64_t type_oid,
+                                  std::string_view op_str,
+                                  const std::span<const char> &lhs_value,
+                                  const std::span<const char> &rhs_value);
 
         /** Helper to convert field to PG Datum */
         Datum _get_datum_from_field(const PgFdwState *state,

@@ -659,13 +659,63 @@ namespace springtail
             }
         }
 
-        // XXX - EXTN - Plugin pg_ext
-        auto comparator_func = [this](const char *op_str, const std::span<const char> &lhs_value, const std::span<const char> &rhs_value) -> bool {
-            return true;
+        auto datum_to_string = [](Datum value, Oid pg_oid)
+        {
+            auto extn_registry = PgExtnRegistry::get_instance();
+            auto type = extn_registry->get_type_by_oid(pg_oid);
+            auto typoutput = extn_registry->get_type_func_by_type_name(type.typoutput);
+
+            DCHECK(typoutput);
+
+            // call the output function
+            Datum result = DirectFunctionCall1(typoutput, value);
+            const char* str = DatumGetCString(result);
+
+            LOG_INFO("[DEBUG] Raw output: {}", str ? str : "(null)");
+            return std::string(str ? str : "");
         };
+
+        auto binary_to_datum = [](const std::span<const char> &value,
+                                Oid pg_oid,
+                                int32_t atttypmod)
+        {
+            auto extn_registry = PgExtnRegistry::get_instance();
+            auto type = extn_registry->get_type_by_oid(pg_oid);
+            auto typreceive = extn_registry->get_type_func_by_type_name(type.typreceive);
+
+            DCHECK(typreceive);
+
+            StringInfoData string;
+            initStringInfo(&string);
+
+            appendBinaryStringInfoNT(&string, value.data(), value.size());
+            Datum datum = PointerGetDatum(&string);
+
+            // call the receive function
+            Datum result = DirectFunctionCall3(typreceive, datum, ObjectIdGetDatum(0), Int32GetDatum(atttypmod));
+            return result;
+        };
+
+        // XXX - EXTN - Plugin pg_ext
+        auto comparator_func = [binary_to_datum, datum_to_string](uint64_t type_oid,
+                                                std::string_view op_str,
+                                                const std::span<const char> &lhval,
+                                                const std::span<const char> &rhval) -> bool {
+            auto extn_registry = PgExtnRegistry::get_instance();
+
+            auto type = extn_registry->get_type_by_oid(type_oid);
+
+            Datum leftDatum = binary_to_datum(lhval, type_oid, -1);
+            Datum rightDatum = binary_to_datum(rhval, type_oid, -1);
+            auto comparator_func = extn_registry->get_operator_func_by_oper_name(op_str.data());
+
+            Datum result = DirectFunctionCall3(comparator_func, leftDatum, rightDatum, ObjectIdGetDatum(0));
+            return DatumGetBool(result);
+        };
+
         auto schema = std::make_shared<ExtentSchema>(_schema.columns, comparator_func);
         auto table = TableMgr::get_instance()->get_snapshot_table(db_id, _schema.table_oid, xid.xid,
-                                                                  schema, _schema.secondary_keys);
+                                                                  schema, _schema.secondary_keys, comparator_func);
 
         // mark the copy as inflight and record the snapshot details
         pg_log_mgr::SyncTracker::get_instance()->mark_inflight(db_id, _schema.table_oid, xid,
@@ -1267,26 +1317,82 @@ namespace springtail
             std::string extension_name = copy_table._connection.get_string(i, 1);
             uint32_t namespace_oid = copy_table._connection.get_int32(i, 2);
             std::string namespace_name = copy_table._connection.get_string(i, 3);
-            std::string enum_type_name = copy_table._connection.get_string(i, 4);
+            std::string extn_type_name = copy_table._connection.get_string(i, 4);
 
             proto::UserTypeRequest udt_req;
             udt_req.set_db_id(db_id);
             udt_req.set_xid(xid);
             udt_req.set_lsn(0);
-            udt_req.set_name(enum_type_name);
+            udt_req.set_name(extn_type_name);
             udt_req.set_type_id(enum_type_oid);
             udt_req.set_namespace_id(namespace_oid);
             udt_req.set_namespace_name(namespace_name);
             udt_req.set_value_json("{}"); // set an empty JSON
             udt_req.set_type(constant::USER_TYPE_EXTENSION); // only support enum types
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Creating extension type: {}", enum_type_name);
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Creating extension type: {}", extn_type_name);
 
             client->create_usertype(udt_req);
         }
 
         // disconnect from the database
         copy_table.disconnect();
+    }
+
+    void
+    PgCopyTable::_load_extn_types(uint64_t db_id)
+    {
+        auto extn_registry = PgExtnRegistry::get_instance();
+        PgCopyTable copy_table;
+
+        // connect to the database
+        copy_table.connect(db_id);
+
+        copy_table._connection.exec(fmt::format(PgExtnRegistry::TYPE_QUERY, "cube"));
+
+        for (int i = 0; i < copy_table._connection.ntuples(); i++) {
+            uint32_t type_oid = copy_table._connection.get_int32(i, 0);
+            std::string type_input = copy_table._connection.get_string(i, 1);
+            std::string type_output = copy_table._connection.get_string(i, 2);
+            std::string type_receive = copy_table._connection.get_string(i, 3);
+            std::string type_send = copy_table._connection.get_string(i, 4);
+
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Adding type: {}, input: {}, output: {}, receive: {}, send: {}", type_oid, type_input, type_output, type_receive, type_send);
+            extn_registry->add_type(type_oid, type_input, type_output, type_receive, type_send);
+        }
+
+        copy_table.disconnect();
+    }
+
+    void
+    PgCopyTable::_load_extn_operators(uint64_t db_id)
+    {
+        auto extn_registry = PgExtnRegistry::get_instance();
+        PgCopyTable copy_table;
+
+        // connect to the database
+        copy_table.connect(db_id);
+
+        copy_table._connection.exec(fmt::format(PgExtnRegistry::OPER_QUERY, "cube"));
+
+        for (int i = 0; i < copy_table._connection.ntuples(); i++) {
+            uint32_t oper_oid = copy_table._connection.get_int32(i, 0);
+            std::string oper_name = copy_table._connection.get_string(i, 1);
+            std::string oper_proc = copy_table._connection.get_string(i, 2);
+            std::string proc_name = copy_table._connection.get_string(i, 3);
+
+            LOG_DEBUG(LOG_PG_LOG_MGR, "Adding operator: {}, name: {}, proc: {}", oper_oid, oper_name, proc_name);
+            extn_registry->add_operator(oper_oid, oper_name, proc_name);
+        }
+
+        copy_table.disconnect();
+    }
+
+    void
+    PgCopyTable::init_pg_extn_registry(uint64_t db_id, uint64_t xid)
+    {
+        _load_extn_types(db_id);
+        _load_extn_operators(db_id);
     }
 
     void

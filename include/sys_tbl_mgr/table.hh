@@ -436,6 +436,16 @@ namespace indexer_helpers {
               const TableMetadata &metadata,
               ExtentSchemaPtr schema);
 
+        Table(uint64_t db_id,
+            uint64_t table_id,
+            uint64_t xid,
+            const std::filesystem::path &table_base,
+            const std::vector<std::string> &primary_key,
+            const std::vector<Index> &secondary,
+            const TableMetadata &metadata,
+            ExtentSchemaPtr schema,
+            ComparatorFunc comparator_func);
+
         /** Returns true if the table has a primary key.  False otherwise. */
         bool has_primary();
 
@@ -594,7 +604,7 @@ namespace indexer_helpers {
          * Creates read-only index of the table.
          */
         BTreePtr
-        _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset);
+        _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset, ComparatorFunc comparator_func);
 
     protected:
         uint64_t _db_id; ///< The ID of the database containing this table.
@@ -624,6 +634,7 @@ namespace indexer_helpers {
         FieldPtr _roots_index_id_f; ///< The field accessor to read the root index ID from each row in the "roots" file.
 
         TableStats _stats; ///< The statistics for this table.
+        ComparatorFunc _comparator_func; ///< The comparator function for this table.
     };
     typedef std::shared_ptr<Table> TablePtr;
 
@@ -645,6 +656,18 @@ namespace indexer_helpers {
                      const TableMetadata &metadata,
                      ExtentSchemaPtr schema,
                      bool for_gc = false);
+
+        MutableTable(uint64_t db_id,
+            uint64_t table_id,
+            uint64_t access_xid,
+            uint64_t target_xid,
+            const std::filesystem::path &table_base,
+            const std::vector<std::string> &primary_key,
+            const std::vector<Index> &secondary,
+            const TableMetadata &metadata,
+            ExtentSchemaPtr schema,
+            bool for_gc = false,
+            ComparatorFunc comparator_func = nullptr);
 
         ~MutableTable() {
             // if we have a dirty, empty page, then evict it
@@ -919,6 +942,7 @@ namespace indexer_helpers {
         TableStats _stats; ///< The stats for the table.
 
         bool _for_gc; ///< If this table is being used for the ingest pipeline.
+        ComparatorFunc _comparator_func; ///< The comparator function for this table.
                       ///
     };
     typedef std::shared_ptr<MutableTable> MutableTablePtr;

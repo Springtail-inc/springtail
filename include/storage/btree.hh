@@ -230,6 +230,13 @@ namespace springtail {
               uint64_t root_offset,
               uint64_t max_extent_size);
 
+        BTree(const std::filesystem::path &file,
+              uint64_t xid,
+              ExtentSchemaPtr schema,
+              uint64_t root_offset,
+              uint64_t max_extent_size,
+              ComparatorFunc comparator_func);
+
         BTree() = delete;
 
         /**

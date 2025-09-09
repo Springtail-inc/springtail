@@ -206,21 +206,21 @@ namespace springtail {
          * Construct the set of column fields based on the column definitions.
          * @param columns A map from column position to column definition.
          */
-        void _populate(const std::map<uint32_t, SchemaColumn>& columns, ComparatorFunc comparison_func);
+        void _populate(const std::map<uint32_t, SchemaColumn>& columns, ComparatorFunc comparator_func);
 
     public:
         /**
          * Constructor.
          * @param columns Map from column position to the SchemaColumn definition.
          */
-        explicit ExtentSchema(const std::vector<SchemaColumn> &columns, ComparatorFunc comparison_func) {
+        explicit ExtentSchema(const std::vector<SchemaColumn> &columns, ComparatorFunc comparator_func) {
             std::map<uint32_t, SchemaColumn> column_map;
             for (auto &&column : columns) {
                 column_map.insert({column.position, column});
             }
 
             // populate the field map using the column definitions
-            _populate(column_map, comparison_func);
+            _populate(column_map, comparator_func);
         }
 
         explicit ExtentSchema(const std::vector<SchemaColumn> &columns) {
@@ -231,15 +231,6 @@ namespace springtail {
 
             // populate the field map using the column definitions
             _populate(column_map, nullptr);
-        }
-
-        /**
-         * Constructor.
-         * @param columns Map from column position to the SchemaColumn definition.
-         */
-        explicit ExtentSchema(const std::map<uint32_t, SchemaColumn> columns, ComparatorFunc comparison_func)
-        {
-            _populate(columns, comparison_func);
         }
 
         /** Returns the fixed width for a single row. */
@@ -291,6 +282,16 @@ namespace springtail {
         create_schema(const std::vector<std::string> &old_columns,
                       const std::vector<SchemaColumn> &new_columns,
                       const std::vector<std::string> &sort_columns) const;
+
+        /**
+         * Generate a new ExtentSchema, based on a list of columns from this schema, as well as
+         * additional provided columns.  Used in the creation of schemas for BTree indexes.
+         */
+         std::shared_ptr<ExtentSchema>
+         create_schema(const std::vector<std::string> &old_columns,
+                       const std::vector<SchemaColumn> &new_columns,
+                       const std::vector<std::string> &sort_columns,
+                       ComparatorFunc comparator_func) const;
 
         /**
          * Retrieve the list of column pg types.
@@ -407,7 +408,7 @@ namespace springtail {
          * @param columns The column definitions for the underlying extent data.
          * @param updates The updates to apply to the extent schema to generate the virtual schema.
          */
-        VirtualSchema(const SchemaMetadata &meta);
+        VirtualSchema(const SchemaMetadata &meta, ComparatorFunc comparator_func);
 
         /**
          * Checks if the column exists within the virtual schema.

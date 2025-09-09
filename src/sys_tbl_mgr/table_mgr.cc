@@ -77,7 +77,7 @@ namespace springtail {
 
         return std::make_shared<UserTable>(db_id, table_id, xid, _table_base,
                                         schema->get_sort_keys(), secondary_indexes,
-                                        *tbl_meta, schema);
+                                        *tbl_meta, schema, comparator_func);
     }
 
     std::filesystem::path
@@ -142,7 +142,8 @@ namespace springtail {
                                  uint64_t table_id,
                                  uint64_t snapshot_xid,
                                  ExtentSchemaPtr schema,
-                                 const std::vector<Index>& secondary_keys)
+                                 const std::vector<Index>& secondary_keys,
+                                 ComparatorFunc comparator_func)
     {
         TableMetadata tbl_meta;
         tbl_meta.snapshot_xid = snapshot_xid;
@@ -158,7 +159,7 @@ namespace springtail {
         // construct an empty mutable table with the provided snapshot XID and return it
         return std::make_shared<UserMutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
                                                   _table_base, schema->get_sort_keys(), secondary_keys,
-                                                  tbl_meta, schema, false);
+                                                  tbl_meta, schema, false, comparator_func);
     }
 
     void

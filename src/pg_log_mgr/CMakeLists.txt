@@ -1,6 +1,7 @@
 find_package(Boost COMPONENTS program_options REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(nlohmann_json REQUIRED)
+find_package(PostgreSQL REQUIRED)
 
 # source files
 set(PG_LOG_SOURCES
@@ -17,6 +18,7 @@ set(PG_LOG_SOURCES
 add_library(springtail_pglog ${PG_LOG_SOURCES})
 target_include_directories(springtail_pglog
     PRIVATE ${CMAKE_SOURCE_DIR}/include
+    ${PostgreSQL_INCLUDE_DIRS}
 )
 target_link_libraries(springtail_pglog
     PUBLIC springtail_pg
@@ -26,45 +28,52 @@ target_link_libraries(springtail_pglog
            springtail_storage
            springtail_sys_tbl_mgr_client
     PRIVATE nlohmann_json::nlohmann_json
-    PRIVATE fmt::fmt)
+    PRIVATE fmt::fmt
+    PRIVATE ${PostgreSQL_LIBRARIES}
+)
 
 add_executable(pg_log_mgr_daemon pg_log_mgr_daemon.cc)
 
 target_include_directories(pg_log_mgr_daemon
     PRIVATE ${CMAKE_SOURCE_DIR}/include
+    ${PostgreSQL_INCLUDE_DIRS}
 )
 target_link_libraries(pg_log_mgr_daemon
     PUBLIC springtail_pglog
     PRIVATE Boost::program_options
+    PUBLIC pgext
+    PRIVATE ${PostgreSQL_LIBRARIES}
 )
 add_dsymutil_command(pg_log_mgr_daemon)
 
 ## unit tests
 springtail_unit_test(test_xact_log
   SOURCES test/test_xact_log.cc
-  INCLUDES ${CMAKE_SOURCE_DIR}/include
-  LIBS springtail_pglog GTest::gtest_main
+  INCLUDES ${CMAKE_SOURCE_DIR}/include ${PostgreSQL_INCLUDE_DIRS}
+  LIBS springtail_pglog GTest::gtest_main ${PostgreSQL_LIBRARIES}
 )
 
 springtail_unit_test(test_pg_log_redis
   SOURCES test/test_redis.cc
-  INCLUDES ${CMAKE_SOURCE_DIR}/include
-  LIBS springtail_pglog GTest::gtest_main
+  INCLUDES ${CMAKE_SOURCE_DIR}/include ${PostgreSQL_INCLUDE_DIRS}
+  LIBS springtail_pglog GTest::gtest_main ${PostgreSQL_LIBRARIES}
 )
 
 springtail_unit_test(test_pg_log_indexer
   SOURCES test/test_indexer.cc
-  INCLUDES ${CMAKE_SOURCE_DIR}/include
-  LIBS springtail_pglog springtail_test GTest::gtest_main
+  INCLUDES ${CMAKE_SOURCE_DIR}/include ${PostgreSQL_INCLUDE_DIRS}
+  LIBS springtail_pglog springtail_test GTest::gtest_main ${PostgreSQL_LIBRARIES}
 )
 
 # dump_repl_log
 add_executable(dump_repl_log test/dump_repl_log.cc)
 target_include_directories(dump_repl_log
     PUBLIC ${PROJECT_SOURCE_DIR}/include
+    ${PostgreSQL_INCLUDE_DIRS}
 )
 target_link_libraries(dump_repl_log
     PUBLIC springtail_pg
+    ${PostgreSQL_LIBRARIES}
     PRIVATE Boost::program_options
 )
 add_dsymutil_command(dump_repl_log)

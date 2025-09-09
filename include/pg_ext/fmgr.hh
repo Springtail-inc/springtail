@@ -1,7 +1,50 @@
 #pragma once
 
+// XXX Temp fix
+#pragma push_macro("strerror")
+#undef strerror
+
+#define HAVE_STRERROR_R 1
+// Isolate PostgreSQL includes
+extern "C" {
+	#include <postgres.h>
+}
+
+#ifdef strerror_r
+#undef strerror_r
+#endif
+#ifdef pg_strerror_r
+#undef pg_strerror_r
+#endif
+
+#ifdef gettext
+#undef gettext
+#endif
+#ifdef dgettext
+#undef dgettext
+#endif
+#ifdef ngettext
+#undef ngettext
+#endif
+#ifdef dngettext
+#undef dngettext
+#endif
+
+#include <libintl.h>
+
+#ifdef snprintf
+#undef snprintf
+#endif
+#ifdef vsnprintf
+#undef vsnprintf
+#endif
+
+#include <cstdio>
+
+// Restore strerror
+#pragma pop_macro("strerror")
+
 #include <pg_ext/export.hh>
-#include <pg_ext/memory.hh>
 
 #include <cstdint>
 #include <unordered_map>
@@ -17,6 +60,9 @@ typedef union
 		char		va_data[FLEXIBLE_ARRAY_MEMBER];
 	}			va_4byte;
 } varattrib_4b;
+
+#define OidFunctionCall3(functionId, arg1, arg2, arg3) \
+	OidFunctionCall3Coll(functionId, InvalidOid, arg1, arg2, arg3)
 
 typedef struct
 {
@@ -40,7 +86,7 @@ typedef struct
 #define VARSIZE_ANY(PTR) \
 	VARATT_IS_1B(PTR) ? VARSIZE_1B(PTR) : \
 	  VARSIZE_4B(PTR)
-#define VARHDRSZ ((uint32_t) sizeof(uint32_t))
+// #define VARHDRSZ ((uint32_t) sizeof(uint32_t))
 #define VARHDRSZ_SHORT (offsetof(varattrib_1b, va_data))
 
 #define VARSIZE_ANY_EXHDR(PTR) \
@@ -65,55 +111,6 @@ struct TypeInfo {
     bool is_varlena;
 };
 
-typedef char *Pointer;
-static inline Pointer
-DatumGetPointer(Datum X)
-{
-	return (Pointer) X;
-}
-
-static inline char *
-DatumGetCString(Datum X)
-{
-	return (char *) DatumGetPointer(X);
-}
-
-static inline bool
-DatumGetBool(Datum X)
-{
-	return (X != 0);
-}
-
-static inline float
-DatumGetFloat8(Datum X)
-{
-	return *((float *) DatumGetPointer(X));
-}
-
-static inline Datum
-PointerGetDatum(const void *X)
-{
-	return (Datum) X;
-}
-
-static inline uint32_t
-DatumGetInt32(Datum X)
-{
-	return (uint32_t) X;
-}
-
-static inline float
-DatumGetFloat4(Datum X)
-{
-	union
-	{
-		uint32_t	value;
-		float		retval;
-	} myunion;
-
-	myunion.value = DatumGetInt32(X);
-	return myunion.retval;
-}
 
 static std::unordered_map<Oid, TypeInfo> _type_output_registry = {
     { 16, { 1242, false } }, // BOOLOID → boolout
@@ -155,15 +152,6 @@ static std::unordered_map<Oid, TypeInfo> _type_output_registry = {
 };
 // XXX Add support for User defined types
 
-typedef struct NullableDatum
-{
-#define FIELDNO_NULLABLE_DATUM_DATUM 0
-	Datum		value;
-#define FIELDNO_NULLABLE_DATUM_ISNULL 1
-	bool		isnull;
-	/* due to alignment padding this could be used for flags for free */
-} NullableDatum;
-
 typedef struct Node *fmNodePtr;
 typedef struct FmgrInfo
 {
@@ -174,7 +162,7 @@ typedef struct FmgrInfo
 	bool		fn_retset;		/* function returns a set */
 	unsigned char fn_stats;		/* collect stats if track_functions > this */
 	void	   *fn_extra;		/* extra space for use by handler */
-	pgext::MemoryContext fn_mcxt;		/* memory context to store fn_extra in */
+	MemoryContext fn_mcxt;		/* memory context to store fn_extra in */
 	fmNodePtr	fn_expr;		/* expression parse tree for call, or NULL */
 } FmgrInfo;
 
@@ -231,8 +219,12 @@ struct FunctionCallInfoData
 #define FunctionCallInvoke(fcinfo)	((* (fcinfo)->flinfo->fn_addr) (fcinfo))
 
 // Function interfaces
+extern "C" PGEXT_API Datum DirectFunctionCall1(PGFunction func, Datum arg1);
+extern "C" PGEXT_API Datum DirectFunctionCall1Coll(PGFunction func, Oid collation, Datum arg1);
 extern "C" PGEXT_API Datum DirectFunctionCall2(PGFunction func, Datum arg1, Datum arg2);
 extern "C" PGEXT_API Datum DirectFunctionCall2Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2);
+extern "C" PGEXT_API Datum DirectFunctionCall3(PGFunction func, Datum arg1, Datum arg2, Datum arg3);
+extern "C" PGEXT_API Datum DirectFunctionCall3Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3);
 extern "C" PGEXT_API Datum get_fn_opclass_options(FmgrInfo *fcinfo);
 extern "C" PGEXT_API bool has_fn_opclass_options(FmgrInfo *fcinfo);
 extern "C" PGEXT_API PGFunction lookup_pgfunction_by_oid(Oid oid);
@@ -240,6 +232,8 @@ extern "C" PGEXT_API const char* OidOutputFunctionCall(Oid function_oid, Datum v
 extern "C" PGEXT_API void getTypeOutputInfo(Oid type, Oid *funcOid, bool *typIsVarlena);
 extern "C" PGEXT_API struct varlena *pg_detoast_datum(struct varlena *datum);
 extern "C" PGEXT_API struct varlena *pg_detoast_datum_packed(struct varlena *datum);
+
+extern "C" PGEXT_API Datum OidFunctionCall3Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3);
 
 // Standard PostgreSQL type OIDs (from postgres.h)
 #define BOOLOID 16

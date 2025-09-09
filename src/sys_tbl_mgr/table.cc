@@ -131,7 +131,7 @@ namespace indexer_helpers {
         };
 
         std::shared_ptr<ExtentSchema>
-        _create_index_schema(ExtentSchemaPtr schema, const std::vector<uint32_t>& index_columns)
+        _create_index_schema(ExtentSchemaPtr schema, const std::vector<uint32_t>& index_columns, ComparatorFunc comparator_func)
         {
 
             // get the column names in the order they appear in the index
@@ -144,7 +144,13 @@ namespace indexer_helpers {
             key.push_back(constant::INDEX_EID_FIELD);
             key.push_back(constant::INDEX_RID_FIELD);
 
-            return schema->create_schema(col_names, { extent_c, row_c }, key);
+            return schema->create_schema(col_names, { extent_c, row_c }, key, comparator_func);
+        }
+
+        std::shared_ptr<ExtentSchema>
+        _create_index_schema(ExtentSchemaPtr schema, const std::vector<uint32_t>& index_columns)
+        {
+            return _create_index_schema(schema, index_columns, nullptr);
         }
     }
 
@@ -156,12 +162,24 @@ namespace indexer_helpers {
                  const std::vector<Index> &secondary,
                  const TableMetadata &metadata,
                  ExtentSchemaPtr schema)
+    : Table(db_id, table_id, xid, table_base, primary_key, secondary, metadata, schema, nullptr) {}
+
+    Table::Table(uint64_t db_id,
+                 uint64_t table_id,
+                 uint64_t xid,
+                 const std::filesystem::path &table_base,
+                 const std::vector<std::string> &primary_key,
+                 const std::vector<Index> &secondary,
+                 const TableMetadata &metadata,
+                 ExtentSchemaPtr schema,
+                 ComparatorFunc comparator_func)
         : _db_id(db_id),
           _id(table_id),
           _xid(xid),
           _primary_key(primary_key),
           _schema(schema),
-          _stats(metadata.stats)
+          _stats(metadata.stats),
+          _comparator_func(comparator_func)
     {
         // construct the table's data directory
         _table_dir = table_helpers::get_table_dir(table_base, db_id, table_id, metadata.snapshot_xid);
@@ -173,7 +191,7 @@ namespace indexer_helpers {
         }
 
         // store the roots schema / field
-        _roots_schema = std::make_shared<ExtentSchema>(ROOTS_SCHEMA);
+        _roots_schema = std::make_shared<ExtentSchema>(ROOTS_SCHEMA, comparator_func);
         _roots_root_f = _roots_schema->get_field("root");
         _roots_index_id_f = _roots_schema->get_field("index_id");
 
@@ -218,9 +236,9 @@ namespace indexer_helpers {
         ExtentSchemaPtr primary_schema;
         if (primary_key.empty()) {
             std::vector<std::string> non_primary_key = { constant::INDEX_EID_FIELD };
-            primary_schema = _schema->create_schema({}, { extent_c }, non_primary_key);
+            primary_schema = _schema->create_schema({}, { extent_c }, non_primary_key, comparator_func);
         } else {
-            primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
+            primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key, comparator_func);
         }
 
         auto it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_PRIMARY; });
@@ -230,7 +248,8 @@ namespace indexer_helpers {
                                                  xid,
                                                  primary_schema,
                                                  it->extent_id,
-                                                 get_max_extent_size());
+                                                 get_max_extent_size(),
+                                                 comparator_func);
 
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
         _pkey_fields = primary_schema->get_fields();
@@ -252,7 +271,7 @@ namespace indexer_helpers {
             if (!idx_cols.empty()) {
                 auto it = std::ranges::find_if(roots, [&](auto const &v) { return v.index_id == idx.id; });
                 assert(it != roots.end());
-                auto btree =  _create_index_root(idx.id, idx_cols, it->extent_id);
+                auto btree =  _create_index_root(idx.id, idx_cols, it->extent_id, comparator_func);
                 assert(_secondary_indexes.find(idx.id) == _secondary_indexes.end());
                 _secondary_indexes[idx.id] = {btree, idx_cols};
             }
@@ -536,16 +555,29 @@ namespace indexer_helpers {
     }
 
     BTreePtr
-    Table::_create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset)
+    Table::_create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset, ComparatorFunc comparator_func)
     {
-        auto index_schema = _create_index_schema(_schema, index_columns);
+        auto index_schema = _create_index_schema(_schema, index_columns, comparator_func);
         auto btree = std::make_shared<BTree>(_table_dir / fmt::format(constant::INDEX_FILE, index_id),
                 _xid, index_schema,
                 offset,
-                index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary());
+                index_id == constant::INDEX_PRIMARY? get_max_extent_size(): get_max_extent_size_secondary(),
+                comparator_func);
         return btree;
     }
 
+    MutableTable::MutableTable(uint64_t db_id,
+        uint64_t table_id,
+        uint64_t access_xid,
+        uint64_t target_xid,
+        const std::filesystem::path &table_base,
+        const std::vector<std::string> &primary_key,
+        const std::vector<Index> &secondary,
+        const TableMetadata &metadata,
+        ExtentSchemaPtr schema,
+        bool for_gc)
+    : MutableTable(db_id, table_id, access_xid, target_xid, table_base, primary_key, secondary, metadata, schema, for_gc, nullptr)
+    {}
 
     MutableTable::MutableTable(uint64_t db_id,
                                uint64_t table_id,
@@ -556,7 +588,8 @@ namespace indexer_helpers {
                                const std::vector<Index> &secondary,
                                const TableMetadata &metadata,
                                ExtentSchemaPtr schema,
-                               bool for_gc)
+                               bool for_gc,
+                               ComparatorFunc comparator_func)
     : _db_id(db_id),
       _id(table_id),
       _access_xid(access_xid),
@@ -565,7 +598,8 @@ namespace indexer_helpers {
       _primary_key(primary_key),
       _schema(schema),
       _stats(metadata.stats),
-      _for_gc(for_gc)
+      _for_gc(for_gc),
+      _comparator_func(comparator_func)
     {
         // construct the table's data directory
         _table_dir = table_helpers::get_table_dir(table_base, db_id, table_id, metadata.snapshot_xid);
@@ -618,19 +652,19 @@ namespace indexer_helpers {
         ExtentSchemaPtr primary_schema;
         if (primary_key.empty()) {
             std::vector<std::string> non_primary_key = { constant::INDEX_EID_FIELD };
-            primary_schema = _schema->create_schema({}, { extent_c }, non_primary_key);
+            primary_schema = _schema->create_schema({}, { extent_c }, non_primary_key, _comparator_func);
 
             _primary_index = std::make_shared<MutableBTree>(_table_dir / constant::INDEX_PRIMARY_FILE,
                                                             non_primary_key,
                                                             primary_schema,
-                                                            _target_xid, get_max_extent_size());
+                                                            _target_xid, get_max_extent_size(), _comparator_func);
         } else {
-            primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
+            primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key, _comparator_func);
 
             _primary_index = std::make_shared<MutableBTree>(_table_dir / constant::INDEX_PRIMARY_FILE,
                                                             primary_key,
                                                             primary_schema,
-                                                            _target_xid, get_max_extent_size());
+                                                            _target_xid, get_max_extent_size(), _comparator_func);
         }
 
 

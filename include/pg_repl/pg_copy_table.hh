@@ -16,6 +16,7 @@
 #include <storage/field.hh>
 #include <storage/xid.hh>
 
+#include <pg_ext/extn_registry.hh>
 
 namespace springtail
 {
@@ -276,6 +277,16 @@ namespace springtail
         /** Get where clause condition for inclusion of schemas */
        static std::string _get_schema_condition(LibPqConnection &connection, uint64_t db_id);
 
+       /**
+        * @brief Load pg extension types
+        */
+       static void _load_extn_types(uint64_t db_id);
+
+       /**
+        * @brief Load pg extension operators
+        */
+       static void _load_extn_operators(uint64_t db_id);
+
         /**
          * @brief Get namespaces, returns a pair of namespace name and oid
          * @param db_id database id
@@ -372,6 +383,11 @@ namespace springtail
          */
         static std::vector<PgCopyResultPtr>
             copy_db(uint64_t db_id, uint64_t xid);
+
+        /**
+         * @brief Initialize pg extension registry
+         */
+        static void init_pg_extn_registry(uint64_t db_id, uint64_t xid);
 
         /**
          * @brief Create namespaces

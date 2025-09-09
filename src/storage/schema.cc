@@ -4,7 +4,7 @@
 namespace springtail {
 
     void
-    ExtentSchema::_populate(const std::map<uint32_t, SchemaColumn>& columns, ComparatorFunc comparison_func)
+    ExtentSchema::_populate(const std::map<uint32_t, SchemaColumn>& columns, ComparatorFunc comparator_func)
     {
         // track how many primary key columns there are
         uint32_t pkey_count = 0;
@@ -22,12 +22,15 @@ namespace springtail {
             break;
 
             case (SchemaType::TEXT):
-            case (SchemaType::EXTENSION):
             case (SchemaType::BINARY):
             case (SchemaType::NUMERIC):
             case (SchemaType::UINT32):
             case (SchemaType::INT32):
             case (SchemaType::FLOAT32):
+                fixed_bytes += 4;
+            break;
+
+            case (SchemaType::EXTENSION):
                 fixed_bytes += 4;
             break;
 
@@ -113,8 +116,18 @@ namespace springtail {
                 byte_pos += 4; // add the used bytes
                 break;
 
-            case (SchemaType::EXTENSION):
-                field = std::make_shared<ExtentField>(column.type, byte_pos, comparison_func);
+            case (SchemaType::EXTENSION): {
+                if ( comparator_func ) {
+                    // Override the compartor function if its present
+                    auto updated_comparator_func = [column, comparator_func](std::string_view op_str,
+                                                                             const std::span<const char> &lhval,
+                                                                             const std::span<const char> &rhval) -> bool {
+                        return comparator_func(column.pg_type, op_str, lhval, rhval);
+                    };
+                    field = std::make_shared<ExtentField>(column.type, byte_pos, updated_comparator_func);
+                } else {
+                    field = std::make_shared<ExtentField>(column.type, byte_pos);
+                }
 
                 if (column.nullable) {
                     field->allow_null((bit_pos >> 3), (bit_pos & 0x7));
@@ -123,6 +136,7 @@ namespace springtail {
 
                 byte_pos += 4; // add the used bytes
                 break;
+            }
 
             case (SchemaType::UINT16):
             case (SchemaType::INT16):
@@ -165,6 +179,7 @@ namespace springtail {
                 throw TypeError();
             }
 
+            LOG_INFO("[DEBUG][SET_FIELD_MAP] Inside _populate, does it have comparator_func? {}", comparator_func ? "Yes" : "No");
             // store the field into the base map
             _field_map[column.name] = { field, idx };
 
@@ -192,6 +207,15 @@ namespace springtail {
     ExtentSchema::create_schema(const std::vector<std::string> &old_columns,
                                 const std::vector<SchemaColumn> &new_columns,
                                 const std::vector<std::string> &sort_columns) const
+    {
+        return create_schema(old_columns, new_columns, sort_columns, nullptr);
+    }
+
+    std::shared_ptr<ExtentSchema>
+    ExtentSchema::create_schema(const std::vector<std::string> &old_columns,
+                                const std::vector<SchemaColumn> &new_columns,
+                                const std::vector<std::string> &sort_columns,
+                                ComparatorFunc comparator_func) const
     {
         // create SchemaColumn entries for the existing fields
         std::vector<SchemaColumn> all_columns;
@@ -234,7 +258,7 @@ namespace springtail {
         }
 
         // create the new ExtentSchema
-        return std::make_shared<ExtentSchema>(all_columns);
+        return std::make_shared<ExtentSchema>(all_columns, comparator_func);
     }
 
     std::shared_ptr<std::vector<FieldPtr>>
@@ -303,12 +327,12 @@ namespace springtail {
         return fields;
     }
 
-    VirtualSchema::VirtualSchema(const SchemaMetadata &meta)
+    VirtualSchema::VirtualSchema(const SchemaMetadata &meta, ComparatorFunc comparator_func)
     {
         std::map<uint32_t, std::string> name_map;
 
         // generate the extent schema from the base columns
-        _extent_schema = std::make_shared<ExtentSchema>(meta.columns);
+        _extent_schema = std::make_shared<ExtentSchema>(meta.columns, comparator_func);
 
         // get a copy of the fields from the extent schema
         for (auto &column : meta.columns) {

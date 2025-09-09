@@ -344,3 +344,8 @@ char *OidOutputFunctionCall(Oid function_id, Datum val)
     // Dummy implementation that returns a constant string
     return pstrdup("dummy_output");
 }
+
+Oid
+TypenameGetTypid(const char *typname) {
+    return 1234;
+}

@@ -1,6 +1,33 @@
 #include <pg_ext/fmgr.hh>
 #include <cstring>
 #include <stdexcept>
+#include <iostream>
+
+Datum DirectFunctionCall1(PGFunction func, Datum arg1)
+{
+    LOCAL_FCINFO(fcinfo, 1);
+
+    InitFunctionCallInfoData(*fcinfo, NULL, 1, 0, NULL, NULL);
+
+    fcinfo->args[0].value = arg1;
+    fcinfo->args[0].isnull = false;
+
+    return func(fcinfo);
+}
+
+Datum DirectFunctionCall1Coll(PGFunction func, Oid collation, Datum arg1)
+{
+    LOCAL_FCINFO(fcinfo, 1);
+
+    InitFunctionCallInfoData(*fcinfo, NULL, 1, collation, NULL, NULL);
+
+	fcinfo->args[0].value = arg1;
+	fcinfo->args[0].isnull = false;
+
+	Datum result = (*func) (fcinfo);
+
+    return result;
+}
 
 Datum DirectFunctionCall2(PGFunction func, Datum arg1, Datum arg2)
 {
@@ -17,6 +44,36 @@ Datum DirectFunctionCall2(PGFunction func, Datum arg1, Datum arg2)
 }
 
 Datum DirectFunctionCall2Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2)
+{
+    LOCAL_FCINFO(fcinfo, 2);
+
+    InitFunctionCallInfoData(*fcinfo, NULL, 2, collation, NULL, NULL);
+
+	fcinfo->args[0].value = arg1;
+	fcinfo->args[0].isnull = false;
+	fcinfo->args[1].value = arg2;
+	fcinfo->args[1].isnull = false;
+
+	Datum result = (*func) (fcinfo);
+
+    return result;
+}
+
+Datum DirectFunctionCall3(PGFunction func, Datum arg1, Datum arg2, Datum arg3)
+{
+    LOCAL_FCINFO(fcinfo, 2);
+
+    InitFunctionCallInfoData(*fcinfo, NULL, 2, 0, NULL, NULL);
+
+    fcinfo->args[0].value = arg1;
+    fcinfo->args[0].isnull = false;
+    fcinfo->args[1].value = arg2;
+    fcinfo->args[1].isnull = false;
+
+    return func(fcinfo);
+}
+
+Datum DirectFunctionCall3Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3)
 {
     LOCAL_FCINFO(fcinfo, 2);
 

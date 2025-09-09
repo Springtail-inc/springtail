@@ -576,7 +576,16 @@ namespace springtail::pg_log_mgr {
                         });
             }
 
-            entry.table_schema = std::make_shared<ExtentSchema>(columns);
+            // XXX - EXTN - Plugin pg_ext
+            auto comparator_func = [this](uint64_t type_oid,
+                                      std::string_view op_str,
+                                      const std::span<const char> &lhval,
+                                      const std::span<const char> &rhval) -> bool {
+                LOG_INFO("[DEBUG] comparator_func: called inside pg_log_reader.cc: for type_oid: {}, op: {}", type_oid, op_str);
+                return true;
+            };
+
+            entry.table_schema = std::make_shared<ExtentSchema>(columns, comparator_func);
             entry.update_schema();
         } else if (msg->msg_type == PgMsgEnum::DROP_TABLE) {
             // XXX should we do a truncate here?  it could improve performance if this follows a set

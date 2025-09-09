@@ -2,11 +2,21 @@
 #include <storage/btree.hh>
 
 namespace springtail {
+
     BTree::BTree(const std::filesystem::path &file,
                  uint64_t xid,
                  ExtentSchemaPtr schema,
                  uint64_t root_offset,
                  uint64_t max_extent_size)
+        : BTree(file, xid, schema, root_offset, max_extent_size, nullptr)
+    {
+    }
+    BTree::BTree(const std::filesystem::path &file,
+                 uint64_t xid,
+                 ExtentSchemaPtr schema,
+                 uint64_t root_offset,
+                 uint64_t max_extent_size,
+                 ComparatorFunc comparator_func)
         : _file(file),
           _xid(xid),
           _leaf_schema(schema),
@@ -22,7 +32,7 @@ namespace springtail {
         // construct the schema for the branches
         // note: don't need a valid sql_type for the internal nodes since they aren't exposed
         SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, 0, false);
-        _branch_schema = _leaf_schema->create_schema(keys, { child }, keys);
+        _branch_schema = _leaf_schema->create_schema(keys, { child }, keys, comparator_func);
 
         // construct the field tuples for the branch nodes
         _branch_keys = _branch_schema->get_fields(keys);
