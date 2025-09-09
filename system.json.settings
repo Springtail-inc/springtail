@@ -98,6 +98,17 @@
         "mount_name": null,
         "dns_name": null
     },
+    "extension_config": {
+        "lib_path": "/usr/lib/postgresql/16/lib/",
+        "1": {
+            "cube": {
+                "version": "1.5"
+            },
+            "hstore": {
+                "version": "1.8"
+            }
+        }
+    },
     "proxy": {
         "NOTE": "cert and key required for ssl; modes = [primary|normal|shadow]; pg_shadow for testing",
         "enable_ssl": false,

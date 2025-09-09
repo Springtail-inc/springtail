@@ -1612,7 +1612,6 @@ namespace springtail::pg_fdw {
         }
 
         auto db_extensions = extension_config_json[db_id_str];
-        std::string lib_path = extension_config_json.value("lib_path", "/usr/lib/postgresql/16/lib/");
 
         for (auto& ext : db_extensions.items()) {
             auto extension_name = ext.key();
