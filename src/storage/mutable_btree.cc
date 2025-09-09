@@ -242,7 +242,7 @@ MutableBTree::_next_leaf(NodePtr node)
     }
 
     // move up the tree
-    while (node != nullptr) {
+    while (node->page != _root) {
         // create the key for the current page
         auto value = std::make_shared<FieldArray>();
         value->push_back(std::make_shared<ConstTypeField<uint64_t>>(node->page->extent_id));
@@ -285,7 +285,7 @@ MutableBTree::_next_leaf(NodePtr node)
     }
 
     // if we were at the last leaf, return nullptr to indiciate end()
-    if (node == nullptr) {
+    if (node->page == _root) {
         return nullptr;
     }
 
@@ -559,9 +559,13 @@ MutableBTree::lower_bound(TuplePtr search_key,
             auto cache_page = StorageCache::get_instance()->get(_btree->_file, id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
 
             // XXX need a better way to create these combined tuples
-            auto row = *(cache_page->last());
-            auto key = std::make_shared<MutableTuple>(_key_fields, &row);
-            ValueTuplePtr value_key = std::make_shared<ValueTuple>(key);
+            ValueTuplePtr value_key;
+            {
+                auto row_i = cache_page->last(); // note: need to hold this iterator to pin extent
+                auto row = *row_i;
+                auto key = std::make_shared<MutableTuple>(_key_fields, &row);
+                value_key = std::make_shared<ValueTuple>(key);
+            }
 
             auto page = std::make_shared<Page>(_btree, id, value_key, std::move(cache_page), _schema);
 
@@ -592,7 +596,8 @@ MutableBTree::lower_bound(TuplePtr search_key,
         // if the page is not the root then we store the key of the entry we used to find this page
         if (!this->type.is_root()) {
             // force a copy of the values into a ValueTuple
-            auto row = *(cache_page->last());
+            auto row_i = cache_page->last(); // note: need to hold this iterator to pin extent
+            auto row = *row_i;
             auto key = std::make_shared<MutableTuple>(_key_fields, &row);
             this->prev_key = std::make_shared<ValueTuple>(key);
         }
@@ -1085,9 +1090,13 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
             // construct a new root page based on the new extent
             uint64_t extent_id = ids[0];
-            auto row = *(cache_page->last());
-            auto key = std::make_shared<MutableTuple>(_branch_keys, &row);
-            ValueTuplePtr value_key = std::make_shared<ValueTuple>(key);
+            ValueTuplePtr value_key;
+            {
+                auto row_i = cache_page->last(); // note: need to hold this iterator to pin extent
+                auto row = *row_i;
+                auto key = std::make_shared<MutableTuple>(_branch_keys, &row);
+                value_key = std::make_shared<ValueTuple>(key);
+            }
 
             new_root = std::make_shared<Page>(this, extent_id,
                                               value_key, std::move(cache_page), _branch_schema);

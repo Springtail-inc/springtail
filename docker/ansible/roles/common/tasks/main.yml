@@ -9,8 +9,6 @@
       - clang-format
       - cmake
       - curl
-      - dnsutils
-      - emacs-nox
       - flex
       - g++-14
       - gcc-14
@@ -18,10 +16,7 @@
       - git
       - gnupg
       - gpg
-      - htop
-      - iftop
       - iproute2
-      - iputils-ping
       - jq
       - libbsd-dev
       - libdw-dev
@@ -30,7 +25,6 @@
       - linux-libc-dev
       - lsb-release
       - net-tools
-      - netcat
       - ninja-build
       - nmap
       - openssh-server
@@ -50,17 +44,31 @@
       - python3-yaml
       - redis-server
       - software-properties-common
+      - rsync
       - sudo
       - tar
-      - traceroute
       - unzip
-      - vim
       - wget
       - zip
 
     update_cache: true
     state: present
     autoclean: true
+
+- name: Install additional packages
+  ansible.builtin.apt:
+    name:
+      - dnsutils
+      - emacs-nox
+      - htop
+      - iftop
+      - iputils-ping
+      - netcat-openbsd
+      - traceroute
+      - vim
+    state: present
+    update_cache: true
+  when: install_additional_packages
 
 - name: Set timezone non-interactively
   ansible.builtin.apt:
@@ -74,3 +82,10 @@
     path: /etc/sysctl.d/10-ptrace.conf
     regexp: '^kernel.yama.ptrace_scope\s*=\s*1'
     replace: 'kernel.yama.ptrace_scope = 0'
+
+- name: Install AWS CLI v2
+  ansible.builtin.shell: |
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o "/tmp/awscliv2.zip"
+    unzip -q /tmp/awscliv2.zip -d /tmp
+    /tmp/aws/install --update
+    rm -f /tmp/awscliv2.zip

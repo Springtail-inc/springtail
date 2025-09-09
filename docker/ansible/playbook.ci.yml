@@ -2,11 +2,11 @@
   hosts: localhost
   become: true
   roles:
-    - common
-    - awscli
-    - python
-    - custom-pg
-    - postgres-config
-    - user_dev
-    - redis
-    - entrypoint
+    - role: common
+      install_additional_packages: false
+    - role: python
+    - role: custom-pg
+    - role: postgres-config
+    - role: user_dev
+    - role: redis
+    - role: entrypoint

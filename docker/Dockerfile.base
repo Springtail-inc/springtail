@@ -13,8 +13,12 @@ EXPOSE 5432 6379 22
 RUN apt-get update && apt-get install -y ansible-core
 # Copy over the ansible assets
 COPY docker/ansible/ /var/ansible/
+COPY docker/entrypoint.sh /entrypoint.sh
 # Run Ansible playbook to install additional dependencies
 RUN ansible-playbook /var/ansible/playbook.base.yml --connection=local --inventory localhost, --extra-vars "ansible_python_interpreter=/usr/bin/python3"
+RUN chmod 777 /tmp && chmod +x /entrypoint.sh
 
 # Set the entrypoint script as the container's entrypoint
-ENTRYPOINT ["/tini"]
+# Use Tini as the init system to handle zombie processes, signal forwarding, etc.
+# ENTRYPOINT ["/tini"]
+ENTRYPOINT ["/tini", "--", "entrypoint.sh"]

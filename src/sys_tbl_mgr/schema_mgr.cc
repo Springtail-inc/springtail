@@ -111,7 +111,8 @@ namespace springtail {
     std::shared_ptr<ExtentSchema>
     SchemaMgr::get_extent_schema(uint64_t db_id,
                                  uint64_t table_id,
-                                 const XidLsn &xid)
+                                 const XidLsn &xid,
+                                 bool allow_undefined)
     {
         LOG_INFO("[DEBUG] Getting extent schema without a comparator_func");
         if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
@@ -124,13 +125,14 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, xid);
 
         // construct the schema from the provided schema metadata
-        return std::make_shared<ExtentSchema>(meta->columns, nullptr);
+        return std::make_shared<ExtentSchema>(meta->columns, allow_undefined, nullptr);
     }
 
     std::shared_ptr<ExtentSchema>
     SchemaMgr::get_extent_schema(uint64_t db_id,
                                  uint64_t table_id,
                                  const XidLsn &xid,
+                                 bool allow_undefined,
                                  ComparatorFunc comparator_func)
     {
         LOG_INFO("[DEBUG] Getting extent schema with a comparator_func");
@@ -144,7 +146,7 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, xid);
 
         // construct the schema from the provided schema metadata
-        return std::make_shared<ExtentSchema>(meta->columns, comparator_func);
+        return std::make_shared<ExtentSchema>(meta->columns, allow_undefined, comparator_func);
     }
 
     std::shared_ptr<UserType>

@@ -75,8 +75,8 @@ PROXY_DAEMONS = [
 ]
 
 ALL_DAEMONS = CORE_DAEMONS + FDW_DAEMONS + PROXY_DAEMONS
-
 ALL_DAEMONS_NAMES = [name[0] for name in ALL_DAEMONS]
+ALL_DAEMONS_SHUTDOWN = ALL_DAEMONS_NAMES[::-1]
 
 PG_CONFIG_BACKUP_PATH = '/tmp/pg_config_backup.txt'
 
@@ -636,7 +636,7 @@ def restart(props: Properties,
             unarchive_logs: bool = False) -> None:
     # Stop the daemons
     print("\nStopping daemons...")
-    stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
+    stop_daemons(props.get_pid_path(), ALL_DAEMONS_SHUTDOWN)
 
     config = props.get_system_config()
     base_dir = props.get_mount_path()
@@ -667,7 +667,7 @@ def restart(props: Properties,
         ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
         log_file = "/tmp/roll_back_" + str(ts) + ".log"
         print(f"Running command: roll_back_xact_log; rolling back database {db_id} to xid: {start_xid}, output log: {log_file}")
-        run_command(os.path.join(build_dir, 'src/xid_mgr/roll_back_xact_log'), ['-p', xact_path, '-d', str(db_id), '-a', 'true', '-x', str(start_xid)], log_file)
+        run_command(os.path.join(build_dir, 'src/xid_mgr/roll_back_xact_log'), ['-p', xact_path, '-d', str(db_id), '-x', str(start_xid)], log_file)
 
     # start daemons with XID if specified
     print("\nStarting daemons...")
@@ -715,7 +715,7 @@ def start(config_file: str,
 
     # Stop the daemons
     print("\nStopping daemons...")
-    stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
+    stop_daemons(props.get_pid_path(), ALL_DAEMONS_SHUTDOWN)
 
     if do_cleanup:
         # Clear file system data
@@ -799,7 +799,7 @@ def stop(config_file: str, do_cleanup: bool = False) -> None:
 def stop_with_properties(props: Properties, do_cleanup: bool = False) -> None:
     # Stop the daemons
     print("\nStopping daemons...")
-    stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
+    stop_daemons(props.get_pid_path(), ALL_DAEMONS_SHUTDOWN)
 
     if do_cleanup:
         # Cleanup db instance

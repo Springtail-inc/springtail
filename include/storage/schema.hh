@@ -175,8 +175,8 @@ namespace springtail {
     using SchemaPtr = std::shared_ptr<Schema>;
 
     /**
-     * Defines the schema for a physical extent in a table.  Creates mutable field accessors to
-     * retrieve data from the extent at a specified target XID.
+     * Defines the schema for a physical extent in a table or table update.  Creates mutable field
+     * accessors to store and retrieve column data from an extent row.
      */
     class ExtentSchema : public Schema {
     private:
@@ -206,31 +206,40 @@ namespace springtail {
          * Construct the set of column fields based on the column definitions.
          * @param columns A map from column position to column definition.
          */
-        void _populate(const std::map<uint32_t, SchemaColumn>& columns, ComparatorFunc comparator_func);
+        void _populate(const std::map<uint32_t, SchemaColumn>& columns, bool allow_undefined, ComparatorFunc comparator_func);
 
     public:
         /**
          * Constructor.
          * @param columns Map from column position to the SchemaColumn definition.
          */
-        explicit ExtentSchema(const std::vector<SchemaColumn> &columns, ComparatorFunc comparator_func) {
+        explicit ExtentSchema(const std::vector<SchemaColumn> &columns, bool allow_undefined = false, ComparatorFunc comparator_func) {
             std::map<uint32_t, SchemaColumn> column_map;
             for (auto &&column : columns) {
                 column_map.insert({column.position, column});
             }
 
             // populate the field map using the column definitions
-            _populate(column_map, comparator_func);
+            _populate(column_map, allow_undefined, comparator_func);
         }
 
-        explicit ExtentSchema(const std::vector<SchemaColumn> &columns) {
+        explicit ExtentSchema(const std::vector<SchemaColumn> &columns, bool allow_undefined = false) {
             std::map<uint32_t, SchemaColumn> column_map;
             for (auto &&column : columns) {
                 column_map.insert({column.position, column});
             }
 
             // populate the field map using the column definitions
-            _populate(column_map, nullptr);
+            _populate(column_map, allow_undefined);
+        }
+
+        /**
+         * Constructor.
+         * @param columns Map from column position to the SchemaColumn definition.
+         */
+        explicit ExtentSchema(const std::map<uint32_t, SchemaColumn> columns, bool allow_undefined = false)
+        {
+            _populate(columns, allow_undefined);
         }
 
         /** Returns the fixed width for a single row. */
@@ -276,12 +285,14 @@ namespace springtail {
 
         /**
          * Generate a new ExtentSchema, based on a list of columns from this schema, as well as
-         * additional provided columns.  Used in the creation of schemas for BTree indexes.
+         * additional provided columns.  Used in the creation of schemas for BTree indexes and to
+         * populate the WriteCache.
          */
         std::shared_ptr<ExtentSchema>
         create_schema(const std::vector<std::string> &old_columns,
                       const std::vector<SchemaColumn> &new_columns,
-                      const std::vector<std::string> &sort_columns) const;
+                      const std::vector<std::string> &sort_columns,
+                      bool allow_undefined = false) const;
 
         /**
          * Generate a new ExtentSchema, based on a list of columns from this schema, as well as

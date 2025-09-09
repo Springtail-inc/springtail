@@ -403,9 +403,15 @@ namespace springtail {
                 if (undefined) {
                     this->set_undefined(lhs, true);
                     return; // no more processing to do since we don't need the value
+                } else {
+                    this->set_undefined(lhs, false);
                 }
             } else {
-                DCHECK_EQ(field->is_undefined(rhs), false);
+                // if this field can't be undefined, but the assigned value is undefined, then we
+                // don't change the current value
+                if (field->is_undefined(rhs)) {
+                    return;
+                }
             }
 
             // handle NULL data cases
@@ -702,6 +708,11 @@ namespace springtail {
             uint32_t var_off;
             std::memcpy(&var_off, e_row->data() + _offset, sizeof(uint32_t));
             return e_row->get_binary(var_off);
+        }
+
+        void set_undefined(void *row, bool is_undefined) override {
+            auto e_row = reinterpret_cast<Extent::Row *>(row);
+            _set_bit(*e_row, _undefined_offset, _undefined_bitmask, is_undefined);
         }
 
         void set_null(void *row, bool is_null) override {
@@ -1379,6 +1390,11 @@ namespace springtail {
         std::string to_string() const {
             std::string value;
             for (int i = 0; i < this->size(); i++) {
+                if (this->field(i)->is_undefined(this->row())) {
+                    value += "UNCHANGED:";
+                    continue;
+                }
+
                 if (this->field(i)->is_null(this->row())) {
                     value += "NULL:";
                     continue;
