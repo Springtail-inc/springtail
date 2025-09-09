@@ -327,14 +327,14 @@ Service::_create_index(const proto::IndexRequest& request, bool &created)
     // Set namespace ID for the requested index
     mutable_index_request.mutable_index()->set_namespace_id(ns_info->id);
 
-    if (_check_index_collumns(request.db_id(), mutable_index_request.index(), keys, xid)) {
+    if (_check_index_columns(request.db_id(), mutable_index_request.index(), keys, xid)) {
         created = _upsert_index_name(request.db_id(), mutable_index_request.index(), xid, keys);
     }
     return mutable_index_request.index();
 }
 
 bool
-Service::_check_index_collumns(uint64_t db_id, const proto::IndexInfo & index_info, const std::map<uint32_t, uint32_t> & keys, XidLsn xid)
+Service::_check_index_columns(uint64_t db_id, const proto::IndexInfo & index_info, const std::map<uint32_t, uint32_t> & keys, XidLsn xid)
 {
     // get the schema prior to this change
     auto info = _get_schema_info(db_id, index_info.table_id(), xid, xid);
@@ -507,8 +507,7 @@ Service::_drop_index(const XidLsn& xid,
     auto info = _find_index(db_id, index_id, xid, tid);
 
     if (!info) {
-        LOG_DEBUG(LOG_SCHEMA, "Drop index not found: {}@{} - {}", db_id, xid.xid,
-                            index_id);
+        LOG_WARN("Drop index not found: {}@{} - {}", db_id, xid.xid, index_id);
         return;
     }
     auto& index_info = std::get<0>(*info);
