@@ -1214,9 +1214,10 @@ StorageCache::PageCache::background_cleaner()
             }
         }
 
-        return std::async(std::launch::async, [offset_futures = std::move(offset_futures), tasks = std::move(tasks), this]() mutable
-                -> std::vector<uint64_t> {
-
+        return std::async(std::launch::async, [offset_futures = std::move(offset_futures),
+                tasks = std::move(tasks), this]() mutable
+                -> std::vector<uint64_t>
+                {
                     // Acquire lock in the async thread
                     boost::unique_lock lock(this->_mutex);
 
@@ -1599,36 +1600,36 @@ StorageCache::PageCache::background_cleaner()
         auto handle = IOMgr::get_instance()->open(extent->_file, IOMgr::IO_MODE::APPEND, true);
         auto async_flush_future = extent->async_flush(handle);
 
-        return std::async(std::launch::async,
-            [flush_response_future = std::move(async_flush_future), extent = std::move(extent), this]() mutable -> void
-            {
-                boost::unique_lock lock(this->_mutex);
+        return std::async(std::launch::async, [flush_response_future = std::move(async_flush_future),
+                extent = std::move(extent), this]() mutable
+                -> void
+                {
+                    boost::unique_lock lock(this->_mutex);
 
-                auto flush_response = flush_response_future.get();
+                    auto flush_response = flush_response_future.get();
 
-                // On-disk size of the originating extent
-                uint64_t prev_extent_size = extent->_extent_size;
+                    // On-disk size of the originating extent
+                    uint64_t prev_extent_size = extent->_extent_size;
 
-                // notify the vacuumer of the now-expired extent
-                if (extent->header().prev_offset != constant::UNKNOWN_EXTENT) {
-                    Vacuumer::get_instance()->expire_extent(extent->_file, extent->header().prev_offset,
-                            prev_extent_size, extent->header().xid);
-                }
+                    // notify the vacuumer of the now-expired extent
+                    if (extent->header().prev_offset != constant::UNKNOWN_EXTENT) {
+                        Vacuumer::get_instance()->expire_extent(extent->_file, extent->header().prev_offset,
+                                prev_extent_size, extent->header().xid);
+                    }
 
-                extent->_extent_id = flush_response->offset;
-                extent->_extent_size = flush_response->next_offset - flush_response->offset;
+                    extent->_extent_id = flush_response->offset;
+                    extent->_extent_size = flush_response->next_offset - flush_response->offset;
 
-                // update the cache ID as pointing to the new extent ID
-                this->_cache_id_map[extent->_cache_id] = extent->key();
+                    // update the cache ID as pointing to the new extent ID
+                    this->_cache_id_map[extent->_cache_id] = extent->key();
 
-                // mark as MUTABLE, place on the clean LRU
-                extent->_state = CacheExtent::State::MUTABLE;
+                    // mark as MUTABLE, place on the clean LRU
+                    extent->_state = CacheExtent::State::MUTABLE;
 
-                // notify anyone waiting
-                extent->_flush_cv->notify_all();
-                extent->_flush_cv = nullptr;
-            });
-
+                    // notify anyone waiting
+                    extent->_flush_cv->notify_all();
+                    extent->_flush_cv = nullptr;
+                });
     }
 
     void

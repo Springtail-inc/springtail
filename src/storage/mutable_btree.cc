@@ -557,30 +557,30 @@ MutableBTree::lower_bound(TuplePtr search_key,
         return std::async(std::launch::async, [flush_future = std::move(flush_future),
                 new_pages = std::move(new_pages), this]() mutable
                 -> std::vector<std::shared_ptr<MutableBTree::Page>>
-        {
-            auto ids = flush_future.get();
-            for (auto id : ids) {
-                // XXX how to handle XIDs?
-                auto cache_page = StorageCache::get_instance()->get(_btree->_file, id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
-
-                // XXX need a better way to create these combined tuples
-                ValueTuplePtr value_key;
                 {
-                    auto row_i = cache_page->last(); // note: need to hold this iterator to pin extent
-                    auto row = *row_i;
-                    auto key = std::make_shared<MutableTuple>(_key_fields, &row);
-                    value_key = std::make_shared<ValueTuple>(key);
-                }
+                    auto ids = flush_future.get();
+                    for (auto id : ids) {
+                        // XXX how to handle XIDs?
+                        auto cache_page = StorageCache::get_instance()->get(_btree->_file, id, _btree->_xid, constant::LATEST_XID, _btree->_max_extent_size);
 
-                auto page = std::make_shared<Page>(_btree, id, std::move(value_key), std::move(cache_page), _schema);
+                        // XXX need a better way to create these combined tuples
+                        ValueTuplePtr value_key;
+                        {
+                            auto row_i = cache_page->last(); // note: need to hold this iterator to pin extent
+                            auto row = *row_i;
+                            auto key = std::make_shared<MutableTuple>(_key_fields, &row);
+                            value_key = std::make_shared<ValueTuple>(key);
+                        }
 
-                LOG_DEBUG(LOG_BTREE, "Creating MutableBTree Page: {} {}", id, page->extent_id);
+                        auto page = std::make_shared<Page>(_btree, id, std::move(value_key), std::move(cache_page), _schema);
 
-                new_pages.push_back(std::move(page));
-            }
+                        LOG_DEBUG(LOG_BTREE, "Creating MutableBTree Page: {} {}", id, page->extent_id);
 
-            return std::move(new_pages);
-        });
+                        new_pages.push_back(std::move(page));
+                    }
+
+                    return std::move(new_pages);
+                });
     }
 
     void
@@ -958,31 +958,32 @@ MutableBTree::lower_bound(TuplePtr search_key,
 
         auto flush_future = page->async_flush(_xid);
 
-        return std::async(std::launch::async, [flush_future = std::move(flush_future), page = std::move(page), parent = std::move(parent), this]() mutable
+        return std::async(std::launch::async, [flush_future = std::move(flush_future),
+                page = std::move(page), parent = std::move(parent), this]() mutable
                 -> std::vector<MutableBTree::PagePtr>
-        {
-            // flush the page's extent(s) to disk
-            // note: it would be nice if we could perform the disk writes without holding the parent
-            //       mutex, but then there is a potential race condition between updating the
-            //       parent's pointers and flushing the parent.  It might be possible with more
-            //       complex logic.
-            std::vector<PagePtr> &&new_pages = flush_future.get();
+            {
+                // flush the page's extent(s) to disk
+                // note: it would be nice if we could perform the disk writes without holding the parent
+                //       mutex, but then there is a potential race condition between updating the
+                //       parent's pointers and flushing the parent.  It might be possible with more
+                //       complex logic.
+                std::vector<PagePtr> &&new_pages = flush_future.get();
 
-            // lock the parent for exclusive access
-            boost::unique_lock parent_lock(parent->mutex);
+                // lock the parent for exclusive access
+                boost::unique_lock parent_lock(parent->mutex);
 
-            // update the parent's pointers
-            parent->update_branch(page, new_pages, _branch_child_f);
+                // update the parent's pointers
+                parent->update_branch(page, new_pages, _branch_child_f);
 
-            // remove the page from the parent's children
-            parent->remove_child(page->extent_id);
+                // remove the page from the parent's children
+                parent->remove_child(page->extent_id);
 
-            // mark the page as flushed
-            page->flushed = true;
+                // mark the page as flushed
+                page->flushed = true;
 
-            return new_pages;
+                return new_pages;
 
-        });
+            });
     }
 
     std::vector<MutableBTree::PagePtr>
@@ -1030,21 +1031,22 @@ MutableBTree::lower_bound(TuplePtr search_key,
             auto flush_future = _async_flush_page_internal(page, parent);
 
             return std::async(std::launch::async, [flush_future = std::move(flush_future),
-                    page = std::move(page), data_lock = std::move(data_lock), this]() mutable
+                    page = std::move(page),
+                    data_lock = std::move(data_lock), this]() mutable
                     -> void
-            {
-                // perform the actual page flush
-                std::vector<PagePtr> &&new_pages = flush_future.get();
+                {
+                    // perform the actual page flush
+                    std::vector<PagePtr> &&new_pages = flush_future.get();
 
-                // evict the page from the cache and add the new pages
-                boost::unique_lock cache_lock(_cache->mutex);
+                    // evict the page from the cache and add the new pages
+                    boost::unique_lock cache_lock(_cache->mutex);
 
-                _cache_evict(page->extent_id);
-                for (auto &&new_page : new_pages) {
-                    _cache_insert(new_page, cache_lock);
-                }
+                    _cache_evict(page->extent_id);
+                    for (auto &&new_page : new_pages) {
+                        _cache_insert(new_page, cache_lock);
+                    }
 
-            });
+                });
         }
     }
 
