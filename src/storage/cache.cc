@@ -551,10 +551,6 @@ StorageCache::PageCache::background_cleaner()
             }
         }
 
-        //XXX: Fix IO queuing limit and remove this
-        if (_clean_lru.empty()) {
-            return;
-        }
         // evict a page from the LRU
         auto page = _clean_lru.front();
         _clean_lru.pop_front();
@@ -1659,10 +1655,6 @@ StorageCache::PageCache::background_cleaner()
 
         // if the clean LRU list is empty, need to clean a page
         while (_clean_lru.empty()) {
-            //XXX: Fix IO queuing limit and remove this
-            if (_dirty_lru.empty()) {
-                break;
-            }
             // choose an extent we can clean
             auto dirty = _dirty_lru.front();
             _dirty_lru.pop_front();
@@ -1675,11 +1667,6 @@ StorageCache::PageCache::background_cleaner()
 
             // release the extent back to the cache
             _release(dirty);
-        }
-
-        //XXX: Fix IO queuing limit and remove this
-        if (_clean_lru.empty()) {
-            return;
         }
 
         // evict an extent to make space
