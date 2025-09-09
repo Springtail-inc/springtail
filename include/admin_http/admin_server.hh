@@ -87,12 +87,24 @@ namespace springtail {
          */
         class InternalHTTPServer : public httplib::Server {
         public:
+            /**
+             * @brief Get a string representing an ip and port that server listens on
+             *
+             * @return std::string
+             */
             std::string get_bind_ip_port();
+
+            /**
+             * @brief Help function for dumping the content of an HTTP request
+             *
+             * @param request - request
+             * @return std::string - output string
+             */
             static std::string request_to_string(const httplib::Request& request);
         };
 
         InternalHTTPServer _svr;               ///< HTTP server object
-        std::string _ip{"0.0.0.0"};         ///< inital IP
+        std::string _ip{"0.0.0.0"};         ///< initial IP
         uint16_t _port{0};                     ///< initial port
         std::unordered_map<std::string, GetHandler> _get_routes;        ///< map of GET routes
         std::unordered_map<std::string, PostHandler> _post_routes;      ///< map of POST routes

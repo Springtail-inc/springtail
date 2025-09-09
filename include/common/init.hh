@@ -76,7 +76,7 @@ springtail_retreive_argument(ServiceId service_id, const std::string &arg_name, 
 inline void
 springtail_store_arguments(ServiceId service_id, const std::map<std::string, std::any> &args_list)
 {
-    for (auto it: args_list) {
+    for (auto &it: args_list) {
         springtail_store_argument_internal(service_id, it.first, it.second);
     }
 }

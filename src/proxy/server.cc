@@ -107,7 +107,7 @@ namespace springtail::pg_proxy {
 
         // register "/proxy" route with AdminServer
         AdminServer::get_instance()->register_get_route("/proxy", [this](const std::string &path, const httplib::Params &params, nlohmann::json &json_response){
-            if (!ProxyServer::has_instance()) {
+            if (!ProxyServer::_has_instance()) {
                 json_response =  R"({})";
                 return;
             }
