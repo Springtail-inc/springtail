@@ -22,6 +22,14 @@
 
 namespace springtail::pg_proxy {
 
+    /** unique session id counter */
+    static std::atomic<uint32_t> process_id(1);
+
+    std::unordered_map<
+        int32_t,
+        std::pair<std::vector<uint8_t>, std::shared_ptr<ClientSession>>
+    > ClientSession::_cancel_map{};
+
     ClientSession::ClientSession(ProxyConnectionPtr connection)
         : Session(connection),
           _stmt_cache(STATEMENT_CACHE_SIZE),
@@ -30,11 +38,14 @@ namespace springtail::pg_proxy {
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client connected: endpoint={}", _id, connection->endpoint());
 
-        // initialize pid and key for cancellation
-        get_random_bytes(reinterpret_cast<uint8_t*>(&_pid), 4);
-        // clear top bit to make pid not signed, some historic issue
-        _pid &= 0x7FFFFFFF;
-        get_random_bytes(reinterpret_cast<uint8_t*>(&_cancel_key), 4);
+        // NOTE: the assumption here is that by the time we wrap around,
+        //  the earliest sessions would be long gone
+        _pid = process_id;
+        process_id = (process_id + 1) & 0x7FFFFFFF;
+
+        // generate random cancel key
+        _cancel_key.resize(sizeof(uint32_t));
+        get_random_bytes(_cancel_key.data(), sizeof(uint32_t));
 
         // create the client auth object
         _auth = std::make_shared<ClientAuthorization>(connection, _id, _pid, _cancel_key);
@@ -152,6 +163,25 @@ namespace springtail::pg_proxy {
             _state = ERROR;
         }
 
+        if (_auth->is_cancel()) {
+            auto pid_cancel_key_pair = _auth->get_pid_cancel_key_pair();
+
+            // 1. Find ClientSession with the given pid and cancel_key
+            auto it = _cancel_map.find(pid_cancel_key_pair.first);
+            if (it != _cancel_map.end()) {
+
+                // 2. Request cancel on this client session
+                const std::vector<uint8_t>& cancel_key = pid_cancel_key_pair.second;
+                it->second.second->_handle_cancel(pid_cancel_key_pair.first, cancel_key);
+            } else {
+                LOG_ERROR("[C:{}] Client session for process id {} is not found", _id, pid_cancel_key_pair.first);
+            }
+
+            // 3. Terminate current connection
+            _connection->close();
+            return;
+        }
+
         if (_state == ERROR) {
             // auth failed, handle the error
             std::string error_code = _auth->get_error_code();
@@ -171,6 +201,8 @@ namespace springtail::pg_proxy {
         }
 
         if (auth_done) {
+            _cancel_map.emplace(_pid, std::make_pair(_cancel_key, shared_from_this()));
+
             // auth done, haven't sent ready for query yet
             // need to finish server authentication
             _state = AUTH_SERVER;
@@ -187,6 +219,26 @@ namespace springtail::pg_proxy {
 
             PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session auth done, db={}, user={}", _id, _database, _user->username());
             _primary_session = _create_server_session(Session::Type::PRIMARY, seq_id);
+        }
+    }
+
+
+    void
+    ClientSession::_handle_cancel(int pid, const std::vector<uint8_t> &cancel_key)
+    {
+        DCHECK(pid == _pid) << "Process id does not match";
+        if (cancel_key != _cancel_key) {
+            LOG_WARN("Invalid cancel key for cancel request");
+            return;
+        }
+
+        if (_primary_session != nullptr) {
+            // send cancel
+            _primary_session->send_cancel();
+        }
+        if (_replica_session != nullptr) {
+            // send cancel
+            _replica_session->send_cancel();
         }
     }
 
@@ -281,6 +333,7 @@ namespace springtail::pg_proxy {
         if (get_associated_session()) {
             clear_associated_session();
         }
+
         _state = ERROR;
     }
 
@@ -314,6 +367,9 @@ namespace springtail::pg_proxy {
             _replica_session = nullptr;
         }
 
+        // clean up cancel map
+        _cancel_map.erase(_pid);
+
         // clear all internal data structures; clears associated session
         reset_session();
     }
@@ -332,7 +388,7 @@ namespace springtail::pg_proxy {
         // iterate through message buffers
         [[maybe_unused]] int i = 0;
 
-        for (auto buffer: blist.buffers) {
+        for (auto &buffer: blist.buffers) {
             char code = buffer->get();
             int32_t len = buffer->get32();
             uint64_t seq_id = _gen_seq_id();
@@ -1006,12 +1062,12 @@ namespace springtail::pg_proxy {
             std::pair<QueryStmtPtr, bool> lookup_result = {nullptr, false};
 
             switch(stmt_type) {
-                    case QueryStmt::DEALLOCATE:
-                        // deallocate specific prepared statement
-                        // XXX optimize this in future, since it is silly to execute
-                        // a prepared statement to deallocate it, but deallocate will
-                        // fail if the prepared statement is not found
-                        lookup_result = _stmt_cache.lookup_prepared(context->name);
+                case QueryStmt::DEALLOCATE:
+                    // deallocate specific prepared statement
+                    // XXX optimize this in future, since it is silly to execute
+                    // a prepared statement to deallocate it, but deallocate will
+                    // fail if the prepared statement is not found
+                    lookup_result = _stmt_cache.lookup_prepared(context->name);
                     break;
 
                 case QueryStmt::EXECUTE:
