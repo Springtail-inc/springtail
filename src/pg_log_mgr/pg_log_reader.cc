@@ -823,7 +823,11 @@ namespace springtail::pg_log_mgr {
                                                                   sys_tbl::IndexNames::State::NOT_READY);
 
                 // Store the index process request for the Committer
-                _index_requests_mgr->add_index_request(_db, xidlsn.xid, create_index_response);
+                if (create_index_response.action() == "create_index") {
+                    _index_requests_mgr->add_index_request(_db, xidlsn.xid, create_index_response);
+                } else {
+                    LOG_WARN("Failed to create an index for db {}", _db);
+                }
                 break;
             }
         case PgMsgEnum::DROP_INDEX:
