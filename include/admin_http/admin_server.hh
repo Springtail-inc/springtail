@@ -37,7 +37,7 @@ namespace springtail {
         void
         register_get_route(const std::string& path, GetHandler &&handler)
         {
-            std::unique_lock<std::shared_mutex> lock(_mutex);
+            std::unique_lock lock(_mutex);
             _get_routes[path] = std::move(handler);
         }
 
@@ -49,7 +49,7 @@ namespace springtail {
         void
         deregister_get_route(const std::string& path)
         {
-            std::unique_lock<std::shared_mutex> lock(_mutex);
+            std::unique_lock lock(_mutex);
             _get_routes.erase(path);
         }
 
@@ -62,7 +62,7 @@ namespace springtail {
         void
         register_post_route(const std::string& path, PostHandler &&handler)
         {
-            std::unique_lock<std::shared_mutex> lock(_mutex);
+            std::unique_lock lock(_mutex);
             _post_routes[path] = std::move(handler);
         }
 
@@ -74,7 +74,7 @@ namespace springtail {
         void
         deregister_post_route(const std::string& path)
         {
-            std::unique_lock<std::shared_mutex> lock(_mutex);
+            std::unique_lock lock(_mutex);
             _post_routes.erase(path);
         }
 
@@ -120,19 +120,19 @@ namespace springtail {
          * @brief Destroy the Admin Server object
          *
          */
-        virtual ~AdminServer() override = default;
+        ~AdminServer() override = default;
 
         /**
          * @brief Signal server thread to stop serving requests and shutdown
          *
          */
-        virtual void _internal_thread_shutdown()  override { _svr.stop(); }
+        void _internal_thread_shutdown()  override { _svr.stop(); }
 
         /**
          * @brief Runs HTTP server in a separate thread
          *
          */
-        virtual void _internal_run() override;
+        void _internal_run() override;
 
         /**
          * @brief Dispatch GET requests

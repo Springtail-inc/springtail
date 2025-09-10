@@ -21,7 +21,7 @@ public:
         return true;
     }
     virtual void stop() {
-        // no default actions
+        LOG_INFO("Default stop for service {}", _name);
     }
     const std::string &get_name() const { return _name; };
 
@@ -90,11 +90,13 @@ void springtail_shutdown();
 class AdminServerRunner : public ServiceRunner {
 public:
     AdminServerRunner() : ServiceRunner("AdminService") {}
-    bool start() {
+    bool start() override
+    {
         AdminServer::get_instance();
         return true;
     }
-    void stop() {
+    void stop() override
+    {
         AdminServer::shutdown();
     }
 };

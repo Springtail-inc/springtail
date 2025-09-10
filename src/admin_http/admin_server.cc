@@ -9,16 +9,18 @@ namespace springtail {
     AdminServer::AdminServer() : Singleton<AdminServer>()
     {
         // Default dispatch routes
-        _svr.Get("/health", [](const httplib::Request&, httplib::Response& res) {
-            res.set_content(R"({"status":"up"})", "application/json");
-        });
+        _svr.Get("/health",
+                 []([[maybe_unused]] const httplib::Request& req, httplib::Response& res) {
+                    res.set_content(R"({"status":"up"})", "application/json");
+                });
 
-        _svr.Get("/config", [](const httplib::Request& req, httplib::Response& res) {
-            nlohmann::json settings = Properties::get_all_settings();
-            std::string json_response = std::string(R"({"status":"ok", "settings":)")
-                       + settings.dump() + "}";
-            res.set_content(json_response, "application/json");
-        });
+        _svr.Get("/config",
+                 []([[maybe_unused]] const httplib::Request& req, httplib::Response& res) {
+                    nlohmann::json settings = Properties::get_all_settings();
+                    std::string json_response = std::string(R"({"status":"ok", "settings":)")
+                            + settings.dump() + "}";
+                    res.set_content(json_response, "application/json");
+                });
 
         // Hook dispatcher into all GET and POST requests
         _svr.Get(".*",
@@ -121,14 +123,12 @@ namespace springtail {
                 sockaddr_in* s = (sockaddr_in*)&addr;
                 char ip[INET_ADDRSTRLEN];
                 inet_ntop(AF_INET, &s->sin_addr, ip, sizeof(ip));
-                ip_port += ip;
-                ip_port += ":" + std::to_string(ntohs(s->sin_port));
+                ip_port = fmt::format("{}:{}", ip, s->sin_port);
             } else if (addr.ss_family == AF_INET6) {
                 sockaddr_in6* s = (sockaddr_in6*)&addr;
                 char ip[INET6_ADDRSTRLEN];
                 inet_ntop(AF_INET6, &s->sin6_addr, ip, sizeof(ip));
-                ip_port += ip;
-                ip_port += ":" + std::to_string(ntohs(s->sin6_port));
+                ip_port = fmt::format("{}:{}", ip, s->sin6_port);
             }
         }
         return ip_port;
