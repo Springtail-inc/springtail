@@ -1,0 +1,176 @@
+- name: Provision custom Postgres for the local containers
+  hosts: localhost
+  become: true
+  vars:
+    pg_version: 16                 # PostgreSQL major version
+    username: "{{ lookup('ansible.builtin.env', 'FDW_USER', default='fdw_user') }}"                  # OS + DB superuser to create
+    password: "{{ lookup('ansible.builtin.env', 'FDW_USER_PASSWORD', default='fdw_user_password') }}"
+    pg_data_location_base: "/var/lib/postgresql/{{ pg_version }}"
+    pg_data_location: "/var/lib/postgresql/{{ pg_version }}/{{ username }}"
+
+    # derived
+    pg_bin_path: "/usr/lib/postgresql/{{ pg_version }}/bin"
+    service_name: "postgresql-{{ username }}"
+    default_maintenance_db: __springtail
+    disable_ssl_flag: "{{ lookup('ansible.builtin.env', '$DISABLE_SSL_FLAG', default='') }}"
+  tasks:
+    - name: Ensure parent data directory exists
+      file:
+        path: "{{ pg_data_location_base }}"
+        state: directory
+        owner: postgres
+        group: postgres
+        mode: "0755"
+
+    - name: Create OS user {{ username }} without a password
+      user:
+        name: "{{ username }}"
+        system: yes
+        shell: /bin/bash
+        create_home: no
+        password: '*'                       # disables interactive login
+
+    - name: Allow {{ username }} password‑less sudo
+      copy:
+        dest: "/etc/sudoers.d/{{ username }}"
+        content: "{{ username }} ALL=(ALL) NOPASSWD:ALL"
+        owner: root
+        group: root
+        mode: "0440"
+        validate: "visudo -cf %s"
+
+    - name: Create data directory for custom cluster
+      file:
+        path: "{{ pg_data_location }}"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0700"
+        recurse: yes
+
+    - name: Ensure PostgreSQL runtime dir is owned by {{ username }}
+      file:
+        path: /var/run/postgresql
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+
+    - name: Make sure the environment file directory exists
+      file:
+        path: "/etc/postgresql/{{ pg_version }}/{{ username }}"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+
+    - name: Create (or update timestamp on) the environment file
+      ansible.builtin.file:
+        path: "/etc/postgresql/{{ pg_version }}/{{ username }}/environment"
+        state: touch
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+
+    - name: Initialise cluster (idempotent)
+      command: >
+        {{ pg_bin_path }}/initdb -D {{ pg_data_location }} --username {{ username }}
+      become: yes
+      become_user: "{{ username }}"
+      args:
+        creates: "{{ pg_data_location }}/PG_VERSION"  # This is the idempotency key.
+
+    - name: Ensure Supervisor config dir exists
+      file:
+        path: /etc/fdw/conf.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Install systemd unit for custom PostgreSQL
+      copy:
+        dest: "/etc/fdw/conf.d/{{ service_name }}.conf"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [program:{{ service_name }}]
+          command=/bin/bash -lc 'set -a; source /etc/postgresql/{{ pg_version }}/{{ username }}/environment; exec {{ pg_bin_path }}/postgres -D {{ pg_data_location }}'
+          ; ↑ load env file, export vars (set -a), then exec postgres in foreground
+          
+          user={{ username }}
+          directory={{ pg_data_location }}
+          
+          ; Startup & restart behavior
+          autostart=true
+          autorestart=true
+          startsecs=5
+
+          ; Stop fast (systemd used: pg_ctl stop -m fast ⇒ SIGINT)
+          stopsignal=INT
+          stopwaitsecs=60
+          stopasgroup=true
+          killasgroup=true
+          
+          ; Logging
+          redirect_stderr=true
+          stdout_logfile=/var/log/postgresql/{{ username }}.log
+          stdout_logfile_maxbytes=50MB
+          stdout_logfile_backups=5
+
+    - name: Patch configs to allow connections from remote for all users
+      ansible.builtin.shell: |
+        postgres_config="{{ pg_data_location }}/postgresql.conf"
+        pg_hba="{{ pg_data_location }}/pg_hba.conf"
+        
+        echo "listen_addresses = '*'" >> "$postgres_config"
+        echo  "host      all      all      0.0.0.0/0      scram-sha-256" >> "$pg_hba"
+
+    - name: Enable SSL for PG
+      ansible.builtin.shell: |
+        postgres_config="{{ pg_data_location }}/postgresql.conf"
+        cp /certs/server_*.pem {{ pg_data_location }}/
+        chown {{ username }}:{{ username }} {{ pg_data_location }}/server_*.pem
+        chmod 400 {{ pg_data_location }}/server_*.pem
+        
+        if [ ! -z "{{ disable_ssl_flag }}" ]; then
+          echo "Skipping SSL configuration as DISABLE_SSL_FLAG is set"
+          exit 0
+        fi
+        echo "ssl = on" >> ${postgres_config}
+        echo "ssl_cert_file = '{{ pg_data_location }}/server_cert.pem'" >> ${postgres_config}
+        echo "ssl_key_file = '{{ pg_data_location }}/server_key.pem'" >> ${postgres_config}
+
+    - name: Log configuration
+      ansible.builtin.shell: |
+        chmod 777 /var/log/postgresql
+        rm /var/log/postgresql/*.log
+        postgres_config="{{ pg_data_location }}/postgresql.conf"
+        echo "logging_collector = on" >> ${postgres_config}
+        echo "log_directory = '/var/log/postgresql'" >> ${postgres_config}
+        echo "log_filename = 'postgresql.log'" >> ${postgres_config}
+        echo "log_rotation_age = 0" >> ${postgres_config}
+        echo "log_rotation_size = 0" >> ${postgres_config}
+
+    - name: Reload systemd to pick up new unit
+      ansible.builtin.shell: |
+        supervisorctl reread && supervisorctl update
+
+    - name: Enable and start custom PostgreSQL service
+      ansible.builtin.shell: |
+        systemctl start {{ service_name }}
+        timeout 15 bash -c 'until systemctl status "$1" | grep "RUNNING"; do sleep 1; done' _ "$service_name"
+
+    - name: Add the PG superuser with password to PG
+      ansible.builtin.shell: |
+        psql -h localhost -d postgres -c "ALTER ROLE {{ username }} WITH PASSWORD '{{ password }}' ;"
+      become: yes
+      become_user: "{{ username }}"
+
+    - name: Drop the Default Postgres and use custom maint db
+      ansible.builtin.shell: |
+        createdb --maintenance-db=postgres "{{ default_maintenance_db }}"
+        dropdb --maintenance-db="{{ default_maintenance_db }}" postgres
+      become: yes
+      become_user: "{{ username }}"

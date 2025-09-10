@@ -1,0 +1,13 @@
+FROM python:3.13.7-trixie AS builder
+
+WORKDIR /app
+RUN apt-get update && apt-get install -y build-essential libpq-dev curl unzip python3-dev
+COPY ./opt/controller/requirements.txt .
+RUN pip install --prefix=/install -r requirements.txt
+COPY ./opt/controller/ .
+
+FROM python:3.13.7-slim-trixie AS runtime
+RUN apt-get update && apt-get install -y curl jq vim unzip postgresql-client
+COPY --from=builder /install /usr/local
+COPY --from=builder /app /app
+WORKDIR /app

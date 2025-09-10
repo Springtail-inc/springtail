@@ -1,0 +1,235 @@
+#!/usr/bin/env bash
+# Fake `systemctl` shim, which uses `supervisorctl` underneath.
+# Rationale: in local cluster containers we don't run systemd, instead, we run `supervisord`.
+# Yet most of our service controls go with systemctl. This script allows using systemctl commands to
+# control services managed by supervisord. It works for basic service verbs against a single supervisord
+# instance.
+#
+# Limitations:
+# - no real unit deps/sockets/timers (cron)
+
+set -euo pipefail
+
+# ---- Config (override via env) ----------------------------------------------
+SUPERVISORCTL="${SUPERVISORCTL:-supervisorctl}"        # path or name
+SUPERVISOR_CONFIG="${SUPERVISOR_CONFIG:-}"              # e.g. /etc/supervisor/supervisord.conf
+SUPERVISOR_SOCKET="${SUPERVISOR_SOCKET:-}"              # e.g. unix:///run/supervisor.sock
+SUPERVISOR_CONF_DIR="${SUPERVISOR_CONF_DIR:-/etc/supervisor/conf.d}" # where to look for program configs
+SUPERVISOR_ENABLE_WRITES="${SUPERVISOR_ENABLE_WRITES:-}" # set non-empty to allow enable/disable edits
+# -----------------------------------------------------------------------------
+
+sc() {
+  # Call supervisorctl with configured socket/config.
+  local args=()
+  [[ -n "$SUPERVISOR_CONFIG" ]] && args+=(-c "$SUPERVISOR_CONFIG")
+  [[ -n "$SUPERVISOR_SOCKET" ]] && args+=(-s "$SUPERVISOR_SOCKET")
+  "$SUPERVISORCTL" "${args[@]}" "$@"
+}
+
+strip_unit_suffix() {
+  local name="$1"
+  name="${name%.service}"
+  echo "$name"
+}
+
+# Map supervisor state -> systemd-ish
+map_state() {
+  # input: supervisor state token (RUNNING/STOPPED/EXITED/FATAL/BACKOFF/STARTING/STOPPING)
+  case "$1" in
+    RUNNING)  echo "active" ;;
+    STARTING) echo "activating" ;;
+    STOPPING) echo "deactivating" ;;
+    EXITED|STOPPED) echo "inactive" ;;
+    FATAL|BACKOFF) echo "failed" ;;
+    UNKNOWN|*) echo "inactive" ;;
+  esac
+}
+
+svc_state() {
+  # prints: "<mapped> <raw>"
+  local unit="$1"; unit="$(strip_unit_suffix "$unit")"
+  # supervisorctl status emits: "name           RUNNING pid ...; uptime ..."
+  local line
+  if ! line="$(sc status "$unit" 2>&1 || true)"; then
+    echo "inactive unknown"; return
+  fi
+  if [[ "$line" =~ ^No\ such\ process ]]; then
+    echo "inactive unknown"; return
+  fi
+  # extract state (2nd field)
+  local raw state
+  raw="$(awk '{print $2}' <<<"$line" | tr -d '\r')"
+  state="$(map_state "$raw")"
+  echo "$state $raw"
+}
+
+print_status() {
+  local unit="$1"; unit="$(strip_unit_suffix "$unit")"
+  local line
+  line="$(sc status "$unit" 2>&1 || true)"
+  if [[ "$line" =~ ^No\ such\ process ]]; then
+    echo "● $unit.service - (supervisor)"; echo "   Loaded: not-found (No such program)"; exit 4
+  fi
+  local raw="$(awk '{print $2}' <<<"$line")"
+  local mapped="$(map_state "$raw")"
+  echo "● $unit.service - (supervisor)"
+  echo "   Loaded: loaded (via supervisor)"
+  echo "   Active: $mapped (raw: $raw)"
+  # show log hint
+  echo "   Logs: use 'supervisorctl tail -f $unit'"
+  # preserve systemctl status exit semantics: 0 if active, nonzero otherwise
+  [[ "$mapped" == "active" ]] || exit 3
+}
+
+is_active() {
+  local unit="$1"
+  read -r mapped _ < <(svc_state "$unit")
+  case "$mapped" in
+    active)    echo "active"; exit 0 ;;
+    failed)    echo "failed"; exit 3 ;;
+    *)         echo "inactive"; exit 3 ;;
+  esac
+}
+
+is_failed() {
+  local unit="$1"
+  read -r mapped _ < <(svc_state "$unit")
+  [[ "$mapped" == "failed" ]]
+}
+
+is_enabled() {
+  # Best-effort: parse conf files under SUPERVISOR_CONF_DIR for [program:<name>] autostart
+  local unit="$1"; unit="$(strip_unit_suffix "$unit")"
+  local file
+  file="$(grep -rl --include='*.conf' "^\[program:${unit}\]" "$SUPERVISOR_CONF_DIR" 2>/dev/null | head -n1 || true)"
+  if [[ -z "$file" ]]; then
+    echo "unknown"; exit 4
+  fi
+  # grab autostart=... in the same [program] section
+  local val
+  val="$(awk -v u="$unit" '
+    $0 ~ "\\[program:"u"\\]" { insec=1; next }
+    /^\[/ { insec=0 }
+    insec && $1 ~ /^autostart[[:space:]]*=/ { print $0; exit }
+  ' "$file" | awk -F= '{gsub(/[[:space:]]/,"",$2); print tolower($2)}')"
+  if [[ "$val" == "true" ]]; then
+    echo "enabled"; exit 0
+  elif [[ "$val" == "false" ]]; then
+    echo "disabled"; exit 1
+  else
+    # default is autostart=true if not present in many setups, but we can’t assume—mark "unknown"
+    echo "unknown"; exit 4
+  fi
+}
+
+do_enable_disable() {
+  local action="$1" unit="$2"; unit="$(strip_unit_suffix "$unit")"
+  if [[ -z "$SUPERVISOR_ENABLE_WRITES" ]]; then
+    echo "Hint: set SUPERVISOR_ENABLE_WRITES=1 to allow ${action} to edit confs in $SUPERVISOR_CONF_DIR" >&2
+    echo "Please edit your supervisor program config to set autostart=$( [[ "$action" == enable ]] && echo true || echo false )." >&2
+    [[ "$action" == enable ]] && exit 0 || exit 0
+  fi
+  local file
+  file="$(grep -rl --include='*.conf' "^\[program:${unit}\]" "$SUPERVISOR_CONF_DIR" 2>/dev/null | head -n1 || true)"
+  if [[ -z "$file" ]]; then
+    echo "No config found for $unit under $SUPERVISOR_CONF_DIR" >&2; exit 4
+  fi
+  # Insert or replace autostart in section
+  awk -v u="$unit" -v desired="$( [[ "$action" == enable ]] && echo "true" || echo "false")" '
+    BEGIN{insec=0; done=0}
+    $0 ~ "\\[program:"u"\\]" {insec=1; print; next}
+    /^\[/ {if(insec && !done){print "autostart="desired; done=1} insec=0}
+    insec && $1 ~ /^autostart[[:space:]]*=/ {print "autostart="desired; insec=2; done=1; next}
+    {print}
+    END{if(insec==1 && !done){print "autostart="desired}}
+  ' "$file" > "$file.tmp"
+  mv "$file.tmp" "$file"
+  # Apply
+  sc reread >/dev/null || true
+  sc update >/dev/null || true
+  [[ "$action" == enable ]] && echo "enabled" || echo "disabled"
+}
+
+list_units() {
+  # Simple table from supervisorctl status
+  local out; out="$(sc status || true)"
+  printf "%-40s %-10s %-10s %-s\n" "UNIT" "LOAD" "ACTIVE" "SUB"
+  while IFS= read -r line; do
+    # name  STATE  ...
+    local name state
+    name="$(awk '{print $1}' <<<"$line")"
+    state="$(awk '{print $2}' <<<"$line")"
+    local mapped; mapped="$(map_state "$state")"
+    printf "%-40s %-10s %-10s %-s\n" "${name}.service" "loaded" "$mapped" "$state"
+  done <<< "$out"
+}
+
+usage() {
+  cat <<EOF
+Fake systemctl (supervisor-backed)
+Usage: systemctl <verb> [UNIT...]
+
+Supported verbs:
+  start|stop|restart|reload|status|is-active|is-failed|is-enabled|enable|disable|daemon-reload|list-units
+Notes:
+  * Units map to supervisor [program:<name>] (".service" suffix optional).
+  * enable/disable edits autostart= in conf when SUPERVISOR_ENABLE_WRITES is set.
+  * daemon-reload -> supervisorctl reread && update
+EOF
+}
+
+verb="${1:-}"; shift || true
+case "${verb:-}" in
+  start|stop|restart)
+    [[ $# -ge 1 ]] || { echo "No unit specified"; exit 1; }
+    rc=0
+    for u in "$@"; do
+      u="$(strip_unit_suffix "$u")"
+      sc "$verb" "$u" || rc=$?
+    done
+    exit "$rc"
+    ;;
+  reload)
+    [[ $# -ge 1 ]] || { echo "No unit specified"; exit 1; }
+    rc=0
+    for u in "$@"; do
+      u="$(strip_unit_suffix "$u")"
+      sc signal HUP "$u" || rc=$?
+    done
+    exit "$rc"
+    ;;
+  status)
+    [[ $# -ge 1 ]] || { list_units; exit 0; }
+    # emulate systemctl: status of each
+    for u in "$@"; do print_status "$u" || true; echo; done
+    ;;
+  is-active)
+    [[ $# -eq 1 ]] || { echo "Usage: systemctl is-active UNIT"; exit 1; }
+    is_active "$1"
+    ;;
+  is-failed)
+    [[ $# -eq 1 ]] || { echo "Usage: systemctl is-failed UNIT"; exit 1; }
+    if is_failed "$1"; then echo "failed"; exit 0; else echo "active"; exit 1; fi
+    ;;
+  is-enabled)
+    [[ $# -eq 1 ]] || { echo "Usage: systemctl is-enabled UNIT"; exit 1; }
+    is_enabled "$1"
+    ;;
+  enable|disable)
+    [[ $# -eq 1 ]] || { echo "Usage: systemctl $verb UNIT"; exit 1; }
+    do_enable_disable "$verb" "$1"
+    ;;
+  daemon-reload)
+    sc reread
+    sc update
+    ;;
+  list-units)
+    list_units
+    ;;
+  --help|-h|help|"")
+    usage
+    ;;
+  *)
+    echo "Unsupported verb: $verb"; usage; exit 2
+    ;;
+esac

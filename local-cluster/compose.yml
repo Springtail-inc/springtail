@@ -1,0 +1,268 @@
+networks:
+  local-cluster:
+    name: springtail_local_cluster_network
+    driver: bridge
+    external: true
+
+volumes:
+  shadow_logs:
+  pgdata:
+  data:
+  ingestion_logs:
+  proxy_logs:
+  fdw_logs:
+
+services:
+  # The bootstrap box
+  controller-bootstrap:
+    image: "local-cluster-controller:latest"
+    restart: "no"
+    env_file:
+      - ./env/env.services
+      - ./env/env.postgres
+      - ./env/env.setup
+      - ./env/.env
+    networks:
+      - local-cluster
+    user: root
+    volumes:
+      - ./env:/envfiles:rw  # We will be updating this file for other services to consume.
+      - ./_temp/prod.system.settings.json:/etc/default-system-settings.json:ro
+      - ./_temp/scripts:/app/scripts:ro
+    init: true
+    command: [ "sh", "-c", "cd /app && ./local-cluster-bootstrap " ]
+    depends_on:
+      primary:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      aws-mock:
+        condition: service_healthy
+
+  # The controller box
+  controller:
+    image: "local-cluster-controller:latest"
+    restart: unless-stopped
+    ports:
+      - "19824:8000"
+    env_file:
+      - ./env/env.services
+      - ./env/env.postgres
+      - ./env/env.setup
+      - ./env/.env
+    networks:
+      - local-cluster
+    user: root
+    volumes:
+      - ./env:/envfiles:rw
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./_temp/prod.system.settings.json:/etc/default-system-settings.json:ro
+      - ./_temp/scripts:/app/scripts:ro
+    init: true
+    command: [ "sh", "-lc", "cd /app && ./stctl server run --port $$CONTROLLER_PORT" ]
+    depends_on:
+      controller-bootstrap:
+        condition: service_completed_successfully
+      primary:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      aws-mock:
+        condition: service_healthy
+
+  # The primary DB
+  primary:
+    image: postgres-custom:16
+    networks:
+      - local-cluster
+    env_file:
+      - ./env/env.postgres
+      - ./env/.env
+    ports:
+      - "${HOST_PORT_PRIMARY_DB}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./etc/postgresql:/etc/postgresql:ro
+    restart: unless-stopped
+    command:
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_wal_senders=10"
+      - "-c"
+      - "max_replication_slots=10"
+      - "-c"
+      - "max_connections=100"
+      - "-c"
+      - "max_prepared_transactions=64"
+      - "-c"
+      - "config_file=/etc/postgresql/postgresql_${PRIMARY_SSL_FLAG}.conf"
+      - "-c"
+      - "hba_file=/etc/postgresql/pg_hba_${PRIMARY_SSL_FLAG}.conf"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $$POSTGRES_USER" ]
+      interval: 5s
+      timeout: 3s
+      retries: 2
+
+  redis:
+    image: redis:7.0
+    networks:
+      - local-cluster
+    ports:
+      - "${HOST_PORT_REDIS}:6379"
+    env_file:
+      - ./env/env.services
+    volumes:
+      - ./etc/redis:/etc/redis:ro
+    command: [ "/etc/redis/redis.conf" ]
+    restart: unless-stopped
+    healthcheck:
+      # Use the REDIS_USER, REDIS_PASSWORD from env file if ACL is enabled
+      test: [ "CMD-SHELL", "redis-cli", "-h", "$$REDIS_HOST", "--user", "$$REDIS_USER", "-a", "$$REDIS_PASSWORD", "-p", "$$REDIS_PORT", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 2
+
+  ingestion:
+    image: ${IMAGE:-local-cluster-img:latest}
+    privileged: true
+    security_opt:
+      - seccomp:unconfined
+    ulimits:
+      core: -1
+    networks:
+      - local-cluster
+    ports:
+      - "2049:2049"
+    env_file:
+      - ./env/env.services
+      - ./env/env.setup
+      - ./env/.env
+    environment:
+      - SERVICE_NAME=ingestion
+      - INSTANCE_KEY=default
+    cap_add:
+      - SYS_ADMIN
+      - SYS_PTRACE
+    volumes:
+      - data:/fsx:rw
+      - ./etc/supervisor:/etc/supervisor:rw
+      - "./opt/springtail/init-services.sh:${INSTALL_DIR}/init-services.sh:ro"
+      - "ingestion_logs:${INSTALL_DIR}/logs:rw"
+      - .certs:/certs:ro
+    restart: unless-stopped
+    command: [ "supervisord","-n","-c","/etc/supervisor/supervisord.conf" ]
+    depends_on:
+      controller-bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      # Checks if there is `<SUCCESS>` in /var/log/supervisor/init-services.out.log
+      test: [ "CMD-SHELL", "grep -q '<SUCCESS>' /var/log/supervisor/init-services.out.log || exit 1" ]
+      interval: 15s
+      retries: 10
+      timeout: 5s
+
+  proxy:
+    image: ${IMAGE:-local-cluster-img:latest}
+    privileged: true
+    security_opt:
+      - seccomp:unconfined
+    ulimits:
+      core: -1
+    networks:
+      - local-cluster
+    ports:
+      - "${HOST_PORT_PROXY}:5432"
+    env_file:
+      - ./env/env.services
+      - ./env/env.setup
+      - ./env/.env
+    environment:
+      - SERVICE_NAME=proxy
+      - NFS_SERVER_IP=ingestion
+      - INSTANCE_KEY=default
+    cap_add:
+      - SYS_ADMIN
+      - SYS_PTRACE
+    restart: unless-stopped
+    volumes:
+      - data:/fsx:ro
+      - ./etc/supervisor:/etc/supervisor:rw
+      - shadow_logs:/shadow_logs:rw
+      - "./opt/springtail/init-services.sh:${INSTALL_DIR}/init-services.sh:ro"
+      - "proxy_logs:${INSTALL_DIR}/logs:rw"
+      - .certs:/certs:ro
+    command: [ "supervisord","-n","-c","/etc/supervisor/supervisord.conf" ]
+    depends_on:
+      ingestion:
+        condition: service_started
+      controller-bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      # Checks if there is `<SUCCESS>` in /var/log/supervisor/init-services.out.log
+      test: [ "CMD-SHELL", "grep -q '<SUCCESS>' /var/log/supervisor/init-services.out.log || exit 1" ]
+      interval: 15s
+      retries: 10
+      timeout: 5s
+
+  fdw:
+    image: ${IMAGE:-local-cluster-img:latest}
+    privileged: true
+    security_opt:
+      - seccomp:unconfined
+    ulimits:
+      core: -1
+    networks:
+      - local-cluster
+    ports:
+      - "${HOST_PORT_FDW}:5432"
+    env_file:
+      - ./env/env.services
+      - ./env/env.setup
+      - ./env/.env
+    environment:
+      - SERVICE_NAME=fdw
+      - NFS_SERVER_IP=ingestion
+      - INSTANCE_KEY=default
+    cap_add:
+      - SYS_ADMIN
+      - SYS_PTRACE
+    restart: unless-stopped
+    volumes:
+      - data:/fsx:ro
+      - ./etc/supervisor:/etc/supervisor:rw
+      - "./opt/springtail/init-services.sh:${INSTALL_DIR}/init-services.sh:ro"
+      - "./opt/springtail/customize-pg.yml:${INSTALL_DIR}/customize-pg.yml:ro"
+      - "fdw_logs:${INSTALL_DIR}/logs:rw"
+      - .certs:/certs:ro
+    command: [ "supervisord","-n","-c","/etc/supervisor/supervisord.conf" ]
+    depends_on:
+      ingestion:
+        condition: service_started
+      controller-bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      # Checks if there is `<SUCCESS>` in /var/log/supervisor/init-services.out.log
+      test: [ "CMD-SHELL", "grep -q '<SUCCESS>' /var/log/supervisor/init-services.out.log || exit 1" ]
+      interval: 15s
+      retries: 24
+      timeout: 5s
+
+  # Mock AWS Service
+  aws-mock:
+    image: motoserver/moto:latest
+    networks:
+      - local-cluster
+    environment:
+      MOTO_PORT: 7000
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    ports:
+      - "${HOST_PORT_MOTO}:7000"
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:7000 || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3

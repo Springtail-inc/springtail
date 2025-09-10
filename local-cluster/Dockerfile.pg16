@@ -1,0 +1,11 @@
+FROM postgres:16
+ENV PGDATA=/var/lib/postgresql/data
+COPY .certs /certs
+USER postgres
+RUN   cp /certs/server_cert.pem "$PGDATA/server.crt" && \
+          cp /certs/server_key.pem "$PGDATA/server.key" && \
+          cp /certs/ca_cert.pem "$PGDATA/root.crt" && \
+          chown postgres:postgres "$PGDATA/server.crt" "$PGDATA/server.key" "$PGDATA/root.crt" && \
+          chmod 600 "$PGDATA/server.key" && \
+          chmod 644 "$PGDATA/server.crt" && \
+          chmod 644 "$PGDATA/root.crt"

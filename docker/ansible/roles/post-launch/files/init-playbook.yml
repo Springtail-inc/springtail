@@ -1,0 +1,66 @@
+---
+- name: Initialize Springtail app and cron jobs
+  hosts: localhost
+  become: true
+
+  vars:
+    # defaults; you can override these via --extra-vars
+    installation_dir: /opt/springtail
+    log_dir: /opt/springtail/logs
+    pid_dir: /opt/springtail/pids
+    shadow_logs_dir: /shadow_logs
+
+    # S3 bucket and SSM parameter for configuration
+    s3_bucket: "{{ lookup('ansible.builtin.env', 'S3_BUCKET') }}"
+    db_instance_id: "{{ lookup('ansible.builtin.env', 'DATABASE_INSTANCE_ID', default='unknown') }}"
+    postgres_superuser: "{{ lookup('ansible.builtin.env', 'FDW_USER', default='postgres') }}"
+    service_name: "{{ lookup('ansible.builtin.env', 'SERVICE_NAME', default='n/a') }}"
+
+  tasks:
+    - name: Ensure required directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+        owner: springtail
+        group: springtail
+      loop:
+        - "{{ installation_dir }}"
+
+    - name: Check whether /shadow_logs exists
+      ansible.builtin.stat:
+        path: "{{ shadow_logs_dir }}"
+      register: shadow_dir_stat
+
+    - name: Change owner if and only if the directory is present
+      ansible.builtin.file:
+        path: "{{ shadow_logs_dir }}"
+        owner: springtail
+        group: springtail
+        state: directory
+      when:
+        - shadow_dir_stat.stat.exists
+        - shadow_dir_stat.stat.isdir
+
+    - name: Ensure logs/pids dirs exist with 0777
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0777'
+        owner: springtail
+        group: springtail
+      loop:
+        - "{{ log_dir }}"
+        - "{{ pid_dir }}"
+
+    - name: Remove old Springtail Coordinator directory if any
+      ansible.builtin.file:
+        path: "{{ installation_dir }}/stc"
+        state: absent
+
+    - name: Ensure the Springtail Coordinator directory is owned by springtail
+      ansible.builtin.file:
+        path: "{{ installation_dir }}/stc"
+        state: directory
+        owner: springtail
+        group: springtail

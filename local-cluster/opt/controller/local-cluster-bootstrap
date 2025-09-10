@@ -1,0 +1,64 @@
+#!/bin/bash
+# Note: We assume the following env vars are set:
+# POSTGRES_USER, POSTGRES_PASSWORD, FDW_USER, FDW_USER_PASSWORD
+# REDIS_HOST, REDIS_PORT, REDIS_USER, REDIS_PASSWORD
+# DATABASE_INSTANCE_ID, ORGANIZATION_ID, ACCOUNT_ID
+# DEPLOYMENT_ENV (local)
+# AWS_SNS_ENDPOINT
+# AWS_SECRETSMANAGER_ENDPOINT
+# PACKAGE_FILE_NAME=/Users/jeffreybian/Downloads/springtail-202509122101-6927f6d.tgz
+
+set -e -o pipefail
+
+# 1. Creates the SNS topic
+topic_arn=$(./stctl notifications create-topic --topic-name sns-topic)
+
+# 2. Replace the SNS_TOPIC_ARN in file DYNAMIC_SERVICE_ENV
+if [ -z "$DYNAMIC_SERVICE_ENV" ]; then
+  echo "DYNAMIC_SERVICE_ENV variable is not set. This points to the .env file containing runtime generated variables."
+  exit 1
+fi
+if [ ! -f "$DYNAMIC_SERVICE_ENV" ]; then
+  echo "DYNAMIC_SERVICE_ENV file does not exist: $DYNAMIC_SERVICE_ENV"
+  exit 1
+fi
+# Remove any existing SNS_TOPIC_ARN line
+sed -i '/^SNS_TOPIC_ARN=/d' "$DYNAMIC_SERVICE_ENV"
+# Append the new SNS_TOPIC_ARN line
+echo "SNS_TOPIC_ARN=$topic_arn" >> "$DYNAMIC_SERVICE_ENV"
+
+# 3. Try to extract the GIT SHA from the package file name, only if SYSTEM_SETTINGS_GITSHA is not set already
+if [ -z "$SYSTEM_SETTINGS_GITSHA" ]; then
+  echo "SYSTEM_SETTINGS_GITSHA is not set, trying to extract from $PACKAGE_FILE_NAME"
+  if [ -z "$PACKAGE_FILE_NAME" ]; then
+    echo "PACKAGE_FILE_NAME is not set"
+    exit 1
+  fi
+  if [[ "$PACKAGE_FILE_NAME" =~ springtail-[0-9]{12}-([a-f0-9]{7})\.tgz ]]; then
+    SYSTEM_SETTINGS_GITSHA="${BASH_REMATCH[1]}"
+  else
+    echo "Failed to extract GIT SHA from PACKAGE_FILE_NAME: $PACKAGE_FILE_NAME"
+    exit 1
+  fi
+fi
+
+# 4. Populate initial config info.
+if [ -z "$DISABLE_SSL" ]; then
+  ./stctl config init \
+    --primary-db-host primary \
+    --system-settings-gitsha "$SYSTEM_SETTINGS_GITSHA" \
+    --db-info 1 postgres springtail_pub_1 springtail_replication_slot_1 \
+    --fdw-info default fdw \
+    --replication-cred "$POSTGRES_USER" "$POSTGRES_PASSWORD" text \
+    --fdw-superuser-cred "$FDW_USER" "$FDW_USER_PASSWORD" text \
+    --force-set
+else
+  ./stctl config init "$DISABLE_SSL_FLAG" \
+    --primary-db-host primary \
+    --system-settings-gitsha "$SYSTEM_SETTINGS_GITSHA" \
+    --db-info 1 postgres springtail_pub_1 springtail_replication_slot_1 \
+    --fdw-info default fdw \
+    --replication-cred "$POSTGRES_USER" "$POSTGRES_PASSWORD" text \
+    --fdw-superuser-cred "$FDW_USER" "$FDW_USER_PASSWORD" text \
+    --force-set
+fi
