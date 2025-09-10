@@ -12,6 +12,7 @@
 #include <common/exception.hh>
 #include <common/logging.hh>
 #include <common/json.hh>
+#include <common/properties.hh>
 
 #include <pg_repl/pg_common.hh>
 #include <pg_repl/pg_msg_stream.hh>

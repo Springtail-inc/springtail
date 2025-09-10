@@ -77,16 +77,16 @@ OpenTelemetry::SpdlogExporter::_log_span(const opentelemetry::sdk::trace::SpanDa
         std::string value_str;
 
         // Handle different attribute types
-        if (std::holds_alternative<std::string>(value)) {
-            value_str = std::get<std::string>(value);
-        } else if (std::holds_alternative<int64_t>(value)) {
-            value_str = std::to_string(std::get<int64_t>(value));
-        } else if (std::holds_alternative<int32_t>(value)) {
-            value_str = std::to_string(std::get<int32_t>(value));
-        } else if (std::holds_alternative<double>(value)) {
-            value_str = std::to_string(std::get<double>(value));
-        } else if (std::holds_alternative<bool>(value)) {
-            value_str = std::to_string(std::get<bool>(value));
+        if (opentelemetry::nostd::holds_alternative<std::string>(value)) {
+            value_str = opentelemetry::nostd::get<std::string>(value);
+        } else if (opentelemetry::nostd::holds_alternative<int64_t>(value)) {
+            value_str = std::to_string(opentelemetry::nostd::get<int64_t>(value));
+        } else if (opentelemetry::nostd::holds_alternative<int32_t>(value)) {
+            value_str = std::to_string(opentelemetry::nostd::get<int32_t>(value));
+        } else if (opentelemetry::nostd::holds_alternative<double>(value)) {
+            value_str = std::to_string(opentelemetry::nostd::get<double>(value));
+        } else if (opentelemetry::nostd::holds_alternative<bool>(value)) {
+            value_str = std::to_string(opentelemetry::nostd::get<bool>(value));
         } else {
             value_str = fmt::format("Unsupported Type: {}", value.index());
         }

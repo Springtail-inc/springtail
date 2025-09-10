@@ -158,6 +158,7 @@ springtail_init_daemon(const std::optional<std::string> &log_filename,
     service_runners.emplace_back(std::make_unique<RedisMgrRunner>());
     service_runners.emplace_back(std::make_unique<PropertiesCacheRunner>());
     service_runners.emplace_back(std::make_unique<CoordinatorRunner>());
+    service_runners.emplace_back(std::make_unique<AdminServerRunner>());
 
     if (!ServiceRegister::get_instance()->start(service_runners)) {
         exit(1);

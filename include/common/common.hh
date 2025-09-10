@@ -1,18 +1,17 @@
 #pragma once
 
+#include <stdint.h>
 #include <unistd.h>
 #include <sys/time.h>
 
+#include <algorithm>
+#include <cassert>
 #include <csignal>
 #include <cstdio>
 #include <deque>
 #include <string>
 #include <vector>
 #include <sstream>
-
-#include <common/logging.hh>
-#include <common/properties.hh>
-#include <common/exception.hh>
 
 namespace springtail {
     /**

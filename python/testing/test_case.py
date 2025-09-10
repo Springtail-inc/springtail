@@ -20,6 +20,9 @@ import common
 
 _GLOBAL_CONFIG_FILE = '__config.sql'
 
+# In verify, don't fetch results for sql statements that begin with the following tokens
+_GLOBAL_NO_FETCH_STATEMENT = ["prepare"];
+
 class TestCase:
     """Class to manage a single test-case.  Handles all phases of the
     test case and stores the result of the test.
@@ -499,7 +502,7 @@ class TestCase:
         """Execute the provided SQL using the provided cursor."""
         db_name = cursor.connection.info.dbname
         if not quiet:
-            logging.debug(f'Execute transaction \'{txn}\' database \'{db_name}\' SQL: {sql}')
+            logging.debug(f'Execute transaction \'{txn}\' database \'{db_name}\' SQL: {sql}\' do_fetch: {do_fetch}')
         try:
             cursor.execute(sql)
 
@@ -823,7 +826,7 @@ class TestCase:
 
         return ranking_sql
 
-    def _replica_command(self, command: dict) -> Optional[dict]:
+    def _replica_command(self, command: dict, do_fetch: bool = True) -> Optional[dict]:
         """Runs a SQL command against the Springtail replica
         database.
 
@@ -837,7 +840,7 @@ class TestCase:
 
         with connection.cursor() as cursor:
             if command['type'] == 'sql':
-                return self._execute_sql(cursor, command['sql'], True, 'replica')
+                return self._execute_sql(cursor, command['sql'], do_fetch, 'replica')
 
             elif command['type'] == 'table_exists':
                 results = {}
@@ -1217,8 +1220,11 @@ class TestCase:
 
         # execute the verification commands against both databases, compare the results
         for command in self._sections['verify'][0]['sequential']:
-            primary_result = self._execute_command(command, True)
-            replica_result = self._replica_command(command)
+            do_fetch = True
+            if command['type'] == 'sql' and any(item.lower() == command['sql'].split()[0].lower() for item in _GLOBAL_NO_FETCH_STATEMENT):
+                do_fetch = False
+            primary_result = self._execute_command(command, do_fetch)
+            replica_result = self._replica_command(command, do_fetch)
             if command["type"] == "benchmark":
                 primary_time = primary_result[0][0][0]['Execution Time']
                 replica_time = replica_result[0][0][0]['Execution Time']

@@ -25,7 +25,7 @@ jobs:
     needs: [ system-settings-check ]
     if: ${{ github.event.pull_request.draft == false }}
     with:
-      base_image_tag: ${{ vars.IMAGE_TAG_DEBUG }}
+      base_image_tag: ci-debug-202509091508-gold
       build_type: "debug"
     secrets:
       aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
