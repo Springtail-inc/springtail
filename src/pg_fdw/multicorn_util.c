@@ -335,6 +335,8 @@ deparse_sortgroup(PlannerInfo *root, Oid foreigntableid, RelOptInfo *rel)
 static void
 computeDeparsedSortGroup(List *deparsed,
         void *planstate,
+        void *scan_state,
+        List* quals,
         List **apply_pathkeys,
         List **deparsed_pathkeys)
 {
@@ -349,7 +351,7 @@ computeDeparsedSortGroup(List *deparsed,
     if (deparsed == NIL)
         return;
 
-    sortable_fields = fdw_can_sort(planstate, deparsed);
+    sortable_fields = fdw_can_sort(planstate, scan_state, deparsed, quals);
 
     /* Don't go further if FDW can't enforce any sort */
     if (sortable_fields == NIL)
@@ -599,13 +601,14 @@ canonicalOpExpr(OpExpr *opExpr, Relids base_relids)
  *	- Var or Const value: the value.
  */
 static void
-extractClauseFromOpExpr(PlannerInfo *root,
+extractClauseFromOpExpr(List* state, size_t qual_index, PlannerInfo *root,
                         Relids base_relids,
                         OpExpr *op,
                         List **quals)
 {
     Var		   *left;
     Expr	   *right;
+    bool added = false;
 
     /* Use a "canonical" version of the op expression, to ensure that the */
     /* left operand is a Var on our relation. */
@@ -614,40 +617,67 @@ extractClauseFromOpExpr(PlannerInfo *root,
     {
         left = list_nth(op->args, 0);
         right = list_nth(op->args, 1);
+
+        if (!root) {
+            if (!state || !fdw_is_qual_ignored(state, qual_index)) {
+                *quals = lappend(*quals, makeQual(left->varattno,
+                                                  getOperatorString(op->opno),
+                                                  right, false, false));
+                added = true;
+            }
+        }
         /* Do not add it if it either contains a mutable function, or makes */
         /* self references in the right hand side. */
-        if (!(contain_volatile_functions((Node *) right) ||
+        else if (!(contain_volatile_functions((Node *) right) ||
               bms_is_subset(base_relids, pull_varnos(root, (Node *) right))))
         {
             *quals = lappend(*quals, makeQual(left->varattno,
                                               getOperatorString(op->opno),
                                               right, false, false));
+            added = true;
         }
+    }
+    if (root && state) {
+        fdw_set_qual_state(state, qual_index, !added);
     }
 }
 
 static void
-extractClauseFromScalarArrayOpExpr(PlannerInfo *root,
+extractClauseFromScalarArrayOpExpr(List* state, size_t qual_index, PlannerInfo *root,
                                    Relids base_relids,
                                    ScalarArrayOpExpr *op,
                                    List **quals)
 {
     Var		   *left;
     Expr	   *right;
+    bool added = false;
 
     op = canonicalScalarArrayOpExpr(op, base_relids);
     if (op)
     {
         left = list_nth(op->args, 0);
         right = list_nth(op->args, 1);
-        if (!(contain_volatile_functions((Node *) right) ||
+        if (!root) {
+            if (!state || !fdw_is_qual_ignored(state, qual_index)) {
+                *quals = lappend(*quals, makeQual(left->varattno,
+                                                  getOperatorString(op->opno),
+                                                  right, true,
+                                                  op->useOr));
+                added = true;
+            }
+        }
+        else if (!(contain_volatile_functions((Node *) right) ||
               bms_is_subset(base_relids, pull_varnos(root, (Node *) right)))) // XXX planner info missing
         {
             *quals = lappend(*quals, makeQual(left->varattno,
                                               getOperatorString(op->opno),
                                               right, true,
                                               op->useOr));
+            added = true;
         }
+    }
+    if (root && state) {
+        fdw_set_qual_state(state, qual_index, !added);
     }
 }
 
@@ -656,11 +686,12 @@ extractClauseFromScalarArrayOpExpr(PlannerInfo *root,
  *	to a suitable intermediate representation.
  */
 static void
-extractClauseFromNullTest(PlannerInfo *root,
+extractClauseFromNullTest(List* state, size_t qual_index, PlannerInfo *root,
                           Relids base_relids,
                           NullTest *node,
                           List **quals)
 {
+    bool added = true;
     if (node->argisrow) {
         // this is a null check for entire row, not handled right now
         return;
@@ -689,15 +720,20 @@ extractClauseFromNullTest(PlannerInfo *root,
                           false,
                           false);
         *quals = lappend(*quals, result);
+        added = true;
+    }
+    if (root && state) {
+        fdw_set_qual_state(state, qual_index, !added);
     }
 }
 
 static void
-extractClauseFromBoolTest(PlannerInfo *root,
+extractClauseFromBoolTest(List* state, size_t qual_index, PlannerInfo *root,
                           Relids base_relids,
                           BooleanTest *node,
                           List **quals)
 {
+    bool added  = false;
     if (IsA(node->arg, Var))
     {
         Var		   *var = (Var *) node->arg;
@@ -737,6 +773,10 @@ extractClauseFromBoolTest(PlannerInfo *root,
                               false);
         }
         *quals = lappend(*quals, result);
+        added = true;
+    }
+    if (root && state) {
+        fdw_set_qual_state(state, qual_index, !added);
     }
 }
 
@@ -745,7 +785,8 @@ extractClauseFromBoolTest(PlannerInfo *root,
  *
  */
 static void
-extractRestrictions(PlannerInfo *root,
+extractRestrictions(List* state, size_t qual_index, 
+                    PlannerInfo *root,
                     Relids base_relids,
                     Expr *node,
                     List **quals)
@@ -753,20 +794,20 @@ extractRestrictions(PlannerInfo *root,
     switch (nodeTag(node))
     {
         case T_OpExpr:
-            extractClauseFromOpExpr(root, base_relids,
+            extractClauseFromOpExpr(state, qual_index, root, base_relids,
                                     (OpExpr *) node, quals);
             break;
         case T_NullTest:
-            extractClauseFromNullTest(root, base_relids,
+            extractClauseFromNullTest(state, qual_index, root, base_relids,
                                       (NullTest *) node, quals);
             break;
         case T_ScalarArrayOpExpr:
-            extractClauseFromScalarArrayOpExpr(root, base_relids,
+            extractClauseFromScalarArrayOpExpr(state, qual_index, root, base_relids,
                                                (ScalarArrayOpExpr *) node,
                                                quals);
             break;
         case T_BooleanTest:
-            extractClauseFromBoolTest(root, base_relids,
+            extractClauseFromBoolTest(state, qual_index, root, base_relids,
                                       (BooleanTest *) node, quals);
             break;
 
@@ -785,6 +826,10 @@ extractRestrictions(PlannerInfo *root,
                                 "extractClauseFrom"),
                          errdetail("nodetag: %d, %s", (int)nodeTag(node),
                                    nodeToString(node))));
+            }
+            // ignore it moving forward
+            if (root && state) {
+                fdw_set_qual_state(state, qual_index, true);
             }
             break;
     }
@@ -846,12 +891,48 @@ colnameFromVar(Var *var, PlannerInfo *root)
 	}
 }
 
+void _get_relation_quals(PlannerInfo *root,
+                     RelOptInfo *baserel, bool set_state, List** qual_list, List** join_quals)
+{
+    size_t qual_index = 0;
+
+    ListCell* lc;
+    /* Extract the restrictions from the plan. */
+    foreach(lc, baserel->baserestrictinfo)
+    {
+        extractRestrictions(set_state?baserel->fdw_private:NULL, qual_index++, root, baserel->relids,
+                            ((RestrictInfo *) lfirst(lc))->clause,
+                            qual_list);
+    }
+
+    if (!join_quals) {
+        return;
+    }
+
+    // Extract restrictions from potential join clauses 
+    //
+    foreach(lc, root->eq_classes)
+    {
+        EquivalenceClass *ec = (EquivalenceClass *) lfirst(lc);
+        if (ec->ec_members->length <= 1) {
+            continue;
+        }
+        ListCell   *ri_lc;
+        foreach(ri_lc, ec->ec_sources)
+        {
+            RestrictInfo *ri = (RestrictInfo *) lfirst(ri_lc);
+            // it must be a join related clause
+            if (ri->clause_relids && !bms_is_subset(ri->clause_relids, baserel->relids)) {
+                extractRestrictions(set_state?baserel->fdw_private:NULL, qual_index++, root, baserel->relids, ri->clause, join_quals);
+            }
+        }
+    }
+}
 
 void
 multicorn_getRelSize(PlannerInfo *root,
                      RelOptInfo *baserel,
-                     Oid foreigntableid,
-                     SpringtailPlanState *planstate)
+                     Oid foreigntableid)
 {
     double rows;
     int width;
@@ -882,12 +963,7 @@ multicorn_getRelSize(PlannerInfo *root,
 
             if (!att->attisdropped)
             {
-                // save the local attno and the attname
-                SpringtailTargetColumn *target = (SpringtailTargetColumn *)palloc0(sizeof(SpringtailTargetColumn));
-                target->attname = makeString(NameStr(att->attname));
-                target->attnum = att->attnum;
-
-                planstate->target_list = lappend(planstate->target_list, target);
+                fdw_add_target(baserel->fdw_private, NameStr(att->attname), att->attnum);
             }
         }
     }
@@ -904,49 +980,24 @@ multicorn_getRelSize(PlannerInfo *root,
             target->attnum = var->varattno;
 
             if (target->attname != NULL && strVal(target->attname) != NULL) {
-                planstate->target_list = lappend(planstate->target_list, target);
+                fdw_add_target(baserel->fdw_private, strVal(target->attname), var->varattno);
             }
         }
     }
-    /* Extract the restrictions from the plan. */
-    foreach(lc, baserel->baserestrictinfo)
-    {
-        extractRestrictions(root, baserel->relids,
-                            ((RestrictInfo *) lfirst(lc))->clause,
-                            &planstate->qual_list);
-    }
-
-    // Extract restrictions from potential join clauses 
     List* join_quals = NIL;
-    foreach(lc, root->eq_classes)
-    {
-        EquivalenceClass *ec = (EquivalenceClass *) lfirst(lc);
-        if (ec->ec_members->length <= 1) {
-            continue;
-        }
-        ListCell   *ri_lc;
-        foreach(ri_lc, ec->ec_sources)
-        {
-            RestrictInfo *ri = (RestrictInfo *) lfirst(ri_lc);
-            // it must be a join related clause
-            if (ri->clause_relids && !bms_is_subset(ri->clause_relids, baserel->relids)) {
-                extractRestrictions(root, baserel->relids, ri->clause, &join_quals);
-            }
-        }
-    }
+    List* quals = NIL;
+    _get_relation_quals(root, baserel, true, &quals, &join_quals);
 
-    fdw_get_rel_size(planstate, planstate->target_list, planstate->qual_list, join_quals, &rows, &width);
+    fdw_get_rel_size(baserel->fdw_private, quals, join_quals, &rows, &width);
 
     baserel->rows = rows;
     baserel->reltarget->width = width;
-    planstate->width = width;
 }
 
-List *
+void
 multicorn_getForeignPaths(PlannerInfo *root,
                           RelOptInfo *baserel,
-                          Oid foreigntableid,
-                          SpringtailPlanState *planstate)
+                          Oid foreigntableid)
 {
     List				*paths; /* List of ForeignPath */
     ListCell		    *lc;
@@ -954,12 +1005,15 @@ multicorn_getForeignPaths(PlannerInfo *root,
     /* These lists are used to handle sort pushdown */
     List				*apply_pathkeys = NULL;
     List				*deparsed_pathkeys = NULL;
+    List* quals = NIL;
+    List* join_quals = NIL;
 
-    List *fdw_private = list_make1((void *)planstate);
+    _get_relation_quals(root, baserel, false, &quals, &join_quals);
 
-    /* Extract a friendly version of the pathkeys. */
-    /* Returns a List of a Lists<attnum, rows> */
-    List *possiblePaths = fdw_get_path_keys(planstate); // see pathKeys()
+    // this will create PgFdwState
+    void *state = fdw_create_scan_state(baserel->fdw_private, quals, join_quals);
+
+    List *possiblePaths = fdw_get_path_keys(baserel->fdw_private, state); // see pathKeys()
 
     /* Try to find parameterized paths */
     paths = findPaths(root, baserel, possiblePaths, SPRINGTAIL_STARTUP_COST,
@@ -985,7 +1039,9 @@ multicorn_getForeignPaths(PlannerInfo *root,
         if (deparsed)
         {
             /* Update the sort_*_pathkeys lists if needed */
-            computeDeparsedSortGroup(deparsed, planstate, &apply_pathkeys,
+            computeDeparsedSortGroup(deparsed, baserel->fdw_private, state,
+                    quals,
+                    &apply_pathkeys,
                     &deparsed_pathkeys);
         }
     }
@@ -1017,46 +1073,26 @@ multicorn_getForeignPaths(PlannerInfo *root,
             add_path(baserel, (Path *) newpath);
         }
     }
+    fdw_delete_scan_state(state);
 }
 
 
 ForeignScan *
-multicorn_getForeignPlan(PlannerInfo *root,
-                         RelOptInfo *baserel,
+multicorn_getForeignPlan(RelOptInfo *baserel,
                          Oid foreigntableid,
                          ForeignPath *best_path,
                          List *tlist,
-                         List *scan_clauses,
-                         Plan *outer_plan,
-                         SpringtailPlanState *planstate)
+                         List *scan_clauses)
 {
-    Index		scan_relid = baserel->relid;
-    ListCell   *lc;
-    best_path->path.pathtarget->width = planstate->width;
+    Index scan_relid = baserel->relid;
+    best_path->path.pathtarget->width = fdw_get_rel_width(baserel->fdw_private);
     scan_clauses = extract_actual_clauses(scan_clauses, false);
-    /* Extract the quals coming from a parameterized path, if any */
-    if (best_path->path.param_info)
-    {
-        foreach(lc, scan_clauses)
-        {
-            extractRestrictions(
-                root,
-                baserel->relids,
-                (Expr *) lfirst(lc),
-                &planstate->qual_list);
-        }
-    }
-    planstate->pathkeys = (List *) best_path->fdw_private;
-
-    List *fdw_private = list_make1((void *)planstate);
-
-    elog(LOG, "multicorn_getForeignPlan()");
 
     return make_foreignscan(tlist,
                             scan_clauses,
                             scan_relid,
                             scan_clauses,   /* no expressions to evaluate */
-                            fdw_private,    /* private data */
+                            baserel->fdw_private,    /* private data */
                             NULL,           /* no custom tlist */
                             NULL,           /* All quals are meant to be rechecked */
                             NULL);
@@ -1077,6 +1113,8 @@ multicorn_buildSimpleQualList(ForeignScanState *node)
     foreach(lc, fs->fdw_exprs)
     {
         extractRestrictions(
+            NULL,
+            0,
             NULL,
             bms_make_singleton(fs->scan.scanrelid),
                             ((Expr *) lfirst(lc)),
@@ -1122,3 +1160,4 @@ multicorn_buildSimpleQualList(ForeignScanState *node)
 
     return result;
 }
+

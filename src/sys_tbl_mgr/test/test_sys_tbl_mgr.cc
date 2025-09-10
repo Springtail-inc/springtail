@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <barrier>
 
+#include <postgresql/server/catalog/pg_type_d.h>
+
 #include <gtest/gtest.h>
 
 #include <common/init.hh>
@@ -163,8 +165,8 @@ namespace {
         create_msg.oid = tid;
         create_msg.namespace_name = "public";
         create_msg.table = name;
-        create_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 1, 0, false, true});
-        create_msg.columns.push_back({"col2", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 2, 0, true, false});
+        create_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), TEXTOID, "foo", 1, 0, false, true});
+        create_msg.columns.push_back({"col2", static_cast<uint8_t>(SchemaType::INT32), INT4OID, std::nullopt, 2, 0, true, false});
 
         _client->create_table(_db, xid, create_msg);
 

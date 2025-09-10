@@ -1,6 +1,8 @@
 #include <google/protobuf/empty.pb.h>
 #include <grpcpp/grpcpp.h>
 
+#include <postgresql/server/catalog/pg_type_d.h>
+
 #include <common/constants.hh>
 #include <common/properties.hh>
 #include <grpc/grpc_server.hh>
@@ -38,8 +40,13 @@ Service::CreateIndex(grpc::ServerContext* context,
 
     try {
         // perform the CREATE INDEX
-        const auto &index_info = _create_index(*request);
-        response->set_action("create_index");
+        bool created = false;
+        const auto &index_info = _create_index(*request, created);
+        if (created) {
+            response->set_action("create_index");
+        } else {
+            response->set_action("no_op");
+        }
         *response->mutable_index() = index_info;
 
         span.span()->SetStatus(opentelemetry::trace::StatusCode::kOk);
@@ -299,7 +306,7 @@ Service::GetUnfinishedIndexesInfo(grpc::ServerContext* context,
 }
 
 proto::IndexInfo
-Service::_create_index(const proto::IndexRequest& request)
+Service::_create_index(const proto::IndexRequest& request, bool &created)
 {
     XidLsn xid(request.xid(), request.lsn());
 
@@ -320,10 +327,55 @@ Service::_create_index(const proto::IndexRequest& request)
     // Set namespace ID for the requested index
     mutable_index_request.mutable_index()->set_namespace_id(ns_info->id);
 
-    _upsert_index_name(request.db_id(), mutable_index_request.index(), xid, keys);
-
+    if (_check_index_columns(request.db_id(), mutable_index_request.index(), keys, xid)) {
+        created = _upsert_index_name(request.db_id(), mutable_index_request.index(), xid, keys);
+    }
     return mutable_index_request.index();
 }
+
+bool
+Service::_check_index_columns(uint64_t db_id, const proto::IndexInfo & index_info, const std::map<uint32_t, uint32_t> & keys, XidLsn xid)
+{
+    // get the schema prior to this change
+    auto info = _get_schema_info(db_id, index_info.table_id(), xid, xid);
+    for (auto [idx_position, column_position]: keys) {
+        uint32_t column_type = 0;
+        for (auto const& c : info->columns()) {
+            if (c.position() == column_position) {
+                column_type = c.pg_type();
+                break;
+            }
+        }
+        CHECK(column_type != 0) << "Failed to find column at position " << column_position << " for table " << index_info.table_id();
+        switch(column_type) {
+            case FLOAT8OID:
+            case INT8OID:
+            case TIMESTAMPOID:
+            case TIMESTAMPTZOID:
+            case TIMEOID:
+            case DATEOID:
+            case FLOAT4OID:
+            case INT4OID:
+            case INT2OID:
+            case BOOLOID:
+            case CHAROID:
+            case UUIDOID:
+            case VARCHAROID:
+            case TEXTOID:
+            // added
+            case TEXTARRAYOID:
+            case NUMERICOID:
+                break;
+            default:
+                LOG_ERROR("Unsupported index column type {} for index column: table {}, index {}",
+                    column_type, idx_position,
+                    index_info.table_id(), index_info.name());
+                return false;
+        }
+    }
+    return true;
+}
+
 
 grpc::Status
 Service::DropIndex(grpc::ServerContext* context,
@@ -455,8 +507,7 @@ Service::_drop_index(const XidLsn& xid,
     auto info = _find_index(db_id, index_id, xid, tid);
 
     if (!info) {
-        LOG_DEBUG(LOG_SCHEMA, "Drop index not found: {}@{} - {}", db_id, xid.xid,
-                            index_id);
+        LOG_WARN("Drop index not found: {}@{} - {}", db_id, xid.xid, index_id);
         return;
     }
     auto& index_info = std::get<0>(*info);
@@ -1323,7 +1374,8 @@ Service::SwapSyncTable(grpc::ServerContext* context,
         CHECK_EQ(index.lsn(), constant::RESYNC_CREATE_LSN);
 
         // note: we don't store the create_index DDL since it doesn't need to be replayed at the FDW
-        this->_create_index(index);
+        bool created = false;
+        this->_create_index(index, created);
     }
 
     // 6. update the metadata of the table

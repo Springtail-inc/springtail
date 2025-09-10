@@ -164,7 +164,12 @@ dump_table(uint64_t db_id,
     FormData_pg_attribute attrdata[fields->size()];
     Form_pg_attribute attrs[fields->size()];
 
-    List *target_list = NIL;
+    PgFdwMgr::fdw_init(nullptr, false);
+    PgFdwMgr *mgr = PgFdwMgr::get_instance();
+
+    // create the fdw state for the table @xid and begin the scan
+    List* planstate = mgr->fdw_create_state(db_id, tid, xid, xid);
+    SpringtailPlanState ps{planstate};
 
     // iterate over column map and extract attrnums
     int i = 0;
@@ -176,18 +181,12 @@ dump_table(uint64_t db_id,
             attrs[i]->atttypmod = -1;
 
             // append col.first to target_list
-            target_list = lappend(target_list, makeInteger(col.first));
-
+            ps.add_target_column(col.second.name, col.first);
             i++;
         }
     }
 
-    PgFdwMgr::fdw_init(nullptr, false);
-    PgFdwMgr *mgr = PgFdwMgr::get_instance();
-
-    // create the fdw state for the table @xid and begin the scan
-    PgFdwState *state = mgr->fdw_create_state(db_id, tid, xid, xid);
-    mgr->fdw_begin_scan(state, fields->size(), attrs, target_list, nullptr);
+    PgFdwState* state = mgr->fdw_begin_scan(&ps, fields->size(), attrs, nullptr);
 
     // iterate through the table and print the values
     Datum values[fields->size()];
