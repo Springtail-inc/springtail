@@ -72,7 +72,8 @@
             "hole_punch_block_size": 4096,
             "max_entries_in_memory": 100000
         },
-        "metrics_update_freq_sec": 10
+        "metrics_update_freq_sec": 10,
+        "io_request_queue_size": 16
     },
     "log_mgr": {
         "replication_log_path": "repl_logs",

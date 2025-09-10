@@ -101,7 +101,8 @@ namespace springtail {
          * @brief Construct a new Thread Pool object
          * @param max_threads number of threads to create
          */
-        ThreadPool(int max_threads)
+        ThreadPool(int max_threads, int io_request_queue_size=-1)
+            : _queue(ConcurrentQueue<ThreadRequest>(io_request_queue_size))
         {
             for (int i = 0; i < max_threads; i++) {
                 ThreadWorkerPtr worker = std::make_shared<ThreadWorker>();
