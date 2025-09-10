@@ -9,6 +9,7 @@
 #include <sw/redis++/redis++.h>
 
 #include <common/common.hh>
+#include <common/logging.hh>
 #include <common/prefix_tree.hh>
 #include <common/redis.hh>
 
@@ -289,7 +290,7 @@ namespace springtail {
         _get_value(const nlohmann::json::json_pointer &json_ptr, const nlohmann::json &json_object)
         {
             try {
-                return json_object.at(json_ptr);
+                return std::cref(json_object.at(json_ptr));
             } catch (const nlohmann::json::out_of_range& e) {
                 return {};
             } catch (const nlohmann::json::parse_error& e) {

@@ -1044,7 +1044,7 @@ namespace springtail
     PgCopyTable::copy_table(uint64_t db_id, uint64_t xid,
                             const nlohmann::json &include_json)
     {
-        return _internal_copy(db_id, xid, std::nullopt, std::nullopt, std::nullopt, include_json);
+        return _internal_copy(db_id, xid, std::nullopt, std::nullopt, std::nullopt, std::optional{include_json});
     }
 
     void

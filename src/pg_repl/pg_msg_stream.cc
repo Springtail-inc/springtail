@@ -12,6 +12,7 @@
 #include <common/exception.hh>
 #include <common/logging.hh>
 #include <common/json.hh>
+#include <common/properties.hh>
 
 #include <pg_repl/pg_common.hh>
 #include <pg_repl/pg_msg_stream.hh>
@@ -28,7 +29,7 @@ namespace springtail {
         :_db_id{db_id}
     {}
 
-    PgMsgStreamReader::PgMsgStreamReader(std::optional<uint64_t> db_id, 
+    PgMsgStreamReader::PgMsgStreamReader(std::optional<uint64_t> db_id,
             const std::filesystem::path &start_file,
             uint64_t start_offset,
             uint64_t end_offset)
@@ -1036,7 +1037,7 @@ namespace springtail {
             CHECK_EQ(object_type, "table");
             return nullptr;
         }
-    
+
         drop_table_msg.xid = message.xid; // only valid in streaming mode
         drop_table_msg.lsn = message.lsn;
 

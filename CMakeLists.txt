@@ -108,6 +108,7 @@ endif()
 
 ## source modules
 set(MODULES
+  admin_http
   benchmarks
   common
   grpc

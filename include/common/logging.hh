@@ -72,12 +72,6 @@ namespace springtail {
         LOG_ALL = 0xFFFFFFFF
     };
 
-    /**
-     * @brief Forward declaration for OpenTelemetrySink.
-     *
-     */
-    // class OpenTelemetrySink;
-
     namespace logging {
         /**
          * @brief Logger singleton class
@@ -180,7 +174,6 @@ namespace springtail {
              */
             static inline std::atomic<bool> _inited_flag{false};
             SpdlogSink _spdlog_sink;        ///< sink object for CHECKs and DCHECKs
-            // std::shared_ptr<OpenTelemetrySink> _otel_sink{nullptr};     ///< OTEL sink
 
             uint32_t _log_mask{LOG_ALL};    ///< current log mask
 
