@@ -1170,9 +1170,12 @@ StorageCache::PageCache::background_cleaner()
         _extents.insert(pos, pair.first);
     }
 
-    std::future<std::vector<uint64_t>>
-    StorageCache::Page::_async_flush(const ExtentHeader &header)
+    std::vector<uint64_t>
+    StorageCache::Page::_async_flush_extents(const ExtentHeader &header)
     {
+        // Acquire lock in the async thread
+        boost::unique_lock lock(this->_mutex);
+
         auto cache = StorageCache::get_instance();
         std::vector<std::future<void>> offset_futures;
 
@@ -1197,10 +1200,9 @@ StorageCache::PageCache::background_cleaner()
                     // update the extent header
                     (*e)->header() = header;
                     auto flush_task = FlushTask{ref, std::move(e), true};
-                    auto flush_future_opt = cache->_data_cache->async_flush(*flush_task.safe_ext.value());
-                    if (flush_future_opt) {
-                        offset_futures.push_back(std::move(*flush_future_opt));
-                    }
+                    auto flush_future = cache->_data_cache->async_flush(*flush_task.safe_ext.value());
+                    offset_futures.push_back(std::move(flush_future));
+
                     tasks.push_back(std::move(flush_task));
                 } else {
                     tasks.push_back(std::move(FlushTask{ref, std::move(e), true}));
@@ -1210,34 +1212,33 @@ StorageCache::PageCache::background_cleaner()
             }
         }
 
-        return std::async(std::launch::async, [offset_futures = std::move(offset_futures),
-                tasks = std::move(tasks), this]() mutable
-                -> std::vector<uint64_t>
-                {
-                    // Acquire lock in the async thread
-                    boost::unique_lock lock(this->_mutex);
+        for (auto& fut: offset_futures) {
+            fut.get();
+        }
 
-                    auto cache = StorageCache::get_instance();
-                    for (auto& fut: offset_futures) {
-                        fut.get();
-                    }
+        std::vector<uint64_t> offsets;
 
-                    std::vector<uint64_t> offsets;
+        for (auto& task: tasks) {
+            if (task.is_flushing) {
+                // bring MUTABLE extents to CLEAN
+                if ((*task.safe_ext.value())->state() == CacheExtent::State::MUTABLE) {
+                    // return the now MUTABLE extent back to the read cache
+                    cache->_data_cache->reinsert(*task.safe_ext.value());
+                }
+                task.ext_ref = task.safe_ext.value().get_ref();
+            }
+            CHECK(task.ext_ref.is_clean());
+            offsets.push_back(task.ext_ref.id());
+        }
+        return offsets;
+    }
 
-                    for (auto& task: tasks) {
-                        if (task.is_flushing) {
-                            // bring MUTABLE extents to CLEAN
-                            if ((*task.safe_ext.value())->state() == CacheExtent::State::MUTABLE) {
-                                // return the now MUTABLE extent back to the read cache
-                                cache->_data_cache->reinsert(*task.safe_ext.value());
-                            }
-                            task.ext_ref = task.safe_ext.value().get_ref();
-                        }
-                        CHECK(task.ext_ref.is_clean());
-                        offsets.push_back(task.ext_ref.id());
-                    }
-                    return offsets;
-                });
+    std::future<std::vector<uint64_t>>
+    StorageCache::Page::_async_flush(const ExtentHeader &header)
+    {
+        return std::async(std::launch::async,
+                &StorageCache::Page::_async_flush_extents,
+                this, std::move(header));
     }
 
     std::vector<uint64_t>
@@ -1459,7 +1460,7 @@ StorageCache::PageCache::background_cleaner()
         _flush(extent);
     }
 
-    std::optional<std::future<void>>
+    std::future<void>
     StorageCache::DataCache::async_flush(CacheExtentPtr extent)
     {
         boost::unique_lock lock(_mutex);
@@ -1567,24 +1568,22 @@ StorageCache::PageCache::background_cleaner()
         return extent;
     }
 
-    std::optional<std::future<void>>
-    StorageCache::DataCache::_async_flush(CacheExtentPtr extent)
-    {
+    void StorageCache::DataCache::_flush_and_update_extent(CacheExtentPtr extent) {
+
+        // Acquire lock before proceeding
+        boost::unique_lock lock(this->_mutex);
+
         // if already flushing, wait for completion
         if (extent->_state == CacheExtent::State::FLUSHING) {
-            boost::unique_lock lock(_mutex, boost::adopt_lock);
-
             auto cv = extent->_flush_cv;
             cv->wait(lock, [&extent](){ return extent->_state != CacheExtent::State::FLUSHING; });
 
-            // note: this doesn't unlock, just releases the adopt_lock
-            lock.release();
-            return std::nullopt;
+            return;
         }
 
         // if the extent isn't DIRTY, don't need to flush
         if (extent->_state != CacheExtent::State::DIRTY) {
-            return std::nullopt;
+            return;
         }
 
         // mark the extent as FLUSHING so that other callers will block until flush complete
@@ -1593,51 +1592,57 @@ StorageCache::PageCache::background_cleaner()
 
         // perform the flush
 
+        lock.unlock();
+
         auto handle = IOMgr::get_instance()->open(extent->_file, IOMgr::IO_MODE::APPEND, true);
         auto async_flush_future = extent->async_flush(handle);
 
-        return std::async(std::launch::async, [flush_response_future = std::move(async_flush_future),
-                extent = std::move(extent), this]() mutable
-                -> void
-                {
-                    boost::unique_lock lock(this->_mutex);
+        auto flush_response = async_flush_future.get();
 
-                    auto flush_response = flush_response_future.get();
+        // On-disk size of the originating extent
+        uint64_t prev_extent_size = extent->_extent_size;
 
-                    // On-disk size of the originating extent
-                    uint64_t prev_extent_size = extent->_extent_size;
+        // notify the vacuumer of the now-expired extent
+        if (extent->header().prev_offset != constant::UNKNOWN_EXTENT) {
+            Vacuumer::get_instance()->expire_extent(extent->_file, extent->header().prev_offset,
+                    prev_extent_size, extent->header().xid);
+        }
 
-                    // notify the vacuumer of the now-expired extent
-                    if (extent->header().prev_offset != constant::UNKNOWN_EXTENT) {
-                        Vacuumer::get_instance()->expire_extent(extent->_file, extent->header().prev_offset,
-                                prev_extent_size, extent->header().xid);
-                    }
+        extent->_extent_id = flush_response->offset;
+        extent->_extent_size = flush_response->next_offset - flush_response->offset;
 
-                    extent->_extent_id = flush_response->offset;
-                    extent->_extent_size = flush_response->next_offset - flush_response->offset;
+        // Lock again before updating cache and extent
+        lock.lock();
 
-                    // update the cache ID as pointing to the new extent ID
-                    this->_cache_id_map[extent->_cache_id] = extent->key();
+        // update the cache ID as pointing to the new extent ID
+        this->_cache_id_map[extent->_cache_id] = extent->key();
 
-                    // mark as MUTABLE, place on the clean LRU
-                    extent->_state = CacheExtent::State::MUTABLE;
+        // mark as MUTABLE, place on the clean LRU
+        extent->_state = CacheExtent::State::MUTABLE;
 
-                    // notify anyone waiting
-                    extent->_flush_cv->notify_all();
-                    extent->_flush_cv = nullptr;
-                });
+        // notify anyone waiting
+        extent->_flush_cv->notify_all();
+        extent->_flush_cv = nullptr;
+    }
+
+    std::future<void>
+    StorageCache::DataCache::_async_flush(CacheExtentPtr extent)
+    {
+        return std::async(std::launch::async,
+                &StorageCache::DataCache::_flush_and_update_extent,
+                this, std::move(extent));
     }
 
     void
     StorageCache::DataCache::_flush(CacheExtentPtr extent)
     {
         auto async_flush_future = _async_flush(extent);
-        if (async_flush_future) {
+        {
             boost::unique_lock lock(_mutex, boost::adopt_lock);
             // _flush async will take care of locking
             lock.unlock();
 
-            async_flush_future.value().get();
+            async_flush_future.get();
 
             lock.lock();
             lock.release();
