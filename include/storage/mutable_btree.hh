@@ -461,6 +461,14 @@ namespace springtail {
             mutable boost::shared_mutex _children_mutex; ///< A mutex to protect the map of children.  Can be acquired unique while sharing the primary mutex.
             std::map<uint64_t, std::shared_ptr<Page>> _children; ///< The set of children of this page that are part of a modified path through the tree.
             std::shared_ptr<Page> _parent; ///< Pointer to the parent page.  Won't change once the page is fully constructed.
+
+            /**
+             * @brief Flushes the contents of the page and updates the parent with the new pages.
+             * @param xid The XID at which the page is being written.
+             *
+             * @returns vector of new pages
+             */
+            std::vector<std::shared_ptr<MutableBTree::Page>> _get_new_pages_post_flush(uint64_t xid);
         };
 
     private:
@@ -746,6 +754,26 @@ namespace springtail {
          * @param keys The list of columns that make up the sort key of the tree.
          */
         void _init_schemas(ExtentSchemaPtr schema, const std::vector<std::string> &keys);
+
+        /**
+         * @brief Flushes the provided page to disk, updating the parent with the corrected pointers after
+         * the CoW and removes the child/parent references.  Requires that exclusive locks be held
+         * on both the parent and the page being flushed.
+         *
+         * @param page The page being flushed.
+         * @param parent The parent of the page being flushed.
+         * @returns vector of new pages
+         */
+        std::vector<MutableBTree::PagePtr> _flush_and_update_branch(PagePtr page, PagePtr parent);
+
+        /**
+         * @brief Calls flush internally, gets the new pages and updates the cache
+         *
+         * @param page      The page being flushed.
+         * @param parent    The parent of the page being flushed.
+         * @param data_lock exclusive lock on the page's disk mutex
+         */
+        void _flush_and_update_cache(PagePtr page, PagePtr parent, boost::unique_lock<boost::shared_mutex> data_lock);
 
         //// ITERATOR SUPPORT
     public:
