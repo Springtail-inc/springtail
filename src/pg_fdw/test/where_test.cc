@@ -111,16 +111,7 @@ namespace {
                 _attrs[i]->attnum = _columns[i].position;
                 strncpy(_attrs[i]->attname.data, _columns[i].name.c_str(), NAMEDATALEN - 1);
 
-                // We have to construct a SpringtailTargetColumn
-                // note: this uses new so has a memory leak, but it's fine for the unit test
-                SpringtailTargetColumn *target = new SpringtailTargetColumn;
-                target->attname = new String;
-                target->attname->sval = new char[_columns[i].name.size() + 1];
-                strncpy(target->attname->sval, _columns[i].name.c_str(), _columns[i].name.size());
-                target->attname->sval[_columns[i].name.size()] = 0;
-                target->attnum = _columns[i].position;
-
-                _target_list = lappend(_target_list, target);
+                _target_list.emplace_back(_columns[i].name, _columns[i].position);
             }
         }
 
@@ -149,7 +140,8 @@ namespace {
 
         static constexpr uint32_t _secondary_index_id{1234};
 
-        List *_target_list = nullptr;
+
+        std::vector<std::pair<std::string, uint64_t>> _target_list;
 
         std::map<QualOpName, std::string> _op_names = {
                 {EQUALS, "="},
@@ -257,33 +249,31 @@ namespace {
         }
 
         void
-        _run_scan(List *qual_list, const std::vector<std::vector<int32_t>> &filtered_data,
+        _run_scan(const List *qual_list, const std::vector<std::vector<int32_t>> &filtered_data,
                 uint32_t index_id = constant::INDEX_PRIMARY,
-                List *sortgroup = NIL)
+                const List *sortgroup = NIL)
         {
             // get the fdw mgr
             PgFdwMgr *mgr = PgFdwMgr::get_instance();
 
             // don't call create state as it calls xid mgr, just create state
             auto table = TableMgr::get_instance()->get_table(_db_id, _tid, _table_xid);
-            PgFdwState *state = new PgFdwState{table, _db_id, _tid, _table_xid};
 
-            // populate the attr_map -- usually done in fdw_get_rel_size()
-            ListCell *lc;
-            foreach(lc, _target_list) {
-                auto column = (SpringtailTargetColumn *)lfirst(lc);
-                state->attr_map.try_emplace(column->attnum, column->attnum);
+            SpringtailPlanState plan{_db_id, _tid, _table_xid};
+
+            for(const auto& [name, attnum]: _target_list) {
+                plan.add_target_column(name, attnum);
             }
 
-            SpringtailPlanState plan;
-            plan.pg_fdw_state = state;
-            plan.qual_list = qual_list;
+            PgFdwState *state = mgr->create_scan_state(&plan, qual_list, NIL);
 
             // this should setup the sortgroup index
-            mgr->fdw_can_sort(&plan, sortgroup, true);
+            mgr->fdw_can_sort(&plan, state, sortgroup, qual_list, true);
+
+            delete state;
 
             // begin the scan
-            mgr->fdw_begin_scan(state, _columns.size(), _attrs, _target_list, qual_list);
+            state = mgr->fdw_begin_scan(&plan, _columns.size(), _attrs, qual_list);
 
             if (state->sortgroup_index.has_value()) {
                 ASSERT_EQ(state->sortgroup_index->id, state->index->id);
