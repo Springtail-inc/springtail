@@ -44,7 +44,7 @@ namespace {
         static void TearDownTestSuite() {
             springtail_shutdown();
             // remove the log file
-            std::filesystem::remove(LOG_FILE);
+            //std::filesystem::remove(LOG_FILE);
         }
 
         void SetUp() override {
@@ -54,7 +54,7 @@ namespace {
         void TearDown() override {
             // remove truncated log file if exists
             if (std::filesystem::exists(LOG_FILE_TRUNC)) {
-                std::filesystem::remove(LOG_FILE_TRUNC);
+                //std::filesystem::remove(LOG_FILE_TRUNC);
             }
         }
 
@@ -108,7 +108,7 @@ namespace {
 
         // repair the log file
         auto last_lsn = PgMsgStreamReader::scan_log(1, LOG_FILE, false);
-        ASSERT_EQ(last_lsn, header.end_lsn + 1);
+        ASSERT_EQ(last_lsn, header.last_commit_lsn + 1);
     }
 
     TEST_F(LogRepair_Test, RepairTruncateLogFile)
@@ -129,8 +129,8 @@ namespace {
         // repair the log file
         auto last_lsn = PgMsgStreamReader::scan_log(1, LOG_FILE_TRUNC, true);
 
-        // for log gen, the start_lsn is the same as the previous end_lsn
-        ASSERT_EQ(last_lsn, header.start_lsn);
+
+        ASSERT_EQ(last_lsn, header.last_commit_lsn + 1);
     }
 
     TEST_F(LogRepair_Test, RepairTruncate2LogFile)
@@ -151,8 +151,8 @@ namespace {
         // repair the log file
         auto last_lsn = PgMsgStreamReader::scan_log(1, LOG_FILE_TRUNC, true);
 
-        // for log gen, the start_lsn is the same as the previous end_lsn
-        ASSERT_EQ(last_lsn, header.start_lsn);
+
+        ASSERT_EQ(last_lsn, header.last_commit_lsn + 1);
     }
 
     TEST_F(LogRepair_Test, RepairTruncate3LogFile)
@@ -174,6 +174,6 @@ namespace {
         auto last_lsn = PgMsgStreamReader::scan_log(1, LOG_FILE_TRUNC, true);
 
         // for log gen, the start_lsn is the same as the previous end_lsn
-        ASSERT_EQ(last_lsn, header.start_lsn);
+        ASSERT_EQ(last_lsn, header.last_commit_lsn + 1);
     }
 } // namespace

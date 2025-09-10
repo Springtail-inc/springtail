@@ -179,6 +179,7 @@ namespace springtail {
         uint32_t _next_table_id = 1000;   ///< next table id
         uint32_t _xid = 0;                ///< transaction id
         uint64_t _lsn = 1;                ///< lsn
+        uint64_t _last_commit_lsn = 0;    ///< last commit lsn
         uint64_t _commit_ts = 0;          ///< commit timestamp
 
         uint32_t _stream_xid = -1;        ///< current stream transaction id if in stream xact

@@ -39,7 +39,7 @@ namespace springtail {
         }
 
         // encode and write the header
-        PgMsgStreamHeader header{_buffer_offset, _lsn, _lsn};
+        PgMsgStreamHeader header{_buffer_offset, _last_commit_lsn};
         char header_buf[PgMsgStreamHeader::SIZE];
         header.encode_header(header_buf);
         if (::fwrite(header_buf, sizeof(header_buf), 1, _fp) != 1) {
@@ -54,8 +54,13 @@ namespace springtail {
         // rotate the LSN
         _log_written += _buffer_offset;
         if (_log_written > 500 || (_buffer[0] == pg_msg::MSG_COMMIT ||
-                                   _buffer[0] == pg_msg::MSG_STREAM_COMMIT ||
-                                   _buffer[0] == pg_msg::MSG_STREAM_ABORT)) {
+                                   _buffer[0] == pg_msg::MSG_STREAM_COMMIT)) {
+
+            if (_buffer[0] == pg_msg::MSG_COMMIT ||
+                _buffer[0] == pg_msg::MSG_STREAM_COMMIT) {
+                _last_commit_lsn = _lsn;
+            }
+
             _lsn++;
             _log_written = 0;
         }

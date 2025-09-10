@@ -15,44 +15,42 @@ namespace springtail {
      * @brief Msg Stream header
      */
     struct PgMsgStreamHeader {
-        LSN_t start_lsn;
-        LSN_t end_lsn;
-        uint32_t magic;
+        uint16_t magic;
         uint32_t msg_length;
+        LSN_t last_commit_lsn = INVALID_LSN; // LSN of last commit record seen before this message
 
         uint64_t header_offset=-1; // not stored in file, filled on reading this header
 
         /** Magic number used in log header */
-        static constexpr uint32_t MAGIC=0xDEFC8193UL;
+        static constexpr uint16_t MAGIC=0x8193;
 
         /** Size of the log header */
-        static constexpr int SIZE = (4 + 4 + 8 + 8);
+        static constexpr int SIZE = (2 + 4 + 8);
 
         PgMsgStreamHeader() = default;
 
-        PgMsgStreamHeader(uint32_t msg_length, LSN_t start_lsn, LSN_t end_lsn)
-            : start_lsn(start_lsn), end_lsn(end_lsn), magic(MAGIC),
-              msg_length(msg_length)
+        PgMsgStreamHeader(uint32_t msg_length, LSN_t commit_lsn)
+            : magic(MAGIC),
+              msg_length(msg_length),
+              last_commit_lsn(commit_lsn)
         {}
 
         PgMsgStreamHeader(const char * const buffer) {
-            magic = recvint32(buffer);
-            msg_length = recvint32(buffer + 4);
-            start_lsn = recvint64(buffer + 8);
-            end_lsn = recvint64(buffer + 16);
+            magic = recvint16(buffer);
+            msg_length = recvint32(buffer + 2);
+            last_commit_lsn = recvint64(buffer + 6);
             DCHECK_EQ(magic, MAGIC);
         }
 
         void encode_header(char * const buffer) const {
-            sendint32(MAGIC, buffer);
-            sendint32(msg_length, buffer + 4);
-            sendint64(start_lsn, buffer + 8);
-            sendint64(end_lsn, buffer + 16);
+            sendint16(MAGIC, buffer);
+            sendint32(msg_length, buffer + 2);
+            sendint64(last_commit_lsn, buffer + 6);
         }
 
         std::string to_string() const {
-            return fmt::format("Header: msg_length={}, start LSN={}, end LSN={}, hdr_offset={}",
-                                msg_length, start_lsn, end_lsn, header_offset);
+            return fmt::format("Header: msg_length={}, last_commit_lsn={}, hdr_offset={}",
+                                msg_length, last_commit_lsn, header_offset);
         }
     };
 
@@ -141,7 +139,18 @@ namespace springtail {
          */
         void set_streaming() { _streaming = true; }
 
+        /**
+         * @brief Get the current message header
+         * @return const PgMsgStreamHeader& current header
+         */
         const PgMsgStreamHeader& current_header() const { return _header; }
+
+        /**
+         * @brief Get the commit LSN from a commit message buffer
+         * @param buffer commit message buffer (either COMMIT or STREAM_COMMIT)
+         * @return LSN_t commit LSN
+         */
+        static LSN_t get_commit_lsn(const char *buffer);
 
     protected:
         // Proto V1; message lengths if fixed length; excludes first byte for opcode

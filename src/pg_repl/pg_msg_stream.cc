@@ -1523,6 +1523,36 @@ namespace springtail {
     }
 
     LSN_t
+    PgMsgStreamReader::get_commit_lsn(const char *buffer)
+    {
+        DCHECK(buffer[0] == pg_msg::MSG_COMMIT ||
+               buffer[0] == pg_msg::MSG_STREAM_COMMIT);
+
+        if (buffer[0] == pg_msg::MSG_COMMIT) {
+            // commit record is:
+            // COMMIT 'C'  1 byte
+            // flags       1 byte
+            // lsn         8 bytes
+            // timestamp   8 bytes
+            // xid         4 bytes
+            return recvint64(buffer + 2);
+        }
+
+        if (buffer[0] == pg_msg::MSG_STREAM_COMMIT) {
+            // stream commit record is:
+            // STREAM_COMMIT 'c'  1 byte
+            // xid                4 bytes
+            // flags              1 byte
+            // lsn                8 bytes
+            // end_lsn            8 bytes
+            // timestamp          8 bytes
+            return recvint64(buffer + 6);
+        }
+
+        return INVALID_LSN;
+    }
+
+    LSN_t
     PgMsgStreamReader::_repair_log(const std::filesystem::path &file, bool truncate)
     {
         // this replicates some login in _open_file and _seek_stream
@@ -1554,9 +1584,7 @@ namespace springtail {
             return INVALID_LSN;
         }
 
-        LSN_t current_start_lsn = INVALID_LSN;
         char current_msg_type = 0;
-
         uint64_t truncate_offset = 0;
         LSN_t restart_lsn = INVALID_LSN;
 
@@ -1568,17 +1596,8 @@ namespace springtail {
             CHECK(_read_header());
             current_msg_type = _stream.peek();
 
-            // make sure we don't go backwards
-            CHECK(current_start_lsn <= _header.start_lsn ||
-                  _header.start_lsn == 0);
-
-            // check if the LSN has changed, if so record it
-            // ignore start_lsn of 0 used for pgoutput generated messages
-            if (current_start_lsn != _header.start_lsn && _header.start_lsn != INVALID_LSN) {
-                current_start_lsn = _header.start_lsn;
-                truncate_offset = _current_offset - PgMsgStreamHeader::SIZE;
-                restart_lsn = current_start_lsn;
-            }
+            // header stores LSN of last commit record (even if this is a commit)
+            restart_lsn = _header.last_commit_lsn + 1;
 
             // try and peek at the current message type
             current_msg_type = _stream.peek();
@@ -1594,14 +1613,20 @@ namespace springtail {
 
             // the current message fits in the file
 
-            // see if this is last message of LSN,
-            // check for commit or abort message
+            // check for commit message
             if (current_msg_type == pg_msg::MSG_COMMIT ||
-                current_msg_type == pg_msg::MSG_STREAM_COMMIT ||
-                current_msg_type == pg_msg::MSG_STREAM_ABORT) {
+                current_msg_type == pg_msg::MSG_STREAM_COMMIT) {
 
+                // extract commit LSN for this commit message
+                char buffer[16]; // enough for commit/stream_commit message
+                _stream.read(buffer, sizeof(buffer));
+
+                auto commit_lsn = PgMsgStreamReader::get_commit_lsn(buffer);
+                DCHECK_NE(commit_lsn, INVALID_LSN);
+                DCHECK_GT(commit_lsn + 1, restart_lsn);
+
+                restart_lsn = commit_lsn + 1;
                 truncate_offset = _xlog_msg_end_offset;
-                restart_lsn = _header.end_lsn + 1;
             }
 
             if (_xlog_msg_end_offset == file_end_offset) {

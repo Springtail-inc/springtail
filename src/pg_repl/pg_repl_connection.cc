@@ -151,7 +151,7 @@ namespace springtail
             _connection->clear();
 
             if (do_init) {
-                // try and re-estable the slot
+                // try and re-establish the slot
                 try {
                     drop_replication_slot();
                     LSN = create_replication_slot();
@@ -240,20 +240,8 @@ namespace springtail
         _copy_msg_length = 0;
         _copy_msg_offset = 0;
 
-        // see libpqwalreceiver.c libpqrcv_endstreaming() for detailed way to shutdown cleanly
-        // send copy end message
-        if (_stream_connection->put_copy_end(nullptr) <= 0 || _stream_connection->flush()) {
-            LOG_ERROR("Error could not send end-of-streaming message to primary\n");
-            _stream_connection.reset(nullptr);
-            return;
-        }
-
-        ExecStatusType status = _stream_connection->status();
-        _stream_connection->clear();
-        if (status == PGRES_COPY_OUT) {
-            // end the copy
-            _stream_connection->end_copy();
-        }
+        // disconnect the streaming connection
+        _stream_connection->disconnect();
 
         // just close connection; cleans up result and other state
         // no need to go through too much trouble...
@@ -879,6 +867,98 @@ namespace springtail
         _connection->clear();
     }
 
+
+    void
+    PgReplConnection::drop_publication()
+    {
+        if (_started_streaming) {
+            throw PgStreamingError();
+        }
+
+        std::string pub_name = _connection->escape_string(_pub_name);
+
+        std::string cmd = fmt::format("DROP PUBLICATION IF EXISTS {}", pub_name);
+
+        // execute query
+        LOG_DEBUG(LOG_PG_REPL, "Executing query drop publication: cmd={}", cmd);
+        _connection->exec(cmd);
+
+        // process results
+        if (_connection->status() != PGRES_TUPLES_OK &&
+            _connection->status() != PGRES_COMMAND_OK) {
+            LOG_ERROR("Error dropping publication: {}\n", pub_name);
+            _connection->clear();
+            throw PgQueryError();
+        }
+
+        _connection->clear();
+    }
+
+
+    bool
+    PgReplConnection::check_publication_exists()
+    {
+        if (_started_streaming) {
+            throw std::runtime_error("No queries after streaming starts");
+        }
+
+        std::string pub_name = _connection->escape_string(_pub_name);
+        std::string cmd = fmt::format("SELECT 1 FROM pg_catalog.pg_publication WHERE pubname='{}'", pub_name);
+
+        // execute query
+        LOG_DEBUG(LOG_PG_REPL, "Executing query check publication: cmd={}", cmd);
+        _connection->exec(cmd);
+
+        // process results
+        if (_connection->status() != PGRES_COMMAND_OK &&
+            _connection->status() != PGRES_TUPLES_OK) {
+            LOG_ERROR("Error executing query: msg={}\n", _connection->result_error_message());
+            _connection->clear();
+
+            throw PgQueryError();
+        }
+
+        if (_connection->ntuples() > 0 && _connection->nfields() == 1) {
+            LOG_DEBUG(LOG_PG_REPL, "Publication exists: name={}\n", pub_name);
+            _connection->clear();
+            return true;
+        }
+
+        return false;
+    }
+
+    void
+    PgReplConnection::create_publication(const std::optional<std::string> &table_list)
+    {
+        if (_started_streaming) {
+            throw PgStreamingError();
+        }
+
+        std::string pub_name = _connection->escape_string(_pub_name);
+
+        std::string cmd;
+        if (!table_list.has_value() || table_list->empty()) {
+            cmd = fmt::format("CREATE PUBLICATION {} FOR ALL TABLES", pub_name);
+        } else {
+            cmd = fmt::format("CREATE PUBLICATION {} FOR TABLE {}", pub_name, *table_list);
+        }
+
+        // execute query
+        LOG_DEBUG(LOG_PG_REPL, "Executing query create publication: cmd={}", cmd);
+        _connection->exec(cmd);
+
+        // process results
+        if (_connection->status() != PGRES_COMMAND_OK &&
+            _connection->status() != PGRES_TUPLES_OK) {
+            LOG_ERROR("Error creating publication: {}\n", pub_name);
+            _connection->clear();
+            throw PgQueryError();
+        }
+
+        LOG_DEBUG(LOG_PG_REPL, "Publication created successfully: {}", pub_name);
+
+        _connection->clear();
+    }
 
     LSN_t
     PgReplConnection::create_replication_slot()

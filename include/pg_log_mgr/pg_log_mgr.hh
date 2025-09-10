@@ -221,7 +221,6 @@ namespace springtail::pg_log_mgr {
         LSN_t _current_lsn{0};                ///< LSN from last message received
         uint64_t _msg_log_start_offset{0};    ///< start offset of unpushed messages
         char _current_msg_type{0};            ///< current message type being processed
-        bool _expect_lsn_change{false};       ///< true if we expect an LSN change on next message (debugging)
 
         /** Process data from replication stream in loop, queue path, offsets */
         void _log_writer_thread();

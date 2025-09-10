@@ -108,7 +108,7 @@ namespace springtail::pg_log_mgr {
     }
 
     bool
-    PgLogWriter::log_data(const PgCopyData &data)
+    PgLogWriter::log_data(const PgCopyData &data, const char current_msg_type)
     {
         if (data.length == 0) {
             return false;
@@ -117,26 +117,58 @@ namespace springtail::pg_log_mgr {
         // get the offset before writing the data
         uint64_t start_offset = _writer.offset();
 
+        LSN_t ack_lsn = INVALID_LSN;
+
         // write out header containing length if start of message
         if (data.msg_offset == 0) {
             _msg_end_offset = start_offset + data.msg_length;
 
             // write the header
-            PgMsgStreamHeader header(data.msg_length, data.starting_lsn, data.ending_lsn);
+            PgMsgStreamHeader header(data.msg_length, _last_commit_lsn);
             _writer.write_header(header);
 
             LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Write repl message start: start lsn={}, length={}, msg_length={}",
                       data.starting_lsn, data.length, data.msg_length);
+
+            if (current_msg_type == pg_msg::MSG_COMMIT ||
+                current_msg_type == pg_msg::MSG_STREAM_COMMIT) {
+
+                // stream commit message is 30B; commit is 26B
+                DCHECK(data.msg_length <= 30);
+
+                // if this is a commit message, we may need to buffer it
+                if (data.length == data.msg_length) {
+                    // full msg, extract LSN from commit record and ack it
+                    ack_lsn = PgMsgStreamReader::get_commit_lsn(data.buffer);
+                    _have_partial_commit = false;
+                } else {
+                    // partial commit message, buffer it
+                    memcpy(_commit_buffer, data.buffer, data.length);
+                    _have_partial_commit = true;
+                }
+            }
+        }
+
+        if (_have_partial_commit) {
+            // we have a partial commit message buffered, copy the rest
+            memcpy(_commit_buffer + data.msg_offset, data.buffer, data.length);
+
+            if (data.msg_offset + data.length == data.msg_length) {
+                // we have a full commit message now, extract LSN and ack it
+                ack_lsn = PgMsgStreamReader::get_commit_lsn(_commit_buffer);
+                _have_partial_commit = false;
+            }
         }
 
         // write message data, returns offset after write
         _current_offset = _writer.write_message(data);
 
         // check if a full message was written
-        if (data.starting_lsn != INVALID_LSN &&
-            data.msg_offset + data.length == data.msg_length) {
-            // always ack one LSN behind the current message lsn
-            _add_lsn_to_queue(_msg_end_offset, data.starting_lsn - 1);
+        if (ack_lsn != INVALID_LSN) {
+            // always ack one byte head of last commit LSN
+            _add_lsn_to_queue(_msg_end_offset, ack_lsn + 1);
+
+            _last_commit_lsn = ack_lsn;
 
             LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Write repl message end: start lsn={}, length={}, msg_length={}",
                       data.ending_lsn, data.length, data.msg_length);

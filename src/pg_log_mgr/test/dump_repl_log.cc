@@ -75,16 +75,15 @@ int main(int argc, char *argv[])
                                          header.to_string(),
                                          header.msg_length + header.header_offset + PgMsgStreamHeader::SIZE);
 
-                auto hdr_lsn = header.start_lsn;
-                if (header.start_lsn != header.end_lsn) {
-                    std::cerr << std::format("Warning: start_lsn {} != end_lsn {}\n",
-                                             header.start_lsn, header.end_lsn);
-                }
+                auto hdr_lsn = header.last_commit_lsn;
 
                 if (last_lsn != INVALID_LSN && hdr_lsn != last_lsn) {
                     std::cout << std::format("LSN jump from {} to {}\n", last_lsn, hdr_lsn);
                 }
-                last_lsn = header.start_lsn;
+
+                CHECK_GE(hdr_lsn, last_lsn);
+
+                last_lsn = hdr_lsn;
             }
 
             // dump the message
