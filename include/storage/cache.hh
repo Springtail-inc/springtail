@@ -517,6 +517,12 @@ namespace springtail {
             std::optional<std::future<void>> _async_flush(CacheExtentPtr extent);
 
             /**
+             * @brief Helper that writes the provided DIRTY extent to disk, updates cache and extent
+             * @param extent Extent to be flushed to the disk
+             */
+            void _flush_and_update_extent(CacheExtentPtr extent);
+
+            /**
              * Helper to read a CLEAN extent into memory.  A callback is provided to be run after
              * the IO to read the extent is complete.
              */
@@ -979,6 +985,15 @@ namespace springtail {
              * @return future that returns ordered list of extent IDs that represent the data of the Page.
              */
             std::future<std::vector<uint64_t>> _async_flush(const ExtentHeader &header);
+
+            /**
+             * @brief Helper that flushes the underlying extents of a page and returns on-disk extent IDsa
+             * @param header  Extent header which will be used as header for all the in-memory extents
+             *
+             * @return vector of extent IDs
+             */
+            std::vector<uint64_t> _async_flush_extents(const ExtentHeader &header);
+
 
         private:
             /** A count of the number of users of this page. */
