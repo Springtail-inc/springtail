@@ -4,6 +4,7 @@
 #include <fstream>
 #include <cassert>
 
+#include <absl/log/check.h>
 #include <fmt/format.h>
 
 #include <pg_repl/pg_types.hh>

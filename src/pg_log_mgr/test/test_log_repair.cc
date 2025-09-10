@@ -44,23 +44,29 @@ namespace {
         static void TearDownTestSuite() {
             springtail_shutdown();
             // remove the log file
-            //std::filesystem::remove(LOG_FILE);
+            std::filesystem::remove(LOG_FILE);
         }
 
         void SetUp() override {
-            // create a new log file
+            _file_size = std::filesystem::file_size(LOG_FILE);
         }
 
         void TearDown() override {
             // remove truncated log file if exists
             if (std::filesystem::exists(LOG_FILE_TRUNC)) {
-                //std::filesystem::remove(LOG_FILE_TRUNC);
+                std::filesystem::remove(LOG_FILE_TRUNC);
             }
         }
 
-        /** Process json command file stored into log file; return last header */
-        PgMsgStreamHeader process_json_cmd_file(const std::filesystem::path &json_file)
+        /**
+         * Process json command file stored into log file; return last header
+         * return mapping offset to commit LSN; offset is ending offset after commit
+         */
+        std::map<std::uint32_t, LSN_t>
+        process_json_cmd_file(const std::filesystem::path &json_file)
         {
+            std::map<std::uint32_t, LSN_t> offset_lsn_map;
+
             // open the new log file
             _fp = ::fopen(LOG_FILE, "r");
             if (_fp == nullptr) {
@@ -69,32 +75,68 @@ namespace {
 
             // iterate through the messages in the log file
             PgMsgStreamHeader header {};
-            auto file_size = std::filesystem::file_size(LOG_FILE);
             int offset = 0;
 
+            char msg_buffer[1024];
+
             // should have full messages
-            while (offset < file_size) {
+            while (offset < _file_size) {
                 // read the header
+                _last_header_offset = offset;
+
                 char buffer[PgMsgStreamHeader::SIZE];
                 int rc = ::fread(buffer, 1, PgMsgStreamHeader::SIZE, _fp);
                 EXPECT_EQ(rc, PgMsgStreamHeader::SIZE);
                 header = PgMsgStreamHeader(buffer);
-                LOG_INFO("Read header: {}", header.to_string());
+
                 offset += rc;
 
-                // seek to the start of the message
-                offset += header.msg_length;
-                rc = ::fseek(_fp, offset, SEEK_SET);
-                EXPECT_EQ(rc, 0);
+                if (header.msg_length > sizeof(msg_buffer)) {
+                    throw Error(std::format("Message length {} exceeds buffer size {}",
+                                            header.msg_length, sizeof(msg_buffer)));
+                }
+
+                rc = ::fread(msg_buffer, 1, header.msg_length, _fp);
+                EXPECT_EQ(rc, header.msg_length);
+                offset += rc;
+
+                if (msg_buffer[0] == pg_msg::MSG_COMMIT ||
+                    msg_buffer[0] == pg_msg::MSG_STREAM_COMMIT) {
+                    LSN_t commit_lsn = PgMsgStreamReader::get_commit_lsn(msg_buffer);
+                    offset_lsn_map[offset] = commit_lsn;
+                }
             }
 
             ::fclose(_fp);
             _fp = nullptr;
 
-            return header;
+            return offset_lsn_map;
+        }
+
+        LSN_t
+        find_last_commit_lsn(const std::map<uint32_t, LSN_t> &map, uint32_t offset)
+        {
+            if (map.empty()) {
+                return INVALID_LSN;
+            }
+
+            auto it = map.lower_bound(offset);
+            if (it == map.end()) {
+                // all keys < offset, take the last one
+                --it;
+            } else if (it->first > offset) {
+                if (it == map.begin()) {
+                    return INVALID_LSN;
+                }
+                --it;
+            }
+
+            return it->second;
         }
 
         FILE *_fp = nullptr;
+        size_t _file_size = 0;
+        size_t _last_header_offset = 0;
     };
 
     TEST_F(LogRepair_Test, ProcessLogFile)
@@ -104,20 +146,19 @@ namespace {
 
     TEST_F(LogRepair_Test, RepairLogFile)
     {
-        PgMsgStreamHeader header = process_json_cmd_file(JSON_FILE);
+        auto map = process_json_cmd_file(JSON_FILE);
 
         // repair the log file
         auto last_lsn = PgMsgStreamReader::scan_log(1, LOG_FILE, false);
-        ASSERT_EQ(last_lsn, header.last_commit_lsn + 1);
+        ASSERT_EQ(last_lsn, find_last_commit_lsn(map, _file_size) + 1);
     }
 
     TEST_F(LogRepair_Test, RepairTruncateLogFile)
     {
-        PgMsgStreamHeader header = process_json_cmd_file(JSON_FILE);
+        auto map = process_json_cmd_file(JSON_FILE);
 
-        // truncate the log file to partially remove the last message
-        auto file_size = std::filesystem::file_size(LOG_FILE);
-        auto new_size = file_size - header.msg_length + 5;
+        // truncate the log file to partially remove the last message; leaving header + part of message
+        auto new_size = _last_header_offset + PgMsgStreamHeader::SIZE + 5;
 
         // make a copy of the file
         std::filesystem::path tmp_file = std::filesystem::path(LOG_FILE_TRUNC);
@@ -129,17 +170,15 @@ namespace {
         // repair the log file
         auto last_lsn = PgMsgStreamReader::scan_log(1, LOG_FILE_TRUNC, true);
 
-
-        ASSERT_EQ(last_lsn, header.last_commit_lsn + 1);
+        ASSERT_EQ(last_lsn, find_last_commit_lsn(map, new_size) + 1);
     }
 
     TEST_F(LogRepair_Test, RepairTruncate2LogFile)
     {
-        PgMsgStreamHeader header = process_json_cmd_file(JSON_FILE);
+        auto map = process_json_cmd_file(JSON_FILE);
 
         // truncate the log file to fully remove the last message; leaving the header
-        auto file_size = std::filesystem::file_size(LOG_FILE);
-        auto new_size = file_size - header.msg_length;
+        auto new_size = _last_header_offset + PgMsgStreamHeader::SIZE;
 
         // make a copy of the file
         std::filesystem::path tmp_file = std::filesystem::path(LOG_FILE_TRUNC);
@@ -151,17 +190,15 @@ namespace {
         // repair the log file
         auto last_lsn = PgMsgStreamReader::scan_log(1, LOG_FILE_TRUNC, true);
 
-
-        ASSERT_EQ(last_lsn, header.last_commit_lsn + 1);
+        ASSERT_EQ(last_lsn, find_last_commit_lsn(map, new_size) + 1);
     }
 
     TEST_F(LogRepair_Test, RepairTruncate3LogFile)
     {
-        PgMsgStreamHeader header = process_json_cmd_file(JSON_FILE);
+        auto map = process_json_cmd_file(JSON_FILE);
 
         // truncate the log file to fully remove the last message; leaving part of the header
-        auto file_size = std::filesystem::file_size(LOG_FILE);
-        auto new_size = file_size - header.msg_length - 3;
+        auto new_size = _last_header_offset + 5;
 
         // make a copy of the file
         std::filesystem::path tmp_file = std::filesystem::path(LOG_FILE_TRUNC);
@@ -174,6 +211,6 @@ namespace {
         auto last_lsn = PgMsgStreamReader::scan_log(1, LOG_FILE_TRUNC, true);
 
         // for log gen, the start_lsn is the same as the previous end_lsn
-        ASSERT_EQ(last_lsn, header.last_commit_lsn + 1);
+        ASSERT_EQ(last_lsn, find_last_commit_lsn(map, new_size) + 1);
     }
 } // namespace

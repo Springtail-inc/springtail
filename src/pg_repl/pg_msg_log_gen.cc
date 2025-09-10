@@ -58,7 +58,7 @@ namespace springtail {
 
             if (_buffer[0] == pg_msg::MSG_COMMIT ||
                 _buffer[0] == pg_msg::MSG_STREAM_COMMIT) {
-                _last_commit_lsn = _lsn;
+                _last_commit_lsn = _begin_lsn;
             }
 
             _lsn++;
@@ -489,7 +489,8 @@ namespace springtail {
         _write_uint8(pg_msg::MSG_STREAM_COMMIT);
         _write_uint32(_stream_xid);
         _write_uint8(0); // unused flags
-        _write_uint64(_begin_lsn); // consistent with commit
+        // XXX using begin_lsn isn't exactly right, but it works for now
+        _write_uint64(++_begin_lsn); // consistent with commit
         _write_uint64(commit_lsn);
         _write_uint64(get_pgtime_in_millis());
 

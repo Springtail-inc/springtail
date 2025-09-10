@@ -1600,6 +1600,11 @@ namespace springtail {
             // header stores LSN of last commit record (even if this is a commit)
             restart_lsn = _header.last_commit_lsn + 1;
 
+            LOG_INFO("Got header at offset {}, last commit LSN: {}, next msg type: '{}'",
+                     _current_offset - PgMsgStreamHeader::SIZE,
+                     _header.last_commit_lsn,
+                     current_msg_type);
+
             // try and peek at the current message type
             current_msg_type = _stream.peek();
             if (current_msg_type == EOF) {
@@ -1623,8 +1628,10 @@ namespace springtail {
                 _stream.read(buffer, sizeof(buffer));
 
                 auto commit_lsn = PgMsgStreamReader::get_commit_lsn(buffer);
+                LOG_INFO("Got commit LSN: {}", commit_lsn);
+
                 DCHECK_NE(commit_lsn, INVALID_LSN);
-                DCHECK_GT(commit_lsn + 1, restart_lsn);
+                DCHECK_GT(commit_lsn, restart_lsn-1);
 
                 restart_lsn = commit_lsn + 1;
                 truncate_offset = _xlog_msg_end_offset;
@@ -1642,8 +1649,9 @@ namespace springtail {
 
         if (truncate_offset == 0) {
             // we may have a partial message or header, but easier to
-            // return INVALID_LSN and caller will remove file and
-            // examine previous file for LSN
+            // return INVALID_LSN and caller will remove file
+            // although we should technically know the restart LSN,
+            // but have no way to indicate that this file should be removed
             return INVALID_LSN;
         }
 
