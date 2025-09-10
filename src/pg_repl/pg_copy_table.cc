@@ -701,7 +701,7 @@ namespace springtail
             auto rightDatumString = extn_registry->datum_to_string(rightDatum, type_oid);
             bool comparatorResult = DatumGetBool(result);
 
-            LOG_DEBUG(LOG_PG_REPL, "Operator = Result: {} {} {} = {}", leftDatumString, op_str, rightDatumString, comparatorResult);
+            LOG_INFO("[DEBUG] Operator = Result: {} {} {} = {}", leftDatumString, op_str, rightDatumString, comparatorResult);
 
             return comparatorResult;
         };

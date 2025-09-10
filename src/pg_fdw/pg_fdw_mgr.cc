@@ -1530,22 +1530,6 @@ namespace springtail::pg_fdw {
         return typeForm;
     }
 
-    std::string
-    PgFdwMgr::_print_function(uint64_t db_id,
-                              uint64_t xid,
-                              uint64_t type_oid,
-                              const std::span<const char> &val)
-    {
-        Oid oid = _get_type_oid(db_id, xid, type_oid);
-
-        Form_pg_type typeForm = _resolve_type_information(oid);
-
-        Datum leftDatum = _binary_to_datum(val, oid, typeForm->typmodin);
-        std::string stringLeftDatum = datum_to_string(leftDatum, oid);
-
-        return stringLeftDatum;
-    }
-
     bool
     PgFdwMgr::_comparator_function(uint64_t db_id,
                                    uint64_t xid,

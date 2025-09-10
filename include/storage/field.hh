@@ -1756,6 +1756,17 @@ namespace springtail {
             return std::span<const char>(col.data.begin(), col.data.size());
         }
 
+        const std::span<const char> get_extension(const void *row) const override {
+            auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
+            const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
+
+            // XXX we only support binary data for native types
+            DCHECK_EQ(col.type, 'b');
+
+            // read in the binary data as a string
+            return std::span<const char>(col.data.begin(), col.data.size());
+        }
+
     protected:
         SchemaType _type;
         uint32_t _offset;  ///< Column offset in the tuple data
@@ -1770,7 +1781,7 @@ namespace springtail {
         PgEnumField(SchemaType type, uint32_t offset, UserTypePtr ut)
             : PgLogField(type, offset), _ut(ut)
         {
-            DCHECK(type == SchemaType::FLOAT32 || type == SchemaType::BINARY);
+            DCHECK(type == SchemaType::FLOAT32 || type == SchemaType::BINARY || type == SchemaType::EXTENSION);
             DCHECK_NE(ut, nullptr);
             DCHECK(ut->type == UserType::ENUM || ut->type == UserType::EXTENSION);
         }
@@ -1794,6 +1805,15 @@ namespace springtail {
             // lookup the label in the enum map
             float index = _ut->enum_label_map.at(label);
             return index;
+        }
+
+        const std::span<const char> get_extension(const void *row) const override
+        {
+            auto &&data = reinterpret_cast<PgMsgTupleData const *>(row);
+            const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
+
+            // read in the binary data as a string
+            return std::span<const char>(col.data.begin(), col.data.size());
         }
 
     private:

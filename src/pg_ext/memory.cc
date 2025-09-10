@@ -143,104 +143,77 @@ MemoryContext::free(void* ptr)
 // // Global memory context pointer
 void* CurrentMemoryContext = &pgext::TopMemoryContext;
 
-// // Implementation of exported functions
-// void*
-// AllocSetContextCreateInternal(void *parent,
-//                               const char *name,
-//                               size_t minContextSize,
-//                               size_t initBlockSize,
-//                               size_t maxBlockSize)
-// {
-//     auto parent_ctx = static_cast<pgext::MemoryContext*>(parent);
-//     CHECK(parent_ctx != nullptr);
+// Implementation of exported functions
+void*
+AllocSetContextCreateInternal(void *parent,
+                              const char *name,
+                              size_t minContextSize,
+                              size_t initBlockSize,
+                              size_t maxBlockSize)
+{
+    auto parent_ctx = static_cast<pgext::MemoryContext*>(parent);
+    CHECK(parent_ctx != nullptr);
 
-//     return parent_ctx->create_child(
-//         name ? name : "UnnamedContext",
-//         initBlockSize,
-//         maxBlockSize
-//     );
-// }
+    return parent_ctx->create_child(
+        name ? name : "UnnamedContext",
+        initBlockSize,
+        maxBlockSize
+    );
+}
 
-// void*
-// MemoryContextAlloc(void *context, size_t size)
-// {
-//     auto ctx = static_cast<pgext::MemoryContext*>(context);
-//     CHECK(ctx != nullptr);
+void*
+MemoryContextAlloc(void *context, size_t size)
+{
+    auto ctx = static_cast<pgext::MemoryContext*>(context);
+    CHECK(ctx != nullptr);
 
-//     return ctx->alloc(size);
-// }
+    return ctx->alloc(size);
+}
 
-// void*
-// MemoryContextAllocZero(void *context, size_t size)
-// {
-//     auto ctx = static_cast<pgext::MemoryContext*>(context);
-//     CHECK(ctx != nullptr);
+void*
+MemoryContextAllocZero(void *context, size_t size)
+{
+    auto ctx = static_cast<pgext::MemoryContext*>(context);
+    CHECK(ctx != nullptr);
 
-//     return ctx->alloc0(size);
-// }
+    return ctx->alloc0(size);
+}
 
-// void
-// MemoryContextDelete(void *context)
-// {
-//     auto ctx = static_cast<pgext::MemoryContext*>(context);
-//     CHECK(ctx != nullptr);
+void
+MemoryContextDelete(void *context)
+{
+    auto ctx = static_cast<pgext::MemoryContext*>(context);
+    CHECK(ctx != nullptr);
 
-//     // Clear all memory in this context
-//     ctx->clear();
+    // Clear all memory in this context
+    ctx->clear();
 
-//     auto parent = ctx->parent();
-//     if (parent == nullptr) {
-//         return; // Don't delete top context
-//     }
+    auto parent = ctx->parent();
+    if (parent == nullptr) {
+        return; // Don't delete top context
+    }
 
-//     // Remove from parent
-//     parent->remove_child(ctx);
-// }
+    // Remove from parent
+    parent->remove_child(ctx);
+}
 
-// void*
-// palloc(size_t size)
-// {
-//     auto ctx = static_cast<pgext::MemoryContext*>(CurrentMemoryContext);
-//     CHECK(ctx != nullptr);
-//     return ctx->alloc(size);
-// }
+void*
+palloc(size_t size)
+{
+    auto ctx = static_cast<pgext::MemoryContext*>(CurrentMemoryContext);
+    CHECK(ctx != nullptr);
+    return ctx->alloc(size);
+}
 
-// void*
-// palloc0(size_t size)
-// {
-//     auto ptr = palloc(size);
-//     if (ptr != nullptr) {
-//         std::memset(ptr, 0, size);
-//     }
-//     return ptr;
-// }
-
-// void
-// pfree(void *ptr)
-// {
-//     if (ptr == nullptr) {
-//         return;
-//     }
-
-//     auto ctx = static_cast<pgext::MemoryContext*>(CurrentMemoryContext);
-//     CHECK(ctx != nullptr);
-
-//     // Try to free the pointer, if not found do nothing
-//     ctx->free(ptr);
-// }
-
-// void* repalloc(void* ptr, size_t size)
-// {
-//     if (ptr == nullptr) {
-//         return palloc(size);
-//     }
-
-//     auto ctx = static_cast<pgext::MemoryContext*>(CurrentMemoryContext);
-//     CHECK(ctx != nullptr);
-
-//     // Try to reallocate the pointer, if not found do nothing
-//     return ctx->alloc(size);
-// }
+void*
+palloc0(size_t size)
+{
+    auto ptr = palloc(size);
+    if (ptr != nullptr) {
+        std::memset(ptr, 0, size);
+    }
+    return ptr;
+}
 
 void
 pfree(void *ptr)
@@ -248,30 +221,57 @@ pfree(void *ptr)
     if (ptr == nullptr) {
         return;
     }
-    free(ptr);
+
+    auto ctx = static_cast<pgext::MemoryContext*>(CurrentMemoryContext);
+    CHECK(ctx != nullptr);
+
+    // Try to free the pointer, if not found do nothing
+    ctx->free(ptr);
 }
 
-void*
-repalloc(void* ptr, size_t size)
+void* repalloc(void* ptr, size_t size)
 {
     if (ptr == nullptr) {
         return palloc(size);
     }
-    return realloc(ptr, size);
+
+    auto ctx = static_cast<pgext::MemoryContext*>(CurrentMemoryContext);
+    CHECK(ctx != nullptr);
+
+    // Try to reallocate the pointer, if not found do nothing
+    return ctx->alloc(size);
 }
 
-void*
-palloc(size_t size)
-{
-    return malloc(size);
-}
+// void
+// pfree(void *ptr)
+// {
+//     if (ptr == nullptr) {
+//         return;
+//     }
+//     free(ptr);
+// }
 
-void*
-palloc0(size_t size)
-{
-    auto ptr = malloc(size);
-    if (ptr != nullptr) {
-        std::memset(ptr, 0, size);
-    }
-    return ptr;
-}
+// void*
+// repalloc(void* ptr, size_t size)
+// {
+//     if (ptr == nullptr) {
+//         return palloc(size);
+//     }
+//     return realloc(ptr, size);
+// }
+
+// void*
+// palloc(size_t size)
+// {
+//     return malloc(size);
+// }
+
+// void*
+// palloc0(size_t size)
+// {
+//     auto ptr = malloc(size);
+//     if (ptr != nullptr) {
+//         std::memset(ptr, 0, size);
+//     }
+//     return ptr;
+// }

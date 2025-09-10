@@ -147,6 +147,12 @@ namespace pgext {
 	{
 		return (Datum) X;
 	}
+
+	static inline bool
+	DatumGetBool(Datum X)
+	{
+		return (bool) X;
+	}
 } // namespace pgext
 
 typedef struct Node *fmNodePtr;

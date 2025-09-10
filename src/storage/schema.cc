@@ -25,14 +25,11 @@ namespace springtail {
 
             case (SchemaType::TEXT):
             case (SchemaType::BINARY):
+            case (SchemaType::EXTENSION):
             case (SchemaType::NUMERIC):
             case (SchemaType::UINT32):
             case (SchemaType::INT32):
             case (SchemaType::FLOAT32):
-                fixed_bytes += 4;
-            break;
-
-            case (SchemaType::EXTENSION):
                 fixed_bytes += 4;
             break;
 
@@ -108,6 +105,7 @@ namespace springtail {
                 break;
 
             case (SchemaType::EXTENSION): {
+                // XXX comparator_func is mandatory for extension types
                 if ( comparator_func ) {
                     // Override the compartor function if its present
                     auto updated_comparator_func = [column, comparator_func](std::string_view op_str,
@@ -118,11 +116,6 @@ namespace springtail {
                     field = std::make_shared<ExtentField>(column.type, byte_pos, updated_comparator_func);
                 } else {
                     field = std::make_shared<ExtentField>(column.type, byte_pos);
-                }
-
-                if (column.nullable) {
-                    field->allow_null((bit_pos >> 3), (bit_pos & 0x7));
-                    ++bit_pos; // add the used null bit
                 }
 
                 byte_pos += 4; // add the used bytes
