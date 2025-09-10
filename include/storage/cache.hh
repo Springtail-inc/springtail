@@ -429,7 +429,7 @@ namespace springtail {
              * @brief Returns a future which writes the provided DIRTY extent to disk.  Extent is returned to the MUTABLE state
              * after the flush() is complete.
              */
-            std::future<void> async_flush(CacheExtentPtr extent);
+            std::optional<std::future<void>> async_flush(CacheExtentPtr extent);
 
             /**
              * Invalidates the provided DIRTY extent, ensuring that it is released without being
@@ -512,15 +512,9 @@ namespace springtail {
              * @brief Helper that returns a future which writes the provided DIRTY extent to disk.  Extent is returned to the MUTABLE
              * state after the flush() is complete.
              *
-             * @returns future which does the operation in async thread
+             * @returns optional future which is nullopt if flush is not needed (not dirty)
              */
-            std::future<void> _async_flush(CacheExtentPtr extent);
-
-            /**
-             * @brief Helper that writes the extent to disk and updates extent ID and state
-             * @param extent  Extent to be flushed to disk
-             */
-            void _flush_and_update_extent(CacheExtentPtr extent);
+            std::optional<std::future<void>> _async_flush(CacheExtentPtr extent);
 
             /**
              * Helper to read a CLEAN extent into memory.  A callback is provided to be run after
@@ -985,14 +979,6 @@ namespace springtail {
              * @return future that returns ordered list of extent IDs that represent the data of the Page.
              */
             std::future<std::vector<uint64_t>> _async_flush(const ExtentHeader &header);
-
-            /**
-             * @brief Helper that flushes page's extents and returns new offset IDs
-             * @param header Extent header which will be used as header for all the in-memory extents
-             *
-             * @returns vector of offset IDs
-             */
-            std::vector<uint64_t> _async_flush_extents(const ExtentHeader &header);
 
         private:
             /** A count of the number of users of this page. */
