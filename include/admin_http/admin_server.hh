@@ -2,7 +2,10 @@
 
 #include <shared_mutex>
 
+#pragma push_macro("DELETE")
 #include <httplib.h>
+#pragma pop_macro("DELETE")
+
 #include <nlohmann/json.hpp>
 
 #include <common/singleton.hh>

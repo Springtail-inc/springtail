@@ -1,8 +1,6 @@
 #pragma once
 
-#pragma push_macro("DELETE")
 #include <admin_http/admin_server.hh>
-#pragma pop_macro("DELETE")
 
 #include <common/exception.hh>
 #include <common/logging.hh>
