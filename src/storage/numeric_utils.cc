@@ -627,7 +627,7 @@ namespace springtail::numeric {
     void
     NumericVar::dump(const std::string &str) const
     {
-        LOG_DEBUG(LOG_STORAGE, "{}: {} ({})", str, this->to_debug_string(), this->to_string());
+        LOG_DEBUG(LOG_STORAGE, LOG_LEVEL_DEBUG1, "{}: {} ({})", str, this->to_debug_string(), this->to_string());
     }
 
     std::string
@@ -657,7 +657,7 @@ namespace springtail::numeric {
 
     void NumericData::dump(const std::string &str) const
     {
-        LOG_DEBUG(LOG_STORAGE, "{}: {} ({})", str, this->to_debug_string(), this->to_string());
+        LOG_DEBUG(LOG_STORAGE, LOG_LEVEL_DEBUG1, "{}: {} ({})", str, this->to_debug_string(), this->to_string());
     }
 
     std::string NumericData::to_string() const

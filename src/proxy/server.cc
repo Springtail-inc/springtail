@@ -28,14 +28,10 @@
 
 #include <proxy/client_session.hh>
 #include <proxy/logger.hh>
-#include <proxy/logging.hh>
 #include <proxy/server.hh>
 #include <proxy/server_session.hh>
 
 namespace springtail::pg_proxy {
-
-    /** Default log level for the proxy server */
-    LogLevel proxy_log_level = LOG_LEVEL_DEBUG1;
 
     void
     ProxyServer::init(int proxy_port,
@@ -169,7 +165,7 @@ namespace springtail::pg_proxy {
         while (!_shutdown) {
             int client = accept(socket, nullptr, nullptr);
             if (client >= 0) {
-                PROXY_DEBUG(LOG_LEVEL_DEBUG5, "Accepted keepalive connection");
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG5, "Accepted keepalive connection");
                 // Wait for remote disconnect with timeout to check shutdown flag
                 char buf[32];
                 fd_set readfds;
@@ -200,12 +196,6 @@ namespace springtail::pg_proxy {
         LOG_INFO("Keepalive socket closed, keepalive thread exiting");
     }
 
-    void
-    ProxyServer::set_log_level(int log_level)
-    {
-        proxy_log_level = static_cast<LogLevel>(log_level);
-    }
-
     /** Callback to get more info about what is going on in SSL */
     [[maybe_unused]] static void
     ssl_info_callback(const SSL *s, int where, int ret)
@@ -225,31 +215,31 @@ namespace springtail::pg_proxy {
         }
 
         if (where & SSL_CB_HANDSHAKE_START) {
-            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "SSL info (CB_HANDSHAKE_STARTED): fd={}", fd);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "SSL info (CB_HANDSHAKE_STARTED): fd={}", fd);
         } else if (where & SSL_CB_HANDSHAKE_DONE) {
-            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "SSL info (CB_HANDSHAKE_DONE): fd={}", fd);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "SSL info (CB_HANDSHAKE_DONE): fd={}", fd);
         } else if (where & SSL_CB_LOOP) {
-            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "SSL info (CB_LOOP): fd={}, {}:{}", fd, str, SSL_state_string_long(s));
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "SSL info (CB_LOOP): fd={}, {}:{}", fd, str, SSL_state_string_long(s));
         } else if (where & SSL_CB_ALERT) {
             str = (where & SSL_CB_READ) ? "read" : "write";
-            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "SSL info (CB_ALERT): fd={}, SSL3 alert {}:{}:{}", fd, str,
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "SSL info (CB_ALERT): fd={}, SSL3 alert {}:{}:{}", fd, str,
                          SSL_alert_type_string_long(ret),
                          SSL_alert_desc_string_long(ret));
        } else if (where & SSL_CB_EXIT) {
             if (ret == 0) {
-                PROXY_DEBUG(LOG_LEVEL_DEBUG5, "SSL info (CB_EXIT): fd={}, {}:failed in {}", fd, str, SSL_state_string_long(s));
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG5, "SSL info (CB_EXIT): fd={}, {}:failed in {}", fd, str, SSL_state_string_long(s));
             } else if (ret < 0) {
-                PROXY_DEBUG(LOG_LEVEL_DEBUG5, "SSL info (CB_EXIT): fd={}, {}:error in {}", fd, str, SSL_state_string_long(s));
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG5, "SSL info (CB_EXIT): fd={}, {}:error in {}", fd, str, SSL_state_string_long(s));
             }
         } else {
-            PROXY_DEBUG(LOG_LEVEL_DEBUG5, "SSL info callback: fd={}, where={:#X}, ret={}", fd, where, ret);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG5, "SSL info callback: fd={}, where={:#X}, ret={}", fd, where, ret);
         }
     }
 
     static int
     ssl_verify_callback(int preverify_ok, X509_STORE_CTX *x509_ctx)
     {
-        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "SSL verify callback: preverify_ok={}", preverify_ok);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "SSL verify callback: preverify_ok={}", preverify_ok);
         return 1; // no verification
     }
 
@@ -320,7 +310,7 @@ namespace springtail::pg_proxy {
         // log the connection
         std::string endpoint = session->get_connection()->endpoint();
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "{} connected from: {} on socket {}",
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "{} connected from: {} on socket {}",
                     (session->type() == Session::Type::CLIENT ? "Client" : "Server"), endpoint, session->get_connection()->get_socket());
 
         Logger::LogMsgType type;
@@ -351,7 +341,7 @@ namespace springtail::pg_proxy {
         // log the connection
         std::string endpoint = session->get_connection()->endpoint();
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "{} disconnected from: {} on socket {}",
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "{} disconnected from: {} on socket {}",
                     (session->type() == Session::Type::CLIENT ? "Client" : "Server"), endpoint, session->get_connection()->get_socket());
 
         Logger::LogMsgType type;
@@ -377,7 +367,7 @@ namespace springtail::pg_proxy {
     {
         while (true) {
             // accept is non-blocking and will return when no more connections
-            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Accepting new connection");
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Accepting new connection");
 
             // accept a new connection
             int client_socket = accept(_socket, nullptr, nullptr);
@@ -434,7 +424,7 @@ namespace springtail::pg_proxy {
 
             int nfds = 2;
             for (auto &session_socket : _waiting_sessions) {
-                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Adding socket to poll list: {}", session_socket);
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Adding socket to poll list: {}", session_socket);
                 fds[nfds].fd = session_socket;
                 fds[nfds].events = POLLIN;
                 fds[nfds].revents = 0;
@@ -443,7 +433,7 @@ namespace springtail::pg_proxy {
 
             lock.unlock();
 
-            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Polling for sockets: size={}", _waiting_sessions.size());
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Polling for sockets: size={}", _waiting_sessions.size());
 
             int n = poll(fds, nfds, -1);
             if (n == -1) {
@@ -454,7 +444,7 @@ namespace springtail::pg_proxy {
                 }
                 break;
             }
-            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Poll returned: {}", n);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Poll returned: {}", n);
 
             // handle any new accepts
             if (fds[0].revents & POLLIN) {
@@ -467,7 +457,7 @@ namespace springtail::pg_proxy {
                 // drain the pipe (we don't care about the data, just the signal)
                 uint64_t val;
                 [[maybe_unused]] int ret = read(_efd, &val, 8);
-                PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Draining eventfd: {}", ret);
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Draining eventfd: {}", ret);
                 n--;
             }
 
@@ -478,7 +468,7 @@ namespace springtail::pg_proxy {
                 if (fds[i].revents & POLLIN) {
                     int fd = fds[i].fd;
                     auto session_itr = _sessions.find(fd);
-                    PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Socket {} is now runnable", fd);
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Socket {} is now runnable", fd);
 
                     // lookup fd in sessions map
                     if (session_itr != _sessions.end()) {
@@ -497,7 +487,7 @@ namespace springtail::pg_proxy {
                             CHECK(it != _session_sockets.end());
 
                             for (auto socket : it->second) {
-                                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Removing socket {} from waiting sessions for {}", socket, session->name());
+                                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Removing socket {} from waiting sessions for {}", socket, session->name());
                                 _waiting_sessions.erase(socket);
                             }
                         }
@@ -513,9 +503,9 @@ namespace springtail::pg_proxy {
             DCHECK_EQ(n, 0);
 
             // queue the sessions that are now session
-            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Queueing {} sessions", runnable_sessions.size());
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Queueing {} sessions", runnable_sessions.size());
             for (auto &session : runnable_sessions) {
-                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Queueing session {}", session->name());
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Queueing session {}", session->name());
                 _thread_pool->queue(session);
             }
 
@@ -562,7 +552,7 @@ namespace springtail::pg_proxy {
 
         // go through the list of sockets and add them back to the waiting sessions list
         for (auto socket: session_itr->second) {
-            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Signaled server waiting on socket {}", socket);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Signaled server waiting on socket {}", socket);
             _waiting_sessions.insert(socket);
         }
          lock.unlock();
@@ -604,14 +594,14 @@ namespace springtail::pg_proxy {
         // need to remove its socket from the appropriate maps
         int socket = session->get_connection()->get_socket();
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Session not found in session sockets, removing socket: {}", socket);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Session not found in session sockets, removing socket: {}", socket);
 
         _waiting_sessions.erase(socket);
 
         // find the primary session by socket
         auto itr = _sessions.find(socket);
         if (itr == _sessions.end()) {
-            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Socket {} not found in sessions map", socket);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Socket {} not found in sessions map", socket);
             return;
         }
 
@@ -630,10 +620,10 @@ namespace springtail::pg_proxy {
                                   int socket,
                                   bool waiting_session_insert)
     {
-        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Registering socket {} with session: {}", socket, new_session->name());
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Registering socket {} with session: {}", socket, new_session->name());
 
         if (old_session != nullptr) {
-            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "De-registering session: {}", old_session->name());
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "De-registering session: {}", old_session->name());
         }
 
         // add the session to the list of sessions
@@ -669,10 +659,10 @@ namespace springtail::pg_proxy {
     void
     ProxyServer::_wake_event_loop()
     {
-        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Waking up event loop");
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Waking up event loop");
         uint64_t val = 1;
         [[maybe_unused]] int ret = write(_efd, &val, sizeof(uint64_t));
-        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Wrote to eventfd: {}", ret);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Wrote to eventfd: {}", ret);
     }
 
     void
@@ -685,7 +675,6 @@ namespace springtail::pg_proxy {
         int num_threads = Json::get_or<int>(json, "threads", 4);
         int port = Json::get_or<int>(json, "port", 8888);
         int keep_alive_port = Json::get_or<int>(json, "keep_alive_port", 0);
-        int log_level = Json::get_or<int>(json, "log_level", 1);
 
         // setup ssl config
         bool enable_ssl = Json::get_or<bool>(json, "enable_ssl", false);
@@ -742,7 +731,6 @@ namespace springtail::pg_proxy {
         }
 
         get_instance()->init(port, num_threads, certificate, key, keep_alive_port, server_mode, enable_ssl, logger);
-        get_instance()->set_log_level(log_level);
 
         get_instance()->_proxy_thread = std::thread(&ProxyServer::run, ProxyServer::get_instance());
 

@@ -34,7 +34,7 @@ namespace springtail::pg_fdw {
             LOG_ERROR("Failed to send a message to the server: db_id = {}, xid = {}", db_id, xid);
         } else {
             CHECK(rc == sizeof(PgXidCollectorMsg)) << "Invalid number of bytes sent";
-            LOG_DEBUG(LOG_FDW, "Sent a message to the server: db_id = {}, xid = {}, pid = {}", db_id, xid, _process_id);
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Sent a message to the server: db_id = {}, xid = {}, pid = {}", db_id, xid, _process_id);
         }
     }
 
@@ -46,7 +46,7 @@ namespace springtail::pg_fdw {
         std::string set_name = fmt::format(redis::SET_FDW_PID, instance_id);
         std::string set_value = fmt::format("{}:{}:{}", _fdw_id, db_id, _process_id);
         CHECK(client->sadd(set_name, set_value) == 1);
-        LOG_DEBUG(LOG_FDW, "Added to the set {}, value {}", set_name, set_value);
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Added to the set {}, value {}", set_name, set_value);
     }
 
     PgXidCollectorClient::~PgXidCollectorClient()

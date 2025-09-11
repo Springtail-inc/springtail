@@ -81,6 +81,18 @@ namespace springtail {
             _post_routes.erase(path);
         }
 
+        /**
+         * @brief Extract specific parameter from the parameter multimap. When a parameter is not
+         *      found or occurs more than once, an error will be generated in the response object.
+         *
+         * @param params - parameters multimap
+         * @param name - parameter name
+         * @param res - response object to handle error case.
+         * @return std::optional<std::string_view>
+         */
+        static std::optional<std::string_view>
+        get_param(const httplib::Params &params, const std::string &name, httplib::Response& res);
+
     private:
 
         /**

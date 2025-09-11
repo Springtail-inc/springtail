@@ -25,7 +25,7 @@ namespace springtail
                                    uint64_t lsn,
                                    const ExtentPtr data)
     {
-        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "Inserting: extent for TID: {}, PG XID: {}, LSN: {}", tid, pg_xid, lsn);
+        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Inserting: extent for TID: {}, PG XID: {}, LSN: {}", tid, pg_xid, lsn);
 
         // find the xid node, if not exists, create a node with given ID and return it
         WriteCacheIndexNodePtr xid_node = _xid_root->findAdd(pg_xid, WriteCacheIndexNode::IndexType::XID);
@@ -42,7 +42,7 @@ namespace springtail
                                  uint64_t start_offset, uint64_t &cursor,
                                  std::vector<uint64_t> &result)
     {
-        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "Searching for TIDS in XID: {}", xid);
+        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Searching for TIDS in XID: {}", xid);
 
         int result_cnt = 0;
         cursor = 0;
@@ -50,18 +50,18 @@ namespace springtail
         // lookup pg xid
         std::set<uint64_t> pg_xids = lookup_pgxid(xid);
         if (pg_xids.empty()) {
-            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "XID {} not found", xid);
+            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "XID {} not found", xid);
             return 0;
         }
 
         // iterate through xids exclusive of start
         for (auto &pg_xid: pg_xids) {
-            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "Finding tids in PG XID: {}", pg_xid);
+            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Finding tids in PG XID: {}", pg_xid);
 
             // fetch xid node for this xid and read lock it
             WriteCacheIndexNodePtr xid_node = _xid_root->find(pg_xid);
             if (xid_node == nullptr) {
-                LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "PG XID {} not found", pg_xid);
+                LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "PG XID {} not found", pg_xid);
                 continue;
             }
 
@@ -94,7 +94,7 @@ namespace springtail
                                     uint64_t start_offset, uint64_t &cursor,
                                     std::vector<WriteCacheIndexExtentPtr> &result, PostgresTimestamp &commit_ts)
     {
-        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "Searching for extents for XID: {}, TID: {}", xid, tid);
+        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Searching for extents for XID: {}, TID: {}", xid, tid);
 
         int result_cnt = 0;
         cursor = 0;
@@ -103,24 +103,24 @@ namespace springtail
         std::set<uint64_t> pg_xids = lookup_pgxid(xid, &commit_ts);
 
         if (pg_xids.empty()) {
-            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "XID {} not found", xid);
+            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "XID {} not found", xid);
             return 0;
         }
 
         // iterate through xids exclusive of start
         for (auto &pg_xid: pg_xids) {
-            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "Finding tids in PG XID: {}", pg_xid);
+            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Finding tids in PG XID: {}", pg_xid);
 
             // fetch xid node for this xid
             WriteCacheIndexNodePtr xid_node = _xid_root->find(pg_xid);
             if (xid_node == nullptr) {
-                LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "PG XID {} not found", pg_xid);
+                LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "PG XID {} not found", pg_xid);
                 return 0;
             }
 
             WriteCacheIndexNodePtr tid_node = xid_node->find(tid);
             if (tid_node == nullptr) {
-                LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "TID {} not found", tid);
+                LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "TID {} not found", tid);
                 return 0;
             }
 
@@ -151,14 +151,14 @@ namespace springtail
     void
     WriteCacheTableSet::evict_xid(uint64_t xid)
     {
-        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "Evicting XID: {}", xid);
+        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Evicting XID: {}", xid);
 
         // lookup pg xid
         uint64_t pg_xid;
         std::unique_lock<std::shared_mutex> lock(_xid_map_mutex);
         auto itr = _xid_map.find(xid);
         if (itr == _xid_map.end()) {
-            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "XID {} not found", xid);
+            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "XID {} not found", xid);
             return;
         }
         pg_xid = itr->second;
@@ -172,12 +172,12 @@ namespace springtail
     void
     WriteCacheTableSet::abort(uint64_t pg_xid)
     {
-        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "Aborting PG XID: {}", pg_xid);
+        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Aborting PG XID: {}", pg_xid);
 
         // fetch xid node for this xid if exists
         WriteCacheIndexNodePtr xid_node = _xid_root->find(pg_xid);
         if (xid_node == nullptr) {
-            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "XID {} not found", pg_xid);
+            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "XID {} not found", pg_xid);
             return;
         }
 
@@ -213,12 +213,12 @@ namespace springtail
     void
     WriteCacheTableSet::evict_table(uint64_t tid, uint64_t xid)
     {
-        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "Evicting table: TID={} XID={}", tid, xid);
+        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Evicting table: TID={} XID={}", tid, xid);
 
         // lookup xid in xid map
         std::set<uint64_t> pg_xids = lookup_pgxid(xid);
         if (pg_xids.empty()) {
-            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "XID {} not found", xid);
+            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "XID {} not found", xid);
             return;
         }
 
@@ -232,17 +232,17 @@ namespace springtail
     void
     WriteCacheTableSet::drop_table(uint64_t tid, uint64_t pg_xid) {
 
-        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "Dropping table: TID={} PG_XID={}", tid, pg_xid);
+        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Dropping table: TID={} PG_XID={}", tid, pg_xid);
 
         // fetch xid node for this xid if exists
-        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "Searching for PG XID: {}", pg_xid);
+        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Searching for PG XID: {}", pg_xid);
         WriteCacheIndexNodePtr xid_node = _xid_root->find(pg_xid);
         if (xid_node == nullptr) {
-            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "PG XID {} not found", pg_xid);
+            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "PG XID {} not found", pg_xid);
             return;
         }
 
-        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, "Removing TID: {}", tid);
+        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Removing TID: {}", tid);
         xid_node->remove(tid);
 
         if (xid_node->children.size() == 0) {

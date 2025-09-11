@@ -1,6 +1,7 @@
 {
     "logging" : {
         "log_level" : "debug",
+        "log_level_debug" : 1,
         "log_path" : "/opt/springtail/logs/",
         "log_file_size" : 10000000,
         "log_file_count" : 10,
@@ -108,7 +109,6 @@
         "key_path": null,
         "mode": "primary",
         "shadow_log_path": null,
-        "log_level": 3,
         "pool_size_limit": 0,
         "pool_timeout_limit": 0,
         "pool_expiration_interval_secs": 0,

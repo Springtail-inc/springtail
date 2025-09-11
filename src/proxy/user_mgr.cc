@@ -32,7 +32,7 @@ namespace springtail::pg_proxy {
         : _username(username),
           _salt(0)
     {
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "Creating new {} user user: {}, password: XXXX, salt: {}",
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Creating new {} user user: {}, password: XXXX, salt: {}",
             PASSWORD_TYPE_TO_STR[type], _username, _salt);
         set_password(password, type);
     }
@@ -40,7 +40,7 @@ namespace springtail::pg_proxy {
     void
     User::set_password(const std::string &password, PasswordType type)
     {
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "Setting password for user: {}, type: {}", _username, PASSWORD_TYPE_TO_STR[type]);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Setting password for user: {}, type: {}", _username, PASSWORD_TYPE_TO_STR[type]);
 
         std::unique_lock lock(_user_mutex);
         _password = password;
@@ -151,7 +151,7 @@ namespace springtail::pg_proxy {
 
         LibPqConnection conn;
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Starting AWS secrets query thread");
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Starting AWS secrets query thread");
         while (!_is_shutting_down()) {
             try {
                 // get the user credentials from AWS secrets manager
@@ -171,7 +171,7 @@ namespace springtail::pg_proxy {
                     std::string role = user["role"];
                     std::string type = user["type"];
 
-                    PROXY_DEBUG(LOG_LEVEL_DEBUG5, "Found user: {}, {}, {}", username, role, type);
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG5, "Found user: {}, {}, {}", username, role, type);
 
                     // only add users with role database
                     if (role != "database") {
@@ -311,10 +311,10 @@ namespace springtail::pg_proxy {
             if ((*it)->find_database(database)) {
                 return *it;
             } else {
-                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "User {} not allowed to access database {}", username, database);
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "User {} not allowed to access database {}", username, database);
             }
         } else {
-            PROXY_DEBUG(LOG_LEVEL_DEBUG1, "User {} not found", username);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "User {} not found", username);
         }
 
         return nullptr;

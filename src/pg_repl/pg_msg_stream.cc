@@ -99,7 +99,7 @@ namespace springtail {
     PgMsgPtr
     PgMsgStreamReader::read_message(const std::vector<char> &filter)
     {
-        LOG_DEBUG(LOG_PG_REPL, "Reading message, current_offset: {}\n", _current_offset);
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Reading message, current_offset: {}\n", _current_offset);
         // check if we've already encountered the end of the file
         if (end_of_stream()) {
             return nullptr;
@@ -114,7 +114,7 @@ namespace springtail {
             bool skip_msg = !_is_message_filtered(msg_type, filter);
             PgMsgPtr msg = nullptr;
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Reading message type: {}, current_offset: {}, skip_msg: {}",
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Reading message type: {}, current_offset: {}, skip_msg: {}",
                       msg_type, _current_offset, skip_msg);
 
             if (skip_msg) {
@@ -952,7 +952,7 @@ namespace springtail {
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded create table: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded create table: json: {}", json.dump());
 
         // check object type, could be an index, default value or something other
         // than a table
@@ -1026,7 +1026,7 @@ namespace springtail {
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded drop table: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded drop table: json: {}", json.dump());
 
         // check object type, could be an index, default value or something other
         // than a table; if so we skip decoding
@@ -1081,7 +1081,7 @@ namespace springtail {
         json["name"].get_to(ns_msg.name);
         json["oid"].get_to(ns_msg.oid);
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded create/alter namespace: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded create/alter namespace: json: {}", json.dump());
 
         //check include schemas
         if (!_is_schema_included(ns_msg.name)) {
@@ -1132,7 +1132,7 @@ namespace springtail {
         json["oid"].get_to(ns_msg.oid);
         json["name"].get_to(ns_msg.name);
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded drop namespace: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded drop namespace: json: {}", json.dump());
 
         //check include schemas
         if (!_is_schema_included(ns_msg.name)) {
@@ -1174,7 +1174,7 @@ namespace springtail {
             return {};
         }
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded create/alter usertype: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded create/alter usertype: json: {}", json.dump());
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_TYPE);
         msg->msg.emplace<PgMsgUserType>(usertype_msg);
@@ -1226,7 +1226,7 @@ namespace springtail {
             return {};
         }
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded drop usertype: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded drop usertype: json: {}", json.dump());
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_TYPE);
         msg->msg.emplace<PgMsgUserType>(usertype_msg);
@@ -1258,7 +1258,7 @@ namespace springtail {
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded attach partition: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded attach partition: json: {}", json.dump());
 
         attach_partition_msg.xid = message.xid;
         attach_partition_msg.lsn = message.lsn;
@@ -1285,7 +1285,7 @@ namespace springtail {
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Decoded detach partition: json: {}", json.dump());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Decoded detach partition: json: {}", json.dump());
 
         detach_partition_msg.xid = message.xid;
         detach_partition_msg.lsn = message.lsn;

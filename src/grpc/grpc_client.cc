@@ -64,7 +64,7 @@ create_channel(std::string_view service,
     int port = 0;
     Json::get_to<int>(rpc_json, "server_port", port);
     std::string server_addr = server_hostname + ":" + std::to_string(port);
-    LOG_DEBUG(LOG_ALL, "{}: Creating channel to {} with SSL: {}", service, server_addr, ssl);
+    LOG_DEBUG(LOG_ALL, LOG_LEVEL_DEBUG1, "{}: Creating channel to {} with SSL: {}", service, server_addr, ssl);
     return grpc::CreateCustomChannel(server_addr, creds, args);
 }
 
