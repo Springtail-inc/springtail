@@ -60,9 +60,6 @@ namespace springtail {
         if (_current_offset != start_offset) {
             _seek_stream(start_offset);
         }
-
-        LOG_DEBUG(LOG_PG_REPL, "Set file to: {}, offset: {}, xlog_msg_end_offset: {}",
-                  file, _current_offset, _xlog_msg_end_offset);
     }
 
     void
@@ -185,7 +182,7 @@ namespace springtail {
         _stream.read(header_buffer, PgMsgStreamHeader::SIZE);
         if (_stream.eof()) {
             // hit eof
-            LOG_DEBUG(LOG_PG_REPL, "Hit EOF reading header, path={}, offset={}",
+            LOG_WARN("Hit EOF reading header, path={}, offset={}",
                       _current_path, _current_offset);
             return false;
         }

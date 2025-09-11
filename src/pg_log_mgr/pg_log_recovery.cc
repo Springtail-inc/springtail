@@ -20,7 +20,8 @@ PgLogRecovery::repair_logs()
 
     _latest_log =
         fs::find_latest_modified_file(_repl_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
-    CHECK(_latest_log);
+
+    CHECK(_latest_log) << "No replication log files found, maybe start in INITIALIZE state";
 
     while (_latest_log && lsn == INVALID_LSN) {
         LOG_DEBUG(LOG_PG_LOG_MGR, "Found latest log file: {}", *_latest_log);
@@ -39,7 +40,7 @@ PgLogRecovery::repair_logs()
 void
 PgLogRecovery::replay_logs()
 {
-    LOG_DEBUG(LOG_PG_LOG_MGR, "Start log replay");
+    LOG_INFO("Start log replay");
 
     // revert the system tables to the committed XID
     _revert_system_tables();
@@ -58,7 +59,7 @@ PgLogRecovery::replay_logs()
         _replay_uncommitted();
     }
 
-    LOG_DEBUG(LOG_PG_LOG_MGR, "Log replay completed");
+    LOG_INFO("Log replay completed");
 }
 
 void
@@ -119,7 +120,7 @@ PgLogRecovery::_skip_committed()
     }
 
     // note: once we are garbage collecting old log files, we'll need a way to ensure that the
-    //       two log positions are aligned with eachother
+    //       two log positions are aligned with each other
 
     // Scan the repl log for any begin/commit/abort messages
     bool done = false;
@@ -262,7 +263,7 @@ PgLogRecovery::_replay_active()
         });
     CHECK(min_i != _active_map.end());
 
-    uint64_t start_offset = min_i->second.offset;  // XXX how is this set, need to handle with xlog header
+    uint64_t start_offset = min_i->second.offset;
     _repl_log = min_i->second.file;
     uint64_t timestamp = fs::extract_timestamp_from_file(_repl_log.value(), PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX).value();
     _repl_reader.set_file(*_repl_log, start_offset);
