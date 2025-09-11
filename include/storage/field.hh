@@ -903,28 +903,8 @@ namespace springtail {
         FieldComparisonFunc _comparator_func;
 
     public:
-        explicit ConstTypeField(const T &value)
-            : _value(value)
-        { }
-
-        explicit ConstTypeField(const T &value, bool is_extn)
-            : _value(value), is_extn(is_extn)
-        { }
-
-        explicit ConstTypeField(const T &value, bool is_extn, FieldComparisonFunc comparator_func)
+        explicit ConstTypeField(const T &value, bool is_extn = false, FieldComparisonFunc comparator_func = nullptr)
             : _value(value), is_extn(is_extn), _comparator_func(comparator_func)
-        { }
-
-        explicit ConstTypeField(T &&value)
-            : _value(std::move(value))
-        { }
-
-        explicit ConstTypeField(T &&value, bool is_extn)
-            : _value(std::move(value)), is_extn(is_extn)
-        { }
-
-        explicit ConstTypeField(T &&value, bool is_extn, FieldComparisonFunc comparator_func)
-            : _value(std::move(value)), is_extn(is_extn), _comparator_func(comparator_func)
         { }
 
         SchemaType get_type() const override {
