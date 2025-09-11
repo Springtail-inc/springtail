@@ -32,6 +32,7 @@ target_link_libraries(pgext
     PRIVATE absl::check
     PRIVATE absl::flat_hash_map
     PRIVATE fmt::fmt
+    PRIVATE springtail_common
 )
 # target_link_options(pgext PRIVATE -Wl,--exclude-libs,ALL) # prevent exports that aren't explicitly part of this library
 target_link_options(pgext PRIVATE -W)

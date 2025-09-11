@@ -2,6 +2,7 @@
 
 #include <pg_ext/export.hh>
 #include <cstddef>
+#include <cstdint>
 
 #ifdef strerror_r
 #undef strerror_r
@@ -27,7 +28,7 @@ extern "C" PGEXT_API void appendBinaryStringInfoNT(StringInfo str, const void *d
 extern "C" PGEXT_API void appendStringInfoChar(StringInfo str, char ch);
 extern "C" PGEXT_API char *pg_strerror_r(int errnum, char *buf, size_t buflen);
 extern "C" PGEXT_API void enlargeStringInfo(StringInfo str, int needed);
-extern "C" PGEXT_API int pq_getmsgint(StringInfo str, int size);
+extern "C" PGEXT_API uint32_t pq_getmsgint(StringInfo str, int size);
 extern "C" PGEXT_API void pq_begintypsend(StringInfo str);
 extern "C" PGEXT_API double pq_getmsgfloat8(StringInfo msg);
 extern "C" PGEXT_API void pq_sendfloat8(StringInfo str, double value);

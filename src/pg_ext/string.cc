@@ -11,6 +11,9 @@
 #include <new>
 #include <stdexcept>
 
+#include <arpa/inet.h>
+#include <common/logging.hh>
+
 // char *lowerstr(const char *str) {
 //     return lowerstr_with_len(str, std::strlen(str));
 // }
@@ -290,12 +293,56 @@ pg_strerror_r(int errnum, char *buf, size_t buflen)
     return strerror_r(errnum, buf, buflen);
 }
 
-int pq_getmsgint(StringInfo str, int size) {
-    int value = 0;
-    for (int i = 0; i < size; i++) {
-        value = (value << 8) | (unsigned char) str->data[str->cursor++];
-    }
-    return value;
+static inline uint16_t pg_ntoh16(uint16_t x) {
+    return ntohs(x);
+}
+
+static inline uint32_t pg_ntoh32(uint32_t x) {
+    return ntohl(x);
+}
+
+static inline uint64_t pg_ntoh64(uint64_t x) {
+    return be64toh(x);
+}
+
+void
+pq_copymsgbytes(StringInfo msg, char *buf, int datalen)
+{
+	if (datalen < 0 || datalen > (msg->len - msg->cursor))
+		LOG_ERROR("Insufficient data left in message");
+
+	memcpy(buf, &msg->data[msg->cursor], datalen);
+	msg->cursor += datalen;
+}
+
+uint32_t
+pq_getmsgint(StringInfo msg, int b)
+{
+	uint32_t result;
+	char n8;
+	uint16_t n16;
+	uint32_t n32;
+
+	switch (b)
+	{
+		case 1:
+			pq_copymsgbytes(msg, (char *) &n8, 1);
+			result = n8;
+			break;
+		case 2:
+			pq_copymsgbytes(msg, (char *) &n16, 2);
+			result = pg_ntoh16(n16);
+			break;
+		case 4:
+			pq_copymsgbytes(msg, (char *) &n32, 4);
+			result = pg_ntoh32(n32);
+			break;
+		default:
+			LOG_WARN("Unsupported integer size {}", b);
+			result = 0;
+			break;
+	}
+	return result;
 }
 
 void appendStringInfoChar(StringInfo str, char ch) {
@@ -310,9 +357,26 @@ void pq_begintypsend(StringInfo str) {
     initStringInfo(str);
 }
 
+int64_t
+pq_getmsgint64(StringInfo msg)
+{
+	uint64_t n64;
+
+	pq_copymsgbytes(msg, (char *) &n64, sizeof(n64));
+
+	return pg_ntoh64(n64);
+}
+
 double pq_getmsgfloat8(StringInfo msg) {
-    // XXX Stubbed for now
-    return 0.0;
+    union
+	{
+		double f;
+		uint64_t i;
+	} swap;
+
+	swap.i = pq_getmsgint64(msg);
+
+	return swap.f;
 }
 
 void pq_sendfloat8(StringInfo str, double value) {
