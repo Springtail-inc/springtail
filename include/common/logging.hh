@@ -13,12 +13,6 @@
 #include <common/open_telemetry.hh>
 #include <common/singleton.hh>
 
-#if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_TRACE
-    #define LOG_TRACE(module,fmt, ...) springtail::logging::Logger::debug(module, __func__, __FILE__, __LINE__, LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
-#else
-    #define LOG_TRACE(module, fmt, ...) (void)0
-#endif
-
 #if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG
     #define LOG_DEBUG(module, level, fmt, ...) springtail::logging::Logger::debug(module, __func__, __FILE__, __LINE__, level, fmt, ##__VA_ARGS__)
 #else
@@ -69,7 +63,6 @@ namespace springtail {
         LOG_SCHEMA = 0x400,
         LOG_COMMITTER = 0x800,
         LOG_SYS_TBL_MGR = 0x1000,
-        LOG_PG_LOG_MGR_DATA = 0x2000,
         LOG_ALL = 0xFFFFFFFF
     };
 
@@ -78,9 +71,7 @@ namespace springtail {
         LOG_LEVEL_DEBUG1 = 1, // highest level, most priority
         LOG_LEVEL_DEBUG2 = 2,
         LOG_LEVEL_DEBUG3 = 3,
-        LOG_LEVEL_DEBUG4 = 4,
-        LOG_LEVEL_DEBUG5 = 5, // lowest level, least priority
-        LOG_LEVEL_TRACE = 6
+        LOG_LEVEL_DEBUG4 = 4  // lowest level, least priority
     };
 
     namespace logging {
@@ -114,8 +105,7 @@ namespace springtail {
                 if (level > _debug_log_level) {
                     return;
                 }
-                spdlog::level::level_enum log_level = (level == LOG_LEVEL_TRACE)? spdlog::level::trace : spdlog::level::debug;
-                _log(spdlog::source_loc{file, line, func}, log_level, fmt, std::forward<Args>(args)...);
+                _log(spdlog::source_loc{file, line, func}, spdlog::level::debug, fmt, std::forward<Args>(args)...);
             }
 
             /**
@@ -176,7 +166,7 @@ namespace springtail {
              * @param lvl - debug log level
              */
             void set_debug_level(LogDebugLevel lvl) {
-                if (lvl >= LOG_LEVEL_DEBUG1 && lvl <= LOG_LEVEL_TRACE) {
+                if (lvl >= LOG_LEVEL_DEBUG1 && lvl <= LOG_LEVEL_DEBUG4) {
                     _debug_log_level = lvl;
                 }
             }

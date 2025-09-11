@@ -42,7 +42,7 @@ namespace springtail
                                  uint64_t start_offset, uint64_t &cursor,
                                  std::vector<uint64_t> &result)
     {
-        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Searching for TIDS in XID: {}", xid);
+        LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG2, "Searching for TIDS in XID: {}", xid);
 
         int result_cnt = 0;
         cursor = 0;
@@ -56,12 +56,12 @@ namespace springtail
 
         // iterate through xids exclusive of start
         for (auto &pg_xid: pg_xids) {
-            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "Finding tids in PG XID: {}", pg_xid);
+            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG2, "Finding tids in PG XID: {}", pg_xid);
 
             // fetch xid node for this xid and read lock it
             WriteCacheIndexNodePtr xid_node = _xid_root->find(pg_xid);
             if (xid_node == nullptr) {
-                LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG1, "PG XID {} not found", pg_xid);
+                LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG2, "PG XID {} not found", pg_xid);
                 continue;
             }
 
@@ -204,7 +204,7 @@ namespace springtail
         // XXX should we check if there is an existing pg_xid with data and skip if not?
         std::unique_lock<std::shared_mutex> lock(_xid_map_mutex);
         for (auto &pg_xid: pg_xids) {
-            LOG_INFO("Committing PG XID: {} -> XID: {}", pg_xid, xid);
+            LOG_DEBUG(LOG_WRITE_CACHE_SERVER, LOG_LEVEL_DEBUG3, "Committing PG XID: {} -> XID: {}", pg_xid, xid);
             _xid_map.insert({xid, pg_xid});
         }
         _xid_ts_map.insert({xid, commit_ts});

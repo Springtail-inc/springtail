@@ -171,7 +171,7 @@ namespace springtail::pg_proxy {
                     std::string role = user["role"];
                     std::string type = user["type"];
 
-                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG5, "Found user: {}, {}, {}", username, role, type);
+                    LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Found user: {}, {}, {}", username, role, type);
 
                     // only add users with role database
                     if (role != "database") {

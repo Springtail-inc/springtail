@@ -114,7 +114,7 @@ namespace springtail {
             bool skip_msg = !_is_message_filtered(msg_type, filter);
             PgMsgPtr msg = nullptr;
 
-            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Reading message type: {}, current_offset: {}, skip_msg: {}",
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG2, "Reading message type: {}, current_offset: {}, skip_msg: {}",
                       msg_type, _current_offset, skip_msg);
 
             if (skip_msg) {

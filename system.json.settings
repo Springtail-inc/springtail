@@ -119,6 +119,7 @@
         "organization_id": "9876",
         "account_id": "123",
         "db_instance_id": 1234,
+        "instance_key": "test",
         "fdw_id": "1"
     },
     "aws_users_override": [

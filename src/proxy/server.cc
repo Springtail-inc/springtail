@@ -165,7 +165,7 @@ namespace springtail::pg_proxy {
         while (!_shutdown) {
             int client = accept(socket, nullptr, nullptr);
             if (client >= 0) {
-                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG5, "Accepted keepalive connection");
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Accepted keepalive connection");
                 // Wait for remote disconnect with timeout to check shutdown flag
                 char buf[32];
                 fd_set readfds;
@@ -227,12 +227,12 @@ namespace springtail::pg_proxy {
                          SSL_alert_desc_string_long(ret));
        } else if (where & SSL_CB_EXIT) {
             if (ret == 0) {
-                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG5, "SSL info (CB_EXIT): fd={}, {}:failed in {}", fd, str, SSL_state_string_long(s));
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "SSL info (CB_EXIT): fd={}, {}:failed in {}", fd, str, SSL_state_string_long(s));
             } else if (ret < 0) {
-                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG5, "SSL info (CB_EXIT): fd={}, {}:error in {}", fd, str, SSL_state_string_long(s));
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "SSL info (CB_EXIT): fd={}, {}:error in {}", fd, str, SSL_state_string_long(s));
             }
         } else {
-            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG5, "SSL info callback: fd={}, where={:#X}, ret={}", fd, where, ret);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "SSL info callback: fd={}, where={:#X}, ret={}", fd, where, ret);
         }
     }
 

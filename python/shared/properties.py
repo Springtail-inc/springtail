@@ -85,7 +85,7 @@ class Properties:
                     'MOUNT_POINT': system_json['fs']['mount_point'],
                     'LUSTRE_MOUNT_NAME': system_json['fs']['mount_name'],
                     'LUSTRE_DNS_NAME': system_json['fs']['dns_name'],
-                    'INSTANCE_KEY': 'default',
+                    'INSTANCE_KEY': system_json['org']['instance_key'],
                 }
 
                 self.aws_users = self._get_users_from_json(system_json['aws_users_override'])

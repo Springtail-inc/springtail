@@ -619,7 +619,7 @@ namespace springtail::pg_log_mgr {
             while (!_shutdown && _wal_buffer_flag) {
                 Coordinator::mark_alive(keep_alive);
 
-                LOG_DEBUG(LOG_PG_LOG_MGR_DATA, LOG_LEVEL_DEBUG1, "Received data in recovery mode");
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Received data in recovery mode");
                 if (!_writer_read_data(data, logger, start_offset,
                     [&post_recovery_queue, &start_offset](uint64_t end_offset, const std::filesystem::path &file_path) {
                         if (!post_recovery_queue.empty()) {
@@ -651,7 +651,7 @@ namespace springtail::pg_log_mgr {
             while (!_shutdown) {
                 Coordinator::mark_alive(keep_alive);
 
-                LOG_DEBUG(LOG_PG_LOG_MGR_DATA, LOG_LEVEL_DEBUG1, "Received data in normal mode");
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Received data in normal mode");
                 if (!_writer_read_data(data, logger, start_offset,
                     [this, &start_offset](uint64_t end_offset, const std::filesystem::path &file_path) {
                         _logger_queue.push(start_offset, end_offset, file_path);
@@ -693,7 +693,7 @@ namespace springtail::pg_log_mgr {
                 continue;
             }
 
-            LOG_DEBUG(LOG_PG_LOG_MGR_DATA, LOG_LEVEL_DEBUG1, "Got log entry: path={}, start_offset={}, num_messages={}",
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Got log entry: path={}, start_offset={}, num_messages={}",
                       log_entry->path, log_entry->start_offset, log_entry->num_messages);
 
             // check for stall message, if so then wait for sync to complete
@@ -717,7 +717,7 @@ namespace springtail::pg_log_mgr {
                 continue;
             }
 
-            LOG_DEBUG(LOG_PG_LOG_MGR_DATA, LOG_LEVEL_DEBUG1, "Processing log entry: path={}, start_offset={}, num_messages={}",
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Processing log entry: path={}, start_offset={}, num_messages={}",
                       log_entry->path, log_entry->start_offset, log_entry->num_messages);
 
             auto file_timestamp = fs::extract_timestamp_from_file(log_entry->path, LOG_PREFIX_REPL, LOG_SUFFIX);

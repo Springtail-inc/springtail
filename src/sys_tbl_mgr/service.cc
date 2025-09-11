@@ -1510,7 +1510,7 @@ Service::GetUserType(grpc::ServerContext* context,
 
     XidLsn xid(request->xid(), constant::MAX_LSN);
     auto info = _get_usertype_info(request->db_id(), request->type_id(), xid);
-    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "info is null? {}", info == nullptr);
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG2, "info is null? {}", info == nullptr);
 
     if (info != nullptr) {
         response->set_type_id(info->id);
@@ -1827,7 +1827,7 @@ Service::_get_usertype_info(uint64_t db_id, uint64_t type_id, const XidLsn& xid)
     auto fields = schema->get_fields();
 
     auto search_key = sys_tbl::UserTypes::Primary::key_tuple(type_id, xid.xid, xid.lsn);
-    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Searching for user type {} at {}:{}", type_id, xid.xid, xid.lsn);
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG2, "Searching for user type {} at {}:{}", type_id, xid.xid, xid.lsn);
 
     // find the row that matches the type_id at the given XID/LSN
     auto row_i = table->inverse_lower_bound(search_key);
@@ -1840,7 +1840,7 @@ Service::_get_usertype_info(uint64_t db_id, uint64_t type_id, const XidLsn& xid)
         return nullptr;
     }
 
-    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Found user type id: {}", id_field->get_uint64(&row));
+    LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG2, "Found user type id: {}", id_field->get_uint64(&row));
     if (row_i == table->end() || id_field->get_uint64(&row) != type_id) {
         LOG_WARN("No user type info at xid {}:{}", xid.xid, xid.lsn);
         return nullptr;
@@ -2305,7 +2305,7 @@ Service::_get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn& xid)
         ri.set_extent_id(eid_f->get_uint64(&row));
         *roots_info->add_roots() = ri;
 
-        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "Found root in table: {} {}", idx.id(), eid_f->get_uint64(&row));
+        LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG2, "Found root in table: {} {}", idx.id(), eid_f->get_uint64(&row));
 
         // use snapshot_xid of the last row
         snapshot_xid = sxid_f->get_uint64(&row);
@@ -2464,7 +2464,7 @@ Service::_read_schema_indexes(SchemaInfoPtr schema_info,
         uint64_t tid = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(&row);
 
         if (tid != table_id) {
-            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "No more indexes for table {} -- {}", table_id, tid);
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG3, "No more indexes for table {} -- {}", table_id, tid);
             break;
         }
 
@@ -2556,7 +2556,7 @@ Service::_populate_index_columns(uint64_t db_id, proto::IndexInfo& info, XidLsn 
             indexes_fields->at(sys_tbl::Indexes::Data::INDEX_ID)->get_uint64(&row);
 
         if (tid != info.table_id() || index_id != info.id()) {
-            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG1, "No more indexes for table {} -- {}, {} -- {}",
+            LOG_DEBUG(LOG_SCHEMA, LOG_LEVEL_DEBUG3, "No more indexes for table {} -- {}, {} -- {}",
                     info.table_id(), tid, index_id, info.id());
             break;
         }
