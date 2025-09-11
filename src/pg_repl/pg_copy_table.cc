@@ -932,6 +932,14 @@ namespace springtail
     }
 
     void
+    PgCopyTable::lock_table(uint32_t table_oid)
+    {
+        std::string lock_query =
+            fmt::format("LOCK TABLE '{}'::regclass IN ACCESS SHARE MODE", table_oid);
+        _connection.exec(lock_query);
+    }
+
+    void
     PgCopyTable::_get_table_oids(const std::string &query,
                                  std::set<uint32_t> &table_oids)
     {
@@ -1051,20 +1059,9 @@ namespace springtail
     PgCopyTable::_worker(uint64_t db_id,
                          uint64_t target_xid,
                          CopyQueuePtr copy_queue,
-                         PgCopyResultPtr result)
+                         std::vector<PgCopyResultPtr> &result)
     {
-        // create copy table object and connect to db
-        PgCopyTable copy_table;
-        copy_table.connect(db_id);
-
         XidLsn xid(target_xid, 0);
-
-        // start transaction and get the xids associated w/snapshot
-        std::pair<uint64_t, std::string> snapshot_info = copy_table._get_xact_xids();
-        result->set_snapshot(snapshot_info.first, snapshot_info.second);
-
-        // get the list of user defined types
-        auto &&user_type_map = copy_table._get_user_types();
 
         // iterate through the copy queue
         while (true) {
@@ -1077,16 +1074,43 @@ namespace springtail
                 continue;
             }
 
+            PgCopyResultPtr copy_result = std::make_shared<PgCopyResult>(target_xid);
+
+            LOG_INFO("Copy table start: oid {}", request->table_oid);
+
+            // create copy table object and connect to db
+            PgCopyTable copy_table;
+            copy_table.connect(db_id);
+
+            // get a lock on the table to prevent schema changes from being applied
+
+            // note: This is an issue because concurrent DDL changes to the table may result in the
+            //       snapshot transaction's relcache to get invalidated.  If that happens then the
+            //       view of the system tables that we query may differ from the actual schema of
+            //       the table data that is returned, which can cause failures.
+            copy_table.lock_table(request->table_oid);
+
+            // start transaction and get the xids associated w/snapshot
+            std::pair<uint64_t, std::string> snapshot_info = copy_table._get_xact_xids();
+            copy_result->set_snapshot(snapshot_info.first, snapshot_info.second);
+
+            // get the list of user defined types
+            auto &&user_type_map = copy_table._get_user_types();
+
             try {
                 // copy the table
                 auto info = copy_table._copy_table(db_id,
                                                    xid,
                                                    user_type_map,
                                                    request->table_oid,
-                                                   result);
+                                                   copy_result);
 
                 // add the table oid to the result
-                result->add_table(info);
+                copy_result->add_table(info);
+                if (copy_result->tids.size() > 0) {
+                    result.push_back(copy_result);
+                    copy_table._send_sync_msg(copy_result);
+                }
             } catch (PgRetryError &e) {
                 LOG_ERROR("Unexpected error, will retry table copy: {}", request->table_oid);
                 copy_queue->push(request);
@@ -1098,17 +1122,15 @@ namespace springtail
                 assert(false);
             }
 
+            // end the copy
+            copy_table._end_copy();
+            copy_table.disconnect();
+
+            LOG_INFO("Copy table complete: oid {}", request->table_oid);
+
             // reset schema object for next table
             copy_table._reset_schema();
         }
-
-        if (result->tids.size() > 0) {
-            copy_table._send_sync_msg(result);
-        }
-
-        // end the copy
-        copy_table._end_copy();
-        copy_table.disconnect();
     }
 
     void
@@ -1346,12 +1368,11 @@ namespace springtail
 
         // create a worker thread to copy the tables
         std::vector<std::thread> workers;
-        std::vector<PgCopyResultPtr> table_results;
-        for (int i = 0; i < std::min(static_cast<std::size_t>(WORKER_THREADS), table_oids.size()); i++) {
-            PgCopyResultPtr copy_result = std::make_shared<PgCopyResult>(target_xid);
-            table_results.push_back(copy_result);
-            workers.push_back(std::thread(&PgCopyTable::_worker,
-                              db_id, target_xid, copy_queue, copy_result));
+        int worker_count = std::min(static_cast<std::size_t>(WORKER_THREADS), table_oids.size());
+        std::vector<std::vector<PgCopyResultPtr>> worker_results(worker_count);
+        for (int i = 0; i < worker_count; i++) {
+            workers.push_back(std::thread(&PgCopyTable::_worker, db_id, target_xid, copy_queue,
+                                          std::ref(worker_results[i])));
         }
 
         // iterate through the tables and copy them
@@ -1372,6 +1393,10 @@ namespace springtail
         }
 
         // create result object
+        std::vector<PgCopyResultPtr> table_results;
+        for (auto &results : worker_results) {
+            table_results.insert(table_results.end(), results.begin(), results.end());
+        }
         return table_results;
     }
 
