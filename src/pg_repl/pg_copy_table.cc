@@ -935,8 +935,8 @@ namespace springtail
     PgCopyTable::lock_table(uint32_t table_oid)
     {
         std::string lock_query =
-            fmt::format("LOCK TABLE '{}'::regclass IN ACCESS SHARE MODE", table_oid);
-        _connection.exec(lock_query);
+            fmt::format("LOCK TABLE {}::regclass IN ACCESS SHARE MODE", table_oid);
+        // _connection.exec(lock_query);
     }
 
     void
