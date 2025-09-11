@@ -1185,60 +1185,63 @@ StorageCache::PageCache::background_cleaner()
         boost::unique_lock lock(this->_mutex);
 
         auto cache = StorageCache::get_instance();
-        std::vector<std::future<void>> offset_futures;
-
-        struct FlushTask {
-            ExtentRef& ext_ref;
-            std::optional<SafeExtent> safe_ext;
-            bool is_flushing;
-        };
-
-        std::vector<FlushTask> tasks;
-
-        for (auto &ref : _extents) {
-            // note: we don't need to do anything to CLEAN extents here
-            if (!ref.is_clean()) {
-                // XXX if the extent was already flushed to disk in the background, we don't
-                //     actually need to read it in again here, we just need to get the extent ID
-
-                auto &&e = ref.make_safe_extent(_file);
-
-                // bring DIRTY extents to MUTABLE
-                if ((*e)->state() == CacheExtent::State::DIRTY) {
-                    // update the extent header
-                    (*e)->header() = header;
-                    auto flush_task = FlushTask{ref, std::move(e), true};
-                    auto flush_future_opt = cache->_data_cache->async_flush(*flush_task.safe_ext.value());
-                    if (flush_future_opt) {
-                        offset_futures.push_back(std::move(*flush_future_opt));
-                    }
-                    tasks.push_back(std::move(flush_task));
-                } else {
-                    tasks.push_back(std::move(FlushTask{ref, std::move(e), true}));
-                }
-            } else {
-                tasks.push_back(std::move(FlushTask{ref, std::nullopt, false}));
-            }
-        }
-
-        for (auto& fut: offset_futures) {
-            fut.get();
-        }
-
         std::vector<uint64_t> offsets;
 
-        for (auto& task: tasks) {
-            if (task.is_flushing) {
-                // bring MUTABLE extents to CLEAN
-                if ((*task.safe_ext.value())->state() == CacheExtent::State::MUTABLE) {
-                    // return the now MUTABLE extent back to the read cache
-                    cache->_data_cache->reinsert(*task.safe_ext.value());
+        {
+            std::vector<std::future<void>> offset_futures;
+
+            struct FlushTask {
+                ExtentRef& ext_ref;
+                std::optional<SafeExtent> safe_ext;
+                bool is_flushing;
+            };
+
+            std::vector<FlushTask> tasks;
+
+            for (auto &ref : _extents) {
+                // note: we don't need to do anything to CLEAN extents here
+                if (!ref.is_clean()) {
+                    // XXX if the extent was already flushed to disk in the background, we don't
+                    //     actually need to read it in again here, we just need to get the extent ID
+
+                    auto &&e = ref.make_safe_extent(_file);
+
+                    // bring DIRTY extents to MUTABLE
+                    if ((*e)->state() == CacheExtent::State::DIRTY) {
+                        // update the extent header
+                        (*e)->header() = header;
+                        auto flush_task = FlushTask{ref, std::move(e), true};
+                        auto flush_future_opt = cache->_data_cache->async_flush(*flush_task.safe_ext.value());
+                        if (flush_future_opt) {
+                            offset_futures.push_back(std::move(*flush_future_opt));
+                        }
+                        tasks.push_back(std::move(flush_task));
+                    } else {
+                        tasks.push_back(std::move(FlushTask{ref, std::move(e), true}));
+                    }
+                } else {
+                    tasks.push_back(std::move(FlushTask{ref, std::nullopt, false}));
                 }
-                task.ext_ref = task.safe_ext.value().get_ref();
             }
-            CHECK(task.ext_ref.is_clean());
-            offsets.push_back(task.ext_ref.id());
+
+            for (auto& fut: offset_futures) {
+                fut.get();
+            }
+
+            for (auto& task: tasks) {
+                if (task.is_flushing) {
+                    // bring MUTABLE extents to CLEAN
+                    if ((*task.safe_ext.value())->state() == CacheExtent::State::MUTABLE) {
+                        // return the now MUTABLE extent back to the read cache
+                        cache->_data_cache->reinsert(*task.safe_ext.value());
+                    }
+                    task.ext_ref = task.safe_ext.value().get_ref();
+                }
+                CHECK(task.ext_ref.is_clean());
+                offsets.push_back(task.ext_ref.id());
+            }
         }
+
         return offsets;
     }
 
@@ -1595,17 +1598,25 @@ StorageCache::PageCache::background_cleaner()
 
         // perform the flush, wrap in future
 
-        return std::async(std::launch::async,
-                &StorageCache::DataCache::_flush_and_update_extent,
-                this, std::move(extent));
+        {
+            boost::unique_lock lock(_mutex, boost::adopt_lock);
+            lock.unlock();
+            auto handle = IOMgr::get_instance()->open(extent->_file, IOMgr::IO_MODE::APPEND, true);
+            auto async_flush_future = extent->async_flush(handle);
+
+            lock.lock();
+            lock.release();
+            return std::async(std::launch::async,
+                    &StorageCache::DataCache::_flush_and_update_extent,
+                    this, std::move(extent), std::move(async_flush_future));
+        }
     }
 
     void
-    StorageCache::DataCache::_flush_and_update_extent(CacheExtentPtr extent)
+    StorageCache::DataCache::_flush_and_update_extent(CacheExtentPtr extent,
+            std::future<std::shared_ptr<IOResponseAppend>> async_flush_future)
     {
-        // Perform the flush
-        auto handle = IOMgr::get_instance()->open(extent->_file, IOMgr::IO_MODE::APPEND, true);
-        auto async_flush_future = extent->async_flush(handle);
+        // Get the flush response
         auto flush_response = async_flush_future.get();
 
         // Lock and update cache, extent

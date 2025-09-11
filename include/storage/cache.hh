@@ -518,9 +518,11 @@ namespace springtail {
 
             /**
              * @brief Helper that writes the provided DIRTY extent to disk, updates cache and extent
-             * @param extent Extent to be flushed to the disk
+             * @param extent             Extent to be flushed to the disk
+             * @param async_flush_future IO flush future thats doing the actual disk flush
              */
-            void _flush_and_update_extent(CacheExtentPtr extent);
+            void _flush_and_update_extent(CacheExtentPtr extent,
+                    std::future<std::shared_ptr<IOResponseAppend>> async_flush_future);
 
             /**
              * Helper to read a CLEAN extent into memory.  A callback is provided to be run after
