@@ -159,7 +159,6 @@ namespace springtail::pg_log_mgr {
 
         std::vector<SchemaColumn> new_columns{op, lsn};
 
-        // XXX Plugin pg_ext
         schema = table_schema->create_schema(columns, new_columns, sort_keys, PgExtnRegistry::get_instance()->comparator_func, true);
 
         op_f = schema->get_mutable_field("__springtail_op");
@@ -267,7 +266,6 @@ namespace springtail::pg_log_mgr {
             if (entry.schema == nullptr) {
                 entry.table_schema = sync_skip.schema();
                 if (entry.table_schema == nullptr) {
-                    // XXX Plugin pg_ext
                     entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, xidlsn, PgExtnRegistry::get_instance()->comparator_func, true);
                 }
                 entry.update_schema();
@@ -356,7 +354,6 @@ namespace springtail::pg_log_mgr {
                 XidLsn current(current_xid);
                 entry.table_schema = sync_skip.schema();
                 if (entry.table_schema == nullptr) {
-                    // XXX Plugin pg_ext
                     entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, current, PgExtnRegistry::get_instance()->comparator_func, true);
                 }
                 entry.update_schema();
@@ -579,7 +576,6 @@ namespace springtail::pg_log_mgr {
                         });
             }
 
-            // XXX Plugin pg_ext
             entry.table_schema = std::make_shared<ExtentSchema>(columns, PgExtnRegistry::get_instance()->comparator_func, true);
             entry.update_schema();
         } else if (msg->msg_type == PgMsgEnum::DROP_TABLE) {

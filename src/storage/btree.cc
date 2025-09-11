@@ -2,7 +2,6 @@
 #include <storage/btree.hh>
 
 namespace springtail {
-
     BTree::BTree(const std::filesystem::path &file,
                  uint64_t xid,
                  ExtentSchemaPtr schema,

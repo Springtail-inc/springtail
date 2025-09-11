@@ -742,7 +742,6 @@ namespace springtail::pg_fdw {
         // the tuple always has at least the first qual field from the primary key
         // if additional fields are EQUALS, they are added to the tuple
         FieldArrayPtr fields = std::make_shared<FieldArray>();
-        LOG_INFO("Generating qual tuple for {} quals", quals.size());
         fields->push_back(qual_fields->at(0));
 
         // this is an optimzation where multiple keys are compared with EQUALS
