@@ -1,4 +1,6 @@
 #pragma once
+
+#include <pg_ext/common.hh>
 #include <pg_ext/export.hh>
 
 #include <cstddef>
@@ -15,3 +17,6 @@ typedef struct {
 extern "C" PGEXT_API ArrayType *construct_array_builtin(const void *elems, int nelems, uint32_t elmtype, size_t elem_size);
 extern "C" PGEXT_API int ArrayGetNItems(int ndim, const int *dims);
 extern "C" PGEXT_API bool array_contains_nulls(ArrayType *array);
+extern "C" PGEXT_API ArrayType *construct_empty_array(uint32_t elmtype);
+extern "C" PGEXT_API ArrayType *construct_md_array(const void *elems, int nelems, uint32_t elmtype, size_t elem_size, int ndim, const int *dims);
+extern "C" PGEXT_API void deconstruct_array_builtin(ArrayType *array, Oid elmtype, Datum **elemsp, bool **nullsp, int *nelemsp);

@@ -1,21 +1,13 @@
 #pragma once
 
 #include <pg_ext/export.hh>
+#include <pg_ext/node.hh>
 
 #define FLEXIBLE_ARRAY_MEMBER
 #define LIST_INITIAL_ALLOC 4
 
 typedef unsigned int 	Oid;
 typedef unsigned int 	TransactionId;
-
-typedef enum NodeTag
-{
-	T_Invalid,
-    T_List,
-	T_IntList,
-	T_OidList,
-	T_XidList
-} NodeTag;
 
 typedef union ListCell
 {

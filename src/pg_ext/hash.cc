@@ -77,3 +77,7 @@ void *hash_seq_search(HASH_SEQ_STATUS *status) {
 long hash_get_num_entries(HTAB *htab) {
     return static_cast<long>(htab->count);
 }
+
+uint32_t hash_bytes(const unsigned char *k, int keylen) {
+    return default_hash_func(k, keylen);
+}

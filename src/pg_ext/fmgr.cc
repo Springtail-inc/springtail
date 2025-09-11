@@ -1,9 +1,12 @@
-#include <pg_ext/fmgr.hh>
 #include <cstring>
-#include <stdexcept>
 #include <iostream>
 
-Datum DirectFunctionCall1(PGFunction func, Datum arg1)
+#include <common/logging.hh>
+#include <pg_ext/fmgr.hh>
+#include <pg_ext/node.hh>
+
+Datum
+DirectFunctionCall1(pgext::PGFunction func, Datum arg1)
 {
     LOCAL_FCINFO(fcinfo, 1);
 
@@ -15,21 +18,23 @@ Datum DirectFunctionCall1(PGFunction func, Datum arg1)
     return func(fcinfo);
 }
 
-Datum DirectFunctionCall1Coll(PGFunction func, Oid collation, Datum arg1)
+Datum
+DirectFunctionCall1Coll(pgext::PGFunction func, Oid collation, Datum arg1)
 {
     LOCAL_FCINFO(fcinfo, 1);
 
     InitFunctionCallInfoData(*fcinfo, NULL, 1, collation, NULL, NULL);
 
-	fcinfo->args[0].value = arg1;
-	fcinfo->args[0].isnull = false;
+    fcinfo->args[0].value = arg1;
+    fcinfo->args[0].isnull = false;
 
-	Datum result = (*func) (fcinfo);
+    Datum result = (*func)(fcinfo);
 
     return result;
 }
 
-Datum DirectFunctionCall2(PGFunction func, Datum arg1, Datum arg2)
+Datum
+DirectFunctionCall2(pgext::PGFunction func, Datum arg1, Datum arg2)
 {
     LOCAL_FCINFO(fcinfo, 2);
 
@@ -43,23 +48,31 @@ Datum DirectFunctionCall2(PGFunction func, Datum arg1, Datum arg2)
     return func(fcinfo);
 }
 
-Datum DirectFunctionCall2Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2)
+Datum
+DirectFunctionCall2Coll(pgext::PGFunction func, Oid collation, Datum arg1, Datum arg2)
 {
     LOCAL_FCINFO(fcinfo, 2);
 
     InitFunctionCallInfoData(*fcinfo, NULL, 2, collation, NULL, NULL);
 
-	fcinfo->args[0].value = arg1;
-	fcinfo->args[0].isnull = false;
-	fcinfo->args[1].value = arg2;
-	fcinfo->args[1].isnull = false;
+    fcinfo->args[0].value = arg1;
+    fcinfo->args[0].isnull = false;
+    fcinfo->args[1].value = arg2;
+    fcinfo->args[1].isnull = false;
 
-	Datum result = (*func) (fcinfo);
+    Datum result = (*func)(fcinfo);
 
     return result;
 }
 
-Datum DirectFunctionCall3(PGFunction func, Datum arg1, Datum arg2, Datum arg3)
+char *
+OidOutputFunctionCall(Oid function_oid, Datum value)
+{
+    // XXX Stubbed for now
+    return nullptr;
+}
+
+Datum DirectFunctionCall3(pgext::PGFunction func, Datum arg1, Datum arg2, Datum arg3)
 {
     LOCAL_FCINFO(fcinfo, 2);
 
@@ -73,248 +86,163 @@ Datum DirectFunctionCall3(PGFunction func, Datum arg1, Datum arg2, Datum arg3)
     return func(fcinfo);
 }
 
-Datum DirectFunctionCall3Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3)
+Datum
+DirectFunctionCall3Coll(pgext::PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3)
 {
     LOCAL_FCINFO(fcinfo, 2);
 
     InitFunctionCallInfoData(*fcinfo, NULL, 2, collation, NULL, NULL);
 
-	fcinfo->args[0].value = arg1;
-	fcinfo->args[0].isnull = false;
-	fcinfo->args[1].value = arg2;
-	fcinfo->args[1].isnull = false;
+    fcinfo->args[0].value = arg1;
+    fcinfo->args[0].isnull = false;
+    fcinfo->args[1].value = arg2;
+    fcinfo->args[1].isnull = false;
 
-	Datum result = (*func) (fcinfo);
+    Datum result = (*func)(fcinfo);
 
     return result;
 }
 
-Datum get_fn_opclass_options(FmgrInfo *fcinfo)
+Datum
+get_fn_opclass_options(pgext::FmgrInfo *fcinfo)
 {
-    if (!fcinfo || !fcinfo->fn_extra)
-        return (Datum)0; // return 0/null equivalent
+    if (!fcinfo || !fcinfo->fn_extra) {
+        return (Datum)0;  // return 0/null equivalent
+    }
 
     return reinterpret_cast<Datum>(fcinfo->fn_extra);
 }
 
-bool has_fn_opclass_options(FmgrInfo *fcinfo)
+bool
+has_fn_opclass_options(pgext::FmgrInfo *fcinfo)
 {
     return fcinfo && fcinfo->fn_extra != nullptr;
 }
 
-struct varlena *
-pg_detoast_datum(struct varlena *datum)
+char *
+strdup_cxx(const std::string &str)
 {
-    if (!datum){
-        return nullptr;
-    }
-    return datum;
-}
-
-struct varlena *
-pg_detoast_datum_packed(struct varlena *datum)
-{
-    return datum;
-}
-
-void getTypeOutputInfo(Oid type, Oid *funcOid, bool *typIsVarlena){
-    std::cout << "getTypeOutputInfo: " << type << std::endl;
-    auto it = _type_output_registry.find(type);
-    if (it == _type_output_registry.end())
-        throw std::runtime_error("getTypeOutputInfo: unknown type OID");
-
-    if (funcOid)
-        *funcOid = it->second.output_func;
-    if (typIsVarlena)
-        *typIsVarlena = it->second.is_varlena;
-}
-
-char* strdup_cxx(const std::string& str) {
-    char* result = static_cast<char*>(malloc(str.size() + 1));
+    char *result = static_cast<char *>(malloc(str.size() + 1));
     if (result) {
         std::memcpy(result, str.c_str(), str.size() + 1);
     }
     return result;
 }
 
-// INT4OID (int32)
-char* int4out(void* datum) {
-    int32_t val = *reinterpret_cast<int32_t*>(datum);
-    return strdup_cxx(std::to_string(val));
-}
-
-// INT8OID (int64)
-char* int8out(void* datum) {
-    int64_t val = *reinterpret_cast<int64_t*>(datum);
-    return strdup_cxx(std::to_string(val));
-}
-
-// FLOAT4OID (float)
-char* float4out(void* datum) {
-    float val = *reinterpret_cast<float*>(datum);
-    char buf[64];
-    std::snprintf(buf, sizeof(buf), "%.17g", val);  // match PG precision
-    return strdup_cxx(buf);
-}
-
-// FLOAT8OID (double)
-char* float8out(void* datum) {
-    double val = *reinterpret_cast<double*>(datum);
-    char buf[64];
-    std::snprintf(buf, sizeof(buf), "%.17g", val);  // match PG precision
-    return strdup_cxx(buf);
-}
-
-// BOOLOID
-char* boolout(void* datum) {
-    bool val = *reinterpret_cast<bool*>(datum);
-    return strdup_cxx(val ? "t" : "f");
-}
-
-// OIDOID (uint32)
-char* oidout(void* datum) {
-    uint32_t val = *reinterpret_cast<uint32_t*>(datum);
-    return strdup_cxx(std::to_string(val));
-}
-
-// NAMEOID (char[64] usually)
-char* nameout(void* datum) {
-    return strdup_cxx(reinterpret_cast<const char*>(datum));
-}
-
-// TEXTOID (struct varlena*)
-char* textout(void* datum) {
-    // Simplified for standalone: assume null-terminated
-    return strdup_cxx(reinterpret_cast<const char*>(datum));
-}
-
-// VARCHAROID
-char* varcharout(void* datum) {
-    return textout(datum);  // Same as text for most use
-}
-
-// BPCHAROID (blank-padded char, strip trailing spaces)
-char* bpcharout(void* datum) {
-    std::string str(reinterpret_cast<const char*>(datum));
-    size_t end = str.find_last_not_of(' ');
-    if (end != std::string::npos)
-        str.resize(end + 1);
-    else
-        str.clear();
-    return strdup_cxx(str);
-}
-
-char* byteaout(void* datum) {
-    // Postgres formats bytea as: "\\xABCD..."
-    const uint8_t* data = reinterpret_cast<const uint8_t*>(datum);
-    size_t len = /* figure out size some way, or pass it separately */ 0;
-
-    char* out = static_cast<char*>(malloc(2 + len * 2 + 1));
-    char* ptr = out;
-    *ptr++ = '\\';
-    *ptr++ = 'x';
-    for (size_t i = 0; i < len; ++i) {
-        std::sprintf(ptr, "%02x", data[i]);
-        ptr += 2;
-    }
-    *ptr = '\0';
-    return out;
-}
-
-PGFunction lookup_pgfunction_by_oid(Oid oid)
+Datum
+FunctionCall1(pgext::FmgrInfo *flinfo, Datum arg1)
 {
-    return nullptr;
+    LOCAL_FCINFO(fcinfo, 1);
+    Datum result;
+
+    InitFunctionCallInfoData(*fcinfo, flinfo, 1, 0, NULL, NULL);
+
+    fcinfo->args[0].value = arg1;
+    fcinfo->args[0].isnull = false;
+
+    result = FunctionCallInvoke(fcinfo);
+
+    /* Check for null result, since caller is clearly not expecting one */
+    if (fcinfo->isnull) {
+        std::cerr << "FunctionCall1Coll: null result" << std::endl;
+    }
+
+    return result;
 }
 
 Datum
-FunctionCall1(FmgrInfo *flinfo, Datum arg1)
+InputFunctionCall(pgext::FmgrInfo *flinfo, char *str, Oid typioparam, int32_t typmod)
 {
-	LOCAL_FCINFO(fcinfo, 1);
-	Datum		result;
+    LOCAL_FCINFO(fcinfo, 3);
+    Datum result;
 
-	InitFunctionCallInfoData(*fcinfo, flinfo, 1, 0, NULL, NULL);
+    if (str == NULL && flinfo->fn_strict) {
+        return (Datum)0; /* just return null result */
+    }
 
-	fcinfo->args[0].value = arg1;
-	fcinfo->args[0].isnull = false;
+    InitFunctionCallInfoData(*fcinfo, flinfo, 3, InvalidOid, NULL, NULL);
 
-	result = FunctionCallInvoke(fcinfo);
+    fcinfo->args[0].value = pgext::CStringGetDatum(str);
+    fcinfo->args[0].isnull = false;
+    fcinfo->args[1].value = pgext::ObjectIdGetDatum(typioparam);
+    fcinfo->args[1].isnull = false;
+    fcinfo->args[2].value = pgext::Int32GetDatum(typmod);
+    fcinfo->args[2].isnull = false;
 
-	/* Check for null result, since caller is clearly not expecting one */
-	if (fcinfo->isnull)
-		std::cerr << "FunctionCall1Coll: null result" << std::endl;
+    result = FunctionCallInvoke(fcinfo);
 
-	return result;
+    /* Should get null result if and only if str is NULL */
+    if (str == NULL) {
+        if (!fcinfo->isnull) {
+            LOG_ERROR("input function {} returned non-NULL", flinfo->fn_oid);
+        }
+    } else {
+        if (fcinfo->isnull) {
+            LOG_ERROR("input function {} returned NULL", flinfo->fn_oid);
+        }
+    }
+
+    return result;
 }
 
 char *
-OutputFunctionCall(FmgrInfo *flinfo, Datum val)
+OutputFunctionCall(pgext::FmgrInfo *flinfo, Datum val)
 {
-	return pgext::DatumGetCString(FunctionCall1(flinfo, val));
+    return pgext::DatumGetCString(FunctionCall1(flinfo, val));
 }
 
-/**
- * Returns a string representation of the Datum value, using the
- * PostgresSQL output function associated with the given OID.
- *
- * The returned string is owned by the caller and must be freed.
- *
- * The function_oid parameter should be set to the OID of the output
- * function associated with the type of the value Datum.
- *
- * The value Datum is passed directly to the output function, so the
- * caller must ensure that it is of the correct type for the given
- * OID.
- *
- * If the OID is not recognized, the function returns a string
- * representation of the OID.
- *
- * XXX This currently only supports a limited set of types.  It should
- * be extended to handle more types.
- */
-const char* OidOutputFunctionCall(Oid function_oid, Datum value)
+pgext::TypeFuncClass
+get_call_result_type(pgext::FunctionCallInfo fcinfo, Oid *resultTypeId, pgext::TupleDesc *resultTupleDesc)
 {
-    switch (function_oid) {
-        // Numeric types
-        case INT4OID:    // 23
-            return int4out((void*)&value);
-        case INT8OID:    // 20
-            return int8out((void*)&value);
-        case 1004:  // 700
-            return float4out((void*)&value);
-        case 1005:  // 701
-            return float8out((void*)&value);
-        case 1700: // 1700
-            // numeric_out would go here
-            return "numeric_out not implemented";
+    return pgext::TYPEFUNC_SCALAR;
+}
 
-        // Boolean
-        case BOOLOID:    // 16
-            return boolout((void*)&value);
+Oid
+get_call_expr_argtype(pgext::Node *expr, int argnum)
+{
+    // XXX Stubbed for now
+    return InvalidOid;
+}
 
-        // String types
-        case TEXTOID:    // 25
-            return textout((void*)&value);
-        case VARCHAROID: // 1043
-            return varcharout((void*)&value);
-        case BPCHAROID:  // 1042
-            return bpcharout((void*)&value);
-        case NAMEOID:    // 19
-            return nameout((void*)&value);
-
-        // Binary data
-        case BYTEAOID:   // 17
-            return byteaout((void*)&value);
-
-        // OID type
-        case OIDOID:     // 26
-            return oidout((void*)&value);
-
-        // XXX Handle more OIDs?
-
-        default:
-            // For unsupported types, return a string representation
-            static char buf[32];
-            snprintf(buf, sizeof(buf), "Unsupported type OID: %u", function_oid);
-            return buf;
+Oid
+get_fn_expr_argtype(pgext::FmgrInfo *flinfo, int argnum)
+{
+    if (!flinfo || !flinfo->fn_expr) {
+        return InvalidOid;
     }
+
+    return get_call_expr_argtype(flinfo->fn_expr, argnum);
+}
+
+void
+getTypeInputInfo(Oid type, Oid *typInput, Oid *typIOParam)
+{
+    // XXX Stubbed for now
+}
+
+pgext::FuncCallContext *
+per_MultiFuncCall(PG_FUNCTION_ARGS)
+{
+    pgext::FuncCallContext *retval = (pgext::FuncCallContext *)fcinfo->flinfo->fn_extra;
+
+    return retval;
+}
+
+void
+fmgr_info_cxt(Oid functionId, pgext::FmgrInfo *finfo, pgext::MemoryContext mcxt)
+{
+    // XXX Stubbed for now
+}
+
+pgext::TupleDesc
+lookup_rowtype_tupdesc_domain(Oid type_id, int32_t typmod, bool noError)
+{
+    // XXX Stubbed for now
+    return nullptr;
+}
+
+void
+DecrTupleDescRefCount(pgext::TupleDesc tupdesc)
+{
+    // XXX Stubbed for now
 }

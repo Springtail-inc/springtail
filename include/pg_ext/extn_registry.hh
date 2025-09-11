@@ -99,25 +99,25 @@ public:
      * @param oid The operator oid
      * @return The operator function
      */
-    PGFunction get_operator_func_by_oid(uint32_t oid) const;
+    pgext::PGFunction get_operator_func_by_oid(uint32_t oid) const;
     /**
      * Get the operator function by operator name
      * @param oper_name The operator name
      * @return The operator function
      */
-    PGFunction get_operator_func_by_oper_name(const std::string& oper_name) const;
+    pgext::PGFunction get_operator_func_by_oper_name(const std::string& oper_name) const;
     /**
      * Get the operator function by proc name
      * @param proc_name The proc name
      * @return The operator function
      */
-    PGFunction get_operator_func_by_proc_name(const std::string& proc_name) const;
+    pgext::PGFunction get_operator_func_by_proc_name(const std::string& proc_name) const;
     /**
      * Get the type function by type name
      * @param type_name The type name
      * @return The type function
      */
-    PGFunction get_type_func_by_type_name(const std::string& type_name) const;
+    pgext::PGFunction get_type_func_by_type_name(const std::string& type_name) const;
 
     /**
      * Convert a datum to a string - Using the typeouput function of the extension type
@@ -150,7 +150,7 @@ public:
                                 const std::span<const char> &lhval,
                                 const std::span<const char> &rhval);
 private:
-    PGFunction _load_extn_function(void* library, const std::string_view oper_name);
+    pgext::PGFunction _load_extn_function(void* library, const std::string_view oper_name);
     void* _load_library(const std::string_view lib_path);
 
     PgExtnRegistry() {}
@@ -161,9 +161,9 @@ private:
     std::unordered_map<uint32_t, std::string> _proc_oid_to_name;
     std::unordered_map<uint32_t, PgType> _type_oid_to_type;
 
-    std::unordered_map<std::string, PGFunction> _oper_name_to_func;
-    std::unordered_map<std::string, PGFunction> _proc_name_to_func;
-    std::unordered_map<std::string, PGFunction> _type_func_name_to_func;
+    std::unordered_map<std::string, pgext::PGFunction> _oper_name_to_func;
+    std::unordered_map<std::string, pgext::PGFunction> _proc_name_to_func;
+    std::unordered_map<std::string, pgext::PGFunction> _type_func_name_to_func;
 
     std::unordered_map<std::string, void*> _library_map;
 };

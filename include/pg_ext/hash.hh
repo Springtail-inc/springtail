@@ -49,3 +49,4 @@ extern "C" PGEXT_API void *hash_search(HTAB *htab, const void *key, HASHACTION a
 extern "C" PGEXT_API void hash_seq_init(HASH_SEQ_STATUS *status, HTAB *htab);
 extern "C" PGEXT_API void *hash_seq_search(HASH_SEQ_STATUS *status);
 extern "C" PGEXT_API long hash_get_num_entries(HTAB *htab);
+extern "C" PGEXT_API uint32_t hash_bytes(const unsigned char *k, int keylen);

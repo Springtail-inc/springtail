@@ -1,4 +1,6 @@
 #include <pg_ext/string.hh>
+#include <pg_ext/memory.hh>
+
 #include <cassert>
 #include <cctype>
 #include <climits>
@@ -10,206 +12,212 @@
 #include <cwchar>
 #include <new>
 #include <stdexcept>
-
 #include <arpa/inet.h>
+
 #include <common/logging.hh>
 
-// char *lowerstr(const char *str) {
-//     return lowerstr_with_len(str, std::strlen(str));
-// }
+char *lowerstr(const char *str) {
+    return lowerstr_with_len(str, std::strlen(str));
+}
 
-// static inline unsigned char tolower_ascii(unsigned char c)
-// {
-//     if (c >= 'A' && c <= 'Z') return (unsigned char)(c + 32);
-//     return c;
-// }
+static inline unsigned char tolower_ascii(unsigned char c)
+{
+    if (c >= 'A' && c <= 'Z') return (unsigned char)(c + 32);
+    return c;
+}
 
-// char *lowerstr_with_len(const char *str, int len) {
-//     if (!str || len <= 0) {
-//         char *empty = (char *)palloc(1);
-//         if (empty) empty[0] = '\0';
-//         return empty;
-//     }
+int
+pg_mblen(const char *mbstr)
+{
+    const unsigned char lead = *(const unsigned char *)mbstr;
+    int len = (lead < 0x80)             ? 1
+              : ((lead & 0xE0) == 0xC0) ? 2
+              : ((lead & 0xF0) == 0xE0) ? 3
+              : ((lead & 0xF8) == 0xF0) ? 4
+                                        : 1;
 
-//     char *buf = (char *)palloc((size_t)len + 1);  // +1 for null terminator
-//     if (!buf) return NULL;
+    return len;
+}
 
-//     int i = 0, o = 0;
+char *lowerstr_with_len(const char *str, int len) {
+    if (!str || len <= 0) {
+        char *empty = (char *)palloc(1);
+        if (empty) empty[0] = '\0';
+        return empty;
+    }
 
-//     while (i < len) {
-//         int m = pg_mblen(str + i);
+    char *buf = (char *)palloc((size_t)len + 1);  // +1 for null terminator
+    if (!buf) return NULL;
 
-//         // Ensure we don’t overread beyond len
-//         if (m <= 0 || i + m > len) {
-//             m = 1;
-//         }
+    int i = 0, o = 0;
 
-//         if (m == 1) {
-//             // ASCII character — lowercase it
-//             unsigned char c = (unsigned char)str[i];
-//             buf[o++] = (char)tolower_ascii(c);
-//         } else {
-//             // Multibyte sequence — copy as-is
-//             memcpy(buf + o, str + i, m);
-//             o += m;
-//         }
+    while (i < len) {
+        int m = pg_mblen(str + i);
 
-//         i += m;
-//     }
+        // Ensure we don’t overread beyond len
+        if (m <= 0 || i + m > len) {
+            m = 1;
+        }
 
-//     buf[o] = '\0';
+        if (m == 1) {
+            // ASCII character — lowercase it
+            unsigned char c = (unsigned char)str[i];
+            buf[o++] = (char)tolower_ascii(c);
+        } else {
+            // Multibyte sequence — copy as-is
+            memcpy(buf + o, str + i, m);
+            o += m;
+        }
 
-//     return buf;
-// }
+        i += m;
+    }
 
+    buf[o] = '\0';
 
-// char *upperstr(const char *str) {
-//     return upperstr_with_len(str, std::strlen(str));
-// }
+    return buf;
+}
 
-// char *upperstr_with_len(const char *str, int len) {
-//     if (!str || len <= 0) {
-//         return nullptr;
-//     }
+char *upperstr(const char *str) {
+    return upperstr_with_len(str, std::strlen(str));
+}
 
-//     char *result = (char *)palloc(len + 1);
-//     if (!result) return nullptr;
+char *upperstr_with_len(const char *str, int len) {
+    if (!str || len <= 0) {
+        return nullptr;
+    }
 
-//     for (size_t i = 0; i < len; i++) {
-//         result[i] = std::toupper((unsigned char)str[i]);
-//     }
+    char *result = (char *)palloc(len + 1);
+    if (!result) return nullptr;
 
-//     result[len] = '\0';
-//     return result;
-// }
+    for (size_t i = 0; i < len; i++) {
+        result[i] = std::toupper((unsigned char)str[i]);
+    }
 
-// int pg_mblen(const char *mbstr) {
-//     const unsigned char lead = *(const unsigned char*)mbstr;
-//     int len = (lead < 0x80) ? 1
-//             : ((lead & 0xE0) == 0xC0) ? 2
-//             : ((lead & 0xF0) == 0xE0) ? 3
-//             : ((lead & 0xF8) == 0xF0) ? 4
-//             : 1;
+    result[len] = '\0';
+    return result;
+}
 
-//     return len;
-// }
+int pg_snprintf(char *str, size_t count, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int result = vsnprintf(str, count, fmt, args);
+    va_end(args);
+    return result;
+}
 
-// int pg_snprintf(char *str, size_t count, const char *fmt, ...) {
-//     va_list args;
-//     va_start(args, fmt);
-//     int result = vsnprintf(str, count, fmt, args);
-//     va_end(args);
-//     return result;
-// }
+int pg_database_encoding_max_length(void) {
+    return 4;
+}
 
-// int pg_database_encoding_max_length(void) {
-//     return 4;
-// }
+int pg_mb2wchar_with_len(const char *from, wchar_t *to, int len) {
+    int count = 0;
+    const unsigned char *s = (const unsigned char *)from;
 
-// int pg_mb2wchar_with_len(const char *from, wchar_t *to, int len) {
-//     int count = 0;
-//     const unsigned char *s = (const unsigned char *)from;
+    while (len > 0 && *s) {
+        int mblen = pg_mblen((const char *)s);
+        if (mblen > len) break; // prevent buffer overrun
 
-//     while (len > 0 && *s) {
-//         int mblen = pg_mblen((const char *)s);
-//         if (mblen > len) break; // prevent buffer overrun
+        uint32_t wc = 0;
+        if (mblen == 1) {
+            wc = s[0];
+        } else if (mblen == 2) {
+            wc = ((s[0] & 0x1F) << 6) | (s[1] & 0x3F);
+        } else if (mblen == 3) {
+            wc = ((s[0] & 0x0F) << 12) | ((s[1] & 0x3F) << 6) | (s[2] & 0x3F);
+        } else if (mblen == 4) {
+            wc = ((s[0] & 0x07) << 18) |
+                 ((s[1] & 0x3F) << 12) |
+                 ((s[2] & 0x3F) << 6) |
+                 (s[3] & 0x3F);
+        }
 
-//         uint32_t wc = 0;
-//         if (mblen == 1) {
-//             wc = s[0];
-//         } else if (mblen == 2) {
-//             wc = ((s[0] & 0x1F) << 6) | (s[1] & 0x3F);
-//         } else if (mblen == 3) {
-//             wc = ((s[0] & 0x0F) << 12) | ((s[1] & 0x3F) << 6) | (s[2] & 0x3F);
-//         } else if (mblen == 4) {
-//             wc = ((s[0] & 0x07) << 18) |
-//                  ((s[1] & 0x3F) << 12) |
-//                  ((s[2] & 0x3F) << 6) |
-//                  (s[3] & 0x3F);
-//         }
+        to[count++] = wc;
+        s += mblen;
+        len -= mblen;
+    }
 
-//         to[count++] = wc;
-//         s += mblen;
-//         len -= mblen;
-//     }
+    return count;
+}
 
-//     return count;
-// }
+int pg_wchar2mb_with_len(const wchar_t *from, char *to, int len) {
+    int bytes_written = 0;
 
-// int pg_wchar2mb_with_len(const wchar_t *from, char *to, int len) {
-//     int bytes_written = 0;
+    for (int i = 0; i < len; i++) {
+        uint32_t wc = from[i];
+        if (wc <= 0x7F) {
+            *to++ = (char)wc;
+            bytes_written += 1;
+        } else if (wc <= 0x7FF) {
+            *to++ = 0xC0 | ((wc >> 6) & 0x1F);
+            *to++ = 0x80 | (wc & 0x3F);
+            bytes_written += 2;
+        } else if (wc <= 0xFFFF) {
+            *to++ = 0xE0 | ((wc >> 12) & 0x0F);
+            *to++ = 0x80 | ((wc >> 6) & 0x3F);
+            *to++ = 0x80 | (wc & 0x3F);
+            bytes_written += 3;
+        } else if (wc <= 0x10FFFF) {
+            *to++ = 0xF0 | ((wc >> 18) & 0x07);
+            *to++ = 0x80 | ((wc >> 12) & 0x3F);
+            *to++ = 0x80 | ((wc >> 6) & 0x3F);
+            *to++ = 0x80 | (wc & 0x3F);
+            bytes_written += 4;
+        }
+        // else: invalid, ignore or insert replacement char
+    }
 
-//     for (int i = 0; i < len; i++) {
-//         uint32_t wc = from[i];
-//         if (wc <= 0x7F) {
-//             *to++ = (char)wc;
-//             bytes_written += 1;
-//         } else if (wc <= 0x7FF) {
-//             *to++ = 0xC0 | ((wc >> 6) & 0x1F);
-//             *to++ = 0x80 | (wc & 0x3F);
-//             bytes_written += 2;
-//         } else if (wc <= 0xFFFF) {
-//             *to++ = 0xE0 | ((wc >> 12) & 0x0F);
-//             *to++ = 0x80 | ((wc >> 6) & 0x3F);
-//             *to++ = 0x80 | (wc & 0x3F);
-//             bytes_written += 3;
-//         } else if (wc <= 0x10FFFF) {
-//             *to++ = 0xF0 | ((wc >> 18) & 0x07);
-//             *to++ = 0x80 | ((wc >> 12) & 0x3F);
-//             *to++ = 0x80 | ((wc >> 6) & 0x3F);
-//             *to++ = 0x80 | (wc & 0x3F);
-//             bytes_written += 4;
-//         }
-//         // else: invalid, ignore or insert replacement char
-//     }
+    return bytes_written;
+}
 
-//     return bytes_written;
-// }
+int pg_mbstrlen_with_len(const char *mbstr, int len)
+{
+    if (!mbstr || len <= 0) return 0;
+    int i = 0, chars = 0;
+    while (i < len) {
+        int m = pg_mblen(mbstr + i);
+        if (m <= 0) m = 1;
+        if (i + m > len) break;   // don't step past end
+        i += m;
+        chars++;
+    }
+    return chars;
+}
 
-// int pg_mbstrlen_with_len(const char *mbstr, int len)
-// {
-//     if (!mbstr || len <= 0) return 0;
-//     int i = 0, chars = 0;
-//     while (i < len) {
-//         int m = pg_mblen(mbstr + i);
-//         if (m <= 0) m = 1;
-//         if (i + m > len) break;   // don't step past end
-//         i += m;
-//         chars++;
-//     }
-//     return chars;
-// }
+int t_isalnum(const char *ptr) {
+    if (!ptr || !*ptr) return 0;
+    return t_isalpha(ptr) || t_isdigit(ptr);
+}
 
-// int t_isalnum(const char *ptr) {
-//     if (!ptr || !*ptr) return 0;
-//     return t_isalpha(ptr) || t_isdigit(ptr);
-// }
+int t_isspace(const char *p) {
+    if (!p || !*p) return 0;
+    unsigned char c = (unsigned char)*p;
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+}
 
-// int t_isspace(const char *p) {
-//     if (!p || !*p) return 0;
-//     unsigned char c = (unsigned char)*p;
-//     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
-// }
+int t_isdigit(const char *p) {
+    if (!p || !*p) return 0;
+    unsigned char c = (unsigned char)*p;
+    return c >= '0' && c <= '9';
+}
 
-// int t_isdigit(const char *p) {
-//     if (!p || !*p) return 0;
-//     unsigned char c = (unsigned char)*p;
-//     return c >= '0' && c <= '9';
-// }
+int t_isalpha(const char *p) {
+    if (!p || !*p) return 0;
+    unsigned char c = (unsigned char)*p;
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
 
-// int t_isalpha(const char *p) {
-//     if (!p || !*p) return 0;
-//     unsigned char c = (unsigned char)*p;
-//     return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
-// }
+char *str_tolower(const char *buff, size_t nbytes, Oid collid) {
+    return lowerstr_with_len(buff, nbytes);
+}
 
-// char *str_tolower(const char *buff, size_t nbytes, Oid collid) {
-//     return lowerstr_with_len(buff, nbytes);
-// }
+char *str_toupper(const char *buff, size_t nbytes, Oid collid) {
+    return upperstr_with_len(buff, nbytes);
+}
 
-// char *str_toupper(const char *buff, size_t nbytes, Oid collid) {
-//     return upperstr_with_len(buff, nbytes);
-// }
+char *pq_getmsgtext(StringInfo msg, int rawbytes, int *nbytes) {
+    // XXX Stubbed for now
+    return strdup(msg->data + msg->cursor);
+}
 
 char *pstrdup(const char *in) {
     return strdup(in);
@@ -272,6 +280,21 @@ enlargeStringInfo(StringInfo str, int needed)
         throw std::bad_alloc();
 
     str->maxlen = newlen;
+}
+
+void
+appendBinaryStringInfo(StringInfo str, const void *data, int datalen)
+{
+    assert(str != NULL);
+
+    /* Make more room if needed */
+    enlargeStringInfo(str, datalen);
+
+    /* OK, append the data */
+    memcpy(str->data + str->len, data, datalen);
+
+    /* Null-terminate */
+    str->data[str->len] = '\0';
 }
 
 void
@@ -383,6 +406,10 @@ void pq_sendfloat8(StringInfo str, double value) {
     // XXX Stubbed for now
 }
 
+void pq_sendtext(StringInfo buf, const char *str, int slen) {
+    // XXX Stubbed for now
+}
+
 bytea *pq_endtypsend(StringInfo buf) {
     // XXX Stubbed for now
     return nullptr;
@@ -394,4 +421,33 @@ void appendStringInfoString(StringInfo str, const char *s) {
     }
     std::strcat(str->data, s);
     str->len += strlen(s);
+}
+
+int parser_errposition(ParseState *pstate, int location) {
+    int pos = 0;
+
+    /* No-op if location was not provided */
+    if (location < 0) {
+        return 0;
+    }
+    /* Can't do anything if source text is not available */
+    if (pstate == NULL || pstate->p_sourcetext == NULL) {
+        return 0;
+    }
+    /* Convert offset to character number */
+    pos = pg_mbstrlen_with_len(pstate->p_sourcetext, location) + 1;
+    /* And pass it to the ereport mechanism */
+    // return errposition(pos);
+    // XXX Stubbed
+    return pos;
+}
+
+bool
+scanner_isspace(char ch)
+{
+    /* This must match scan.l's list of {space} characters */
+    if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
+        return true;
+    }
+    return false;
 }

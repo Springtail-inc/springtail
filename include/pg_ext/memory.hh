@@ -15,14 +15,14 @@
 // Context management
 // extern "C" PGEXT_API void *CurrentMemoryContext;
 
-// extern "C" PGEXT_API void *AllocSetContextCreateInternal(void *parent,
-//                                                          const char *name,
-//                                                          size_t minContextSize,
-//                                                          size_t initBlockSize,
-//                                                          size_t maxBlockSize);
+extern "C" PGEXT_API void *AllocSetContextCreateInternal(void *parent,
+                                                         const char *name,
+                                                         size_t minContextSize,
+                                                         size_t initBlockSize,
+                                                         size_t maxBlockSize);
 // extern "C" PGEXT_API void *MemoryContextAlloc(void *context, size_t size);
 // extern "C" PGEXT_API void *MemoryContextAllocZero(void *context, size_t size);
-// extern "C" PGEXT_API void MemoryContextDelete(void *context);
+extern "C" PGEXT_API void MemoryContextDelete(void *context);
 
 // Memory management
 extern "C" PGEXT_API void *palloc(size_t size);

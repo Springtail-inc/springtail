@@ -36,7 +36,7 @@ PgExtnRegistry::add_operator(const std::string& extension, uint32_t oid, const s
     _proc_oid_to_name.insert({oid, proc_name});
 }
 
-PGFunction
+pgext::PGFunction
 PgExtnRegistry::get_operator_func_by_oid(uint32_t oid) const
 {
     auto it = _oper_oid_to_name.find(oid);
@@ -47,7 +47,7 @@ PgExtnRegistry::get_operator_func_by_oid(uint32_t oid) const
     return _oper_name_to_func.at(it->second);
 }
 
-PGFunction
+pgext::PGFunction
 PgExtnRegistry::get_operator_func_by_oper_name(const std::string& oper_name) const
 {
     auto it = _oper_name_to_func.find(oper_name);
@@ -58,7 +58,7 @@ PgExtnRegistry::get_operator_func_by_oper_name(const std::string& oper_name) con
     return it->second;
 }
 
-PGFunction
+pgext::PGFunction
 PgExtnRegistry::get_operator_func_by_proc_name(const std::string& proc_name) const
 {
     auto it = _proc_name_to_func.find(proc_name);
@@ -69,7 +69,7 @@ PgExtnRegistry::get_operator_func_by_proc_name(const std::string& proc_name) con
     return it->second;
 }
 
-PGFunction
+pgext::PGFunction
 PgExtnRegistry::get_type_func_by_type_name(const std::string& type_name) const
 {
     auto it = _type_func_name_to_func.find(type_name);
@@ -164,12 +164,12 @@ PgExtnRegistry::binary_to_datum(const std::span<const char> &value,
     return result;
 };
 
-PGFunction
+pgext::PGFunction
 PgExtnRegistry::_load_extn_function(void* library, const std::string_view func_name)
 {
-    PGFunction extn_function = (PGFunction)dlsym(library, func_name.data());
+    pgext::PGFunction extn_function = (pgext::PGFunction)dlsym(library, func_name.data());
     if (!extn_function) {
-        LOG_ERROR("Failed to find function PGFunction {}", func_name);
+        LOG_ERROR("Failed to find function pgext::PGFunction {}", func_name);
         return nullptr;
     }
     return extn_function;

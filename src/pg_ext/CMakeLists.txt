@@ -6,7 +6,7 @@ find_package(Boost COMPONENTS program_options REQUIRED)
 set(LIB_PGEXT_SOURCES
     error.cc
     memory.cc
-    # guc.cc
+    guc.cc
     string.cc
     list.cc
     hash.cc
@@ -18,6 +18,10 @@ set(LIB_PGEXT_SOURCES
     crc.cc
     reloptions.cc
     float.cc
+    numeric.cc
+    node.cc
+    jsonb.cc
+    toast.cc
     extn_registry.cc
 )
 
@@ -43,40 +47,13 @@ set_target_properties(pgext PROPERTIES
   VISIBILITY_INLINES_HIDDEN ON
 )
 
-# # ──────────────────────────────────────────────────────────────
-# # Add test_runner executable
-# # ──────────────────────────────────────────────────────────────
+# Add extn_parser executable
+add_executable(extn_parser extn_parser.cc)
 
-# # Adjust path if test_runner.cc is elsewhere
-# add_executable(test_runner test_runner.cc)
-
-# # Link the executable against your shim lib and libdl for dlsym
-# target_link_libraries(test_runner
-#     PRIVATE pgext
-#     PRIVATE dl
-#     PRIVATE absl::flat_hash_map
-# )
-
-# target_include_directories(test_runner
-#     PRIVATE ${CMAKE_SOURCE_DIR}/include
-# )
-
-# # Add extn_parser executable
-# add_executable(extn_parser extn_parser.cc)
-
-# # Link the executable against the required libraries
-# target_link_libraries(extn_parser
-#     PRIVATE pgext
-#     PRIVATE springtail_proxy  # Add the proxy library that contains the parser implementation
-#     PRIVATE dl
-#     PRIVATE absl::flat_hash_map
-# )
-
-# target_include_directories(extn_parser
-#     PRIVATE ${CMAKE_SOURCE_DIR}/include
-#     INCLUDES ${CMAKE_SOURCE_DIR}/include
-#         ${CMAKE_SOURCE_DIR}/external/libpg_query/
-#         ${CMAKE_SOURCE_DIR}/external/libpg_query/src
-#         ${CMAKE_SOURCE_DIR}/external/libpg_query/src/postgres/include
-#         ${CMAKE_SOURCE_DIR}/external/libpg_query/vendor/include
-# )
+# Link the executable against the required libraries
+target_link_libraries(extn_parser
+    PRIVATE pgext
+    PRIVATE springtail_common
+    PRIVATE dl
+    PRIVATE absl::flat_hash_map
+)

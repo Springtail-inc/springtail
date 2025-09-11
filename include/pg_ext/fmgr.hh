@@ -1,303 +1,228 @@
 #pragma once
 
+#include <pg_ext/common.hh>
 #include <pg_ext/export.hh>
 #include <pg_ext/memory.hh>
 
-#include <cstdint>
-#include <unordered_map>
-
-// VARATT START
-#define FLEXIBLE_ARRAY_MEMBER
-
-typedef union
-{
-	struct
-	{
-		uint32_t		va_header;
-		char		va_data[FLEXIBLE_ARRAY_MEMBER];
-	}			va_4byte;
-} varattrib_4b;
-
-#define OidFunctionCall3(functionId, arg1, arg2, arg3) \
-	OidFunctionCall3Coll(functionId, InvalidOid, arg1, arg2, arg3)
-
-typedef struct
-{
-	uint8_t		va_header;
-	char		va_data[FLEXIBLE_ARRAY_MEMBER];
-} varattrib_1b;
-
-#define VARDATA_4B(PTR)		(((varattrib_4b *) (PTR))->va_4byte.va_data)
-#define VARDATA_1B(PTR)		(((varattrib_1b *) (PTR))->va_data)
-#define VARATT_IS_1B(PTR) \
-	((((varattrib_1b *) (PTR))->va_header & 0x80) == 0x80)
-
-#define VARSIZE_4B(PTR) \
-	(((varattrib_4b *) (PTR))->va_4byte.va_header & 0x3FFFFFFF)
-#define VARSIZE_1B(PTR) \
-	(((varattrib_1b *) (PTR))->va_header & 0x7F)
-
-#define VARDATA_ANY(PTR) \
-	 (VARATT_IS_1B(PTR) ? VARDATA_1B(PTR) : VARDATA_4B(PTR))
-
-#define VARSIZE_ANY(PTR) \
-	VARATT_IS_1B(PTR) ? VARSIZE_1B(PTR) : \
-	  VARSIZE_4B(PTR)
-// #define VARHDRSZ ((uint32_t) sizeof(uint32_t))
-#define VARHDRSZ_SHORT (offsetof(varattrib_1b, va_data))
-
-#define VARSIZE_ANY_EXHDR(PTR) \
-	(VARATT_IS_1B(PTR) ? VARSIZE_1B(PTR)-VARHDRSZ_SHORT : \
-	  VARSIZE_4B(PTR)-VARHDRSZ)
-#define SET_VARSIZE_4B(PTR,len) \
-	(((varattrib_4b *) (PTR))->va_4byte.va_header = (((uint32_t) (len)) << 2))
-#define SET_VARSIZE_1B(PTR,len) \
-	(((varattrib_1b *) (PTR))->va_header = (((uint8_t) (len)) << 1) | 0x01)
-
-// VARATT END
-
-
-// Collation is often just a 4-byte OID in Postgres
-typedef uint32_t Oid;
-typedef uintptr_t Datum;
-typedef struct FunctionCallInfoBaseData *FunctionCallInfo;
-typedef Datum (*PGFunction) (FunctionCallInfo fcinfo);
-
-struct TypeInfo {
-    Oid output_func;
-    bool is_varlena;
-};
-
-
-static std::unordered_map<Oid, TypeInfo> _type_output_registry = {
-    { 16, { 1242, false } }, // BOOLOID → boolout
-    { 17, { 140, false } },  // BYTEAOID → byteaout
-    { 18, { 114, false } },  // CHAROID → charout
-    { 19, { 30, false } },   // NAMEOID → nameout
-    { 20, { 23, false } },   // INT8OID → int8out
-    { 21, { 1082, false } }, // INT2OID → int2out
-    { 22, { 1700, false } }, // BPCHAROID → bpcharout
-    { 23, { 1001, false } }, // INT4OID → int4out
-    { 24, { 25, false } },   // OIDOID → oidout
-    { 25, { 1002, true } },  // TEXTOID → textout
-    { 26, { 295, false } },  // VARCHAROID → varcharout
-    { 600, { 1263, false } }, // POINTOID → pointout
-    { 700, { 1004, false } }, // FLOAT4OID → float4out
-    { 701, { 1184, false } }, // FLOAT8OID → float8out
-    { 1042, { 1007, false } }, // BPCHAROID → bpcharout
-    { 1043, { 1003, true } }, // VARCHAROID → varcharout
-    { 1082, { 1005, false } }, // DATEOID → dateout
-    { 1083, { 1006, false } }, // TIMEOID → timeout
-    { 1114, { 1184, false } }, // TIMESTAMPOID → timestamptzout
-    { 1184, { 1185, false } }, // TIMESTAMPTZOID → timestamptzout
-    { 1266, { 1270, false } }, // TIMETZOID → timetzout
-    { 1270, { 1271, false } }, // ABSTIMEOID → abstimeout
-    { 1700, { 1701, false } }, // CIRCLEOID → circleout
-    { 1790, { 1791, false } }, // MACADDROID → macaddrout
-    { 2202, { 2203, false } }, // BITOID → bitout
-    { 2203, { 2204, false } }, // VARBITOID → varbitout
-    { 2249, { 2250, false } }, // UUIDOID → uuidout
-    { 2950, { 2951, false } }, // XMLEXTERNALOID → xmlexternalout
-    { 2951, { 2952, false } }, // XMLOID → xmlout
-    { 3802, { 3803, false } }, // PG_LSNOID → pg_lsnout
-    { 1033, { 1034, false } }, // JSONOID → jsonout
-    { 2952, { 2953, false } }, // XMLARRAYOID → xmlarrayout
-    { 1999, { 2000, false } }, // CIDROID → cidrout
-    { 2000, { 2001, false } }, // INETOID → inetout
-    { 2070, { 2071, false } }, // MACADDR8OID → macaddr8out
-    { 2281, { 2282, false } }, // INTERVALOID → intervalout
-};
-// XXX Add support for User defined types
+#define PG_FUNCTION_ARGS pgext::FunctionCallInfo fcinfo
 
 namespace pgext {
-    struct NullableDatum {
-        Datum value;
-        bool  isnull;
-        // due to alignment padding this could be used for flags for free
-    };
-
-	typedef char *Pointer;
-
-	static inline Pointer
-	DatumGetPointer(Datum X)
-	{
-		return (Pointer) X;
-	}
-
-	static inline char *
-	DatumGetCString(Datum X)
-	{
-		return (char *) DatumGetPointer(X);
-	}
-
-	static inline Datum
-	PointerGetDatum(const void *X)
-	{
-		return (Datum) X;
-	}
-
-	static inline Datum
-	Int32GetDatum(uint32_t X)
-	{
-		return (Datum) X;
-	}
-
-	static inline Datum
-	ObjectIdGetDatum(Oid X)
-	{
-		return (Datum) X;
-	}
-
-	static inline bool
-	DatumGetBool(Datum X)
-	{
-		return (bool) X;
-	}
-} // namespace pgext
-
-typedef struct Node *fmNodePtr;
-typedef struct FmgrInfo
-{
-	PGFunction	fn_addr;		/* pointer to function or handler to be called */
-	Oid			fn_oid;			/* OID of function (NOT of handler, if any) */
-	short		fn_nargs;		/* number of input args (0..FUNC_MAX_ARGS) */
-	bool		fn_strict;		/* function is "strict" (NULL in => NULL out) */
-	bool		fn_retset;		/* function returns a set */
-	unsigned char fn_stats;		/* collect stats if track_functions > this */
-	void	   *fn_extra;		/* extra space for use by handler */
-	pgext::MemoryContext fn_mcxt;		/* memory context to store fn_extra in */
-	fmNodePtr	fn_expr;		/* expression parse tree for call, or NULL */
-} FmgrInfo;
-
-#define FLEXIBLE_ARRAY_MEMBER
-
-typedef struct FunctionCallInfoBaseData
-{
-	FmgrInfo   *flinfo;			/* ptr to lookup info used for this call */
-	fmNodePtr	context;		/* pass info about context of call */
-	fmNodePtr	resultinfo;		/* pass or return extra info about result */
-	Oid			fncollation;	/* collation for function to use */
-#define FIELDNO_FUNCTIONCALLINFODATA_ISNULL 4
-	bool		isnull;			/* function must set true if result is NULL */
-	short		nargs;			/* # arguments actually passed */
-#define FIELDNO_FUNCTIONCALLINFODATA_ARGS 6
-	pgext::NullableDatum args[FLEXIBLE_ARRAY_MEMBER];
-} FunctionCallInfoBaseData;
-
-struct FunctionCallInfoData
-{
-    FmgrInfo      fn;
-    void*         fn_extra;
-    void*         context;
-    Oid           fn_collation;
-    bool*         argnull;
-    Datum         args[2];
-    int           nargs;
+struct NullableDatum {
+    Datum value;
+    bool isnull;
 };
 
-#define SizeForFunctionCallInfo(nargs) \
-	(offsetof(FunctionCallInfoBaseData, args) + \
-	 sizeof(pgext::NullableDatum) * (nargs))
+typedef char *Pointer;
 
-#define LOCAL_FCINFO(name, nargs) \
-	/* use union with FunctionCallInfoBaseData to guarantee alignment */ \
-	union \
-	{ \
-		FunctionCallInfoBaseData fcinfo; \
-		/* ensure enough space for nargs args is available */ \
-		char fcinfo_data[SizeForFunctionCallInfo(nargs)]; \
-	} name##data; \
-	FunctionCallInfo name = &name##data.fcinfo
+static inline Pointer
+DatumGetPointer(Datum X)
+{
+    return (Pointer)X;
+}
+
+static inline char *
+DatumGetCString(Datum X)
+{
+    return (char *)DatumGetPointer(X);
+}
+
+static inline Datum
+PointerGetDatum(const void *X)
+{
+    return (Datum)X;
+}
+
+static inline Datum
+Int32GetDatum(uint32_t X)
+{
+    return (Datum)X;
+}
+
+static inline Datum
+ObjectIdGetDatum(Oid X)
+{
+    return (Datum)X;
+}
+
+static inline bool
+DatumGetBool(Datum X)
+{
+    return (bool)X;
+}
+
+static inline Datum
+CStringGetDatum(const char *str)
+{
+    return (Datum)str;
+}
+
+typedef struct {
+} FormData_pg_attribute;
+
+typedef int16_t AttrNumber;
+
+typedef struct ConstrCheck {
+    char *ccname;
+    char *ccbin; /* nodeToString representation of expr */
+    bool ccvalid;
+    bool ccnoinherit; /* this is a non-inheritable constraint */
+} ConstrCheck;
+
+typedef struct AttrDefault {
+    AttrNumber adnum;
+    char *adbin; /* nodeToString representation of expr */
+} AttrDefault;
+
+typedef struct TupleConstr {
+    AttrDefault *defval;         /* array */
+    ConstrCheck *check;          /* array */
+    struct AttrMissing *missing; /* missing attributes values, NULL if none */
+    uint16_t num_defval;
+    uint16_t num_check;
+    bool has_not_null;
+    bool has_generated_stored;
+} TupleConstr;
+
+typedef struct TupleDescData {
+    int natts;           /* number of attributes in the tuple */
+    Oid tdtypeid;        /* composite type ID for tuple type */
+    int32_t tdtypmod;    /* typmod for tuple type */
+    int tdrefcount;      /* reference count, or -1 if not counting */
+    TupleConstr *constr; /* constraints, or NULL if none */
+    /* attrs[N] is the description of Attribute Number N+1 */
+    FormData_pg_attribute attrs[FLEXIBLE_ARRAY_MEMBER];
+} TupleDescData;
+typedef struct TupleDescData *TupleDesc;
+
+/* Type categories for get_call_result_type and siblings */
+typedef enum TypeFuncClass {
+    TYPEFUNC_SCALAR,           /* scalar result type */
+    TYPEFUNC_COMPOSITE,        /* determinable rowtype result */
+    TYPEFUNC_COMPOSITE_DOMAIN, /* domain over determinable rowtype result */
+    TYPEFUNC_RECORD,           /* indeterminate rowtype result */
+    TYPEFUNC_OTHER             /* bogus type, eg pseudotype */
+} TypeFuncClass;
+
+typedef struct FunctionCallInfoBaseData *FunctionCallInfo;
+typedef Datum (*PGFunction)(FunctionCallInfo fcinfo);
+
+typedef struct Node *fmNodePtr;
+typedef struct FmgrInfo {
+    PGFunction fn_addr;           /* pointer to function or handler to be called */
+    Oid fn_oid;                   /* OID of function (NOT of handler, if any) */
+    short fn_nargs;               /* number of input args (0..FUNC_MAX_ARGS) */
+    bool fn_strict;               /* function is "strict" (NULL in => NULL out) */
+    bool fn_retset;               /* function returns a set */
+    unsigned char fn_stats;       /* collect stats if track_functions > this */
+    void *fn_extra;               /* extra space for use by handler */
+    pgext::MemoryContext fn_mcxt; /* memory context to store fn_extra in */
+    fmNodePtr fn_expr;            /* expression parse tree for call, or NULL */
+} FmgrInfo;
+
+typedef struct FunctionCallInfoBaseData {
+    FmgrInfo *flinfo;     /* ptr to lookup info used for this call */
+    fmNodePtr context;    /* pass info about context of call */
+    fmNodePtr resultinfo; /* pass or return extra info about result */
+    Oid fncollation;      /* collation for function to use */
+#define FIELDNO_FUNCTIONCALLINFODATA_ISNULL 4
+    bool isnull; /* function must set true if result is NULL */
+    short nargs; /* # arguments actually passed */
+#define FIELDNO_FUNCTIONCALLINFODATA_ARGS 6
+    pgext::NullableDatum args[FLEXIBLE_ARRAY_MEMBER];
+} FunctionCallInfoBaseData;
+
+struct FunctionCallInfoData {
+    FmgrInfo fn;
+    void *fn_extra;
+    void *context;
+    Oid fn_collation;
+    bool *argnull;
+    Datum args[2];
+    int nargs;
+};
+
+typedef struct AttInMetadata {
+    TupleDesc tupdesc;
+    FmgrInfo *attinfuncs;
+    Oid *attioparams;
+    int32_t *atttypmods;
+} AttInMetadata;
+
+typedef struct FuncCallContext {
+    uint64_t call_cntr;
+
+    uint64_t max_calls;
+    void *user_fctx;
+
+    AttInMetadata *attinmeta;
+
+    MemoryContext multi_call_memory_ctx;
+    TupleDesc tuple_desc;
+
+} FuncCallContext;
+
+}  // namespace pgext
+
+#define SizeForFunctionCallInfo(nargs) \
+    (offsetof(pgext::FunctionCallInfoBaseData, args) + sizeof(pgext::NullableDatum) * (nargs))
+
+#define LOCAL_FCINFO(name, nargs)                                        \
+    /* use union with FunctionCallInfoBaseData to guarantee alignment */ \
+    union {                                                              \
+        pgext::FunctionCallInfoBaseData fcinfo;                          \
+        /* ensure enough space for nargs args is available */            \
+        char fcinfo_data[SizeForFunctionCallInfo(nargs)];                \
+    } name##data;                                                        \
+    pgext::FunctionCallInfo name = &name##data.fcinfo
 
 #define InitFunctionCallInfoData(Fcinfo, Flinfo, Nargs, Collation, Context, Resultinfo) \
-	do { \
-		(Fcinfo).flinfo = (Flinfo); \
-		(Fcinfo).context = (Context); \
-		(Fcinfo).resultinfo = (Resultinfo); \
-		(Fcinfo).fncollation = (Collation); \
-		(Fcinfo).isnull = false; \
-		(Fcinfo).nargs = (Nargs); \
-	} while (0)
+    do {                                                                                \
+        (Fcinfo).flinfo = (Flinfo);                                                     \
+        (Fcinfo).context = (Context);                                                   \
+        (Fcinfo).resultinfo = (Resultinfo);                                             \
+        (Fcinfo).fncollation = (Collation);                                             \
+        (Fcinfo).isnull = false;                                                        \
+        (Fcinfo).nargs = (Nargs);                                                       \
+    } while (0)
 
-#define FunctionCallInvoke(fcinfo)	((* (fcinfo)->flinfo->fn_addr) (fcinfo))
+#define FunctionCallInvoke(fcinfo) ((*(fcinfo)->flinfo->fn_addr)(fcinfo))
 
 // Function interfaces
-extern "C" PGEXT_API Datum DirectFunctionCall1(PGFunction func, Datum arg1);
-extern "C" PGEXT_API Datum DirectFunctionCall1Coll(PGFunction func, Oid collation, Datum arg1);
-extern "C" PGEXT_API Datum DirectFunctionCall2(PGFunction func, Datum arg1, Datum arg2);
-extern "C" PGEXT_API Datum DirectFunctionCall2Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2);
-extern "C" PGEXT_API Datum DirectFunctionCall3(PGFunction func, Datum arg1, Datum arg2, Datum arg3);
-extern "C" PGEXT_API Datum DirectFunctionCall3Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3);
-extern "C" PGEXT_API Datum get_fn_opclass_options(FmgrInfo *fcinfo);
-extern "C" PGEXT_API bool has_fn_opclass_options(FmgrInfo *fcinfo);
-extern "C" PGEXT_API PGFunction lookup_pgfunction_by_oid(Oid oid);
-extern "C" PGEXT_API const char* OidOutputFunctionCall(Oid function_oid, Datum value);
+extern "C" PGEXT_API Datum DirectFunctionCall1(pgext::PGFunction func, Datum arg1);
+extern "C" PGEXT_API Datum DirectFunctionCall1Coll(pgext::PGFunction func,
+                                                   Oid collation,
+                                                   Datum arg1);
+extern "C" PGEXT_API Datum DirectFunctionCall2(pgext::PGFunction func, Datum arg1, Datum arg2);
+extern "C" PGEXT_API Datum DirectFunctionCall2Coll(pgext::PGFunction func,
+                                                   Oid collation,
+                                                   Datum arg1,
+                                                   Datum arg2);
+extern "C" PGEXT_API Datum DirectFunctionCall3(pgext::PGFunction func,
+                                               Datum arg1,
+                                               Datum arg2,
+                                               Datum arg3);
+extern "C" PGEXT_API Datum DirectFunctionCall3Coll(pgext::PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3);
+extern "C" PGEXT_API Datum InputFunctionCall(pgext::FmgrInfo *flinfo,
+                                             char *str,
+                                             Oid typioparam,
+                                             int32_t typmod);
+extern "C" PGEXT_API Datum get_fn_opclass_options(pgext::FmgrInfo *fcinfo);
+extern "C" PGEXT_API bool has_fn_opclass_options(pgext::FmgrInfo *fcinfo);
+extern "C" PGEXT_API pgext::PGFunction lookup_pgfunction_by_oid(Oid oid);
+extern "C" PGEXT_API char *OidOutputFunctionCall(Oid function_oid, Datum value);
 extern "C" PGEXT_API void getTypeOutputInfo(Oid type, Oid *funcOid, bool *typIsVarlena);
-extern "C" PGEXT_API struct varlena *pg_detoast_datum(struct varlena *datum);
-extern "C" PGEXT_API struct varlena *pg_detoast_datum_packed(struct varlena *datum);
-
+extern "C" PGEXT_API void getTypeInputInfo(Oid type, Oid *typInput, Oid *typIOParam);
+extern "C" PGEXT_API pgext::TypeFuncClass get_call_result_type(pgext::FunctionCallInfo fcinfo,
+                                                               Oid *resultTypeId,
+                                                               pgext::TupleDesc *resultTupleDesc);
 extern "C" PGEXT_API Datum OidFunctionCall3Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3);
+extern "C" PGEXT_API Oid get_fn_expr_argtype(pgext::FmgrInfo *flinfo, int argnum);
+extern "C" PGEXT_API pgext::FuncCallContext *per_MultiFuncCall(pgext::FunctionCallInfo fcinfo);
+extern "C" PGEXT_API void fmgr_info_cxt(Oid functionId, pgext::FmgrInfo *finfo, pgext::MemoryContext mcxt);
 
-// Standard PostgreSQL type OIDs (from postgres.h)
-#define BOOLOID 16
-#define BYTEAOID 17
-#define CHAROID 18
-#define NAMEOID 19
-#define INT8OID 20
-#define INT2OID 21
-#define INT2VECTOROID 22
-#define INT4OID 23
-#define REGPROCOID 24
-#define TEXTOID 25
-#define OIDOID 26
-#define TIDOID 27
-#define XIDOID 28
-#define CIDOID 29
-#define JSONOID 114
-#define XMLOID 142
-#define XID8OID 5069
-#define POINTOID 600
-#define LSEGOID 601
-#define PATHOID 602
-#define BOXOID 603
-#define POLYGONOID 604
-#define FLOAT4OID 700    // float4 (single precision)
-#define FLOAT8OID 701    // float8 (double precision)
-#define UNKNOWNOID 705
-#define CIRCLEOID 718
-#define CASHOID 790
-#define MACADDROID 829
-#define INETOID 869
-#define CIDROID 650
-#define INT4ARRAYOID 1007
-#define TEXTARRAYOID 1009
-#define FLOAT4ARRAYOID 1021
-#define FLOAT8ARRAYOID 1022
-#define BPCHAROID 1042   // blank-padded char, char(N)
-#define VARCHAROID 1043  // varchar(N)
-#define DATEOID 1082
-#define TIMEOID 1083
-#define TIMESTAMPOID 1114
-#define TIMESTAMPTZOID 1184
-#define INTERVALOID 1186
-#define TIMETZOID 1266
-#define BITOID 1560
-#define VARBITOID 1562
-#define NUMERICOID 1700  // numeric/decimal
-#define REFCURSOROID 1790
-#define REGPROCEDUREOID 2202
-#define REGOPEROID 2203
-#define REGOPERATOROID 2204
-#define REGCLASSOID 2205
-#define REGTYPEOID 2206
-#define REGROLEOID 4096
-#define REGNAMESPACEOID 4089
-#define UUIDOID 2950
-#define JSONBOID 3802
-#define INT4RANGEOID 3904
-#define NUMRANGEOID 3906
-#define TSRANGEOID 3908
-#define TSTZRANGEOID 3910
-#define DATERANGEOID 3912
-#define INT8RANGEOID 3926
-#define JSONPATHOID 4072
+// Type interfaces
+extern "C" PGEXT_API pgext::TupleDesc lookup_rowtype_tupdesc_domain(Oid type_id,
+                                                                    int32_t typmod,
+                                                                    bool noError);
+
+extern "C" PGEXT_API void DecrTupleDescRefCount(pgext::TupleDesc tupdesc);
