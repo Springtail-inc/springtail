@@ -103,6 +103,32 @@ PgExtnRegistry::init_libraries(uint64_t db_id,
     _library_map.insert({extension, library});
 }
 
+bool
+PgExtnRegistry::comparator_func(uint64_t type_oid,
+                                std::string_view op_str,
+                                const std::span<const char> &lhval,
+                                const std::span<const char> &rhval)
+{
+    auto extn_registry = PgExtnRegistry::get_instance();
+
+    auto type = extn_registry->get_type_by_oid(type_oid);
+
+    Datum leftDatum = extn_registry->binary_to_datum(lhval, type_oid, -1);
+    Datum rightDatum = extn_registry->binary_to_datum(rhval, type_oid, -1);
+
+    auto comparator_func = extn_registry->get_operator_func_by_oper_name(op_str.data());
+
+    Datum result = DirectFunctionCall3(comparator_func, leftDatum, rightDatum, pgext::ObjectIdGetDatum(0));
+
+    auto leftDatumString = extn_registry->datum_to_string(leftDatum, type_oid);
+    auto rightDatumString = extn_registry->datum_to_string(rightDatum, type_oid);
+    bool comparatorResult = pgext::DatumGetBool(result);
+
+    LOG_DEBUG(LOG_COMMON, "Operator = Result: {} {} {} = {}", leftDatumString, op_str, rightDatumString, comparatorResult);
+
+    return comparatorResult;
+}
+
 std::string
 PgExtnRegistry::datum_to_string(Datum value, Oid pg_oid){
     auto type = get_type_by_oid(pg_oid);

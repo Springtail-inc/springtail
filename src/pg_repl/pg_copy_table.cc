@@ -681,39 +681,14 @@ namespace springtail
             }
         }
 
-        auto comparator_func = [](uint64_t type_oid,
-                                  std::string_view op_str,
-                                  const std::span<const char> &lhval,
-                                  const std::span<const char> &rhval) -> bool
-        {
-            auto extn_registry = PgExtnRegistry::get_instance();
-
-            auto type = extn_registry->get_type_by_oid(type_oid);
-
-            Datum leftDatum = extn_registry->binary_to_datum(lhval, type_oid, -1);
-            Datum rightDatum = extn_registry->binary_to_datum(rhval, type_oid, -1);
-
-            auto comparator_func = extn_registry->get_operator_func_by_oper_name(op_str.data());
-
-            Datum result = DirectFunctionCall3(comparator_func, leftDatum, rightDatum, ObjectIdGetDatum(0));
-
-            auto leftDatumString = extn_registry->datum_to_string(leftDatum, type_oid);
-            auto rightDatumString = extn_registry->datum_to_string(rightDatum, type_oid);
-            bool comparatorResult = DatumGetBool(result);
-
-            LOG_INFO("[DEBUG] Operator = Result: {} {} {} = {}", leftDatumString, op_str, rightDatumString, comparatorResult);
-
-            return comparatorResult;
-        };
-
-        auto schema = std::make_shared<ExtentSchema>(_schema.columns, comparator_func);
+        auto schema = std::make_shared<ExtentSchema>(_schema.columns, PgExtnRegistry::get_instance()->comparator_func);
         auto table = TableMgr::get_instance()->get_snapshot_table(db_id, _schema.table_oid, xid.xid,
-                                                                  schema, _schema.secondary_keys, comparator_func);
+                                                                  schema, _schema.secondary_keys);
 
         // mark the copy as inflight and record the snapshot details
         // note: we create a version of the schema that may contain undefined data so that we can
         //       correctly record updates with unchanged data from the replication stream
-        auto update_schema = std::make_shared<ExtentSchema>(_schema.columns, comparator_func, true);
+        auto update_schema = std::make_shared<ExtentSchema>(_schema.columns, PgExtnRegistry::get_instance()->comparator_func, true);
         pg_log_mgr::SyncTracker::get_instance()->mark_inflight(db_id, _schema.table_oid, xid,
                                                                snapshot_details, update_schema);
 

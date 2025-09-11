@@ -72,7 +72,8 @@ namespace springtail {
                                 uint64_t table_id,
                                 uint64_t access_xid,
                                 uint64_t target_xid,
-                                bool for_gc)
+                                bool for_gc,
+                                ComparatorFunc comparator_func)
     {
         boost::shared_lock lock(_mutex);
 
@@ -86,7 +87,7 @@ namespace springtail {
 
         // construct the mutable table and return it
         XidLsn xid(target_xid);
-        auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id, xid);
+        auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id, xid, comparator_func);
 
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
@@ -104,7 +105,7 @@ namespace springtail {
 
         return std::make_shared<UserMutableTable>(db_id, table_id, access_xid, target_xid,
                                                   _table_base, schema->get_sort_keys(), secondary_indexes,
-                                                  *tbl_meta, schema, for_gc);
+                                                  *tbl_meta, schema, for_gc, comparator_func);
     }
 
     MutableTablePtr

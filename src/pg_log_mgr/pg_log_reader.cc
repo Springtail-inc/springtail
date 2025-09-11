@@ -160,7 +160,7 @@ namespace springtail::pg_log_mgr {
         std::vector<SchemaColumn> new_columns{op, lsn};
 
         // XXX Plugin pg_ext
-        schema = table_schema->create_schema(columns, new_columns, sort_keys, nullptr, true);
+        schema = table_schema->create_schema(columns, new_columns, sort_keys, PgExtnRegistry::get_instance()->comparator_func, true);
 
         op_f = schema->get_mutable_field("__springtail_op");
         lsn_f = schema->get_mutable_field("__springtail_lsn");
@@ -268,7 +268,7 @@ namespace springtail::pg_log_mgr {
                 entry.table_schema = sync_skip.schema();
                 if (entry.table_schema == nullptr) {
                     // XXX Plugin pg_ext
-                    entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, xidlsn, nullptr, true);
+                    entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, xidlsn, PgExtnRegistry::get_instance()->comparator_func, true);
                 }
                 entry.update_schema();
             }
@@ -357,7 +357,7 @@ namespace springtail::pg_log_mgr {
                 entry.table_schema = sync_skip.schema();
                 if (entry.table_schema == nullptr) {
                     // XXX Plugin pg_ext
-                    entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, current, nullptr, true);
+                    entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, current, PgExtnRegistry::get_instance()->comparator_func, true);
                 }
                 entry.update_schema();
             }
@@ -579,16 +579,8 @@ namespace springtail::pg_log_mgr {
                         });
             }
 
-            // XXX - EXTN - Plugin pg_ext
-            auto comparator_func = [this](uint64_t type_oid,
-                                      std::string_view op_str,
-                                      const std::span<const char> &lhval,
-                                      const std::span<const char> &rhval) -> bool {
-                LOG_INFO("[DEBUG] comparator_func: called inside pg_log_reader.cc: for type_oid: {}, op: {}", type_oid, op_str);
-                return true;
-            };
-
-            entry.table_schema = std::make_shared<ExtentSchema>(columns, comparator_func, true);
+            // XXX Plugin pg_ext
+            entry.table_schema = std::make_shared<ExtentSchema>(columns, PgExtnRegistry::get_instance()->comparator_func, true);
             entry.update_schema();
         } else if (msg->msg_type == PgMsgEnum::DROP_TABLE) {
             // XXX should we do a truncate here?  it could improve performance if this follows a set

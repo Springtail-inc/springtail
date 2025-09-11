@@ -50,7 +50,6 @@ float8out_internal(double num)
 }
 
 double float8in_internal(const char *numstr) {
-    LOG_INFO("[DEBUG] Inside float8in_internal: {}", numstr);
     // XXX Stubbed for now
     return 0.0;
 }

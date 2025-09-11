@@ -45,7 +45,7 @@ std::filesystem::path get_table_dir(const std::filesystem::path &base,
         /**
          * Returns the MutableTable interface for the requested table ID.
          */
-        MutableTablePtr get_mutable_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid, bool for_gc = false);
+        MutableTablePtr get_mutable_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid, bool for_gc = false, ComparatorFunc comparator_func = nullptr);
 
         /**
          * Returns a MutableTable that can be used to populate a new snapshot of the given table.

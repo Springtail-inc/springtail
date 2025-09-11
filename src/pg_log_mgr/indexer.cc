@@ -9,6 +9,8 @@
 #include <sys_tbl_mgr/schema_mgr.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 
+#include <pg_ext/extn_registry.hh>
+
 namespace springtail::committer {
 
     Indexer::Indexer(uint32_t worker_count,
@@ -292,7 +294,7 @@ namespace springtail::committer {
 
         std::shared_ptr<std::vector<FieldPtr>> key_fields;
 
-        auto mutable_table = TableMgr::get_instance()->get_mutable_table(db_id, tid, idx._xid, idx._xid);
+        auto mutable_table = TableMgr::get_instance()->get_mutable_table(db_id, tid, idx._xid, idx._xid, false, PgExtnRegistry::get_instance()->comparator_func);
         MutableBTreePtr root = mutable_table->create_index_root(index_id, idx_cols);
         root->init_empty();
         key_fields = mutable_table->schema()->get_fields(mutable_table->schema()->get_column_names(idx_cols));
@@ -304,7 +306,7 @@ namespace springtail::committer {
         uint32_t current_row_id = 0;
 
         LOG_DEBUG(LOG_COMMITTER, "Indexing build in progress: {}:{}", db_id, index_id);
-        auto table = TableMgr::get_instance()->get_table(db_id, tid, idx._xid);
+        auto table = TableMgr::get_instance()->get_table(db_id, tid, idx._xid, PgExtnRegistry::get_instance()->comparator_func);
         for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
             if (st.stop_requested()) {
                 root->truncate();
@@ -522,7 +524,7 @@ namespace springtail::committer {
             auto idx_cols = _get_index_cols(idx_state._idx._index_request.index());
 
             // Get the next_extent from disk using the stats last offset
-            auto table = TableMgr::get_instance()->get_table(db_id, idx_state._tid, idx_state._idx._xid);
+            auto table = TableMgr::get_instance()->get_table(db_id, idx_state._tid, idx_state._idx._xid, PgExtnRegistry::get_instance()->comparator_func);
             auto next_eid = table->get_stats().end_offset;
             auto next_extent_result = table->read_extent_from_disk(next_eid);
             auto next_extent = next_extent_result.first;
@@ -535,7 +537,7 @@ namespace springtail::committer {
                 // Get the table at the next XID
                 // and fetch the page for the extent
                 auto next_xid = next_extent->header().xid;
-                auto next_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(next_xid));
+                auto next_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(next_xid), PgExtnRegistry::get_instance()->comparator_func);
 
                 // If previous offset exists and not processed before, lets invalidate that first
                 if (auto prev_eid = next_extent->header().prev_offset; prev_eid != constant::UNKNOWN_EXTENT
@@ -544,7 +546,7 @@ namespace springtail::committer {
                     // Get the previous extent and its schema
                     auto [prev_extent, tmp_next_eid] = table->read_extent_from_disk(prev_eid);
                     auto prev_xid = prev_extent->header().xid;
-                    auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(prev_xid));
+                    auto prev_schema = SchemaMgr::get_instance()->get_extent_schema(db_id, idx_state._tid, XidLsn(prev_xid), PgExtnRegistry::get_instance()->comparator_func);
 
                     // and invalidate index for the rows in the prev page
                     indexer_helpers::invalidate_index_for_extent(prev_eid, prev_extent, idx_state._root, idx_cols, prev_schema);
