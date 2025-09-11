@@ -934,9 +934,36 @@ namespace springtail
     void
     PgCopyTable::lock_table(uint32_t table_oid)
     {
-        std::string lock_query =
-            fmt::format("LOCK TABLE {}::regclass IN ACCESS SHARE MODE", table_oid);
-        // _connection.exec(lock_query);
+        std::string name_query = fmt::format(
+            "SELECT n.nspname AS schema_name, c.relname AS table_name FROM pg_class c JOIN "
+            "pg_namespace n ON n.oid = c.relnamespace WHERE c.oid = {}",
+            table_oid);
+
+        int retry = 3;
+        while (retry) {
+            try {
+                _connection.exec(name_query);
+                if (_connection.ntuples() != 1) {
+                    throw PgTableNotFoundError();
+                }
+
+                std::string schema_name = _connection.get_string(0, 0);
+                std::string table_name = _connection.get_string(0, 1);
+                std::string lock_query = fmt::format(
+                    "LOCK TABLE \"{}\".\"{}\" IN ACCESS SHARE MODE", schema_name, table_name);
+
+                _connection.exec(lock_query);
+                return;
+            } catch (PgQueryError &e) {
+                // re-start the transaction and retry
+                _connection.end_transaction();
+                _connection.start_transaction();
+            }
+
+            --retry;
+        }
+
+        throw PgQueryError();
     }
 
     void
