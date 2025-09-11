@@ -8,9 +8,21 @@
 
 #include <nlohmann/json.hpp>
 
+#include <common/exception.hh>
+#include <common/logging.hh>
 #include <common/singleton.hh>
 
 namespace springtail {
+
+    class HttpError : public Error {
+    public:
+        HttpError(const std::string &msg, uint32_t error_code = 400) :
+            Error(msg), _error_code(error_code) {}
+
+        uint32_t get_error_code() { return _error_code; }
+    private:
+        uint32_t _error_code;
+    };
 
     /**
      * @brief This class provides access to an embeded HTTP server.
@@ -80,18 +92,6 @@ namespace springtail {
             std::unique_lock lock(_mutex);
             _post_routes.erase(path);
         }
-
-        /**
-         * @brief Extract specific parameter from the parameter multimap. When a parameter is not
-         *      found or occurs more than once, an error will be generated in the response object.
-         *
-         * @param params - parameters multimap
-         * @param name - parameter name
-         * @param res - response object to handle error case.
-         * @return std::optional<std::string_view>
-         */
-        static std::optional<std::string_view>
-        get_param(const httplib::Params &params, const std::string &name, httplib::Response& res);
 
     private:
 
@@ -164,5 +164,54 @@ namespace springtail {
          * @param res - response
          */
         void _dispatch_post(const httplib::Request& req, httplib::Response& res);
+
+        /**
+         * @brief Generic function wrapper for handling possible errors from calling the
+         *      the function passed as an argument.
+         *
+         * @tparam Func - template parameter of the function to be called
+         * @tparam Args - template parameter for the function argument list
+         * @param res - reference to HTTP response object
+         * @param func - function to call
+         * @param args - argument list for the function
+         * @return requires - the function is required to return a JSON object
+         */
+        template<typename Func, typename... Args>
+        requires std::same_as<std::invoke_result_t<Func, Args...>, nlohmann::json>
+        void _wrap_error_handler(httplib::Response& res, Func func, Args && ...args) {
+            nlohmann::json result = {};
+            try {
+                result = func(std::forward<Args>(args)...);
+            } catch (HttpError &e) {
+                res.status = e.get_error_code();
+                result = {
+                    {"status", "internal error"},
+                    {"error_message", std::string(e.what()) }
+                };
+                LOG_ERROR("Internal error while processing HTTP request: {}", e.what());
+            } catch (nlohmann::detail::exception &e) {
+                res.status = 500;
+                result = {
+                    {"status", "JSON error"},
+                    {"error_message", std::string(e.what()) }
+                };
+                LOG_ERROR("JSON error while processing HTTP request: {}", e.what());
+            } catch (std::exception &e) {
+                res.status = 500;
+                result = {
+                    {"status", "STL error"},
+                    {"error_message", std::string(e.what()) }
+                };
+                LOG_ERROR("STL error while processing HTTP request: {}", e.what());
+            } catch (...) {
+                res.status = 500;
+                result = {
+                    {"status", "unknown error"}
+                };
+                LOG_ERROR("Unknown exception while processing HTTP request");
+            }
+            res.set_content(result.dump(), "application/json");
+        }
+
     };
 } // springtail

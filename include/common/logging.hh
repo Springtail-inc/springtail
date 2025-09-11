@@ -156,8 +156,10 @@ namespace springtail {
              *
              * @param lvl - log level value
              */
-            void set_log_level(spdlog::level::level_enum lvl) {
-                spdlog::default_logger()->set_level(lvl);
+            void set_log_level(uint32_t lvl) {
+                if (lvl >= spdlog::level::trace && lvl < spdlog::level::n_levels) {
+                    spdlog::default_logger()->set_level(static_cast<spdlog::level::level_enum>(lvl));
+                }
             }
 
             /**
@@ -165,9 +167,9 @@ namespace springtail {
              *
              * @param lvl - debug log level
              */
-            void set_debug_level(LogDebugLevel lvl) {
+            void set_debug_level(uint32_t lvl) {
                 if (lvl >= LOG_LEVEL_DEBUG1 && lvl <= LOG_LEVEL_DEBUG4) {
-                    _debug_log_level = lvl;
+                    _debug_log_level = static_cast<LogDebugLevel>(lvl);
                 }
             }
 

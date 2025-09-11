@@ -1,5 +1,3 @@
-#include <charconv>
-
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
@@ -26,47 +24,31 @@ namespace springtail {
                 });
 
         _svr.Get("/logging",
-                 []([[maybe_unused]] const httplib::Request& req, httplib::Response& res) {
-                    std::optional<std::string_view> action = get_param(req.params, "action", res);
-                    if (!action.has_value()) {
-                        return;
-                    }
+                 [this]([[maybe_unused]] const httplib::Request& req, httplib::Response& res) {
+                    _wrap_error_handler(res, []() {
+                        return logging::Logger::get_instance()->get_stats();
+                    });
+                });
 
-                    if (action == "get") {
-                        res.set_content(logging::Logger::get_instance()->get_stats().dump(), "application/json");
-                        return;
-                    } else if (action == "set") {
-                        std::optional<std::string_view> key = get_param(req.params, "key", res);
-                        if (!key.has_value()) {
-                            return;
-                        }
-                        std::optional<std::string_view> value = get_param(req.params, "value", res);
-                        if (!value.has_value()) {
-                            return;
-                        }
-                        std::string value_str(value.value());
-
-                        res.set_content(R"({"status": "ok"})", "application/json");
-                        if (key == "log_level") {
-                            spdlog::level::level_enum level = logging::Logger::get_log_level_from_string(value_str);
+        _svr.Post("/logging",
+                  [this]([[maybe_unused]] const httplib::Request& req, httplib::Response& res) {
+                    _wrap_error_handler(res, [&req]() {
+                        nlohmann::json json_body = nlohmann::json::parse(req.body);
+                        if (json_body.contains("log_level")) {
+                            std::string log_level_str = json_body["log_level"];
+                            spdlog::level::level_enum level = logging::Logger::get_log_level_from_string(log_level_str);
                             logging::Logger::get_instance()->set_log_level(level);
-                        } else if (key == "debug_level") {
-                            uint32_t level{};
-                            auto [ptr, ec] = std::from_chars(value.value().data(), value.value().data() + value.value().size(), level);
-                            if (ec == std::errc()) {
-                                logging::Logger::get_instance()->set_debug_level(static_cast<LogDebugLevel>(level));
-                            } else {
-                                res.status = 404;
-                                res.set_content(fmt::format("{{\"error\": \"Invalid value: {}\"}}", value),
-                                                "application/json");
-                            }
-                        } else {
-                            res.status = 404;
-                            res.set_content(fmt::format("{{\"error\": \"Invalid key: {}\"}}", key),
-                                            "application/json");
                         }
-                    }
-                 });
+                        if (json_body.contains("debug_level")) {
+                            uint32_t level = json_body["debug_level"];
+                            logging::Logger::get_instance()->set_debug_level(level);
+                        }
+                        nlohmann::json result = {{ "status", "ok"}};
+                        return result;
+                    });
+                });
+
+
         // Hook dispatcher into all GET and POST requests
         _svr.Get(".*",
                  [this](const httplib::Request& req, httplib::Response& res) {
@@ -113,43 +95,45 @@ namespace springtail {
     void
     AdminServer::_dispatch_get(const httplib::Request& req, httplib::Response& res)
     {
-        GetHandler handler;
-        {
-            std::shared_lock lock(_mutex);
-            auto it = _get_routes.find(req.path);
-            if (it != _get_routes.end()) {
-                handler = it->second;
+        _wrap_error_handler(res, [this, &req]() {
+            GetHandler handler;
+            {
+                std::shared_lock lock(_mutex);
+                auto it = _get_routes.find(req.path);
+                if (it != _get_routes.end()) {
+                    handler = it->second;
+                }
             }
-        }
-        if (handler) {
-            nlohmann::json json_res;
-            handler(req.path, req.params, json_res);
-            res.set_content(json_res.dump(), "application/json");
-        } else {
-            res.status = 404;
-            res.set_content("{\"error\":\"not found\"}", "application/json");
-        }
+            if (handler) {
+                nlohmann::json json_res;
+                handler(req.path, req.params, json_res);
+                return json_res;
+            } else {
+                throw HttpError(fmt::format("No handler found for path: {}", req.path));
+            }
+        });
     }
 
     void
     AdminServer::_dispatch_post(const httplib::Request& req, httplib::Response& res)
     {
-        PostHandler handler;
-        {
-            std::shared_lock lock(_mutex);
-            auto it = _post_routes.find(req.path);
-            if (it != _post_routes.end()) {
-                handler = it->second;
+        _wrap_error_handler(res, [this, &req]() {
+            PostHandler handler;
+            {
+                std::shared_lock lock(_mutex);
+                auto it = _post_routes.find(req.path);
+                if (it != _post_routes.end()) {
+                    handler = it->second;
+                }
             }
-        }
-        if (handler) {
-            nlohmann::json json_res;
-            handler(req.path, req.params, req.body, json_res);
-            res.set_content(json_res.dump(), "application/json");
-        } else {
-            res.status = 404;
-            res.set_content("{\"error\":\"not found\"}", "application/json");
-        }
+            if (handler) {
+                nlohmann::json json_res;
+                handler(req.path, req.params, req.body, json_res);
+                return json_res;
+            } else {
+                throw HttpError(fmt::format("No handler found for path: {}", req.path));
+            }
+        });
     }
 
     std::string
@@ -177,27 +161,6 @@ namespace springtail {
             }
         }
         return ip_port;
-    }
-
-    std::optional<std::string_view>
-    AdminServer::get_param(const httplib::Params &params, const std::string &name, httplib::Response& res)
-    {
-        auto range = params.equal_range(name);
-        std::size_t n = std::distance(range.first, range.second);
-
-        if (n == 0) {
-            res.status = 404;
-            res.set_content(fmt::format("{{\"error\": \"Missing parameter: {}\"}}", name), "application/json");
-            return {};
-        }
-
-        if (n > 1) {
-            res.status = 404;
-            res.set_content(fmt::format("{{\"error\": \"More than one value for parameter: {}\"}}", name), "application/json");
-            return {};
-        }
-
-        return range.first->second;
     }
 
     std::string
