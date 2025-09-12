@@ -1,7 +1,7 @@
 #include <memory>
 #include <thread>
+
 #include <common/filesystem.hh>
-#include <common/logging.hh>
 #include <common/open_telemetry.hh>
 #include <common/coordinator.hh>
 
@@ -149,7 +149,7 @@ namespace springtail::pg_log_mgr {
     PgLogReader::Batch::TableEntry::update_schema()
     {
         auto columns = table_schema->column_order();
-        CHECK_GT(columns.size(), 0);
+        DCHECK_GT(columns.size(), 0);
 
         auto sort_keys = table_schema->get_sort_keys();
         sort_keys.push_back("__springtail_lsn");
@@ -157,12 +157,42 @@ namespace springtail::pg_log_mgr {
         SchemaColumn op("__springtail_op", 0, SchemaType::UINT8, 0, false);
         SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
 
-        std::vector<SchemaColumn> new_columns{op, lsn};
 
+        std::vector<SchemaColumn> new_columns{op, lsn};
         schema = table_schema->create_schema(columns, new_columns, sort_keys, true);
+
+        INSTRUMENT_INGEST( {
+            columns = table_schema->column_order();
+
+            std::vector<SchemaColumn> new_columns;
+            new_columns.emplace_back("__springtail_ts_msg_created", 0, SchemaType::UINT64, 0, false);
+            new_columns.emplace_back("__springtail_ts_msg_pop", 0, SchemaType::UINT64, 0, false);
+
+            new_columns.emplace_back("__springtail_msg_queue_enter_size", 0, SchemaType::UINT64, 0, false);
+            new_columns.emplace_back("__springtail_msg_queue_exit_size", 0, SchemaType::UINT64, 0, false);
+
+            new_columns.emplace_back("__springtail_ts_log_created", 0, SchemaType::UINT64, 0, false);
+            new_columns.emplace_back("__springtail_ts_log_pop", 0, SchemaType::UINT64, 0, false);
+
+            new_columns.emplace_back("__springtail_log_queue_enter_size", 0, SchemaType::UINT64, 0, false);
+            new_columns.emplace_back("__springtail_msg_queue_exit_size", 0, SchemaType::UINT64, 0, false);
+
+            schema = table_schema->create_schema(columns, new_columns, sort_keys, true);
+        } );
 
         op_f = schema->get_mutable_field("__springtail_op");
         lsn_f = schema->get_mutable_field("__springtail_lsn");
+
+        INSTRUMENT_INGEST( {
+                ts_created_f = schema->get_mutable_field("__springtail_ts_created");
+                ts_pop_f = schema->get_mutable_field("__springtail_ts_pop");
+                msg_queue_enter_size_f = schema->get_mutable_field("__springtail_msg_queue_enter_size");
+                msg_queue_exit_size_f = schema->get_mutable_field("__springtail_msg_queue_exit_size");
+                ts_log_entry_created_f = schema->get_mutable_field("__springtail_ts_log_entry_created");
+                ts_log_entry_pop_f = schema->get_mutable_field("__springtail_ts_log_entry_pop");
+                log_queue_enter_size_f = schema->get_mutable_field("__springtail_log_queue_enter_size");
+                log_queue_exit_size_f = schema->get_mutable_field("__springtail_log_queue_exit_size");
+                })
 
         // reset fields; forces a resync of fields during add_mutation()
         fields = nullptr;
@@ -281,7 +311,7 @@ namespace springtail::pg_log_mgr {
         if (entry.fields == nullptr) {
             entry.update_fields(this, xidlsn);
         }
-        CHECK_NE(entry.fields, nullptr);
+        DCHECK_NE(entry.fields, nullptr);
 
         // add the mutation to the batch
         LOG_DEBUG(LOG_PG_LOG_MGR, "Adding row: pg_xid={} tid={} op={}", pg_xid, tid, T);
@@ -880,12 +910,19 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::enqueue_msg(PgMsgPtr msg)
     {
+        INSTRUMENT_INGEST(
+                {
+                    msg->msg_queue_enter_size = _msg_queue.size();
+                })
+
         _msg_queue.push(msg);
     }
 
     void
     PgLogReader::_msg_worker()
     {
+        using clock = std::chrono::steady_clock;
+
         std::string coordinator_id = fmt::format(PgLogMgr::MSG_WORKER_ID, _db_id);
         auto coordinator = Coordinator::get_instance();
         auto& keep_alive = coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
@@ -896,6 +933,11 @@ namespace springtail::pg_log_mgr {
 
             // get message from queue
             PgMsgPtr msg = _msg_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
+            INSTRUMENT_INGEST(
+                    {
+                        msg->msg_queue_exit_size = _msg_queue.size();
+                        msg->ts_pop = clock::now();
+                    })
             if (msg == nullptr) {
                 continue; // timeout, check for shutdown
             }
@@ -911,7 +953,8 @@ namespace springtail::pg_log_mgr {
     PgLogReader::process_log(const std::filesystem::path &path,
                              uint64_t timestamp,
                              uint64_t start_offset,
-                             int num_messages)
+                             int num_messages,
+                             std::optional<PgLogQueueEntryPtr> entry)
     {
         // init stream reader
         _reader.set_file(path, start_offset);
@@ -937,6 +980,15 @@ namespace springtail::pg_log_mgr {
         while (num_messages != 0 && !eos) {
             // read next message
             PgMsgPtr msg = _reader.read_message(filter, eos);
+
+            INSTRUMENT_INGEST( {
+                    if (entry.has_value()) {
+                        msg->ts_log_entry_created = (*entry)->ts_created;
+                        msg->ts_log_entry_pop = (*entry)->ts_pop;
+                        msg->log_queue_enter_size = (*entry)->enter_queue_size;
+                        msg->log_queue_exit_size = (*entry)->exit_queue_size;
+                    }});
+
             if (msg != nullptr) {
                 msg->pg_log_timestamp = timestamp;
 

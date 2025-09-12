@@ -2,10 +2,19 @@
 
 #include <optional>
 #include <variant>
+#include <chrono>
+
+#define PROFILE_INGEST
+#include <pg_repl/pg_repl_instrument.hh>
+
+#if defined(PROFILE_INGEST) && !defined(PROFILE_INGEST_ENABLED)
+static_assert(false, "This error means that <logging.hh> was included before PROFILE_INGEST is set.");
+#endif
 
 #include <pg_repl/pg_types.hh>
 #include <nlohmann/json.hpp>
 #include <storage/schema_type.hh>
+
 
 namespace springtail
 {
@@ -310,6 +319,8 @@ namespace springtail
      * @details Contains union of messages with the type
      *          specified by the Pgmsg_type
      */
+
+
     struct PgMsg {
         std::variant<
          PgMsgKeepAlive,
@@ -346,8 +357,35 @@ namespace springtail
         int proto_version;     ///< which protocol version
         bool is_streaming;     ///< is this a streaming message
 
-        PgMsg(PgMsgEnum type=PgMsgEnum::INVALID)
-            : msg_type(type) {}
+        using clock = std::chrono::steady_clock;
+
+        INSTRUMENT_INGEST_DATA(clock::time_point, ts_created)
+        INSTRUMENT_INGEST_DATA(clock::time_point, ts_pop)
+        INSTRUMENT_INGEST_DATA(size_t, msg_queue_enter_size)
+        INSTRUMENT_INGEST_DATA(size_t, msg_queue_exit_size)
+
+        INSTRUMENT_INGEST_DATA(clock::time_point, ts_log_entry_created)
+        INSTRUMENT_INGEST_DATA(clock::time_point, ts_log_entry_pop)
+        INSTRUMENT_INGEST_DATA(size_t, log_queue_enter_size)
+        INSTRUMENT_INGEST_DATA(size_t, log_queue_exit_size)
+
+        explicit PgMsg(PgMsgEnum type=PgMsgEnum::INVALID)
+            : msg_type(type)
+        {
+            INSTRUMENT_INGEST( { 
+                    ts_created = clock::now();
+                    log_queue_enter_size = 0;
+                    log_queue_exit_size = 0;
+                    msg_queue_enter_size = 0;
+                    msg_queue_exit_size = 0;
+                    } )
+        }
+
+        PgMsg() = delete;
+        PgMsg(const PgMsg&) = delete;
+        const PgMsg& operator=(const PgMsg&) = delete;
+
+        PgMsg(PgMsg&&) = default;
     };
     using PgMsgPtr = std::shared_ptr<PgMsg>;
 

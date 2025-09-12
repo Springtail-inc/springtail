@@ -630,7 +630,7 @@ namespace springtail::pg_log_mgr {
                                 return;
                             }
                         }
-                        post_recovery_queue.emplace_back(PgLogQueueEntry(start_offset, end_offset, file_path));
+                        post_recovery_queue.emplace_back(start_offset, end_offset, file_path);
                     }
                 )) {
                     done = true;
@@ -679,6 +679,8 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_log_reader_thread()
     {
+        using clock = std::chrono::steady_clock;
+
         std::string coordinator_id = fmt::format(READER_WORKER_ID, _db_id);
         auto coordinator = Coordinator::get_instance();
         auto& keep_alive = coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
@@ -692,6 +694,8 @@ namespace springtail::pg_log_mgr {
             if (log_entry == nullptr) {
                 continue;
             }
+
+            INSTRUMENT_INGEST( {log_entry->ts_pop = clock::now(); log_entry->exit_queue_size = this->_logger_queue.size();} )
 
             LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Got log entry: path={}, start_offset={}, num_messages={}",
                       log_entry->path, log_entry->start_offset, log_entry->num_messages);
@@ -723,7 +727,8 @@ namespace springtail::pg_log_mgr {
             auto file_timestamp = fs::extract_timestamp_from_file(log_entry->path, LOG_PREFIX_REPL, LOG_SUFFIX);
             CHECK(file_timestamp);
             _pg_log_reader->process_log(log_entry->path, *file_timestamp,
-                                        log_entry->start_offset, log_entry->num_messages);
+                                        log_entry->start_offset, log_entry->num_messages,
+                                        log_entry);
         }
         LOG_DEBUG(LOG_PG_LOG_MGR, "Exiting log reader thread");
 

@@ -3,8 +3,17 @@
 #include <memory>
 #include <mutex>
 #include <filesystem>
+#include <chrono>
+
+#define PROFILE_INGEST
+#include <pg_repl/pg_repl_instrument.hh>
+
+#if defined(PROFILE_INGEST) && !defined(PROFILE_INGEST_ENABLED)
+static_assert(false, "This error means that <logging.hh> was included before PROFILE_INGEST is set.");
+#endif
 
 #include <common/concurrent_queue.hh>
+#include <common/common.hh>
 
 namespace springtail::pg_log_mgr {
     /**
@@ -12,18 +21,42 @@ namespace springtail::pg_log_mgr {
      *        plus number of messages covered by offset range
      */
     struct PgLogQueueEntry {
+        using clock = std::chrono::steady_clock;
+
         uint64_t start_offset;
         uint64_t end_offset;
         std::filesystem::path path;
         int num_messages;
         bool is_stall_message;
 
+        INSTRUMENT_INGEST_DATA(clock::time_point, ts_created)
+        INSTRUMENT_INGEST_DATA(clock::time_point, ts_pop)
+        INSTRUMENT_INGEST_DATA(size_t, enter_queue_size)
+        INSTRUMENT_INGEST_DATA(size_t, exit_queue_size)
+
+        PgLogQueueEntry() = delete;
+
         PgLogQueueEntry(uint64_t start_offset, uint64_t end_offset, const std::filesystem::path &path)
             : start_offset(start_offset), end_offset(end_offset),
               path(path), num_messages(1), is_stall_message(false)
-        {}
+        {
+            INSTRUMENT_INGEST( { ts_created = clock::now();
+                    enter_queue_size = 0;
+                    exit_queue_size = 0;
+                    } )
+        }
 
-        explicit PgLogQueueEntry(bool stall) : is_stall_message(stall) {}
+        explicit PgLogQueueEntry(bool stall) : is_stall_message(stall)
+        {
+            INSTRUMENT_INGEST( { ts_created = clock::now();
+                    enter_queue_size = 0;
+                    exit_queue_size = 0;
+                    } )
+        }
+
+        PgLogQueueEntry(const PgLogQueueEntry&) = delete;
+        PgLogQueueEntry(PgLogQueueEntry&&) = default;
+        const PgLogQueueEntry& operator=(const PgLogQueueEntry&) = delete;
     };
     using PgLogQueueEntryPtr = std::shared_ptr<PgLogQueueEntry>;
 
@@ -58,10 +91,11 @@ namespace springtail::pg_log_mgr {
 
         void push(const std::vector<PgLogQueueEntry> &entries) {
             std::unique_lock<std::mutex> write_lock{_mutex};
-            for (auto entry: entries) {
+            for (const auto& entry: entries) {
                 PgLogQueueEntryPtr new_entry = std::make_shared<PgLogQueueEntry>(entry.start_offset, entry.end_offset, entry.path);
                 new_entry->num_messages = entry.num_messages;
-                _internal_push(new_entry, write_lock);
+                INSTRUMENT_INGEST( {new_entry->enter_queue_size = size();})
+                _internal_push(std::move(new_entry), write_lock);
             }
         }
 
@@ -71,7 +105,10 @@ namespace springtail::pg_log_mgr {
         void push_stall()
         {
             std::unique_lock<std::mutex> write_lock{_mutex};
-            _internal_push(std::make_shared<PgLogQueueEntry>(true), write_lock);
+
+            auto v = std::make_shared<PgLogQueueEntry>(true);
+            INSTRUMENT_INGEST( {v->enter_queue_size = size();})
+            _internal_push(std::move(v), write_lock);
         }
     };
 } // namespace springtail::pg_log_mgr

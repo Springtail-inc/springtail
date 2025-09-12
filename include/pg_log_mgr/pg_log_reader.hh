@@ -13,6 +13,7 @@
 
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/schema_mgr.hh>
+#include "pg_log_mgr/pg_log_queue.hh"
 
 namespace springtail::pg_log_mgr {
     /**
@@ -60,7 +61,9 @@ namespace springtail::pg_log_mgr {
         void process_log(const std::filesystem::path &path,
                          uint64_t timestamp,
                          uint64_t start_offset,
-                         int num_messages);
+                         int num_messages,
+                         std::optional<PgLogQueueEntryPtr> entry = {});
+                         
 
         /**
          * Set the starting point for XID assignment.
@@ -216,8 +219,19 @@ namespace springtail::pg_log_mgr {
 
                 MutableFieldPtr op_f; ///< The field accessor for the mutation's operation type.
                 MutableFieldPtr lsn_f; ///< The field accessor for the mutation's LSN.
+
+                INSTRUMENT_INGEST_DATA(MutableFieldPtr, ts_created_f)
+                INSTRUMENT_INGEST_DATA(MutableFieldPtr, ts_pop_f)
+                INSTRUMENT_INGEST_DATA(MutableFieldPtr, msg_queue_enter_size_f)
+                INSTRUMENT_INGEST_DATA(MutableFieldPtr, msg_queue_exit_size_f)
+                INSTRUMENT_INGEST_DATA(MutableFieldPtr, ts_log_entry_created_f)
+                INSTRUMENT_INGEST_DATA(MutableFieldPtr, ts_log_entry_pop_f)
+                INSTRUMENT_INGEST_DATA(MutableFieldPtr, log_queue_enter_size_f)
+                INSTRUMENT_INGEST_DATA(MutableFieldPtr, log_queue_exit_size_f)
+
                 MutableFieldArrayPtr fields; ///< The underlying fields of the schema that match the columns from the table schema.
                 MutableFieldArrayPtr pkey_fields; ///< The underlying fields of the schema that match the pkey columns from the table schema.
+
 
                 FieldArrayPtr pg_fields; ///< The matching fields for processing a PgMsgTupleData
                 FieldArrayPtr pg_pkey_fields; ///< The matching pkey fields for processing a PgMsgTupleData
