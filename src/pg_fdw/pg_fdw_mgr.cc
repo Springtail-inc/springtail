@@ -182,7 +182,7 @@ namespace springtail::pg_fdw {
         #error "USE_FLOAT8_BYVAL must be defined"
     #endif
 
-        LOG_DEBUG(LOG_FDW, "Converting qual from {} to {}", to_string(from), to_string(to));
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Converting qual from {} to {}", to_string(from), to_string(to));
 
         // if switching between int types no need to convert the underlying datum
         if (from == SchemaType::INT8 || from == SchemaType::INT16 ||
@@ -251,7 +251,7 @@ namespace springtail::pg_fdw {
     bool
     PgFdwMgr::check_type_compatibility(const SchemaColumn &column, ConstQualPtr qual)
     {
-        LOG_DEBUG(LOG_FDW, "Checking type compatibility for column {}:{} and qual oid: {}, is_null: {}",
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Checking type compatibility for column {}:{} and qual oid: {}, is_null: {}",
                   column.name, to_string(column.type), qual->base.typeoid, qual->isnull);
 
         int32_t pg_type = qual->base.typeoid;
@@ -370,11 +370,11 @@ namespace springtail::pg_fdw {
 
                 // must be of the same internal type
                 auto column = state->columns.at(pos);
-                LOG_DEBUG(LOG_FDW, "Checking qual {}:{} against column {} {}:{}, for op {}",
+                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Checking qual {}:{} against column {} {}:{}, for op {}",
                          qual->base.typeoid, to_string(convert_pg_type(qual->base.typeoid, 'N')),
                          column.name, column.pg_type, to_string(column.type), (int)qual->base.op);
                 if (PgFdwMgr::check_type_compatibility(column, qual)) {
-                    LOG_DEBUG(LOG_FDW, "Qual match successful");
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Qual match successful");
                     return qual;
                 }
             }
@@ -530,7 +530,7 @@ namespace springtail::pg_fdw {
                 }
             }
 
-            LOG_DEBUG(LOG_FDW, "Obtaining and sending data to xid collector for schema xid: {}", schema_xid);
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Obtaining and sending data to xid collector for schema xid: {}", schema_xid);
             // TODO: running this function from the thread resulted in a crash
             //      find out why this is happening and determine if it should be called
             //      from the thread to begin with. Maybe a better place would be to call
@@ -548,7 +548,7 @@ namespace springtail::pg_fdw {
     PgFdwMgr::_update_last_xid(uint64_t schema_xid)
     {
         uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(_db_id, schema_xid);
-        LOG_DEBUG(LOG_FDW, "XidMgrClient returned xid = {}", xid);
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "XidMgrClient returned xid = {}", xid);
 
         // TODO: fix _root_cache so that we can acquire correct xid
         /*
@@ -576,7 +576,7 @@ namespace springtail::pg_fdw {
     void
     PgFdwMgr::fdw_exit()
     {
-        LOG_DEBUG(LOG_FDW, "Shutting down springtail");
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Shutting down springtail");
         springtail_shutdown();
     }
 
@@ -584,7 +584,7 @@ namespace springtail::pg_fdw {
     void
     PgFdwMgr::fdw_init(const char *config_file, bool init)
     {
-        LOG_DEBUG(LOG_FDW, "Initializing PgFdwMgr");
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Initializing PgFdwMgr");
 
         if (config_file != nullptr && strlen(config_file) > 0) {
             // set env variables based on redis config
@@ -636,7 +636,7 @@ namespace springtail::pg_fdw {
                                uint64_t pg_xid,
                                uint64_t schema_xid)
     {
-        LOG_DEBUG(LOG_FDW, "Create state: {}, {}, {}, {}, {}", _db_id, db_id, tid, pg_xid, schema_xid);
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Create state: {}, {}, {}, {}, {}", _db_id, db_id, tid, pg_xid, schema_xid);
         _in_transaction = true;
         DCHECK(db_id == _db_id);
         uint64_t xid; // springtail xid
@@ -671,7 +671,7 @@ namespace springtail::pg_fdw {
 
         if (!_ddl_connection) {
             while (xid < _last_xid) {
-                LOG_DEBUG(LOG_FDW, "Trying to get valid xid, current xid = {}, _last_xid = {}", xid, _last_xid);
+                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Trying to get valid xid, current xid = {}, _last_xid = {}", xid, _last_xid);
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 xid = _update_last_xid(schema_xid);
             }
@@ -683,13 +683,13 @@ namespace springtail::pg_fdw {
 
         xid_lock.unlock();
 
-        LOG_DEBUG(LOG_FDW, "fdw_create_state: db_id: {}, tid: {}, xid: {}, pg_xid: {}, schema_xid: {}",
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "fdw_create_state: db_id: {}, tid: {}, xid: {}, pg_xid: {}, schema_xid: {}",
                             db_id, tid, xid, pg_xid, schema_xid);
 
         // This c'tor uses PG memory API's to allocate List
         // and adds db_id, tid and xid to it. SpringtailPlanState
-        // never deletes the PG List object. It's safe because 
-        // the lifespan of the allocated List is managed 
+        // never deletes the PG List object. It's safe because
+        // the lifespan of the allocated List is managed
         // by the PG executor. fdw_private() return the List pointer
         // that we can pass around FDW callbacks as a collection of
         // our private data.
@@ -697,10 +697,10 @@ namespace springtail::pg_fdw {
         return ps.fdw_private();
     }
 
-    PgFdwState* 
+    PgFdwState*
     PgFdwMgr::create_scan_state(const SpringtailPlanState *planstate, const List* quals, const List* join_quals)
     {
-        double dummy = 0; 
+        double dummy = 0;
         auto state = _create_scan_state(planstate, quals, join_quals, &dummy);
         return state.release();
     }
@@ -714,9 +714,9 @@ namespace springtail::pg_fdw {
         // we create a temporary scan state here because for historical reasons
         // it has some API's need by this function. The state will be deleted
         // when the function exist.
-        double dummy = 0; 
+        double dummy = 0;
         auto state = _create_scan_state(planstate, quals, NIL, &dummy);
-        LOG_DEBUG(LOG_FDW, "fdw_begin_scan: tid: {}, {}", state->tid, num_attrs);
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "fdw_begin_scan: tid: {}, {}", state->tid, num_attrs);
 
         for (size_t i = 0; i != num_attrs; ++i) {
             state->_attrs.emplace_back(attrs[i]->atttypid, attrs[i]->atttypmod, attrs[i]->attnum);
@@ -785,7 +785,7 @@ namespace springtail::pg_fdw {
             state->target_columns.emplace_back(
                     col_ind++, col_i->second.pg_type, state->_attrs[attno-1], col_i->second.name);
 
-            LOG_DEBUG(LOG_FDW, "Target list column: {}:{}",
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Target list column: {}:{}",
                                 attno, col_i->second.name);
         }
 
@@ -852,7 +852,7 @@ namespace springtail::pg_fdw {
         // for DESC order, scan from iter_end to iter_end with (iter_end--)
         // make sure to handle the special case for NOT_EQUALS while scanning
         if (!state->index.has_value()) {
-            LOG_DEBUG(LOG_FDW, "Setting up iterators for full table scan: tid={}, ASC={}, quals={}",
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Setting up iterators for full table scan: tid={}, ASC={}, quals={}",
                     state->tid, state->scan_asc, state->filtered_quals.size());
             state->iter_start.emplace(state->table->begin());
             state->iter_end.emplace(state->table->end());
@@ -861,7 +861,7 @@ namespace springtail::pg_fdw {
 
         if (state->filtered_quals.empty()) {
             // Usually the index is defined by sortgroup in this case.
-            LOG_DEBUG(LOG_FDW, "Setting up iterators for full index scan: tid={}, index={}, ASC={}",
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Setting up iterators for full index scan: tid={}, index={}, ASC={}",
                     state->tid ,state->index->id, state->scan_asc);
             state->iter_start.emplace(state->table->begin(state->index->id, state->index_only_scan));
             state->iter_end.emplace(state->table->end(state->index->id, state->index_only_scan));
@@ -875,7 +875,7 @@ namespace springtail::pg_fdw {
         FieldTuplePtr tuple = _gen_qual_tuple(state->filtered_quals, state->qual_fields);
         QualOpName op = qual->base.op;
 
-        LOG_DEBUG(LOG_FDW, "Setting up iterators for qual scan: tid: {}, index: {}, op: {}, fields: {}, index cols: {}",
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Setting up iterators for qual scan: tid: {}, index: {}, op: {}, fields: {}, index cols: {}",
                             state->tid, state->index->id, qual->base.opname, tuple->to_string(), state->index_only_scan);
 
         switch (op) {
@@ -975,7 +975,7 @@ namespace springtail::pg_fdw {
         time_trace::traces.reset();
 #endif
 
-        LOG_DEBUG(LOG_FDW, "fdw_end: tid: {}, rows fetched: {}, rows skipped: {}",
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "fdw_end: tid: {}, rows fetched: {}, rows skipped: {}",
                             state->tid, state->rows_fetched, state->rows_skipped);
         delete state;
     }
@@ -983,7 +983,7 @@ namespace springtail::pg_fdw {
     void
     PgFdwMgr::fdw_reset_scan(PgFdwState *state, const List *qual_list)
     {
-        LOG_DEBUG(LOG_FDW, "fdw_reset_scan: tid: {}", state->tid);
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "fdw_reset_scan: tid: {}", state->tid);
 
         state->filtered_quals.clear();
 
@@ -1023,7 +1023,7 @@ namespace springtail::pg_fdw {
         TIME_TRACE_SCOPED(time_trace::traces, iterate_scan_total);
 
         // Note: for now always scan up, so we don't need to check if we are scanning down
-        LOG_DEBUG(LOG_FDW, "fdw_iterate_scan: tid: {}", state->tid);
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "fdw_iterate_scan: tid: {}", state->tid);
 
         size_t num_attrs = state->_attrs.size();
 
@@ -1039,7 +1039,7 @@ namespace springtail::pg_fdw {
         // check if we are scanning up and iterator is at the end
         if (*state->iter_start == *state->iter_end) {
 
-            LOG_DEBUG(LOG_FDW, "fdw_iterate_scan: iter_start == iter_end, done");
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "fdw_iterate_scan: iter_start == iter_end, done");
             if (state->filtered_quals.empty() || state->filtered_quals[0]->base.op != NOT_EQUALS) {
                 *eos = true;
                 return false;
@@ -1093,10 +1093,9 @@ namespace springtail::pg_fdw {
         // iterate through attributes passed in
         for (const auto& c: state->target_columns) {
             auto attno = c.pg_attr.attnum;
-            LOG_DEBUG(LOG_FDW, "Fetching column: {}, {}", attno, c.name);
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Fetching column: {}, {}", attno, c.name);
 
             DCHECK_LE(attno, num_attrs);
-
 
             // get field idx that matches this attrno, then fetch the field and data
             const FieldPtr& field = state->fields->at(c.field_idx);
@@ -1109,7 +1108,7 @@ namespace springtail::pg_fdw {
                 if (!res) {
                     // qual doesn't match, so this row must be skipped
                     // since it isn't the first qual, we can skip to the next row
-                    LOG_DEBUG(LOG_FDW, "Qual not equal, skipping row");
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Qual not equal, skipping row");
                     state->rows_skipped++;
                     // increment iterator if scanning up
                     if (state->scan_asc) {
@@ -1143,7 +1142,7 @@ namespace springtail::pg_fdw {
     List *
     PgFdwMgr::fdw_can_sort(SpringtailPlanState* planstate, PgFdwState* pg_state, const List *sortgroup, const List* quals, bool use_secondary)
     {
-        LOG_DEBUG(LOG_FDW, "fdw_can_sort");
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "fdw_can_sort");
 
         struct FinalizePlanState
         {
@@ -1175,12 +1174,12 @@ namespace springtail::pg_fdw {
                 if (i == 0) {
                     reversed = pathkey->reversed;
                 } else if (reversed != pathkey->reversed) {
-                    LOG_DEBUG(LOG_FDW, "The sort order must be the same for all attributes: {}!={}", reversed, pathkey->reversed);
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "The sort order must be the same for all attributes: {}!={}", reversed, pathkey->reversed);
                     return {};
                 }
 
                 if (!(pathkey->nulls_first? pathkey->reversed: !pathkey->reversed)) {
-                    LOG_DEBUG(LOG_FDW, "This combination isn't supported: null_first={}, reversed={}",
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "This combination isn't supported: null_first={}, reversed={}",
                             pathkey->nulls_first, pathkey->reversed);
                     return {};
                 }
@@ -1212,7 +1211,7 @@ namespace springtail::pg_fdw {
             }
 
             if (!keys.empty()) {
-                LOG_DEBUG(LOG_FDW, "Matching sortgroup index found: {}", idx.id);
+                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Matching sortgroup index found: {}", idx.id);
             }
 
             List *r = nullptr;
@@ -1311,7 +1310,7 @@ namespace springtail::pg_fdw {
             // note: state->rows has taken quals into account in fdw_get_rel_size
             auto rows = rel_rows;
 
-            // The paths related to join clauses seem to be handled by PG 
+            // The paths related to join clauses seem to be handled by PG
             // differently. For example, if there are no normal quals,
             // it seems to be much better to give PG the full count of rows
             // from fdw_get_rel_size and then create a low cost path for the join index.
@@ -1333,9 +1332,9 @@ namespace springtail::pg_fdw {
 
             List      *attnums = NULL;
             List      *item = NULL;
-            LOG_DEBUG(LOG_FDW, "adding index path: {}", idx.id);
+            LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "adding index path: {}", idx.id);
             for (const auto col: idx.columns) {
-                LOG_DEBUG(LOG_FDW, "adding pathkey attnum: {}", col.position);
+                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "adding pathkey attnum: {}", col.position);
                 attnums = list_append_unique_int(attnums, col.position);
             }
             item = lappend(item, attnums);
@@ -1365,7 +1364,7 @@ namespace springtail::pg_fdw {
         // TODO: we create a temporary scan state here because for historical reasons
         // it has some API's needed by this function. The state will be deleted
         // when the function exits
-        // 
+        //
         auto state = _create_scan_state(planstate, qual_list, join_quals, rows);
         // estimate width based on target list using most common types
         *width = 0;
@@ -1422,7 +1421,7 @@ namespace springtail::pg_fdw {
     PgFdwMgr::fdw_commit_rollback(uint64_t pg_xid, bool commit)
     {
         // remove transaction ID mapping on a commit or rollback
-        LOG_DEBUG(LOG_FDW, "fdw_commit_rollback: pg_xid: {}, commit: {}", pg_xid, commit);
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "fdw_commit_rollback: pg_xid: {}, commit: {}", pg_xid, commit);
         _in_transaction = false;
         std::unique_lock<std::shared_mutex> lock(_mutex);
         _trans_pg_xid = 0;
@@ -1566,7 +1565,7 @@ namespace springtail::pg_fdw {
         ReleaseSysCache(tup);
 
         // create a datum from the enum's entry oid
-        LOG_DEBUG(LOG_FDW, "Enum datum: springtail_oid: {}, pg_oid: {}, enum_oid: {}",
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Enum datum: springtail_oid: {}, pg_oid: {}, enum_oid: {}",
                             springtail_oid, pg_oid, enum_oid);
 
         return ObjectIdGetDatum(enum_oid);
@@ -1729,7 +1728,7 @@ namespace springtail::pg_fdw {
 
         create += fmt::format("\n) SERVER {} OPTIONS (tid '{}');", quote_identifier(server_name.c_str()), tid);
 
-        LOG_DEBUG(LOG_FDW, "Generated SQL: {}", create);
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Generated SQL: {}", create);
 
         return create;
     }
@@ -1872,7 +1871,7 @@ namespace springtail::pg_fdw {
             }
         }
 
-        LOG_DEBUG(LOG_FDW, "Importing schema: {} <=> {}\n", namespace_name, CATALOG_SCHEMA_NAME);
+        LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Importing schema: {} <=> {}\n", namespace_name, CATALOG_SCHEMA_NAME);
 
         // if we are importing the catalog schema, handle it separately
         if (namespace_name == std::string(CATALOG_SCHEMA_NAME)) {
@@ -1922,10 +1921,10 @@ namespace springtail::pg_fdw {
             default:
                 if (pg_type >= FirstNormalObjectId) {
                     // enum type; ordering based on sort order, treat as float
-                    LOG_DEBUG(LOG_FDW, "Found user defined type for sorting: {}", pg_type);
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Found user defined type for sorting: {}", pg_type);
                     return true;
                 }
-                LOG_DEBUG(LOG_FDW, "Type not suitable for sorting: {}", pg_type);
+                LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Type not suitable for sorting: {}", pg_type);
                 return false;
         }
     }
@@ -2008,7 +2007,7 @@ namespace springtail::pg_fdw {
                 // handle enum user defined type
                 if (qual->base.typeoid >= FirstNormalObjectId) {
                     Oid oid = DatumGetObjectId(qual->value);
-                    LOG_DEBUG(LOG_FDW, "Found user defined type datum qual field: {}", oid);
+                    LOG_DEBUG(LOG_FDW, LOG_LEVEL_DEBUG1, "Found user defined type datum qual field: {}", oid);
 
                     // do reverse mapping lookup to get the enum idx from springtail
                     float enum_id = _get_enum_id_from_pg(state, column.pg_type, qual->base.typeoid, oid);
@@ -2051,7 +2050,7 @@ namespace springtail::pg_fdw {
     PgFdwMgr::_enum_cache_lookup(uint64_t db_id, int32_t oid, uint64_t xid)
     {
         // first check the _user_type_cache for the oid
-        LOG_DEBUG(LOG_FDW, "Enum cache lookup for oid: {}", oid);
+        LOG_DEBUG(LOG_FDW,LOG_LEVEL_DEBUG1,  "Enum cache lookup for oid: {}", oid);
 
         // lookup oid in user type cache, if not there fetch from systbl mgr
         UserTypePtr utp = _user_type_cache.get(oid);

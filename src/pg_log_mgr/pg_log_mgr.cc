@@ -62,7 +62,7 @@ namespace springtail::pg_log_mgr {
     PgLogMgr::_on_database_state_changed(const std::string &path,
                                          const nlohmann::json &new_value)
     {
-        LOG_DEBUG(LOG_PG_LOG_MGR,"Replicated database state change; path: {}, state: {}",
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Replicated database state change; path: {}, state: {}",
                   path, new_value.dump(4));
 
         CHECK(path.starts_with(Properties::DATABASE_STATE_PATH));
@@ -71,7 +71,7 @@ namespace springtail::pg_log_mgr {
         std::vector<std::string> path_parts;
         common::split_string("/", path, path_parts);
         CHECK_EQ(path_parts.size(), 2);
-        
+
         uint64_t db_id = stoull(path_parts[1]);
         CHECK_EQ(db_id, _db_id);
 
@@ -85,7 +85,7 @@ namespace springtail::pg_log_mgr {
         std::string state_str = new_value.get<std::string>();
         redis::db_state_change::DBState state = redis::db_state_change::db_state_map[state_str];
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Received state change: {}", redis::db_state_change::db_state_to_name[state]);
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Received state change: {}", redis::db_state_change::db_state_to_name[state]);
         _handle_external_state_change(state);
     }
 
@@ -114,7 +114,7 @@ namespace springtail::pg_log_mgr {
             std::string(Properties::DATABASE_STATE_PATH) + "/" + std::to_string(_db_id),
             _cache_watcher_db_states);
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Starting up: db_id: {}, DB state: {}", _db_id, state);
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Starting up: db_id: {}, DB state: {}", _db_id, state);
 
         // need to add back table sync worker items to redis sync queue and clear the queue
         _redis_sync_queue.abort(REDIS_WORKER_ID);
@@ -128,7 +128,7 @@ namespace springtail::pg_log_mgr {
         uint64_t next_xid = committed_xid + 2;
         _pg_log_reader->set_next_xid(next_xid);
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Last committed XID: db_id: {}, xid: {}", _db_id, committed_xid);
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Last committed XID: db_id: {}, xid: {}", _db_id, committed_xid);
 
         // Note: If we are in recovery then we need to start the copy and reader threads first so
         //       that we can perform log replay, then we can start streaming from the last LSN.  But
@@ -137,7 +137,7 @@ namespace springtail::pg_log_mgr {
         uint64_t lsn = INVALID_LSN;
         bool do_init = (state == redis::db_state_change::REDIS_STATE_INITIALIZE);
         if (do_init) {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Started in init state");
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Started in init state");
             _startup_init();
             _wal_buffer_flag = true;
 
@@ -157,7 +157,7 @@ namespace springtail::pg_log_mgr {
             _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
 
         } else {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Started in recovery state");
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Started in recovery state");
             _wal_buffer_flag = true;
 
             // XXX currently we perform full recovery any time that the state is not INITIALIZE, but if
@@ -192,7 +192,7 @@ namespace springtail::pg_log_mgr {
             _committer_queue->push(std::make_shared<committer::XidReady>(_db_id, committer::XidReady::Type::INDEX_RECOVERY_TRIGGER));
 
             _wal_buffer_flag = false;
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Done with recovery");
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Done with recovery");
         }
     }
 
@@ -251,13 +251,13 @@ namespace springtail::pg_log_mgr {
         if (internal_state == STATE_SYNC_STALL ||
             internal_state == STATE_STARTUP_SYNC) {
             // if in replaying, ignore message will switch to running when replay is done
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Received state change to running from replaying");
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Received state change to running from replaying");
             return;
         }
 
         // if in replay done set to running XXX
         _internal_state.test_and_set(STATE_REPLAYING, STATE_RUNNING);
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Current state is running: {}", (_internal_state.get() == STATE_RUNNING));
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Current state is running: {}", (_internal_state.get() == STATE_RUNNING));
     }
 
     void
@@ -276,7 +276,7 @@ namespace springtail::pg_log_mgr {
             if (auto request = _index_reconciliation_queue_mgr->pop(_db_id, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT)) {
                 if (request != nullptr) {
                     //Pass it to log reader to notify committer
-                    LOG_DEBUG(LOG_PG_LOG_MGR, "Request received for index reconciliation for XID: {} @ {}", request->db_id(), request->reconcile_xid());
+                    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Request received for index reconciliation for XID: {} @ {}", request->db_id(), request->reconcile_xid());
                     reconcile_index_msg.db_id = request->db_id();
                     reconcile_index_msg.reconcile_xid = request->reconcile_xid();
                     auto msg = std::make_shared<PgMsg>(PgMsgEnum::RECONCILE_INDEX);
@@ -340,7 +340,7 @@ namespace springtail::pg_log_mgr {
             _do_table_copies(table_ids);
 
             // update redis state
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Committing table sync queue");
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Committing table sync queue");
             _redis_sync_queue.commit(REDIS_WORKER_ID);
         }
     }
@@ -356,7 +356,7 @@ namespace springtail::pg_log_mgr {
         }
         if (request != nullptr) {
             // populate the tables to copy; check for more work
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Table sync queue: {}@{}:{}", request->table_id(),
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Table sync queue: {}@{}:{}", request->table_id(),
                     request->xid().xid, request->xid().lsn);
             return std::make_pair(request->table_id(), request->xid());
         }
@@ -378,19 +378,19 @@ namespace springtail::pg_log_mgr {
         _internal_state.wait_for_state(STATE_SYNCING);
 
         // copy tables
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Copying tables for db {}; state=synchronizing", _db_id);
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Copying tables for db {}; state=synchronizing", _db_id);
         std::vector<PgCopyResultPtr> res;
         auto xid = _pg_log_reader->get_next_xid();
 
         auto token = open_telemetry::OpenTelemetry::get_instance()->set_context_variables({{"xid", std::to_string(xid)}});
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Copying tables; target xid={}", xid);
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Copying tables; target xid={}", xid);
         if (table_ids.has_value()) {
             res = PgCopyTable::copy_tables(_db_id, xid, table_ids.value());
         } else {
             res = PgCopyTable::copy_db(_db_id, xid);
         }
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; res size={}", res.size());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Table copy done; res size={}", res.size());
 
         bool copy_task_pending = true;
         while(copy_task_pending) {
@@ -402,11 +402,11 @@ namespace springtail::pg_log_mgr {
                     if (next_table_id != -1) {
                         xid = _pg_log_reader->get_next_xid();
                         SyncTracker::get_instance()->pick_table_for_sync(_db_id, next_table_id, next_xid_lsn.value());
-                        LOG_DEBUG(LOG_PG_LOG_MGR, "Copying more tables; target xid={}", xid);
+                        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Copying more tables; target xid={}", xid);
                         res = PgCopyTable::copy_tables(_db_id, xid, std::set<uint32_t>{next_table_id});
                     } else {
                         // Not able to fetch next table, so exit copy
-                        LOG_DEBUG(LOG_PG_LOG_MGR, "Couldn't fetch more tables; setting state=running");
+                        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Couldn't fetch more tables; setting state=running");
                         // set to running this unblocks the xact handler
                         _internal_state.set(STATE_RUNNING);
                         Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_RUNNING);
@@ -415,7 +415,7 @@ namespace springtail::pg_log_mgr {
                 }
             } else {
                 // no tables copied
-                LOG_DEBUG(LOG_PG_LOG_MGR, "No more tables copied; setting state=running");
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "No more tables copied; setting state=running");
                 // set to running this unblocks the xact handler
                 _internal_state.set(STATE_RUNNING);
                 Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_RUNNING);
@@ -439,7 +439,7 @@ namespace springtail::pg_log_mgr {
     {
         assert(_internal_state.is(STATE_SYNCING));
 
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Pushing copy results to sync tracker");
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Pushing copy results to sync tracker");
 
         for (const auto &r : res) {
             // skip the result if it contains no tables
@@ -448,7 +448,7 @@ namespace springtail::pg_log_mgr {
             }
 
             // send table sync message to GC
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Recording table sync msgs: target_xid={}", r->target_xid);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Recording table sync msgs: target_xid={}", r->target_xid);
             PgXactMsg redis_xact(_db_id, r);
 
             SyncTracker::get_instance()->add_sync(std::get<pg_log_mgr::PgXactMsg::TableSyncMsg>(redis_xact.msg));
@@ -458,10 +458,10 @@ namespace springtail::pg_log_mgr {
             // process stalled messages; set state to replaying
             _internal_state.set(STATE_REPLAYING);
             _internal_state.wait_for_state(STATE_RUNNING);
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; state=replaying");
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Table copy done; state=replaying");
             return false;
         } else {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Table copy done; More to process, dont wake up logreader");
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Table copy done; More to process, dont wake up logreader");
             return true;
         }
     }
@@ -471,14 +471,14 @@ namespace springtail::pg_log_mgr {
     {
         try {
             _pg_conn.connect();
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Connecting to postgres server: {}\n", _host);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Connecting to postgres server: {}\n", _host);
 
             // create slot if need be
             bool create_slot = !_pg_conn.check_slot_exists();
 
             if (create_slot) {
                 if (do_init) {
-                    LOG_DEBUG(LOG_PG_LOG_MGR, "Creating replication slot: {}\n", _slot_name);
+                    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Creating replication slot: {}\n", _slot_name);
                     lsn = _pg_conn.create_replication_slot();
                 } else {
                     LOG_ERROR("Replication slot does not exist: db_id={}, slot={}", _db_id, _slot_name);
@@ -492,7 +492,7 @@ namespace springtail::pg_log_mgr {
             _proto_version = _pg_conn.get_protocol_version();
 
             // start steaming
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Starting streaming: lsn={}", lsn);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Starting streaming: lsn={}", lsn);
             _pg_conn.start_streaming(lsn, do_init);
         } catch (const PgConnectionError &e) {
             // this may be recoverable if we can reconnect, but not handled right now
@@ -560,7 +560,7 @@ namespace springtail::pg_log_mgr {
                 return true;
             }
         } catch (const PgIOShutdown &e) {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Received shutdown signal");
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Received shutdown signal");
             return false;
         } catch (const PgConnectionError &e) {
             LOG_ERROR("Error reading data from pg: {}", e.what());
@@ -574,7 +574,7 @@ namespace springtail::pg_log_mgr {
                 return false;
             }
         }
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Recevied data: length={}, msg_length={}, msg_offset={}",
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Recevied data: length={}, msg_length={}, msg_offset={}",
             data.length, data.msg_length, data.msg_offset);
 
         if (!logger->log_data(data)) {
@@ -619,7 +619,7 @@ namespace springtail::pg_log_mgr {
             while (!_shutdown && _wal_buffer_flag) {
                 Coordinator::mark_alive(keep_alive);
 
-                LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Recevied data in recovery mode");
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Received data in recovery mode");
                 if (!_writer_read_data(data, logger, start_offset,
                     [&post_recovery_queue, &start_offset](uint64_t end_offset, const std::filesystem::path &file_path) {
                         if (!post_recovery_queue.empty()) {
@@ -640,7 +640,7 @@ namespace springtail::pg_log_mgr {
             // once recovery is done, move all the entries to the _logger_queue
             if (!done && !_shutdown) {
                 // copy queue from
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Moving data to _logger_queue");
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Moving data to _logger_queue");
                 _logger_queue.push(post_recovery_queue);
             }
         }
@@ -651,7 +651,7 @@ namespace springtail::pg_log_mgr {
             while (!_shutdown) {
                 Coordinator::mark_alive(keep_alive);
 
-                LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Received data in normal mode");
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Received data in normal mode");
                 if (!_writer_read_data(data, logger, start_offset,
                     [this, &start_offset](uint64_t end_offset, const std::filesystem::path &file_path) {
                         _logger_queue.push(start_offset, end_offset, file_path);
@@ -693,7 +693,7 @@ namespace springtail::pg_log_mgr {
                 continue;
             }
 
-            LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Got log entry: path={}, start_offset={}, num_messages={}",
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Got log entry: path={}, start_offset={}, num_messages={}",
                       log_entry->path, log_entry->start_offset, log_entry->num_messages);
 
             // check for stall message, if so then wait for sync to complete
@@ -702,7 +702,7 @@ namespace springtail::pg_log_mgr {
                 // wait for sync to complete
                 _internal_state.set(STATE_SYNCING);
 
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Waiting for sync to complete");
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Waiting for sync to complete");
                 while (!_shutdown && !_internal_state.wait_for_state({ STATE_REPLAYING, STATE_RUNNING }, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT)) {
                     Coordinator::mark_alive(keep_alive);
                 }
@@ -712,12 +712,12 @@ namespace springtail::pg_log_mgr {
                 }
 
                 _internal_state.set(STATE_RUNNING);
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Sync to complete");
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Sync to complete");
 
                 continue;
             }
 
-            LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Processing log entry: path={}, start_offset={}, num_messages={}",
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Processing log entry: path={}, start_offset={}, num_messages={}",
                       log_entry->path, log_entry->start_offset, log_entry->num_messages);
 
             auto file_timestamp = fs::extract_timestamp_from_file(log_entry->path, LOG_PREFIX_REPL, LOG_SUFFIX);
@@ -725,7 +725,7 @@ namespace springtail::pg_log_mgr {
             _pg_log_reader->process_log(log_entry->path, *file_timestamp,
                                         log_entry->start_offset, log_entry->num_messages);
         }
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Exiting log reader thread");
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Exiting log reader thread");
 
         // unregister thread before exiting
         coordinator->unregister_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);

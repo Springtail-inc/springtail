@@ -13,7 +13,7 @@
 
 #include <openssl/ssl.h>
 
-#include <proxy/logging.hh>
+#include <common/logging.hh>
 
 namespace springtail::pg_proxy {
 
@@ -25,7 +25,7 @@ namespace springtail::pg_proxy {
         explicit ProxyConnection(int socket);
 
         ~ProxyConnection() {
-            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Destroying connection to {}", _socket);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG4, "Destroying connection to {}", _socket);
             close();
         }
 

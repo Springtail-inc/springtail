@@ -5,9 +5,7 @@
 // springtail includes
 #include <common/init.hh>
 
-#include <proxy/database.hh>
 #include <proxy/server.hh>
-#include <proxy/user_mgr.hh>
 
 using namespace springtail;
 using namespace springtail::pg_proxy;
