@@ -177,7 +177,7 @@ namespace springtail::pg_log_mgr {
                 xid_ts = it->first;
             }
             uint64_t min_ts = std::min(pg_xid_ts, xid_ts);
-            LOG_DEBUG(LOG_PG_LOG_MGR, "pg_xid_ts = {}, xid_ts = {},  min timestamp = {}, returning timestamp = {}",
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "pg_xid_ts = {}, xid_ts = {},  min timestamp = {}, returning timestamp = {}",
                 pg_xid_ts, xid_ts, min_ts, (min_ts == UINT64_MAX)? 0 : min_ts);
             return (min_ts == UINT64_MAX)? 0 : min_ts;
         }

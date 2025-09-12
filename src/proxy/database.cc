@@ -5,7 +5,6 @@
 #include <proxy/client_session.hh>
 #include <proxy/database.hh>
 #include <proxy/exception.hh>
-#include <proxy/logging.hh>
 
 #include <redis/redis_db_tables.hh>
 
@@ -209,7 +208,7 @@ namespace springtail::pg_proxy
                                   int num_instances,
                                   bool deallocate)
     {
-        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Session being released: [S:{:d}]", session->id());
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Session being released: [S:{:d}]", session->id());
 
         // deallocate if connection is closed or database id is invalid
         if (session->is_connection_closed() || session->database_id() == constant::INVALID_DB_ID) {
@@ -218,12 +217,12 @@ namespace springtail::pg_proxy
 
         if (!deallocate) {
             DatabasePoolPtr pool = session->get_instance()->get_pool();
-            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Adding session back to pool: [S:{:d}]", session->id());
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Adding session back to pool: [S:{:d}]", session->id());
             pool->add_session(session);
             return;
         }
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Deallocating session: [S:{:d}]", session->id());
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Deallocating session: [S:{:d}]", session->id());
 
         // otherwise, remove from the internal maps and deallocate
         auto instance_it = _sessions.find(session->get_instance());
@@ -309,7 +308,7 @@ namespace springtail::pg_proxy
     void
     DatabaseReplicaSet::release_session(ServerSessionPtr session, bool deallocate)
     {
-        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Replica session released: [S:{:d}]", session->id());
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Replica session released: [S:{:d}]", session->id());
         assert(session->type() == Session::Type::REPLICA);
 
         std::shared_lock lock(_base_mutex);
@@ -326,7 +325,7 @@ namespace springtail::pg_proxy
     DatabaseReplicaSet::release_expired_sessions()
     {
         std::shared_lock lock(_base_mutex);
-        for (auto replica : _replicas) {
+        for (auto &replica : _replicas) {
             auto pool = replica->get_pool();
             pool->evict_expired_sessions();
         }
@@ -357,7 +356,7 @@ namespace springtail::pg_proxy
     void
     DatabasePrimarySet::release_session(ServerSessionPtr session, bool deallocate)
     {
-        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Primary Session released: [S:{:d}]", session->id());
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG2, "Primary Session released: [S:{:d}]", session->id());
         assert(session->type() == Session::Type::PRIMARY);
 
         std::shared_lock lock(_base_mutex);
@@ -488,7 +487,7 @@ namespace springtail::pg_proxy
     {
         _cache_watcher_db_ids = std::make_shared<RedisCache::RedisChangeWatcher>(
             [this](const std::string &path, const nlohmann::json &new_value) -> void {
-                LOG_DEBUG(LOG_PROXY,"Replicated databases: {}", new_value.dump(4));
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Replicated databases: {}", new_value.dump(4));
                 CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
                 // get a vector of old database ids from _log_mgrs
                 std::shared_lock<std::shared_mutex> lock(_db_mutex);
@@ -511,7 +510,7 @@ namespace springtail::pg_proxy
         );
         _cache_watcher_db_states = std::make_shared<RedisCache::RedisChangeWatcher>(
             [this](const std::string &path, const nlohmann::json &new_value) -> void {
-                LOG_DEBUG(LOG_PROXY,"Replicated database state change; path: {}, state: {}",
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Replicated database state change; path: {}, state: {}",
                     path, new_value.dump(4));
                 CHECK(path.starts_with(Properties::DATABASE_STATE_PATH));
                 // extract database id
@@ -601,7 +600,7 @@ namespace springtail::pg_proxy
 
     void DatabaseMgr::_handle_db_table_change(const std::string &msg)
     {
-        LOG_DEBUG(LOG_PROXY, "Received DB table change: {}", msg);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Received DB table change: {}", msg);
         uint64_t db_id;
         std::string action;
         std::string schema;
@@ -618,12 +617,12 @@ namespace springtail::pg_proxy
         // update the schema table map in the database object
         if (action == "add") {
             iter->second->add_schema_table(schema, table);
-            LOG_DEBUG(LOG_PROXY, "Added schema: {}, table: {} to database {}", schema, table, db_id);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Added schema: {}, table: {} to database {}", schema, table, db_id);
         } else if (action == "remove") {
             iter->second->remove_schema_table(schema, table);
-            LOG_DEBUG(LOG_PROXY, "Removed schema: {}, table: {} from database {}", schema, table, db_id);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Removed schema: {}, table: {} from database {}", schema, table, db_id);
         } else {
-            LOG_DEBUG(LOG_PROXY, "Unsupported action: {}", action);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Unsupported action: {}", action);
         }
     }
 
@@ -650,7 +649,7 @@ namespace springtail::pg_proxy
         for (const auto& [db_id, db_name]: db_list) {
             // create database object and insert it into the maps
             DatabasePtr db_object = std::make_shared<Database>(db_id, db_name);
-            LOG_DEBUG(LOG_PROXY, "Added database (id, name): ({}, {})", db_id, db_name);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Added database (id, name): ({}, {})", db_id, db_name);
             _db_name_rep_dbs.insert(std::pair<std::string, DatabasePtr>(db_name, db_object));
             _db_id_rep_dbs.insert(std::pair<uint64_t, DatabasePtr>(db_id, db_object));
 
@@ -696,7 +695,7 @@ namespace springtail::pg_proxy
         _db_id_rep_dbs.insert(std::pair<uint64_t, DatabasePtr>(db_id, db_object));
         db_lock.unlock();
 
-        LOG_DEBUG(LOG_PROXY, "Added database (id, name): ({}, {})", db_id, db_name);
+        LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG1, "Added database (id, name): ({}, {})", db_id, db_name);
 
         // update database schemas and tables
         std::vector<std::pair<std::string, std::string>> schema_table_pairs;
@@ -821,7 +820,7 @@ namespace springtail::pg_proxy
 
         // deregister callbacks for replicated database state change
         std::shared_lock<std::shared_mutex> lock(_db_mutex);
-        for (auto [db_id, rep_db]: _db_id_rep_dbs) {
+        for (auto &[db_id, rep_db]: _db_id_rep_dbs) {
             redis_cache->remove_callback(
                 std::string(Properties::DATABASE_STATE_PATH) + "/" + std::to_string(db_id),
                 _cache_watcher_db_states);

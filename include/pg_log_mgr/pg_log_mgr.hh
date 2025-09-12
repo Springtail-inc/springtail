@@ -135,22 +135,22 @@ namespace springtail::pg_log_mgr {
             redis_cache->remove_callback(
                 std::string(Properties::DATABASE_STATE_PATH) + "/" + std::to_string(_db_id),
                 _cache_watcher_db_states);
-            LOG_DEBUG(LOG_PG_LOG_MGR, "joining threads");
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "joining threads");
             _writer_thread.join();
-            LOG_DEBUG(LOG_PG_LOG_MGR, "writer thread joined");
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "writer thread joined");
             _reader_thread.join();
-            LOG_DEBUG(LOG_PG_LOG_MGR, "reader thread joined");
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "reader thread joined");
             _table_copy_thread.join();
-            LOG_DEBUG(LOG_PG_LOG_MGR, "copy thread joined");
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "copy thread joined");
             _reconciliation_thread.join();
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Index reconciliation thread joined");
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Index reconciliation thread joined");
             _tracer_thread.join();
-            LOG_DEBUG(LOG_PG_LOG_MGR, "tracer thread joined");
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "tracer thread joined");
         }
 
         /** Set shutdown flag */
         void shutdown() {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "shutting down");
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "shutting down");
             _shutdown = true;
 
             // set shutdown flag in pg connection repl class

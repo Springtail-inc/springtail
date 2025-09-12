@@ -274,7 +274,7 @@ namespace springtail {
         // default error response
         std::shared_ptr<IOResponseRead> response = std::make_shared<IOResponseRead>(request);
 
-        LOG_DEBUG(LOG_STORAGE, "IOSysFH::read offset={}", request->offset);
+        LOG_DEBUG(LOG_STORAGE, LOG_LEVEL_DEBUG1, "IOSysFH::read offset={}", request->offset);
 
         // prefetch 36 bytes to try to avoid multiple reads
         // this may read past the end of file, so must handle that case
@@ -320,7 +320,7 @@ namespace springtail {
 
         int hdr_off = 12;
 
-        LOG_DEBUG(LOG_STORAGE, "IOSysFH::read vector count={}", (0xFF & count));
+        LOG_DEBUG(LOG_STORAGE, LOG_LEVEL_DEBUG1, "IOSysFH::read vector count={}", (0xFF & count));
 
         // output vector
         response->data.resize(count);
@@ -362,7 +362,7 @@ namespace springtail {
                 iov[i].iov_len = size;
             }
 
-            LOG_DEBUG(LOG_STORAGE, "IOSysFH::read ({}) Vector {}: size={} csize={}",
+            LOG_DEBUG(LOG_STORAGE, LOG_LEVEL_DEBUG1, "IOSysFH::read ({}) Vector {}: size={} csize={}",
                          (is_compressed ? "compressed" : "uncompressed") , i, size, csize);
 
             total_size += iov[i].iov_len;
@@ -376,7 +376,7 @@ namespace springtail {
         }
         CHECK_EQ(bytes_read, total_size);
 
-        LOG_DEBUG(LOG_STORAGE, "IOSysFH::read bytes read={}, hdr_off={}", bytes_read, hdr_off);
+        LOG_DEBUG(LOG_STORAGE, LOG_LEVEL_DEBUG1, "IOSysFH::read bytes read={}, hdr_off={}", bytes_read, hdr_off);
 
         // if data was compressed we need to decompress it into final location,
         // otherwise we are done
@@ -402,7 +402,7 @@ namespace springtail {
             return;
         }
 
-        LOG_DEBUG(LOG_STORAGE, "Read {} vectors", response->data.size());
+        LOG_DEBUG(LOG_STORAGE, LOG_LEVEL_DEBUG1, "Read {} vectors", response->data.size());
 
         response->next_offset = request->offset + hdr_off + total_size;
         request->complete(response, IOStatus::SUCCESS);
@@ -433,7 +433,7 @@ namespace springtail {
                 for (int i = 0; i < count; i++) {
                     compressor->compress_raw(data[i], compressed_data[i]);
 
-                    LOG_DEBUG(LOG_STORAGE, "IOSysFH::_internal_write: compressing vector: {}", i);
+                    LOG_DEBUG(LOG_STORAGE, LOG_LEVEL_DEBUG1, "IOSysFH::_internal_write: compressing vector: {}", i);
 
                     compressed_size += compressed_data[i].size();
                     size += data[i]->size();
@@ -451,7 +451,7 @@ namespace springtail {
                 // don't compress
                 is_compressed = false;
 
-                LOG_DEBUG(LOG_STORAGE, "IOSys::internal_write: Not compressing data, compressed size too big: {} vs {}",
+                LOG_DEBUG(LOG_STORAGE, LOG_LEVEL_DEBUG1, "IOSys::internal_write: Not compressing data, compressed size too big: {} vs {}",
                              compressed_size, size);
             }
         }
@@ -484,13 +484,13 @@ namespace springtail {
                 iov[i+1].iov_base = compressed_data[i].data();
                 iov[i+1].iov_len = csize;
 
-                LOG_DEBUG(LOG_STORAGE, "IOSysFH::internal_write (compressed); idx={}, size={}, csize={}", i, size, csize);
+                LOG_DEBUG(LOG_STORAGE, LOG_LEVEL_DEBUG1, "IOSysFH::internal_write (compressed); idx={}, size={}, csize={}", i, size, csize);
             } else {
                 std::copy_n(reinterpret_cast<char *>(&size), sizeof(int32_t), &hdr[hdr_off + 4]);
                 iov[i+1].iov_base = data[i]->data();
                 iov[i+1].iov_len = size;
 
-                LOG_DEBUG(LOG_STORAGE, "IOSysFH::internal_write (uncompressed); idx={}, size={}", i, size);
+                LOG_DEBUG(LOG_STORAGE, LOG_LEVEL_DEBUG1, "IOSysFH::internal_write (uncompressed); idx={}, size={}", i, size);
             }
 
             total_size += iov[i+1].iov_len;
@@ -544,7 +544,7 @@ namespace springtail {
             return;
         }
 
-        LOG_DEBUG(LOG_STORAGE, "Append at offset={}, written={}", offset, bytes_written);
+        LOG_DEBUG(LOG_STORAGE, LOG_LEVEL_DEBUG1, "Append at offset={}, written={}", offset, bytes_written);
 
         _is_dirty = true;
 

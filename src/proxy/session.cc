@@ -10,7 +10,6 @@
 #include <proxy/connection.hh>
 #include <proxy/exception.hh>
 #include <proxy/buffer_pool.hh>
-#include <proxy/logging.hh>
 #include <proxy/session_msg.hh>
 #include <proxy/client_session.hh>
 
@@ -152,14 +151,14 @@ namespace springtail::pg_proxy {
             // message length includes length field but not code byte
             // so really msg_length -= 4
             msg_length = recvint32(buffer + offset + 1) + 1;
-            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Read message length: {}", msg_length);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Read message length: {}", msg_length);
 
             // allocate a buffer from the buffer pool and copy data in
             BufferPtr bufferp = blist.get(msg_length);
 
             // copy data into buffer
             bufferp->copy_into(buffer + offset, std::min(n - offset, msg_length));
-            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Read message n: {}, offset: {}", n, offset);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Read message n: {}, offset: {}", n, offset);
 
             // incr by full message length instead of by n
             // this allows us to find out if we read too little for a full buffer
@@ -169,7 +168,7 @@ namespace springtail::pg_proxy {
         // if we didn't get all the data for the last buffer
         if (offset > n) {
             // read remaining data into tail buffer
-            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Need to read more data for message: {}", offset - n);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "Need to read more data for message: {}", offset - n);
             BufferPtr tail = blist.buffers.back();
             int rd = connection->read(tail->data() + tail->size(), offset - n, offset - n);
             tail->incr_size(rd);
@@ -203,12 +202,12 @@ namespace springtail::pg_proxy {
         if (!_is_shadow) {
             n = _associated_session->get_connection()->write(buffer, 5);
             CHECK_EQ(n, 5);
-            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Streamed header to remote session: code={}, msg_length={}", (_type == CLIENT ? 'C': 'S'), _id, code, msg_length);
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[{}:{}] Streamed header to remote session: code={}, msg_length={}", (_type == CLIENT ? 'C': 'S'), _id, code, msg_length);
         }
 
         // iterate reading buffer from local session and write to remote session
         while (msg_length > 0) {
-            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Reading {} bytes from local socket", (_type == CLIENT ? 'C': 'S'), _id, std::min(msg_length, 4096));
+            LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[{}:{}] Reading {} bytes from local socket", (_type == CLIENT ? 'C': 'S'), _id, std::min(msg_length, 4096));
 
             // throws exception on error
             int read_length = std::min(msg_length, 4096);
@@ -225,7 +224,7 @@ namespace springtail::pg_proxy {
                 // log the buffer as outgoing from associated session
                 _associated_session->_log_buffer(false, code, n, buffer, seq_id, n == msg_length);
 
-                PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Streamed {} bytes to remote session", (_type == CLIENT ? 'C': 'S'), _id, m);
+                LOG_DEBUG(LOG_PROXY, LOG_LEVEL_DEBUG3, "[{}:{}] Streamed {} bytes to remote session", (_type == CLIENT ? 'C': 'S'), _id, m);
             }
 
             msg_length -= n;

@@ -22,7 +22,7 @@ XidMgrSubscriber::XidMgrSubscriber(std::shared_ptr<grpc::Channel> ch, Callbacks 
 
 XidMgrSubscriber::~XidMgrSubscriber()
 {
-    LOG_DEBUG(LOG_XID_MGR, "XidMgrSubscriber::~XidMgrSubscriber: Deleted");
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XidMgrSubscriber::~XidMgrSubscriber: Deleted");
     _stub.reset();
 }
 
@@ -33,7 +33,7 @@ void XidMgrSubscriber::cancel()
 
 void XidMgrSubscriber::OnReadDone(bool ok)
 {
-    LOG_DEBUG(LOG_XID_MGR, "XidMgrSubscriber::OnReadDone");
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XidMgrSubscriber::OnReadDone");
     if (ok) {
         _cb->push(_push_response.db_id(), _push_response.xid());
         StartRead(&_push_response);
@@ -48,7 +48,7 @@ void XidMgrSubscriber::OnReadDone(bool ok)
 
 void XidMgrSubscriber::OnDone(const grpc::Status& s)
 {
-    LOG_DEBUG(LOG_XID_MGR, "XidMgrSubscriber::OnDone");
+    LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "XidMgrSubscriber::OnDone");
     if (_cb.has_value()) {
         _cb->disconnect();
         _cb = {};

@@ -24,7 +24,7 @@ PgLogRecovery::repair_logs()
     CHECK(_latest_log) << "No replication log files found, maybe start in INITIALIZE state";
 
     while (_latest_log && lsn == INVALID_LSN) {
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Found latest log file: {}", *_latest_log);
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Found latest log file: {}", *_latest_log);
         lsn = PgMsgStreamReader::scan_log(_db_id, *_latest_log, true);
 
         if (lsn == INVALID_LSN) {
@@ -79,7 +79,7 @@ PgLogRecovery::_skip_committed()
     //     require changing the xact log to capture all of the relevant messages and their positions
     //     in the repl log so that we can replicate this behavior
 
-    LOG_DEBUG(LOG_PG_LOG_MGR, "Remove old replication logs first");
+    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Remove old replication logs first");
 
     auto first_xact_log = fs::find_earliest_modified_file(_xact_path,
             springtail::xid_mgr::PgXactLogWriter::LOG_PREFIX_XACT,
@@ -93,20 +93,20 @@ PgLogRecovery::_skip_committed()
         }
     }
 
-    LOG_DEBUG(LOG_PG_LOG_MGR, "Skip already committed records");
+    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Skip already committed records");
 
     // open the repl log
     _repl_log = fs::find_earliest_modified_file(_repl_path, PgLogMgr::LOG_PREFIX_REPL,
                                                 PgLogMgr::LOG_SUFFIX);
     if (!_repl_log) {
-        LOG_DEBUG(LOG_PG_LOG_MGR, "No repl log found");
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "No repl log found");
         return false;
     }
 
-    LOG_DEBUG(LOG_PG_LOG_MGR, "Start with file {}", *_repl_log);
+    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Start with file {}", *_repl_log);
 
     if (fs::timestamp_file_exists(_repl_log.value(), PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_PREFIX_REPL_STREAMING, PgLogMgr::LOG_SUFFIX)) {
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Set streaming for file {}", _repl_log.value().string());
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Set streaming for file {}", _repl_log.value().string());
         _repl_reader.set_streaming();
     }
 
@@ -115,7 +115,7 @@ PgLogRecovery::_skip_committed()
     // Open the xact log
     xid_mgr::PgXactLogReader xact_reader(_xact_path);
     if (!xact_reader.begin()) {
-        LOG_DEBUG(LOG_PG_LOG_MGR, "No xact log found");
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "No xact log found");
         return true;
     }
 
@@ -143,10 +143,10 @@ PgLogRecovery::_skip_committed()
         bool eos = false;
         auto msg = _repl_reader.read_message(filter, eos);
         if (msg != nullptr) {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Found message {}, eos {}", static_cast<int>(msg->msg_type), eos);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Found message {}, eos {}", static_cast<int>(msg->msg_type), eos);
             done = _process_msg(msg, xact_reader, cur_pgxid);
         } else {
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Skipping message in repl log; offset {}, eos {}", _repl_reader.offset(), eos);
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Skipping message in repl log; offset {}, eos {}", _repl_reader.offset(), eos);
         }
 
         // check if we need to move to the next replication log file
@@ -211,7 +211,7 @@ PgLogRecovery::_process_msg(PgMsgPtr msg,
                 auto &commit_msg = std::get<PgMsgStreamCommit>(msg->msg);
                 pgxid = commit_msg.xid;
             }
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Found COMMIT for pgxid {} == {} with xact_xid {}", pgxid, xact_reader.get_pg_xid(), xact_reader.get_xid());
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Found COMMIT for pgxid {} == {} with xact_xid {}", pgxid, xact_reader.get_pg_xid(), xact_reader.get_xid());
             CHECK(pgxid == xact_reader.get_pg_xid() || pgxid == 0);
 
             bool done = false;
@@ -220,7 +220,7 @@ PgLogRecovery::_process_msg(PgMsgPtr msg,
                 // the previous commit was the final commit -- this can happen when a commit we are
                 // rolling back to is not directly recorded in the log because it's an XID with no
                 // associated pgxid
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Previous was final commit");
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Previous was final commit");
                 done = true;
             } else {
                 if (pgxid != 0) {
@@ -229,11 +229,11 @@ PgLogRecovery::_process_msg(PgMsgPtr msg,
 
                 _final_committed = {_repl_reader.offset(), *_repl_log};
                 if (xact_reader.get_xid() == _committed_xid) {
-                    LOG_DEBUG(LOG_PG_LOG_MGR, "Found final commit");
+                    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Found final commit");
                     done = true;
                 } else {
                     done = !xact_reader.next();  // move to the next record in the xact log
-                    LOG_DEBUG(LOG_PG_LOG_MGR, "Advanced xact_reader to the next xid; done = {}", done);
+                    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Advanced xact_reader to the next xid; done = {}", done);
                 }
             }
 
@@ -252,7 +252,7 @@ PgLogRecovery::_replay_active()
 {
     CHECK(!_active_map.empty());
 
-    LOG_DEBUG(LOG_PG_LOG_MGR, "Replay active messages");
+    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Replay active messages");
 
     // Otherwise, we need to re-process all of the in-flight active xacts.  Find the earliest
     // starting position of an active transaction.
@@ -267,7 +267,7 @@ PgLogRecovery::_replay_active()
     _repl_log = min_i->second.file;
     uint64_t timestamp = fs::extract_timestamp_from_file(_repl_log.value(), PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX).value();
     _repl_reader.set_file(*_repl_log, start_offset);
-    LOG_DEBUG(LOG_PG_LOG_MGR, "Replaying active from file {}", _repl_log.value().string());
+    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Replaying active from file {}", _repl_log.value().string());
 
     // replay repl log entries for the active set... skip everything else until we get to the end of
     // the _final_committed transaction
@@ -305,7 +305,7 @@ PgLogRecovery::_replay_active()
                 auto &begin_msg = std::get<PgMsgBegin>(msg->msg);
                 skip = !_active_map.contains(begin_msg.xid);
                 filter = (skip) ? scan_filter : process_filter;
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Found BEGIN; pgxid {}, skip {}", begin_msg.xid, skip);
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Found BEGIN; pgxid {}, skip {}", begin_msg.xid, skip);
                 break;
             }
             case PgMsgEnum::STREAM_START: {
@@ -313,7 +313,7 @@ PgLogRecovery::_replay_active()
                 auto &start_msg = std::get<PgMsgBegin>(msg->msg);
                 skip = !_active_map.contains(start_msg.xid);
                 filter = (skip) ? scan_filter : process_filter;
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Found STREAM_START; pgxid {}, skip {}", start_msg.xid, skip);
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Found STREAM_START; pgxid {}, skip {}", start_msg.xid, skip);
                 break;
             }
             case PgMsgEnum::STREAM_ABORT: {
@@ -321,7 +321,7 @@ PgLogRecovery::_replay_active()
                 auto &abort_msg = std::get<PgMsgStreamAbort>(msg->msg);
                 skip = !_active_map.contains(abort_msg.xid);
                 filter = (skip) ? scan_filter : process_filter;
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Found STREAM_ABORT; pgxid {}, skip {}", abort_msg.xid, skip);
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Found STREAM_ABORT; pgxid {}, skip {}", abort_msg.xid, skip);
                 break;
             }
             case PgMsgEnum::STREAM_COMMIT: {
@@ -329,7 +329,7 @@ PgLogRecovery::_replay_active()
                 auto &commit_msg = std::get<PgMsgStreamCommit>(msg->msg);
                 skip = !_active_map.contains(commit_msg.xid);
                 filter = (skip) ? scan_filter : process_filter;
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Found STREAM_COMMIT; pgxid {}, skip {}", commit_msg.xid, skip);
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Found STREAM_COMMIT; pgxid {}, skip {}", commit_msg.xid, skip);
                 break;
             }
             default:
@@ -339,7 +339,7 @@ PgLogRecovery::_replay_active()
 
             // if we aren't skipping the message, process it
             if (!skip) {
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Process msg {}", static_cast<int>(msg->msg_type));
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Process msg {}", static_cast<int>(msg->msg_type));
                 msg->pg_log_timestamp = timestamp;
                 _pg_log_reader->enqueue_msg(msg);
             }
@@ -354,7 +354,7 @@ PgLogRecovery::_replay_active()
             timestamp = fs::extract_timestamp_from_file(_repl_log.value(),
                                                         PgLogMgr::LOG_PREFIX_REPL,
                                                         PgLogMgr::LOG_SUFFIX).value();
-            LOG_DEBUG(LOG_PG_LOG_MGR, "Replaying active from file {}", _repl_log.value().string());
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Replaying active from file {}", _repl_log.value().string());
         }
     }
 
@@ -373,7 +373,7 @@ PgLogRecovery::_replay_uncommitted()
     };
 
     uint64_t timestamp = fs::extract_timestamp_from_file(_repl_log.value(), PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX).value();
-    LOG_DEBUG(LOG_PG_LOG_MGR, "Replaying uncommitted from file {}", _repl_log.value().string());
+    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Replaying uncommitted from file {}", _repl_log.value().string());
 
     while (_repl_log) {
         bool eos;
@@ -389,7 +389,7 @@ PgLogRecovery::_replay_uncommitted()
             bool found_next = _next_repl_log();
             if (found_next) {
                 timestamp = fs::extract_timestamp_from_file(_repl_log.value(), PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX).value();
-                LOG_DEBUG(LOG_PG_LOG_MGR, "Replaying uncommitted from file {}", _repl_log.value().string());
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Replaying uncommitted from file {}", _repl_log.value().string());
             }
         }
     }
@@ -399,7 +399,7 @@ bool
 PgLogRecovery::_next_repl_log()
 {
     if (_repl_log == _latest_log) {
-        LOG_DEBUG(LOG_PG_LOG_MGR, "Processed the final log file: {} == {}",
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Processed the final log file: {} == {}",
                   _repl_log, *_latest_log);
         _repl_log = std::nullopt;
         return false;
@@ -410,12 +410,12 @@ PgLogRecovery::_next_repl_log()
         PgLogMgr::LOG_SUFFIX);
 
     if (!_repl_log) {
-        LOG_DEBUG(LOG_PG_LOG_MGR, "No next replication log found");
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "No next replication log found");
         return false;
     }
 
     _repl_reader.set_file(*_repl_log);
-    LOG_DEBUG(LOG_PG_LOG_MGR, "Found next log file {}", _repl_log.value().string());
+    LOG_INFO("Found next log file {}", _repl_log.value().string());
 
     return true;
 }

@@ -127,7 +127,7 @@ namespace springtail::pg_log_mgr {
             PgMsgStreamHeader header(data.msg_length, _last_commit_lsn);
             _writer.write_header(header);
 
-            LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Write repl message start: start lsn={}, length={}, msg_length={}",
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Write repl message start: start lsn={}, length={}, msg_length={}",
                       data.starting_lsn, data.length, data.msg_length);
 
             if (current_msg_type == pg_msg::MSG_COMMIT ||
@@ -170,7 +170,7 @@ namespace springtail::pg_log_mgr {
 
             _last_commit_lsn = ack_lsn;
 
-            LOG_DEBUG(LOG_PG_LOG_MGR_DATA, "Write repl message end: start lsn={}, length={}, msg_length={}",
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Write repl message end: start lsn={}, length={}, msg_length={}",
                       data.ending_lsn, data.length, data.msg_length);
 
             return true;

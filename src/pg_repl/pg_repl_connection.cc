@@ -69,7 +69,7 @@ namespace springtail
         try {
             end_streaming();
         } catch (const std::exception &exc) {
-            LOG_DEBUG(LOG_PG_REPL, "Exception during close ending streaming: {}", exc.what());
+            LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Exception during close ending streaming: {}", exc.what());
         } // we are ending streaming, catch all exceptions
 
         // free the libpq standard connection if open
@@ -143,7 +143,7 @@ namespace springtail
         char *wal_status = _connection->get_value(0, 0);
         char *lsn_str = _connection->get_value(0, 1);
         LSN_t confirmed_flush_lsn = pg_msg::str_to_LSN(lsn_str);
-        LOG_DEBUG(LOG_PG_REPL, "Found current LSN: {}", confirmed_flush_lsn);
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Found current LSN: {}", confirmed_flush_lsn);
 
         if (wal_status != nullptr && std::strcmp(wal_status, "lost") == 0) {
             // if we have a 'lost' status, we need to recreate the slot or hard fail
@@ -201,7 +201,7 @@ namespace springtail
         // send header and then data
         // we do this on using sockets to support non-blocking reads of less
         // than the full message length on the stream connection for copy data
-        LOG_DEBUG(LOG_PG_REPL, "Executing copy command: {}", cmd);
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Executing copy command: {}", cmd);
         _send_copy_data(cmd_buffer, cmd_length, MSG_QUERY);
 
         // read message header for response; msg type placed in _msg_type
@@ -268,12 +268,12 @@ namespace springtail
         if (_started_streaming) {
             // check to see if we should fetch latest LSN to sync back
             int64_t now = get_pgtime_in_millis();
-            LOG_DEBUG(LOG_PG_REPL, "Now: {}, Last received time: {}, now - last received time: {}", now, _last_received_time, now - _last_received_time);
+            LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Now: {}, Last received time: {}, now - last received time: {}", now, _last_received_time, now - _last_received_time);
             if ((now - _last_received_time) > IDLE_SLOT_TIMEOUT_MSEC) {
                 // see if we've been idle for longer (received no data)
                 // than IDLE_SLOT_TIMEOUT_MSEC; if so we force an update
                 // based on the current LSN
-                LOG_DEBUG(LOG_PG_REPL, "Forcing LSN update due to idle slot");
+                LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Forcing LSN update due to idle slot");
                 _fast_forward_stream();
             }
 
@@ -331,7 +331,7 @@ namespace springtail
             // Extract the errno into a separate variable to ensure the the LOG_DEBUG below this
             // doesn't overwrite the err code
             auto err_no = errno;
-            LOG_DEBUG(LOG_PG_REPL, "Read {} bytes from connection (errno={})", r, err_no);
+            LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Read {} bytes from connection (errno={})", r, err_no);
             if (r == -1 && (err_no == EWOULDBLOCK || err_no == EAGAIN || err_no == EINTR)) {
                 r = wait_for_data();
                 if (r >= 0) {
@@ -359,7 +359,7 @@ namespace springtail
         }
 
         assert(_shutdown);
-        LOG_DEBUG(LOG_PG_REPL, "Shutting down recv copy data");
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Shutting down recv copy data");
         throw PgIOShutdown();
     }
 
@@ -495,7 +495,7 @@ namespace springtail
             case MSG_PARAM_STATUS:
             default:
                 // skip message for now
-                LOG_DEBUG(LOG_PG_REPL, "Skipping message: type={}", _msg_type);
+                LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Skipping message: type={}", _msg_type);
                 _skip_message();
                 _copy_state = NEW_MSG;
                 return;
@@ -517,7 +517,7 @@ namespace springtail
             int offset = 0;
             switch (_copy_buffer[0]) {
                 case MSG_KEEP_ALIVE:
-                    LOG_DEBUG(LOG_PG_REPL, "Found keep alive message");
+                    LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Found keep alive message");
                     offset = _process_keep_alive(_copy_buffer, _copy_buffer_length);
 
                     // there shouldn't be more data
@@ -532,7 +532,7 @@ namespace springtail
                     break;
 
                 case MSG_XLOG_DATA:
-                    LOG_DEBUG(LOG_PG_REPL, "Found xlog data");
+                    LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Found xlog data");
                     offset = _process_xlog_header(_copy_buffer, _copy_buffer_length);
 
                     // adjust msg size to remove xlog header
@@ -623,7 +623,7 @@ namespace springtail
         [[maybe_unused]] int64_t send_time = recvint64(&buffer[pos]);
         pos += 8;
 
-        LOG_DEBUG(LOG_PG_REPL, "Keep alive msg recvd: wal_end={}, send_time={}, last_flushed LSN={}",
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Keep alive msg recvd: wal_end={}, send_time={}, last_flushed LSN={}",
                             wal_end, send_time, _last_flushed_lsn);
 
         bool response_requested = false;
@@ -717,7 +717,7 @@ namespace springtail
         // update last received time
         _last_received_time = get_pgtime_in_millis();
 
-        LOG_DEBUG(LOG_PG_REPL, "Primary LSN={}, Last flushed LSN={}, MsgEnd LSN={}", lsn, _last_flushed_lsn, _message_end_lsn);
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Primary LSN={}, Last flushed LSN={}, MsgEnd LSN={}", lsn, _last_flushed_lsn, _message_end_lsn);
 
         // check that LSN is ahead of where we are
         if (lsn == _last_flushed_lsn || lsn < _message_end_lsn) {
@@ -733,7 +733,7 @@ namespace springtail
 
         // fast forward stream
         _last_flushed_lsn = lsn;
-        LOG_DEBUG(LOG_PG_REPL, "Fast forwarding stream to LSN: {}", lsn);
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Fast forwarding stream to LSN: {}", lsn);
 
         _send_standby_status_msg();
     }
@@ -778,7 +778,7 @@ namespace springtail
         // set applied lsn and flushed lsn to same value
         int len = _encode_standby_status_msg(now, replybuf);
 
-        LOG_DEBUG(LOG_PG_REPL, "Standby message send: LSN={}", _last_flushed_lsn);
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Standby message send: LSN={}", _last_flushed_lsn);
 
         // send data
         _send_copy_data(replybuf, len);
@@ -810,7 +810,7 @@ namespace springtail
                                       slot_name);
 
         // execute query
-        LOG_DEBUG(LOG_PG_REPL, "Executing query check slots: cmd={}", cmd);
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Executing query check slots: cmd={}", cmd);
         _connection->exec(cmd);
 
         // process results
@@ -829,7 +829,7 @@ namespace springtail
             restart_lsn_out = pg_msg::str_to_LSN(restart_lsn_str);
             flushed_lsn_out = pg_msg::str_to_LSN(confirmed_flush_lsn_str);
 
-            LOG_DEBUG(LOG_PG_REPL, "Slot exists: restart_lsn={}, confirmed_flush_lsn={}",
+            LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Slot exists: restart_lsn={}, confirmed_flush_lsn={}",
                                 restart_lsn_out, flushed_lsn_out);
 
             _connection->clear();
@@ -853,7 +853,7 @@ namespace springtail
         std::string cmd = fmt::format("SELECT pg_drop_replication_slot('{}')", slot_name);
 
         // execute query
-        LOG_DEBUG(LOG_PG_REPL, "Executing query drop replication slot: cmd={}", cmd);
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Executing query drop replication slot: cmd={}", cmd);
         _connection->exec(cmd);
 
         // process results
@@ -972,7 +972,7 @@ namespace springtail
         std::string cmd = fmt::format("SELECT * FROM pg_create_logical_replication_slot('{}', 'pgoutput')", slot_name);
 
         // execute query
-        LOG_DEBUG(LOG_PG_REPL, "Executing query create replication slot: cmd={}", cmd);
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Executing query create replication slot: cmd={}", cmd);
         _connection->exec(cmd);
 
         // process results
@@ -983,7 +983,7 @@ namespace springtail
             throw PgQueryError();
         }
 
-        LOG_DEBUG(LOG_PG_REPL, "Replication slot created successfully: {}", slot_name);
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Replication slot created successfully: {}", slot_name);
 
         if (_connection->ntuples() < 1 && _connection->nfields() != 2) {
             LOG_ERROR("Replication slot creation did not return expected number of tuples for slot: {}", slot_name);
@@ -1013,7 +1013,7 @@ namespace springtail
             return;
         }
 
-        LOG_DEBUG(LOG_PG_REPL, "Setting last flushed LSN: lsn={}", lsn);
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Setting last flushed LSN: lsn={}", lsn);
 
         int64_t now = get_pgtime_in_millis();
         bool send_standby = false;
