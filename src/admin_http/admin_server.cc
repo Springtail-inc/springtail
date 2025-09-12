@@ -109,7 +109,7 @@ namespace springtail {
                 handler(req.path, req.params, json_res);
                 return json_res;
             } else {
-                throw HttpError(fmt::format("No handler found for path: {}", req.path));
+                throw HttpError(fmt::format("No handler found for path: {}", req.path), 404);
             }
         });
     }
@@ -131,7 +131,7 @@ namespace springtail {
                 handler(req.path, req.params, req.body, json_res);
                 return json_res;
             } else {
-                throw HttpError(fmt::format("No handler found for path: {}", req.path));
+                throw HttpError(fmt::format("No handler found for path: {}", req.path), 404);
             }
         });
     }

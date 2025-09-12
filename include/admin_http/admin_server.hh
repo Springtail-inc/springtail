@@ -16,7 +16,7 @@ namespace springtail {
 
     class HttpError : public Error {
     public:
-        HttpError(const std::string &msg, uint32_t error_code = 400) :
+        explicit HttpError(const std::string &msg, uint32_t error_code = 400) :
             Error(msg), _error_code(error_code) {}
 
         uint32_t get_error_code() { return _error_code; }
