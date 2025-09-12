@@ -158,6 +158,9 @@ namespace springtail {
                               const std::string &partition_key,
                               nlohmann::json partition_data);
 
+        /** Finalize the current message -- write it to disk */
+        void finalize_message();
+
         /** Get list of transaction start/end pairs */
         std::vector<PgTransactionPtr> get_xact_list() { return _xact_list; }
 
@@ -176,13 +179,18 @@ namespace springtail {
         uint32_t _next_table_id = 1000;   ///< next table id
         uint32_t _xid = 0;                ///< transaction id
         uint64_t _lsn = 1;                ///< lsn
+        uint64_t _last_commit_lsn = 0;    ///< last commit lsn
         uint64_t _commit_ts = 0;          ///< commit timestamp
 
         uint32_t _stream_xid = -1;        ///< current stream transaction id if in stream xact
         bool _in_stream_xact = false;     ///< true if in streaming transaction
         bool _is_streaming = false;       ///< true if streaming
 
-        PgTransactionPtr _current_xact; ///< current transaction
+        char _buffer[8192];               ///< buffer for building messages
+        uint32_t _buffer_offset = 0;      ///< current offset in buffer
+        uint32_t _log_written = 0;        ///< number of message bytes written
+
+        PgTransactionPtr _current_xact;   ///< current transaction
         std::vector<PgTransactionPtr> _xact_list; ///< transaction list
 
         std::map<uint32_t, std::string> _table_id_to_name; ///< table id to name

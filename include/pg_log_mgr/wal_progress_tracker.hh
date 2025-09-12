@@ -38,7 +38,7 @@ namespace springtail::pg_log_mgr {
         {
             std::unique_lock<std::shared_mutex> lock(_mt);
 
-            // verify that Postgress XID is not somehow already inserted
+            // verify that Postgres XID is not somehow already inserted
             DCHECK(!_pg_xid_to_ts.contains(pg_xid));
 
             // insert into pg_xid -> ts map
@@ -61,15 +61,15 @@ namespace springtail::pg_log_mgr {
         {
             std::unique_lock<std::shared_mutex> lock(_mt);
 
-            // verify that Postgress XID is known
+            // verify that Postgres XID is known
             if(!_pg_xid_to_ts.contains(pg_xid)) {
                 return;
             }
 
-            // Get Postgress XID timestamp
+            // Get Postgres XID timestamp
             uint64_t ts = _pg_xid_to_ts[pg_xid];
 
-            // Erase Postgress XID from pg_xid -> ts map
+            // Erase Postgres XID from pg_xid -> ts map
             _pg_xid_to_ts.erase(pg_xid);
 
             // verify that ts exists in ts -> pg_xid count map
@@ -93,15 +93,15 @@ namespace springtail::pg_log_mgr {
         {
             std::unique_lock<std::shared_mutex> lock(_mt);
 
-            // verify that Postgress XID is known
+            // verify that Postgres XID is known
             if(!_pg_xid_to_ts.contains(pg_xid)) {
                 return;
             }
 
-            // Get Postgress XID timestamp
+            // Get Postgres XID timestamp
             uint64_t ts = _pg_xid_to_ts[pg_xid];
 
-            // Erase Postgress XID from pg_xid -> ts map
+            // Erase Postgres XID from pg_xid -> ts map
             _pg_xid_to_ts.erase(pg_xid);
 
             // verify that ts exists in ts -> pg_xid count map
@@ -160,7 +160,7 @@ namespace springtail::pg_log_mgr {
         }
 
         /**
-         * @brief Get the min timestamp id recorded for Porstgress and Springtail Xids
+         * @brief Get the min timestamp id recorded for Postgres and Springtail Xids
          *
          * @return uint64_t - timestamp id
          */

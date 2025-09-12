@@ -92,6 +92,9 @@ namespace springtail
             lsn = _last_flushed_lsn;
         }
 
+        LOG_INFO("Reconnecting to database: {}, slot: {}, lsn: {}",
+                 _db_name, _slot_name, lsn);
+
         // restart streaming
         start_streaming(lsn, false);
     }
@@ -104,6 +107,9 @@ namespace springtail
             // error already streaming
             throw PgStreamingError();
         }
+
+        LOG_INFO("Starting streaming for database: {}, slot: {}, LSN: {} ({})",
+                 _db_name, _slot_name, LSN, pg_msg::lsn_to_str(LSN));
 
         _stream_connection = std::make_unique<LibPqConnection>();
         _stream_connection->connect(_db_host, _db_name, _db_user, _db_pass, _db_port, true);
@@ -137,7 +143,7 @@ namespace springtail
         char *wal_status = _connection->get_value(0, 0);
         char *lsn_str = _connection->get_value(0, 1);
         LSN_t confirmed_flush_lsn = pg_msg::str_to_LSN(lsn_str);
-        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Found current LSN: {}", confirmed_flush_lsn);
+        LOG_INFO("Found current LSN: {}", confirmed_flush_lsn);
 
         if (wal_status != nullptr && std::strcmp(wal_status, "lost") == 0) {
             // if we have a 'lost' status, we need to recreate the slot or hard fail
@@ -145,8 +151,9 @@ namespace springtail
             _connection->clear();
 
             if (do_init) {
-                // try and re-estable the slot
+                // try and re-establish the slot
                 try {
+                    // XXX may need to drop the publication as well, but we don't know how to recreate it
                     drop_replication_slot();
                     LSN = create_replication_slot();
                     confirmed_flush_lsn = LSN;
@@ -234,20 +241,8 @@ namespace springtail
         _copy_msg_length = 0;
         _copy_msg_offset = 0;
 
-        // see libpqwalreceiver.c libpqrcv_endstreaming() for detailed way to shutdown cleanly
-        // send copy end message
-        if (_stream_connection->put_copy_end(nullptr) <= 0 || _stream_connection->flush()) {
-            LOG_ERROR("Error could not send end-of-streaming message to primary\n");
-            _stream_connection.reset(nullptr);
-            return;
-        }
-
-        ExecStatusType status = _stream_connection->status();
-        _stream_connection->clear();
-        if (status == PGRES_COPY_OUT) {
-            // end the copy
-            _stream_connection->end_copy();
-        }
+        // disconnect the streaming connection
+        _stream_connection->disconnect();
 
         // just close connection; cleans up result and other state
         // no need to go through too much trouble...
@@ -274,7 +269,7 @@ namespace springtail
         if (_started_streaming) {
             // check to see if we should fetch latest LSN to sync back
             int64_t now = get_pgtime_in_millis();
-            LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Now: {}, Last received time: {}, now - last received time: {}", now, _last_received_time, now - _last_received_time);
+            LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG2, "Now: {}, Last received time: {}, now - last received time: {}", now, _last_received_time, now - _last_received_time);
             if ((now - _last_received_time) > IDLE_SLOT_TIMEOUT_MSEC) {
                 // see if we've been idle for longer (received no data)
                 // than IDLE_SLOT_TIMEOUT_MSEC; if so we force an update
@@ -337,7 +332,7 @@ namespace springtail
             // Extract the errno into a separate variable to ensure the the LOG_DEBUG below this
             // doesn't overwrite the err code
             auto err_no = errno;
-            LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Read {} bytes from connection (errno={})", r, err_no);
+            LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG2, "Read {} bytes from connection (errno={})", r, err_no);
             if (r == -1 && (err_no == EWOULDBLOCK || err_no == EAGAIN || err_no == EINTR)) {
                 r = wait_for_data();
                 if (r >= 0) {
@@ -364,8 +359,8 @@ namespace springtail
             return r;
         }
 
-        assert(_shutdown);
-        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Shutting down recv copy data");
+        DCHECK(_shutdown);
+        LOG_INFO("Shutting down recv copy data");
         throw PgIOShutdown();
     }
 
@@ -603,6 +598,7 @@ namespace springtail
         dataOut.msg_length = _copy_msg_length;
         dataOut.starting_lsn = _message_start_lsn;
         dataOut.ending_lsn = _message_end_lsn; // this is believed to be the end lsn for this message
+        dataOut.server_time = _message_send_time;
 
         // copy msg offset is ahead by the length of data we just read
         // but dataOut.msg_offset points to where the consumer is in the stream
@@ -628,7 +624,7 @@ namespace springtail
         [[maybe_unused]] int64_t send_time = recvint64(&buffer[pos]);
         pos += 8;
 
-        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Keep alive msg recvd: wal_end={}, send_time={}, last_flushed LSN={}",
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG2, "Keep alive msg recvd: wal_end={}, send_time={}, last_flushed LSN={}",
                             wal_end, send_time, _last_flushed_lsn);
 
         bool response_requested = false;
@@ -672,12 +668,17 @@ namespace springtail
         LSN_t wal_end = recvint64(&buffer[pos]);
         pos += 8;
 
+        // send time is in millis since 2000-01-01
         int64_t send_time = recvint64(&buffer[pos]);
         pos += 8;
 
         _last_received_time = send_time / 1000;
         _message_start_lsn = wal_start;
         _message_end_lsn = wal_end;
+        _message_send_time = send_time + MSEC_SINCE_Y2K;
+
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG3, "XLOG data msg recvd: wal_start={}, wal_end={}, send_time={}",
+                            wal_start, wal_end, send_time);
 
         if (_message_end_lsn > _server_latest_lsn) {
             _server_latest_lsn = _message_end_lsn;
@@ -733,7 +734,7 @@ namespace springtail
 
         // fast forward stream
         _last_flushed_lsn = lsn;
-        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Fast forwarding stream to LSN: {}", lsn);
+        LOG_INFO("Fast forwarding stream to LSN: {}", lsn);
 
         _send_standby_status_msg();
     }
@@ -867,6 +868,98 @@ namespace springtail
         _connection->clear();
     }
 
+
+    void
+    PgReplConnection::drop_publication()
+    {
+        if (_started_streaming) {
+            throw PgStreamingError();
+        }
+
+        std::string pub_name = _connection->escape_string(_pub_name);
+
+        std::string cmd = fmt::format("DROP PUBLICATION IF EXISTS {}", pub_name);
+
+        // execute query
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Executing query drop publication: cmd={}", cmd);
+        _connection->exec(cmd);
+
+        // process results
+        if (_connection->status() != PGRES_TUPLES_OK &&
+            _connection->status() != PGRES_COMMAND_OK) {
+            LOG_ERROR("Error dropping publication: {}\n", pub_name);
+            _connection->clear();
+            throw PgQueryError();
+        }
+
+        _connection->clear();
+    }
+
+
+    bool
+    PgReplConnection::check_publication_exists()
+    {
+        if (_started_streaming) {
+            throw std::runtime_error("No queries after streaming starts");
+        }
+
+        std::string pub_name = _connection->escape_string(_pub_name);
+        std::string cmd = fmt::format("SELECT 1 FROM pg_catalog.pg_publication WHERE pubname='{}'", pub_name);
+
+        // execute query
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Executing query check publication: cmd={}", cmd);
+        _connection->exec(cmd);
+
+        // process results
+        if (_connection->status() != PGRES_COMMAND_OK &&
+            _connection->status() != PGRES_TUPLES_OK) {
+            LOG_ERROR("Error executing query: msg={}\n", _connection->result_error_message());
+            _connection->clear();
+
+            throw PgQueryError();
+        }
+
+        if (_connection->ntuples() > 0 && _connection->nfields() == 1) {
+            LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Publication exists: name={}\n", pub_name);
+            _connection->clear();
+            return true;
+        }
+
+        return false;
+    }
+
+    void
+    PgReplConnection::create_publication(const std::optional<std::string> &table_list)
+    {
+        if (_started_streaming) {
+            throw PgStreamingError();
+        }
+
+        std::string pub_name = _connection->escape_string(_pub_name);
+
+        std::string cmd;
+        if (!table_list.has_value() || table_list->empty()) {
+            cmd = fmt::format("CREATE PUBLICATION {} FOR ALL TABLES", pub_name);
+        } else {
+            cmd = fmt::format("CREATE PUBLICATION {} FOR TABLE {}", pub_name, *table_list);
+        }
+
+        // execute query
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Executing query create publication: cmd={}", cmd);
+        _connection->exec(cmd);
+
+        // process results
+        if (_connection->status() != PGRES_COMMAND_OK &&
+            _connection->status() != PGRES_TUPLES_OK) {
+            LOG_ERROR("Error creating publication: {}\n", pub_name);
+            _connection->clear();
+            throw PgQueryError();
+        }
+
+        LOG_DEBUG(LOG_PG_REPL, LOG_LEVEL_DEBUG1, "Publication created successfully: {}", pub_name);
+
+        _connection->clear();
+    }
 
     LSN_t
     PgReplConnection::create_replication_slot()

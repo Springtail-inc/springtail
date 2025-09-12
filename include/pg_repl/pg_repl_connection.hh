@@ -24,6 +24,7 @@ namespace springtail
         LSN_t starting_lsn;  // starting LSN for message buffer
         LSN_t ending_lsn;    // end LSN for message
         int proto_version;   // protocol version
+        uint64_t server_time; // server time in epoch millis when message was sent
     };
 
     /**
@@ -134,6 +135,8 @@ namespace springtail
         LSN_t _message_end_lsn = INVALID_LSN;
         /** server's latest lsn (from wal_end or keep alive) */
         LSN_t _server_latest_lsn = INVALID_LSN;
+        /** message send time (from xlog message -- send_time) */
+        uint64_t _message_send_time = 0;
 
         /** last time copy data received
          * determines when to fast forward stream based on idle time */
@@ -327,6 +330,13 @@ namespace springtail
 
 
         /**
+         * @brief Check if the publication exists on the server
+         * @return true if publication exists; false otherwise
+         * @throws PgQueryError on error
+         */
+        bool check_publication_exists();
+
+        /**
          * @brief Create the replication slot
          * @return LSN of the slot
          * @throws PgStreamingError if streaming already started
@@ -335,11 +345,26 @@ namespace springtail
         LSN_t create_replication_slot();
 
         /**
+         * @brief Create the publication
+         * @param table_list optional list of tables to include in publication (optional; default all tables)
+         * @throws PgQueryError on query error
+         * @throws PgStreamingError if streaming already started
+         */
+        void create_publication(const std::optional<std::string> &table_list = std::nullopt);
+
+        /**
          * @brief Drop the replication slot from the server
          * @throws PgQueryError on error
          * @throws PgStreamingError if already streaming
          */
         void drop_replication_slot();
+
+        /**
+         * @brief Drop the publication from the server
+         * @throws PgQueryError on error
+         * @throws PgStreamingError if already streaming
+         */
+        void drop_publication();
 
         /**
          * @brief Read WAL data from server; blocks

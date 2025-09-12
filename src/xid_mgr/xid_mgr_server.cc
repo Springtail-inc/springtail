@@ -220,7 +220,6 @@ XidMgrServer::DBXactLogData::get_committed_xid(uint64_t schema_xid)
 
     if (pos_i == _xact_history.end()) {
         // if the schema XID is ahead of the history, return the most recent commited XID
-        LOG_DEBUG(LOG_XID_MGR, LOG_LEVEL_DEBUG1, "Get committed xid for db_id={}: {}", _db_id, last_xid);
         return last_xid;
     }
 

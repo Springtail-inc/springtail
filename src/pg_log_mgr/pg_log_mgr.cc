@@ -541,24 +541,26 @@ namespace springtail::pg_log_mgr {
     }
 
     bool
-    PgLogMgr::_writer_read_data(
-        PgCopyData &data,
-        PgLogWriterPtr &logger,
-        uint64_t &start_offset,
-        std::function<void(uint64_t, const std::filesystem::path &)> queue_append_func)
+    PgLogMgr::_read_repl_data(PgLogWriterPtr logger,
+                              PgCopyData &data)
     {
         // read data from pg replication connection (blocks)
         try {
             // wait for data from pg; true if data is available
             if (!_pg_conn.wait_for_data(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT)) {
+                data.length = 0;
                 return true;
             }
 
             // read data from pg, length will be 0 if no data (timeout)
+            // this will return contents of an xlogdata message
+            // typically it will contain a single replication message but it
+            // may be split across multiple buffers
             _pg_conn.read_data(data);
             if (data.length == 0) {
                 return true;
             }
+
         } catch (const PgIOShutdown &e) {
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Received shutdown signal");
             return false;
@@ -566,36 +568,113 @@ namespace springtail::pg_log_mgr {
             LOG_ERROR("Error reading data from pg: {}", e.what());
             // try reconnecting
             try {
+                auto now = common::get_time_in_millis();
+                if (_reconnect_time + RECONNECT_TIME_PERIOD_SEC * 1000 < now) {
+                    // reset count if outside time period
+                    _reconnect_count = 1;
+                    _reconnect_time = now;
+                } else if (_reconnect_count < MAX_RECONNECT_COUNT) {
+                    // within time period and under max count
+                    _reconnect_count++;
+                } else {
+                    // too many reconnects in time period, fail
+                    LOG_ERROR("Too many reconnect attempts within {} seconds, failing",
+                              RECONNECT_TIME_PERIOD_SEC);
+
+                    // shutdown
+                    Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
+                    PgLogCoordinator::get_instance()->shutdown();
+                    return false;
+                }
+
+                // XXX not sure it is good enough to reconnect at last sync LSN
+                // as we could have more written in the log since then.
+                // probably need to run recovery
+
+                LOG_WARN("Reconnecting to postgres db: {} at LSN: {}",
+                         _db_id, logger->get_latest_synced_lsn());
                 _pg_conn.reconnect(logger->get_latest_synced_lsn());
+
             } catch (const PgConnectionError &e) {
                 LOG_ERROR("Error reconnecting to pg: {}", e.what());
                 // shutdown
+                Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_FAILED);
                 PgLogCoordinator::get_instance()->shutdown();
                 return false;
             }
         }
-        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Recevied data: length={}, msg_length={}, msg_offset={}",
-            data.length, data.msg_length, data.msg_offset);
 
-        if (!logger->log_data(data)) {
-            // data has been consumed by keep alive or not full message
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3, "Received data: length={}, msg_length={}, msg_offset={}, start_lsn={}, end_lsn={}",
+            data.length, data.msg_length, data.msg_offset, data.starting_lsn, data.ending_lsn);
+
+        return true;
+    }
+
+    bool
+    PgLogMgr::_writer_read_data(
+        PgCopyData &data,
+        PgLogWriterPtr &logger,
+        std::function<void(uint64_t, uint64_t, const std::filesystem::path &)> queue_append_func)
+    {
+        // read data from pg replication connection (blocks)
+        if (!_read_repl_data(logger, data)) {
+            return false;
+        }
+
+        // no data read, just return
+        if (data.length == 0) {
             return true;
         }
 
-        // push data to queue, if data message is complete then record start/end offsets
-        uint64_t end_offset = logger->offset();
+        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3,
+                  "Processing data: type={}, length={}, msg_length={}, msg_offset={}, start_lsn={}, end_lsn={}",
+                  (data.msg_offset == 0) ? data.buffer[0] : _current_msg_type, data.length, data.msg_length,
+                  data.msg_offset, data.starting_lsn, data.ending_lsn);
 
-        // record start/end offsets for this message
-        queue_append_func(end_offset, logger->filename());
-        // logger_queue.push(start_offset, end_offset, logger->filename());
-        start_offset = end_offset;
+        auto current_log_offset = logger->offset();
 
-        // check to see if we should rollover log
-        if (end_offset > _log_size_rollover_threshold) {
-            logger->close();
-            logger = _create_repl_logger();
-            start_offset = 0;
+        // if this is the start of a new message, record its message type
+        if (data.msg_offset == 0) {
+            // record the message type
+            _current_msg_type = data.buffer[0];
         }
+
+        // check if we received a full message
+        if (!logger->log_data(data, _current_msg_type)) {
+            // data is not complete yet
+            return true;
+        }
+
+        // verify full message
+        DCHECK_EQ(data.msg_offset + data.length, data.msg_length);
+
+        // queue msg and update start offset for next message
+        auto end_offset = logger->offset();
+        queue_append_func(_msg_log_start_offset, end_offset, logger->filename());
+        _msg_log_start_offset = end_offset;
+
+        // if we got here, we have a complete xlog message
+        // only rotate the log on commit messages
+        if (_current_msg_type == pg_msg::MSG_COMMIT ||
+            _current_msg_type == pg_msg::MSG_STREAM_COMMIT) {
+
+            LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG3, "Complete commit message: path={}, start_offset={}, end_offset={}, msg_type={}",
+                      logger->filename(), _msg_log_start_offset, end_offset, (char)_current_msg_type);
+
+            // check if we need to do a rotation
+            // at this point we have a full message an know it is a COMMIT
+            if (current_log_offset > _log_size_rollover_threshold) {
+                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Rollover log, old path={}, offset={}",
+                        logger->filename(), logger->offset());
+
+                logger->close();
+                logger = _create_repl_logger();
+
+                current_log_offset = 0;
+                _msg_log_start_offset = 0;
+            }
+        }
+
         return true;
     }
 
@@ -607,7 +686,6 @@ namespace springtail::pg_log_mgr {
         std::vector<PgLogQueueEntry> post_recovery_queue;
 
         PgCopyData data;
-        uint64_t start_offset = logger->offset();
 
         std::string coordinator_id = fmt::format(WRITER_WORKER_ID, _db_id);
         auto coordinator = Coordinator::get_instance();
@@ -620,8 +698,8 @@ namespace springtail::pg_log_mgr {
                 Coordinator::mark_alive(keep_alive);
 
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Received data in recovery mode");
-                if (!_writer_read_data(data, logger, start_offset,
-                    [&post_recovery_queue, &start_offset](uint64_t end_offset, const std::filesystem::path &file_path) {
+                if (!_writer_read_data(data, logger,
+                    [&post_recovery_queue](uint64_t start_offset, uint64_t end_offset, const std::filesystem::path &file_path) {
                         if (!post_recovery_queue.empty()) {
                             PgLogQueueEntry &entry = post_recovery_queue.back();
                             if (entry.path == file_path && entry.end_offset == start_offset) {
@@ -640,7 +718,7 @@ namespace springtail::pg_log_mgr {
             // once recovery is done, move all the entries to the _logger_queue
             if (!done && !_shutdown) {
                 // copy queue from
-                LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Moving data to _logger_queue");
+                LOG_INFO("Moving data to _logger_queue, recovery is done");
                 _logger_queue.push(post_recovery_queue);
             }
         }
@@ -652,8 +730,10 @@ namespace springtail::pg_log_mgr {
                 Coordinator::mark_alive(keep_alive);
 
                 LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Received data in normal mode");
-                if (!_writer_read_data(data, logger, start_offset,
-                    [this, &start_offset](uint64_t end_offset, const std::filesystem::path &file_path) {
+                if (!_writer_read_data(data, logger,
+                    [this](uint64_t start_offset, uint64_t end_offset, const std::filesystem::path &file_path) {
+                        LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Queueing log entry: start_offset={}, end_offset={}, file_path={}",
+                                  start_offset, end_offset, file_path);
                         _logger_queue.push(start_offset, end_offset, file_path);
                     }
                 )) {
@@ -682,6 +762,9 @@ namespace springtail::pg_log_mgr {
         std::string coordinator_id = fmt::format(READER_WORKER_ID, _db_id);
         auto coordinator = Coordinator::get_instance();
         auto& keep_alive = coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
+        std::filesystem::path last_path;
+        uint64_t last_timestamp = 0;
 
         while (!_shutdown) {
             // mark alive with coordinator
@@ -720,10 +803,16 @@ namespace springtail::pg_log_mgr {
             LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG4, "Processing log entry: path={}, start_offset={}, num_messages={}",
                       log_entry->path, log_entry->start_offset, log_entry->num_messages);
 
-            auto file_timestamp = fs::extract_timestamp_from_file(log_entry->path, LOG_PREFIX_REPL, LOG_SUFFIX);
-            CHECK(file_timestamp);
-            _pg_log_reader->process_log(log_entry->path, *file_timestamp,
-                                        log_entry->start_offset, log_entry->num_messages);
+            // extract timestamp from file name if different file
+            if (last_timestamp == 0 || last_path != log_entry->path) {
+                auto file_timestamp = fs::extract_timestamp_from_file(log_entry->path, LOG_PREFIX_REPL, LOG_SUFFIX);
+                CHECK(file_timestamp);
+                last_timestamp = *file_timestamp;
+                last_path = log_entry->path;
+            }
+
+            _pg_log_reader->process_log(log_entry->path, last_timestamp,
+                                        log_entry->start_offset, log_entry->end_offset);
         }
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Exiting log reader thread");
 
@@ -736,7 +825,8 @@ namespace springtail::pg_log_mgr {
     {
         std::filesystem::path file = fs::create_log_file(_repl_log_path, LOG_PREFIX_REPL, LOG_SUFFIX);
         return std::make_shared<PgLogWriter>(_db_id, file,
-            [this](LSN_t lsn) { _pg_conn.set_last_flushed_LSN(lsn); });
+            [this](LSN_t lsn) { LOG_INFO("Flushed LSN: {}", lsn);
+                _pg_conn.set_last_flushed_LSN(lsn); });
     }
 
 } // namespace springtail::pg_log_mgr

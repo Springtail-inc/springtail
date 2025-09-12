@@ -20,7 +20,8 @@ PgLogRecovery::repair_logs()
 
     _latest_log =
         fs::find_latest_modified_file(_repl_path, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
-    CHECK(_latest_log);
+
+    CHECK(_latest_log) << "No replication log files found, maybe start in INITIALIZE state";
 
     while (_latest_log && lsn == INVALID_LSN) {
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Found latest log file: {}", *_latest_log);
@@ -39,7 +40,7 @@ PgLogRecovery::repair_logs()
 void
 PgLogRecovery::replay_logs()
 {
-    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Start log replay");
+    LOG_INFO("Start log replay");
 
     // revert the system tables to the committed XID
     _revert_system_tables();
@@ -58,7 +59,7 @@ PgLogRecovery::replay_logs()
         _replay_uncommitted();
     }
 
-    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Log replay completed");
+    LOG_INFO("Log replay completed");
 }
 
 void
@@ -119,7 +120,7 @@ PgLogRecovery::_skip_committed()
     }
 
     // note: once we are garbage collecting old log files, we'll need a way to ensure that the
-    //       two log positions are aligned with eachother
+    //       two log positions are aligned with each other
 
     // Scan the repl log for any begin/commit/abort messages
     bool done = false;
@@ -277,9 +278,11 @@ PgLogRecovery::_replay_active()
         pg_msg::MSG_MESSAGE  // this will capture create_table, drop_table, alter_table,
                              // create_index, drop_index
     };
+
     std::vector<char> scan_filter = {pg_msg::MSG_BEGIN,         pg_msg::MSG_STREAM_START,
                                      pg_msg::MSG_COMMIT,        pg_msg::MSG_STREAM_STOP,
                                      pg_msg::MSG_STREAM_COMMIT, pg_msg::MSG_STREAM_ABORT};
+
     std::vector<char> &filter = scan_filter;
     bool skip = true;
 
@@ -402,15 +405,18 @@ PgLogRecovery::_next_repl_log()
         return false;
     }
 
-    _repl_log =
-        fs::get_next_log_file(*_repl_log, PgLogMgr::LOG_PREFIX_REPL, PgLogMgr::LOG_SUFFIX);
+    _repl_log = fs::get_next_log_file(*_repl_log,
+        PgLogMgr::LOG_PREFIX_REPL,
+        PgLogMgr::LOG_SUFFIX);
+
     if (!_repl_log) {
         LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "No next replication log found");
         return false;
     }
 
     _repl_reader.set_file(*_repl_log);
-    LOG_DEBUG(LOG_PG_LOG_MGR, LOG_LEVEL_DEBUG1, "Found next log file {}", _repl_log.value().string());
+    LOG_INFO("Found next log file {}", _repl_log.value().string());
+
     return true;
 }
 
